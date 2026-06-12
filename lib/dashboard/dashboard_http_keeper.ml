@@ -43,6 +43,80 @@ let keeper_names (config : Workspace.config) =
 let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
+let non_empty_trimmed_string_opt value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let degraded_keeper_dashboard_row
+      ?error
+      ~(site : string)
+      (m : Keeper_meta_contract.keeper_meta)
+  =
+  let attention_reason = Option.value ~default:site error in
+  let runtime_trust =
+    `Assoc
+      [ ("disposition", `String "Degraded")
+      ; ("disposition_reason", `String site)
+      ; ("operator_disposition", `String "blocked_runtime")
+      ; ("operator_disposition_reason", `String site)
+      ; ("needs_attention", `Bool true)
+      ; ("attention_reason", `String attention_reason)
+      ; ("next_human_action", `String "inspect_keeper_dashboard_worker")
+      ]
+  in
+  let fd_pressure = Keeper_fd_pressure.degraded_projection_json () in
+  let runtime_id =
+    Keeper_meta_contract.runtime_id_of_meta m |> non_empty_trimmed_string_opt
+  in
+  let runtime_id_json = Json_util.string_opt_to_json runtime_id in
+  let diagnostic =
+    `Assoc
+      ([ ("status", `String "degraded")
+       ; ("reason", `String site)
+       ; ("error", Json_util.string_opt_to_json error)
+       ; ("fd_pressure", fd_pressure)
+       ])
+  in
+  `Assoc
+    ([ ("name", `String m.name)
+     ; ("agent_name", `String m.agent_name)
+     ; ( "keeper_id"
+       , match m.keeper_id with
+         | Some keeper_id -> `String (Keeper_id.Uid.to_string keeper_id)
+         | None -> `Null )
+     ; ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id))
+     ; ("generation", `Int m.runtime.generation)
+     ; ("current_task_id",
+        Json_util.string_opt_to_json
+          (Option.map Keeper_id.Task_id.to_string m.current_task_id))
+     ; ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids))
+     ; ("created_at", `String m.created_at)
+     ; ("updated_at", `String m.updated_at)
+     ; ("goal", `String m.goal)
+     ; ("short_goal", `String m.short_goal)
+     ; ("mid_goal", `String m.mid_goal)
+     ; ("long_goal", `String m.long_goal)
+     ; ("phase", `String "degraded")
+     ; ("pipeline_stage", `String "degraded")
+     ; ("status", `String "degraded")
+     ; ("degraded", `Bool true)
+     ; ("degraded_reason", `String site)
+     ; ("agent", `Null)
+     ; ("diagnostic", diagnostic)
+     ; ("trust", runtime_trust)
+     ; ("runtime_trust", runtime_trust)
+     ; ("paused", `Bool m.paused)
+     ; ("keepalive_running", `Bool false)
+     ; ("total_turns", `Int m.runtime.usage.total_turns)
+     ; ("runtime_id", runtime_id_json)
+     ; ("runtime_canonical", runtime_id_json)
+     ; ("selected_runtime_canonical", runtime_id_json)
+     ; ("primary_model", `Null)
+     ; ("active_model", `Null)
+     ; ("active_model_label", `Null)
+     ; ("last_model_used_label", `Null)
+     ])
+
 type keeper_activity_source =
   | Keeper_meta
   | Tool_call of Yojson.Safe.t
@@ -282,7 +356,8 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
   let results = Array.make (List.length names) None in
   Eio.Fiber.all
     (List.mapi (fun idx name -> fun () ->
-      results.(idx) <- (
+      let row =
+      try
       match Keeper_meta_store.read_meta config name with
       | Error _ | Ok None -> None
       | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
@@ -1013,8 +1088,36 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                 | [] -> `Null);
             ] @ detail_fields)
           in
-          Some summary)
-    ) names);
+          Some summary
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+          let error = Printexc.to_string exn in
+          Keeper_fd_pressure.note_exception ~site:"keeper_dashboard.worker" exn;
+          Log.Dashboard.error
+            "keeper dashboard worker error (%s): %s"
+            name
+            error;
+          (try
+             match Keeper_meta_store.read_meta config name with
+             | Ok (Some meta) ->
+                 Some
+                   (degraded_keeper_dashboard_row
+                      ~site:"keeper_dashboard_worker_exception"
+                      ~error
+                      meta)
+             | Error _ | Ok None -> None
+           with
+           | Eio.Cancel.Cancelled _ as exn -> raise exn
+           | fallback_exn ->
+               Log.Dashboard.error
+                 "keeper dashboard degraded fallback failed (%s): %s"
+                 name
+                 (Printexc.to_string fallback_exn);
+               None)
+      in
+      results.(idx) <- row)
+     names);
   let summaries = Array.to_list results |> List.filter_map Fun.id in
   (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
   let recent_alerts =

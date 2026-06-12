@@ -1,3 +1,5 @@
+open Masc
+
 let contains ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in

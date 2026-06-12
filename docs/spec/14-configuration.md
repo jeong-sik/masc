@@ -148,8 +148,8 @@ contains four sections: `tts`, `stt`, `session`, `local_playback`.
 | `MASC_INFERENCE_CACHE_MAX_TEMP` | float | 0.0 | 캐시 허용 최대 온도 |
 | `MASC_INFERENCE_CACHE_L1_MAX_ENTRIES` | int | 512 | L1 인메모리 캐시 상한 |
 | `MASC_SPAWN_CACHE_POLICY` | string | `"safe_only"` | Spawn 캐시 정책 (`off`/`safe_only`) |
-| `ZAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-k` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
-| `ZAI_CODING_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `provider-k-coding` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
+| `ZAI_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
+| `ZAI_CODING_DEFAULT_MODEL` | string | OAS runtime binding/catalog default | 설정 시 `glm-coding` provider `auto` 기본 모델로 사용. 미설정이면 OAS runtime binding/catalog default에 위임한다. |
 | `PROVIDER-F_DEFAULT_MODEL` | string | 없음 | 설정 시 direct `provider-f` provider `auto` 기본 모델로 사용. 미설정이면 direct 기본 동작에 위임한다. |
 | `PROVIDER-F_CLI_DEFAULT_MODEL` | string | 없음 | 설정 시 `cli-tool-b` provider `auto` 기본 모델로 사용. 미설정이면 CLI-Tool-C 기본 동작에 위임한다. |
 | `MASC_PROVIDER-F_CLI_AUTO_MODELS` | csv string | `"auto"` | 설정 시 `cli-tool-b:auto`를 operator 지정 후보 목록으로 확장. 미설정이면 CLI-Tool-C 기본 모델에 위임한다. |
@@ -366,8 +366,8 @@ Tier member는 `<provider_id>.<model_id>` 또는
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
 | `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local OpenAI-compatible runtime) |
-| `provider-k` | `Glm` | `ZAI_DEFAULT_MODEL` |
-| `provider-k-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
+| `glm` | `Glm` | `ZAI_DEFAULT_MODEL` |
+| `glm-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
 | `provider-f` | `Provider-F` | `PROVIDER-F_DEFAULT_MODEL` |
 | `cli-tool-b` | CLI transport | `MASC_PROVIDER-F_CLI_AUTO_MODELS` when model is `auto` |
 | `cli-tool-a` | CLI transport | `MASC_AGENT-CODE_CLI_AUTO_MODELS` when model is `auto` |
@@ -460,7 +460,7 @@ capacity 조회 순서: `Runtime_throttle` (llama-server /slots 기반) → `Run
 ### 7.7 예시
 
 ```toml
-[provider-k-coding.provider-k-flashx]
+[glm-coding.glm-4-7-coding]
 is-default = false
 max-concurrent = 2
 
@@ -469,7 +469,7 @@ is-default = true
 max-concurrent = 1
 
 [tier.tier_medium]
-members = ["provider-k-coding.provider-k-flashx", "cli-tool-b.provider-f-flash"]
+members = ["glm-coding.glm-4-7-coding", "cli-tool-b.provider-f-flash"]
 strategy = "failover"
 
 [runtime.tier_medium]

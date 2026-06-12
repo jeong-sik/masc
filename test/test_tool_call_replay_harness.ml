@@ -31,8 +31,8 @@ let contains_substring haystack needle =
 
 let test_load_fixture_snapshot () =
   let snapshot = load_fixture () in
-  check string "snapshot id" "provider_k-tool-call-001" snapshot.id;
-  check string "provider" "provider_k" snapshot.provider;
+  check string "snapshot id" "glm-coding-tool-call-001" snapshot.id;
+  check string "provider" "glm-coding" snapshot.provider;
   check (list string) "declared tools"
     [ "masc_add_task"; "masc_status" ]
     snapshot.tools;
@@ -107,7 +107,7 @@ let test_load_rejects_malformed_jsonl () =
       if Sys.file_exists dir then Unix.rmdir dir)
     (fun () ->
       Fs_compat.save_file path
-        {|{"id":"ok","provider":"provider_k","goal":"x","tools":[],"response":{"choices":[]},"expected_tool_calls":[]}
+        {|{"id":"ok","provider":"glm","goal":"x","tools":[],"response":{"choices":[]},"expected_tool_calls":[]}
 not-json
 |};
       match Tool_call_replay_harness.load_snapshots_from_jsonl path with

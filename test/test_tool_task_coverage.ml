@@ -423,7 +423,7 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
         ("action", `String "done");
         ("notes", `String "Applied the fix to the login path.");
         ("completion_contract", `List [ `String "test coverage"; `String "migration" ]);
-        ("evaluator_runtime", `String "provider_k:auto");
+        ("evaluator_runtime", `String "glm:auto");
       ]) in
     assert (not (Tool_result.is_success result));
     assert (str_contains (Tool_result.message result) "completion contract not satisfied");
@@ -436,7 +436,7 @@ let () = test "handle_transition_respects_completion_contract_and_records_custom
       Yojson.Safe.Util.(first |> member "evaluator_runtime" |> to_string)
     in
     assert (gate = "contract");
-    assert (evaluator_runtime = "provider_k:auto");
+    assert (evaluator_runtime = "glm:auto");
     Eval_calibration.reset_store_for_testing ())
 )
 

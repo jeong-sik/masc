@@ -38,8 +38,8 @@ let test_decode_task_missing_priority_defaults () =
   | Ok task -> Alcotest.(check int) "default priority" 3 task.priority
   | Error err -> Alcotest.fail err
 
-let keeper_json ?(models = `List [ `String "provider_k-5.1" ]) ?(last_turn_ts = `String "1700000000")
-    ?(active_model = Some (`String "provider_k-5.1"))
+let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String "1700000000")
+    ?(active_model = Some (`String "glm-5.1"))
     ?(initiative_enabled = Some (`Bool true)) () =
   let optional_field key = function
     | Some value -> [ (key, value) ]
@@ -106,13 +106,13 @@ let test_decode_keeper_rejects_invalid_models_type () =
   Alcotest.(check bool) "invalid models rejected" true
     (Result.is_error
        (Tui_decode.decode_keeper ~filename:"keeper-main.json"
-          (keeper_json ~models:(`String "provider_k-5.1") ())))
+          (keeper_json ~models:(`String "glm-5.1") ())))
 
 let test_decode_keeper_rejects_non_string_model_items () =
   Alcotest.(check bool) "non-string model entries rejected" true
     (Result.is_error
        (Tui_decode.decode_keeper ~filename:"keeper-main.json"
-          (keeper_json ~models:(`List [ `String "provider_k-5.1"; `Int 7 ]) ())))
+          (keeper_json ~models:(`List [ `String "glm-5.1"; `Int 7 ]) ())))
 
 let test_decode_keeper_rejects_non_finite_last_turn_ts () =
   Alcotest.(check bool) "non-finite timestamp rejected" true

@@ -567,7 +567,7 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 
 | Provider | 예시 | API |
 |----------|------|-----|
-| `provider-k` | `provider-k:provider-k-4.7-flash` | Z.ai ChatCompletions |
+| `glm-coding` | `glm-coding:glm-4.7` | Z.AI GLM Coding Plan ChatCompletions |
 | `agent-llm-a` | `agent-llm-a:sonnet` | Provider-A Messages API |
 | `provider-f` | `provider-f:pro` | Google AI API |
 | `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |

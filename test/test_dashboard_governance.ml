@@ -444,7 +444,7 @@ let test_parse_governance_response_requires_guardrail_state () =
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names guardrail_state" true
@@ -482,7 +482,7 @@ let test_parse_governance_response_preserves_guardrail_state () =
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error _ -> fail "valid guardrail_state should parse"
   | Ok [ judgment ] ->
@@ -524,7 +524,7 @@ let test_parse_governance_response_requires_guardrail_fields () =
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names missing field" true
@@ -538,7 +538,7 @@ let test_parse_governance_response_requires_items_array () =
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names items array" true
@@ -552,7 +552,7 @@ let test_parse_governance_response_rejects_unparseable_recovered_block () =
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error (Dashboard_governance_judge.Lenient_fallback recovered) ->
       check bool "fallback keeps recovered fragment" true
@@ -579,7 +579,7 @@ let test_refresh_failure_keeps_fresh_cache_online () =
         st.generated_at_unix <- Some now;
         st.expires_at <- Some expires_at;
         st.expires_at_unix <- Some (now +. 300.0);
-        st.model_used <- Some "provider_k:test";
+        st.model_used <- Some "glm:test";
         st.last_error <- None;
         Dashboard_governance_judge.mark_refresh_failure
           ~now_ts:now st ~message:"Execution timed out after 60.0s");
@@ -744,7 +744,7 @@ let test_refresh_once_skips_fresh_cached_result () =
         st.generated_at_unix <- Some now;
         st.expires_at <- Some expires_at;
         st.expires_at_unix <- Some expires_at_unix;
-        st.model_used <- Some "provider_k:cached";
+        st.model_used <- Some "glm:cached";
         st.last_error <- None);
       let build_called = ref false in
       Eio.Switch.run @@ fun sw ->

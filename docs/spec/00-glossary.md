@@ -385,7 +385,7 @@ MASC에서 OAS 기반 모델 호출을 수행하는 통합 진입점. runtime_id
 `config/runtime.toml`에 정의된 runtime 이름별 모델 리스트와 추론 파라미터. OAS Provider와 MASC 모두에서 사용된다. `-> config/runtime.toml`
 
 **Provider Kind**
-OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `provider-k`(Provider-K Cloud), `agent-llm-a`, `provider-f` 등이 사용된다.
+OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `glm`(Z.AI GLM), `glm-coding`(Z.AI GLM Coding Plan), `agent-llm-a`, `provider-f` 등이 사용된다.
 
 **Agent.run**
 OAS의 에이전트 실행 진입점. MASC의 always-on keeper loop은 이 API 위에서 실행된다. Keeper 포함 모든 자율 에이전트 루프가 이 경로를 사용한다. MASC 문서에서 `Agent.run`을 언급할 때는 agent run / OAS SDK turn / keeper turn 중 어느 clock을 말하는지 명시한다.

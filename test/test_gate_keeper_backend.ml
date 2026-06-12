@@ -175,11 +175,11 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
   let cases =
     [
       ( "models",
-        {|{"name":"luna","message":"hello","models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
       ( "allowed_models",
-        {|{"name":"luna","message":"hello","allowed_models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
       ( "active_model",
-        {|{"name":"luna","message":"hello","active_model":"provider_k:legacy"}|} );
+        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
     ]
   in
   List.iter

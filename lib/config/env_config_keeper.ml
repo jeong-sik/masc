@@ -589,7 +589,7 @@ end
 module KeeperRuntimeProviderFilter = struct
   (** Comma-separated provider kind allowlist for every keeper runtime call.
       Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [provider_k], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
+      [ollama], [glm], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
       [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
       Matching is case-insensitive; empty entries are dropped.
 

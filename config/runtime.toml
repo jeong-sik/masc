@@ -47,7 +47,7 @@ endpoint = "https://api.z.ai/api/coding/paas/v4"
 
 [providers.glm-coding.credentials]
 type = "env"
-key = "ZAI_CODING_API_KEY"
+key = "ZAI_API_KEY_SB"
 
 [providers.glm-coding.capabilities]
 supports-runtime-mcp-tools = true
@@ -132,10 +132,34 @@ max-concurrent = 4
 [glm-coding.glm-4-7-coding]
 max-concurrent = 3
 
+[models.glm-5-turbo]
+api-name = "GLM-5-Turbo"
+max-context = 203000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-5-turbo.capabilities]
+max-output-tokens = 131072
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 3
+
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1
 
-# Local Gemma 4 canary: one keeper only. Other keepers fall back to
-# [runtime].default unless the live config pins them elsewhere.
-[runtime.assignments]
-nick0cave = "ollama.gemma4-26b-a4b-qat"
+# ── Keeper assignments ──────────────────────────────────────────────
+# Keepers are assigned to a model by provider.model key. Unassigned
+# keepers fall back to [runtime].default. Per-keeper overrides in the
+# live config (<base>/.masc/config/runtime.toml) take precedence.
+#
+# Example: pin sangsu to GLM-5-Turbo, nick0cave to local Gemma 4 canary.
+# [runtime.assignments]
+# sangsu = "glm-coding.glm-5-turbo"
+# nick0cave = "ollama.gemma4-26b-a4b-qat"

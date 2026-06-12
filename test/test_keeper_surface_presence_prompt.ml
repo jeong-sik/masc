@@ -172,6 +172,17 @@ let test_empty_presence_has_no_section () =
   check bool "no section when empty" false
     (contains ~needle:"### Connected Surfaces" user)
 
+let test_namespace_state_names_running_keeper_fibers () =
+  let user =
+    user_message { base_observation with active_agent_count = 2 }
+  in
+  check bool "namespace state present" true
+    (contains ~needle:"### Namespace State" user);
+  check bool "running keeper label present" true
+    (contains ~needle:"- Running keeper fibers: 2" user);
+  check bool "legacy active agents label absent" false
+    (contains ~needle:"- Active agents:" user)
+
 let () =
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
@@ -188,5 +199,7 @@ let () =
             test_dashboard_only_keeper_has_no_section;
           test_case "empty presence has no section" `Quick
             test_empty_presence_has_no_section;
+          test_case "namespace state names running keeper fibers" `Quick
+            test_namespace_state_names_running_keeper_fibers;
         ] );
     ]

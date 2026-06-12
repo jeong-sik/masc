@@ -75,7 +75,7 @@ type world_observation = {
       so newly added work is not delayed behind the previous turn's timer. *)
 
   active_agent_count : int;
-  (** Number of agents currently active in the workspace. *)
+  (** Number of live keeper fibers for this workspace base path. *)
 
   connected_surfaces : Gate_surface.surface_presence list;
   (** Connector surfaces attached to this keeper (RFC-0223 P2).

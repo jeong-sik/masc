@@ -701,7 +701,9 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
       Buffer.add_string ubuf
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);
     Buffer.add_string ubuf
-      (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
+      (Printf.sprintf
+         "- Running keeper fibers: %d\n"
+         observation.active_agent_count);
     Buffer.add_char ubuf '\n');
   (* 4. Context health — stable resource framing *)
   Buffer.add_string ubuf

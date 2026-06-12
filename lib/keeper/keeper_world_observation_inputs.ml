@@ -100,9 +100,13 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
     0, 0, 0, 0, false
 ;;
 
-(** Count active agents in workspace. *)
+(** Count live keeper fibers for keeper world state.
+
+    Keepers do not write the legacy [.masc/agents/] registry.  That registry may
+    be empty while keepers are running normally, so keeper observations must use
+    the live keeper registry instead. *)
 let count_active_agents ~(config : Workspace.config) : int =
-  try List.length (Workspace.get_agents_raw config) with
+  try Keeper_registry.count_running ~base_path:config.base_path () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
     Otel_metric_store.inc_counter

@@ -138,7 +138,11 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let published_mailbox = Some input_mailbox in
   Atomic.set input_mailbox_cell published_mailbox;
   Eio.Switch.on_release sw (fun () ->
-    ignore (Atomic.compare_and_set input_mailbox_cell published_mailbox None));
+    (* Best-effort: a newer run may have already replaced the published mailbox. *)
+    let (_ : bool) =
+      Atomic.compare_and_set input_mailbox_cell published_mailbox None
+    in
+    ());
   let heartbeat_ms = ref None in
   (* Heartbeat ACK tracking. The heartbeat fiber clears on tick; the
      reader sets on Op_heartbeat_ack.  Starts [true] so the first tick

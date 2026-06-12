@@ -108,19 +108,31 @@ let speaker_display (m : Keeper_chat_store.chat_message) : string =
    mention newer than my last line". An unanswered mention stays pending across
    observations (it keeps the keeper reactive until it replies in the lane).
 
+   RFC-0232 P1: "newer" is lane order, not wall-clock. The lane is an
+   append-only file, so its line order is the true arrival order; the
+   watermark is the *position* of the keeper's last assistant line. Folding
+   forward, an assistant line clears every candidate accumulated so far —
+   no float comparisons, no equal-timestamp conventions, no skew
+   sensitivity. [append_turn]'s user→tool→assistant write order makes a
+   turn's own user line answered by its own reply, as before.
+
    Pure over the loaded lane so it is testable without I/O; [collect_message_scope]
    only adds the [Keeper_chat_store.load]. *)
 
-(* The watermark: ts of the keeper's own last lane line (assistant role). A user
-   line at or before it is already answered. *)
-let last_self_ts (messages : Keeper_chat_store.chat_message list) : float =
+(* User lines after the keeper's last assistant line, in lane order. The
+   shared positional watermark for mentions and scope. *)
+let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
+  : Keeper_chat_store.chat_message list
+  =
   List.fold_left
     (fun acc (m : Keeper_chat_store.chat_message) ->
-      match m.ts with
-      | Some ts when m.role = "assistant" && ts > acc -> ts
-      | _ -> acc)
-    0.0
+      match m.role with
+      | Keeper_chat_store.Role.Assistant -> []
+      | Keeper_chat_store.Role.User -> m :: acc
+      | Keeper_chat_store.Role.Tool -> acc)
+    []
     messages
+  |> List.rev
 ;;
 
 let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
@@ -134,14 +146,11 @@ let pending_mentions_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  let my_last_ts = last_self_ts messages in
-  List.filter_map
-    (fun (m : Keeper_chat_store.chat_message) ->
-      match m.ts with
-      | Some ts when ts > my_last_ts && m.role = "user" && line_mentions ~targets m.content
-        -> Some (speaker_display m, m.content)
-      | _ -> None)
-    messages
+  user_lines_after_last_self messages
+  |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
+    if line_mentions ~targets m.content
+    then Some (speaker_display m, m.content)
+    else None)
 ;;
 
 (* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
@@ -155,17 +164,11 @@ let pending_scope_of_messages
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  let my_last_ts = last_self_ts messages in
-  List.filter_map
-    (fun (m : Keeper_chat_store.chat_message) ->
-      match m.ts with
-      | Some ts
-        when ts > my_last_ts
-             && m.role = "user"
-             && is_owner_authored m
-             && not (line_mentions ~targets m.content) -> Some (speaker_display m, m.content)
-      | _ -> None)
-    messages
+  user_lines_after_last_self messages
+  |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
+    if is_owner_authored m && not (line_mentions ~targets m.content)
+    then Some (speaker_display m, m.content)
+    else None)
 ;;
 
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)

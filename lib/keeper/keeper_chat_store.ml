@@ -61,6 +61,32 @@ type tool_call = {
   args : string;
 }
 
+(* RFC-0232 P1: the lane role is a closed sum parsed once at the read
+   boundary; consumers match exhaustively instead of comparing role
+   strings. On-disk labels are unchanged ("user"/"assistant"/"tool"). *)
+module Role = struct
+  type t =
+    | User
+    | Assistant
+    | Tool
+
+  let to_label = function
+    | User -> "user"
+    | Assistant -> "assistant"
+    | Tool -> "tool"
+
+  let of_label = function
+    | "user" -> Some User
+    | "assistant" -> Some Assistant
+    | "tool" -> Some Tool
+    | _ -> None
+
+  let equal a b =
+    match a, b with
+    | User, User | Assistant, Assistant | Tool, Tool -> true
+    | (User | Assistant | Tool), _ -> false
+end
+
 type speaker_authority =
   | Owner
   | External
@@ -81,7 +107,7 @@ type speaker = {
 }
 
 type chat_message = {
-  role : string;
+  role : Role.t;
   content : string;
   ts : float option;
   attachments : attachment list option;
@@ -122,10 +148,11 @@ let speaker_fields = function
       @ opt_string_field "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
-let encode_line ~role ~content ~ts ?attachments ?tool_call_id ?tool_call_name
-    ?source ?conversation_id ?external_message_id ?speaker () : string =
+let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
+    ?tool_call_name ?source ?conversation_id ?external_message_id ?speaker ()
+    : string =
   let base_fields = [
-    ("role", `String role);
+    ("role", `String (Role.to_label role));
     ("content", `String content);
     ("ts", `Float ts);
   ] in
@@ -188,14 +215,14 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     (* Speaker identity belongs to the user line only: tool and
        assistant lines are the keeper's own output. *)
     let user_line =
-      encode_line ~role:"user" ~content:user_content ~ts
+      encode_line ~role:Role.User ~content:user_content ~ts
         ~attachments:user_attachments ?source ?conversation_id
         ?external_message_id ?speaker ()
     in
     let tool_lines =
       List.mapi
         (fun position tc ->
-          encode_line ~role:"tool"
+          encode_line ~role:Role.Tool
             ~content:(normalize_tool_args tc.args)
             ~ts
             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
@@ -204,7 +231,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
         tool_calls
     in
     let asst_line =
-      encode_line ~role:"assistant" ~content:assistant_content ~ts ?source
+      encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?source
         ?conversation_id ()
     in
     let payload =
@@ -232,7 +259,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:"assistant" ~content ~ts ?source ?conversation_id ()
+      encode_line ~role:Role.Assistant ~content ~ts ?source ?conversation_id ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -257,7 +284,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:"user" ~content ~ts ?source ?conversation_id
+      encode_line ~role:Role.User ~content ~ts ?source ?conversation_id
         ?external_message_id ?speaker ()
     in
     Fs_compat.append_file path (line ^ "\n")
@@ -274,7 +301,9 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
 let parse_line ~file_path (line : string) : chat_message option =
   try
     let json = Yojson.Safe.from_string line in
-    let role = Json_util.get_string_with_default json ~key:"role" ~default:"" in
+    let role_label =
+      Json_util.get_string_with_default json ~key:"role" ~default:""
+    in
     let content = Json_util.get_string_with_default json ~key:"content" ~default:"" in
     let ts =
       (try Some ((match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | _ -> 0.0))
@@ -340,22 +369,33 @@ let parse_line ~file_path (line : string) : chat_message option =
           if atts = [] then None else Some atts
       | _ -> None
     in
-    if role = "" || content = "" then (
+    if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
         ~path:file_path
         ~detail:"chat row missing non-empty role/content";
       None)
-    else if role = "tool" && tool_call_name = None then (
-      report_persistence_read_drop
-        ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-        ~path:file_path
-        ~detail:"tool chat row missing non-empty tool_call_name";
-      None)
     else
-      Some
-        { role; content; ts; attachments; tool_call_id; tool_call_name;
-          source; conversation_id; external_message_id; speaker }
+      match Role.of_label role_label with
+      | None ->
+          (* RFC-0232 P1: an unknown role cannot participate in any lane
+             semantics (watermark, pending, rendering); surface it
+             instead of carrying an untyped row. *)
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:(Printf.sprintf "unknown chat row role %S" role_label);
+          None
+      | Some Role.Tool when tool_call_name = None ->
+          report_persistence_read_drop
+            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+            ~path:file_path
+            ~detail:"tool chat row missing non-empty tool_call_name";
+          None
+      | Some role ->
+          Some
+            { role; content; ts; attachments; tool_call_id; tool_call_name;
+              source; conversation_id; external_message_id; speaker }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -370,7 +410,7 @@ let parse_line ~file_path (line : string) : chat_message option =
 let max_history = 100
 let max_total_lines = 400
 
-let is_tool_message (msg : chat_message) = String.equal msg.role "tool"
+let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
 (* A turn is persisted as user, tool*, assistant. Evicting the front of
    the window can leave tool lines whose owning user line is gone;
@@ -525,7 +565,7 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
     (List.map
        (fun m ->
          `Assoc
-           ([ ("role", `String m.role);
+           ([ ("role", `String (Role.to_label m.role));
               ("content", `String m.content);
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]

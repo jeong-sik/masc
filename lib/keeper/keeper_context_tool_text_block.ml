@@ -38,15 +38,11 @@ let tool_result_text_of_block
 
 let tool_use_text_of_block
       ~(tool_use_id : string)
-      ~(tool_name : string)
-      ~(input : Yojson.Safe.t)
+      ~tool_name:(_tool_name : string)
+      ~input:(_input : Yojson.Safe.t)
   : string
   =
-  let tool_name = Inference_utils.sanitize_text_utf8 (String.trim tool_name) in
   let tool_use_id = Inference_utils.sanitize_text_utf8 (String.trim tool_use_id) in
-  let tool_name = if tool_name = "" then "unknown_tool" else tool_name in
-  let input_json =
-    Yojson.Safe.to_string input |> Inference_utils.sanitize_text_utf8
-  in
-  Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
+  let tool_use_id = if tool_use_id = "" then "unknown" else tool_use_id in
+  Printf.sprintf "[unpaired tool use elided id:%s]" tool_use_id
 ;;

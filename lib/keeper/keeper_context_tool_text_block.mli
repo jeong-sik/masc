@@ -10,8 +10,9 @@ val tool_result_text_of_block
   -> max_chars:int
   -> string
 
-(** Build the text fallback for a ToolUse, sanitizing [tool_name] /
-    [tool_use_id] and serializing [input] inline. *)
+(** Build the text fallback for a dangling ToolUse.  The fallback omits
+    [tool_name] and [input] so orphan repair does not replay an unpaired
+    tool-selection pattern back into the prompt. *)
 val tool_use_text_of_block
   :  tool_use_id:string
   -> tool_name:string

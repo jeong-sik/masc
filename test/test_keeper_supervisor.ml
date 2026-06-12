@@ -241,6 +241,27 @@ let test_supervisor_policy_runtime_error_no_reason_falls_through () =
   check bool "reason=None yields no runtime-exhausted decision" true
     (Sup.failure_reason_policy_decision_for_test (Some r) = None)
 
+let test_supervisor_policy_provider_timeout_catch_all_retries () =
+  let r =
+    Reg.Provider_runtime_error
+      { code = "provider_error_timeout:http_operation"
+      ; detail =
+          "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  let decision = policy_decision_exn (Some r) in
+  check string "scope" "provider"
+    (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "soft_fail_turn"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check string "operator action" "inspect_provider_stream"
+    (KFP.operator_action_to_label decision.operator_action);
+  check string "reason" "provider_timeout:http_operation" decision.reason
+
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
 let test_keep_last_n_under_limit () =
@@ -2116,6 +2137,8 @@ let () =
         test_supervisor_policy_runtime_exhausted_retryable_reasons;
       test_case "runtime-exhausted capability/unknown reasons are terminal" `Quick
         test_supervisor_policy_runtime_exhausted_terminal_reasons;
+      test_case "provider timeout catch-all is retryable" `Quick
+        test_supervisor_policy_provider_timeout_catch_all_retries;
       test_case "provider error with reason=None falls through to no decision" `Quick
         test_supervisor_policy_runtime_error_no_reason_falls_through;
     ];

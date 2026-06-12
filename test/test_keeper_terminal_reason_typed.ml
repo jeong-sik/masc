@@ -430,6 +430,29 @@ let () =
 ;;
 
 let () =
+  let code = "provider_error_timeout:http_operation" in
+  check
+    "provider timeout marker is transient"
+    (Tr.is_transient_provider_runtime_failure (Tr.of_wire code));
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = code
+    ; error_kind = Some (R.error_kind_of_string "provider")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_fail_open_next_runtime, R.Reason_transient_runtime_retry in
+  check
+    (Printf.sprintf
+       "provider timeout marker disposition want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want)
+;;
+
+let () =
   match !failures with
   | [] -> print_endline "test_keeper_terminal_reason_typed: OK"
   | xs ->

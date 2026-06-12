@@ -51,6 +51,26 @@ module Role : sig
   val equal : t -> t -> bool
 end
 
+(** What an assistant line {e is}, declared by the writer at append.
+    [Utterance] is something the keeper actually said.
+    [Transport_failure] is the server persisting a failed request
+    terminal (["Keeper request failed: ..."]) so the operator still sees
+    the failure after a reload — it is {e not} a self reply: it does not
+    advance the lane watermark, so the user line it failed to answer
+    stays pending until the keeper's next real utterance, and
+    observation never quotes it back as the keeper's own words.
+    Persisted as ["kind"]; the field is absent for utterances, so rows
+    written before it existed read unchanged. *)
+module Row_kind : sig
+  type t =
+    | Utterance
+    | Transport_failure
+
+  val to_label : t -> string
+  val of_label : string -> t option
+  val equal : t -> t -> bool
+end
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
@@ -101,6 +121,12 @@ type chat_message = {
           and rows written before P4 (the offline backfill tool stamps
           those).  Malformed persisted entries are reported as
           persistence read drops and skipped; the row stays valid. *)
+  kind : Row_kind.t;
+      (** Declared by the writer at append.  Absent persisted field
+          (every row written before it existed) reads as [Utterance];
+          an unknown label is reported as a persistence read drop and
+          reads as [Utterance] — the conservative arm: the row renders
+          and advances the watermark like any reply. *)
 }
 
 (** {1 I/O} *)
@@ -113,8 +139,10 @@ type chat_message = {
     identifies the user-line author and is written on the user line
     only. [conversation_id] identifies the external conversation/thread
     coordinate and is written on all lines of the turn; [external_message_id]
-    belongs to the inbound user line only. Failures are logged but never raised except for
-    {!Eio.Cancel.Cancelled}. *)
+    belongs to the inbound user line only. [assistant_kind] declares what
+    the assistant line is (default [Utterance]); the failed-request
+    persistence path passes [Transport_failure]. Failures are logged but
+    never raised except for {!Eio.Cancel.Cancelled}. *)
 val append_turn :
   base_dir:string ->
   keeper_name:string ->
@@ -126,6 +154,7 @@ val append_turn :
   ?external_message_id:string ->
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
+  ?assistant_kind:Row_kind.t ->
   assistant_content:string ->
   unit ->
   unit

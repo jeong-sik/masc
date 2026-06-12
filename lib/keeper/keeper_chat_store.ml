@@ -87,6 +87,35 @@ module Role = struct
     | (User | Assistant | Tool), _ -> false
 end
 
+(* What an assistant line *is*, declared by the writer at append time.
+   [Utterance] is something the keeper actually said; [Transport_failure]
+   is the server persisting a failed request terminal ("Keeper request
+   failed: ...") so the operator still sees the failure after a reload.
+   Readers branch on the type: a transport failure is not a self reply —
+   it does not advance the lane watermark, so the user line it failed to
+   answer stays pending until the keeper's next real utterance — and it
+   is never quoted back as the keeper's own words. On disk the field is
+   ["kind"], absent for utterances so pre-existing rows read unchanged. *)
+module Row_kind = struct
+  type t =
+    | Utterance
+    | Transport_failure
+
+  let to_label = function
+    | Utterance -> "utterance"
+    | Transport_failure -> "transport_failure"
+
+  let of_label = function
+    | "utterance" -> Some Utterance
+    | "transport_failure" -> Some Transport_failure
+    | _ -> None
+
+  let equal a b =
+    match a, b with
+    | Utterance, Utterance | Transport_failure, Transport_failure -> true
+    | (Utterance | Transport_failure), _ -> false
+end
+
 type speaker_authority =
   | Owner
   | External
@@ -128,6 +157,12 @@ type chat_message = {
          (plus connector-provided explicit mentions); [] = none.  Rows
          written before P4 lack the field and read as []; the offline
          backfill tool stamps them. *)
+  kind : Row_kind.t;
+      (* Declared by the writer at append.  Absent field (every row
+         written before this field existed) reads as [Utterance]; an
+         unknown label is reported as a persistence read drop and the
+         row reads as [Utterance] (the conservative arm: it renders and
+         advances the watermark like any reply). *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -161,7 +196,7 @@ let speaker_fields = function
 
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?(mentions = []) ()
+    ?(mentions = []) ?(kind = Row_kind.Utterance) ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -205,10 +240,19 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
         ) atts in
         [("attachments", `List att_json)]
   in
+  (* Utterance is the absent-field default so rows written before the
+     [kind] field existed and ordinary rows stay byte-identical. *)
+  let kind_field =
+    match kind with
+    | Row_kind.Utterance -> []
+    | Row_kind.Transport_failure ->
+        [ ("kind", `String (Row_kind.to_label kind)) ]
+  in
   let all_fields =
     base_fields
     @ attachment_fields
     @ mention_fields
+    @ kind_field
     @ opt_string_field "tool_call_id" tool_call_id
     @ opt_string_field "tool_call_name" tool_call_name
     @ opt_string_field "source" source
@@ -239,6 +283,7 @@ let user_line_mentions ~extra_mentions content =
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
+    ?(assistant_kind = Row_kind.Utterance)
     ~(assistant_content : string)
     () =
   try
@@ -277,7 +322,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
-        ?conversation_id ()
+        ?conversation_id ~kind:assistant_kind ()
     in
     let payload =
       String.concat "\n" ((user_line :: tool_lines) @ [ asst_line ]) ^ "\n"
@@ -468,6 +513,24 @@ let parse_line ~file_path (line : string) : chat_message option =
             ~detail:"mentions field is not a list";
           []
     in
+    let kind =
+      (* Absent field = every row written before [kind] existed; all of
+         those are utterances. Unknown labels are surfaced and read as
+         [Utterance] — the conservative arm (renders and advances the
+         watermark like any reply) rather than silently resurrecting a
+         pending user line. *)
+      match opt_string "kind" with
+      | None -> Row_kind.Utterance
+      | Some label -> (
+          match Row_kind.of_label label with
+          | Some kind -> kind
+          | None ->
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "unknown chat row kind %S" label);
+              Row_kind.Utterance)
+    in
     if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -495,7 +558,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           Some
             { role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              mentions }
+              mentions; kind }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -670,6 +733,13 @@ let to_json_array (messages : chat_message list) : Yojson.Safe.t =
             ] @ (match m.ts with
                  | Some t -> [("ts", `Float t)]
                  | None -> [])
+              (* Dashboard history: surface the writer-declared kind for
+                 non-utterance rows so a reload can tell a transport
+                 failure apart from keeper speech. *)
+              @ (match m.kind with
+                 | Row_kind.Utterance -> []
+                 | Row_kind.Transport_failure ->
+                     [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ opt_string_field "tool_call_id" m.tool_call_id
               @ opt_string_field "tool_call_name" m.tool_call_name
               @ opt_string_field "source" m.source

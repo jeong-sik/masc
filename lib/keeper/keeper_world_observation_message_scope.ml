@@ -67,14 +67,21 @@ let speaker_display (m : Keeper_chat_store.chat_message) : string =
    only adds the [Keeper_chat_store.load]. *)
 
 (* User lines after the keeper's last assistant line, in lane order. The
-   shared positional watermark for mentions and scope. *)
+   shared positional watermark for mentions and scope. Only an assistant
+   *utterance* is a self reply; a [Transport_failure] row is the server
+   persisting a failed request terminal — the keeper never answered, so
+   the user line stays pending until the keeper's next real utterance
+   (which, per positional semantics, clears every pending line). *)
 let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
   : Keeper_chat_store.chat_message list
   =
   List.fold_left
     (fun acc (m : Keeper_chat_store.chat_message) ->
       match m.role with
-      | Keeper_chat_store.Role.Assistant -> []
+      | Keeper_chat_store.Role.Assistant -> (
+        match m.kind with
+        | Keeper_chat_store.Row_kind.Utterance -> []
+        | Keeper_chat_store.Row_kind.Transport_failure -> acc)
       | Keeper_chat_store.Role.User -> m :: acc
       | Keeper_chat_store.Role.Tool -> acc)
     []

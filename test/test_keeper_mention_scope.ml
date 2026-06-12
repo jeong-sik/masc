@@ -43,7 +43,8 @@ let test_empty_targets () =
        (Lane.mention_ids_of_content "@dreamer"))
 ;;
 
-let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None) content
+let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None)
+    ?(kind = Store.Row_kind.Utterance) content
   : Store.chat_message
   =
   { role
@@ -58,6 +59,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None) content
   ; external_message_id = None
   ; speaker
   ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
+  ; kind
   }
 ;;
 
@@ -193,6 +195,7 @@ let tool_line : Store.chat_message =
   ; external_message_id = None
   ; speaker = None
   ; mentions = []
+  ; kind = Store.Row_kind.Utterance
   }
 ;;
 
@@ -204,6 +207,28 @@ let test_tool_lines_do_not_clear () =
   in
   check (list string) "tool line is not an answer" [ "@dreamer please look" ]
     (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_transport_failure_does_not_clear () =
+  (* A transport-failure marker is the server recording a failed request
+     terminal ("Keeper request failed: ..."), not the keeper answering;
+     the user line stays pending so the keeper revisits it on its next
+     turn. A real utterance afterwards still clears. *)
+  let failure =
+    msg ~role:Store.Role.Assistant ~ts:(Some 10.5)
+      ~kind:Store.Row_kind.Transport_failure
+      "Keeper request failed: Idle detected"
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) "@dreamer please look"; failure ]
+  in
+  check (list string) "failure marker is not an answer" [ "@dreamer please look" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages));
+  let answered =
+    messages @ [ msg ~role:Store.Role.Assistant ~ts:(Some 11.0) "done" ]
+  in
+  check (list string) "a real utterance still clears" []
+    (contents (MS.pending_mentions_of_messages ~targets answered))
 ;;
 
 let test_assistant_append_empties_pending () =
@@ -262,6 +287,8 @@ let () =
         ; test_case "ts_fuzz_invariant" `Quick test_ts_fuzz_does_not_change_pending
         ; test_case "none_ts_assistant_clears" `Quick test_none_ts_assistant_still_clears
         ; test_case "tool_lines_do_not_clear" `Quick test_tool_lines_do_not_clear
+        ; test_case "transport_failure_does_not_clear" `Quick
+            test_transport_failure_does_not_clear
         ; test_case "assistant_append_empties_pending" `Quick
             test_assistant_append_empties_pending
         ] )

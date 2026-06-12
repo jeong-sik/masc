@@ -222,14 +222,23 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
         ~route:Discord_observability.Control
         Discord_observability.Open_wss;
       (match !conn_ref with
-       | Some _ ->
+       | Some old_conn ->
+         (* Defensive cleanup: the state machine may not have emitted
+            Close_wss before this Open_wss (e.g. Wss_closed from a server
+            Close frame that didn't go through our explicit Close_wss path).
+            Discord_wss_connection.close is idempotent (peek-resolve
+            pattern), so calling it on an already-closed connection is
+            safe. Without this, the stale conn_ref blocks reconnection
+            permanently — the FSM transitions to Awaiting_hello but no
+            socket is opened, and no timeout escapes that state. *)
          log_effect `Warn
-           "Open_wss while conn_ref still Some; expected Close_wss \
-            first — dropping new connect"
-       | None ->
-         let conn = Discord_wss_connection.connect ~sw ~env ~url in
-         conn_ref := Some conn;
-         Eio.Fiber.fork ~sw (fun () -> reader_loop conn))
+           "Open_wss while conn_ref still Some; force-closing stale connection";
+         Discord_wss_connection.close old_conn;
+         conn_ref := None
+       | None -> ());
+      let conn = Discord_wss_connection.connect ~sw ~env ~url in
+      conn_ref := Some conn;
+      Eio.Fiber.fork ~sw (fun () -> reader_loop conn)
     | Close_wss { code; reason = _ } ->
       (* Phase 1.4b: explicit close. Discord_wss_connection.close
          resolves the inner session switch's close-signal promise,

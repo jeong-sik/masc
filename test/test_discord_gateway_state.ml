@@ -1212,6 +1212,97 @@ let test_resume_round_trip_to_connected () =
   | _ -> fail "expected Connected sess-1 last_seq=99 after RESUMED"
 
 (* ---------------------------------------------------------------- *)
+(* Phase 1.4c — reconnect safety-net tests                         *)
+(* ---------------------------------------------------------------- *)
+
+let test_wss_closed_emits_close_wss () =
+  (* Regression: Wss_closed from a connection state must emit Close_wss
+     so the I/O layer can clear conn_ref. Without this, a stale conn_ref
+     blocks the next Open_wss and the gateway stalls permanently in
+     Awaiting_hello. *)
+  let m =
+    connected_at
+      ~session_id:"sess-1"
+      ~resume_url:"wss://resume.discord.gg/"
+      ~user_id:"42"
+  in
+  let _m', effects =
+    S.step m ~now_mono:10.0
+      (S.Wss_closed { code = 1001; reason = "server requested reconnect" })
+  in
+  check bool "Close_wss emitted on Wss_closed from Connected" true
+    (has_close_wss effects);
+  check bool "Schedule_backoff also emitted" true
+    (has_schedule_backoff effects)
+
+let test_wss_closed_emits_close_wss_from_awaiting_hello () =
+  (* Same regression check for Awaiting_hello (WSS opened but no Hello
+     received before a remote close). *)
+  let config =
+    { S.token = "test-token"
+    ; intents = [ S.Guilds; S.Message_content ]
+    ; bot_user_id = None
+    ; trigger_policy = S.Mention_only
+    }
+  in
+  let m, _ = S.step (S.create ~config) ~now_mono:0.0 S.Connect_requested in
+  (match S.state m with
+   | S.Awaiting_hello -> ()
+   | _ -> fail "expected Awaiting_hello");
+  let _m', effects =
+    S.step m ~now_mono:5.0
+      (S.Wss_closed { code = 1000; reason = "remote close" })
+  in
+  check bool "Close_wss emitted on Wss_closed from Awaiting_hello" true
+    (has_close_wss effects)
+
+let test_awaiting_hello_timeout_escapes_to_reconnect () =
+  (* Safety-net: Heartbeat_tick after the timeout threshold in
+     Awaiting_hello should escape to Reconnect_pending instead of
+     staying stuck forever. *)
+  let config =
+    { S.token = "test-token"
+    ; intents = [ S.Guilds; S.Message_content ]
+    ; bot_user_id = None
+    ; trigger_policy = S.Mention_only
+    }
+  in
+  let m, _ = S.step (S.create ~config) ~now_mono:0.0 S.Connect_requested in
+  (match S.state m with
+   | S.Awaiting_hello -> ()
+   | _ -> fail "expected Awaiting_hello");
+  (* Advance time past the 30s timeout *)
+  let m', effects =
+    S.step m ~now_mono:45.0 S.Heartbeat_tick
+  in
+  (match S.state m' with
+   | S.Reconnect_pending _ -> ()
+   | _ -> fail "expected Reconnect_pending after Awaiting_hello timeout");
+  check bool "Schedule_backoff emitted" true
+    (has_schedule_backoff effects)
+
+let test_awaiting_hello_before_timeout_stays () =
+  (* Heartbeat_tick arriving before the timeout should NOT trigger
+     escape — still legitimately waiting for Hello. *)
+  let config =
+    { S.token = "test-token"
+    ; intents = [ S.Guilds; S.Message_content ]
+    ; bot_user_id = None
+    ; trigger_policy = S.Mention_only
+    }
+  in
+  let m, _ = S.step (S.create ~config) ~now_mono:0.0 S.Connect_requested in
+  (* 10s < 30s timeout, should stay in Awaiting_hello *)
+  let m', effects =
+    S.step m ~now_mono:10.0 S.Heartbeat_tick
+  in
+  (match S.state m' with
+   | S.Awaiting_hello -> ()
+   | _ -> fail "expected Awaiting_hello (not timed out yet)");
+  check bool "no Schedule_backoff before timeout" false
+    (has_schedule_backoff effects)
+
+(* ---------------------------------------------------------------- *)
 (* Thread tracking + Mention_or_thread policy                      *)
 (* ---------------------------------------------------------------- *)
 
@@ -1794,6 +1885,18 @@ let () =
             "Resume round trip: Connected → blip → Backoff → Hello → \
              Op_resume → RESUMED → Connected"
             `Quick test_resume_round_trip_to_connected
+        ; test_case
+            "Wss_closed from Connected emits Close_wss (conn_ref cleanup)"
+            `Quick test_wss_closed_emits_close_wss
+        ; test_case
+            "Wss_closed from Awaiting_hello emits Close_wss"
+            `Quick test_wss_closed_emits_close_wss_from_awaiting_hello
+        ; test_case
+            "Awaiting_hello timeout escapes to Reconnect_pending"
+            `Quick test_awaiting_hello_timeout_escapes_to_reconnect
+        ; test_case
+            "Awaiting_hello before timeout stays in Awaiting_hello"
+            `Quick test_awaiting_hello_before_timeout_stays
         ] )
     ; ( "thread decode"
       , [ test_case "THREAD_CREATE with id + parent_id => Thread_tracked" `Quick

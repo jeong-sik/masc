@@ -143,6 +143,7 @@ val log_call :
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
+  ?execution_id:Ids.Execution_id.t ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -161,6 +162,9 @@ val log_call :
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
+    [execution_id] is the RFC-0233 canonical join key minted once at the
+    dispatch boundary; the trajectory row for the same execution carries
+    the identical value.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],

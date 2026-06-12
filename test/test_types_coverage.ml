@@ -93,6 +93,41 @@ let test_task_id_to_yojson () =
   | `String s -> check string "to json" "task-123" s
   | _ -> fail "expected String"
 
+(* ============================================================
+   Execution_id Tests (RFC-0233)
+   ============================================================ *)
+
+let test_execution_id_generate_prefix () =
+  let s = Masc_domain.Execution_id.(to_string (generate ())) in
+  check bool "starts with exec-" true (String.sub s 0 5 = "exec-")
+
+let test_execution_id_generate_unique () =
+  let id1 = Masc_domain.Execution_id.generate () in
+  let id2 = Masc_domain.Execution_id.generate () in
+  check bool "unique" false (Masc_domain.Execution_id.equal id1 id2)
+
+let test_execution_id_mint_order_sorts () =
+  (* Same-millisecond mints differ by sequence; the lexicographic order
+     of the suffix tracks mint order within a process. *)
+  let ids =
+    List.init 50 (fun _ -> Masc_domain.Execution_id.(to_string (generate ())))
+  in
+  check (list string) "lexicographic order = mint order"
+    ids (List.sort compare ids)
+
+let test_execution_id_yojson_roundtrip () =
+  let id = Masc_domain.Execution_id.of_string "exec-1718150400000-0001" in
+  match Masc_domain.Execution_id.(of_yojson (to_yojson id)) with
+  | Ok back ->
+      check string "roundtrip" "exec-1718150400000-0001"
+        (Masc_domain.Execution_id.to_string back)
+  | Error _ -> fail "expected Ok"
+
+let test_execution_id_of_yojson_rejects_non_string () =
+  match Masc_domain.Execution_id.of_yojson (`Int 42) with
+  | Ok _ -> fail "expected Error for non-string"
+  | Error _ -> check bool "rejected" true true
+
 let test_task_id_of_yojson_ok () =
   let json = `String "my-task" in
   match Masc_domain.Task_id.of_yojson json with
@@ -1407,6 +1442,14 @@ let () =
       test_case "to_yojson" `Quick test_task_id_to_yojson;
       test_case "of_yojson ok" `Quick test_task_id_of_yojson_ok;
       test_case "of_yojson err" `Quick test_task_id_of_yojson_err;
+    ];
+    "execution_id", [
+      test_case "generate prefix" `Quick test_execution_id_generate_prefix;
+      test_case "generate unique" `Quick test_execution_id_generate_unique;
+      test_case "mint order sorts" `Quick test_execution_id_mint_order_sorts;
+      test_case "yojson roundtrip" `Quick test_execution_id_yojson_roundtrip;
+      test_case "of_yojson rejects non-string" `Quick
+        test_execution_id_of_yojson_rejects_non_string;
     ];
     "timestamp", [
       test_case "now_iso format" `Quick test_now_iso_format;

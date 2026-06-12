@@ -31,6 +31,12 @@ type tool_call_entry = {
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
   cost_usd : float;                 (** Estimated cost of this call *)
+  execution_id : string option;
+      (** RFC-0233 canonical join key minted at the dispatch boundary; the
+          tool_calls JSONL row for the same execution carries the identical
+          value. Plain string here: Trajectory is a dependency-leaf
+          persistence record, the typed [Ids.Execution_id.t] lives at the
+          mint site. *)
 }
 
 type gate_decode_summary = {
@@ -170,6 +176,9 @@ let entry_to_json ?(result_max_len = default_result_truncation)
        ("error", Json_util.string_opt_to_json e.error);
        ("cost_usd", `Float e.cost_usd);
      ]
+    @ (match e.execution_id with
+       | Some id -> [ ("execution_id", `String id) ]
+       | None -> [])
     @ runtime_contract_field @ action_radius_field)
 
 let default_thinking_truncation = 2000
@@ -657,6 +666,10 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) :
                  | Some (`String s) -> Some s
                  | Some _ -> None);
               cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              execution_id =
+                (match Json_util.assoc_member_opt "execution_id" json with
+                 | Some (`String s) -> Some s
+                 | _ -> None);
             },
             parsed_gate )
   with

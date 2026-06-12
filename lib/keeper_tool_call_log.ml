@@ -416,6 +416,7 @@ let log_call
       ?thinking_enabled
       ?thinking_budget
       ?prompt_fingerprint
+      ?execution_id
       ?trace_id
       ?session_id
       ?generation
@@ -490,6 +491,14 @@ let log_call
       let trace_id_field =
         match trace_id with
         | Some value -> [ "trace_id", `String value ]
+        | None -> []
+      in
+      (* RFC-0233 PR-1: canonical per-execution join key, minted once at
+         the dispatch boundary and shared with the trajectory row. *)
+      let execution_id_field =
+        match execution_id with
+        | Some value ->
+          [ "execution_id", `String (Ids.Execution_id.to_string value) ]
         | None -> []
       in
       let session_id_field =
@@ -604,6 +613,7 @@ let log_call
            @ thinking_enabled_field
            @ thinking_budget_field
            @ prompt_fingerprint_field
+           @ execution_id_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

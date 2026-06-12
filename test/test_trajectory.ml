@@ -80,6 +80,7 @@ let test_record_entry () =
       duration_ms = 50;
       error = None;
       cost_usd = 0.0001;
+      execution_id = Some "exec-1000-0001";
     } in
     Trajectory.record_entry acc entry;
     Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
@@ -101,6 +102,7 @@ let test_entropy_not_triggered () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk_entry "tool_execute");
     let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
@@ -117,6 +119,7 @@ let test_entropy_triggered () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk_entry "tool_execute");
     Trajectory.record_entry acc (mk_entry "tool_execute");
@@ -159,6 +162,7 @@ let test_finalize () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 100;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc entry;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -197,6 +201,7 @@ let test_calls_in_current_turn () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk "tool_execute");
     Trajectory.record_entry acc (mk "tool_read_file");
@@ -285,6 +290,7 @@ let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur c
     gate_decision = gate;
     result = Some "ok"; duration_ms = dur;
     error; cost_usd = cost;
+    execution_id = None;
   }
 
 let test_aggregate_basic () =
@@ -410,6 +416,7 @@ let test_entry_to_json_includes_contract_and_radius () =
     duration_ms = 25;
     error = None;
     cost_usd = 0.0001;
+    execution_id = Some "exec-1000-0001";
   } in
   let runtime_contract =
     Keeper_runtime_contract.runtime_observability_contract_json_from_fields
@@ -438,7 +445,31 @@ let test_entry_to_json_includes_contract_and_radius () =
     (json |> member "action_radius" |> member "tool_name" |> to_string);
   Alcotest.(check string) "observed path" "/tmp/work"
     (json |> member "action_radius" |> member "observed_paths" |> to_list
-     |> List.hd |> to_string)
+     |> List.hd |> to_string);
+  Alcotest.(check string) "execution_id persisted" "exec-1000-0001"
+    (json |> member "execution_id" |> to_string)
+
+(* RFC-0233 PR-1: the canonical join key survives the JSONL round-trip,
+   and rows written before the field existed decode as [None]. *)
+let test_execution_id_roundtrip () =
+  let entry : Trajectory.tool_call_entry = {
+    ts = 1000.0; ts_iso = "2026-06-12T00:00:00Z"; turn = 3; round = 1;
+    tool_name = "tool_execute"; args_json = "{}";
+    gate_decision = Trajectory.Pass;
+    result = Some "ok"; duration_ms = 10; error = None; cost_usd = 0.0;
+    execution_id = Some "exec-1718150400000-0001";
+  } in
+  (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
+   | Some (decoded, _) ->
+       Alcotest.(check (option string)) "round-trip"
+         (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
+   | None -> Alcotest.fail "entry did not decode");
+  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
+  match Trajectory.tool_call_entry_of_json legacy with
+  | Some (decoded, _) ->
+      Alcotest.(check (option string)) "legacy row decodes as None" None
+        decoded.Trajectory.execution_id
+  | None -> Alcotest.fail "legacy entry did not decode"
 
 let has_assoc_key key = function
   | `Assoc fields -> List.mem_assoc key fields
@@ -662,6 +693,8 @@ let () =
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
       Alcotest.test_case "entry carries runtime/action telemetry" `Quick
         test_entry_to_json_includes_contract_and_radius;
+      Alcotest.test_case "execution_id JSONL round-trip + legacy None" `Quick
+        test_execution_id_roundtrip;
       Alcotest.test_case "runtime contract redacts backend details" `Quick
         test_runtime_contract_projection_redacts_backend_details;
     ]);

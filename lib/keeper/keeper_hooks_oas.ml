@@ -608,6 +608,10 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
+        (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
+           the log_call row and the trajectory entry below share the value
+           so downstream views can join the two stores on a single key. *)
+        let execution_id = Ids.Execution_id.generate () in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -619,6 +623,7 @@ let make_hooks
              ?thinking_enabled:tctx.thinking_enabled
              ?thinking_budget:tctx.thinking_budget
              ?prompt_fingerprint:tctx.prompt_fingerprint
+             ~execution_id
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
@@ -688,6 +693,8 @@ let make_hooks
                duration_ms = trajectory_duration_ms duration_ms;
                error = (if outcome = Tool_result.Ok then None else Some safe_output);
                cost_usd = Trajectory.tool_cost_estimate tool_name;
+               execution_id =
+                 Some (Ids.Execution_id.to_string execution_id);
              }
            in
            Trajectory.record_entry

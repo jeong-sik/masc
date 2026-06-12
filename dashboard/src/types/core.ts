@@ -1225,6 +1225,7 @@ interface KeeperConfigPrompt {
     }
   }
   effective_system_prompt: string
+  unified_system_prompt: string
 }
 
 interface KeeperConfigExecution {

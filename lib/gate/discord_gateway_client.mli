@@ -106,3 +106,11 @@ val connection_state : unit -> Discord_gateway_state.connection_state
     [Disconnected] until [run] has started. One gateway per process
     (single bot token); written only by [run], safe to read from any
     fiber. Feeds connector presence ([Channel_gate_discord_state]). *)
+
+val set_presence : Discord_gateway_state.presence_status -> unit
+(** [set_presence status] pushes a [Status_change] input into the
+    gateway's drive loop. When connected, the bot's Discord presence
+    updates immediately (online/idle/dnd/invisible). When disconnected,
+    the request is logged and dropped.
+
+    Thread-safe: may be called from any fiber. *)

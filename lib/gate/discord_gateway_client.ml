@@ -111,6 +111,21 @@ let published_connection_state : Discord_gateway_state.connection_state Atomic.t
 
 let connection_state () = Atomic.get published_connection_state
 
+(* Module-level ref to the gateway's input mailbox, set by [run].
+   Allows external callers to push [Status_change] inputs without
+   a direct handle on the mailbox. Only written once (by [run]). *)
+let input_mailbox_ref :
+  Discord_gateway_state.input Eio.Stream.t option ref = ref None
+
+let set_presence (status : Discord_gateway_state.presence_status) =
+  match !input_mailbox_ref with
+  | None ->
+    Log.Discord.debug
+      "set_presence ignored: gateway not running (status=%s)"
+      (Discord_gateway_state.presence_status_to_string status)
+  | Some mb ->
+    Eio.Stream.add mb (Discord_gateway_state.Status_change status)
+
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
@@ -118,6 +133,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let state = ref (Discord_gateway_state.create ~config) in
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
   let input_mailbox = Eio.Stream.create 64 in
+  input_mailbox_ref := Some input_mailbox;
   let heartbeat_ms = ref None in
   (* Heartbeat ACK tracking. The heartbeat fiber clears on tick; the
      reader sets on Op_heartbeat_ack.  Starts [true] so the first tick
@@ -180,7 +196,8 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
             | Discord_gateway_state.Wss_closed _
             | Discord_gateway_state.Heartbeat_tick
             | Discord_gateway_state.Heartbeat_ack_timeout
-            | Discord_gateway_state.Backoff_elapsed -> ());
+            | Discord_gateway_state.Backoff_elapsed
+            | Discord_gateway_state.Status_change _ -> ());
            Eio.Stream.add input_mailbox inp
          | None -> ());
         loop ()

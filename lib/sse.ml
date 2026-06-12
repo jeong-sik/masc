@@ -116,8 +116,28 @@ let session_kind_to_string = function
 
 let take = List.take
 
+(** Minimum interval between full transport snapshot computations (seconds).
+    The snapshot iterates all SSE clients and builds per-session records;
+    at ~9 broadcasts/sec this path accounts for most allocation on the
+    broadcast hot path.  Throttling to ~0.2/sec cuts allocation by ~97%
+    while keeping dashboard metrics within 5 seconds of reality.
+    Configurable via [MASC_SNAPSHOT_INTERVAL_SEC] env var (default 5.0). *)
+let snapshot_min_interval_sec =
+  try float_of_string (Sys.getenv "MASC_SNAPSHOT_INTERVAL_SEC")
+  with Not_found -> 5.0
+
+(** Timestamp of the last completed snapshot.  CAS-guarded so that
+    concurrent [broadcast_impl] fibers racing to snapshot after the
+    interval expires do not duplicate work — only one fiber wins the
+    compare-and-set and runs the full iteration. *)
+let last_snapshot_time : float Atomic.t = Atomic.make 0.0
+
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
+  let last = Atomic.get last_snapshot_time in
+  if now -. last < snapshot_min_interval_sec then ()
+  else if not (Atomic.compare_and_set last_snapshot_time last now) then ()
+  else begin
   (* Single-pass aggregation: previously [SMap.fold] built a
      [(sid, client)] tuple list, then [List.map] re-walked it to
      produce [session_snapshot] records.  [SMap.iter] over the
@@ -182,6 +202,7 @@ let sync_transport_snapshot () =
   Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
+  end
 
 let mark_seen (client : client) =
   Atomic.set client.last_seen_at (Time_compat.now ())

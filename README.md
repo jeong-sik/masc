@@ -1,18 +1,17 @@
-# MASC (Multi-Agent workspace Collaboration)
+# MASC (Multi-Agent Workspace Collaboration)
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
 [![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.206.1-blue.svg)](https://github.com/jeong-sik/oas)
 
-> **Personal Infrastructure Invariant**  
-> 본 프로젝트는 개발자 1인의 워크플로우를 위해 설계된 개인용 에이전트 오케스트레이션 및 모니터링 시스템입니다. 프로덕션 SLA, 외부 하드웨어 호환성, 혹은 SemVer 기반의 API 호환성을 제공하지 않습니다.
+MASC는 OCaml 5.x 및 Eio 기반의 멀티 파이버(Multi-Fiber) 아키텍처로 구현된 병렬 멀티 에이전트 작업 및 모니터링 시스템입니다. 동일한 작업 공간(Workspace) 내에서 복수의 에이전트가 충돌 없이 자율적으로 Turn, Lock, Workspace State, Heartbeat, Task Owner를 교환하며 협업할 수 있도록 제어하며, 런타임 환경은 `~/me/.masc`를 사용합니다.
 
-MASC는 **OCaml 5.x + Eio** 기반의 비차단 멀티 파이버(Multi-Fiber) 아키텍처로 구현된 에이전트 자율 협업 및 제어 플레인입니다. 같은 저장소(Repository) 공간을 점유하고 동시에 작업하는 AI 코딩 에이전트들이 충돌 없이 자율적으로 Turn, Lock, Workspace State, Heartbeat, Task Owner를 교환하도록 중재합니다.
+MASC와 공용 라이브러리인 OAS(OCaml Agent SDK)는 모두 자체 개발중인 시스템입니다.
 
 ---
 
 ## 1. MASC vs. OAS Architectural Boundary
 
-MASC와 OAS(agent_sdk)는 명확히 분리된 경계(RFC-0058 / OAS-MASC-BOUNDARY)를 가집니다.
+MASC와 OAS(agent_sdk)는 결합도를 낮추기 위해 명확한 경계(RFC-0058 / OAS-MASC-BOUNDARY)를 유지합니다.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -35,14 +34,14 @@ MASC와 OAS(agent_sdk)는 명확히 분리된 경계(RFC-0058 / OAS-MASC-BOUNDAR
 └──────────────────────────────────────────────────┘
 ```
 
-*   **MASC (Orchestrator):** "언제, 왜, 어떤 에이전트 프로필(Model & Provider Chain)로 턴을 돌릴 것인가"를 스케줄링하고, 동시성(Single-Flight Admission)을 제어하며, 다중 메시지 채널(Surface)을 조율합니다.
-*   **OAS (Agent Runtime):** MASC에 의해 선택 및 할당된 단일 프로바이더 호출의 순수 실행(Tool Dispatch, Context Window 관리, 로컬 재시도)만 처리합니다. MASC의 비즈니스 로직이나 스케줄링 상태를 참조하지 않습니다.
+*   **MASC (Orchestrator & Monitor):** 여러 채널(Surface)을 조율하고 동시성(Single-Flight Admission)을 제어하며, 에이전트 실행 턴 및 제어 플레인을 조율합니다.
+*   **OAS (Agent SDK):** Provider 및 Model별 세부 처리를 담당하고 트랜스포트 전반을 담당하는 공용 라이브러리입니다. 에이전트 자체의 Turn 및 생명주기 관리, Hooks, 동기/비동기/배치 Tool 사용 시스템이 정의되어 있습니다. OAS는 MASC 시스템에 의존하거나 MASC를 대비한 코드를 가지지 않고 독자적으로 동작합니다.
 
 ---
 
 ## 2. Multi-Channel Inputs & Channel Gate
 
-MASC는 다양한 커뮤니케이션 경로를 `Surface` 타입(`Dashboard`, `Discord`, `Slack`, `Gate`)으로 추상화하여 턴을 트리거하고 제어합니다.
+MASC는 다양한 커뮤니케이션 경로를 `Surface` 타입(`Dashboard`, `Discord`, `Slack`, `Gate` 등)으로 추상화합니다. 시스템은 여러 입력 채널을 통해 에이전트의 Turn을 시작하거나 종료하고, 진행 상태를 폴링(Polling)하거나 대기(Awaiting)하는 라이프사이클을 수행합니다.
 
 ```
                   ┌──────────────┐
@@ -63,11 +62,12 @@ MASC는 다양한 커뮤니케이션 경로를 `Surface` 타입(`Dashboard`, `Di
              └───────────────────────┘
 ```
 
-*   **REST Async Entry:** 외부 연동 커넥터들은 `/api/v1/gate/message`로 메시지를 밀어 넣어 비동기적으로 턴을 트리거합니다.
-*   **Polling & Cancellation:**
-    *   **결과 폴링:** `GET /api/v1/gate/message/requests/<request_id>`로 턴 진행 상태 및 실행 결과를 비동기적으로 확인합니다.
-    *   **턴 취소:** `POST /api/v1/gate/message/requests/<request_id>/cancel`을 통해 활성 상태의 턴을 취소할 수 있습니다.
-*   **Discord Gateway:** `DISCORD_BOT_TOKEN` 환경변수가 주어지면 서버 부팅 시 별도 사이드카 없이 자동으로 Discord Gateway WSS에 상주하며 메시지를 파싱하여 라우팅합니다.
+*   **Turn Lifecycle Operations:**
+    *   **시작 (Trigger):** 외부 커넥터(Slack, Discord, Dashboard 등)의 메시지 수신이나 REST API(`POST /api/v1/gate/message`) 호출을 통해 Turn을 비동기적으로 시작합니다.
+    *   **종료 (Completion / Cancellation):** Turn 실행이 성공/실패로 완료되거나, 필요 시 API(`POST /api/v1/gate/message/requests/<request_id>/cancel`)를 통해 강제로 활성 상태의 Turn을 종료(취소)합니다.
+    *   **폴링 (Polling):** REST API(`GET /api/v1/gate/message/requests/<request_id>`)로 현재 Turn의 실행 단계와 진행 결과를 주기적으로 폴링하여 확인합니다.
+    *   **대기 (Awaiting):** 동시성 제어를 위해 활성 Turn이 이미 기동 중일 때, 새로운 Chat/Direct Turn 요청은 거부되지 않고 FIFO 직렬화 큐에서 차례가 올 때까지 대기(Awaiting)합니다.
+*   **Discord Gateway:** `DISCORD_BOT_TOKEN` 환경변수가 제공되면 별도 사이드카 없이 자동으로 Discord Gateway WSS에 연결하여 실시간 메시지를 파싱하고 라우팅합니다.
 
 ---
 
@@ -98,11 +98,11 @@ Offline ──► Running ──► {Failing | Overflowed | Compacting | Handing
 
 ## 4. Single-Flight Turn Admission Control
 
-MASC는 동일한 Keeper에 대해 **단 하나의 Active Turn만 허용**하는 극도의 상호 배제 정책(RFC-0225)을 준수하여 Checkpoint 훼손 및 메타데이터 역행을 차단합니다.
+MASC는 동일한 Keeper에 대해 단 하나의 Active Turn만 실행되도록 제어하여(Single-Flight Turn Admission, RFC-0225) 체크포인트 및 메타데이터의 정합성을 보존합니다.
 
 *   **Autonomous Lane (자율 스케줄링):** Heartbeat 주기 루프에서 세계 상태(World Observation)를 관측하여 턴을 실행하려 할 때, 이미 해당 Keeper가 챗 턴을 실행 중이면 틱을 즉시 스킵(`PhaseGateSkip`)하고 다음 주기에 재시도합니다.
-*   **Direct Lane (챗/직접 메시지):** API나 메신저 등을 통해 들어오는 챗 턴은 Phase Gate를 우회하여 실행됩니다. 만약 해당 Keeper가 이미 턴을 수행 중인 경우, 요청은 거부되지 않고 **FIFO 직렬화 큐**에 삽입되어 순차 대기한 뒤 처리됩니다.
-*   **CAS Integrity:** 체크포인트 저장 및 메타데이터 갱신 시 `monotonically increasing max` 정책과 CAS(Compare-And-Swap) 버전을 대조하여 역행을 물리적으로 원천 차단합니다.
+*   **Direct Lane (챗/직접 메시지):** API나 메신저 등을 통해 들어오는 챗 턴은 Phase Gate를 우회하여 실행됩니다. 만약 해당 Keeper가 이미 턴을 수행 중인 경우, 요청은 거부되지 않고 FIFO 직렬화 큐에 삽입되어 순차 대기한 뒤 처리됩니다.
+*   **CAS Integrity:** 체크포인트 저장 및 메타데이터 갱신 시 `monotonically increasing max` 정책과 CAS(Compare-And-Swap) 버전을 대조하여 역행을 방지합니다.
 
 ---
 
@@ -175,4 +175,4 @@ make release-evidence
 
 ## 8. License
 
-MIT. No warranties or SLAs. Use at your own risk.
+MIT License

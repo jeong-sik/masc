@@ -528,6 +528,7 @@ let keeper_context_status_json
         ([ "name", `String meta.name
          ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          ; "generation", `Int meta.runtime.generation
+         ; "unread_mentions", (let n = Mention_inbox.unread_count config ~target_agent:meta.name in `Int n)
          ; "context_ratio", `Float ctx_ratio
          ; "context_tokens", `Int ctx_tokens
          ; "context_max", `Int ctx_max

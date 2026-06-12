@@ -102,6 +102,7 @@
   test_multi_workspace
   test_worktree_detection
   test_mention
+  test_ids_keeper_id
   test_mention_dedup
   test_heartbeat_qw
   test_sse_qw

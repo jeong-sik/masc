@@ -36,7 +36,7 @@ let to_yojson selector =
         ; ("key", `String key)
         ; ("value", `String value)
         ]
-  | Tool_name _ | Descriptor_id _ | Runtime_handler _ | Eval_tag _ ->
+  | (Tool_name _ | Descriptor_id _ | Runtime_handler _ | Eval_tag _) as selector ->
       let kind, value = kind_value selector in
       `Assoc [ ("type", `String kind); ("value", `String value) ]
 

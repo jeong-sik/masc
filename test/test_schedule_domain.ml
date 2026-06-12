@@ -4,6 +4,18 @@ open Schedule_domain
 let human ?display_name id = { id; kind = Human_operator; display_name }
 let automated ?display_name id = { id; kind = Automated_actor; display_name }
 
+let payload_json ?(kind = "consumer.note") ?(schema_version = 1) ?body () =
+  let body =
+    Option.value body
+      ~default:(`Assoc [ "text", `String "ship the thing" ])
+  in
+  `Assoc
+    [ "kind", `String kind
+    ; "schema_version", `Int schema_version
+    ; "body", body
+    ]
+;;
+
 let request
   ?(risk_class = Workspace_write)
   ?(approval_required = false)
@@ -14,8 +26,8 @@ let request
   match
     create_request ~schedule_id:"sched-1" ~requested_by ~scheduled_by
       ~requested_at:100.0 ~due_at:200.0
-      ~payload:(`Assoc [ "body", `String "ship the thing" ])
-      ~risk_class ~approval_required ~source:Operator_request ()
+      ~payload:(payload_json ()) ~risk_class ~approval_required
+      ~source:Operator_request ()
   with
   | Ok request -> request
   | Error msg -> fail msg
@@ -49,6 +61,28 @@ let test_read_only_can_start_scheduled () =
   let req = request ~risk_class:Read_only () in
   check bool "approval not required" false req.approval_required;
   check_status "status" Scheduled req.status
+;;
+
+let test_payload_requires_object_envelope () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(`String "do later") ~risk_class:Read_only
+      ~approval_required:false ~source:Operator_request ()
+  with
+  | Ok _ -> fail "expected invalid payload"
+  | Error msg -> check string "payload error" "payload must be a JSON object" msg
+;;
+
+let test_payload_requires_known_envelope_fields () =
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload:(`Assoc [ "body", `Assoc [] ]) ~risk_class:Read_only
+      ~approval_required:false ~source:Operator_request ()
+  with
+  | Ok _ -> fail "expected invalid payload"
+  | Error msg -> check string "payload error" "missing field: kind" msg
 ;;
 
 let test_separate_human_approval_accepts () =
@@ -147,6 +181,10 @@ let () =
             test_side_effecting_starts_pending;
           test_case "read-only can start scheduled" `Quick
             test_read_only_can_start_scheduled;
+          test_case "payload requires object envelope" `Quick
+            test_payload_requires_object_envelope;
+          test_case "payload requires envelope fields" `Quick
+            test_payload_requires_known_envelope_fields;
           test_case "mark due only affects scheduled" `Quick
             test_mark_due_only_scheduled;
         ] );

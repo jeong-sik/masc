@@ -322,6 +322,20 @@ let assemble_hooks
                           necessary.")
                   else ctx
                 in
+                let ctx =
+                  (* Memory OS recall — bounded advisory block rendered from
+                     persisted facts/episodes (read side; the write side is
+                     the librarian wired in #20897). Opt-in via
+                     MASC_KEEPER_MEMORY_OS_RECALL. *)
+                  match
+                    Keeper_memory_os_recall.render_if_enabled
+                      ~keeper_id:meta.name
+                      ~now:(Time_compat.now ())
+                      ()
+                  with
+                  | None -> ctx
+                  | Some block -> append_ctx ctx block
+                in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
                 in

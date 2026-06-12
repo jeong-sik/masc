@@ -98,6 +98,13 @@ let json_bool_field key = function
       | _ -> None)
   | _ -> None
 
+let json_assoc_field key = function
+  | `Assoc fields -> (
+      match List.assoc_opt key fields with
+      | Some (`Assoc nested) -> `Assoc nested
+      | _ -> `Null)
+  | _ -> `Null
+
 let with_config_dir f =
   let base = temp_dir () in
   let config_dir = Filename.concat base ".masc/config" in
@@ -185,6 +192,79 @@ tool_access = ["tool_execute", "tool_read_file"]
         "tool_access overlays from TOML"
         [ "tool_execute"; "tool_read_file" ]
         meta.tool_access
+
+let test_profile_identity_snapshot_reaches_meta_json () =
+  with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
+  let name = "probe" in
+  let persona_dir = Filename.concat (Filename.concat config_dir "personas") name in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|{
+  "persona_name": "probe",
+  "display_name": "Probe",
+  "keeper": {
+    "will": "profile will",
+    "needs": "profile needs",
+    "desires": "profile desires",
+    "instructions": "profile instructions"
+  }
+}
+|};
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+persona_name = "probe"
+sandbox_profile = "local"
+tool_access = ["tool_execute"]
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Store.read_effective_meta config name with
+  | Error err -> Alcotest.failf "read_effective_meta failed: %s" err
+  | Ok None -> Alcotest.fail "expected seeded keeper meta"
+  | Ok (Some meta) ->
+      Alcotest.(check (option string))
+        "persona overlays from profile"
+        (Some "probe")
+        meta.persona;
+      Alcotest.(check string) "will overlays from profile" "profile will" meta.will;
+      Alcotest.(check string) "needs overlays from profile" "profile needs" meta.needs;
+      Alcotest.(check string)
+        "desires overlays from profile"
+        "profile desires"
+        meta.desires;
+      Alcotest.(check string)
+        "instructions overlays from profile"
+        "profile instructions"
+        meta.instructions;
+      let json = Masc.Keeper_meta_json.meta_to_json meta in
+      Alcotest.(check (option string))
+        "meta json keeps persona snapshot"
+        (Some "probe")
+        (json_string_field "persona" json);
+      Alcotest.(check (option string))
+        "meta json keeps will snapshot"
+        (Some "profile will")
+        (json_string_field "will" json);
+      Alcotest.(check (option string))
+        "meta json keeps instructions snapshot"
+        (Some "profile instructions")
+        (json_string_field "instructions" json);
+      let status_result =
+        Status_detail.handle_keeper_status_config ~config ~agent_name:"test-agent"
+          (`Assoc [ ("name", `String name); ("fast", `Bool true) ])
+      in
+      if not (Profile.tool_result_success status_result) then
+        Alcotest.failf "status failed: %s" (Profile.tool_result_body status_result);
+      let status_json =
+        Yojson.Safe.from_string (Profile.tool_result_body status_result)
+      in
+      let self_model = json_assoc_field "self_model" status_json in
+      Alcotest.(check (option string))
+        "status self_model keeps instructions snapshot"
+        (Some "profile instructions")
+        (json_string_field "instructions" self_model)
 
 let test_turn_setup_uses_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -476,6 +556,9 @@ let () =
         [
           Alcotest.test_case "TOML sandbox/tool overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case
+            "profile identity snapshot reaches meta JSON"
+            `Quick test_profile_identity_snapshot_reaches_meta_json;
           Alcotest.test_case "turn setup uses effective meta" `Quick
             test_turn_setup_uses_effective_meta;
           Alcotest.test_case

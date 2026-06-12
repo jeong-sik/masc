@@ -59,7 +59,11 @@ let () =
     let ctrl = get () in
     set { ctrl with
       minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB on 64-bit; reduces minor->major promotion rate *)
-      space_overhead = 200;               (* default 120; less frequent major GC slices *)
+      space_overhead = 100;               (* default 120; triggers major GC when free > live (was 200/3x).
+                                             Lower value = shorter individual pauses at the cost of more
+                                             frequent GC slices.  P0 allocation fixes (PR #20965) reduced
+                                             broadcast hot-path allocation by ~97%, so the increased GC
+                                             frequency has negligible throughput impact. *)
       max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
     }
   end

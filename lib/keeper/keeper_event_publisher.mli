@@ -91,11 +91,21 @@ val publish_keeper_lifecycle :
 
 (** {1 Telemetry events} *)
 
+val telemetry_event_payload :
+  event_name:string -> payload:Yojson.Safe.t -> Yojson.Safe.t
+(** Builds the payload for [Custom("telemetry_event", _)].
+
+    Object payloads keep their fields at the top level with [event_name]
+    inserted or replaced. Non-object payloads are wrapped as
+    [{event_name, payload}] so the semantic event name is never dropped. *)
+
 val publish_telemetry_event :
   event_name:string -> payload:Yojson.Safe.t -> unit
-(** Publishes [masc.telemetry.<event_name>] with the given [payload].
-    The event is routed through the MASC Event_bus for consumption
-    by {!Keeper_telemetry_consumer} and downstream observers.
+(** Publishes [Custom("telemetry_event", payload)] on the MASC Event_bus.
+
+    [event_name] is embedded in the JSON payload by
+    {!telemetry_event_payload}. The event is routed through the MASC Event_bus
+    for consumption by {!Keeper_telemetry_consumer} and downstream observers.
     MASC does not deserialize OAS-level provider/model telemetry;
     the raw [Yojson.Safe.t] payload is appended to the Dated_jsonl
     store by the consumer subscriber. *)

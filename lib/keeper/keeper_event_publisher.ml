@@ -176,6 +176,29 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
 
 (** {1 Runtime Execution Telemetry Events} *)
 
+(** Build the canonical payload for [Custom("telemetry_event", _)].
+
+    Object payloads keep their fields at the top level for compatibility with
+    existing telemetry logs; non-object payloads are wrapped so [event_name] is
+    never dropped. *)
+let telemetry_event_payload ~event_name ~payload =
+  match payload with
+  | `Assoc fields ->
+    let fields =
+      List.filter (fun (name, _) -> not (String.equal name "event_name")) fields
+    in
+    `Assoc (("event_name", `String event_name) :: fields)
+  | other -> `Assoc [ ("event_name", `String event_name); ("payload", other) ]
+
+(** Generic telemetry event publisher for keeper/OAS telemetry observability.
+    Callers provide a semantic [event_name] (e.g. ["tool_dispatch"],
+    ["turn_admitted"], ["turn_completed"]) and a Yojson payload.
+    The consumer observes [Custom("telemetry_event", _)] on the MASC Event_bus
+    and appends the payload to its telemetry store. *)
+let publish_telemetry_event ~event_name ~payload =
+  let payload = telemetry_event_payload ~event_name ~payload in
+  masc_publish (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
+
 (** Publish a telemetry event when runtime execution parameters are
     successfully built during keeper pre-dispatch. The
     [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
@@ -202,26 +225,4 @@ let publish_runtime_execution_built
     ("generation", `Int generation);
     ("timestamp", `Float (Time_compat.now ()));
   ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))
-
-(** Generic telemetry event publisher for OAS telemetry observability.
-    Callers provide the event name segment (e.g. "tool_dispatch",
-    "turn_admitted", "turn_completed") and a Yojson payload.
-    The Consumer subscriber on the OAS event bus persists these
-    to a Dated_jsonl store under [<base_path>/telemetry_events/]. *)
-let publish_telemetry_event ~event_name ~payload =
-  (* All telemetry events use the canonical [Custom(\"telemetry_event\", _)]
-     name so the consumer subscriber in Keeper_telemetry_consumer can
-     observe them uniformly. The [event_name] parameter is embedded in
-     the payload for downstream routing. *)
-  let payload_with_name =
-    match payload with
-    | `Assoc fields -> `Assoc (("event_name", `String event_name) :: fields)
-    | other -> other
-  in
-  match Keeper_event_bus.get () with
-  | Some bus ->
-      Agent_sdk_metrics_bridge.publish bus
-        (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload_with_name)))
-  | None -> ()
+  publish_telemetry_event ~event_name:"runtime_execution_built" ~payload

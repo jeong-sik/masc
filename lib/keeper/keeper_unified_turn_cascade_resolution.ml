@@ -43,10 +43,6 @@ let publish_cascade_resolution
     ; "timestamp", `Float (Time_compat.now ())
     ]
   in
-  match Masc_event_bus.get () with
-  | None ->
-    Log.Keeper.debug
-      "cascade_resolution: no Masc_event_bus available, skipping telemetry"
-  | Some bus ->
-    let open Agent_sdk.Event_bus in
-    publish bus (mk_event (Custom ("telemetry_event", payload)))
+  Keeper_event_publisher.publish_telemetry_event
+    ~event_name:"cascade_resolution"
+    ~payload

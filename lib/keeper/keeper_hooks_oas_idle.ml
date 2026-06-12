@@ -24,10 +24,22 @@ let suggest_alternatives ~(allowed_tools : string list)
 
 let includes_tool name tools = List.exists (String.equal name) tools
 
-let board_get_recovery_hint ~allowed_tools ~tool_names =
-  if not (includes_tool "keeper_board_post_get" tool_names) then
-    None
-  else
+let recovery_hint ~allowed_tools ~tool_names =
+  if includes_tool "keeper_tools_list" tool_names then
+    Some
+      (if includes_tool "keeper_surface_read" allowed_tools then
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; for current lane context use keeper_surface_read with a \
+          surface label from Connected Surfaces or chat history. If the user asks \
+          for a connector-wide channel registry outside those connected lanes, \
+          state that it is unavailable."
+       else
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; do not repeat it to answer user content questions.")
+  else if
+    includes_tool "keeper_board_get" tool_names
+    || includes_tool "keeper_board_post_get" tool_names
+  then
     let discovery_tools =
       [ "keeper_board_list"; "keeper_board_search" ]
       |> List.filter (fun name -> includes_tool name allowed_tools)
@@ -40,9 +52,11 @@ let board_get_recovery_hint ~allowed_tools ~tool_names =
     in
     Some
       (Printf.sprintf
-         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
-          Do not call keeper_board_post_get with {}."
+         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_get with {}."
          discovery)
+  else
+    None
 
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
@@ -70,18 +84,26 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | names -> String.concat ", " names
   in
   let alternatives =
-    suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
-      ~max_suggestions:5
+    let base =
+      suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
+        ~max_suggestions:5
+    in
+    if includes_tool "keeper_tools_list" tool_names
+       && includes_tool "keeper_surface_read" allowed_tools
+    then
+      Keeper_types_profile_toml_normalizers.dedupe_keep_order
+        ("keeper_surface_read" :: base)
+      |> List.filteri (fun i _ -> i < 5)
+    else
+      base
   in
   let alt_str = match alternatives with
     | [] -> "keeper_tool_search or keeper_stay_silent"
     | alts -> String.concat ", " alts
   in
-  let recovery_hint =
-    board_get_recovery_hint ~allowed_tools ~tool_names
-  in
+  let hint = recovery_hint ~allowed_tools ~tool_names in
   let append_hint msg =
-    match recovery_hint with
+    match hint with
     | None -> msg
     | Some hint -> msg ^ " " ^ hint
   in

@@ -180,10 +180,16 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
+let closed_object_schema ?(required = []) properties =
+  match object_schema ~required properties with
+  | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
+  | schema -> schema
+;;
+
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
-  object_schema
+  closed_object_schema
     ~required:[ "file_path" ]
     [ property
         "file_path"
@@ -991,6 +997,8 @@ let internal_descriptors : t list =
       ~name:"keeper_tools_list"
       ~description:
         "List the active keeper tool surface from descriptors and registered schemas. \
+         This is capability introspection, not connector content lookup. Use \
+         keeper_surface_read only for current connected-surface lane context. \
          No arguments."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
@@ -1051,8 +1059,11 @@ let internal_descriptors : t list =
       ~description:
         "Read recent conversation from one connected surface lane (dashboard, \
          discord, slack, or another connector label) with speaker identity \
-         and a derived participant roster. Use after Connected Surfaces \
-         shows a lane you want context from."
+         and a derived participant roster. Use when the user asks about a \
+         current connector lane, recent lane messages, or participants. This \
+         does not enumerate connector-wide channel registries; if asked for \
+         channels outside Connected Surfaces, read only visible lane evidence \
+         and state that the wider registry is unavailable."
       ~input_schema:surface_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_surface_read

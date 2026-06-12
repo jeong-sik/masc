@@ -1,8 +1,9 @@
 (* RFC-0230: keeper mention reactivity.
 
    Two pure cores are tested here:
-   - line_mentions: token-equality @-mention match (the substring bug that made
-     "@dreamerx" / "email@dreamer.com" false-match "@dreamer" must not recur).
+   - the boundary mention parse + match (RFC-0232 P4: parse at append,
+     match persisted ids; the substring bug that made "@dreamerx" /
+     "email@dreamer.com" false-match "@dreamer" must not recur).
    - pending_mentions_of_messages: the lane-is-the-state watermark — a mention
      is pending iff it arrives after the keeper's own last line. *)
 
@@ -10,9 +11,16 @@ open Alcotest
 
 module MS = Masc.Keeper_world_observation_message_scope
 module Store = Masc.Keeper_chat_store
+module Lane = Masc.Keeper_lane_mentions
 
 let targets = [ "dreamer" ]
-let lm content = MS.line_mentions ~targets content
+
+(* Boundary-parse-then-match: the P4 equivalent of the deleted
+   read-time [line_mentions]. *)
+let lm content =
+  Lane.ids_match
+    ~target_ids:(Lane.target_ids_of targets)
+    (Lane.mention_ids_of_content content)
 
 let test_plain_mention () = check bool "@dreamer by another" true (lm "hey @dreamer look")
 
@@ -29,7 +37,10 @@ let test_trailing_punct () = check bool "@dreamer, comma" true (lm "ok @dreamer,
 let test_no_mention () = check bool "no @target" false (lm "just chatting here")
 
 let test_empty_targets () =
-  check bool "no targets to match" false (MS.line_mentions ~targets:[] "@dreamer")
+  check bool "no targets to match" false
+    (Lane.ids_match
+       ~target_ids:(Lane.target_ids_of [])
+       (Lane.mention_ids_of_content "@dreamer"))
 ;;
 
 let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None) content
@@ -45,6 +56,7 @@ let msg ~role ?(ts = Some 1.0) ?(source = None) ?(speaker = None) content
   ; conversation_id = None
   ; external_message_id = None
   ; speaker
+  ; mentions = Masc.Keeper_lane_mentions.mention_ids_of_content content
   }
 ;;
 
@@ -178,6 +190,7 @@ let tool_line : Store.chat_message =
   ; conversation_id = None
   ; external_message_id = None
   ; speaker = None
+  ; mentions = []
   }
 ;;
 
@@ -221,7 +234,7 @@ let test_assistant_append_empties_pending () =
 
 let () =
   run "keeper_mention_scope"
-    [ ( "line_mentions"
+    [ ( "boundary_mention_match"
       , [ test_case "plain" `Quick test_plain_mention
         ; test_case "dreamerx_not_matched" `Quick test_dreamerx_not_matched
         ; test_case "email_not_matched" `Quick test_email_not_matched

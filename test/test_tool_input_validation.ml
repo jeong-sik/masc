@@ -654,6 +654,15 @@ let param_by_name name params =
 
 let legacy_background_flag_name = "run_" ^ "in_background"
 
+let execute_async_lifecycle_field_names =
+  [ legacy_background_flag_name
+  ; "job_id"
+  ; "request_id"
+  ; "backgroundTaskId"
+  ; "poll"
+  ; "cancel"
+  ]
+
 let check_param_type name expected params =
   match param_by_name name params with
   | Some (param : Agent_sdk.Types.tool_param) ->
@@ -685,7 +694,14 @@ let test_tool_execute_schema_exposes_typed_boundary () =
   Alcotest.(check bool)
     "legacy background flag not exposed"
     true
-    (Option.is_none (param_by_name legacy_background_flag_name params))
+    (Option.is_none (param_by_name legacy_background_flag_name params));
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (field ^ " async lifecycle field not exposed")
+        true
+        (Option.is_none (param_by_name field params)))
+    execute_async_lifecycle_field_names
 
 let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
   let args = `Assoc [] in
@@ -768,6 +784,38 @@ let test_validate_args_tool_execute_rejects_background_flag () =
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions legacy background flag" true
       (string_contains msg legacy_background_flag_name)
+
+let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
+  let cases =
+    [ legacy_background_flag_name, `Bool true
+    ; "job_id", `String "job-123"
+    ; "request_id", `String "req-123"
+    ; "backgroundTaskId", `String "bg-123"
+    ; "poll", `Bool true
+    ; "cancel", `Bool true
+    ]
+  in
+  List.iter
+    (fun (field, value) ->
+      let args = `Assoc [ "executable", `String "pwd"; field, value ] in
+      match
+        Tool_input_validation.validate_args
+          ~schema:tool_execute_schema
+          ~name:"tool_execute"
+          ~args
+          ()
+      with
+      | Ok _ ->
+          Alcotest.failf
+            "expected tool_execute async lifecycle field %s to be rejected"
+            field
+      | Error result ->
+          let msg = Yojson.Safe.to_string (Tool_result.data result) in
+          Alcotest.(check bool)
+            ("mentions async lifecycle field " ^ field)
+            true
+            (string_contains msg field))
+    cases
 
 let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
@@ -1934,6 +1982,8 @@ let () =
         test_validate_args_tool_execute_rejects_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
         test_validate_args_tool_execute_rejects_background_flag;
+      Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
+        test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick

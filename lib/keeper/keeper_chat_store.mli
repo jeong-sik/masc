@@ -87,6 +87,13 @@ type chat_message = {
           older lines, tool/assistant lines, and lines whose persisted
           [speaker_authority] label fails to parse (reported as a
           persistence read drop, row otherwise kept). *)
+  mentions : Keeper_identity.Keeper_id.t list;
+      (** RFC-0232 §3.3: mention ids parsed once at append from the
+          persisted user content (plus connector-supplied explicit
+          mentions).  [[]] on tool/assistant lines, mention-free lines,
+          and rows written before P4 (the offline backfill tool stamps
+          those).  Malformed persisted entries are reported as
+          persistence read drops and skipped; the row stays valid. *)
 }
 
 (** {1 I/O} *)
@@ -111,6 +118,7 @@ val append_turn :
   ?conversation_id:string ->
   ?external_message_id:string ->
   ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   assistant_content:string ->
   unit ->
   unit
@@ -143,6 +151,7 @@ val append_user_message :
   ?conversation_id:string ->
   ?external_message_id:string ->
   ?speaker:speaker ->
+  ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   unit
 

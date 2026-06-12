@@ -31,6 +31,7 @@
  (names
   test_keeper_reactive_wake_backlog_gate
   test_keeper_mention_scope
+  test_keeper_lane_mentions
   test_keeper_turn_outcome
   test_keeper_identity_id
   test_board_activity_cache
@@ -307,6 +308,7 @@
   test_env_keeper_scrub
   test_keeper_reactive_wake_backlog_gate
   test_keeper_mention_scope
+  test_keeper_lane_mentions
   test_keeper_turn_outcome
   test_keeper_identity_id
   test_board_activity_cache
@@ -1429,6 +1431,7 @@
 
 (include stanzas/test_keeper_long_turn_9943.inc)
 
+(include stanzas/test_keeper_msg_async_path_traversal.inc)
 (include stanzas/test_keeper_msg_cancel.inc)
 
 (include stanzas/test_keeper_chat_coalescing.inc)

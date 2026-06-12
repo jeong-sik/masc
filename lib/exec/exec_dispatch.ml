@@ -86,13 +86,48 @@ let apply_redirect_plan plan result =
 let unsupported_redirect_result message =
   { status = Unix.WEXITED 1; stdout = ""; stderr = message }
 
-let emit_captured_output on_output_chunk result =
+type output_emission =
+  { stdout_emitted : bool ref
+  ; stderr_emitted : bool ref
+  }
+
+let tracked_output_callback on_output_chunk =
+  let emitted = { stdout_emitted = ref false; stderr_emitted = ref false } in
+  match on_output_chunk with
+  | None -> None, emitted
+  | Some on_chunk ->
+      let on_chunk = function
+        | `Stdout chunk ->
+            emitted.stdout_emitted := true;
+            on_chunk (`Stdout chunk)
+        | `Stderr chunk ->
+            emitted.stderr_emitted := true;
+            on_chunk (`Stderr chunk)
+      in
+      Some on_chunk, emitted
+
+let emit_unseen_captured_output on_output_chunk emitted result =
   match on_output_chunk with
   | None -> result
   | Some on_chunk ->
-      on_chunk (`Stdout result.stdout);
-      on_chunk (`Stderr result.stderr);
+      if (not !(emitted.stdout_emitted)) && result.stdout <> ""
+      then on_chunk (`Stdout result.stdout);
+      if (not !(emitted.stderr_emitted)) && result.stderr <> ""
+      then on_chunk (`Stderr result.stderr);
       result
+
+let emit_stdout_if_captured on_output_chunk stdout =
+  match on_output_chunk with
+  | None -> ()
+  | Some on_chunk when stdout <> "" -> on_chunk (`Stdout stdout)
+  | Some _ -> ()
+
+let emit_pipeline_stage_result ?(emit_stdout = false) on_output_chunk result =
+  match on_output_chunk with
+  | None -> ()
+  | Some on_chunk ->
+      if emit_stdout && result.stdout <> "" then on_chunk (`Stdout result.stdout);
+      if result.stderr <> "" then on_chunk (`Stderr result.stderr)
 
 let status_is_success = function
   | Unix.WEXITED 0 -> true
@@ -168,88 +203,94 @@ let process_spec_of_simple (s : Shell_ir.simple) =
   (argv, env, cwd)
 
 let dispatch_simple ?base_host_env ?stdin_content ?on_output_chunk (s : Shell_ir.simple) =
+  let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
   let argv, env, cwd = process_spec_of_simple s in
-  match redirect_plan_of_redirects s.redirects with
-  | Error message -> unsupported_redirect_result message
-  | Ok redirect_plan -> (
-    match s.sandbox with
-    | Host ->
-      let raw_source = String.concat " " argv in
-      let host_env = resolve_host_env ?base_host_env s.env in
-      let run () =
-        match stdin_content with
-        | None ->
-          (match on_output_chunk with
-           | None ->
-             Exec_gate.run_argv_with_status_split
-               ~actor:`Tool_local_runtime
-               ~raw_source
-               ~summary:"exec dispatch simple"
-               ?env:host_env
-               ?cwd
-               argv
-           | Some on_chunk ->
-             Exec_gate.run_argv_with_status_split_streaming
-               ~actor:`Tool_local_runtime
-               ~raw_source
-               ~summary:"exec dispatch simple streaming"
-               ?env:host_env
-               ?cwd
-               ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
-               ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
-               argv)
-        | Some stdin_content ->
-          (match on_output_chunk with
-           | None ->
-             Exec_gate.run_argv_with_stdin_and_status_split
-               ~actor:`Tool_local_runtime
-               ~raw_source
-               ~summary:"exec dispatch simple stdin"
-               ?env:host_env
-               ?cwd
-               ~stdin_content
-               argv
-           | Some on_chunk ->
-             (* WORKAROUND: streaming stdin path is not yet wired; callback
-                receives the full stdout/stderr after completion. 근본 해결:
-                extend Process_eio.run_argv_with_stdin_and_status_split with
-                chunk callbacks and route here. *)
-             let status, stdout, stderr =
+  let result =
+    match redirect_plan_of_redirects s.redirects with
+    | Error message -> unsupported_redirect_result message
+    | Ok redirect_plan -> (
+      let child_on_output_chunk =
+        if s.redirects = [] then on_output_chunk else None
+      in
+      match s.sandbox with
+      | Host ->
+        let raw_source = String.concat " " argv in
+        let host_env = resolve_host_env ?base_host_env s.env in
+        let run () =
+          match stdin_content with
+          | None ->
+            (match child_on_output_chunk with
+             | None ->
+               Exec_gate.run_argv_with_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch simple"
+                 ?env:host_env
+                 ?cwd
+                 argv
+             | Some on_chunk ->
+               Exec_gate.run_argv_with_status_split_streaming
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch simple streaming"
+                 ?env:host_env
+                 ?cwd
+                 ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                 ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                 argv)
+          | Some stdin_content ->
+            (match child_on_output_chunk with
+             | None ->
+               Exec_gate.run_argv_with_stdin_and_status_split
+                 ~actor:`Tool_local_runtime
+                 ~raw_source
+                 ~summary:"exec dispatch simple stdin"
+                 ?env:host_env
+                 ?cwd
+                 ~stdin_content
+                 argv
+             | Some on_chunk ->
                Exec_gate.run_argv_with_stdin_and_status_split
                  ~actor:`Tool_local_runtime
                  ~raw_source
                  ~summary:"exec dispatch simple stdin streaming"
                  ?env:host_env
                  ?cwd
+                 ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                 ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
                  ~stdin_content
-                 argv
-             in
-             on_chunk (`Stdout stdout);
-             on_chunk (`Stderr stderr);
-             status, stdout, stderr)
-      in
-      (match run () with
-       | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | exception exn ->
-         { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-       | status, stdout, stderr ->
-         apply_redirect_plan redirect_plan { status; stdout; stderr })
-    | Docker { runner; _ } ->
-    (* WORKAROUND: Docker sandbox runner does not expose chunk callbacks yet;
-       the callback, if provided, receives the full captured output after
-       completion.  근본 해결: extend the Docker runner contract with
-       ~on_stdout_chunk/~on_stderr_chunk. *)
-    (match runner ~stdin_content ~argv ~env ~cwd with
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn ->
-       { status = Unix.WEXITED 1; stdout = ""; stderr = Printexc.to_string exn }
-     | status, stdout, stderr ->
-       (match on_output_chunk with
-        | None -> ()
-        | Some on_chunk ->
-          on_chunk (`Stdout stdout);
-          on_chunk (`Stderr stderr));
-       apply_redirect_plan redirect_plan { status; stdout; stderr }))
+                 argv)
+        in
+        (match run () with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             { status = Unix.WEXITED 1
+             ; stdout = ""
+             ; stderr = Printexc.to_string exn
+             }
+         | status, stdout, stderr ->
+             apply_redirect_plan redirect_plan { status; stdout; stderr })
+      | Docker { runner; _ } ->
+        let on_stdout_chunk, on_stderr_chunk =
+          match child_on_output_chunk with
+          | None -> None, None
+          | Some on_chunk ->
+              ( Some (fun chunk -> on_chunk (`Stdout chunk))
+              , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+        in
+        (match
+           runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd
+         with
+         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+         | exception exn ->
+             { status = Unix.WEXITED 1
+             ; stdout = ""
+             ; stderr = Printexc.to_string exn
+             }
+         | status, stdout, stderr ->
+             apply_redirect_plan redirect_plan { status; stdout; stderr }))
+  in
+  emit_unseen_captured_output on_output_chunk emitted result
 
 (* --- pipeline + entry point (mutually recursive) --- *)
 
@@ -298,8 +339,21 @@ let docker_pipeline_specs stages =
   loop None None [] stages
 
 (* TEL-OK: this lower-level Shell IR dispatcher is wrapped by Execute/keeper
-   telemetry at the action boundary; it only preserves captured output delivery. *)
+   telemetry at the action boundary; it preserves output delivery but does not
+   record action-level telemetry directly. *)
 let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages =
+  let on_output_chunk, emitted = tracked_output_callback on_output_chunk in
+  let decomposed_stage_callback ~is_final (simple : Shell_ir.simple) on_output_chunk =
+    match on_output_chunk with
+    | None -> None
+    | Some _ when simple.redirects <> [] -> None
+    | Some on_chunk ->
+        Some
+          (function
+          | `Stdout chunk ->
+              if is_final then on_chunk (`Stdout chunk)
+          | `Stderr chunk -> on_chunk (`Stderr chunk))
+  in
   let result =
     match stages with
     | [] ->
@@ -315,38 +369,89 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                |> String.concat " | "
              in
              let status, stdout, stderr =
-               Exec_gate.run_argv_pipeline_with_status_split
-                 ~actor:`Tool_local_runtime
-                 ~raw_source
-                 ~summary:"exec dispatch pipeline"
-                 specs
-             in
+               match on_output_chunk with
+               | None ->
+                   Exec_gate.run_argv_pipeline_with_status_split
+                     ~actor:`Tool_local_runtime
+                     ~raw_source
+                     ~summary:"exec dispatch pipeline"
+                     specs
+               | Some on_chunk ->
+                   Exec_gate.run_argv_pipeline_with_status_split
+                     ~actor:`Tool_local_runtime
+                     ~raw_source
+                     ~summary:"exec dispatch pipeline streaming"
+                     ~on_stdout_chunk:(fun chunk -> on_chunk (`Stdout chunk))
+                     ~on_stderr_chunk:(fun chunk -> on_chunk (`Stderr chunk))
+                     specs
+               in
              { status; stdout; stderr }
          | None -> (
              match docker_pipeline_specs stages with
              | Some (runner, specs) ->
-                 let status, stdout, stderr = runner ~stages:specs in
+                 let on_stdout_chunk, on_stderr_chunk =
+                   match on_output_chunk with
+                   | None -> None, None
+                   | Some on_chunk ->
+                       ( Some (fun chunk -> on_chunk (`Stdout chunk))
+                       , Some (fun chunk -> on_chunk (`Stderr chunk)) )
+                 in
+                 let status, stdout, stderr =
+                   runner ~on_stdout_chunk ~on_stderr_chunk ~stages:specs
+                 in
                  { status; stdout; stderr }
              | None ->
                  let rec chain ~prev_stdout ~status ~stderr = function
                    | [] -> { status; stdout = prev_stdout; stderr }
                    | Shell_ir.Simple s :: rest ->
+                       let is_final = match rest with [] -> true | _ -> false in
+                       let stage_on_output_chunk =
+                         decomposed_stage_callback ~is_final s on_output_chunk
+                       in
                        let stage_result =
                          dispatch_simple
                            ?base_host_env
+                           ?on_output_chunk:stage_on_output_chunk
                            ~stdin_content:prev_stdout
                            s
+                       in
+                       let stage_streamed =
+                         Option.is_some stage_on_output_chunk
                        in
                        let status = pipeline_status status stage_result.status in
                        let stderr = stderr ^ stage_result.stderr in
                        if status_is_timeout stage_result.status
-                       then { status; stdout = stage_result.stdout; stderr }
-                       else
+                       then (
+                         let () =
+                           if stage_streamed
+                           then
+                             if not is_final
+                             then
+                               emit_stdout_if_captured
+                                 on_output_chunk
+                                 stage_result.stdout
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:true
+                               on_output_chunk
+                               stage_result
+                         in
+                         { status; stdout = stage_result.stdout; stderr })
+                       else (
+                         let () =
+                           if stage_streamed
+                           then ()
+                           else
+                             emit_pipeline_stage_result
+                               ~emit_stdout:is_final
+                               on_output_chunk
+                               stage_result
+                         in
                          chain
                            ~prev_stdout:stage_result.stdout
                            ~status
                            ~stderr
-                           rest
+                           rest)
                    | Pipeline _ :: _ ->
                        { status = Unix.WEXITED 1
                        ; stdout = ""
@@ -360,27 +465,61 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                   | first :: rest -> (
                     match first with
                     | Shell_ir.Simple s ->
-                        let first_result = dispatch_simple ?base_host_env s in
+                        let first_on_output_chunk =
+                          decomposed_stage_callback
+                            ~is_final:false
+                            s
+                            on_output_chunk
+                        in
+                        let first_result =
+                          dispatch_simple
+                            ?base_host_env
+                            ?on_output_chunk:first_on_output_chunk
+                            s
+                        in
+                        let first_streamed =
+                          Option.is_some first_on_output_chunk
+                        in
                         let status =
                           pipeline_status (Unix.WEXITED 0) first_result.status
                         in
                         if status_is_timeout first_result.status
-                        then
+                        then (
+                          let () =
+                            if first_streamed
+                            then
+                              emit_stdout_if_captured
+                                on_output_chunk
+                                first_result.stdout
+                            else
+                              emit_pipeline_stage_result
+                                ~emit_stdout:true
+                                on_output_chunk
+                                first_result
+                          in
                           { status
                           ; stdout = first_result.stdout
                           ; stderr = first_result.stderr
-                          }
-                        else
+                          })
+                        else (
+                          let () =
+                            if first_streamed
+                            then ()
+                            else
+                              emit_pipeline_stage_result
+                                on_output_chunk
+                                first_result
+                          in
                           chain
                             ~prev_stdout:first_result.stdout
                             ~status
                             ~stderr:first_result.stderr
-                            rest
+                            rest)
                     | Pipeline _ ->
                         invalid_pipeline
                           "nested pipeline not supported in native dispatch" ))))
   in
-  emit_captured_output on_output_chunk result
+  emit_unseen_captured_output on_output_chunk emitted result
 
 and dispatch ?base_host_env ?on_output_chunk (ir : Shell_ir.t) =
   match ir with

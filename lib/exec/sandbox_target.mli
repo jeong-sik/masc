@@ -15,6 +15,8 @@
     propagated; callers in [Exec_dispatch] catch and translate them into
     structured dispatch results. *)
 type runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stdin_content:string option ->
   argv:string list ->
   env:string array ->
@@ -28,6 +30,8 @@ type pipeline_stage = {
 }
 
 type pipeline_runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stages:pipeline_stage list ->
   Unix.process_status * string * string
 
@@ -43,4 +47,3 @@ val host : unit -> t
     the runner closure; this keeps [lib/exec] from having to know about
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
 val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
-

@@ -1,0 +1,109 @@
+name: Dashboard Manual Smoke
+
+# Consolidated manual-only smoke workflows for the masc dashboard.
+# - Lighthouse synthetic perf budget (previously dashboard-lighthouse.yml)
+# - k6 WebSocket load smoke (previously dashboard-ws-load.yml)
+#
+# Both jobs are non-blocking (continue-on-error) and intended for operator
+# triggered validation only. The main CI Dashboard job owns PR build/typecheck.
+
+on:
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'Virtual users (default 100; CI smoke uses 5)'
+        default: '100'
+      duration:
+        description: 'Scenario duration (default 30s; CI smoke uses 5s)'
+        default: '30s'
+      target_url:
+        description: 'WS URL (default ws://127.0.0.1:8937/dashboard/ws)'
+        default: 'ws://127.0.0.1:8937/dashboard/ws'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-manual-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lighthouse-smoke:
+    name: Lighthouse synthetic perf budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dashboard
+        run: pnpm build
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse (warn-only budgets)
+        continue-on-error: true
+        env:
+          LHCI_BUDGET_PATH: dashboard/test/perf/lighthouse-budget.json
+        run: |
+          lhci autorun \
+            --collect.staticDistDir=dist \
+            --collect.numberOfRuns=1 \
+            --upload.target=filesystem \
+            --upload.outputDir=.lighthouseci \
+            --assert.budgetsFile="$LHCI_BUDGET_PATH" \
+            || echo "lighthouse exit=$?"
+
+      - name: Upload Lighthouse artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: lighthouse-report-${{ github.run_id }}
+          path: dashboard/.lighthouseci/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  k6-smoke:
+    name: k6 WebSocket load smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run k6 smoke (server unreachable in CI is expected)
+        uses: grafana/k6-action@v0.3.1
+        continue-on-error: true
+        with:
+          filename: dashboard/test/load/ws-100vu.js
+          flags: --summary-export=k6-summary.json
+        env:
+          MASC_DASHBOARD_WS_URL: ${{ inputs.target_url || 'ws://127.0.0.1:8937/dashboard/ws' }}
+          K6_VUS: ${{ inputs.vus || '5' }}
+          K6_DURATION: ${{ inputs.duration || '5s' }}
+          K6_HOLD_MS: '3000'
+
+      - name: Upload k6 summary
+        uses: actions/upload-artifact@v7
+        with:
+          name: k6-summary-${{ github.run_id }}
+          path: k6-summary.json
+          retention-days: 30
+          if-no-files-found: ignore

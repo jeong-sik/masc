@@ -299,11 +299,39 @@ let handle_message_create ~dispatch
          Channel_gate.handle_inbound ~dispatch msg)
      with
      | Error gate_err ->
-       Discord_observability.record_inbound_dispatch
-         Discord_observability.Gate_error;
-       Log.Server.warn "discord inbound -> keeper failed (channel=%s keeper=%s): %s"
-         channel_id keeper_name
-         (Channel_gate.gate_error_to_string gate_err)
+       (match gate_err with
+        | Channel_gate.Dispatch_unavailable ->
+          let notice =
+            Printf.sprintf "⚠️ `%s` 오프라인" keeper_name
+          in
+          (match State.send_message ~channel_id ~content:notice
+                  ~reply_to_message_id:message_id () with
+           | Ok _ ->
+             Discord_observability.record_inbound_dispatch
+               Discord_observability.Reply_sent;
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_ok
+           | Error e ->
+             Discord_observability.record_inbound_dispatch
+               Discord_observability.Gate_error;
+             Discord_observability.record_reply
+               Discord_observability.Reply_send_failed;
+             Log.Server.error
+               "discord send unavailable notice failed (channel=%s): %s"
+               channel_id
+               (Format.asprintf "%a" State.pp_send_error e));
+         Log.Server.info
+           "discord inbound -> keeper unavailable, notice sent (channel=%s keeper=%s)"
+           channel_id keeper_name
+        | Channel_gate.Validation _
+        | Channel_gate.Keeper_error _
+        | Channel_gate.Internal _ ->
+          Discord_observability.record_inbound_dispatch
+            Discord_observability.Gate_error;
+          Log.Server.warn
+            "discord inbound -> keeper failed (channel=%s keeper=%s): %s"
+            channel_id keeper_name
+            (Channel_gate.gate_error_to_string gate_err))
      | Ok out ->
        if String.equal out.content "" then begin
          (match attention_event_id with

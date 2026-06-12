@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
+import { isSubmitEnter } from '../../lib/keyboard'
 import type { KeeperConversationAttachment, KeeperConversationDetails, KeeperConversationEntry } from '../../types'
 
 type ChatTranscriptVariant = 'default' | 'messenger'
@@ -672,7 +673,7 @@ export function ChatComposer({
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}
         onKeyDown=${(event: KeyboardEvent) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
+          if (isSubmitEnter(event) && !event.shiftKey) {
             event.preventDefault()
             if (!sendDisabled) {
               onSend()

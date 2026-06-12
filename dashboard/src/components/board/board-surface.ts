@@ -12,6 +12,7 @@ import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichComposer } from '../common/rich-composer'
+import { isSubmitEnter } from '../../lib/keyboard'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
@@ -528,7 +529,7 @@ function SortBar() {
           value=${boardAuthorFilter.value}
           class="!bg-transparent !px-2.5 !py-1 !text-2xs !font-medium w-28"
           onKeyDown=${(e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
+            if (isSubmitEnter(e)) {
               boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()
               refreshBoard()
             }

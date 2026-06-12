@@ -105,6 +105,13 @@ type dispatched_event =
           layer uses this to populate binding-resolution registries;
           the state machine stores it in [thread_parents] for
           [Mention_or_thread] trigger policy evaluation. *)
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+            (** (thread_id * parent_channel_id) pairs, typically from
+                GUILD_CREATE's [threads] array. *)
+      }
+      (** Bulk thread discovery from GUILD_CREATE. Carries all active
+          threads in a guild that existed before the bot connected. *)
   | Ignored of string
 
 (* ── Frame ─────────────────────────────────────────────────────── *)
@@ -425,12 +432,32 @@ let decode_thread_create ~payload =
       else Ok (Thread_tracked { thread_id; parent_channel_id })
   | _ -> Ok (Ignored "THREAD_CREATE: missing id or parent_id")
 
+let decode_guild_create_threads ~payload =
+  let threads_json = assoc_opt "threads" payload in
+  match threads_json with
+  | Some (`List items) ->
+      let entries =
+        List.filter_map (fun item ->
+          let thread_id = field_string_opt "id" item in
+          let parent_id = field_string_opt "parent_id" item in
+          match thread_id, parent_id with
+          | Some tid, Some pid
+            when String.trim tid <> "" && String.trim pid <> "" ->
+              Some (tid, pid)
+          | _ -> None)
+          items
+      in
+      if entries = [] then Ok (Ignored "GUILD_CREATE: no valid threads")
+      else Ok (Threads_bulk_tracked { threads = entries })
+  | Some _ | None -> Ok (Ignored "GUILD_CREATE: no threads field")
+
 let decode_dispatch ~bot_user_id ~event_name ~payload =
   match event_name with
   | "READY" -> decode_ready ~payload
   | "MESSAGE_CREATE" -> decode_message_create ~bot_user_id ~payload
   | "MESSAGE_REACTION_ADD" -> decode_reaction_add ~payload
   | "THREAD_CREATE" | "THREAD_UPDATE" -> decode_thread_create ~payload
+  | "GUILD_CREATE" -> decode_guild_create_threads ~payload
   | other -> Ok (Ignored other)
 
 (* ── Trigger policy filters ────────────────────────────────────────
@@ -655,6 +682,21 @@ let handle_dispatch t (frame : frame) =
                      Printf.sprintf
                        "thread tracked: %s -> parent %s"
                        thread_id parent_channel_id
+                 }
+             ] )
+       | Ok (Threads_bulk_tracked { threads } as ev) ->
+           let thread_parents' =
+             List.fold_left (fun acc (tid, pid) -> StringMap.add tid pid acc)
+               t'.thread_parents threads
+           in
+           ( { t' with thread_parents = thread_parents' }
+           , [ Emit_event ev
+             ; Log
+                 { level = `Info
+                 ; message =
+                     Printf.sprintf
+                       "guild threads bulk tracked: %d threads"
+                       (List.length threads)
                  }
              ] )
        | Ok (Ignored "RESUMED") ->

@@ -400,6 +400,12 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
       "Discord thread registered: %s -> parent %s (total=%d)"
       thread_id parent_channel_id
       (State.registered_thread_count ())
+  | Gw.Threads_bulk_tracked { threads } ->
+    List.iter (fun (tid, pid) -> State.register_thread ~thread_id:tid ~parent_channel_id:pid) threads;
+    Log.Server.info
+      "Discord guild threads bulk registered: %d threads (total=%d)"
+      (List.length threads)
+      (State.registered_thread_count ())
   | Gw.Ignored _ ->
     ()
 
@@ -463,7 +469,7 @@ let on_ambient ~base_dir (ev : Gw.gateway_event) =
     ->
     handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
       ~author_name ~content
-  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Ignored _ -> ()
+  | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Ignored _ -> ()
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)

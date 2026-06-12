@@ -110,6 +110,9 @@ type dispatched_event =
       { thread_id : string
       ; parent_channel_id : string
       }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
   | Ignored of string  (** Known dispatch type we deliberately don't surface. *)
 
 (** {1 Inbound frame — what comes off the wire} *)

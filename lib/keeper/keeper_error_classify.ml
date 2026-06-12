@@ -181,31 +181,8 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Io _ -> false
   | Agent_sdk.Error.Orchestration _ -> false
 
-(** Provider-level timeout (not structural OAS wall-clock budget). *)
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Api (Timeout _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-  (* Not a provider-level timeout. *)
-  | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
-    | RateLimited _ | AuthError _ | InvalidRequest _ | NotFound _
-    | ContextOverflow _) -> false
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.ServerError _
-      | Llm_provider.Error.RateLimit _ | Llm_provider.Error.AuthError _
-      | Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.NotFound _
-      | Llm_provider.Error.CapacityExhausted _ | Llm_provider.Error.HardQuota _
-      | Llm_provider.Error.InvalidRequest _ | Llm_provider.Error.InvalidConfig _
-      | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderUnavailable _
-      | Llm_provider.Error.ProviderTerminal _
-      | Llm_provider.Error.UnknownVariant _) -> false
-  | Agent_sdk.Error.Agent _ -> false
-  | Agent_sdk.Error.Mcp _ -> false
-  | Agent_sdk.Error.Config _ -> false
-  | Agent_sdk.Error.Serialization _ -> false
-  | Agent_sdk.Error.Io _ -> false
-  | Agent_sdk.Error.Orchestration _ -> false
-  | Agent_sdk.Error.Internal _ -> false
+  Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
    orchestration level this means the current provider lane is saturated or
@@ -632,14 +609,17 @@ let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   || is_auto_recoverable_runtime_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout _) -> true
+  if Keeper_provider_runtime_boundary.is_provider_timeout_error err
+  then true
+  else
+    match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
   | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)

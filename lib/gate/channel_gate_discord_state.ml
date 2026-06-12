@@ -205,6 +205,26 @@ let gateway_state_label = function
   | Reconnect_pending _ -> "reconnect_pending"
   | Failed _ -> "failed"
 
+(* Bot identity captured from the gateway's READY dispatch. The legacy
+   sidecar wrote this to status.json; the in-process gateway (RFC-0203)
+   keeps it in memory — nothing writes that file anymore. *)
+type ready_info = {
+  ready_bot_user_id : string;
+  ready_at : string;
+}
+
+let last_ready : ready_info option Atomic.t = Atomic.make None
+
+let record_ready ~bot_user_id =
+  Atomic.set last_ready
+    (Some
+       {
+         ready_bot_user_id = bot_user_id;
+         (* NDT-OK: READY wall-clock is operator-facing telemetry only
+            (status_json last_ready_at); no control flow reads it. *)
+         ready_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
+       })
+
 let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
   let binding_store_path = binding_store_read_path () in
@@ -257,9 +277,23 @@ let status_json ?(audit_limit = 10) () =
       ("names_path", `String names_path);
       ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
-      ("last_ready_at", `String (if connected then updated_at else ""));
+      ( "last_ready_at",
+        (* The READY timestamp survives reconnect_pending/resuming dips,
+           so operators can tell "was up, recovering" from "never came
+           up" — current liveness is gateway_state above. *)
+        `String
+          (match Atomic.get last_ready with
+           | Some { ready_at; _ } -> ready_at
+           | None -> "") );
+      (* READY carries only the bot user id; the gateway does not parse
+         the username. Empty is honest — the dead sidecar file used to
+         supply a stale value here. *)
       ("bot_user_name", `String "");
-      ("bot_user_id", `String "");
+      ( "bot_user_id",
+        `String
+          (match Atomic.get last_ready with
+           | Some { ready_bot_user_id; _ } -> ready_bot_user_id
+           | None -> "") );
       ("guild_count", `Int 0);
       ("gate_base_url", `String "in-process");
       ("gate_healthy", if connected then `Bool true else `Null);
@@ -493,7 +527,20 @@ let unbind ~channel_id ~actor_name =
 (* In-process gateway support — replaces sidecars/discord-bot/      *)
 (* ---------------------------------------------------------------- *)
 
-let keeper_for_channel ~channel_id =
+type keeper_binding_resolution = {
+  keeper_name : string;
+  incoming_channel_id : string;
+  bound_channel_id : string;
+  via_parent : bool;
+}
+
+let binding_for_channel bindings ~channel_id =
+  List.find_map
+    (fun (b : binding) ->
+      if String.equal b.channel_id channel_id then Some b else None)
+    bindings
+
+let resolve_keeper_for_channel ~channel_id =
   let normalized = String.trim channel_id in
   if String.equal normalized "" then None
   else
@@ -503,11 +550,41 @@ let keeper_for_channel ~channel_id =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | _ -> []
     in
-    List.find_map
-      (fun (b : binding) ->
-        if String.equal b.channel_id normalized then Some b.keeper_name
-        else None)
-      candidates
+    match binding_for_channel candidates ~channel_id:normalized with
+    | Some b ->
+        Some
+          {
+            keeper_name = b.keeper_name;
+            incoming_channel_id = normalized;
+            bound_channel_id = b.channel_id;
+            via_parent = false;
+          }
+    | None -> (
+        let parent_channel_id =
+          try Names.resolve_parent_channel_id_for_channel ~channel_id:normalized
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | _ -> None
+        in
+        match parent_channel_id with
+        | None -> None
+        | Some parent_channel_id -> (
+            let parent_channel_id = String.trim parent_channel_id in
+            match binding_for_channel candidates ~channel_id:parent_channel_id with
+            | None -> None
+            | Some b ->
+                Some
+                  {
+                    keeper_name = b.keeper_name;
+                    incoming_channel_id = normalized;
+                    bound_channel_id = b.channel_id;
+                    via_parent = true;
+                  } ))
+
+let keeper_for_channel ~channel_id =
+  match resolve_keeper_for_channel ~channel_id with
+  | None -> None
+  | Some resolution -> Some resolution.keeper_name
 
 (* RFC-0223 P2: presence surface. Both recomputed per call — no cached
    presence state. *)
@@ -570,3 +647,11 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
         | Error e -> Error (Rest_error e)
       in
       send_chunks true content
+
+let trigger_typing ~channel_id () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+      (match Discord_rest_client.trigger_typing ~token ~channel_id () with
+       | Ok () -> Ok ()
+       | Error e -> Error (Rest_error e))

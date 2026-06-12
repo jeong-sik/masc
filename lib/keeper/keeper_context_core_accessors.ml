@@ -130,6 +130,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     top_k = None;
     min_p = None;
     enable_thinking = None;
+    preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
@@ -479,4 +480,3 @@ let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
   || stats.dropped_chars > 0
   || stats.truncated_blocks > 0
   || stats.truncated_chars > 0
-

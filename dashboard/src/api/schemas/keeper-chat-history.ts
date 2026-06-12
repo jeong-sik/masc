@@ -33,10 +33,14 @@ export const KeeperChatHistoryMessageSchema = object({
   // carry the executed tool's id/name; `content` holds the accumulated
   // argument JSON. `source` names the originating connector
   // ('dashboard' | 'discord' | 'slack' | 'agent') on every row of a
-  // turn. All three are absent on legacy rows.
+  // turn. Connector rows may also carry opaque conversation/message
+  // coordinates so UI surfaces can group platform channels/threads.
+  // These fields are absent on legacy rows.
   tool_call_id: optional(string()),
   tool_call_name: optional(string()),
   source: optional(string()),
+  conversation_id: optional(string()),
+  external_message_id: optional(string()),
   // RFC-0223 P1 speaker identity, present on user rows written since
   // then. `speaker_authority` is 'owner' (authenticated dashboard
   // operator) or 'external' (arbitrary person on a connector channel);

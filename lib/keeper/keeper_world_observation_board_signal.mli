@@ -23,7 +23,7 @@ val match_signal
   -> match_result
 
 val check_self_comment_status
-  :  self_tokens:string list
+  :  self_ids:Keeper_identity.Keeper_id.t list
   -> post_id:string
   -> comment_status
 

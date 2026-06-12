@@ -54,10 +54,13 @@ let run_argv_with_stdin_and_status ~actor:_ ~raw_source:_ ~summary:_
     ~stdin_content argv
 
 let run_argv_with_stdin_and_status_split ~actor:_ ~raw_source:_ ~summary:_
-    ?(timeout_sec = default_exec_timeout_sec) ?env ?cwd ~stdin_content argv =
+    ?(timeout_sec = default_exec_timeout_sec) ?env ?cwd ?on_stdout_chunk
+    ?on_stderr_chunk ~stdin_content argv =
   Process_eio.run_argv_with_stdin_and_status_split ~timeout_sec ?env ?cwd
-    ~stdin_content argv
+    ?on_stdout_chunk ?on_stderr_chunk ~stdin_content argv
 
 let run_argv_pipeline_with_status_split ~actor:_ ~raw_source:_ ~summary:_
-    ?(timeout_sec = default_exec_timeout_sec) stages =
-  Process_eio.run_argv_pipeline_with_status_split ~timeout_sec stages
+    ?(timeout_sec = default_exec_timeout_sec) ?on_stdout_chunk
+    ?on_stderr_chunk stages =
+  Process_eio.run_argv_pipeline_with_status_split ~timeout_sec
+    ?on_stdout_chunk ?on_stderr_chunk stages

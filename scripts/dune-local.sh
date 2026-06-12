@@ -527,6 +527,89 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
+# --- auto-clean stale _build on installed agent_sdk interface change ----
+# The pin guard can be intentionally bypassed during local surgery with
+# MASC_SKIP_PIN_CHECK=1.  Even then, the shared opam switch may have moved
+# from one agent_sdk build to another while _build still contains CMIs
+# compiled against the previous Llm_provider interfaces.  Track the actual
+# installed Provider_config and Provider_kind CMI checksums and clear _build
+# when they change, before Dune can produce a cascade of stale alias or
+# "inconsistent assumptions" diagnostics.
+#
+# This guard is intentionally independent of MASC_SKIP_PIN_CHECK.  It does
+# not prove the pin is correct; it only keeps the current build directory
+# internally consistent with whatever agent_sdk is installed right now.
+_current_agent_sdk_llm_provider_crc() {
+  local module_name="$1"
+  local unit_name="Llm_provider__${module_name}"
+  command -v ocamlobjinfo >/dev/null 2>&1 || return 1
+
+  local llm_provider_dir cmi_path
+  if command -v ocamlfind >/dev/null 2>&1; then
+    llm_provider_dir="$(ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
+  elif command -v opam >/dev/null 2>&1; then
+    llm_provider_dir="$(opam exec -- ocamlfind query agent_sdk.llm_provider 2>/dev/null || true)"
+  else
+    return 1
+  fi
+
+  [[ -n "${llm_provider_dir}" ]] || return 1
+  cmi_path="${llm_provider_dir%/}/llm_provider__${module_name}.cmi"
+  [[ -r "${cmi_path}" ]] || return 1
+
+  ocamlobjinfo "${cmi_path}" 2>/dev/null \
+    | awk -v unit="${unit_name}" '$2 == unit { print $1; found = 1; exit }
+           END { if (!found) exit 1 }'
+}
+
+if [[ "${GITHUB_ACTIONS:-}" != "true" \
+      && "${MASC_DUNE_DRY_RUN:-0}" != "1" \
+      && "${_subcommand}" != "clean" ]]; then
+  _agent_sdk_interface_build_dir="${DUNE_BUILD_DIR:-$repo_root/_build}"
+  _agent_sdk_interface_markers=()
+  _agent_sdk_interface_crcs=()
+  _agent_sdk_interface_changed=0
+  for _agent_sdk_interface in Provider_config Provider_kind; do
+    _agent_sdk_interface_crc="$(_current_agent_sdk_llm_provider_crc "${_agent_sdk_interface}" || true)"
+    [[ -n "${_agent_sdk_interface_crc}" ]] || continue
+    case "${_agent_sdk_interface}" in
+      Provider_config)
+        _agent_sdk_interface_marker="${_agent_sdk_interface_build_dir}/.last-agent-sdk-provider-config-crc"
+        ;;
+      Provider_kind)
+        _agent_sdk_interface_marker="${_agent_sdk_interface_build_dir}/.last-agent-sdk-provider-kind-crc"
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    _agent_sdk_interface_markers+=("${_agent_sdk_interface_marker}")
+    _agent_sdk_interface_crcs+=("${_agent_sdk_interface_crc}")
+    if [[ -f "${_agent_sdk_interface_marker}" ]]; then
+      _last_agent_sdk_interface_crc="$(cat "${_agent_sdk_interface_marker}" 2>/dev/null || true)"
+      if [[ -n "${_last_agent_sdk_interface_crc}" \
+            && "${_last_agent_sdk_interface_crc}" != "${_agent_sdk_interface_crc}" ]]; then
+        printf '[dune-local] agent_sdk %s interface changed (%.8s -> %.8s) - cleaning stale _build artifacts\n' \
+          "${_agent_sdk_interface}" \
+          "${_last_agent_sdk_interface_crc}" \
+          "${_agent_sdk_interface_crc}" >&2
+        _agent_sdk_interface_changed=1
+      fi
+    fi
+  done
+  if [[ "${_agent_sdk_interface_changed}" -eq 1 ]]; then
+    rm -rf "${_agent_sdk_interface_build_dir}"
+  fi
+  if [[ "${#_agent_sdk_interface_markers[@]}" -gt 0 ]]; then
+    mkdir -p "${_agent_sdk_interface_build_dir}" 2>/dev/null || true
+    for _agent_sdk_interface_i in "${!_agent_sdk_interface_markers[@]}"; do
+      printf '%s' "${_agent_sdk_interface_crcs[${_agent_sdk_interface_i}]}" \
+        > "${_agent_sdk_interface_markers[${_agent_sdk_interface_i}]}"
+    done
+  fi
+fi
+# -----------------------------------------------------------------------
+
 # --- core opam-deps installed guard ------------------------------------
 # Catch the "deps declared but not installed" failure mode before Dune
 # emits a wall of cryptic abstract-cmi errors:

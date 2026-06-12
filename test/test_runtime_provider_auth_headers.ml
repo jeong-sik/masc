@@ -18,6 +18,16 @@ let normalized_header_value name headers =
   |> List.find_map (fun (k, v) ->
     if String.equal name (String.lowercase_ascii k) then Some v else None)
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
   ; display_name = "RunPod"
@@ -36,6 +46,7 @@ let qwen_model =
   ; tools_support = true
   ; max_context = 160000
   ; thinking_support = true
+  ; preserve_thinking = false
   ; max_thinking_budget = None
   ; streaming = true
   ; capabilities = None
@@ -140,6 +151,136 @@ key = " OLLAMA_CLOUD_API_KEY "
         | Some _ -> fail "expected env credential"
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
+
+let deepseek_runtime_toml =
+  {|
+[runtime]
+default = "deepseek.deepseek-v4-pro"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "provider_d-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+|}
+
+let deepseek_runtime_config_or_fail () =
+  match Runtime_toml.parse_string deepseek_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected DeepSeek runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let deepseek_provider_config_or_fail () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
+  | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
+
+let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
+
+let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    (match model.capabilities with
+     | Some caps ->
+       check bool "reasoning effort parsed" true
+         (caps.thinking_control_format = Runtime_schema.Reasoning_effort);
+       check (option int) "max output" (Some 384000) caps.max_output_tokens
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_toml_accepts_chat_template_token_capability () =
+  let toml =
+    {|
+[runtime]
+default = "ollama.gemma4"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4.capabilities]
+thinking-control-format = "chat_template_token"
+
+[ollama.gemma4]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected Gemma4 runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models with
+     | [ model ] ->
+       (match model.capabilities with
+        | Some caps ->
+          check bool "chat template token parsed" true
+            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+        | None -> fail "expected model capabilities")
+     | models -> failf "expected one model, got %d" (List.length models))
+
+let test_runtime_adapter_materializes_deepseek_openai_compat () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+    check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
+    check string "api key" "ds-test-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
 
 let test_runtime_adapter_keeps_auth_out_of_headers () =
   let cfg =
@@ -488,6 +629,18 @@ let () =
             "runtime TOML trims env credential key"
             `Quick
             test_runtime_toml_trims_env_credential_key
+        ; test_case
+            "runtime TOML accepts DeepSeek reasoning effort"
+            `Quick
+            test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime TOML accepts chat template token thinking"
+            `Quick
+            test_runtime_toml_accepts_chat_template_token_capability
+        ; test_case
+            "runtime adapter materializes DeepSeek OpenAI compat"
+            `Quick
+            test_runtime_adapter_materializes_deepseek_openai_compat
         ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick

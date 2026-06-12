@@ -71,6 +71,7 @@ type config = Runtime_agent_context.config = {
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
+  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;

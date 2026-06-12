@@ -17,6 +17,7 @@ import { StatGrid } from './common/stat-tile'
 import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { formatTokens } from '../lib/format-number'
 import { findKeeper } from '../lib/keeper-utils'
+import { isSubmitEnter } from '../lib/keyboard'
 import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
@@ -487,7 +488,7 @@ export function AgentProfile({ name }: { name: string }) {
             placeholder="메시지 입력..."
             value=${mentionText.value}
             onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
+            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention(name) }}
             disabled=${sendingMention.value}
           />
           <${ActionButton}

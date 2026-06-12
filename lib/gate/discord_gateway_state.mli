@@ -75,6 +75,9 @@ type dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
+        (** Guild snowflake when Discord includes one. Direct messages and
+            some partial payloads omit it. *)
       ; message_id : string
       ; author_id : string
       ; author_name : string option
@@ -82,7 +85,20 @@ type dispatched_event =
             [author.username]; [None] only when the payload carries
             neither (RFC-0223 P1). *)
       ; content : string
+      ; mention_user_ids : string list
+            (* RFC-0232 §3.3: the structured [mentions] member ids are
+               kept at decode instead of being reduced to a bot bool;
+               the gate maps what its bindings can resolve. *)
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+        (** [true] only when message [content] contains a literal
+            Discord user mention for the bot, e.g. [<@123>] /
+            [<@!123>]. Discord may also include the bot in
+            [mentions] for reply-pings; those stay [mentions_bot]
+            but do not start a [Mention_only] turn by themselves. *)
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string

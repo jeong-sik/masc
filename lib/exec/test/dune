@@ -24,7 +24,10 @@
   test_shell_ir_differential
   test_shell_ir_oracle
   test_shell_ir_risk_action_flags
-  test_shell_ir_effect_projection)
+  test_shell_ir_effect_projection
+  test_exec_dispatch_docker_streaming
+  test_exec_dispatch_stdin_streaming
+  test_exec_dispatch_pipeline_streaming)
  (libraries
   masc_exec
   masc_exec_bash_parser

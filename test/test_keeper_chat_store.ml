@@ -111,7 +111,8 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
-let roles messages = List.map (fun (m : K.chat_message) -> m.role) messages
+let roles messages =
+  List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
 
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
@@ -289,20 +290,27 @@ let test_append_user_message_roundtrip () =
       K.append_user_message ~base_dir ~keeper_name
         ~content:"two humans chatting, no mention"
         ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-7"
+        ~external_message_id:"msg-7"
         ~speaker:
           { K.speaker_id = Some "55501";
             speaker_name = Some "jane";
             speaker_authority = K.External }
         ();
       K.append_assistant_message ~base_dir ~keeper_name
-        ~content:"reply recorded separately" ~source:"discord" ();
+        ~content:"reply recorded separately" ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-7" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
-          Alcotest.(check string) "lone user line first" "user" user.K.role;
+          Alcotest.(check string) "lone user line first" "user" (K.Role.to_label user.K.role);
           Alcotest.(check string) "content"
             "two humans chatting, no mention" user.K.content;
           Alcotest.(check (option string)) "source"
             (Some "discord") user.K.source;
+          Alcotest.(check (option string)) "conversation id"
+            (Some "discord:guild-1:channel:chan-7") user.K.conversation_id;
+          Alcotest.(check (option string)) "external message id"
+            (Some "msg-7") user.K.external_message_id;
           (match user.speaker with
            | Some sp ->
                Alcotest.(check (option string)) "speaker id"
@@ -313,9 +321,33 @@ let test_append_user_message_roundtrip () =
                  "external" (K.authority_label sp.K.speaker_authority)
            | None -> Alcotest.fail "ambient user line lost its speaker");
           Alcotest.(check string) "assistant joins the lane"
-            "assistant" assistant.K.role;
+            "assistant" (K.Role.to_label assistant.K.role);
+          Alcotest.(check (option string)) "assistant conversation id"
+            (Some "discord:guild-1:channel:chan-7") assistant.K.conversation_id;
+          Alcotest.(check (option string)) "assistant has no inbound message id"
+            None assistant.K.external_message_id;
           Alcotest.(check string) "no duplicated user line"
-            "reply recorded separately" assistant.K.content
+            "reply recorded separately" assistant.K.content;
+          let json_rows = K.to_json_array [ user; assistant ] in
+          (match Yojson.Safe.Util.to_list json_rows with
+          | user_json :: assistant_json :: _ ->
+              Alcotest.(check string) "json conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "conversation_id" |> to_string);
+              Alcotest.(check string) "json external message id" "msg-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "external_message_id" |> to_string);
+              Alcotest.(check string) "json assistant conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  assistant_json |> member "conversation_id" |> to_string);
+              Alcotest.(check bool) "json assistant omits inbound message id" true
+                Yojson.Safe.Util.(
+                  assistant_json |> member "external_message_id" = `Null)
+          | rows ->
+              Alcotest.failf "expected 2 json rows, got %d"
+                (List.length rows))
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
@@ -370,6 +402,28 @@ let test_unknown_speaker_authority_reported_not_guessed () =
         1.0
         (drop_value invalid_payload -. before))
 
+let test_unknown_role_row_dropped () =
+  (* RFC-0232 P1: a role label outside the closed sum cannot participate
+     in lane semantics; the row is dropped and reported, never defaulted. *)
+  let base_dir = temp_base_path "keeper-chat-store-role-bad" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-role-bad" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"role":"user","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"role":"system","content":"injected","ts":2.0}|} ^ "\n"
+        ^ {|{"role":"assistant","content":"done","ts":3.0}|} ^ "\n");
+      let messages = K.load ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "unknown role row dropped"
+        [ "user"; "assistant" ] (roles messages);
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
+        1.0
+        (drop_value invalid_payload -. before))
+
 let test_tool_row_missing_name_dropped () =
   let base_dir = temp_base_path "keeper-chat-store-toolname" in
   Fun.protect
@@ -411,13 +465,13 @@ let test_window_keeps_tool_lines_of_retained_turns () =
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check int) "50 full turns survive" 150 (List.length messages);
       let primaries =
-        List.filter (fun (m : K.chat_message) -> m.role <> "tool") messages
+        List.filter (fun (m : K.chat_message) -> not (K.Role.equal m.role K.Role.Tool)) messages
       in
       Alcotest.(check int) "primary window is 100" 100 (List.length primaries);
       match messages with
       | first :: _ ->
           Alcotest.(check string) "window starts at a user line, not an orphan tool"
-            "user" first.role;
+            "user" (K.Role.to_label first.role);
           Alcotest.(check string) "oldest retained turn is turn 2" "u2" first.content
       | [] -> Alcotest.fail "expected non-empty window")
 
@@ -472,14 +526,14 @@ let test_tail_bounded_load_matches_full_scan_window () =
        | first :: _ ->
            Alcotest.(check string) "window starts at line 5101"
              "msg-5101" (content_prefix first);
-           Alcotest.(check string) "line 5101 is a user line" "user" first.K.role
+           Alcotest.(check string) "line 5101 is a user line" "user" (K.Role.to_label first.K.role)
        | [] -> Alcotest.fail "expected non-empty window");
       (match List.rev messages with
        | last :: _ ->
            Alcotest.(check string) "window ends at line 5200"
              "msg-5200" (content_prefix last);
            Alcotest.(check string) "line 5200 is an assistant line"
-             "assistant" last.K.role
+             "assistant" (K.Role.to_label last.K.role)
        | [] -> Alcotest.fail "expected non-empty window"))
 
 (* RFC-0228 P1 — backward paging. Raw JSONL with controlled ts so the
@@ -571,6 +625,8 @@ let () =
             test_load_records_malformed_row_drops;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
+          Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick
+            test_unknown_role_row_dropped;
         ] );
       ( "speaker_identity",
         [

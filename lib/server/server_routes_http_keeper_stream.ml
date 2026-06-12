@@ -293,11 +293,6 @@ let strip_keeper_visible_reply (reply : string) =
   |> Keeper_execution.strip_state_blocks_text
   |> String.trim
 
-let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
-
-let is_continuation_checkpoint_reply text =
-  has_prefix ~prefix:continuation_checkpoint_prefix (String.trim text)
-
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
   if len = 0 then
@@ -532,6 +527,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
          ~channel_user_id:payload.channel_user_id
          ~channel_user_name:payload.channel_user_name
          ~channel_workspace_id:payload.channel_workspace_id
+         ~metadata:[]
          ~content:payload.message
     else
       payload.message
@@ -559,10 +555,13 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       (if payload.attachments = [] then base_fields
        else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
   in
-  (* Buffer model text deltas until the terminal payload arrives. This
-     avoids sending raw partial output before the full reply can pass
-     through keeper-scoped redaction. *)
-  let streamed_text = Buffer.create 256 in
+  (* Stream model text deltas live with per-delta redaction — the same
+     treatment ThinkingDelta and Tool_call_args already get in
+     [consume_worker_events]. The once-only invariant (live emit + terminal
+     re-send suppression + raw fallback) is owned by
+     [Keeper_stream_text_accum]; see its interface for the #20825/#20854/
+     #20869 history this guards against. *)
+  let text_accum = Keeper_stream_text_accum.create () in
   let worker_events = Eio.Stream.create 512 in
   let push_worker_event event =
     if not !closed then
@@ -668,8 +667,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         in
         match dispatch_result with
         | Ok (true, body) ->
-            let _payload_json_opt, visible_reply = extract_visible_reply body in
-            if not (is_continuation_checkpoint_reply visible_reply) then begin
+            let payload_json_opt, visible_reply = extract_visible_reply body in
+            (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> ()
+            | Keeper_turn_outcome.Visible_reply ->
               Keeper_chat_store.append_turn
                 ~base_dir:base_path
                 ~keeper_name:payload.name
@@ -681,8 +682,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 ~assistant_content:visible_reply
                 ();
               Keeper_chat_broadcast.chat_appended
-                ~keeper_name:payload.name ~source:chat_source
-            end;
+                ~keeper_name:payload.name ~source:chat_source);
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
@@ -749,7 +749,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events
                (Event_error { message = redact_text ("Timeout: " ^ reason) })
          | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
-             Buffer.add_string streamed_text text
+             Keeper_chat_events.publish events
+               (Text_delta
+                  (Keeper_stream_text_accum.on_delta text_accum
+                     ~redact:redact_text text))
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
              Keeper_chat_events.publish events
                (Custom
@@ -777,15 +780,22 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
           let visible_reply =
             match String.trim visible_reply with
             | "" ->
-                let streamed = Buffer.contents streamed_text |> String.trim in
+                let streamed =
+                  Keeper_stream_text_accum.streamed_text text_accum |> String.trim
+                in
                 if streamed = "" then visible_reply else streamed
             | _ -> visible_reply
           in
           let visible_reply = redact_text visible_reply in
           let is_checkpoint =
-            is_continuation_checkpoint_reply visible_reply
+            match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> true
+            | Keeper_turn_outcome.Visible_reply -> false
           in
-          if not is_checkpoint then
+          if
+            (not is_checkpoint)
+            && not (Keeper_stream_text_accum.suppress_terminal_resend text_accum)
+          then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));

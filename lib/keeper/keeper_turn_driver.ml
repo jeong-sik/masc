@@ -104,6 +104,13 @@ let run_named
   let runtime_id = String.trim runtime_id in
   let error_runtime_id = runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
+  let enable_thinking =
+    match runtime_seed.thinking_enabled with
+    | Some enabled -> Some enabled
+    | None -> enable_thinking
+  in
+  let preserve_thinking = runtime_seed.preserve_thinking in
   (* Parameters that only fed the deleted multi-candidate machinery
      (provider selection, admission queue gating, per-candidate accept). *)
   ignore provider_filter;
@@ -171,6 +178,7 @@ let run_named
     context_injector;
     context;
     enable_thinking;
+    preserve_thinking;
     approval;
     exit_condition;
     exit_condition_result;

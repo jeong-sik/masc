@@ -50,6 +50,7 @@ type benchmark_case = {
   category : case_category;
   keeper_profiles : string list;
   forbidden_tools : string list;
+  forbidden_selectors : Eval_tool_selector.t list;
   max_tool_calls : int;
   success_checks : json_check list;
   arg_checks : arg_check list;
@@ -61,6 +62,7 @@ type tool_call = {
   success : bool;
   input : Yojson.Safe.t;
   output : Yojson.Safe.t option;
+  route_evidence : Yojson.Safe.t option;
   duration_ms : float option;
 }
 

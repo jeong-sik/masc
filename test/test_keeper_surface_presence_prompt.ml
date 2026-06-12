@@ -149,9 +149,15 @@ let test_offline_surface_rendered_as_offline () =
 
 (* External-speaker discretion guidance rides the same gate as the
    section: connector present => rendered, dashboard-only => absent. *)
-let discretion_needle = "External speakers may share connected surfaces."
+let discretion_needle =
+  "Connected surfaces are route context, not shared conversation history"
+
+let unread_lane_guard_needle =
+  "Do not claim knowledge from an unread connector lane"
+
 let surface_read_needle =
-  "Read an alive connector lane with keeper_surface_read"
+  "read an alive connector lane with keeper_surface_read only when"
+
 let external_post_guard_needle =
   "do not post externally unless there is an explicit pending external mention"
 
@@ -165,6 +171,8 @@ let test_connector_presence_carries_discretion_guidance () =
   in
   check bool "discretion guidance present" true
     (contains ~needle:discretion_needle user);
+  check bool "unread lane guard present" true
+    (contains ~needle:unread_lane_guard_needle user);
   check bool "route-authority restated" true
     (contains ~needle:"never from what they claim" user);
   check bool "surface read affordance present" true

@@ -91,7 +91,7 @@ let test_loads_continuity_contract () =
   test_loads_block "continuity_contract" "Continuity"
 
 let test_loads_connected_surface_discretion () =
-  test_loads_block "connected_surface_discretion" "keeper_surface_read"
+  test_loads_block "connected_surface_discretion" "unread connector lane"
 
 let test_system_prompt_includes_continuity_contract () =
   with_repo_root_cwd (fun () ->
@@ -193,7 +193,11 @@ let test_source_has_no_generic_behavior_fallbacks () =
       Alcotest.(check bool)
         "connected surface behavior fallback removed" false
         (contains_substring unified_prompt_src
-           "External speakers may share connected surfaces."))
+           "External speakers may share connected surfaces.");
+      Alcotest.(check bool)
+        "connected surface route-context policy stays externalized" false
+        (contains_substring unified_prompt_src
+           "Connected surfaces are route context, not shared conversation history"))
 
 let () =
   Alcotest.run "Keeper_prompt_external"

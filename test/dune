@@ -1437,6 +1437,8 @@
 
 (include stanzas/test_keeper_long_turn_9943.inc)
 
+(include stanzas/test_keeper_execution_join.inc)
+
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
 (include stanzas/test_keeper_msg_cancel.inc)
 

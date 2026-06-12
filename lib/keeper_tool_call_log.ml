@@ -417,6 +417,7 @@ let log_call
       ?thinking_budget
       ?prompt_fingerprint
       ?execution_id
+      ?tool_use_id
       ?trace_id
       ?session_id
       ?generation
@@ -500,6 +501,13 @@ let log_call
         | Some value ->
           [ "execution_id", `String (Ids.Execution_id.to_string value) ]
         | None -> []
+      in
+      (* RFC-0233 PR-2: provider call id — the key the oas-event rows
+         carry, joining this store to oas:tool_called/oas:tool_completed. *)
+      let tool_use_id_field =
+        match tool_use_id with
+        | Some value when value <> "" -> [ "tool_use_id", `String value ]
+        | Some _ | None -> []
       in
       let session_id_field =
         match session_id with
@@ -614,6 +622,7 @@ let log_call
            @ thinking_budget_field
            @ prompt_fingerprint_field
            @ execution_id_field
+           @ tool_use_id_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

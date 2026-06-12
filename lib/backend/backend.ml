@@ -665,29 +665,41 @@ module FileSystem = struct
       acquired_at = now;
       expires_at = now +. float_of_int ttl_seconds;
     } in
-    match set_if_not_exists t lock_key (lock_info_to_json info) with
-    | Ok true -> Ok true
-    | Ok false -> Ok false
-    | Error (AlreadyExists _) ->
-        (* Check if expired *)
-        (match get t lock_key with
-         | Ok json ->
-             (match lock_info_of_json json with
-              | Some existing when existing.expires_at < now ->
+    (* Read-First check: avoid write disk operations if a valid lock is present *)
+    let has_valid_lock =
+      match get t lock_key with
+      | Ok json -> (
+          match lock_info_of_json json with
+          | Some existing when existing.expires_at >= now -> true
+          | _ -> false)
+      | Error _ -> false
+    in
+    if has_valid_lock then
+      Ok false
+    else
+      match set_if_not_exists t lock_key (lock_info_to_json info) with
+      | Ok true -> Ok true
+      | Ok false -> Ok false
+      | Error (AlreadyExists _) -> (
+          (* Check if expired *)
+          match get t lock_key with
+          | Ok json -> (
+              match lock_info_of_json json with
+              | Some existing when existing.expires_at < now -> (
                   (* Expired, try to take over *)
-                  (match set t lock_key (lock_info_to_json info) with
-                   | Ok () -> Ok true
-                   | Error e -> Error e)
+                  match set t lock_key (lock_info_to_json info) with
+                  | Ok () -> Ok true
+                  | Error e -> Error e)
               | Some _ -> Ok false
-              | None ->
+              | None -> (
                   (* Invalid lock metadata, overwrite to recover *)
-                  (match set t lock_key (lock_info_to_json info) with
-                   | Ok () -> Ok true
-                   | Error e -> Error e))
-         | Error _ -> Ok false)
-    | Error
-        (( NotFound _ | IOError _ | InvalidKey _ | ConnectionFailed _
-         | BackendNotSupported _ ) as e) -> Error e
+                  match set t lock_key (lock_info_to_json info) with
+                  | Ok () -> Ok true
+                  | Error e -> Error e))
+          | Error _ -> Ok false)
+      | Error
+          (( NotFound _ | IOError _ | InvalidKey _ | ConnectionFailed _
+           | BackendNotSupported _ ) as e) -> Error e
 
   let release_lock t ~key ~owner =
     let lock_key = "locks:" ^ key in

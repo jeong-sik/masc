@@ -540,7 +540,14 @@ let run
         | Error _ -> None
       in
       match on_event with
-      | Some cb -> Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:cb agent goal
+      | Some cb ->
+        let safe_cb event =
+          try cb event
+          with exn ->
+            Log.Misc.warn "oas_worker %s: on_event callback raised %s"
+              config.name (Printexc.to_string exn)
+        in
+        Agent_sdk.Agent.run_stream ~sw ?clock ?on_yield ?on_resume ~on_event:safe_cb agent goal
       | None -> Agent_sdk.Agent.run ~sw ?clock ?on_yield ?on_resume agent goal
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in

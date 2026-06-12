@@ -267,9 +267,42 @@ let lazy_startup_task_names () =
   lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
 
+(* Cap the per-boot file list in the sync log line; full counts are always
+   logged, names are illustrative. *)
+let max_logged_prompt_sync_entries = 10
+
+let sync_prompt_assets_from_binary () =
+  let sync =
+    Prompt_defaults.sync_prompt_assets
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ()
+  in
+  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
+   | [], [] -> ()
+   | copied, overwritten ->
+       let names = copied @ overwritten in
+       let shown =
+         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
+       in
+       Log.Misc.info
+         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
+         (List.length copied) (List.length overwritten)
+         (String.concat ", " shown)
+         (if List.length names > max_logged_prompt_sync_entries then ", …"
+          else ""));
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
+    sync.Prompt_defaults.failed
+
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
+  (* Converge runtime prompt markdown onto the binary-embedded assets
+     before the registry scans the directory (#20929: merged prompt edits
+     never reached the runtime dir otherwise). *)
+  sync_prompt_assets_from_binary ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime

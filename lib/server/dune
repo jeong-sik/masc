@@ -16,6 +16,9 @@
   ;; directly (specs_json / tlc_results_json) and dune does not re-export through
   ;; the masc dep, so masc_server lists it explicitly.
   masc.dashboard_tla_specs
+  ;; #20929: server bootstrap converges <base>/.masc/config/prompts onto the
+  ;; binary-embedded config/ tree so merged prompt edits ship on restart.
+  masc.embedded_config
   masc.masc_tool_surface
   masc.operator
   yojson

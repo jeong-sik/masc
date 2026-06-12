@@ -112,6 +112,10 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'CUSTOM':
+      if (event.name === 'KEEPER_THINKING_DELTA') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        return null
+      }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {
         setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'queued')
         return null

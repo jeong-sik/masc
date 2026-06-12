@@ -738,6 +738,7 @@ export interface KeeperConversationAttachment {
 
 export type KeeperConversationStreamState =
   | 'opening'
+  | 'thinking'
   | 'streaming'
   | 'finalizing'
   | null

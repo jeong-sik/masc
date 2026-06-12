@@ -19,6 +19,37 @@ let string_contains haystack needle =
     done;
     !found
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "config/prompts/keeper.tool_hints.toml" in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
+    root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 anchor with
+     | Some root -> root
+     | None -> Alcotest.fail "could not locate repo source root")
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let assert_contains label haystack needle =
+  Alcotest.(check bool) label true (string_contains haystack needle)
+
+let assert_not_contains label haystack needle =
+  Alcotest.(check bool) label false (string_contains haystack needle)
+
 (* ================================================================ *)
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
@@ -457,6 +488,12 @@ let keeper_board_list_schema =
 
 let keeper_board_search_schema =
   find_schema_exn "keeper_board_search" Config.raw_all_tool_schemas
+
+let keeper_board_post_get_schema =
+  find_schema_exn "keeper_board_post_get" Config.raw_all_tool_schemas
+
+let keeper_task_done_schema =
+  find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
 
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
@@ -1260,6 +1297,132 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
   Alcotest.(check string) "required blank preserved for handler validation" ""
     (assoc_string "mode" forwarded)
 
+let schema_required_fields schema =
+  match Yojson.Safe.Util.member "required" schema with
+  | `List values ->
+    List.filter_map (function `String value -> Some value | _ -> None) values
+  | _ -> []
+
+let assert_schema_requires label schema field =
+  Alcotest.(check bool)
+    (label ^ " requires " ^ field)
+    true
+    (List.mem field (schema_required_fields schema))
+
+let assert_validation_rejects ~label ~schema ~tool_name ~args ~snippets =
+  match Tool_input_validation.validate_args ~schema ~name:tool_name ~args () with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    List.iter
+      (fun snippet ->
+         assert_contains (label ^ " mentions " ^ snippet) msg snippet)
+      snippets
+  | Ok forwarded ->
+    Alcotest.failf
+      "%s: expected validation rejection, got %s"
+      label
+      (Yojson.Safe.to_string forwarded)
+
+let test_high_risk_tool_contract_rejection_corpus () =
+  List.iter
+    (fun (label, tool_name, schema, args, snippets) ->
+       assert_validation_rejects ~label ~tool_name ~schema ~args ~snippets)
+    [ ( "execute empty object"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc []
+      , [ "exactly one of" ] )
+    ; ( "execute raw cmd string"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc [ "cmd", `String "git status --short" ]
+      , [ "cmd"; "executable/argv" ] )
+    ; ( "keeper_task_done notes-only drift"
+      , "keeper_task_done"
+      , keeper_task_done_schema
+      , `Assoc [ "notes", `String "evidence" ]
+      , [ "task_id"; "result" ] )
+    ; ( "keeper_board_post_get missing post_id"
+      , "keeper_board_post_get"
+      , keeper_board_post_get_schema
+      , `Assoc []
+      , [ "post_id" ] )
+    ; ( "masc_transition retired alias fields"
+      , "masc_transition"
+      , masc_transition_schema
+      , `Assoc
+          [ "agent_name", `String "agent_code-local-admin"
+          ; "task_id", `String "task-239"
+          ; "action", `String "claim"
+          ; "to", `String "claimed"
+          ; "note", `String "PR #8308 Draft"
+          ]
+      , [ "to"; "note" ] )
+    ]
+
+let test_keeper_tool_hint_contracts_match_required_fields () =
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
+  assert_schema_requires
+    "keeper_board_post_get schema"
+    keeper_board_post_get_schema
+    "post_id";
+  assert_schema_requires "keeper_board_post schema" keeper_board_post_schema "content";
+  Alcotest.(check bool)
+    "keeper_board_post schema does not require hearth"
+    false
+    (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
+  let hints = read_source_file "config/prompts/keeper.tool_hints.toml" in
+  assert_contains
+    "keeper_task_done hint names task_id"
+    hints
+    "`keeper_task_done` { task_id:";
+  assert_contains
+    "keeper_task_done hint names result"
+    hints
+    "result:";
+  assert_contains
+    "keeper_task_done hint names evidence"
+    hints
+    "completion evidence";
+  assert_not_contains
+    "keeper_task_done hint does not regress to notes-only"
+    hints
+    "`keeper_task_done` { notes: \"evidence\" }";
+  assert_contains
+    "board get hint uses current tool name"
+    hints
+    "name = \"keeper_board_post_get\"";
+  assert_contains
+    "board get hint names post_id"
+    hints
+    "post_id:";
+  assert_not_contains
+    "board get hint avoids retired name"
+    hints
+    "name = \"keeper_board_get\""
+
+let test_orchestrator_prompt_pins_start_transition () =
+  let prompt = read_source_file "config/prompts/system.orchestrator.md" in
+  assert_contains "orchestrator prompt claims first" prompt "action: \"claim\"";
+  assert_contains "orchestrator prompt starts before work" prompt "action: \"start\"";
+  assert_contains "orchestrator prompt marks done" prompt "action: \"done\""
+
+let test_board_prompt_does_not_require_optional_hearth () =
+  let prompt = read_source_file "config/prompts/keeper.capabilities.md" in
+  assert_contains
+    "board prompt says hearth optional"
+    prompt
+    "Hearth is optional";
+  assert_not_contains
+    "board prompt does not claim hearth required"
+    prompt
+    "hearth required";
+  assert_not_contains
+    "board prompt does not forbid omitted hearth"
+    prompt
+    "Never post without hearth"
+
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
@@ -1779,6 +1942,16 @@ let () =
         test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
+    ]);
+    ("high_risk_contract_harness", [
+      Alcotest.test_case "rejects live high-risk invalid call corpus" `Quick
+        test_high_risk_tool_contract_rejection_corpus;
+      Alcotest.test_case "keeper prompt hints match schema-required fields" `Quick
+        test_keeper_tool_hint_contracts_match_required_fields;
+      Alcotest.test_case "orchestrator prompt includes start transition" `Quick
+        test_orchestrator_prompt_pins_start_transition;
+      Alcotest.test_case "board prompt does not require optional hearth" `Quick
+        test_board_prompt_does_not_require_optional_hearth;
     ]);
     ("oneof_const_discriminator", [
       Alcotest.test_case "alpha branch matches via const" `Quick

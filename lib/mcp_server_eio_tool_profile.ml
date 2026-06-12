@@ -58,7 +58,7 @@ PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
+WORKFLOW: masc_status → masc_transition(claim) → masc_transition(start) → work in a repo-local worktree → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."

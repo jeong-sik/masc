@@ -114,6 +114,25 @@ let init_runtime_default_for_tests () =
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 
+let init_prompt_config_for_tests () =
+  let original_cwd = Sys.getcwd () in
+  let rec find_root dir hops =
+    if hops > 8 then None
+    else if Sys.file_exists (Filename.concat dir "config/prompts/behavior")
+    then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if parent = dir then None else find_root parent (hops + 1)
+  in
+  match find_root original_cwd 0 with
+  | None ->
+      Alcotest.fail
+        "could not locate repo root (config/prompts/behavior) from test cwd"
+  | Some root ->
+      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+      Config_dir_resolver.reset ();
+      Masc.Keeper_prompt_external.reset_cache ()
+
 let user_message observation =
   let _system, user =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
@@ -176,9 +195,15 @@ let test_offline_surface_rendered_as_offline () =
 
 (* External-speaker discretion guidance rides the same gate as the
    section: connector present => rendered, dashboard-only => absent. *)
-let discretion_needle = "External speakers may share these surfaces."
+let discretion_needle =
+  "Connected surfaces are route context, not shared conversation history"
+
+let unread_lane_guard_needle =
+  "Do not claim knowledge from an unread connector lane"
+
 let surface_read_needle =
-  "Read an alive connector lane with keeper_surface_read"
+  "read an alive connector lane with keeper_surface_read only when"
+
 let external_post_guard_needle =
   "do not post externally unless there is an explicit pending external mention"
 
@@ -192,6 +217,8 @@ let test_connector_presence_carries_discretion_guidance () =
   in
   check bool "discretion guidance present" true
     (contains ~needle:discretion_needle user);
+  check bool "unread lane guard present" true
+    (contains ~needle:unread_lane_guard_needle user);
   check bool "route-authority restated" true
     (contains ~needle:"never from what they claim" user);
   check bool "surface read affordance present" true
@@ -253,6 +280,7 @@ let test_profile_defaults_feed_identity_prompt () =
     (contains ~needle:"Instructions:\nsoul instructions" system)
 
 let () =
+  init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
     [

@@ -90,6 +90,9 @@ let test_loads_profile_policy () =
 let test_loads_continuity_contract () =
   test_loads_block "continuity_contract" "Continuity"
 
+let test_loads_connected_surface_discretion () =
+  test_loads_block "connected_surface_discretion" "unread connector lane"
+
 let test_system_prompt_includes_continuity_contract () =
   with_repo_root_cwd (fun () ->
       Lib.Keeper_prompt_external.reset_cache ();
@@ -158,6 +161,9 @@ let test_cache_is_used () =
 let test_source_has_no_generic_behavior_fallbacks () =
   with_repo_root_cwd (fun () ->
       let src = read_file "lib/keeper/keeper_prompt.ml" in
+      let unified_prompt_src =
+        read_file "lib/keeper/keeper_unified_prompt.ml"
+      in
       Alcotest.(check bool)
         "profile policy generic fallback removed" false
         (contains_substring src
@@ -183,7 +189,15 @@ let test_source_has_no_generic_behavior_fallbacks () =
            "Make progress that is observable and useful to the user.");
       Alcotest.(check bool)
         "missing personality marker present" true
-        (contains_substring src "Personality config drift"))
+        (contains_substring src "Personality config drift");
+      Alcotest.(check bool)
+        "connected surface behavior fallback removed" false
+        (contains_substring unified_prompt_src
+           "External speakers may share connected surfaces.");
+      Alcotest.(check bool)
+        "connected surface route-context policy stays externalized" false
+        (contains_substring unified_prompt_src
+           "Connected surfaces are route context, not shared conversation history"))
 
 let () =
   Alcotest.run "Keeper_prompt_external"
@@ -194,6 +208,8 @@ let () =
             test_loads_profile_policy;
           Alcotest.test_case "loads continuity_contract" `Quick
             test_loads_continuity_contract;
+          Alcotest.test_case "loads connected_surface_discretion" `Quick
+            test_loads_connected_surface_discretion;
           Alcotest.test_case "system prompt includes continuity_contract"
             `Quick test_system_prompt_includes_continuity_contract;
           Alcotest.test_case

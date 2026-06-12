@@ -41,8 +41,10 @@ cp config/runtime.toml "$tmp/.masc/config/runtime.toml"
 
 log="$tmp/boot.log"
 echo "smoke: booting $BINARY on :$PORT under $tmp"
+# Release smoke validates boot/listening and README drift; CI has no OTLP collector.
 MASC_BASE_PATH="$tmp" \
 MASC_BASE_PATH_INPUT="$tmp" \
+MASC_OTEL_ENABLED=0 \
   "$BINARY" --base-path "$tmp" --port "$PORT" >"$log" 2>&1 &
 PID=$!
 
@@ -76,6 +78,7 @@ esac
 help_txt="$tmp/help.txt"
 MASC_BASE_PATH="$tmp" \
 MASC_BASE_PATH_INPUT="$tmp" \
+MASC_OTEL_ENABLED=0 \
 TERM=dumb \
   "$BINARY" --help=plain >"$help_txt" 2>/dev/null || true
 

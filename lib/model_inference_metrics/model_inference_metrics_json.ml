@@ -277,7 +277,7 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
 (* ── Cost & Latency aggregator ─────────────────────────────
    Composes the O4 cost-latency payload consumed by the
    /api/v1/dashboard/cost-latency endpoint.  All raw entries
-   are read once; per-agent stats, the provider x model cost
+   are read once; per-agent stats, the provider-by-model cost
    matrix, the latency histogram, and the global p50/p95 are
    derived from that single pass. *)
 

@@ -47,6 +47,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
         capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
       },
       effective_system_prompt: 'full prompt',
+      unified_system_prompt: 'unified prompt',
     },
     execution: {
       models: ['llama:test-balanced'],

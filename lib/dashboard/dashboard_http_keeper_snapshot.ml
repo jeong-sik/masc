@@ -248,6 +248,37 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ~active_goals
           ()
       in
+      (* Preview the actual unified system prompt that the keeper turn uses.
+         We pass an empty/dummy world observation because the dashboard is
+         previewing the static system-message half of the prompt; the dynamic
+         "Current World State" user message depends on runtime observation. *)
+      let unified_system_prompt_preview =
+        let empty_observation : Keeper_world_observation.world_observation =
+          {
+            pending_mentions = [];
+            pending_board_events = [];
+            pending_scope_messages = [];
+            idle_seconds = 0;
+            active_goals = resolved_active_goal_ids;
+            continuity_summary = "";
+            context_ratio = 0.0;
+            unclaimed_task_count = 0;
+            claimable_task_count = 0;
+            provider_capacity_blocked_task_count = 0;
+            failed_task_count = 0;
+            pending_verification_count = 0;
+            backlog_updated_since_last_scheduled_autonomous = false;
+            active_agent_count = 0;
+            connected_surfaces = [];
+          }
+        in
+        let system_prompt, _user_message =
+          Keeper_unified_prompt.build_prompt ~meta:m
+            ~base_path:config.base_path ~profile_defaults:defaults
+            ~observation:empty_observation ()
+        in
+        system_prompt
+      in
       let prompt =
         `Assoc [
           ("goal", `String prompt_goal);
@@ -266,6 +297,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
                 ("capabilities", prompt_block_json Keeper_prompt_names.capabilities);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
+          ("unified_system_prompt", `String unified_system_prompt_preview);
         ]
       in
       let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in

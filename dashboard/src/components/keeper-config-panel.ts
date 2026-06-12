@@ -812,7 +812,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
       <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     ` : html`
-      <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
+      <${LongText} text=${c.prompt.unified_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />
     `}
   `
 

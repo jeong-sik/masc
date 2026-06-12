@@ -396,8 +396,14 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  | Error result ->
                      respond_error reqd (Keeper_types_profile.tool_result_body result)
                  | Ok parsed ->
+                     (* Dashboard edits are user-initiated and should
+                        override concurrent heartbeat/version writes.
+                        Also preserve existing prompt fields when the
+                        request omits them, so profile defaults do not
+                        clobber prior dashboard edits. *)
                      let result =
-                       Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
+                       Keeper_turn_up_update.update_keeper ~force:true
+                         ~preserve_prompt_defaults:true keeper_ctx parsed meta0
                      in
                      if not (Keeper_types_profile.tool_result_success result) then
                        respond_error reqd (Keeper_types_profile.tool_result_body result)

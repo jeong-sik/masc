@@ -10,34 +10,24 @@ let message_feed_targets (meta : keeper_meta) =
   if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
 ;;
 
-let normalized_identity_token value =
-  let trimmed = String.lowercase_ascii (String.trim value) in
-  if trimmed = "" then None else Some trimmed
-;;
-
-let identity_tokens_of_value value =
-  let trimmed = String.trim value in
-  [ normalized_identity_token trimmed
-  ; Option.bind
-      (Keeper_identity.canonical_keeper_name_from_agent_name trimmed)
-      normalized_identity_token
-  ; Option.bind (Keeper_identity.canonical_keeper_name trimmed) normalized_identity_token
-  ]
-  |> List.filter_map (fun value -> value)
-  |> List.sort_uniq String.compare
-;;
-
-let self_identity_tokens (meta : keeper_meta) =
-  [ meta.name; meta.agent_name ]
-  |> List.map identity_tokens_of_value
-  |> List.flatten
-  |> List.sort_uniq String.compare
+(* RFC-0232 §3.4: identities are minted once at the parse boundary by
+   [Keeper_id.of_string]; the multi-form token-set expansion that used to
+   live here moved inside it.  A keeper's self is the (≤2-element) id set
+   minted from its name and agent name — they usually collapse to the
+   same canonical id. *)
+let self_ids (meta : keeper_meta) : Keeper_identity.Keeper_id.t list =
+  List.filter_map
+    Keeper_identity.Keeper_id.of_string
+    [ meta.name; meta.agent_name ]
+  |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
 (* Single source of truth for "is this author one of us?". *)
-let is_self_author ~self_tokens (author : string) : bool =
-  identity_tokens_of_value author
-  |> List.exists (fun author_token -> List.mem author_token self_tokens)
+let is_self_author ~self_ids (author : string) : bool =
+  match Keeper_identity.Keeper_id.of_string author with
+  | None -> false
+  | Some author_id ->
+    List.exists (Keeper_identity.Keeper_id.equal author_id) self_ids
 ;;
 
 let is_keeper_authored_message author =

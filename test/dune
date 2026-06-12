@@ -32,6 +32,7 @@
   test_keeper_reactive_wake_backlog_gate
   test_keeper_mention_scope
   test_keeper_turn_outcome
+  test_keeper_identity_id
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection
@@ -307,6 +308,7 @@
   test_keeper_reactive_wake_backlog_gate
   test_keeper_mention_scope
   test_keeper_turn_outcome
+  test_keeper_identity_id
   test_board_activity_cache
   test_jsonl_mtime_projection
   test_jsonl_incremental_projection

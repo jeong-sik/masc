@@ -116,7 +116,7 @@ type board_signal_match = Board_signal.match_result =
 module Message_scope = Keeper_world_observation_message_scope
 module Inputs = Keeper_world_observation_inputs
 
-let self_identity_tokens = Message_scope.self_identity_tokens
+let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
 let read_backlog_counts = Inputs.read_backlog_counts
@@ -144,7 +144,7 @@ let pending_board_event_of_board_signal
       (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
-  let self_tokens = self_identity_tokens meta in
+  let self_ids = self_ids meta in
   let matched = board_signal_match ~continuity_summary ~meta ~signal in
   let post_snapshot =
     match Board_dispatch.get_post ~post_id:signal.post_id with
@@ -170,7 +170,7 @@ let pending_board_event_of_board_signal
     match signal.kind with
     | Board_dispatch.Board_post_created -> false, 0, None, None
     | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
        | `New_external (count, author, preview) -> true, count, Some author, Some preview
        | `No_new_external ->
          true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
@@ -233,11 +233,11 @@ let collect_board_events_with_cursor_policy
       else Time_compat.now () -. bootstrap_window_sec, None
     in
     let posts = list_board_posts_after_cursor base_cursor in
-    let self_tokens = self_identity_tokens meta in
+    let self_ids = self_ids meta in
     let recent =
       List.filter
         (fun (p : Board.post) ->
-           not (is_self_author ~self_tokens (Board.Agent_id.to_string p.author)))
+           not (is_self_author ~self_ids (Board.Agent_id.to_string p.author)))
         posts
     in
     let new_count = List.length recent in
@@ -263,7 +263,7 @@ let collect_board_events_with_cursor_policy
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
         let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_comment_status ~self_tokens ~post_id in
+        let comment_status = check_self_comment_status ~self_ids ~post_id in
         (match comment_status with
          | `No_new_external ->
            Log.Keeper.debug

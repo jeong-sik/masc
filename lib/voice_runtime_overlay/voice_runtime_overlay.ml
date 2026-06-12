@@ -274,14 +274,6 @@ let endpoint_base_url (endpoint : Voice_config.endpoint) =
   | _ -> Option.map normalize_base_url endpoint.base_url
 ;;
 
-let elevenlabs_premade_voice_ids =
-  [ "Sarah", "EXAVITQu4vr4xnSDxMaL"
-  ; "Roger", "CwhRBWXzGAHq8TQ4Fs17"
-  ; "George", "JBFqnCBsd6RMkjVDRZzb"
-  ; "Laura", "FGY2WhTYpPnrIDTdsKH5"
-  ]
-;;
-
 let is_elevenlabs_voice_id value =
   let len = String.length value in
   len >= 20
@@ -295,18 +287,20 @@ let is_elevenlabs_voice_id value =
 
 let elevenlabs_voice_id_result voice =
   match String.trim voice with
-  | "" -> Ok "21m00Tcm4TlvDq8ikWAM"
+  | "" ->
+    Error
+      "ElevenLabs direct TTS requires a configured voice_id; set tts.default_voice \
+       or an agent-specific voice in voice config."
   | value ->
-    (match List.assoc_opt value elevenlabs_premade_voice_ids with
-     | Some voice_id -> Ok voice_id
-     | None when is_elevenlabs_voice_id value -> Ok value
-     | None ->
-       Error
-         (Printf.sprintf
-            "ElevenLabs direct TTS requires a voice_id or known premade alias \
-             (got %S). Add shared/library voices to the account first, then \
-             store the resulting voice_id in voice config."
-            value))
+    if is_elevenlabs_voice_id value
+    then Ok value
+    else
+      Error
+        (Printf.sprintf
+           "ElevenLabs direct TTS requires a configured voice_id (got %S). Add \
+            shared/library voices to the account first, then store the resulting \
+            voice_id in voice config."
+           value)
 ;;
 
 let http_request_for_tts

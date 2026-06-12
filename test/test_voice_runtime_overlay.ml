@@ -127,13 +127,15 @@ let default_voice_tuning : Voice_config.voice_tuning =
   { stability = 0.55; similarity_boost = 0.75; style = 0.0 }
 ;;
 
+let test_elevenlabs_voice_id = "testvoiceid0123456789"
+
 let test_tts_request_elevenlabs_accepts_voice_id () =
   match
     Voice.http_request_for_tts
       elevenlabs_tts_endpoint
       ~api_key:"test-key-123"
       ~message:"hello"
-      ~voice:"CwhRBWXzGAHq8TQ4Fs17"
+      ~voice:test_elevenlabs_voice_id
       ~model:"eleven_multilingual_v2"
       ~tuning:default_voice_tuning
   with
@@ -141,28 +143,28 @@ let test_tts_request_elevenlabs_accepts_voice_id () =
     check
       string
       "url uses configured voice_id"
-      "https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17"
+      ("https://api.elevenlabs.io/v1/text-to-speech/" ^ test_elevenlabs_voice_id)
       req.url
   | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
 ;;
 
-let test_tts_request_elevenlabs_maps_premade_alias () =
+let test_tts_request_elevenlabs_rejects_blank_voice () =
   match
     Voice.http_request_for_tts
       elevenlabs_tts_endpoint
       ~api_key:"test-key-123"
       ~message:"hello"
-      ~voice:"Roger"
+      ~voice:""
       ~model:"eleven_multilingual_v2"
       ~tuning:default_voice_tuning
   with
-  | Ok req ->
+  | Ok _ -> fail "expected Error for blank ElevenLabs voice"
+  | Error err ->
     check
-      string
-      "url maps Roger alias"
-      "https://api.elevenlabs.io/v1/text-to-speech/CwhRBWXzGAHq8TQ4Fs17"
-      req.url
-  | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
+      bool
+      "error explains configured voice_id requirement"
+      true
+      (String_util.contains_substring err "configured voice_id")
 ;;
 
 let test_tts_request_elevenlabs_rejects_unknown_name () =
@@ -595,9 +597,9 @@ let () =
             `Quick
             test_tts_request_elevenlabs_accepts_voice_id
         ; test_case
-            "tts request elevenlabs maps premade alias"
+            "tts request elevenlabs rejects blank voice"
             `Quick
-            test_tts_request_elevenlabs_maps_premade_alias
+            test_tts_request_elevenlabs_rejects_blank_voice
         ; test_case
             "tts request elevenlabs rejects unknown name"
             `Quick

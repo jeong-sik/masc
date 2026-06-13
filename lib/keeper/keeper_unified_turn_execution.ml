@@ -181,8 +181,6 @@ let run (ctx : ctx)
                ~runtime_id:execution.runtime_id
                ~world_observation:observation
                ~turn_affordances
-               ?provider_filter:
-                 (Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                ~generation:run_generation
                ~max_turns
                ~max_idle_turns

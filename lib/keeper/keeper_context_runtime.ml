@@ -359,7 +359,8 @@ let keeper_action_kind_of_tool_names tool_names =
   |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  (* provider filtering now handled by OAS runtime via ~provider_filter *)
+  (* Provider selection is runtime.toml SSOT; the former ~provider_filter
+     plumbing was dead and deleted (audit F8). *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
   match String.trim (Keeper_status_runtime.active_model_of_meta m) with
   | "" -> configured

@@ -41,20 +41,30 @@ let runtime_catalog_error_to_sdk_error detail =
 (** Resolve runtime provider configs via MASC Runtime_config.
     Returns Provider_config.t list for the downstream OAS runtime,
     bypassing the old Model_spec facade. *)
-let resolve_runtime_providers
-      ?provider_filter:_
-      ?runtime_mcp_policy:_
-      ~runtime_id:_
-      ()
-  =
-  (* RFC-0206 single-binding: runtime catalog resolution removed. The providers
-     are the default runtime's single provider_config. [provider_filter] is
-     moot with one provider; runtime tool surface compatibility is handled by
-     runtime MCP policy resolution. *)
-  match Runtime.get_default_runtime () with
-  | None -> Error "no default runtime configured"
-  | Some rt ->
-    Ok [ rt.Runtime.provider_config ]
+let resolve_runtime_providers ~runtime_id () =
+  (* Audit F8: honor the *requested* runtime id (RFC-0207 catalog lookup).
+     The previous RFC-0206 single-binding stub discarded [runtime_id] and
+     always returned the default runtime, silently substituting an
+     operator-overridable id (e.g. MASC_KEEPER_LLM_RERANK_RUNTIME) — an
+     Unknown→Permissive fallback. An empty id means the default runtime; a
+     non-empty id that is not a configured runtime is an [Error] (no silent
+     substitution — RFC-0206 §2.1). The former [?provider_filter] /
+     [?runtime_mcp_policy] parameters were ignored here and are deleted;
+     each resolved runtime carries exactly one provider_config. *)
+  let runtime_id = String.trim runtime_id in
+  if String.equal runtime_id "" then
+    match Runtime.get_default_runtime () with
+    | None -> Error "no default runtime configured"
+    | Some rt -> Ok [ rt.Runtime.provider_config ]
+  else
+    match Runtime.get_runtime_by_id runtime_id with
+    | Some rt -> Ok [ rt.Runtime.provider_config ]
+    | None ->
+      Error
+        (Printf.sprintf
+           "requested runtime %S not found among configured runtimes \
+            (no silent fallback to default — RFC-0206 §2.1)"
+           runtime_id)
 
 (* Injected keeper name translators (dependency inversion of the
    runtime -> keeper-domain Keeper_identity edge). The runtime no longer

@@ -40,10 +40,8 @@ let runtime_candidates_of_providers =
   Keeper_turn_driver_admission.runtime_candidates_of_providers
 let run_named
     ~runtime_id
-    ?base_path
     ?(keeper_name = "")
     ~goal
-    ?provider_filter
     ?priority
     ?session_id
     ?(system_prompt = "")
@@ -56,7 +54,6 @@ let run_named
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -111,11 +108,10 @@ let run_named
     | None -> enable_thinking
   in
   let preserve_thinking = runtime_seed.preserve_thinking in
-  (* Parameters that only fed the deleted multi-candidate machinery
-     (provider selection and admission queue gating). *)
-  ignore provider_filter;
-  ignore base_path;
-  ignore wait_timeout_sec;
+  (* Audit F8: the former [?provider_filter] / [?base_path] /
+     [?wait_timeout_sec] parameters only fed the deleted multi-candidate
+     machinery and were silently ignored here; they are removed from the
+     signature so callers cannot pass dead routing knobs. *)
   (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
      selection or the global default, both produced by [runtime_id_of_meta])
      instead of unconditionally the default.  A requested id that does not

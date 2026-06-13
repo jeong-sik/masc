@@ -466,8 +466,6 @@ let keeper_bootstrap_entries =
 
 let keeper_runtime_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST"
-      "Comma-separated provider allowlist for runtime (None=unfiltered)";
     entry ~default:"enforce" "MASC_RUNTIME_ATTEMPT_LIVENESS"
       "Runtime attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
        Explicit values must be canonical; invalid values raise a config error.";

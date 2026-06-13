@@ -341,6 +341,63 @@ let test_get_runtime_by_id_resolves_and_fails_fast () =
          (Runtime.get_runtime_by_id "bogus.binding")))
 ;;
 
+(* ---- rerank resolver: resolve the requested runtime, or fail fast ----
+
+   Audit F8: [Runtime_oas_runner.resolve_runtime_providers] used to discard
+   [runtime_id] and always return the default runtime, silently substituting
+   an operator-overridable id (MASC_KEEPER_LLM_RERANK_RUNTIME on the LLM
+   rerank path).  It must resolve the requested id via the RFC-0207 catalog
+   and return [Error] on an unknown id — never the default runtime. *)
+
+let provider_base_url_of_runtime_id runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some rt -> rt.Runtime.provider_config.Llm_provider.Provider_config.base_url
+  | None -> Alcotest.failf "fixture runtime %s missing from catalog" runtime_id
+;;
+
+let test_rerank_resolver_resolves_requested_runtime () =
+  with_runtime_initialized (fun () ->
+    (* Known non-default id resolves to that runtime's provider, not the
+       default's. *)
+    (match
+       Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"openai.gpt" ()
+     with
+     | Error msg -> Alcotest.failf "expected openai.gpt to resolve: %s" msg
+     | Ok [ provider ] ->
+       Alcotest.(check string)
+         "resolved provider belongs to the requested runtime"
+         (provider_base_url_of_runtime_id "openai.gpt")
+         provider.Llm_provider.Provider_config.base_url
+     | Ok providers ->
+       Alcotest.failf "expected exactly one provider, got %d" (List.length providers));
+    (* Empty id resolves the default runtime. *)
+    match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"" () with
+    | Error msg -> Alcotest.failf "expected empty id to resolve default: %s" msg
+    | Ok [ provider ] ->
+      Alcotest.(check string)
+        "empty id resolves the default runtime's provider"
+        (provider_base_url_of_runtime_id (Runtime.get_default_runtime_id ()))
+        provider.Llm_provider.Provider_config.base_url
+    | Ok providers ->
+      Alcotest.failf "expected exactly one provider, got %d" (List.length providers))
+;;
+
+let test_rerank_resolver_errors_on_unknown_runtime_id () =
+  with_runtime_initialized (fun () ->
+    match
+      Runtime_oas_runner.resolve_runtime_providers ~runtime_id:"bogus.binding" ()
+    with
+    | Ok _ ->
+      Alcotest.fail
+        "unknown runtime id must return Error, not the default runtime \
+         (silent substitution)"
+    | Error msg ->
+      Alcotest.(check bool)
+        "error names the unknown runtime id"
+        true
+        (string_contains msg "bogus.binding"))
+;;
+
 let test_context_budget_uses_selected_runtime () =
   with_runtime_initialized (fun () ->
     let default_budget =
@@ -534,6 +591,14 @@ let () =
             "get_runtime_by_id resolves known / fails fast on unknown"
             `Quick
             test_get_runtime_by_id_resolves_and_fails_fast
+        ; Alcotest.test_case
+            "rerank resolver resolves the requested runtime (audit F8)"
+            `Quick
+            test_rerank_resolver_resolves_requested_runtime
+        ; Alcotest.test_case
+            "rerank resolver errors on unknown runtime id, no default substitution"
+            `Quick
+            test_rerank_resolver_errors_on_unknown_runtime_id
         ; Alcotest.test_case
             "context budget uses selected runtime max-context"
             `Quick

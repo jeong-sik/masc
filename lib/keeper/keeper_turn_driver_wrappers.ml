@@ -172,7 +172,6 @@ let run_named_with_masc_tools
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -196,7 +195,7 @@ let run_named_with_masc_tools
   ) masc_tools in
   Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
     ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
-    ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks
+    ?stream_idle_timeout_s ?guardrails ?hooks
     ~accept
     ?compact_ratio
     ?approval

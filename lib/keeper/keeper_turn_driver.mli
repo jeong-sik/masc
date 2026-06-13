@@ -91,10 +91,8 @@ val provider_attempt_finished_decision :
 
 val run_named :
   runtime_id:string ->
-  ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
-  ?provider_filter:string list ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
@@ -107,7 +105,6 @@ val run_named :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
-  ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->

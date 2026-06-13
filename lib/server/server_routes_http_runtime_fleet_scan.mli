@@ -70,6 +70,7 @@ type keeper_phase_snapshot = {
   running_names : string list;
   recovering_names : string list;
   executable_names : string list;
+  phase_names : (string * string) list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts

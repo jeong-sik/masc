@@ -397,12 +397,21 @@ type keeper_phase_snapshot =
   ; running_names : string list
   ; recovering_names : string list
   ; executable_names : string list
+  ; phase_names : (string * string) list
   }
 
 let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
+          let acc =
+            {
+              acc with
+              phase_names =
+                (entry.name, Keeper_state_machine.phase_to_string entry.phase)
+                :: acc.phase_names;
+            }
+          in
           let counts = acc.counts in
           let executable_names =
             if Keeper_state_machine.can_execute_turn entry.phase then
@@ -439,6 +448,7 @@ let keeper_phase_snapshot ?base_path () =
               running_names = entry.name :: acc.running_names;
               recovering_names;
               executable_names;
+              phase_names = acc.phase_names;
             }
           | Keeper_state_machine.Failing ->
             {
@@ -465,6 +475,7 @@ let keeper_phase_snapshot ?base_path () =
          running_names = [];
          recovering_names = [];
          executable_names = [];
+         phase_names = [];
        }
   |> fun snapshot ->
   {
@@ -472,6 +483,8 @@ let keeper_phase_snapshot ?base_path () =
     running_names = sorted_unique_strings snapshot.running_names;
     recovering_names = sorted_unique_strings snapshot.recovering_names;
     executable_names = sorted_unique_strings snapshot.executable_names;
+    phase_names =
+      List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_names;
   }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
@@ -539,6 +552,20 @@ let keeper_fleet_safety_health_json
        | _ -> 0)
     | _ -> 0
   in
+  let json_string_list_field name =
+    match paused_keepers_json with
+    | `Assoc fields -> (
+      match List.assoc_opt name fields with
+      | Some (`List values) ->
+        values
+        |> List.filter_map (function
+             | `String value -> Some value
+             | _ -> None)
+        |> sorted_unique_strings
+      | _ -> [] )
+    | _ -> []
+  in
+  let paused_autoboot_names = json_string_list_field "autoboot_enabled_names" in
   let names_not_in active_names =
     let active_names = sorted_unique_strings active_names in
     autoboot_scan.autoboot_names
@@ -560,6 +587,12 @@ let keeper_fleet_safety_health_json
     | Some snapshot -> snapshot.executable_names
     | None -> []
   in
+  let phase_names =
+    match phase_snapshot with
+    | Some snapshot -> snapshot.phase_names
+    | None -> []
+  in
+  let phase_name name = List.assoc_opt name phase_names in
   let status =
     if no_executable_keeper_fibers then "blocked"
     else if no_running_fibers then "degraded"
@@ -578,6 +611,24 @@ let keeper_fleet_safety_health_json
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
     then names_not_in (running_names @ recovering_names)
     else []
+  in
+  let blocked_keeper_reason name =
+    if List.mem name paused_autoboot_names then "durable_paused_autoboot_enabled"
+    else
+      match phase_name name with
+      | Some "paused" -> "phase_paused"
+      | Some phase -> "phase_" ^ phase
+      | None -> "not_registered"
+  in
+  let blocked_keeper_reasons =
+    blocked_keeper_names
+    |> List.map (fun name ->
+         `Assoc
+           [
+             ("keeper", `String name);
+             ("reason", `String (blocked_keeper_reason name));
+             ("phase", Json_util.string_opt_to_json (phase_name name));
+           ])
   in
   let blocker =
     if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
@@ -632,6 +683,7 @@ let keeper_fleet_safety_health_json
     ; "blocked_keepers", `Int blocked_count
     ; ( "blocked_keeper_names"
       , `List (List.map (fun name -> `String name) blocked_keeper_names) )
+    ; "blocked_keeper_reasons", `List blocked_keeper_reasons
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

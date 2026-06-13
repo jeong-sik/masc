@@ -37,6 +37,14 @@ let create_fields =
   ]
 ;;
 
+let human id : Schedule_domain.actor =
+  { id; kind = Schedule_domain.Human_operator; display_name = None }
+;;
+
+let automated id : Schedule_domain.actor =
+  { id; kind = Schedule_domain.Automated_actor; display_name = None }
+;;
+
 let create_args = `Assoc create_fields
 
 let schedule_definition action =
@@ -127,6 +135,54 @@ let test_dispatch_cancel_persists_status () =
         (Schedule_domain.schedule_status_to_string request.status)
 ;;
 
+let create_schedule_exn
+  config
+  ~schedule_id
+  ~due_at
+  ~risk_class
+  ~requested_by
+  ~scheduled_by
+  =
+  match
+    Schedule_service.create config ~schedule_id ~requested_at:100.0
+      ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
+      ~source:Schedule_domain.Operator_request ()
+  with
+  | Ok request -> request
+  | Error err ->
+    fail ("schedule create failed: " ^ Schedule_service.service_error_to_string err)
+;;
+
+let test_dashboard_projection_surfaces_schedule_fsm () =
+  with_config
+  @@ fun config ->
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-due" ~due_at:1.0
+       ~risk_class:Schedule_domain.Read_only ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+      : Schedule_domain.schedule_request);
+  ignore
+    (create_schedule_exn config ~schedule_id:"sched-approval" ~due_at:300.0
+       ~risk_class:Schedule_domain.Workspace_write ~requested_by:(human "operator")
+       ~scheduled_by:(automated "scheduler-agent")
+      : Schedule_domain.schedule_request);
+  let json =
+    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+  in
+  let open Yojson.Safe.Util in
+  check string "schema" "masc.dashboard.scheduled_automation.v1"
+    (json |> member "schema" |> to_string);
+  check int "request count" 2 (json |> member "request_count" |> to_int);
+  check string "fsm state" "pending_approval"
+    (json |> member "fsm" |> member "state" |> to_string);
+  check int "pending count" 1
+    (json |> member "counts" |> member "pending_approval" |> to_int);
+  check int "scheduled count" 1
+    (json |> member "counts" |> member "scheduled" |> to_int);
+  check int "due effective count" 1
+    (json |> member "derived_counts" |> member "due_effective" |> to_int)
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
@@ -136,6 +192,8 @@ let () =
             test_dispatch_create_persists_schedule
         ; test_case "dispatch cancel persists status" `Quick
             test_dispatch_cancel_persists_status
+        ; test_case "dashboard projection surfaces schedule FSM" `Quick
+            test_dashboard_projection_surfaces_schedule_fsm
         ] )
     ]
 ;;

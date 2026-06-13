@@ -28,6 +28,19 @@ type schedule_status =
   | Cancelled
   | Expired
 
+let all_schedule_statuses =
+  [ Pending_approval
+  ; Scheduled
+  ; Due
+  ; Running
+  ; Succeeded
+  ; Failed
+  ; Rejected
+  ; Cancelled
+  ; Expired
+  ]
+;;
+
 type schedule_source =
   | Operator_request
   | Automated_request

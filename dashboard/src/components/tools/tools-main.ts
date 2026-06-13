@@ -18,6 +18,7 @@ import { ActionButton } from '../common/button'
 import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
+import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
@@ -58,6 +59,10 @@ export function Tools() {
       />
 
       <${PromptRegistryPanel} />
+
+      <${SectionCard} label="예약 자동화 FSM" class="section mb-4">
+        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} />
+      <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section mb-4">
         <${FullInventoryView}

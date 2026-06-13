@@ -1659,7 +1659,8 @@ let light_runtime_resolution_json (config : Workspace.config) =
    cadence (~3s polling × 10 = a fresh value at least every minute under
    sustained load).  Tool inventory + usage stats rarely change inside a
    30s window — the per-actor cache key isolates permission changes from
-   leaking across actors. *)
+   leaking across actors.  Schedule FSM projection is attached outside this
+   cache because due/pending state is operationally time-sensitive. *)
 let dashboard_tools_cache_ttl_sec = 30.0
 
 let dashboard_tools_cache_key ~base_path ~actor =
@@ -1668,6 +1669,173 @@ let dashboard_tools_cache_key ~base_path ~actor =
 let dashboard_actor_name = function
   | Some actor when String.trim actor <> "" -> actor
   | Some _ | None -> "dashboard"
+;;
+
+let schedule_projection_request_limit = 20
+
+let unix_iso_json ts = `String (Masc_domain.iso8601_of_unix_seconds ts)
+
+let unix_iso_option_json = function
+  | None -> `Null
+  | Some ts -> unix_iso_json ts
+;;
+
+let schedule_status_count schedules status =
+  List.fold_left
+    (fun count (request : Schedule_domain.schedule_request) ->
+      if request.status = status then count + 1 else count)
+    0 schedules
+;;
+
+let schedule_counts_json schedules =
+  `Assoc
+    (List.map
+       (fun status ->
+         ( Schedule_domain.schedule_status_to_string status
+         , `Int (schedule_status_count schedules status) ))
+       Schedule_domain.all_schedule_statuses)
+;;
+
+let schedule_request_active (request : Schedule_domain.schedule_request) =
+  not (Schedule_domain.is_terminal request.status)
+;;
+
+let schedule_effectively_due ~now (request : Schedule_domain.schedule_request) =
+  match request.status with
+  | Schedule_domain.Due -> true
+  | Schedule_domain.Scheduled -> request.due_at <= now
+  | Schedule_domain.Pending_approval
+  | Schedule_domain.Running
+  | Schedule_domain.Succeeded
+  | Schedule_domain.Failed
+  | Schedule_domain.Rejected
+  | Schedule_domain.Cancelled
+  | Schedule_domain.Expired ->
+    false
+;;
+
+let schedule_due_candidate (request : Schedule_domain.schedule_request) =
+  match request.status with
+  | Schedule_domain.Pending_approval | Schedule_domain.Scheduled | Schedule_domain.Due ->
+    true
+  | Schedule_domain.Running
+  | Schedule_domain.Succeeded
+  | Schedule_domain.Failed
+  | Schedule_domain.Rejected
+  | Schedule_domain.Cancelled
+  | Schedule_domain.Expired ->
+    false
+;;
+
+let schedule_next_due_at schedules =
+  schedules
+  |> List.filter schedule_due_candidate
+  |> List.fold_left
+       (fun acc (request : Schedule_domain.schedule_request) ->
+         match acc with
+         | None -> Some request.due_at
+         | Some ts -> Some (min ts request.due_at))
+       None
+;;
+
+let schedule_fsm_state ~now schedules =
+  let count status = schedule_status_count schedules status in
+  let due_effective_count =
+    List.fold_left
+      (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
+      0 schedules
+  in
+  if count Schedule_domain.Running > 0
+  then "running"
+  else if count Schedule_domain.Pending_approval > 0
+  then "pending_approval"
+  else if due_effective_count > 0
+  then "due"
+  else if count Schedule_domain.Scheduled > 0
+  then "scheduled"
+  else "idle"
+;;
+
+let schedule_payload_kind request =
+  match Schedule_domain.payload_to_yojson request.Schedule_domain.payload with
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String kind) -> Some kind
+     | _ -> None)
+  | _ -> None
+;;
+
+let schedule_request_dashboard_json (request : Schedule_domain.schedule_request) =
+  `Assoc
+    [ "schedule_id", `String request.schedule_id
+    ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
+    ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
+    ; "approval_required", `Bool request.approval_required
+    ; "source", `String (Schedule_domain.schedule_source_to_string request.source)
+    ; "requested_by", Schedule_domain.actor_to_yojson request.requested_by
+    ; "scheduled_by", Schedule_domain.actor_to_yojson request.scheduled_by
+    ; "requested_at", `Float request.requested_at
+    ; "requested_at_iso", unix_iso_json request.requested_at
+    ; "due_at", `Float request.due_at
+    ; "due_at_iso", unix_iso_json request.due_at
+    ; "expires_at", (match request.expires_at with None -> `Null | Some ts -> `Float ts)
+    ; "expires_at_iso", unix_iso_option_json request.expires_at
+    ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+    ; ( "payload_kind"
+      , match schedule_payload_kind request with
+        | None -> `Null
+        | Some kind -> `String kind )
+    ]
+;;
+
+let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
+  (* NDT-OK: dashboard read-model freshness clock; it derives display-only
+     effective-due state and never mutates the schedule store or runs work. *)
+  let now = Unix.gettimeofday () in
+  let schedules = Schedule_service.list config () in
+  let active_count =
+    List.fold_left
+      (fun count request -> if schedule_request_active request then count + 1 else count)
+      0 schedules
+  in
+  let terminal_count = List.length schedules - active_count in
+  let due_effective_count =
+    List.fold_left
+      (fun count request -> if schedule_effectively_due ~now request then count + 1 else count)
+      0 schedules
+  in
+  let sorted =
+    schedules
+    |> List.sort (fun left right ->
+      match
+        ( schedule_request_active left
+        , schedule_request_active right
+        , compare left.due_at right.due_at )
+      with
+      | true, false, _ -> -1
+      | false, true, _ -> 1
+      | _, _, due_cmp when due_cmp <> 0 -> due_cmp
+      | _ -> String.compare left.schedule_id right.schedule_id)
+  in
+  let request_rows = take schedule_projection_request_limit sorted in
+  `Assoc
+    [ "schema", `String "masc.dashboard.scheduled_automation.v1"
+    ; "source", `String "schedule_store"
+    ; "generated_at", `String (Masc_domain.now_iso ())
+    ; "request_count", `Int (List.length schedules)
+    ; "request_limit", `Int schedule_projection_request_limit
+    ; "truncated", `Bool (List.length schedules > schedule_projection_request_limit)
+    ; "counts", schedule_counts_json schedules
+    ; "derived_counts", `Assoc [ "due_effective", `Int due_effective_count ]
+    ; ( "fsm"
+      , `Assoc
+          [ "state", `String (schedule_fsm_state ~now schedules)
+          ; "active_count", `Int active_count
+          ; "terminal_count", `Int terminal_count
+          ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
+          ] )
+    ; "requests", `List (List.map schedule_request_dashboard_json request_rows)
+    ]
 ;;
 
 let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
@@ -1711,14 +1879,25 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
       ; "tool_usage", usage
       ]
   in
-  match timing with
-  | None ->
-    Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
-      compute
-  | Some t ->
-    Server_timing.measure t Cache_lookup (fun () ->
-      Dashboard_cache.get_or_compute cache_key
-        ~ttl:dashboard_tools_cache_ttl_sec compute)
+  let attach_scheduled_automation json =
+    let scheduled_automation =
+      run Tools_compute (fun () -> scheduled_automation_dashboard_json config)
+    in
+    match json with
+    | `Assoc fields -> `Assoc (fields @ [ "scheduled_automation", scheduled_automation ])
+    | other -> other
+  in
+  let cached =
+    match timing with
+    | None ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_tools_cache_ttl_sec
+        compute
+    | Some t ->
+      Server_timing.measure t Cache_lookup (fun () ->
+        Dashboard_cache.get_or_compute cache_key
+          ~ttl:dashboard_tools_cache_ttl_sec compute)
+  in
+  attach_scheduled_automation cached
 ;;
 
 let dashboard_perf_http_json = Server_dashboard_http_perf.dashboard_perf_http_json

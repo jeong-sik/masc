@@ -59,6 +59,7 @@ graph TB
 | `01-system-overview.md` | System Overview | 문제 정의, 배포 모델, 기술 스택, sub-library 의존성 | Draft |
 | `02-types-and-invariants.md` | Types and Invariants | 핵심 타입 정의, 상태 전이, 불변식 | Draft |
 | `03-workspace-state collaboration.md` | Workspace State | Workspace 생명주기, session 관리, agent join/leave | Draft |
+| `04-turn-lifecycle.md` | Turn Lifecycle | Keeper turn 시작/종료, heartbeat/polling/waiting, direct msg, FSM, receipt | Draft |
 | `05-keeper-agent.md` | Keeper Engine | 자율 에이전트 루프, succession, context 관리 | Draft |
 | `06-command-plane.md` | Command Plane v2 | Internal command-plane reference and migration context | Historical |
 | `09-server-transport.md` | Server and Transport | HTTP transport, SSE, JSON-RPC dispatch, routing | Draft |
@@ -139,3 +140,4 @@ graph TB
 | `docs/SPEC.md` | Historical snapshot. 이 suite로 대체. |
 | `docs/MERGED-ARCHITECTURE-SSOT.md` | Layer map과 canonical paths는 `01-system-overview.md`로 이관. |
 | `docs/GLOSSARY.md` | `00-glossary.md`로 통합. |
+| `docs/keeper-turn-lifecycle.md` | `04-turn-lifecycle.md`로 이관. 기존 문서는 historical diagram/tooling notes로 유지. |

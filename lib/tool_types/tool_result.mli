@@ -37,6 +37,15 @@ val is_retryable : tool_failure_class -> bool
 (** [Runtime_failure] maps to [Error]; all others to [Warn]. *)
 val log_level_of_failure_class : tool_failure_class -> Log.level
 
+(** {1 Tool call outcome (wire-level)} *)
+
+(** Lightweight tri-state for MCP/keeper tool call logging.
+    Maps from JSONRPC wire format or [result] variant. *)
+type tool_call_outcome = Ok | Error | Unknown
+
+val string_of_tool_call_outcome : tool_call_outcome -> string
+val log_level_of_tool_call_outcome : tool_call_outcome -> Log.level
+
 (** Classify a tool failure from an exception raised during execution.
     Constructor-only fallback.  Semantic classes from exception messages must
     be passed explicitly at the catch boundary. *)

@@ -5,15 +5,12 @@
     body, board-reactive wakeup filtering, and optional gRPC heartbeat
     fiber.
 
-    [MASC_KEEPER_*] env vars read here (semaphore timeout, concurrency,
-    fairness cooldown, autoboot max) can also be set in
-    [<resolved config root>/keeper_runtime.toml].
+    [MASC_KEEPER_*] env vars read here (compatibility counters) can also be set in
+    [<resolved config root>/runtime.toml].
     See {!Keeper_runtime_config} and [docs/BOOT-ENV-STATE-INVENTORY.md]
     section 1.3.
 
     Structure (facade decomposition):
-    - [Keeper_turn_slot]      — semaphores, autonomous wait queue,
-                                 fairness cooldown, [with_keeper_turn_slot]
     - [Keeper_keepalive_signal] — gRPC client refs, FSM guard identity
                                    helpers, interruptible sleep, wakeup
                                    dispatch, board-reactive wakeup,
@@ -22,14 +19,16 @@
                                      dispatch, stage timing metrics
     - [Keeper_heartbeat_loop]  — [run_keepalive_unified_turn], smart
                                    heartbeat, [run_heartbeat_loop]
-    This facade [include]s all four and adds: event bus delegation,
+    This facade [include]s all three and adds: event bus delegation,
     identity repair, gRPC heartbeat stream, directive processing, and
     keeper lifecycle start/stop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
-include Keeper_turn_slot
 include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop
@@ -61,7 +60,7 @@ let persist_directive_meta_update
   : unit
   =
   let keeper_filename = entry.name ^ ".json" in
-  let masc_root = Coord_utils.masc_dir_from_base_path ~base_path:entry.base_path in
+  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
   let default_path =
     Filename.concat (Filename.concat masc_root "keepers") keeper_filename
   in
@@ -94,11 +93,11 @@ let persist_directive_meta_update
          | latest_path :: _ -> latest_path
          | [] -> default_path))
   in
-  match Keeper_fs.save_json_atomic persisted_path (meta_to_json updated_meta) with
+  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
   | Ok () ->
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
   | Error msg ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
       ();
@@ -111,7 +110,7 @@ let set_keeper_paused_state ~agent_name paused =
     ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "pause_resume_not_in_registry" ]
         ();
@@ -140,7 +139,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "wakeup_not_in_registry" ]
         ();
@@ -152,7 +151,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "claim_not_in_registry" ]
         ();
@@ -198,7 +197,7 @@ let process_directive ~agent_name directive =
       match Keeper_registry_lookup.find_by_agent_name agent_name with
       | Some e -> e.meta.paused
       | None ->
-        (match Agent_tool_shared_runtime.find_registry_meta
+        (match Keeper_tool_shared_runtime.find_registry_meta
                  ~keeper_name:agent_name
                  ~source_layer:"keepalive"
          with
@@ -237,7 +236,7 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[ "keeper", agent_name; "phase", "grpc_heartbeat" ]
       ();
@@ -266,235 +265,35 @@ let current_task_id_for_agent ~config agent_name =
     else ""
 ;;
 
-let make_grpc_heartbeat_ping ~config ~agent_name ~session_id =
-  Masc_grpc_types.HeartbeatPing.
-    { agent_name
-    ; session_id
-    ; timestamp_ms = Int64.of_float (Time_compat.now () *. 1000.0)
-    ; current_task_id = current_task_id_for_agent ~config agent_name
-    }
-;;
-
-let handle_grpc_heartbeat_ack ~agent_name (ack : Masc_grpc_types.HeartbeatAck.t) =
-  Log.Keeper.debug
-    "gRPC bidi heartbeat: agent=%s agents=%d tasks=%d directives=%d"
-    agent_name
-    ack.active_agent_count
-    ack.pending_task_count
-    (List.length ack.directives);
-  List.iter (process_directive ~agent_name) ack.directives
-;;
-
-let run_grpc_heartbeat_stream
-      ~stop
-      ~close_ref
-      ~clock
-      ~interval_sec
-      ~config
-      ~agent_name
-      ~session_id
-      send
-      recv
-  =
-  let rec tick () =
-    if Atomic.get stop || Atomic.get close_ref
-    then ()
-    else (
-      (try
-         send (make_grpc_heartbeat_ping ~config ~agent_name ~session_id);
-         match recv () with
-         | Ok ack -> handle_grpc_heartbeat_ack ~agent_name ack
-         | Error err ->
-           Prometheus.inc_counter
-             Keeper_metrics.(to_string HeartbeatFailures)
-             ~labels:[ "keeper", agent_name; "site", "grpc_recv" ]
-             ();
-           Log.Keeper.warn "gRPC heartbeat recv: %s" err
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | End_of_file -> raise End_of_file
-       | exn ->
-         Prometheus.inc_counter
-           Keeper_metrics.(to_string HeartbeatFailures)
-           ~labels:[ "keeper", agent_name; "site", "grpc_tick" ]
-           ();
-         Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
-      if not (Atomic.get stop || Atomic.get close_ref)
-      then (
-        let no_wakeup = Atomic.make false in
-        ignore
-          (interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
-           : Keeper_keepalive_signal.sleep_outcome);
-        tick ()))
-  in
-  tick ()
-;;
-
-let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
-  | `Closed ->
-    Log.Keeper.warn
-      "gRPC heartbeat stream closed for %s (attempt %d/%d)"
-      agent_name
-      (attempts + 1)
-      Env_config.KeeperGrpc.max_reconnect_attempts
-  | `Error exn ->
-    Prometheus.inc_counter
-      Keeper_metrics.(to_string HeartbeatFailures)
-      ~labels:[ "keeper", agent_name; "site", "grpc_stream" ]
-      ();
-    Log.Keeper.warn
-      "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
-      agent_name
-      (Printexc.to_string exn)
-      (attempts + 1)
-      Env_config.KeeperGrpc.max_reconnect_attempts
-;;
-
-(** Run a gRPC heartbeat sender in a background fiber.
-    Opens a bidirectional [Heartbeat] stream and sends [HeartbeatPing]
-    messages at the configured interval. Reads [HeartbeatAck] responses,
-    logs agent/task counts, and dispatches directives. Reconnects on
-    stream failure up to 5 times. Stops when [stop] is set.
-
-    Requires [grpc_client_ref] to be set (via [set_grpc_client])
-    and Eio switch/env to be available in [Eio_context]. *)
-let max_reconnect_attempts = Env_config.KeeperGrpc.max_reconnect_attempts
-
-let reconnect_backoff_sec = Env_config.KeeperGrpc.reconnect_backoff_sec
-
-let run_grpc_heartbeat_fiber
-      ~sw
-      ~stop
-      ~(grpc_client : Masc_grpc_client.t)
-      ~(config : Coord.config)
-      ~(agent_name : string)
-      ~(session_id : string)
-      ~(interval_sec : float)
-      ~(clock : _ Eio.Time.clock)
-  =
-  match Eio_context.get_switch_opt (), Atomic.get grpc_env_ref with
-  | None, _ | _, None ->
-    Prometheus.inc_counter
-      Keeper_metrics.(to_string HeartbeatFailures)
-      ~labels:[ "keeper", agent_name; "site", "grpc_no_eio_context" ]
-      ();
-    Log.Keeper.warn "gRPC heartbeat: Eio context or env not available";
-    None
-  | Some grpc_sw, Some env ->
-    let close_ref = Atomic.make false in
-    Eio.Fiber.fork ~sw (fun () ->
-      (* Outer loop: reconnect on stream failure *)
-      let rec connect_loop attempts =
-        if Atomic.get stop || Atomic.get close_ref
-        then ()
-        else if attempts >= max_reconnect_attempts
-        then (
-          Prometheus.inc_counter
-            Keeper_metrics.(to_string HeartbeatFailures)
-            ~labels:[ "keeper", agent_name; "site", "grpc_reconnect_exhausted" ]
-            ();
-          Log.Keeper.error
-            "gRPC heartbeat: exceeded %d reconnect attempts for %s, stopping"
-            max_reconnect_attempts
-            agent_name)
-        else (
-          let send, recv, close_stream =
-            Masc_grpc_client.heartbeat_stream grpc_client ~sw:grpc_sw ~env
-          in
-          (try
-             run_grpc_heartbeat_stream
-               ~stop
-               ~close_ref
-               ~clock
-               ~interval_sec
-               ~config
-               ~agent_name
-               ~session_id
-               send
-               recv
-           with
-           | Eio.Cancel.Cancelled _ as e ->
-             close_stream ();
-             raise e
-           | End_of_file ->
-             log_grpc_heartbeat_stream_failure ~agent_name ~attempts `Closed;
-             close_stream ()
-           | exn ->
-             log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
-             close_stream ());
-          if not (Atomic.get stop || Atomic.get close_ref)
-          then (
-            Eio.Time.sleep clock reconnect_backoff_sec;
-            connect_loop (attempts + 1)))
-      in
-      connect_loop 0);
-    Some (fun () -> Atomic.set close_ref true)
-;;
-
 let start_keeper_grpc_heartbeat
       ~(ctx : _ context)
       ~(m : keeper_meta)
       ~(stop : bool Atomic.t)
   : (unit -> unit) option
   =
-  match Masc_grpc_transport.from_env (), Atomic.get grpc_client_ref with
-  | Masc_grpc_transport.Grpc, Some client ->
-    Log.Keeper.info "keeper %s: starting gRPC heartbeat fiber" m.name;
-    let interval = float_of_int (keepalive_interval_sec ()) in
-    let session_id =
-      Printf.sprintf
-        "keeper-%s-%Ld"
-        m.name
-        (Int64.of_float (Time_compat.now () *. 1000.0))
-    in
-    run_grpc_heartbeat_fiber
-      ~sw:ctx.sw
-      ~stop
-      ~grpc_client:client
-      ~config:ctx.config
-      ~agent_name:m.agent_name
-      ~session_id
-      ~interval_sec:interval
-      ~clock:ctx.clock
-  | Masc_grpc_transport.Grpc, None ->
-    Prometheus.inc_counter
-      Keeper_metrics.(to_string HeartbeatFailures)
-      ~labels:[ "keeper", m.name; "site", "grpc_no_client" ]
-      ();
-    Log.Keeper.warn "keeper %s: gRPC transport requested but no client configured" m.name;
-    None
-  | _ -> None
+  grpc_heartbeat_starter ~ctx ~m ~stop
+;;
 ;;
 
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
 let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_meta =
   try
-    if not (Coord_utils.is_initialized ctx.config)
+    if not (Workspace_utils.is_initialized ctx.config)
     then (
-      let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
+      let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
       ());
     let m =
       match repair_identity_drift_for_keepalive ~ctx m with
       | Some repaired -> repaired
       | None -> m
     in
-    let synced = ensure_keeper_room_presence ctx.config m in
+    let synced = m in
     (* Reset stale timestamp from previous server lifecycle.
 
-       Use [Time_compat.now ()] (not [0.0]). The original intent was to
-       prevent the stale watchdog from immediately terminating the fiber
-       on server restart by clearing an old [last_turn_ts]. Setting it
-       to [0.0] worked for that — but [keeper_stale_watchdog.ml:141]
-       gates the stall check on [last_turn > 0.0], so [0.0] permanently
-       blinds the watchdog: a keeper that never runs a real turn (auth
-       failure, OAS budget exhaustion, no work signal) stays in a
-       zombie state the watchdog cannot detect.
-
-       Resetting to [now_ts] preserves the original goal — grace_period
-       (180s default) covers the bootstrap window so the watchdog still
-       doesn't fire prematurely — while restoring detection for a
-       truly idle keeper after grace elapses. Real turns continue to
+       Use [Time_compat.now ()] (not [0.0]). This preserves a sane
+       bootstrap timestamp for runtime health surfaces without encoding
+       a stale value from a previous server lifecycle. Real turns continue to
        overwrite this with the actual turn time as before.
 
        Production evidence (2026-04-27): 7 of 11 keepers had
@@ -512,7 +311,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     (match write_meta ~force:true ctx.config synced with
      | Ok () -> ()
      | Error e ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
          ();
@@ -521,11 +320,11 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", m.name; "phase", "bootstrap-catch" ]
       ();
-    Log.Keeper.error "room presence bootstrap failed: %s" (Printexc.to_string exn);
+    Log.Keeper.error "workspace presence bootstrap failed: %s" (Printexc.to_string exn);
     m
 ;;
 
@@ -538,7 +337,7 @@ let publish_keeper_lifecycle
       ()
   : unit
   =
-  Cascade_events.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
+  Keeper_event_publisher.publish_keeper_lifecycle ~event ~keeper_name ~detail ()
 ;;
 
 (** Phase-event helper: the wire event name IS the phase name. *)
@@ -566,7 +365,7 @@ let dispatch_fiber_started ~base_path keeper_name =
   match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
   | Ok _ -> ()
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "fiber_started_rejected" ]
       ();
@@ -580,10 +379,13 @@ let dispatch_fiber_started ~base_path keeper_name =
 
 let resolve_registry_done
       (entry : Keeper_registry.registry_entry)
+      ~source
       (value : [ `Stopped | `Crashed of string ])
   : bool
   =
-  Keeper_registry.try_resolve_done entry value
+  match Keeper_registry.resolve_done entry ~source value with
+  | Keeper_registry.Done_resolved _ -> true
+  | Keeper_registry.Done_already_resolved _ -> false
 ;;
 
 let record_keeper_stopped
@@ -593,7 +395,7 @@ let record_keeper_stopped
       ~detail
   : bool
   =
-  if resolve_registry_done entry `Stopped
+  if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
     Keeper_registry.dispatch_event_unit
       ~base_path
@@ -620,14 +422,9 @@ let record_keeper_crashed
   : unit
   =
   let reason = Keeper_registry.failure_reason_to_string failure_reason in
-  if resolve_registry_done entry (`Crashed reason)
+  if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
-    let outcome =
-      Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
-        ~base_path
-        ~keeper_name
-        reason
-    in
+    let outcome = reason in
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
     Keeper_registry.dispatch_event_unit
       ~base_path
@@ -648,7 +445,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
   =
   match repair_identity_drift_for_keepalive ~ctx m with
   | None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", m.name; "phase", "identity_drift_unrepairable" ]
       ();
@@ -656,20 +453,38 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       "start_keepalive skipped %s: identity drift could not be repaired"
       m.name
   | Some m ->
-    let existing_entry = Keeper_registry.get ~base_path:ctx.config.base_path m.name in
-    let reclaim_stale_stopped_entry (entry : Keeper_registry.registry_entry) =
-      entry.phase = Keeper_state_machine.Stopped
-      && Eio.Promise.peek entry.done_p = Some `Stopped
+    let existing_entry =
+      Keeper_registry.get ~base_path:ctx.config.base_path m.name
+    in
+    let reclaimable_stale_entry (entry : Keeper_registry.registry_entry) =
+      let finished = Option.is_some (Eio.Promise.peek entry.done_p) in
+      match entry.phase with
+      | Keeper_state_machine.Stopped -> finished
+      | Keeper_state_machine.Failing
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Dead
+      | Keeper_state_machine.Zombie -> finished
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Offline -> false
     in
     (match existing_entry with
-     | Some entry when reclaim_stale_stopped_entry entry ->
-       Log.Keeper.info "start_keepalive: reclaiming stale stopped entry %s" m.name;
+     | Some entry when reclaimable_stale_entry entry ->
+       Log.Keeper.info
+         "start_keepalive: reclaiming stale registered entry %s phase=%s"
+         m.name
+         (Keeper_state_machine.phase_to_string entry.phase);
        Keeper_registry.unregister ~base_path:ctx.config.base_path m.name
      | _ -> ());
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path m.name
     then Log.Keeper.info "start_keepalive: skipped %s (already registered)" m.name
     else
-      match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+      match Keeper_registry.spawn_slots_decision () with
       | Error reason ->
         Keeper_registry.record_spawn_slot_denied ~keeper_name:m.name ~surface:"keepalive" reason;
         publish_keeper_lifecycle
@@ -702,11 +517,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
        behavioral_stats no longer consumed by build_prompt. *)
       dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
       publish_keeper_started ~live_meta;
-      Keeper_stale_watchdog.fork_stale_watchdog
-        ctx
-        live_meta
-        ~startup_warmup_sec:proactive_warmup_sec
-        reg;
       Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let record_crash failure_reason =
           record_keeper_crashed
@@ -751,7 +561,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           with
           | Eio.Cancel.Cancelled _ -> ()
           | e ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CleanupTrackingFailures)
               ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
               ();
@@ -781,12 +591,13 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                    | None -> Keeper_registry.Exception "fiber_crash"
                  in
                  record_crash reason)
-             | Eio.Cancel.Cancelled _ as e -> raise e
+             | Eio.Cancel.Cancelled _ ->
+               record_stopped "cancelled"
              | exn ->
                if Atomic.get stop
                then record_stopped "manual stop"
                else (
-                 Prometheus.inc_counter
+                 Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string HeartbeatFailures)
                    ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
                    ();
@@ -799,13 +610,6 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
 ;;
 
 let stop_keepalive ?base_path name =
-  let eio_context_available () =
-    try
-      Eio.Fiber.yield ();
-      true
-    with
-    | Effect.Unhandled _ -> false
-  in
   let entries =
     Keeper_registry.all ?base_path ()
     |> List.filter (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name)
@@ -825,7 +629,7 @@ let stop_keepalive ?base_path name =
           (try close_fn () with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                "masc_keeper_grpc_close_failures"
                ~labels:[ "keeper", entry.meta.name ]
                ())
@@ -833,16 +637,6 @@ let stop_keepalive ?base_path name =
        match entry.phase with
        | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()
        | _ ->
-         let released_slots =
-           if eio_context_available ()
-           then force_release_holder_for ~keeper_name:entry.name
-           else []
-         in
-         if released_slots <> [] then
-           Log.Keeper.warn
-             "%s: manual stop force-released holder slot(s) [%s] before marking stopped"
-             entry.name
-             (String.concat "," (List.map fst released_slots));
          if
            record_keeper_stopped
              entry

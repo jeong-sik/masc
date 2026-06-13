@@ -1,11 +1,8 @@
 (** Dashboard namespace-truth read-model regression tests. *)
 
-let () = Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"test"
-let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Masc_mcp.Agent_tool_dispatch_runtime.init_policy_config ~base_path))
+let () = Masc.Server_startup_state.mark_state_ready ~backend_mode:"test"
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -14,7 +11,7 @@ let () = Unix.putenv "MASC_STORAGE_TYPE" "filesystem"
 
 (* Bypass the proactive execution cache warm-up guard so tests get the full
    namespace-truth response instead of the "initializing" short-circuit. *)
-let () = Lib.Server_dashboard_http.seed_execution_cache_for_test ()
+let () = Server_dashboard_http.seed_execution_cache_for_test ()
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_namespace_truth" "" in
@@ -92,30 +89,30 @@ let request target =
     return. Without this, proactive_first_cycle_pending is true and the handler
     returns a minimal {"status":"initializing"} JSON without namespace/execution/command data. *)
 let warm_execution_cache () =
-  Lib.Server_dashboard_http_cache.mark_cached_surface_success
-    Lib.Server_dashboard_http.execution_cache
+  Server_dashboard_http_cache.mark_cached_surface_success
+    Server_dashboard_http.execution_cache
     (`Assoc [("status", `String "ok")])
 
-let warm_meta_cognition_summary (config : Lib.Coord.config) =
+let warm_meta_cognition_summary (config : Lib.Workspace.config) =
   let key =
-    Lib.Server_dashboard_http.dashboard_cache_key config
+    Server_dashboard_http.dashboard_cache_key config
       "meta_cognition_summary" "dashboard_shell"
   in
   ignore
-    (Lib.Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+    (Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
          Lib.Meta_cognition.summary_json config));
-  Lib.Dashboard_cache.invalidate_prefix
-    (Printf.sprintf "shell:coord=%s:" config.base_path)
+  Dashboard_cache.invalidate_prefix
+    (Printf.sprintf "shell:workspace=%s:" config.base_path)
 
 let expire_execution_warmup () =
-  let surface = Lib.Server_dashboard_http.execution_cache in
-  Lib.Server_dashboard_http_cache.invalidate_cached_surface surface;
+  let surface = Server_dashboard_http.execution_cache in
+  Server_dashboard_http_cache.invalidate_cached_surface surface;
   let stale_attempt_ts = Unix.gettimeofday () -. 120.0 in
   surface.last_attempt_unix <- Some stale_attempt_ts;
   surface.last_attempt_at <- Some "stale_attempt_for_test"
 
 let create_keeper env sw config name =
-  let ctx : _ Lib.Tool_keeper.context =
+  let ctx : _ Lib.Keeper_tool_surface.context =
     {
       config;
       agent_name = "tester";
@@ -125,7 +122,7 @@ let create_keeper env sw config name =
     }
   in
   match
-    Lib.Tool_keeper.dispatch ctx ~name:"masc_keeper_up"
+    Lib.Keeper_tool_surface.dispatch ctx ~name:"masc_keeper_up"
       ~args:
         (`Assoc
           [
@@ -139,7 +136,7 @@ let create_keeper env sw config name =
   | Some result -> fail (Tool_result.message result)
   | None -> fail "missing masc_keeper_up dispatch"
 
-let test_dashboard_namespace_truth_empty_room () =
+let test_dashboard_namespace_truth_empty_workspace () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -150,29 +147,29 @@ let test_dashboard_namespace_truth_empty_room () =
       Eio.Switch.run (fun sw ->
         warm_execution_cache ();
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
         check string "cluster default"
           "default"
-          (json |> member "root" |> member "status" |> member "cluster" |> to_string);
+          (json |> member "workspace" |> member "status" |> member "cluster" |> to_string);
         check int "pending confirms zero"
           0
           (json |> member "operator" |> member "pending_confirm_summary" |> member "total_count" |> to_int);
         check int "configured keepers default to zero"
           0
-          (json |> member "root" |> member "configured_keepers" |> to_int);
+          (json |> member "workspace" |> member "configured_keepers" |> to_int);
         check int "namespace counts expose total runtimes"
           0
-          (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
+          (json |> member "workspace" |> member "counts" |> member "total_runtimes" |> to_int);
         check string "runtime count authority is namespace truth"
           "namespace_truth_read_model"
-          (json |> member "root" |> member "runtime_count_authority" |> member "source" |> to_string);
+          (json |> member "workspace" |> member "runtime_count_authority" |> member "source" |> to_string);
         check bool "runtime counts do not arbitrate through shell"
           false
-          (json |> member "root" |> member "runtime_count_authority"
+          (json |> member "workspace" |> member "runtime_count_authority"
            |> member "shell_arbitration_allowed" |> to_bool);
         check string "canonical dashboard surface"
           "/api/v1/dashboard/namespace-truth"
@@ -188,11 +185,11 @@ let test_dashboard_namespace_truth_empty_room () =
           (match json |> member "generated_at_iso" with
           | `String value -> String.length value > 0
           | _ -> false);
-        check bool "room-truth alias retired"
+        check bool "workspace-truth alias retired"
           false
           (json |> member "dashboard_aliases" |> to_list
            |> List.map to_string
-           |> List.mem "/api/v1/dashboard/room-truth");
+           |> List.mem "/api/v1/dashboard/workspace-truth");
         check bool "readiness status exposed"
           true
           (String.length (json |> member "readiness" |> member "status" |> to_string) > 0);
@@ -216,7 +213,7 @@ let test_dashboard_namespace_truth_execution_fixture () =
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth?fixture=execution_smoke")
         in
@@ -230,7 +227,7 @@ let test_dashboard_namespace_truth_execution_fixture () =
           (json |> member "execution" |> member "top_queue" = `Null);
       ))
 
-let test_dashboard_namespace_truth_empty_room_focus_label () =
+let test_dashboard_namespace_truth_empty_workspace_focus_label () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -241,19 +238,19 @@ let test_dashboard_namespace_truth_empty_room_focus_label () =
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
         let focus_label = json |> member "focus" |> member "label" |> to_string in
-        check bool "empty room focus mentions no agents"
+        check bool "empty workspace focus mentions no agents"
           true
           (String.length focus_label > 0
            && focus_label <> "지금은 namespace 전체가 비교적 안정적입니다");
       ))
 
-let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
+let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
   let dir = test_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -262,10 +259,10 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.room_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Coord.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -278,19 +275,19 @@ let test_dashboard_namespace_truth_keeper_only_room_not_reported_empty () =
             create_keeper env sw config "sangsu";
             warm_execution_cache ();
             let json =
-              Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+              Server_dashboard_http.dashboard_namespace_truth_http_json
                 ~state ~sw ~clock:(Eio.Stdenv.clock env)
                 (request "/api/v1/dashboard/namespace-truth")
             in
             let open Yojson.Safe.Util in
             let focus_label = json |> member "focus" |> member "label" |> to_string in
-            check int "keeper-only room counts general agents as zero"
+            check int "keeper-only workspace counts general agents as zero"
               0
-              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
-            check int "keeper-only room still counts keeper meta"
+              (json |> member "workspace" |> member "counts" |> member "agents" |> to_int);
+            check int "keeper-only workspace still counts keeper meta"
               1
-              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
-            check bool "keeper-only room does not report empty room focus"
+              (json |> member "workspace" |> member "counts" |> member "keepers" |> to_int);
+            check bool "keeper-only workspace does not report empty workspace focus"
               false
               (String.equal focus_label
                  "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
@@ -304,16 +301,16 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.room_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
       ignore
-        (Lib.Coord.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"agent_code-test-agent"
            ~agent_type_override:(Some "agent_code")
            ~capabilities:["typescript"]
            ());
       ignore
-        (Lib.Coord.join config
+        (Lib.Workspace.bind_session config
            ~agent_name:"keeper-sangsu-agent"
            ~agent_type_override:(Some "keeper")
            ~capabilities:["keeper"]
@@ -326,19 +323,19 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
             create_keeper env sw config "sangsu";
             warm_execution_cache ();
             let json =
-              Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+              Server_dashboard_http.dashboard_namespace_truth_http_json
                 ~state ~sw ~clock:(Eio.Stdenv.clock env)
                 (request "/api/v1/dashboard/namespace-truth")
             in
             let open Yojson.Safe.Util in
             let focus_label = json |> member "focus" |> member "label" |> to_string in
-            check int "mixed room counts one general agent"
+            check int "mixed workspace counts one general agent"
               1
-              (json |> member "root" |> member "counts" |> member "agents" |> to_int);
-            check int "mixed room counts one keeper"
+              (json |> member "workspace" |> member "counts" |> member "agents" |> to_int);
+            check int "mixed workspace counts one keeper"
               1
-              (json |> member "root" |> member "counts" |> member "keepers" |> to_int);
-            check bool "mixed room avoids empty runtime fallback"
+              (json |> member "workspace" |> member "counts" |> member "keepers" |> to_int);
+            check bool "mixed workspace avoids empty runtime fallback"
               false
               (String.equal focus_label
                  "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다."))))
@@ -354,7 +351,7 @@ let test_operator_digest_shape_matches_namespace_truth () =
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
@@ -378,9 +375,9 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.room_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
-      let masc_dir = Lib.Coord.masc_dir config in
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
+      let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -401,12 +398,12 @@ let test_dashboard_namespace_truth_promotes_meta_cognition_focus () =
         ];
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
-        Lib.Dashboard_cache.invalidate_all ();
-        Atomic.set Lib.Server_dashboard_http.shell_warmed false;
-        Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
+        Dashboard_cache.invalidate_all ();
+        Atomic.set Server_dashboard_http.shell_warmed false;
+        Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
         warm_meta_cognition_summary config;
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
@@ -443,9 +440,9 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Mcp_server.room_config in
-      ignore (Lib.Coord.init config ~agent_name:None);
-      let masc_dir = Lib.Coord.masc_dir config in
+      let config = state.Mcp_server.workspace_config in
+      ignore (Lib.Workspace.init config ~agent_name:None);
+      let masc_dir = Lib.Workspace.masc_dir config in
       save_jsonl
         (Filename.concat masc_dir "board_posts.jsonl")
         [
@@ -467,7 +464,7 @@ let test_dashboard_namespace_truth_does_not_auto_post_meta_digest () =
       warm_execution_cache ();
       Eio.Switch.run (fun sw ->
         ignore
-          (Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          (Server_dashboard_http.dashboard_namespace_truth_http_json
              ~state ~sw ~clock:(Eio.Stdenv.clock env)
              (request "/api/v1/dashboard/namespace-truth"));
         let posts =
@@ -487,15 +484,15 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
       warm_execution_cache ();
-      Lib.Server_dashboard_http.warm_shell_cache state;
+      Server_dashboard_http.warm_shell_cache state;
       Eio.Switch.run (fun sw ->
         let http_json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
         let cached_snapshot =
-          match Lib.Server_dashboard_http.namespace_truth_snapshot_from_caches state with
+          match Server_dashboard_http.namespace_truth_snapshot_from_caches state with
           | Some json -> json
           | None -> fail "expected cached namespace-truth snapshot"
         in
@@ -511,18 +508,18 @@ let test_namespace_truth_cached_snapshot_matches_http_projection_blocks () =
 
 let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
   let dir = test_dir () in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
-  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good;
-      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good;
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
       cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      let config = state.Lib.Mcp_server.room_config in
+      let config = state.Lib.Mcp_server.workspace_config in
       warm_execution_cache ();
       let cached_shell =
         `Assoc
@@ -547,18 +544,18 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
             ("meta_cognition", `Null);
           ]
       in
-      Atomic.set Lib.Server_dashboard_http.last_good_shell cached_shell;
-      Atomic.set Lib.Server_dashboard_http.shell_warmed true;
+      Atomic.set Server_dashboard_http.last_good_shell cached_shell;
+      Atomic.set Server_dashboard_http.shell_warmed true;
       Eio.Switch.run (fun sw ->
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
         let open Yojson.Safe.Util in
         check int "warm request uses cached shell counts"
           7
-          (json |> member "root" |> member "counts" |> member "agents" |> to_int);
+          (json |> member "workspace" |> member "counts" |> member "agents" |> to_int);
         check string "warm request reports stale-while-revalidate"
           "stale_while_revalidate"
           (json |> member "projection_diagnostics" |> member "cache_mode" |> to_string);
@@ -567,11 +564,11 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
           (json |> member "projection_diagnostics" |> member "shell_source" |> to_string);
         check string "runtime authority documents stale shell as fallback"
           "shell_last_good_only_when_namespace_unavailable"
-          (json |> member "root" |> member "runtime_count_authority"
+          (json |> member "workspace" |> member "runtime_count_authority"
            |> member "fallback_policy" |> to_string);
         check int "authority reports configured/live keeper delta"
           0
-          (json |> member "root" |> member "runtime_count_authority"
+          (json |> member "workspace" |> member "runtime_count_authority"
            |> member "configured_minus_live_keepers" |> to_int)
       ))
 
@@ -588,7 +585,7 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
       expire_execution_warmup ();
       Eio.Switch.run (fun sw ->
         let json =
-          Lib.Server_dashboard_http.dashboard_namespace_truth_http_json
+          Server_dashboard_http.dashboard_namespace_truth_http_json
             ~state ~sw ~clock:(Eio.Stdenv.clock env)
             (request "/api/v1/dashboard/namespace-truth")
         in
@@ -598,7 +595,7 @@ let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =
           (json |> member "status" = `Null);
         check bool "namespace block present"
           true
-          (json |> member "root" <> `Null);
+          (json |> member "workspace" <> `Null);
         check int "execution summary falls back to zero operations"
           0
           (json |> member "execution" |> member "summary" |> member "active_operations" |> to_int);
@@ -615,11 +612,11 @@ let test_last_good_shell_fallback_preserves_counts () =
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let state = Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:dir () in
-      ignore (Lib.Coord.init state.Lib.Mcp_server.room_config ~agent_name:None);
+      ignore (Lib.Workspace.init state.Lib.Mcp_server.workspace_config ~agent_name:None);
       warm_execution_cache ();
       (* Warm the shell cache so last_good_shell gets populated. *)
-      Lib.Server_dashboard_http.warm_shell_cache state;
-      let last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+      Server_dashboard_http.warm_shell_cache state;
+      let last_good = Atomic.get Server_dashboard_http.last_good_shell in
       check bool "last good shell is non-empty after warm"
         true
         (last_good <> `Assoc []);
@@ -631,27 +628,27 @@ let test_last_good_shell_fallback_preserves_counts () =
         (counts <> `Null);
       (* Verify namespace-truth snapshot_from_caches uses the stale shell data
          even when the warmed flag is false (cold path, simulating timeout). *)
-      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warmed false;
       let snapshot =
-        match Lib.Server_dashboard_http.namespace_truth_snapshot_from_caches state with
+        match Server_dashboard_http.namespace_truth_snapshot_from_caches state with
         | Some json -> json
         | None -> fail "expected cached namespace-truth snapshot"
       in
-      let ns_counts = snapshot |> member "root" |> member "counts" in
+      let ns_counts = snapshot |> member "workspace" |> member "counts" in
       (* Shell was warmed once then reset; snapshot_from_caches should still
          produce a valid namespace block via the last_good_shell fallback. *)
       check bool "namespace counts block present in fallback snapshot"
         true
         (ns_counts <> `Null);
       (* Restore warmed state for subsequent tests. *)
-      Atomic.set Lib.Server_dashboard_http.shell_warmed true)
+      Atomic.set Server_dashboard_http.shell_warmed true)
 
 let test_namespace_truth_snapshot_hash_ignores_generated_at () =
   Fun.protect
     ~finally:(fun () ->
-      Lib.Server_dashboard_http.last_namespace_truth_snapshot_hash := None)
+      Server_dashboard_http.last_namespace_truth_snapshot_hash := None)
     (fun () ->
-      Lib.Server_dashboard_http.last_namespace_truth_snapshot_hash := None;
+      Server_dashboard_http.last_namespace_truth_snapshot_hash := None;
       Eio_main.run @@ fun _env ->
       let snapshot ~generated_at ~active_sessions =
         `Assoc
@@ -671,15 +668,15 @@ let test_namespace_truth_snapshot_hash_ignores_generated_at () =
       in
       check bool "first snapshot broadcasts"
         true
-        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+        (Server_dashboard_http.should_broadcast_namespace_truth_snapshot
            (snapshot ~generated_at:"2026-04-09T00:00:00Z" ~active_sessions:1));
       check bool "generated_at-only changes stay deduped"
         false
-        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+        (Server_dashboard_http.should_broadcast_namespace_truth_snapshot
            (snapshot ~generated_at:"2026-04-09T00:00:05Z" ~active_sessions:1));
       check bool "semantic changes still broadcast"
         true
-        (Lib.Server_dashboard_http.should_broadcast_namespace_truth_snapshot
+        (Server_dashboard_http.should_broadcast_namespace_truth_snapshot
            (snapshot ~generated_at:"2026-04-09T00:00:10Z" ~active_sessions:2)))
 
 let () =
@@ -687,11 +684,11 @@ let () =
     [
       ( "read_model",
         [
-          test_case "empty room shape" `Quick test_dashboard_namespace_truth_empty_room;
+          test_case "empty workspace shape" `Quick test_dashboard_namespace_truth_empty_workspace;
           test_case "execution fixture surfaces top queue" `Quick test_dashboard_namespace_truth_execution_fixture;
-          test_case "empty room focus label reflects no agents" `Quick test_dashboard_namespace_truth_empty_room_focus_label;
-          test_case "keeper-only room does not look empty" `Quick
-            test_dashboard_namespace_truth_keeper_only_room_not_reported_empty;
+          test_case "empty workspace focus label reflects no agents" `Quick test_dashboard_namespace_truth_empty_workspace_focus_label;
+          test_case "keeper-only workspace does not look empty" `Quick
+            test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty;
           test_case "mixed runtimes keep counts aligned" `Quick
             test_dashboard_namespace_truth_mixed_runtime_counts;
           test_case "operator digest shape matches namespace-truth" `Quick test_operator_digest_shape_matches_namespace_truth;

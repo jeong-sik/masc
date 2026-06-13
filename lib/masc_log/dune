@@ -1,9 +1,11 @@
 (include_subdirs no)
+
 (library
  (name masc_log)
- (public_name masc_mcp.masc_log)
+ (public_name masc.masc_log)
  (wrapped false)
- (modules log system_log_category)
+ (modules log system_log_category console_sink)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
- (flags (:standard -w +4))
- (libraries unix yojson time_compat eio fs_compat))
+ (flags
+  (:standard -w +4))
+ (libraries unix threads.posix yojson time_compat eio fs_compat))

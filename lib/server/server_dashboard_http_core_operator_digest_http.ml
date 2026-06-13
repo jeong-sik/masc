@@ -25,6 +25,8 @@
     Pure helper move (no callback injection). All references reach
     existing siblings or top-level libraries. *)
 
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+
 open Server_utils
 open Server_auth
 include Server_dashboard_http_cache
@@ -40,7 +42,7 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
 open Server_dashboard_http_runtime_support
 
 let operator_digest_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let actor =
     dashboard_actor_for_request ~base_path:config.base_path request
@@ -56,10 +58,10 @@ let operator_digest_http_json ~state ~sw ~clock request =
   let root_target_type value =
     match Option.map (fun raw -> String.lowercase_ascii (String.trim raw)) value with
     | None -> true
-    | Some "root" -> true
+    | Some "workspace" -> true
     | Some _ -> false
   in
-  let effective_target_type = Option.value ~default:"root" target_type in
+  let effective_target_type = Option.value ~default:"workspace" target_type in
   let default_namespace_request =
     actor = None
     && target_id = None
@@ -137,7 +139,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
           ~surface:"operator_digest"
           ~started_at
           ~extra:
-            [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+            [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
           json
       | Error `Timeout ->
         `Assoc
@@ -151,7 +153,7 @@ let operator_digest_http_json ~state ~sw ~clock request =
     Ok
       (Dashboard_cache.get_or_compute_with_timeout
          cache_key
-         ~ttl:5.0
+         ~ttl:standard_cache_ttl_s
          ~clock
          ~timeout_sec:Core_cache.dashboard_request_timeout_s
          compute

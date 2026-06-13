@@ -22,13 +22,14 @@ import {
 } from './keeper-detail-telemetry'
 import {
   KeeperLiveTruthPanel,
+  KeeperSecretProjectionPanel,
   RuntimeLensSection,
   RuntimeSignals,
   TurnBudgetSection,
   KeeperNeighborhood,
 } from './keeper-detail-runtime'
 import {
-  KeeperDetailOverviewSidebar,
+  KeeperDetailSectionRail,
   KeeperDetailSection,
 } from './keeper-detail-shell'
 import {
@@ -46,9 +47,12 @@ import { SessionTraceView } from './session-trace/session-trace-view'
 import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
+import { KeeperTurnInspector } from './keeper-turn-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperConfigPanel } from './keeper-config-panel'
+import { KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
+import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
 import { FsmHub } from './fsm-hub'
@@ -100,18 +104,30 @@ export function KeeperDetailBody({
   onSocialSweep,
 }: KeeperDetailBodyProps) {
   return html`
-    <div class="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-      <${KeeperDetailOverviewSidebar} />
-
-      <div class="order-1 xl:order-2 flex flex-col gap-5">
+    <div class="mx-auto flex w-full max-w-[1180px] flex-col gap-5">
         <${KeeperRuntimeAlertStrip} keeper=${keeper} />
+        <${KeeperDetailSectionRail} />
+
+        <${KeeperDetailSection}
+          id="keeper-comms"
+          eyebrow="대화 & 세션"
+          title="대화 / 세션"
+          lockedOpen=${true}
+          variant="primary"
+        >
+          <${KeeperCommsPanel} keeper=${keeper} />
+          <${CollapsibleSection} title="세션 활동 로그" open=${false} mountWhenOpen=${true}>
+            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
+          <//>
+        <//>
 
         <${KeeperDetailSection}
           id="keeper-summary"
           eyebrow="상태 개요"
           title="운영 상태 개요"
+          defaultCollapsed=${true}
         >
-      ${'' /* KeeperLiveTruthPanel (derived "Live truth / 런타임 / 현재 턴 / 최신 증거 / 차단" composite) moved to the 진단 / 운영 section as a default-closed CollapsibleSection — it is a heuristic synthesis on top of composite + keeper + runtime_trace + linked_state and lives below the raw-state alert-strip in information hierarchy. */}
+      ${'' /* KeeperLiveTruthPanel (derived "Live truth / 런타임 / 현재 턴 / 최신 증거 / 차단" composite) moved to the 진단 / 운영 section as a default-closed CollapsibleSection. It is a derived synthesis on top of composite + keeper + runtime_trace + linked_state and lives below the raw-state alert-strip in information hierarchy. */}
       ${'' /* RFC-0046: 6-axis composite snapshot (KSM/KTC/KDP/KCL/KMC/breaker) — SSOT for keeper FSM state */}
       ${'' /* RFC-0046 §7 #2: share useKeeperComposite with FsmHub to dedup the /composite poll */}
       <${CollapsibleSection} title="FSM Hub (6축 상태 머신)" open=${false}>
@@ -151,6 +167,9 @@ export function KeeperDetailBody({
       ${'' /* ── CTX composition by category ── */}
       <${CtxCompositionPanel} keeper=${keeper} />
 
+      ${'' /* ── Keeper prompt assembly provenance and stale guidance audit ── */}
+      <${KeeperPromptAssemblyPanel} compact=${true} />
+
       ${'' /* ── Prompt fingerprint / segment telemetry ── */}
       <${PromptTelemetryPanel} keeper=${keeper} />
 
@@ -159,24 +178,15 @@ export function KeeperDetailBody({
         <//>
 
         <${KeeperDetailSection}
-          id="keeper-comms"
-          eyebrow="대화 & 세션"
-          title="대화 / 활동 흐름"
-          defaultCollapsed=${true}
-        >
-          <${KeeperCommsPanel} keeper=${keeper} />
-          <${PanelCard} title="세션 활동 로그">
-            <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
-          <//>
-        <//>
-
-        <${KeeperDetailSection}
           id="keeper-runtime"
           eyebrow="런타임 진단"
           title="진단 / 운영"
           defaultCollapsed=${true}
         >
+          ${'' /* ── 런타임 model 편집 (RFC-0207 persona runtime_id) — surfaced here so it is one expand away, not buried under 설정 → Keeper 설정 → 소스 ── */}
+          <${KeeperRuntimeModelEditor} keeperName=${keeper.name} />
           <${KeeperToolTelemetry} keeperName=${keeper.name} />
+          <${KeeperSecretProjectionPanel} projection=${compositeSnapshot?.secret_projection} />
           <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
           <${CollapsibleSection} title="Live Truth (composite/runtime 합성)" open=${false}>
             <${KeeperLiveTruthPanel}
@@ -206,6 +216,10 @@ export function KeeperDetailBody({
               <div class="pt-3 border-t border-[var(--color-border-divider)]">
                 <${SectionHeader} size="xs" class="mb-3">호출 검사기</${SectionHeader}>
                 ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
+              </div>
+              <div class="pt-3 border-t border-[var(--color-border-divider)]">
+                <${SectionHeader} size="xs" class="mb-3">턴 검사기 (컨텍스트 블록 diff)</${SectionHeader}>
+                ${diagOpen ? html`<${KeeperTurnInspector} keeperName=${keeper.name} />` : null}
               </div>
             </div>
           <//>
@@ -335,7 +349,6 @@ export function KeeperDetailBody({
         onPreserveToggle=${onPreserveToggle}
         onSubmit=${onClearSubmit}
       />
-      </div>
     </div>
   `
 }

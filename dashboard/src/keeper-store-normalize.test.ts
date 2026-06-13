@@ -46,6 +46,24 @@ describe('normalizeKeepers phase field', () => {
       { name: 'phase-test', status: 'active', phase: 'running' },
     ])
     expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Running')
+  })
+
+  it('preserves explicit lifecycle phase and pipeline stage detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'offline-detail-test',
+        status: 'offline',
+        phase: 'running',
+        lifecycle_phase: 'Offline',
+        pipeline_stage: 'offline',
+        pipeline_stage_detail: 'launch_pending_no_fiber',
+      },
+    ])
+    expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Offline')
+    expect(keeper?.pipeline_stage).toBe('offline')
+    expect(keeper?.pipeline_stage_detail).toBe('launch_pending_no_fiber')
   })
 
   it('normalizes handing_off to HandingOff', () => {
@@ -86,6 +104,46 @@ describe('normalizeKeepers phase field', () => {
 })
 
 describe('normalizeKeepers lifecycle metrics', () => {
+  it('normalizes live activity projection and current approval gate', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        last_activity_at: '2026-06-06T02:49:01Z',
+        last_activity_source: 'approval_pending',
+        live_activity: {
+          source: 'approval_pending',
+          at: '2026-06-06T02:49:01Z',
+          age_s: 5,
+          tool: 'Write',
+        },
+        current_gate: {
+          kind: 'approval_required',
+          source: 'audit_approvals',
+          tool: 'Write',
+          risk: 'high',
+          turn_id: 178,
+          at: '2026-06-06T02:49:01Z',
+        },
+      },
+    ])
+
+    expect(keeper?.last_activity_source).toBe('approval_pending')
+    expect(keeper?.last_activity_at).toBe('2026-06-06T02:49:01Z')
+    expect(keeper?.live_activity).toMatchObject({
+      source: 'approval_pending',
+      tool: 'Write',
+      age_s: 5,
+    })
+    expect(keeper?.current_gate).toMatchObject({
+      kind: 'approval_required',
+      source: 'audit_approvals',
+      tool: 'Write',
+      risk: 'high',
+      turn_id: 178,
+    })
+  })
+
   it('accepts flat backend handoff fields', () => {
     const [keeper] = normalizeKeepers([
       {
@@ -329,7 +387,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 1,
           },
           execution_summary: {
-            tool_contract_result: 'unknown',
             sandbox_summary: 'docker / none',
             mutation_guard_summary: 'mutation_contract_not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -362,7 +419,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 1,
       },
       execution_summary: {
-        tool_contract_result: 'unknown',
         sandbox_summary: 'docker / none',
         mutation_guard_summary: 'mutation_contract_not_observed',
       },
@@ -475,11 +531,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
             pending_count: 0,
           },
           execution: {
-            tool_contract_result: 'violated',
-            required_tools: ['masc_board_post'],
-            missing_required_tools: ['masc_board_post'],
-            unexpected_tools: ['keeper_board_list'],
-            unexpected_tool_count: 1,
             provider_attempt_count: 2,
             provider_fallback_applied: true,
             provider_selected_model: 'provider:runtime-lane',
@@ -507,11 +558,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         pending_count: 0,
       },
       execution_summary: {
-        tool_contract_result: 'violated',
-        required_tools: ['masc_board_post'],
-        missing_required_tools: ['masc_board_post'],
-        unexpected_tools: ['keeper_board_list'],
-        unexpected_tool_count: 1,
         provider_attempt_count: 2,
         provider_fallback_applied: true,
         provider_selected_model: 'provider:runtime-lane',
@@ -525,13 +571,13 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
-  it('preserves cascade lane evidence while redacting model/provider identity', () => {
+  it('preserves runtime lane evidence while redacting model/provider identity', () => {
     const [keeper] = normalizeKeepers([
       {
-        name: 'cascade-keeper',
+        name: 'runtime-keeper',
         status: 'active',
-        cascade_name: 'oas-keeper_unified',
-        selected_cascade_canonical: 'primary',
+        runtime_id: 'oas-keeper_unified',
+        selected_runtime_canonical: 'primary',
         primary_model: 'provider-d:gpt-5.4',
         active_model: 'gpt-5.4',
         active_model_label: 'provider-d:gpt-5.4',
@@ -547,8 +593,8 @@ describe('normalizeKeepers lifecycle metrics', () => {
             generation: 1,
             channel: 'turn',
             model_used: 'provider-a:model-a-sonnet',
-            cascade: {
-              cascade_name: 'primary',
+            runtime: {
+              runtime_id: 'primary',
               selected_model: 'provider-a:model-a-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
@@ -569,9 +615,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
     ])
 
     expect(keeper).toMatchObject({
-      cascade_name: 'oas-keeper_unified',
-      cascade_canonical: 'primary',
-      selected_cascade_canonical: 'primary',
+      runtime_id: 'oas-keeper_unified',
+      runtime_canonical: 'primary',
+      selected_runtime_canonical: 'primary',
       active_model_label: null,
       last_model_used_label: null,
     })
@@ -579,11 +625,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(keeper?.active_model).toBeUndefined()
     expect(keeper?.last_model_used).toBeUndefined()
     expect(keeper?.metrics_series?.[0]).toMatchObject({
-      cascade_name: 'primary',
-      cascade_selected_model: null,
-      cascade_attempt_count: 2,
-      cascade_outcome: 'passed_to_next_model',
-      cascade_strategy: 'round_robin',
+      runtime_id: 'primary',
+      runtime_selected_model: null,
+      runtime_attempt_count: 2,
+      runtime_outcome: 'passed_to_next_model',
+      runtime_strategy: 'round_robin',
       fallback_applied: true,
       fallback_hops: 1,
       fallback_from: null,
@@ -928,7 +974,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
             pending_count: 1,
             pending_first: {
               id: 'appr_2cae9bec14f6',
-              tool_name: 'masc_worktree_create',
+              tool_name: 'Execute',
               task_id: 'task-187',
               blocker_class: 'blocked_before_worktree',
             },
@@ -938,7 +984,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
     ])
     expect(keeper?.trust?.approval_state?.pending_first).toEqual({
       id: 'appr_2cae9bec14f6',
-      tool_name: 'masc_worktree_create',
+      tool_name: 'Execute',
       task_id: 'task-187',
       blocker_class: 'blocked_before_worktree',
     })

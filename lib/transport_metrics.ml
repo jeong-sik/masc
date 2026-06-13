@@ -1,12 +1,28 @@
 (** Transport Observability Metrics for 50-agent monitoring.
 
     Collects SSE, gRPC, and agent-health transport metrics in
-    Prometheus text format via the existing Prometheus module.
+    Otel_metric_store text format via the existing Otel_metric_store module.
 
-    Metric naming follows Prometheus conventions:
+    Metric naming follows Otel_metric_store conventions:
     - masc_sse_* for SSE transport
     - masc_grpc_* for gRPC transport
     - masc_agent_heartbeat_* for agent liveness *)
+
+let webrtc_is_enabled_ref = Atomic.make (fun () -> false)
+let webrtc_pending_count_ref = Atomic.make (fun () -> 0)
+let webrtc_peers_count_ref = Atomic.make (fun () -> 0)
+let webrtc_live_count_ref = Atomic.make (fun () -> 0)
+let webrtc_channels_count_ref = Atomic.make (fun () -> 0)
+let webrtc_ice_servers_urls_ref = Atomic.make (fun () -> [])
+
+let register_webrtc_metrics ~is_enabled ~pending_count ~peers_count ~live_count ~channels_count ~ice_servers_urls =
+  Atomic.set webrtc_is_enabled_ref is_enabled;
+  Atomic.set webrtc_pending_count_ref pending_count;
+  Atomic.set webrtc_peers_count_ref peers_count;
+  Atomic.set webrtc_live_count_ref live_count;
+  Atomic.set webrtc_channels_count_ref channels_count;
+  Atomic.set webrtc_ice_servers_urls_ref ice_servers_urls
+;;
 
 (** {1 SSE Metrics} *)
 
@@ -21,20 +37,20 @@ type hot_queue_session =
 let sse_hot_sessions : hot_queue_session list Atomic.t = Atomic.make []
 
 let set_sse_sessions ~kind count =
-  Prometheus.set_gauge
-    Prometheus.metric_sse_sessions
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_sse_sessions
     ~labels:[ "kind", kind ]
     (float_of_int count)
 ;;
 
 let observe_broadcast_duration ?target seconds =
-  Prometheus.observe_histogram Prometheus.metric_sse_broadcast_duration seconds;
+  Otel_metric_store.observe_histogram Otel_metric_store.metric_sse_broadcast_duration seconds;
   let labels =
     match target with
     | None -> []
     | Some t -> [ "target", t ]
   in
-  Prometheus.inc_counter Prometheus.metric_sse_broadcast_events ~labels ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_broadcast_events ~labels ()
 ;;
 
 (* P1 silent-failure fix (transport scan):
@@ -49,7 +65,7 @@ let inc_broadcast_failure ?target () =
     | None -> []
     | Some t -> [ "target", t ]
   in
-  Prometheus.inc_counter Prometheus.metric_sse_broadcast_failures ~labels ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_broadcast_failures ~labels ()
 ;;
 
 (* P1 silent-failure fix (transport scan):
@@ -59,7 +75,7 @@ let inc_broadcast_failure ?target () =
    the subscriber identity is high-cardinality (sub_id is gRPC stream
    id); operators can correlate via the warn log line if needed. *)
 let inc_external_subscriber_callback_failure () =
-  Prometheus.inc_counter Prometheus.metric_sse_external_subscriber_callback_failures ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_external_subscriber_callback_failures ()
 ;;
 
 (* P2 silent-failure fix (transport scan):
@@ -70,82 +86,82 @@ let inc_external_subscriber_callback_failure () =
    so the recovery-path failure rate is isolated from normal broadcast
    failures. *)
 let inc_relay_drop_marker_failure () =
-  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drop_marker_failures ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drop_marker_failures ()
 ;;
 
 let set_sse_queue_depth ~session_id depth =
-  Prometheus.set_gauge
-    Prometheus.metric_sse_stream_queue_depth
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_sse_stream_queue_depth
     ~labels:[ "session_id", session_id ]
     (float_of_int depth)
 ;;
 
 let set_sse_queue_snapshot ~avg_depth ~max_depth ~hot_sessions =
-  Prometheus.set_gauge Prometheus.metric_sse_queue_depth_avg avg_depth;
-  Prometheus.set_gauge Prometheus.metric_sse_queue_depth_max (float_of_int max_depth);
+  Otel_metric_store.set_gauge Otel_metric_store.metric_sse_queue_depth_avg avg_depth;
+  Otel_metric_store.set_gauge Otel_metric_store.metric_sse_queue_depth_max (float_of_int max_depth);
   Atomic.set sse_hot_sessions hot_sessions
 ;;
 
 let set_sse_external_subscribers count =
-  Prometheus.set_gauge Prometheus.metric_sse_external_subscribers (float_of_int count)
+  Otel_metric_store.set_gauge Otel_metric_store.metric_sse_external_subscribers (float_of_int count)
 ;;
 
 let inc_sse_client_evicted () =
-  Prometheus.inc_counter Prometheus.metric_sse_client_evictions ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_client_evictions ()
 ;;
 
 let inc_sse_idle_evicted () =
-  Prometheus.inc_counter Prometheus.metric_sse_idle_evictions ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_idle_evictions ()
 ;;
 
 let inc_sse_reject ~reason =
-  Prometheus.inc_counter Prometheus.metric_sse_rejects ~labels:[ "reason", reason ] ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_sse_rejects ~labels:[ "reason", reason ] ()
 ;;
 
-let inc_sse_reconnect () = Prometheus.inc_counter Prometheus.metric_sse_reconnects ()
+let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metric_sse_reconnects ()
 
 (** {1 gRPC Metrics} *)
 
 let set_grpc_active_streams count =
-  Prometheus.set_gauge Prometheus.metric_grpc_active_streams (float_of_int count)
+  Otel_metric_store.set_gauge Otel_metric_store.metric_grpc_active_streams (float_of_int count)
 ;;
 
 let observe_grpc_heartbeat_latency seconds =
-  Prometheus.observe_histogram Prometheus.metric_grpc_heartbeat_latency seconds
+  Otel_metric_store.observe_histogram Otel_metric_store.metric_grpc_heartbeat_latency seconds
 ;;
 
 let set_grpc_subscribers count =
-  Prometheus.set_gauge Prometheus.metric_grpc_subscribers (float_of_int count)
+  Otel_metric_store.set_gauge Otel_metric_store.metric_grpc_subscribers (float_of_int count)
 ;;
 
 let inc_grpc_events_delivered ?(delta = 1) () =
-  Prometheus.inc_counter
-    Prometheus.metric_grpc_events_delivered
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_grpc_events_delivered
     ~delta:(float_of_int delta)
     ()
 ;;
 
 let inc_grpc_events_dropped () =
-  Prometheus.inc_counter Prometheus.metric_grpc_events_dropped ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_grpc_events_dropped ()
 ;;
 
 (** {1 WebSocket Metrics} *)
 
 let set_ws_sessions count =
-  Prometheus.set_gauge Prometheus.metric_ws_sessions (float_of_int count)
+  Otel_metric_store.set_gauge Otel_metric_store.metric_ws_sessions (float_of_int count)
 ;;
 
 let inc_ws_parse_cache_hit () =
-  Prometheus.inc_counter Prometheus.metric_ws_parse_cache_hits ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_hits ()
 ;;
 
 let inc_ws_parse_cache_miss () =
-  Prometheus.inc_counter Prometheus.metric_ws_parse_cache_misses ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_parse_cache_misses ()
 ;;
 
 (** Iter 28 visibility fix — counter for previously-silent JSON parse
     drops in parse_sse_dashboard_event. Closed 2-value error_kind
-    vocab keeps Prometheus label cardinality bounded. *)
+    vocab keeps Otel_metric_store label cardinality bounded. *)
 type ws_frame_json_parse_error_kind =
   | Yojson_parse_error
   | Other_ws_frame_json_parse_error
@@ -156,60 +172,60 @@ let ws_frame_json_parse_error_kind_to_string = function
 ;;
 
 let inc_ws_frame_json_parse_failure ~error_kind =
-  Prometheus.inc_counter
-    Prometheus.metric_server_mcp_ws_frame_json_parse_failures
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_server_mcp_ws_frame_json_parse_failures
     ~labels:[ "error_kind", ws_frame_json_parse_error_kind_to_string error_kind ]
     ()
 ;;
 
 let inc_ws_bytes_cache_hit () =
-  Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_hits ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_bytes_cache_hits ()
 ;;
 
 let inc_ws_bytes_cache_miss () =
-  Prometheus.inc_counter Prometheus.metric_ws_bytes_cache_misses ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_bytes_cache_misses ()
 ;;
 
 let observe_ws_dashboard_hello_latency ~success seconds =
   let outcome = if success then "success" else "error" in
-  Prometheus.observe_histogram
-    Prometheus.metric_ws_dashboard_hello_latency_seconds
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
     ~labels:[ "outcome", outcome ]
     (max 0.0 seconds)
 ;;
 
 let observe_ws_client_buffered_bytes n =
   let bytes = float_of_int (max 0 n) in
-  Prometheus.observe_histogram Prometheus.metric_ws_client_buffered_bytes bytes;
-  Prometheus.inc_counter Prometheus.metric_ws_client_acks ()
+  Otel_metric_store.observe_histogram Otel_metric_store.metric_ws_client_buffered_bytes bytes;
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_client_acks ()
 ;;
 
 let inc_ws_throttled_delivery () =
-  Prometheus.inc_counter Prometheus.metric_ws_throttled_deliveries ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_throttled_deliveries ()
 ;;
 
 let inc_ws_slice_fanout_skipped () =
-  Prometheus.inc_counter Prometheus.metric_ws_slice_fanout_skipped ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_ws_slice_fanout_skipped ()
 ;;
 
 let inc_ws_bytes_sent ~bytes =
   if bytes > 0
   then
-    Prometheus.inc_counter Prometheus.metric_ws_bytes_sent ~delta:(float_of_int bytes) ()
+    Otel_metric_store.inc_counter Otel_metric_store.metric_ws_bytes_sent ~delta:(float_of_int bytes) ()
 ;;
 
 let observe_ws_message_bytes_sent n =
   let bytes = float_of_int (max 0 n) in
-  Prometheus.observe_histogram
-    Prometheus.metric_ws_message_bytes
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_ws_message_bytes
     ~labels:[ "direction", "send" ]
     bytes
 ;;
 
 let observe_ws_message_bytes_recv n =
   let bytes = float_of_int (max 0 n) in
-  Prometheus.observe_histogram
-    Prometheus.metric_ws_message_bytes
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_ws_message_bytes
     ~labels:[ "direction", "recv" ]
     bytes
 ;;
@@ -217,19 +233,19 @@ let observe_ws_message_bytes_recv n =
 let inc_grpc_bytes_sent ~bytes =
   if bytes > 0
   then
-    Prometheus.inc_counter
-      Prometheus.metric_grpc_bytes_sent
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_grpc_bytes_sent
       ~delta:(float_of_int bytes)
       ()
 ;;
 
-let inc_ws_delta_built () = Prometheus.inc_counter Prometheus.metric_ws_delta_built ()
+let inc_ws_delta_built () = Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_built ()
 
 let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
   if delta > 0
   then
-    Prometheus.inc_counter
-      Prometheus.metric_grpc_backlog_replay_lines_scanned
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_grpc_backlog_replay_lines_scanned
       ~delta:(float_of_int delta)
       ()
 ;;
@@ -237,8 +253,8 @@ let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
 let inc_grpc_backlog_replay_events_replayed ?(delta = 1) () =
   if delta > 0
   then
-    Prometheus.inc_counter
-      Prometheus.metric_grpc_backlog_replay_events_replayed
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_grpc_backlog_replay_events_replayed
       ~delta:(float_of_int delta)
       ()
 ;;
@@ -252,8 +268,8 @@ let http_last_accept_unix : float option Atomic.t = Atomic.make None
 let http_last_accept_error : string option Atomic.t = Atomic.make None
 
 let set_http_connection_gauge value =
-  Prometheus.set_gauge
-    Prometheus.metric_http_active_connections
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_http_active_connections
     (float_of_int (max 0 value))
 ;;
 
@@ -274,7 +290,7 @@ let record_http_accept ~mode =
   Atomic.set http_listener_status "listening";
   Atomic.set http_last_accept_unix (Some (Unix.gettimeofday ()));
   Atomic.set http_last_accept_error None;
-  Prometheus.inc_counter Prometheus.metric_http_accepts ~labels:[ "mode", mode ] ();
+  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accepts ~labels:[ "mode", mode ] ();
   let active = Atomic.fetch_and_add http_active_connections 1 + 1 in
   set_http_connection_gauge active
 ;;
@@ -297,7 +313,7 @@ let record_http_accept_error ~mode ~error =
   Atomic.set http_listener_mode_runtime mode;
   Atomic.set http_listener_status "accept_error";
   Atomic.set http_last_accept_error (Some error);
-  Prometheus.inc_counter Prometheus.metric_http_accept_errors ~labels:[ "mode", mode ] ()
+  Otel_metric_store.inc_counter Otel_metric_store.metric_http_accept_errors ~labels:[ "mode", mode ] ()
 ;;
 
 let accept_latency_metric = "masc_http_accept_latency_seconds"
@@ -308,7 +324,7 @@ let ensure_accept_latency_registered () =
   then ()
   else (
     Atomic.set accept_latency_registered true;
-    Prometheus.register_histogram
+    Otel_metric_store.register_histogram
       ~name:accept_latency_metric
       ~help:
         "Time spent in Eio.Net.accept before a new TCP connection is handed to the \
@@ -320,15 +336,13 @@ let ensure_accept_latency_registered () =
 
 let record_http_accept_latency ~mode latency_s =
   ensure_accept_latency_registered ();
-  Prometheus.observe_histogram accept_latency_metric ~labels:[ "mode", mode ] latency_s
+  Otel_metric_store.observe_histogram accept_latency_metric ~labels:[ "mode", mode ] latency_s
 ;;
 
 let json_float_option = function
   | Some value -> `Float value
   | None -> `Null
 ;;
-
-let json_string_option = Json_util.string_opt_to_json
 
 let http_listener_json ?now () =
   let now =
@@ -345,13 +359,13 @@ let http_listener_json ?now () =
     ; "status", `String (Atomic.get http_listener_status)
     ; "active_connections", `Int (Atomic.get http_active_connections)
     ; ( "accepted_total"
-      , `Int (int_of_float (Prometheus.metric_total Prometheus.metric_http_accepts)) )
+      , `Int (int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_http_accepts)) )
     ; ( "accept_errors_total"
-      , `Int (int_of_float (Prometheus.metric_total Prometheus.metric_http_accept_errors))
+      , `Int (int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_http_accept_errors))
       )
     ; "last_accept_unix", json_float_option last_accept_unix
     ; "last_accept_age_seconds", json_float_option last_accept_age_seconds
-    ; "last_error", json_string_option (Atomic.get http_last_accept_error)
+    ; "last_error", Json_util.string_opt_to_json (Atomic.get http_last_accept_error)
     ]
 ;;
 
@@ -377,13 +391,13 @@ let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
 (** {1 Agent Health Metrics} *)
 
 let set_agent_heartbeat_age ~agent_name age_seconds =
-  Prometheus.set_gauge
-    Prometheus.metric_agent_heartbeat_age_seconds
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_agent_heartbeat_age_seconds
     ~labels:[ "agent_name", agent_name ]
     age_seconds
 ;;
 
-let inc_agent_stale () = Prometheus.inc_counter Prometheus.metric_agent_stale_total ()
+let inc_agent_stale () = Otel_metric_store.inc_counter Otel_metric_store.metric_agent_stale_total ()
 
 (** {1 Transport Health JSON Snapshot} *)
 
@@ -399,10 +413,10 @@ let int_field key json =
   | _ -> 0
 ;;
 
-let room_id_from_config (_config : Coord.config) = "default"
+let workspace_id_from_config (_config : Workspace.config) = "default"
 
-let cluster_summary_json (_config : Coord.config) =
-  (* Transport health should stay metrics-only and avoid command-plane/Coord I/O. *)
+let cluster_summary_json (_config : Workspace.config) =
+  (* Transport health should stay metrics-only and avoid command-plane/Workspace I/O. *)
   None
 ;;
 
@@ -411,10 +425,6 @@ let int_field_opt key = function
   | None -> None
 ;;
 
-let int_option_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
 
 let http_listener_mode () =
   Env_config.Transport.use_h2 () |> Env_config.Transport.h2_mode_to_string
@@ -496,73 +506,73 @@ let ws_delivery_metric_names =
   ; throttled_deliveries = "masc_ws_throttled_deliveries_total"
   ; client_buffered_bytes = "masc_ws_client_buffered_bytes"
   ; client_buffered_bytes_count = "masc_ws_client_buffered_bytes_count"
-  ; hello_latency = Prometheus.metric_ws_dashboard_hello_latency_seconds
-  ; hello_latency_count = Prometheus.metric_ws_dashboard_hello_latency_seconds ^ "_count"
+  ; hello_latency = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
+  ; hello_latency_count = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count"
   }
 ;;
 
 let transport_health_json ~config =
-  let v name ?(labels = []) () = Prometheus.metric_value_or_zero name ~labels () in
-  let sse_observer = v Prometheus.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
-  let sse_coordinator =
-    v Prometheus.metric_sse_sessions ~labels:[ "kind", "coordinator" ] ()
+  let v name ?(labels = []) () = Otel_metric_store.metric_value_or_zero name ~labels () in
+  let sse_observer = v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "observer" ] () in
+  let sse_agent_stream =
+    v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "agent_stream" ] ()
   in
-  let sse_presence = v Prometheus.metric_sse_sessions ~labels:[ "kind", "presence" ] () in
-  let sse_total = int_of_float (sse_observer +. sse_coordinator +. sse_presence) in
+  let sse_presence = v Otel_metric_store.metric_sse_sessions ~labels:[ "kind", "presence" ] () in
+  let sse_total = int_of_float (sse_observer +. sse_agent_stream +. sse_presence) in
   let sse_external_subscribers =
-    int_of_float (v Prometheus.metric_sse_external_subscribers ())
+    int_of_float (v Otel_metric_store.metric_sse_external_subscribers ())
   in
-  let sse_queue_avg = v Prometheus.metric_sse_queue_depth_avg () in
-  let sse_queue_max = int_of_float (v Prometheus.metric_sse_queue_depth_max ()) in
+  let sse_queue_avg = v Otel_metric_store.metric_sse_queue_depth_avg () in
+  let sse_queue_max = int_of_float (v Otel_metric_store.metric_sse_queue_depth_max ()) in
   let relay_queue_depth =
-    int_of_float (v Prometheus.metric_oas_sse_relay_queue_depth ())
+    int_of_float (v Otel_metric_store.metric_oas_sse_relay_queue_depth ())
   in
   let relay_retry_append =
     int_of_float
-      (v Prometheus.metric_oas_sse_relay_retries ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "append" ] ())
   in
   let relay_retry_broadcast =
     int_of_float
-      (v Prometheus.metric_oas_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_oas_sse_relay_retries ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_retry_total =
-    int_of_float (Prometheus.metric_total Prometheus.metric_oas_sse_relay_retries)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_retries)
   in
   let relay_drop_queue =
-    int_of_float (v Prometheus.metric_oas_sse_relay_drops ~labels:[ "stage", "queue" ] ())
+    int_of_float (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "queue" ] ())
   in
   let relay_drop_append =
     int_of_float
-      (v Prometheus.metric_oas_sse_relay_drops ~labels:[ "stage", "append" ] ())
+      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "append" ] ())
   in
   let relay_drop_broadcast =
     int_of_float
-      (v Prometheus.metric_oas_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
+      (v Otel_metric_store.metric_oas_sse_relay_drops ~labels:[ "stage", "broadcast" ] ())
   in
   let relay_drop_total =
-    int_of_float (Prometheus.metric_total Prometheus.metric_oas_sse_relay_drops)
+    int_of_float (Otel_metric_store.metric_total Otel_metric_store.metric_oas_sse_relay_drops)
   in
-  let broadcast_sum = v Prometheus.metric_sse_broadcast_duration () in
+  let broadcast_sum = v Otel_metric_store.metric_sse_broadcast_duration () in
   let broadcast_count = v "masc_sse_broadcast_duration_seconds_count" () in
   let broadcast_avg =
     if broadcast_count > 0.0 then broadcast_sum /. broadcast_count else 0.0
   in
-  let grpc_streams = v Prometheus.metric_grpc_active_streams () in
-  let grpc_subscribers = v Prometheus.metric_grpc_subscribers () in
-  let grpc_heartbeat_sum = v Prometheus.metric_grpc_heartbeat_latency () in
+  let grpc_streams = v Otel_metric_store.metric_grpc_active_streams () in
+  let grpc_subscribers = v Otel_metric_store.metric_grpc_subscribers () in
+  let grpc_heartbeat_sum = v Otel_metric_store.metric_grpc_heartbeat_latency () in
   let grpc_heartbeat_count = v "masc_grpc_heartbeat_latency_seconds_count" () in
   let grpc_heartbeat_avg =
     if grpc_heartbeat_count > 0.0 then grpc_heartbeat_sum /. grpc_heartbeat_count else 0.0
   in
-  let grpc_events = v Prometheus.metric_grpc_events_delivered () in
-  let grpc_events_dropped = v Prometheus.metric_grpc_events_dropped () in
-  let stale_agents = v Prometheus.metric_agent_stale_total () in
+  let grpc_events = v Otel_metric_store.metric_grpc_events_delivered () in
+  let grpc_events_dropped = v Otel_metric_store.metric_grpc_events_dropped () in
+  let stale_agents = v Otel_metric_store.metric_agent_stale_total () in
   let lifecycle_dispatch_rejections =
     int_of_float
-      (Prometheus.metric_total Keeper_metrics.(to_string LifecycleDispatchRejections))
+      (Otel_metric_store.metric_total Keeper_metrics.(to_string LifecycleDispatchRejections))
   in
   let ws_delivery_metrics = ws_delivery_metric_names in
-  let ws_sessions = int_of_float (v Prometheus.metric_ws_sessions ()) in
+  let ws_sessions = int_of_float (v Otel_metric_store.metric_ws_sessions ()) in
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
   let grpc_reachable = grpc_live || tcp_port_reachable (grpc_port ()) in
@@ -572,16 +582,16 @@ let transport_health_json ~config =
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
-  let webrtc_configured = Server_webrtc_transport.is_enabled () in
-  let webrtc_pending = Server_webrtc_transport.pending_offer_count () in
-  let webrtc_peers = Server_webrtc_transport.active_peer_count () in
-  let webrtc_live = Server_webrtc_transport.live_webrtc_count () in
-  let webrtc_channels = Server_webrtc_transport.connected_channel_count () in
+  let webrtc_configured = (Atomic.get webrtc_is_enabled_ref) () in
+  let webrtc_pending = (Atomic.get webrtc_pending_count_ref) () in
+  let webrtc_peers = (Atomic.get webrtc_peers_count_ref) () in
+  let webrtc_live = (Atomic.get webrtc_live_count_ref) () in
+  let webrtc_channels = (Atomic.get webrtc_channels_count_ref) () in
   let listener_mode = http_listener_mode () in
   let topology_summary = cluster_summary_json config in
-  let room_id = room_id_from_config config in
+  let workspace_id = workspace_id_from_config config in
   let cluster_name = Env_config_core.cluster_name () in
-  (* Keep transport-health free of Coord/PG reads so proactive refresh does not
+  (* Keep transport-health free of Workspace/PG reads so proactive refresh does not
      contend with dashboard and MCP writes on the shared backend. *)
   let recent_messages = None in
   let recent_messages_available = Option.is_some recent_messages in
@@ -606,7 +616,7 @@ let transport_health_json ~config =
                    ~relay_queue_depth
                    ~relay_retry_total
                    ~relay_drop_total) )
-          ; "recent_messages", int_option_json recent_messages
+          ; "recent_messages", Json_util.int_opt_to_json recent_messages
           ; "recent_messages_available", `Bool recent_messages_available
           ; "recent_messages_source", `String degraded_source
           ; "external_fanout_targets", `Int sse_external_subscribers
@@ -614,7 +624,7 @@ let transport_health_json ~config =
     ; ( "sse"
       , `Assoc
           [ "sessions_observer", `Int (int_of_float sse_observer)
-          ; "sessions_coordinator", `Int (int_of_float sse_coordinator)
+          ; "sessions_agent_stream", `Int (int_of_float sse_agent_stream)
           ; "sessions_presence", `Int (int_of_float sse_presence)
           ; "sessions_total", `Int sse_total
           ; "external_subscribers", `Int sse_external_subscribers
@@ -678,7 +688,7 @@ let transport_health_json ~config =
                 ; ( "throttled_deliveries"
                   , `Int (int_of_float (v ws_delivery_metrics.throttled_deliveries ())) )
                 ; (* Histogram sum + auto _count give operators enough to compute
-           average buffered bytes per ack without scraping /metrics. *)
+           average buffered bytes per ack without external telemetry queries. *)
                   ( "client_buffered_bytes_sum"
                   , `Float (v ws_delivery_metrics.client_buffered_bytes ()) )
                 ; ( "client_buffered_bytes_count"
@@ -686,11 +696,11 @@ let transport_health_json ~config =
                       (int_of_float
                          (v ws_delivery_metrics.client_buffered_bytes_count ())) )
                 ; ( "hello_latency_sum_seconds"
-                  , `Float (Prometheus.metric_total ws_delivery_metrics.hello_latency) )
+                  , `Float (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency) )
                 ; ( "hello_latency_count"
                   , `Int
                       (int_of_float
-                         (Prometheus.metric_total ws_delivery_metrics.hello_latency_count))
+                         (Otel_metric_store.metric_total ws_delivery_metrics.hello_latency_count))
                   )
                 ] )
           ] )
@@ -705,7 +715,7 @@ let transport_health_json ~config =
           ; "live_connections", `Int webrtc_live
           ; "connected_channels", `Int webrtc_channels
           ; ( "ice_server_count"
-            , `Int (List.length (Server_webrtc_transport.configured_ice_server_urls ())) )
+            , `Int (List.length ((Atomic.get webrtc_ice_servers_urls_ref) ())) )
           ] )
     ; ( "streamable_http"
       , `Assoc
@@ -733,18 +743,18 @@ let transport_health_json ~config =
     ; ( "cluster"
       , `Assoc
           [ "cluster", `String cluster_name
-          ; "room_id", `String room_id
+          ; "workspace_id", `String workspace_id
           ; "topology_available", `Bool topology_available
           ; "topology_source", `String degraded_source
-          ; "total_units", int_option_json (int_field_opt "total_units" topology_summary)
+          ; "total_units", Json_util.int_opt_to_json (int_field_opt "total_units" topology_summary)
           ; ( "managed_units"
-            , int_option_json (int_field_opt "managed_unit_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "managed_unit_count" topology_summary) )
           ; ( "live_agents"
-            , int_option_json (int_field_opt "live_agent_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "live_agent_count" topology_summary) )
           ; ( "active_operations"
-            , int_option_json (int_field_opt "active_operation_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "active_operation_count" topology_summary) )
           ; ( "stale_units"
-            , int_option_json (int_field_opt "stale_unit_count" topology_summary) )
+            , Json_util.int_opt_to_json (int_field_opt "stale_unit_count" topology_summary) )
           ] )
     ; ( "agent_health"
       , `Assoc

@@ -2,18 +2,12 @@
 
 open Tool_args
 open Keeper_types
-open Agent_tool_persona_runtime
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_tool_persona_runtime
 
 module Turn = Keeper_turn
-module Authoring = Keeper_persona_authoring
-type tool_result = Keeper_types.tool_result
-
-(* RFC-0182 §3.1 — ctx-free body shared with the persona dispatch ref
-   path.  Keeper_persona / Keeper_persona_authoring transitively touch
-   Keeper_turn_driver, so static import from
-   Agent_tool_in_process_runtime closes a cycle.  These [_handler]
-   entry points let Tool_keeper register the persona surface into
-   Persona_dispatch_ref at module load. *)
+type tool_result = Keeper_types_profile.tool_result
 let persona_list_handler args : tool_result =
   let detailed = get_bool args "detailed" true in
   let personas = list_persona_summaries () in
@@ -21,7 +15,7 @@ let persona_list_handler args : tool_result =
     if detailed then
       `List (List.map persona_summary_to_json personas)
     else
-      string_list_to_json (List.map (fun (persona : Keeper_types_profile.persona_summary) -> persona.persona_name) personas)
+      Json_util.json_string_list (List.map (fun (persona : Keeper_types_profile.persona_summary) -> persona.persona_name) personas)
   in
   let json =
     `Assoc
@@ -35,16 +29,6 @@ let persona_list_handler args : tool_result =
 (* TEL-OK: thin wrapper — telemetry stays in [persona_list_handler]. *)
 let handle_persona_list _ctx args : tool_result = persona_list_handler args
 
-let handle_persona_schema = Authoring.handle_persona_schema
-let persona_schema_handler args : tool_result =
-  Authoring.handle_persona_schema_no_ctx args
-
-let handle_persona_generate = Authoring.handle_persona_generate
-
-let handle_persona_save = Authoring.handle_persona_save
-let persona_save_handler args : tool_result =
-  Authoring.handle_persona_save_no_ctx args
-
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with
   | Error e -> tool_result_error ("" ^ e)
@@ -57,7 +41,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
             [
               ("persona", persona_summary_to_json persona);
               ("ready", `Bool (errors = []));
-              ("errors", string_list_to_json errors);
+              ("errors", Json_util.json_string_list errors);
               ("resolved_args", resolved_args);
             ]
         in
@@ -69,7 +53,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
                [
                  ("persona", persona_summary_to_json persona);
                  ("ready", `Bool false);
-                 ("errors", string_list_to_json errors);
+                 ("errors", Json_util.json_string_list errors);
                  ("resolved_args", resolved_args);
                ]))
       else

@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 (** {1 Test helpers} *)
 
@@ -36,11 +36,11 @@ let cleanup () =
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =
-  let result = Tool_board.handle_tool name args in
+  let result = Board_tool.handle_tool name args in
   ((Tool_result.is_success result), (Tool_result.message result))
 
 let dispatch_result name args =
-  Tool_board.handle_tool name args
+  Board_tool.handle_tool name args
 
 let check_failure_class name expected result =
   let actual =
@@ -63,7 +63,7 @@ let parse_create_response_json body =
     | None ->
         Alcotest.failf "expected JSON payload in create response: %s" body
 
-let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
+let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -89,22 +89,22 @@ let test_visibility_of_string () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check string) "public" "public"
-    (match Tool_board.visibility_of_string "public" with
+    (match Board_tool.visibility_of_string "public" with
      | Some Board.Public -> "public" | _ -> "other");
   Alcotest.(check string) "unlisted" "unlisted"
-    (match Tool_board.visibility_of_string "unlisted" with
+    (match Board_tool.visibility_of_string "unlisted" with
      | Some Board.Unlisted -> "unlisted" | _ -> "other");
   Alcotest.(check string) "internal" "internal"
-    (match Tool_board.visibility_of_string "internal" with
+    (match Board_tool.visibility_of_string "internal" with
      | Some Board.Internal -> "internal" | _ -> "other");
   Alcotest.(check string) "direct" "direct"
-    (match Tool_board.visibility_of_string "direct" with
+    (match Board_tool.visibility_of_string "direct" with
      | Some Board.Direct -> "direct" | _ -> "other");
   Alcotest.(check string) "unknown returns None" "none"
-    (match Tool_board.visibility_of_string "garbage" with
+    (match Board_tool.visibility_of_string "garbage" with
      | None -> "none" | _ -> "other")
 
-(* Issue #8449 PR B: [Tool_board.sort_order_of_string] removed —
+(* Issue #8449 PR B: [Board_tool.sort_order_of_string] removed —
    replaced by [parse_sort_order] (Result-returning) which delegates to
    [Board_dispatch.sort_order_of_string_opt]. The previous silent
    "unknown defaults to Hot" behavior is now an explicit Error so
@@ -114,27 +114,27 @@ let test_sort_order_of_string () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let check name expected input =
-    match Tool_board.parse_sort_order input with
+    match Board_tool.parse_sort_order input with
     | Ok v when v = expected -> Alcotest.(check string) name name name
     | Ok _ -> Alcotest.failf "%s: parsed wrong variant" name
     | Error e -> Alcotest.failf "%s: expected Ok, got Error: %s" name e
   in
-  check "hot" Tool_board.Hot "hot";
-  check "trending" Tool_board.Trending "trending";
-  check "recent" Tool_board.Recent "recent";
-  check "updated" Tool_board.Updated "updated";
-  check "discussed" Tool_board.Discussed "discussed";
+  check "hot" Board_tool.Hot "hot";
+  check "trending" Board_tool.Trending "trending";
+  check "recent" Board_tool.Recent "recent";
+  check "updated" Board_tool.Updated "updated";
+  check "discussed" Board_tool.Discussed "discussed";
   (* Garbage input is now an explicit Error, not a silent Hot default. *)
   Alcotest.(check bool) "garbage rejected" true
-    (match Tool_board.parse_sort_order "xyz" with Error _ -> true | Ok _ -> false)
+    (match Board_tool.parse_sort_order "xyz" with Error _ -> true | Ok _ -> false)
 
 let test_board_error_to_string () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let s = Tool_board.board_error_to_string (Board.Post_not_found "test-id") in
+  let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
   Alcotest.(check bool) "post_not_found has text" true (String.length s > 0);
-  let s2 = Tool_board.board_error_to_string (Board.Validation_error "bad") in
+  let s2 = Board_tool.board_error_to_string (Board.Validation_error "bad") in
   Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
 
 let test_is_agent () =
@@ -143,29 +143,29 @@ let test_is_agent () =
   cleanup ();
   (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
   Alcotest.(check bool) "no hook = not agent" false
-    (Tool_board.is_agent "dreamer");
+    (Board_tool.is_agent "dreamer");
   (* Install a mock hook that recognises "dreamer" *)
-  Tool_board.set_agent_lookup (fun name -> name = "dreamer");
-  Fun.protect ~finally:Tool_board.set_agent_lookup_none (fun () ->
+  Board_tool.set_agent_lookup (fun name -> name = "dreamer");
+  Fun.protect ~finally:Board_tool.set_agent_lookup_none (fun () ->
     Alcotest.(check bool) "registered agent" true
-      (Tool_board.is_agent "dreamer");
+      (Board_tool.is_agent "dreamer");
     Alcotest.(check bool) "unregistered agent" false
-      (Tool_board.is_agent "unknown");
+      (Board_tool.is_agent "unknown");
     Alcotest.(check bool) "empty = not agent" false
-      (Tool_board.is_agent ""))
+      (Board_tool.is_agent ""))
 
 let test_format_timestamp_relative () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let now = Time_compat.now () in
-  let s = Tool_board.format_timestamp_relative now in
+  let s = Board_tool.format_timestamp_relative now in
   Alcotest.(check string) "recent timestamp" "just now" s;
   let old = now -. 86400.0 in
-  let s2 = Tool_board.format_timestamp_relative old in
+  let s2 = Board_tool.format_timestamp_relative old in
   Alcotest.(check bool) "1-day old has 'd'" true (String.contains s2 'd');
   let minutes_ago = now -. 120.0 in
-  let s3 = Tool_board.format_timestamp_relative minutes_ago in
+  let s3 = Board_tool.format_timestamp_relative minutes_ago in
   Alcotest.(check bool) "2min ago has 'm'" true (String.contains s3 'm')
 
 let json_member_string json key =
@@ -449,7 +449,7 @@ let test_board_dashboard_json_embeds_contributor_quality () =
   in
   let rep =
     {
-      (Agent_reputation.default_reputation ~agent_name:"quality-author") with
+      (Reputation.default_reputation ~agent_name:"quality-author") with
       overall_score = 0.72;
       completion_rate = 0.8;
       response_rate = 0.6;
@@ -489,7 +489,7 @@ let test_inline_board_post_author_rewrites_caller_claim () =
       ]
   in
   let normalized =
-    Tool_inline_dispatch_extra.ensure_board_post_author
+    Mcp_tool_runtime_board.ensure_board_post_author
       ~agent_name:"keeper-velvet-hammer-agent" args
   in
   Alcotest.(check string) "author from ctx" "velvet-hammer"
@@ -512,7 +512,7 @@ let test_inline_board_post_author_accepts_matching_alias () =
       ]
   in
   let normalized =
-    Tool_inline_dispatch_extra.ensure_board_post_author
+    Mcp_tool_runtime_board.ensure_board_post_author
       ~agent_name:"keeper-analyst-agent" args
   in
   Alcotest.(check string) "author canonical" "analyst"
@@ -599,7 +599,7 @@ let test_post_create_structured_payload () =
     Yojson.Safe.Util.(json |> member "post_kind" |> to_string);
   Alcotest.(check string) "source meta kept" "keeper_autonomy"
     Yojson.Safe.Util.(json |> member "meta" |> member "source" |> to_string);
-  (* state_block is stripped by tool_board before reaching board_core,
+  (* state_block is stripped by board_tool before reaching board_core,
      so meta.state_block is absent (null) in the created post. *)
   Alcotest.(check bool) "state_block absent after strip" true
     (Yojson.Safe.Util.(json |> member "meta" |> member "state_block") = `Null)
@@ -739,7 +739,7 @@ let test_keeper_board_post_preserves_meta_reason () =
     "LLM judged this as automation because it broadcasts a keeper-owned status update."
   in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -770,7 +770,7 @@ let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -800,7 +800,7 @@ let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -826,7 +826,7 @@ let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -852,7 +852,7 @@ let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -875,7 +875,7 @@ let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -912,7 +912,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"typed-keeper" () in
   let fake =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_fake"
       ~args:(make_args [])
@@ -920,7 +920,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "fake board name rejected" true
     (contains_substring fake "unknown_board_tool");
   let comment_vote =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_comment_vote"
       ~args:(make_args [ ("comment_id", `String "") ])
@@ -930,7 +930,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed comment vote is not unknown" false
     (contains_substring comment_vote "unknown_board_tool");
   let curation =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_curation_read"
       ~args:(make_args [])
@@ -939,7 +939,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed curation read is not unknown" false
     (contains_substring curation "unknown_board_tool");
   let curation_submit =
-    Agent_tool_board_runtime.handle_keeper_board_tool
+    Keeper_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_curation_submit"
       ~args:
@@ -1089,8 +1089,8 @@ let test_board_curation_submit_roundtrips_to_read () =
   let submitted = Yojson.Safe.from_string body in
   Alcotest.(check string) "submitted_by persisted" "curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
-  Alcotest.(check string) "model trimmed" "test-model"
-    Yojson.Safe.Util.(submitted |> member "model" |> to_string);
+  Alcotest.(check bool) "model omitted from board curation contract" true
+    Yojson.Safe.Util.(submitted |> member "model" = `Null);
   Alcotest.(check string) "summary persisted"
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(submitted |> member "summary" |> to_string);
@@ -1122,47 +1122,47 @@ let test_board_curation_submit_roundtrips_to_read () =
     "Board has one high-priority routing item."
     Yojson.Safe.Util.(read_json |> member "summary" |> to_string)
 
-let inline_board_dispatch ~sw ~clock name args =
+let mcp_runtime_board_dispatch ~sw ~clock name args =
   let state = Mcp_server.create_state ~base_path:_test_base_path in
-  Tool_inline_dispatch_extra.dispatch ~config:state.Mcp_server.room_config
-    ~agent_name:"inline-curator" ~arguments:args ~state ~sw ~clock ~name
+  Mcp_tool_runtime_board.dispatch ~config:state.Mcp_server.workspace_config
+    ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~sw ~clock ~name
     ~start_time:(Unix.gettimeofday ())
 
-let require_inline_result ~sw ~clock name args =
-  match inline_board_dispatch ~sw ~clock name args with
+let require_mcp_runtime_result ~sw ~clock name args =
+  match mcp_runtime_board_dispatch ~sw ~clock name args with
   | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
-  | None -> Alcotest.failf "%s not routed by inline board dispatch" name
+  | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
-let test_board_curation_inline_dispatch_routes_read_and_submit () =
+let test_board_curation_mcp_runtime_routes_read_and_submit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let read_ok, read_body =
-    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
   in
-  Alcotest.(check bool) "inline curation read ok" true read_ok;
-  Alcotest.(check string) "inline curation read empty" "null" read_body;
+  Alcotest.(check bool) "MCP runtime curation read ok" true read_ok;
+  Alcotest.(check string) "MCP runtime curation read empty" "null" read_body;
   let submit_ok, submit_body =
-    require_inline_result ~sw ~clock "masc_board_curation_submit"
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_submit"
       (make_args
          [
-           ("submitted_by", `String "inline-curator");
-           ("summary", `String "Inline MCP curation route works.");
+           ("submitted_by", `String "mcp-runtime-curator");
+           ("summary", `String "MCP runtime curation route works.");
            ("rationale", `String "Pin schema-to-dispatch curation routing");
          ])
   in
-  Alcotest.(check bool) "inline curation submit ok" true submit_ok;
+  Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  Alcotest.(check string) "inline submitted_by persisted" "inline-curator"
+  Alcotest.(check string) "MCP runtime submitted_by persisted" "mcp-runtime-curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);
   let read2_ok, read2_body =
-    require_inline_result ~sw ~clock "masc_board_curation_read" (make_args [])
+    require_mcp_runtime_result ~sw ~clock "masc_board_curation_read" (make_args [])
   in
-  Alcotest.(check bool) "inline curation read after submit ok" true read2_ok;
-  Alcotest.(check string) "inline curation read after submit summary"
-    "Inline MCP curation route works."
+  Alcotest.(check bool) "MCP runtime curation read after submit ok" true read2_ok;
+  Alcotest.(check string) "MCP runtime curation read after submit summary"
+    "MCP runtime curation route works."
     Yojson.Safe.Util.(
       Yojson.Safe.from_string read2_body |> member "summary" |> to_string)
 
@@ -1633,13 +1633,13 @@ let test_tools_count () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "19 tool schemas" 19 (List.length Tool_board.tools)
+  Alcotest.(check int) "19 tool schemas" 19 (List.length Board_tool.tools)
 
 let test_tools_names_unique () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Tool_board.tools in
+  let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Board_tool.tools in
   let unique = List.sort_uniq String.compare names in
   Alcotest.(check int) "all names unique" (List.length names) (List.length unique)
 
@@ -1650,7 +1650,7 @@ let test_tools_all_have_descriptions () =
   List.iter (fun (t : Masc_domain.tool_schema) ->
     Alcotest.(check bool) (Printf.sprintf "%s has description" t.name) true
       (String.length t.description > 0)
-  ) Tool_board.tools
+  ) Board_tool.tools
 
 let health_score_schema (tool : Masc_domain.tool_schema) =
   match tool.input_schema with
@@ -1677,7 +1677,7 @@ let test_curation_health_score_schema_bounds () =
       Yojson.Safe.Util.(List.assoc "maximum" schema |> to_float)
   in
   check_bounds "raw curation submit"
-    (find_tool "masc_board_curation_submit" Tool_board.tools);
+    (find_tool "masc_board_curation_submit" Board_tool.tools);
   check_bounds "keeper curation submit"
     (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
 
@@ -1831,7 +1831,7 @@ let test_rate_dispatch_error_message () =
 (** {1 Test Runner} *)
 
 let () =
-  Alcotest.run "Tool_board_coverage"
+  Alcotest.run "Board_tool_coverage"
     [
       ( "helpers",
         [
@@ -1852,9 +1852,9 @@ let () =
             `Quick test_board_dashboard_json_hides_unvoted_scores_when_blind;
           Alcotest.test_case "board dashboard json embeds contributor quality"
             `Quick test_board_dashboard_json_embeds_contributor_quality;
-          Alcotest.test_case "inline board post author rewrites caller claim"
+          Alcotest.test_case "MCP runtime board post author rewrites caller claim"
             `Quick test_inline_board_post_author_rewrites_caller_claim;
-          Alcotest.test_case "inline board post author accepts matching alias"
+          Alcotest.test_case "MCP runtime board post author accepts matching alias"
             `Quick test_inline_board_post_author_accepts_matching_alias;
         ] );
       ( "json_helpers",
@@ -1905,8 +1905,8 @@ let () =
             test_board_curation_read_empty_returns_json_null;
           Alcotest.test_case "curation submit roundtrips to read" `Quick
             test_board_curation_submit_roundtrips_to_read;
-          Alcotest.test_case "curation inline dispatch routes read and submit" `Quick
-            test_board_curation_inline_dispatch_routes_read_and_submit;
+          Alcotest.test_case "curation MCP runtime routes read and submit" `Quick
+            test_board_curation_mcp_runtime_routes_read_and_submit;
           Alcotest.test_case "accept automation reject system" `Quick
             test_post_create_accepts_automation_rejects_system;
           Alcotest.test_case "create empty content" `Quick test_post_create_empty_content;
@@ -1978,7 +1978,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.set_agent_lookup_none ();
+            Board_tool.set_agent_lookup_none ();
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "agent_llm_a-agent")
@@ -1991,7 +1991,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.set_agent_lookup (fun name -> name = "agent_llm_a-agent");
+            Board_tool.set_agent_lookup (fun name -> name = "agent_llm_a-agent");
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "agent_llm_a-agent")
@@ -2004,7 +2004,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.set_agent_lookup (fun _name -> false);
+            Board_tool.set_agent_lookup (fun _name -> false);
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "sangsu")
@@ -2017,7 +2017,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.set_agent_lookup (fun _name -> true);
+            Board_tool.set_agent_lookup (fun _name -> true);
             let (ok, msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "agent_llm_a-agent");
@@ -2033,7 +2033,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             (* Create a post so list is non-empty *)
             let (_ok, _msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "cached"); ("content", `String "hello");
@@ -2052,7 +2052,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             let (_ok, _msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "first"); ("content", `String "hello");
               ("author", `String "tester")
@@ -2072,7 +2072,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             let (_ok, _msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "test"); ("content", `String "hello");
               ("author", `String "tester")
@@ -2090,7 +2090,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             (* Create multiple posts so random shuffle can differ *)
             List.iter (fun i ->
               let (_ok, _msg) = dispatch "masc_board_post" (make_args [
@@ -2105,7 +2105,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "to-delete"); ("content", `String "hello");
               ("author", `String "tester")
@@ -2127,7 +2127,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "for-comment"); ("content", `String "hello");
               ("author", `String "tester")
@@ -2150,7 +2150,7 @@ let () =
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
-            Tool_board.invalidate_board_list_cache ();
+            Board_tool.invalidate_board_list_cache ();
             let (_ok, create_msg) = dispatch "masc_board_post" (make_args [
               ("title", `String "for-vote"); ("content", `String "hello");
               ("author", `String "tester")

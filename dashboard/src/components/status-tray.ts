@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
-import { isAttentionCodeSatisfied } from '../lib/keeper-classifiers'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import {
   dashboardWsConnected,
@@ -58,6 +57,7 @@ export interface StatusTraySummary {
   latestJournalEntries: JournalEntry[]
   counts: {
     totalKeepers: number
+    freshKeepers: number
     staleKeepers: number
     keeperAttention: number
     pendingVerificationTasks: number
@@ -138,38 +138,12 @@ function countPendingVerification(tasksInput: readonly Task[]): number {
   return tasksInput.filter(task => task.status === 'awaiting_verification').length
 }
 
-// Closed set of wire-format values emitted by the backend
-// keeper_execution_receipt.tool_contract_result_to_string (11 variants).
-// Both runtime_proof_status and tool_contract_result use the same values.
-const EXECUTION_ATTENTION_SET: ReadonlySet<string> = new Set([
-  'violated',
-  'tool_surface_mismatch',
-  'no_tool_capable_provider',
-  'missing_required_tool_use',
-  'claim_only_after_owned_task',
-  'needs_execution_progress',
-  'passive_only',
-  'not_dispatched',
-])
-
-function isExecutionAttentionCode(value: string | null | undefined): boolean {
-  if (!value) return false
-  const normalized = value.trim().toLowerCase()
-  if (!normalized || normalized === 'unknown') return false
-  if (isAttentionCodeSatisfied(normalized)) return false
-  return EXECUTION_ATTENTION_SET.has(normalized)
-}
-
 function hasExecutionAttentionEvidence(keeper: Keeper): boolean {
   const trust = keeper.trust
   if (trust?.needs_attention === true) return true
   const terminalSeverity = trust?.latest_terminal_reason?.severity?.trim().toLowerCase()
   if (terminalSeverity === 'bad' || terminalSeverity === 'warn') return true
-  const execution = trust?.execution_summary
-  if (!execution) return false
-  if ((execution.missing_required_tools ?? []).length > 0) return true
-  return isExecutionAttentionCode(execution.runtime_proof_status)
-    || isExecutionAttentionCode(execution.tool_contract_result)
+  return false
 }
 
 function countKeeperAttention(keeperInput: readonly Keeper[]): number {
@@ -201,7 +175,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
   const totalKeepers = input.keepers.length
   const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
   const keeperAttention = countKeeperAttention(input.keepers)
-  const activeKeepers = Math.max(0, totalKeepers - staleCount)
+  const freshKeepers = Math.max(0, totalKeepers - staleCount)
   const pendingVerificationTasks = countPendingVerification(input.tasks)
 
   let transport: StatusTrayItem
@@ -295,6 +269,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
     latestJournalEntries: latest,
     counts: {
       totalKeepers,
+      freshKeepers,
       staleKeepers: staleCount,
       keeperAttention,
       pendingVerificationTasks,
@@ -308,11 +283,11 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
         key: 'fleet',
         tone: fleetTone,
         label: 'Keepers',
-        value: totalKeepers === 0 ? 'none' : `${activeKeepers}/${totalKeepers}`,
+        value: totalKeepers === 0 ? 'none' : `fresh ${freshKeepers}/${totalKeepers}`,
         detail: staleCount > 0
-          ? `${staleCount} stale heartbeat${staleCount === 1 ? '' : 's'}`
+          ? `${staleCount} stale heartbeat${staleCount === 1 ? '' : 's'}; freshness is separate from running fibers`
           : keeperAttention > 0
-            ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention`
+            ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention; heartbeat freshness is current`
             : 'keeper heartbeats are current',
       },
       activity: {
@@ -422,8 +397,8 @@ function PopoverContent({
       <div class="grid gap-3">
         <div class="grid grid-cols-3 gap-2">
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Total</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.totalKeepers}</div>
+            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
           </div>
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>
@@ -461,9 +436,9 @@ function PopoverContent({
           <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keepers</div>
           <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.keeperAttention}</div>
         </div>
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Verify</div>
-          <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.pendingVerificationTasks}</div>
+        <div class="rounded-[var(--r-1)] border ${summary.counts.pendingVerificationTasks >= 3 ? 'border-[var(--warn-20)] bg-[var(--warn-10)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)]'} px-2 py-1.5">
+          <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : 'text-[var(--color-fg-muted)]'}">Verify</div>
+          <div class="mt-0.5 text-sm font-semibold tabular-nums ${summary.counts.pendingVerificationTasks >= 3 ? 'text-[var(--warn-bright)]' : ''}">${summary.counts.pendingVerificationTasks}</div>
         </div>
       </div>
       ${summary.counts.unacknowledgedErrors > 0 ? html`

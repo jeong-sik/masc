@@ -1,6 +1,6 @@
 (** Unit tests for Trajectory module — JSONL trajectory logging. *)
 
-open Masc_mcp
+open Masc
 
 let () =
   (* Ensure RNG is initialized for any code that may need it *)
@@ -54,7 +54,7 @@ let test_create_accumulator () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-001" ~generation:0 in
+      ~trace_id:"trace-001" ~generation:0 () in
     Alcotest.(check int) "initial turn" 0 acc.Trajectory.turn;
     Alcotest.(check (float 0.0001)) "initial cost" 0.0 acc.Trajectory.total_cost;
     Alcotest.(check int) "initial entries" 0 (List.length acc.Trajectory.entries))
@@ -67,7 +67,7 @@ let test_record_entry () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-002" ~generation:0 in
+      ~trace_id:"trace-002" ~generation:0 () in
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0;
       ts_iso = "2026-01-01T00:00:00Z";
@@ -80,6 +80,7 @@ let test_record_entry () =
       duration_ms = 50;
       error = None;
       cost_usd = 0.0001;
+      execution_id = Some "exec-1000-0001";
     } in
     Trajectory.record_entry acc entry;
     Alcotest.(check int) "entries count" 1 (List.length acc.Trajectory.entries);
@@ -93,7 +94,7 @@ let test_entropy_not_triggered () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-003" ~generation:0 in
+      ~trace_id:"trace-003" ~generation:0 () in
     (* Add 1 consecutive call — with +1 for upcoming, count=2 < threshold 3 *)
     let mk_entry tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
@@ -101,6 +102,7 @@ let test_entropy_not_triggered () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk_entry "tool_execute");
     let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
@@ -110,13 +112,14 @@ let test_entropy_triggered () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-004" ~generation:0 in
+      ~trace_id:"trace-004" ~generation:0 () in
     let mk_entry tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = 1; round = 0;
       tool_name = tool; args_json = "{}";
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk_entry "tool_execute");
     Trajectory.record_entry acc (mk_entry "tool_execute");
@@ -135,7 +138,7 @@ let test_increment_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-005" ~generation:0 in
+      ~trace_id:"trace-005" ~generation:0 () in
     Alcotest.(check int) "turn 0" 0 acc.Trajectory.turn;
     Trajectory.increment_turn acc;
     Alcotest.(check int) "turn 1" 1 acc.Trajectory.turn;
@@ -150,7 +153,7 @@ let test_finalize () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-006" ~generation:0 in
+      ~trace_id:"trace-006" ~generation:0 () in
     Trajectory.increment_turn acc;
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
@@ -159,6 +162,7 @@ let test_finalize () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 100;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc entry;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -189,7 +193,7 @@ let test_calls_in_current_turn () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-007" ~generation:0 in
+      ~trace_id:"trace-007" ~generation:0 () in
     Trajectory.increment_turn acc;
     let mk tool = { Trajectory.
       ts = 1000.0; ts_iso = ""; turn = acc.Trajectory.turn; round = 0;
@@ -197,6 +201,7 @@ let test_calls_in_current_turn () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk "tool_execute");
     Trajectory.record_entry acc (mk "tool_read_file");
@@ -211,14 +216,14 @@ let test_task_id_default_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-001" ~generation:0 in
+      ~trace_id:"trace-tid-001" ~generation:0 () in
     Alcotest.(check (option string)) "task_id default" None acc.Trajectory.task_id)
 
 let test_set_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-002" ~generation:0 in
+      ~trace_id:"trace-tid-002" ~generation:0 () in
     Trajectory.set_task_id acc "task-042";
     Alcotest.(check (option string)) "task_id set"
       (Some "task-042") acc.Trajectory.task_id)
@@ -227,7 +232,7 @@ let test_clear_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-003" ~generation:0 in
+      ~trace_id:"trace-tid-003" ~generation:0 () in
     Trajectory.set_task_id acc "task-042";
     Trajectory.clear_task_id acc;
     Alcotest.(check (option string)) "task_id cleared" None acc.Trajectory.task_id)
@@ -236,7 +241,7 @@ let test_finalize_propagates_task_id () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-004" ~generation:0 in
+      ~trace_id:"trace-tid-004" ~generation:0 () in
     Trajectory.set_task_id acc "task-099";
     Trajectory.increment_turn acc;
     let traj = Trajectory.finalize acc Trajectory.Completed in
@@ -247,7 +252,7 @@ let test_task_id_in_trajectory_json () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-005" ~generation:0 in
+      ~trace_id:"trace-tid-005" ~generation:0 () in
     Trajectory.set_task_id acc "task-json-test";
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
@@ -262,7 +267,7 @@ let test_task_id_null_when_none () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"test-keeper"
-      ~trace_id:"trace-tid-006" ~generation:0 in
+      ~trace_id:"trace-tid-006" ~generation:0 () in
     let traj = Trajectory.finalize acc Trajectory.Completed in
     let json = Trajectory.trajectory_to_json traj in
     let open Yojson.Safe.Util in
@@ -272,7 +277,7 @@ let test_task_id_null_when_none () =
     | _ -> Alcotest.fail "Expected task_id to be null when not set")
 
 (* model_pricing tests removed — model_token_pricing / estimate_turn_cost
-   deleted from Trajectory (#3029). Pricing belongs to OAS cascade. *)
+   deleted from Trajectory (#3029). Pricing belongs to OAS runtime. *)
 
 (* ================================================================ *)
 (* Test: aggregate_tool_stats                                        *)
@@ -285,6 +290,7 @@ let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur c
     gate_decision = gate;
     result = Some "ok"; duration_ms = dur;
     error; cost_usd = cost;
+    execution_id = None;
   }
 
 let test_aggregate_basic () =
@@ -410,9 +416,10 @@ let test_entry_to_json_includes_contract_and_radius () =
     duration_ms = 25;
     error = None;
     cost_usd = 0.0001;
+    execution_id = Some "exec-1000-0001";
   } in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:"alpha"
       ~agent_name:"alpha-agent"
       ~trace_id:"trace-alpha"
@@ -438,7 +445,73 @@ let test_entry_to_json_includes_contract_and_radius () =
     (json |> member "action_radius" |> member "tool_name" |> to_string);
   Alcotest.(check string) "observed path" "/tmp/work"
     (json |> member "action_radius" |> member "observed_paths" |> to_list
-     |> List.hd |> to_string)
+     |> List.hd |> to_string);
+  Alcotest.(check string) "execution_id persisted" "exec-1000-0001"
+    (json |> member "execution_id" |> to_string)
+
+(* RFC-0233 PR-1: the canonical join key survives the JSONL round-trip,
+   and rows written before the field existed decode as [None]. *)
+let test_execution_id_roundtrip () =
+  let entry : Trajectory.tool_call_entry = {
+    ts = 1000.0; ts_iso = "2026-06-12T00:00:00Z"; turn = 3; round = 1;
+    tool_name = "tool_execute"; args_json = "{}";
+    gate_decision = Trajectory.Pass;
+    result = Some "ok"; duration_ms = 10; error = None; cost_usd = 0.0;
+    execution_id = Some "exec-1718150400000-0001";
+  } in
+  (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
+   | Some (decoded, _) ->
+       Alcotest.(check (option string)) "round-trip"
+         (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
+   | None -> Alcotest.fail "entry did not decode");
+  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
+  match Trajectory.tool_call_entry_of_json legacy with
+  | Some (decoded, _) ->
+      Alcotest.(check (option string)) "legacy row decodes as None" None
+        decoded.Trajectory.execution_id
+  | None -> Alcotest.fail "legacy entry did not decode"
+
+let has_assoc_key key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
+
+let test_runtime_contract_projection_redacts_backend_details () =
+  let keeper_visible =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"alpha"
+      ~agent_name:"alpha-agent"
+      ~trace_id:"trace-alpha"
+      ~generation:2
+      ~sandbox_profile:"docker"
+      ~sandbox_root:"/workspace"
+      ~network_mode:"none"
+      ()
+  in
+  let observability =
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
+      ~keeper_name:"alpha"
+      ~agent_name:"alpha-agent"
+      ~trace_id:"trace-alpha"
+      ~generation:2
+      ~sandbox_profile:"docker"
+      ~sandbox_root:"/workspace"
+      ~network_mode:"none"
+      ()
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "keeper contract redacts sandbox_profile" false
+    (has_assoc_key "sandbox_profile" keeper_visible);
+  Alcotest.(check bool) "keeper contract redacts network_mode" false
+    (has_assoc_key "network_mode" keeper_visible);
+  Alcotest.(check string) "keeper contract keeps sandbox root" "/workspace"
+    (keeper_visible |> member "sandbox_root" |> to_string);
+  Alcotest.(check bool) "keeper contract says Read has no implicit cwd" false
+    (keeper_visible |> member "path_resolution" |> member "read_implicit_cwd"
+     |> to_bool);
+  Alcotest.(check string) "observability keeps sandbox_profile" "docker"
+    (observability |> member "sandbox_profile" |> to_string);
+  Alcotest.(check string) "observability keeps network_mode" "none"
+    (observability |> member "network_mode" |> to_string)
 
 (* ================================================================ *)
 (* Test: read_entries_since (file-based)                             *)
@@ -508,6 +581,67 @@ let test_read_entries_since_no_dir () =
 (* Runner                                                            *)
 (* ================================================================ *)
 
+(* ================================================================ *)
+(* Test: thinking trajectory — full untruncated text, per-turn        *)
+(* ================================================================ *)
+
+let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
+  let path = Filename.concat masc_root
+    (Printf.sprintf "trajectories/%s/%s.jsonl" keeper_name trace_id) in
+  if not (Sys.file_exists path) then []
+  else begin
+    let ic = open_in path in
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      let rec loop acc =
+        match input_line ic with
+        | line -> loop (Yojson.Safe.from_string line :: acc)
+        | exception End_of_file -> List.rev acc
+      in
+      loop [])
+  end
+
+(* append_thinking must persist the FULL text, not the legacy 2000-byte cap. *)
+let test_append_thinking_persists_untruncated () =
+  with_tmpdir (fun dir ->
+    let big = String.make 9000 'x' in
+    let entry : Trajectory.thinking_entry = {
+      ts = 1000.0; ts_iso = "2026-06-09T00:00:00Z"; turn = 4;
+      content = big; content_length = String.length big; redacted = false;
+    } in
+    Trajectory.append_thinking ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" entry;
+    let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" in
+    Alcotest.(check int) "one thinking line" 1 (List.length lines);
+    let open Yojson.Safe.Util in
+    let row = List.hd lines in
+    Alcotest.(check string) "type=thinking" "thinking" (row |> member "type" |> to_string);
+    Alcotest.(check int) "content untruncated (9000B, not 2000 cap)" 9000
+      (row |> member "content" |> to_string |> String.length);
+    Alcotest.(check int) "content_length records true length" 9000
+      (row |> member "content_length" |> to_int))
+
+(* persist_response_content stamps every block with the hook's ~turn (not
+   acc.turn) and writes one line per thinking block, untruncated. *)
+let test_persist_response_content_per_turn_full () =
+  with_tmpdir (fun dir ->
+    let acc = Trajectory.create_accumulator
+      ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
+    (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
+    let big = String.make 5000 'a' in
+    let content = [
+      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = big };
+      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = "second block" };
+    ] in
+    Keeper_agent_run_thinking_trajectory.persist_response_content
+      ~keeper_name:"k" ~trajectory_acc:(Some acc) ~turn:11 content;
+    let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" in
+    let open Yojson.Safe.Util in
+    Alcotest.(check int) "both thinking blocks persisted" 2 (List.length lines);
+    List.iter (fun row ->
+      Alcotest.(check int) "turn stamped from hook (11), not acc.turn (0)" 11
+        (row |> member "turn" |> to_int)) lines;
+    Alcotest.(check int) "first block untruncated (5000B)" 5000
+      (List.hd lines |> member "content" |> to_string |> String.length))
+
 let () =
   Alcotest.run "Trajectory" [
     ("tool_cost", [
@@ -559,11 +693,21 @@ let () =
       Alcotest.test_case "hourly_bucket to json" `Quick test_hourly_bucket_json;
       Alcotest.test_case "entry carries runtime/action telemetry" `Quick
         test_entry_to_json_includes_contract_and_radius;
+      Alcotest.test_case "execution_id JSONL round-trip + legacy None" `Quick
+        test_execution_id_roundtrip;
+      Alcotest.test_case "runtime contract redacts backend details" `Quick
+        test_runtime_contract_projection_redacts_backend_details;
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;
       Alcotest.test_case "parses persisted gate summary" `Quick
         test_read_entries_since_result_parses_gate_summary;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
+    ]);
+    ("thinking_trajectory", [
+      Alcotest.test_case "append_thinking persists full untruncated text" `Quick
+        test_append_thinking_persists_untruncated;
+      Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
+        test_persist_response_content_per_turn_full;
     ]);
   ]

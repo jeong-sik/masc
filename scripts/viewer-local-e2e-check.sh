@@ -15,9 +15,7 @@ RUN_ROUND=0
 
 ROUNDS="${ROUNDS:-1}"
 ROUND_TIMEOUT_SEC="${ROUND_TIMEOUT_SEC:-45}"
-ROOM_ID="${ROOM_ID:-}"
-WORLD_PRESET_ID="${WORLD_PRESET_ID:-}"
-DM_PRESET_ID="${DM_PRESET_ID:-}"
+WORKSPACE_ID="${WORKSPACE_ID:-}"
 PARTY_SIZE="${PARTY_SIZE:-4}"
 POOL_SIZE="${POOL_SIZE:-6}"
 KEEPER_MODELS="${KEEPER_MODELS:-}"
@@ -51,9 +49,7 @@ viewer-local-e2e-check.sh
   --run-round                smoke에 trpg.round.run 실행 포함 (암시적으로 --run-smoke)
   --rounds N                 smoke 라운드 수 (기본 1)
   --round-timeout-sec N      round timeout (기본 45)
-  --room-id ID               smoke room_id (기본: 자동 생성)
-  --world-preset-id ID       smoke world preset
-  --dm-preset-id ID          smoke DM preset
+  --workspace-id ID               smoke workspace_id (기본: 자동 생성)
   --party-size N             smoke party size (기본 4)
   --pool-size N              smoke pool size (기본 6)
   --keeper-models CSV        smoke keeper 모델 (예: glm:auto)
@@ -64,7 +60,7 @@ viewer-local-e2e-check.sh
   scripts/viewer-local-e2e-check.sh
   scripts/viewer-local-e2e-check.sh --build-viewer
   scripts/viewer-local-e2e-check.sh --run-smoke --keeper-models "glm:auto"
-  scripts/viewer-local-e2e-check.sh --run-round --rounds 2 --keeper-models "gemini:gemini-3-flash-preview"
+  scripts/viewer-local-e2e-check.sh --run-round --rounds 2 --keeper-models "auto:auto"
 EOF
 }
 
@@ -358,17 +354,9 @@ while [ $# -gt 0 ]; do
       shift
       ROUND_TIMEOUT_SEC="${1:-}"
       ;;
-    --room-id)
+    --workspace-id)
       shift
-      ROOM_ID="${1:-}"
-      ;;
-    --world-preset-id)
-      shift
-      WORLD_PRESET_ID="${1:-}"
-      ;;
-    --dm-preset-id)
-      shift
-      DM_PRESET_ID="${1:-}"
+      WORKSPACE_ID="${1:-}"
       ;;
     --party-size)
       shift
@@ -413,7 +401,7 @@ echo "  MCP_URL=$MCP_URL"
 echo "  RUN_VIEWER_BUILD=$RUN_VIEWER_BUILD"
 echo "  RUN_SMOKE=$RUN_SMOKE"
 echo "  RUN_ROUND=$RUN_ROUND"
-echo "  ROOM_ID=${ROOM_ID:-<auto>}"
+echo "  WORKSPACE_ID=${WORKSPACE_ID:-<auto>}"
 echo "  LOG_DIR=$LOG_DIR"
 
 run_step "command prerequisites" step_check_commands

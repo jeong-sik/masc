@@ -6,6 +6,8 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type parsed_args = {
   name : string;
@@ -14,11 +16,9 @@ type parsed_args = {
   short_goal_opt : string option;
   mid_goal_opt : string option;
   long_goal_opt : string option;
-  cascade_name_opt : string option;
+  runtime_id_opt : string option;
   allowed_paths_opt : string list option;
   autoboot_enabled_opt : bool option;
-  sandbox_profile_opt : sandbox_profile option;
-  network_mode_opt : network_mode option;
   mention_targets_in : string list;
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
@@ -29,9 +29,9 @@ type parsed_args = {
   compaction_message_gate_opt : int option;
   compaction_token_gate_opt : int option;
   continuity_compaction_cooldown_sec_opt : int option;
-  tool_access_opt : tool_access option;
-  tool_preset_opt : tool_preset option;
-  tool_also_allow_opt : string list option;
+  sandbox_profile_opt : string option;
+  network_mode_opt : string option;
+  tool_access_opt : string list option;
   tool_denylist_opt : string list option;
   auto_handoff_opt : bool option;
   handoff_threshold_opt : float option;
@@ -50,10 +50,6 @@ let normalize_tool_name_list names =
   |> List.filter (fun name -> name <> "")
   |> dedupe_keep_order
 
-let json_assoc_member_opt key (json : Yojson.Safe.t) =
-  match json with
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
 
 let json_non_null_member_present key (json : Yojson.Safe.t) =
   match json with
@@ -64,7 +60,7 @@ let json_non_null_member_present key (json : Yojson.Safe.t) =
   | _ -> false
 
 let parse_present_tool_name_list_opt args key =
-  match json_assoc_member_opt key args with
+  match Json_util.assoc_member_opt key args with
   | None -> Ok None
   | Some (`List items) ->
       let rec collect acc index = function
@@ -83,7 +79,7 @@ let parse_present_tool_name_list_opt args key =
            (Json_util.kind_name other))
 
 let parse_present_string_list_opt args key =
-  match json_assoc_member_opt key args with
+  match Json_util.assoc_member_opt key args with
   | None -> Ok None
   | Some (`List items) ->
       let rec collect acc index = function
@@ -101,101 +97,46 @@ let parse_present_string_list_opt args key =
         (Printf.sprintf "%s must be an array of strings (received %s)" key
            (Json_util.kind_name other))
 
-let parse_enum_string_opt args key of_string ~allowed_values =
-  match json_assoc_member_opt key args with
-  | None -> Ok None
-  | Some (`String raw) -> (
-      match of_string raw with
-      | Some value -> Ok (Some value)
-      | None ->
-          Error
-            (Printf.sprintf "invalid %s '%s' (allowed: %s)"
-               key raw allowed_values))
-  | Some `Null -> Error (Printf.sprintf "%s must not be null" key)
+let parse_runtime_id_opt args =
+  match Json_util.assoc_member_opt "runtime_id" args with
+  | None | Some `Null -> Ok None
+  | Some (`String raw) ->
+      let runtime_id = String.trim raw in
+      if runtime_id = ""
+      then Error "runtime_id must not be empty"
+      else Ok (Some runtime_id)
   | Some other ->
       Error
-        (Printf.sprintf "%s must be a string (received %s)" key
+        (Printf.sprintf
+           "runtime_id must be a string (received %s)"
            (Json_util.kind_name other))
-
-let parse_cascade_name_opt args =
-  match get_string_opt args "cascade_name" with
-  | None -> Ok None
-  | Some raw ->
-      let normalized =
-        Keeper_cascade_profile.normalize_declared_name raw |> String.trim
-      in
-      if normalized = "" then Error "cascade_name must not be empty"
-      else
-        let assignable = Keeper_cascade_profile.keeper_catalog_names () in
-        if List.mem normalized assignable then Ok (Some normalized)
-        else
-          let catalog = Keeper_cascade_profile.catalog_names () in
-          if List.mem normalized catalog then
-            Error
-              (Printf.sprintf
-                 "cascade_name '%s' is system-only (keeper_assignable=false); \
-                  choose a keeper-assignable cascade"
-                 raw)
-          else
-            match
-              Cascade_runtime.models_of_cascade_name_result
-                (Cascade_name.of_string_exn normalized)
-            with
-            | Ok _ -> Ok (Some normalized)
-            | Error detail ->
-                Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
 
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
-let reject_legacy_tool_access_kind access_json =
-  match json_assoc_member_opt "kind" access_json with
-  | Some (`String ("restricted" | "unrestricted")) ->
-      Error
-        "tool_access.kind must be \"preset\" or \"custom\"; legacy kinds \"restricted\" and \"unrestricted\" are not supported for this endpoint"
-  | _ -> Ok ()
-
 let parse_tool_access_input (args : Yojson.Safe.t) :
-    (tool_access option * tool_preset option * string list option, string) result =
-  let removed_tool_policy_keys =
-    present_json_keys
-      [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist" ]
-      args
-  in
-  if removed_tool_policy_keys <> [] then
-    Error
-      (Printf.sprintf
-         "removed keeper tool policy args: %s. Use canonical tool_access."
-         (String.concat ", " removed_tool_policy_keys))
-  else
-    let tool_access_opt =
-      match json_assoc_member_opt "tool_access" args with
-      | Some ((`Assoc _) as access_json) -> (
-          match reject_legacy_tool_access_kind access_json with
-          | Error msg -> Error msg
-          | Ok () -> (
-              match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
-              | Ok access -> Ok (Some access)
-              | Error msg -> Error msg))
-      | Some `Null -> Ok None
-      | Some other ->
-          Error
-            (Printf.sprintf "tool_access must be an object (received %s)"
-               (Json_util.kind_name other))
-      | None -> Ok None
-    in
-    match tool_access_opt with
-    | Error msg -> Error msg
-    | Ok tool_access_opt -> Ok (tool_access_opt, None, None)
+    (string list option, string) result =
+  match Json_util.assoc_member_opt "tool_access" args with
+  | Some (`List _ as access_json) -> (
+      match tool_access_of_meta_json (`Assoc [ ("tool_access", access_json) ]) with
+      | Ok access -> Ok (Some access)
+      | Error msg -> Error msg)
+  | Some `Null -> Ok None
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "tool_access must be an array of strings (received %s)"
+           (Json_util.kind_name other))
+  | None -> Ok None
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
     Error (tool_result_error "invalid keeper name (allowed: [A-Za-z0-9._-])")
   else
-    match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
+    match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
     match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with
@@ -207,35 +148,25 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let tool_access_input_res = parse_tool_access_input args in
     let allowed_paths_opt_res = parse_present_string_list_opt args "allowed_paths" in
     let active_goal_ids_opt_res = parse_present_string_list_opt args "active_goal_ids" in
-    let sandbox_profile_opt_res =
-      parse_enum_string_opt args "sandbox_profile" sandbox_profile_of_string
-        ~allowed_values:(String.concat ", " valid_sandbox_profile_strings)
-    in
-    let network_mode_opt_res =
-      parse_enum_string_opt args "network_mode" network_mode_of_string
-        ~allowed_values:"none, inherit"
-    in
+    let runtime_id_opt_res = parse_runtime_id_opt args in
     match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res
+      active_goal_ids_opt_res, runtime_id_opt_res
     with
-    | Error e, _, _, _, _, _
-    | _, Error e, _, _, _, _
-    | _, _, Error e, _, _, _
-    | _, _, _, Error e, _, _
-    | _, _, _, _, Error e, _
-    | _, _, _, _, _, Error e -> Error (tool_result_error e)
+    | Error e, _, _, _, _
+    | _, Error e, _, _, _
+    | _, _, Error e, _, _
+    | _, _, _, Error e, _
+    | _, _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
-      Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
+      Ok tool_access_opt,
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt,
-      Ok sandbox_profile_opt,
-      Ok network_mode_opt ->
+      Ok runtime_id_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
     let long_goal_opt = parse_goal_horizon_opt args "long_goal" in
-    let cascade_name_opt_res = parse_cascade_name_opt args in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let mention_targets_in = get_string_list args "mention_targets" in
     let max_context_override_opt =
@@ -265,12 +196,23 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let continuity_compaction_cooldown_sec_opt =
       Safe_ops.json_int_opt "continuity_compaction_cooldown_sec" args
     in
+    let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
+    let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let tool_denylist_opt_res = parse_present_tool_name_list_opt args "tool_denylist" in
     let auto_handoff_opt = get_bool_opt args "auto_handoff" in
     let handoff_threshold_opt = Safe_ops.json_float_opt "handoff_threshold" args in
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let instructions_arg = get_string_opt args "instructions" in
     let profile_defaults = load_keeper_profile_defaults name in
+    let sandbox_profile_error =
+      match profile_defaults.sandbox_profile with
+      | None ->
+        Some
+          (missing_required_sandbox_profile_error
+             ~keeper_name:name
+             profile_defaults)
+      | Some _ -> None
+    in
     (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
        on every keeper turn-up and wrapped the resulting (or "not found")
        text into a "[SYSTEM: SOUL INFUSION]" block prepended to the
@@ -288,9 +230,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
-    match tool_denylist_opt_res, cascade_name_opt_res with
-    | Error msg, _ | _, Error msg -> Error (tool_result_error msg)
-    | Ok tool_denylist_opt, Ok cascade_name_opt ->
+    match sandbox_profile_error, tool_denylist_opt_res with
+    | Some msg, _ -> Error (tool_result_error msg)
+    | None, Error msg -> Error (tool_result_error msg)
+    | None, Ok tool_denylist_opt ->
     Ok {
       name;
       compaction_profile_opt;
@@ -298,12 +241,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       short_goal_opt;
       mid_goal_opt;
       long_goal_opt;
-      cascade_name_opt;
+      runtime_id_opt;
       allowed_paths_opt;
       active_goal_ids_opt;
       autoboot_enabled_opt;
-      sandbox_profile_opt;
-      network_mode_opt;
       mention_targets_in;
       max_context_override_opt;
       proactive_enabled_opt;
@@ -313,9 +254,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       compaction_message_gate_opt;
       compaction_token_gate_opt;
       continuity_compaction_cooldown_sec_opt;
+      sandbox_profile_opt;
+      network_mode_opt;
       tool_access_opt;
-      tool_preset_opt;
-      tool_also_allow_opt;
       tool_denylist_opt;
       auto_handoff_opt;
       handoff_threshold_opt;
@@ -337,12 +278,12 @@ let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =
   in
   raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
 
-let resolve_sandbox_profile ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+let resolve_sandbox_profile ~fallback =
+  fallback
   |> Option.value ~default:default_sandbox_profile
 
-let resolve_network_mode ~sandbox_profile ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+let resolve_network_mode ~sandbox_profile ~fallback =
+  fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 
@@ -350,7 +291,7 @@ let private_workspace_root_rel ~sandbox_profile keeper_name =
   Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name
   |> Keeper_alerting_path.strip_trailing_slashes
 
-let private_workspace_root_abs ~(config : Coord.config) ~sandbox_profile keeper_name =
+let private_workspace_root_abs ~(config : Workspace.config) ~sandbox_profile keeper_name =
   Filename.concat
     (Keeper_alerting_path.project_root_of_config config)
     (private_workspace_root_rel ~sandbox_profile keeper_name)
@@ -371,65 +312,17 @@ let sandbox_allowed_path_has_forbidden_segments path =
            | "." | ".." -> true
            | _ -> false))
 
-let sandbox_allowed_path_within_private_root
-    ~(config : Coord.config)
-    ~keeper_name
-    ~sandbox_profile
-    path =
-  let trimmed = String.trim path in
-  if trimmed = "" then false
-  else if sandbox_allowed_path_has_forbidden_segments trimmed then
-    false
-  else
-    let private_root =
-      private_workspace_root_abs ~config ~sandbox_profile keeper_name
-    in
-    let candidate =
-      (if Filename.is_relative trimmed then
-         Filename.concat
-           (Keeper_alerting_path.project_root_of_config config)
-           trimmed
-       else
-         trimmed)
-      |> Keeper_alerting_path.normalize_path_for_check
-      |> Keeper_alerting_path.strip_trailing_slashes
-    in
-    candidate = private_root
-    || String.starts_with ~prefix:(private_root ^ "/") candidate
-
-let validate_sandbox_settings
-    ~(config : Coord.config)
-    ~keeper_name
-    ~repo_cli_identity
-    ~sandbox_profile
-    ~network_mode
-    ~allowed_paths =
+let validate_sandbox_settings ~allowed_paths =
   if allowed_paths = [ "*" ] then
     Error "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
   else
-  match sandbox_profile with
-  | Local -> (
-      match network_mode with
-      | Network_inherit -> Ok ()
-      | Network_none ->
-          Error
-            "network_mode=none requires sandbox_profile=docker")
-  | Docker ->
-      let profile_label = sandbox_profile_to_string sandbox_profile in
-      let escaping =
-        List.filter
-          (fun path ->
-            not
-              (sandbox_allowed_path_within_private_root
-                 ~config ~keeper_name ~sandbox_profile path))
-          allowed_paths
-      in
-      match escaping with
-      | [] -> Ok ()
-      | _ ->
-          Error
-            (Printf.sprintf
-               "%s allowed_paths must stay under %s (rejected: %s)"
-               profile_label
-               (private_workspace_root_rel ~sandbox_profile keeper_name)
-               (String.concat ", " escaping))
+    match
+      List.filter sandbox_allowed_path_has_forbidden_segments allowed_paths
+    with
+    | [] -> Ok ()
+    | rejected ->
+        Error
+          (Printf.sprintf
+             "allowed_paths entries may not contain globs or traversal segments \
+              (rejected: %s)"
+             (String.concat ", " rejected))

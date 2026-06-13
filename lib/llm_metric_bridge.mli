@@ -1,98 +1,79 @@
-(** Bridge between OAS Llm_provider.Metrics.t and the masc-mcp
-    Prometheus counter registry.
+(** Otel_metric_store-backed bridge for OAS [Llm_provider.Metrics.t].
 
-    See the implementation docstring for the rationale; briefly,
-    this module installs a process-wide sink via
-    [Llm_provider.Metrics.set_global] so that keeper cascade calls
-    — which do not thread [~metrics] explicitly through
-    [Agent.run] — can still observe HTTP responses per provider.
+    The process-wide sink is installed early during server bootstrap so OAS
+    provider callbacks update the in-process metric store. The store is then
+    exported through the OTel metrics bridge. *)
 
-    @since 0.4.x (telemetry chain: oas#804 + oas#807) *)
-
-(** Canonical metric name used when emitting the counter.  Exposed
-    for test assertions and dashboard integration. *)
 val http_status_metric : string
+val fallback_triggered_metric : string
 
-(** Emit a single HTTP status observation to the Prometheus counter.
-    Called by both the global sink built in {!make_sink} and any
-    per-call OAS [Metrics.t] literal that wants to forward
-    [on_http_status] (e.g. cascade observation captures).  Single
-    source of truth for the label shape. *)
-val emit_http_status :
-  provider:string -> model_id:string -> status:int -> unit
+val emit_http_status
+  :  provider:string
+  -> model_id:string
+  -> status:int
+  -> unit
 
-(** Emit a single latency observation to the Prometheus histogram.  Values
-    below 1ms are recorded as 1ms so fast calls still produce a non-zero
-    histogram sum; non-positive inputs also increment
-    [masc_llm_provider_request_latency_clamped_total] so sentinel or missing
-    durations remain visible.  [?provider] is optional because the OAS
-    [on_request_end] callback currently carries only [model_id]; when omitted,
-    the bridge uses the provider most recently observed for that model from
-    adjacent OAS callbacks such as [on_http_status].
+val emit_request_latency
+  :  ?provider:string
+  -> model_id:string
+  -> latency_ms:int
+  -> unit
+  -> unit
 
-    Called by both the global sink built in {!make_sink} and any
-    per-call OAS [Metrics.t] literal that wants to forward
-    [on_request_end] (e.g. cascade observation captures).  Single
-    source of truth for the label shape. *)
-val emit_request_latency :
-  ?provider:string -> model_id:string -> latency_ms:int -> unit -> unit
-
-(** Emit a capability drop observation to the Prometheus counter. *)
 val emit_capability_drop : model_id:string -> field:string -> unit
-
-(** Emit cache hit/miss observations from OAS metrics callbacks. *)
 val emit_cache_hit : model_id:string -> unit
 val emit_cache_miss : model_id:string -> unit
-
-(** Emit request lifecycle observations from OAS metrics callbacks. *)
 val emit_request_start : model_id:string -> unit
 val emit_error : model_id:string -> error:string -> unit
 val emit_retry : provider:string -> model_id:string -> attempt:int -> unit
-val emit_circuit_state :
-  provider:string ->
-  model_id:string ->
-  provider_key:string ->
-  state:Llm_provider.Metrics.circuit_state ->
-  unit
-val emit_token_usage :
-  provider:string ->
-  model_id:string ->
-  input_tokens:int ->
-  output_tokens:int ->
-  unit
 
-(** Emit provider-agnostic tool-call count observations from OAS metrics
-    callbacks. Labels are [provider] and [model]. *)
-val emit_tool_calls : provider:string -> model_id:string -> count:int -> unit
+val emit_circuit_state
+  :  provider:string
+  -> model_id:string
+  -> provider_key:string
+  -> state:Llm_provider.Metrics.circuit_state
+  -> unit
 
-(** Emit streaming first-response-chunk and inter-chunk observations from OAS
-    streaming metrics callbacks. Labels are [provider] and [model]. *)
-val emit_streaming_first_chunk :
-  provider:string -> model_id:string -> ttfrc_ms:float -> unit
+val emit_token_usage
+  :  provider:string
+  -> model_id:string
+  -> input_tokens:int
+  -> output_tokens:int
+  -> unit
 
-val emit_streaming_chunk :
-  provider:string ->
-  model_id:string ->
-  chunk_index:int ->
-  inter_chunk_ms:float ->
-  unit
+val emit_usage_details
+  :  ?input_tokens:int
+  -> ?output_tokens:int
+  -> ?cache_creation_input_tokens:int
+  -> ?cache_read_input_tokens:int
+  -> ?reasoning_output_tokens:int
+  -> ?request_stream:bool
+  -> ?finish_reason:string
+  -> provider:string
+  -> model_id:string
+  -> unit
+  -> unit
 
-(** Canonical metric name for the §7.3.2 unified fallback counter. *)
-val fallback_triggered_metric : string
+val emit_tool_calls
+  :  provider:string
+  -> model_id:string
+  -> count:int
+  -> unit
 
-(** Emit a fallback observation to the unified counter.
-    [kind] enumerates the fallback class (cascade_empty | capability_drop |
-    cli_unsupported | provider_error_fallback | …); [detail] carries the
-    specific reason within the kind. This is the single numerator across all
-    fallback classes. *)
+val emit_streaming_first_chunk
+  :  provider:string
+  -> model_id:string
+  -> ttfrc_ms:float
+  -> unit
+
+val emit_streaming_chunk
+  :  provider:string
+  -> model_id:string
+  -> chunk_index:int
+  -> inter_chunk_ms:float
+  -> unit
+
 val emit_fallback_triggered : kind:string -> detail:string -> unit
-
-(** Construct the OAS Metrics.t sink without installing it.  Useful
-    for tests that want to pass [~metrics] explicitly without
-    touching global state. *)
 val make_sink : unit -> Llm_provider.Metrics.t
-
-(** Install the bridge as the process-wide default metrics sink.
-    Idempotent; should be called once during server bootstrap
-    before any keeper turn fires its first LLM call. *)
+val init : base_path:string -> unit
 val install : unit -> unit

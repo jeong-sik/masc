@@ -1,0 +1,149 @@
+(** Self-standing Runtime configuration types (RFC-0206, runtime→Runtime rebirth).
+
+    Provider × Model × Binding declarative schema (RFC-0058 layers 1-3),
+    re-homed from the deleted [Runtime_declarative_types] as types owned by
+    [lib/runtime/]. Routing layers (aliases/routes/profiles/strategy) are
+    intentionally dropped: a Runtime is a single pre-selected binding. *)
+
+(** {1 API format & transport} *)
+
+type api_format =
+  | Messages_api
+  | Chat_completions_api
+  | Ollama_api
+[@@deriving show, eq]
+
+type transport =
+  | Http of string
+  | Cli of string
+[@@deriving show, eq]
+
+type credential =
+  | Env of string
+  | File of string
+  | Inline of string
+[@@deriving show, eq]
+
+(** {1 Layer 1: Provider} *)
+
+type capabilities =
+  { supports_inline_tools : bool
+  ; supports_runtime_mcp_tools : bool
+  ; supports_runtime_tool_events : bool
+  ; supports_runtime_mcp_http_headers : bool
+  ; requires_per_keeper_bridging_for_bound_actor_tools : bool
+  ; identity_runtime_mcp_header_keys : string list
+  ; argv_prompt_preflight : bool
+  ; uses_anthropic_caching : bool
+  ; max_turns_per_attempt : int option
+  ; tolerates_bound_actor_fallback : bool
+  }
+[@@deriving show, eq]
+
+(** All-false / empty / [None] defaults; used when [\[providers.<id>.capabilities\]]
+    is absent. *)
+val capabilities_default : capabilities
+
+type provider =
+  { id : string
+  ; display_name : string
+  ; protocol : string
+  ; api_format : api_format
+  ; transport : transport
+  ; is_non_interactive : bool
+  ; credentials : credential option
+  ; capabilities : capabilities option
+  ; headers : (string * string) list option
+  }
+[@@deriving show, eq]
+
+(** {1 Layer 2: Model} *)
+
+type thinking_control_format =
+  | No_thinking_control
+  | Thinking_object
+  | Chat_template_kwargs
+  | Chat_template_token
+  | Reasoning_effort
+[@@deriving show, eq]
+
+type model_capabilities =
+  { max_output_tokens : int option
+  ; supports_tool_choice : bool
+  ; supports_extended_thinking : bool
+  ; supports_reasoning_budget : bool
+  ; thinking_control_format : thinking_control_format
+  ; supports_image_input : bool
+  ; supports_audio_input : bool
+  ; supports_video_input : bool
+  ; supports_multimodal_inputs : bool
+  ; supports_response_format_json : bool
+  ; supports_structured_output : bool
+  ; supports_native_streaming : bool
+  ; supports_caching : bool
+  ; supports_prompt_caching : bool
+  ; prompt_cache_alignment : int option
+  ; supports_top_k : bool
+  ; supports_min_p : bool
+  ; supports_seed : bool
+  ; emits_usage_tokens : bool
+  ; supports_computer_use : bool
+  }
+[@@deriving show, eq]
+
+(** All-false / [None] defaults, except [emits_usage_tokens = true] (most
+    providers report usage; CLI wrappers opt out). Used when
+    [\[models.<id>.capabilities\]] is absent. *)
+val model_capabilities_default : model_capabilities
+
+type model_spec =
+  { id : string
+  ; api_name : string
+  ; tools_support : bool
+  ; max_context : int
+  ; thinking_support : bool
+  ; preserve_thinking : bool
+  ; max_thinking_budget : int option
+  ; streaming : bool
+  ; capabilities : model_capabilities option
+  ; match_prefixes : string list
+  }
+[@@deriving show, eq]
+
+(** {1 Layer 3: Binding} *)
+
+type binding =
+  { provider_id : string
+  ; model_id : string
+  ; is_default : bool
+  ; max_concurrent : int
+  ; price_input : float option
+  ; price_output : float option
+  ; keep_alive : string option
+  ; num_ctx : int option
+  }
+[@@deriving show, eq]
+
+(** {1 Top-level config} *)
+
+type config =
+  { providers : provider list
+  ; models : model_spec list
+  ; bindings : binding list
+  ; default_runtime_id : string option
+  ; keeper_assignments : (string * string) list
+    (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
+        Sole SSOT for keeper→runtime assignment (persona⊥{model,runtime}). A
+        keeper absent from this table routes to the default runtime; an
+        assignment to an unknown id is rejected at load. The id is an opaque
+        binding key (only the OAS adapter parses it into provider/model/spec). *)
+  }
+[@@deriving show, eq]
+
+(** {1 Lookups} *)
+
+val provider_of_id : config -> string -> provider option
+val model_of_id : config -> string -> model_spec option
+
+(** Runtime id derived from a binding: ["provider.model"]. *)
+val binding_key : binding -> string

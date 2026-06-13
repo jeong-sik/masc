@@ -1,7 +1,7 @@
 open Alcotest
 
-module Metrics = Masc_mcp.Dashboard_http_keeper_metrics
-module Detail = Masc_mcp.Dashboard_http_keeper_detail
+module Metrics = Dashboard_http_keeper_metrics
+module Detail = Dashboard_http_keeper_detail
 
 let metric ?(channel = "turn") tools =
   `Assoc

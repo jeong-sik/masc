@@ -2,7 +2,7 @@
 
 
 (** Config type alias *)
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** Tool-call error classification labels. *)
 type error_kind = Error_kind of string
@@ -25,8 +25,8 @@ let show_error_kind = error_kind_to_string
 
 (** Telemetry event types *)
 type event =
-  | Agent_joined of { agent_id: string; capabilities: string list }
-  | Agent_left of { agent_id: string; reason: string }
+  | Agent_session_bound of { agent_id: string; capabilities: string list }
+  | Agent_unbound of { agent_id: string; reason: string }
   | Task_started of { task_id: string; agent_id: string }
   | Task_completed of { task_id: string; duration_ms: int; success: bool }
   | Handoff_triggered of { from_agent: string; to_agent: string; reason: string }
@@ -58,7 +58,6 @@ type event =
   | Tool_assigned of {
       agent_id: string;
       profile: string;
-      preset: string option [@default None];
       tool_count: int;
       assignment_id: string;
     }
@@ -121,7 +120,7 @@ let update_tool_usage stats_by_tool ~tool_name ~success ~timestamp =
 
 (** Legacy single-file path (for fallback reads). *)
 let telemetry_file config =
-  Filename.concat (Coord_utils.masc_dir config) "telemetry.jsonl"
+  Filename.concat (Workspace_utils.masc_dir config) "telemetry.jsonl"
 
 (** Date-split store: [.masc/telemetry/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -152,7 +151,7 @@ let telemetry_max_bytes () =
     ~default:default_telemetry_max_bytes
 
 let get_telemetry_store config : Dated_jsonl.t =
-  let base = Filename.concat (Coord_utils.masc_dir config) "telemetry" in
+  let base = Filename.concat (Workspace_utils.masc_dir config) "telemetry" in
   Eio_guard.with_mutex telemetry_store_cache_mu (fun () ->
     match Hashtbl.find_opt telemetry_store_cache base with
     | Some store -> store
@@ -168,7 +167,7 @@ let get_telemetry_store config : Dated_jsonl.t =
 let telemetry_eio_surface = "telemetry_eio"
 
 let observe_telemetry_drop ~reason =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[ ("surface", telemetry_eio_surface); ("reason", reason) ]
     ()
 
@@ -177,10 +176,40 @@ let report_telemetry_drop ~reason ~path ~detail =
     ~on_drop:(fun () -> observe_telemetry_drop ~reason)
     ~surface:telemetry_eio_surface ~reason ~path ~detail
 
+(** Schema migration: map legacy variant names to current ones.
+
+    The [event] type underwent renames ([Agent_joined] → [Agent_session_bound],
+    [Agent_left] → [Agent_unbound]) but stored JSONL records retain the old
+    names in the wire format.  This normalizes the raw JSON so the
+    auto-generated yojson codec can deserialize it.
+
+    Payload fields are identical — this is a pure rename, no field migration. *)
+let legacy_variant_aliases : (string * string) list = [
+  ("Agent_joined", "Agent_session_bound");
+  ("Agent_left", "Agent_unbound");
+]
+
+let migrate_legacy_event_variant (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    let migrate_field (key, value) =
+      if key <> "event" then (key, value)
+      else
+        match value with
+        | `List [`String variant; payload] ->
+          (match List.assoc_opt variant legacy_variant_aliases with
+           | Some new_name -> (key, `List [`String new_name; payload])
+           | None -> (key, value))
+        | _ -> (key, value)
+    in
+    `Assoc (List.map migrate_field fields)
+  | _ -> json
+
 let parse_event_records (jsons : Yojson.Safe.t list) : event_record list =
   List.filter_map
     (fun json ->
-      match event_record_of_yojson json with
+      let migrated = migrate_legacy_event_variant json in
+      match event_record_of_yojson migrated with
       | Ok record -> Some record
       | Error msg ->
           report_telemetry_drop
@@ -197,7 +226,8 @@ let read_all_events_from_path (file : string) : event_record list =
     |> List.filter (fun line -> String.trim line <> "")
     |> List.filter_map (fun line ->
            try
-             match event_record_of_yojson (Yojson.Safe.from_string line) with
+             let json = migrate_legacy_event_variant (Yojson.Safe.from_string line) in
+             match event_record_of_yojson json with
              | Ok record -> Some record
              | Error msg ->
                  report_telemetry_drop
@@ -246,31 +276,53 @@ let read_recent_events ?fs:_ config ~limit : event_record list =
       |> List.filteri (fun i _ -> i < limit)
       |> List.rev
 
+(* ── Tool usage summary cache ──────────────────────────────────────
+   The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
+   surfaces every 30 s. Each surface calls [summarize_tool_usage] on
+   the same store, opening and counting every day-file. With 30
+   day-files × 15 MB this becomes a hot read-side load.
+   Cache TTL matches the dashboard refresh interval. *)
+
+type tool_usage_cache_entry = {
+  cached_summary : tool_usage_summary;
+  cached_at : float;
+}
+
+let tool_usage_cache : tool_usage_cache_entry option Atomic.t = Atomic.make None
+let tool_usage_cache_ttl = 30.0  (* seconds *)
+
 let summarize_tool_usage ?fs config : tool_usage_summary =
-  let telemetry_path = telemetry_file config in
-  let store = get_telemetry_store config in
-  let telemetry_available =
-    Sys.file_exists telemetry_path
-    || Sys.file_exists (Dated_jsonl.base_dir store)
-  in
-  let stats_by_tool = Hashtbl.create 32 in
-  let total_calls = ref 0 in
-  let records = read_all_events ?fs config in
-  List.iter (fun (record : event_record) ->
-    match record.event with
-    | Tool_called { tool_name; success; _ } ->
-        incr total_calls;
-        update_tool_usage stats_by_tool ~tool_name ~success
-          ~timestamp:record.timestamp
-    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
-    | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
-  ) records;
-  {
-    telemetry_path;
-    telemetry_available;
-    total_calls = !total_calls;
-    stats_by_tool;
-  }
+  let now = Time_compat.now () in
+  match Atomic.get tool_usage_cache with
+  | Some entry when now -. entry.cached_at < tool_usage_cache_ttl ->
+      entry.cached_summary
+  | _ ->
+      let telemetry_path = telemetry_file config in
+      let store = get_telemetry_store config in
+      let telemetry_available =
+        Sys.file_exists telemetry_path
+        || Sys.file_exists (Dated_jsonl.base_dir store)
+      in
+      let stats_by_tool = Hashtbl.create 32 in
+      let total_calls = ref 0 in
+      let records = read_all_events ?fs config in
+      List.iter (fun (record : event_record) ->
+        match record.event with
+        | Tool_called { tool_name; success; _ } ->
+            incr total_calls;
+            update_tool_usage stats_by_tool ~tool_name ~success
+              ~timestamp:record.timestamp
+        | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
+        | Handoff_triggered _ | Error_occurred _ | Tool_assigned _ -> ()
+      ) records;
+      let summary = {
+        telemetry_path;
+        telemetry_available;
+        total_calls = !total_calls;
+        stats_by_tool;
+      } in
+      Atomic.set tool_usage_cache (Some { cached_summary = summary; cached_at = now });
+      summary
 
 (** Agent activity summary from telemetry, filtered by time window. *)
 type agent_activity = {
@@ -305,12 +357,12 @@ let summarize_agent_activity ?fs config ~since : agent_activity list =
               last_seen = max current.last_seen record.timestamp;
             }
       | Tool_called { agent_id = None; _ } -> ()
-      | Agent_joined { agent_id; _ } ->
+      | Agent_session_bound { agent_id; _ } ->
           if not (Hashtbl.mem by_agent agent_id) then
             Hashtbl.replace by_agent agent_id
               { agent_id; tool_calls = 0; success_count = 0; failure_count = 0;
                 first_seen = record.timestamp; last_seen = record.timestamp }
-      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_assigned _ -> ()
   ) records;
   Hashtbl.fold (fun _ v acc -> v :: acc) by_agent []
@@ -340,20 +392,20 @@ let read_events_since ?fs config ~since : event_record list =
 
 (** Metrics calculation functions (pure) *)
 
-(* [count_active_agents] = joined \ left,
+(* [count_active_agents] = session_bound \ left,
    [count_tasks_in_progress] = started \ completed.
    Kernel lives in [Set_util.count_difference] (lib/core/set_util.ml). *)
 let count_active_agents events =
   Set_util.count_difference events
     ~present:(fun r ->
       match r.event with
-      | Agent_joined { agent_id; _ } -> Some agent_id
-      | Agent_left _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Agent_session_bound { agent_id; _ } -> Some agent_id
+      | Agent_unbound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
-      | Agent_left { agent_id; _ } -> Some agent_id
-      | Agent_joined _ | Task_started _ | Task_completed _ | Handoff_triggered _
+      | Agent_unbound { agent_id; _ } -> Some agent_id
+      | Agent_session_bound _ | Task_started _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_tasks_in_progress events =
@@ -361,19 +413,19 @@ let count_tasks_in_progress events =
     ~present:(fun r ->
       match r.event with
       | Task_started { task_id; _ } -> Some task_id
-      | Agent_joined _ | Agent_left _ | Task_completed _ | Handoff_triggered _
+      | Agent_session_bound _ | Agent_unbound _ | Task_completed _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
     ~absent:(fun r ->
       match r.event with
       | Task_completed { task_id; _ } -> Some task_id
-      | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+      | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
       | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None)
 
 let count_completed_tasks events =
   List_util.count_if (fun r ->
     match r.event with
     | Task_completed _ -> true
-    | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events
 
@@ -381,7 +433,7 @@ let avg_duration events =
   let durations = List.filter_map (fun r ->
     match r.event with
     | Task_completed { duration_ms; _ } -> Some (float_of_int duration_ms)
-    | Agent_joined _ | Agent_left _ | Task_started _ | Handoff_triggered _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Handoff_triggered _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> None
   ) events in
   match durations with
@@ -394,13 +446,13 @@ let calculate_handoff_rate events =
   let handoffs = List_util.count_if (fun r ->
     match r.event with
     | Handoff_triggered _ -> true
-    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
     | Error_occurred _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let task_events = List_util.count_if (fun r ->
     match r.event with
     | Task_started _ | Task_completed _ -> true
-    | Agent_joined _ | Agent_left _ | Handoff_triggered _ | Error_occurred _
+    | Agent_session_bound _ | Agent_unbound _ | Handoff_triggered _ | Error_occurred _
     | Tool_called _ | Tool_assigned _ -> false
   ) events in
   if task_events = 0 then 0.0
@@ -410,7 +462,7 @@ let calculate_error_rate events =
   let errors = List_util.count_if (fun r ->
     match r.event with
     | Error_occurred _ -> true
-    | Agent_joined _ | Agent_left _ | Task_started _ | Task_completed _
+    | Agent_session_bound _ | Agent_unbound _ | Task_started _ | Task_completed _
     | Handoff_triggered _ | Tool_called _ | Tool_assigned _ -> false
   ) events in
   let total = List.length events in
@@ -432,11 +484,11 @@ let get_metrics ?fs config : metrics =
   }
 
 (** Convenience tracking functions *)
-let track_agent_joined ?fs config ~agent_id ?(capabilities=[]) () =
-  track ?fs config (Agent_joined { agent_id; capabilities })
+let track_agent_session_bound ?fs config ~agent_id ?(capabilities=[]) () =
+  track ?fs config (Agent_session_bound { agent_id; capabilities })
 
-let track_agent_left ?fs config ~agent_id ~reason =
-  track ?fs config (Agent_left { agent_id; reason })
+let track_agent_unbound ?fs config ~agent_id ~reason =
+  track ?fs config (Agent_unbound { agent_id; reason })
 
 let track_task_started ?fs config ~task_id ~agent_id =
   track ?fs config (Task_started { task_id; agent_id })
@@ -445,7 +497,7 @@ let track_task_completed ?fs config ~task_id ~duration_ms ~success =
   track ?fs config (Task_completed { task_id; duration_ms; success })
 
 (* [track_handoff] removed: 0 production callers as of #10358 (c2)
-   audit (2026-05-05). masc-mcp has no cascade-routing handoff
+   audit (2026-05-05). masc has no runtime-routing handoff
    concept; the [Handoff_triggered] event variant is retained for
    wire-schema compatibility and exhaustive-match coverage in
    [dashboard_http_monitoring],
@@ -533,8 +585,8 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
           track ?fs config
             (Error_occurred { code = trimmed_kind; message; context })
 
-let track_tool_assigned ?fs config ~agent_id ~profile ?preset ~tool_count ~assignment_id () =
-  track ?fs config (Tool_assigned { agent_id; profile; preset; tool_count; assignment_id })
+let track_tool_assigned ?fs config ~agent_id ~profile ~tool_count ~assignment_id () =
+  track ?fs config (Tool_assigned { agent_id; profile; tool_count; assignment_id })
 
 (** Prune telemetry entries older than [max_age_days] days.
     Replaces the old rotate function; date-split makes rewriting unnecessary. *)

@@ -30,9 +30,11 @@ import {
   DashboardHealthStrip,
   DashboardMain,
   ErrorCounterBadge,
+  isKeeperDetailDashboardRoute,
   SideRail,
 } from './components/dashboard-shell'
 import { ThemeSwitch } from './components/theme-switch'
+import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
 import { SkipLink } from './components/skip-link'
@@ -40,6 +42,7 @@ import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
 import { ConfirmDialogOverlay } from './components/common/confirm-dialog'
+import { BundleStalenessBanner, installBundleStalenessWatch } from './components/bundle-staleness-banner'
 import { startErrorCleanup, stopErrorCleanup } from './components/common/error-notification-state'
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
@@ -99,6 +102,18 @@ function refreshCurrentRoute(options?: { recordVisit?: boolean }): void {
     .catch(err => {
       console.warn('[app] route refresh unavailable', err instanceof Error ? err.message : err)
     })
+}
+
+export function shouldUseCompactDashboardChrome({
+  widgetSoloMode,
+  focusMode,
+  keeperDetailMode,
+}: {
+  widgetSoloMode: boolean
+  focusMode: boolean
+  keeperDetailMode: boolean
+}): boolean {
+  return widgetSoloMode || focusMode || keeperDetailMode
 }
 
 export function App() {
@@ -202,6 +217,9 @@ export function App() {
     // Error notification cleanup (removes old acknowledged errors)
     startErrorCleanup()
 
+    // Detect a newer served bundle when the tab is picked up again
+    const uninstallStalenessWatch = installBundleStalenessWatch()
+
     return () => {
       cancelled = true
       stopSseFallback()
@@ -213,6 +231,7 @@ export function App() {
       stopPeriodicRefresh()
       stopErrorCleanup()
       disposeNamespaceTruthScheduler()
+      uninstallStalenessWatch()
     }
   }, [])
 
@@ -234,14 +253,20 @@ export function App() {
   const currentSection = currentSectionForRoute(route.value)
   const isCodeSurface = currentTab === 'code'
   const widgetSoloMode = isWidgetSoloRoute(route.value)
+  const keeperDetailMode = isKeeperDetailDashboardRoute(route.value)
   const focusMode = dashboardFocusMode.value
-  const compactChromeMode = widgetSoloMode || focusMode
+  const compactChromeMode = shouldUseCompactDashboardChrome({
+    widgetSoloMode,
+    focusMode,
+    keeperDetailMode,
+  })
 
   return html`
     <div
       class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]"
       data-widget-solo=${widgetSoloMode ? 'true' : 'false'}
       data-focus-mode=${focusMode ? 'true' : 'false'}
+      data-keeper-detail-mode=${keeperDetailMode ? 'true' : 'false'}
     >
       <${SkipLink} />
       <header class="${compactChromeMode ? 'hidden' : 'relative'} z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
@@ -283,6 +308,7 @@ export function App() {
           </div>
 
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
+            <${EmergencyStopControl} />
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />
             <//>
@@ -310,7 +336,7 @@ export function App() {
           </div>
         `
         : null}
-      ${focusMode ? null : html`
+      ${focusMode || keeperDetailMode ? null : html`
         <${Suspense} fallback=${null}>
           <${LazyRemoteWarningBanner} />
         <//>
@@ -339,10 +365,13 @@ export function App() {
       ${selectedTask.value
         ? html`<${Suspense} fallback=${null}><${LazyTaskDetailOverlay} /><//>`
         : null}
-      <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
-      <${DashboardFocusModeToggle} />
+      ${keeperDetailMode ? null : html`
+        <${DashboardStatusTray} sideRailCollapsed=${sidebarCollapsed.value} />
+        <${DashboardFocusModeToggle} />
+      `}
       <${ToastContainer} />
       <${ConfirmDialogOverlay} />
+      <${BundleStalenessBanner} />
       <${Suspense} fallback=${null}>
         <${LazyCommandPalette} />
       <//>

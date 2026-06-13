@@ -126,20 +126,18 @@ let to_yojson (envelope : t) =
     ]
 
 let required_string json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String value -> Ok value
-  | `Null -> Error (Printf.sprintf "missing required failure field: %s" key)
-  | other ->
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> Error (Printf.sprintf "missing required failure field: %s" key)
+  | Some (`String value) -> Ok value
+  | Some other ->
       Error
         (Printf.sprintf
            "failure field %s must be a string (received %s)" key
            (Json_util.kind_name other))
 
 let optional_string json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String value -> String_util.trim_to_option value
+  match Json_util.assoc_member_opt key json with
+  | Some (`String value) -> String_util.trim_to_option value
   | _ -> None
 
 let of_yojson json =
@@ -185,8 +183,9 @@ let of_yojson json =
                                             optional_string json
                                               "operator_action";
                                           evidence_ref =
-                                            Yojson.Safe.Util.member
-                                              "evidence_ref" json;
+                                            Option.value ~default:`Null
+                                              (Json_util.assoc_member_opt
+                                                 "evidence_ref" json);
                                         }))))))))
   | other ->
       Error
@@ -201,7 +200,7 @@ let attach_to_details details envelope =
 let find_in_json json =
   match json with
   | `Assoc _ -> (
-      match of_yojson (Yojson.Safe.Util.member "failure_envelope" json) with
+      match of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "failure_envelope" json)) with
       | Ok envelope -> Some envelope
       | Error _ -> None)
   | _ -> None

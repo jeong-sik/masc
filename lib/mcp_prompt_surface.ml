@@ -56,8 +56,8 @@ let lookup name =
   List.find_opt (fun (prompt : prompt_def) -> String.equal prompt.name name) prompt_defs
 
 let assoc_string args key =
-  match Yojson.Safe.Util.member key args with
-  | `String value ->
+  match Json_util.assoc_member_opt key args with
+  | Some (`String value) ->
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | _ -> None

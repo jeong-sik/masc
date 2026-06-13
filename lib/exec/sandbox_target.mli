@@ -10,16 +10,17 @@
     directly to [Exec_gate], avoiding a circular dependency between
     [Sandbox_target] and [Exec_gate]. *)
 
-(** A runner closure executes an argv with the given env / cwd / timeout
-    and returns the raw process status plus stdout/stderr buffers.
-    Exceptions are propagated; callers in [Exec_dispatch] catch and
-    translate them into structured dispatch results. *)
+(** A runner closure executes an argv with the given env / cwd and returns
+    the raw process status plus stdout/stderr buffers. Exceptions are
+    propagated; callers in [Exec_dispatch] catch and translate them into
+    structured dispatch results. *)
 type runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stdin_content:string option ->
   argv:string list ->
   env:string array ->
   cwd:string option ->
-  timeout_sec:float ->
   Unix.process_status * string * string
 
 type pipeline_stage = {
@@ -29,8 +30,9 @@ type pipeline_stage = {
 }
 
 type pipeline_runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stages:pipeline_stage list ->
-  timeout_sec:float ->
   Unix.process_status * string * string
 
 type t =
@@ -45,4 +47,3 @@ val host : unit -> t
     the runner closure; this keeps [lib/exec] from having to know about
     [Keeper_turn_sandbox_runtime] or any other keeper-side construct. *)
 val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
-

@@ -15,11 +15,12 @@
 
     Cross-reference:
     - [lib/keeper/keeper_types_profile.ml] — [effective_oas_env]
-    - OAS [transport_cli_tool_b.ml:67-85] — sentinel behavior *)
+    - OAS [transport_cli_tool_b.ml:67-85] — marker behavior *)
 
 open Alcotest
 
-module KTP = Masc_mcp.Keeper_types_profile
+module KTP = Masc.Keeper_types_profile
+module Keeper_types_profile = Masc.Keeper_types_profile
 
 (* ── effective_oas_env tests ───────────────────────────────── *)
 

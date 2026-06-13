@@ -91,7 +91,7 @@ in_baseline() {
 declare -a TYPE_SET_PAIRS=(
   "turn_phase:TurnPhaseSet"
   "decision_stage:DecisionSet"
-  "cascade_state:CascadeSet"
+  "runtime_state:RuntimeSet"
   # KSM `phase` variant uses a different spec representation (Phase
   # constant via DerivePhase, not a closed set literal).  R-B-1.c can
   # extend to KSM in a follow-up by adding spec-side `PhaseSet` first
@@ -246,7 +246,7 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
 
   # First underscore-separated word of the type name is the meaningful
   # constructor prefix: turn_phase → "turn", decision_stage → "decision",
-  # cascade_state → "cascade", phase → "phase" (no strip).
+  # runtime_state → "runtime", phase → "phase" (no strip).
   prefix_word="${ocaml_type%%_*}"
 
   while IFS= read -r ocaml_sym; do
@@ -297,8 +297,8 @@ declare -a CROSS_SPEC_UNIFORM_SETS=(
   "TurnPhaseSet"
   # KTC + KCL: decision projection.
   "DecisionSet"
-  # KTC + KCL: cascade-state projection.
-  "CascadeSet"
+  # KTC + KCL: runtime-state projection.
+  "RuntimeSet"
 )
 
 CROSS_SPEC_DRIFTS=0

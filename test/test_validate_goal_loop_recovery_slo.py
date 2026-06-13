@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import copy
 import importlib.util
 import json
 import subprocess
@@ -39,7 +38,7 @@ class ValidateGoalLoopRecoverySloTest(unittest.TestCase):
         self.assertEqual(report.status, "PASS")
         self.assertEqual(
             report.requirements_checked,
-            ["startup-alive-but-stuck", "startup-credential-starvation"],
+            ["startup-credential-starvation"],
         )
         self.assertEqual(report.missing_requirements, [])
         self.assertEqual(report.errors, [])
@@ -60,33 +59,9 @@ class ValidateGoalLoopRecoverySloTest(unittest.TestCase):
             report.errors,
         )
 
-    def test_alive_but_stuck_must_cross_threshold(self) -> None:
-        payload = self.load_fixture()
-        proofs = payload["proofs"]
-        assert isinstance(proofs, list)
-        alive = copy.deepcopy(proofs[1])
-        assert isinstance(alive, dict)
-        trigger = alive["trigger"]
-        assert isinstance(trigger, dict)
-        trigger["elapsed_sec"] = trigger["threshold_sec"]
-        payload["proofs"] = [alive]
-
-        report = validate_goal_loop_recovery_slo.validate_recovery_slo_proof(
-            payload,
-            required_requirements=["startup-alive-but-stuck"],
-        )
-
-        self.assertEqual(report.status, "FAIL")
-        self.assertIn(
-            "startup-alive-but-stuck: trigger.elapsed_sec must exceed threshold_sec",
-            report.errors,
-        )
-
     def test_cli_require_pass_returns_nonzero_for_missing_required_proof(self) -> None:
         payload = self.load_fixture()
-        proofs = payload["proofs"]
-        assert isinstance(proofs, list)
-        payload["proofs"] = proofs[:1]
+        payload["proofs"] = []
         with tempfile.TemporaryDirectory() as raw_dir:
             path = Path(raw_dir) / "proof.json"
             path.write_text(json.dumps(payload), encoding="utf-8")
@@ -106,7 +81,9 @@ class ValidateGoalLoopRecoverySloTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         report = json.loads(result.stdout)
         self.assertEqual(report["status"], "FAIL")
-        self.assertEqual(report["missing_requirements"], ["startup-alive-but-stuck"])
+        self.assertEqual(
+            report["missing_requirements"], ["startup-credential-starvation"]
+        )
 
 
 if __name__ == "__main__":

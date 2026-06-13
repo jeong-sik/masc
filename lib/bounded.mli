@@ -2,7 +2,7 @@
     guarantees.
 
     Termination, safety, and soundness properties from MAGI review
-    (Provider_f + Qwen3 formal verification):
+    (Gemini + Qwen3 formal verification):
 
     - {b Termination}: always terminates via
       {!constraints.hard_max_iterations}.
@@ -159,7 +159,7 @@ val is_retryable_error : string -> bool
     [temporarily unavailable] via pre-compiled case-insensitive
     DFAs.  Hard quota/capacity exhaustion short-circuits to [false]
     even when the message also contains [429], because same-agent
-    retry cannot repair an exhausted account; cascade/keeper
+    retry cannot repair an exhausted account; runtime/keeper
     classifiers own cross-provider fallback and cooldown. *)
 
 val check_goal : Yojson.Safe.t -> goal -> bool

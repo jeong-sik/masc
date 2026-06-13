@@ -58,7 +58,7 @@ The following direct registry mutation helpers update fields that the composite 
 - `mark_turn_started`
 - `mark_turn_measurement`
 - `set_turn_decision_stage`
-- `set_turn_cascade_state`
+- `set_turn_runtime_state`
 - `set_turn_phase`
 - `set_turn_selected_model`
 - `mark_turn_finished`
@@ -71,9 +71,9 @@ Current code cross-check: `keeper_unified_turn.ml` still calls these helpers dir
 | `mark_turn_started` | live turn entry | installs `current_turn_observation`, initializes `turn_phase=prompting`, resets compaction stage | Yes |
 | `mark_turn_measurement` | live turn measurement bind | binds pending measurement into the current turn snapshot | Yes, when a pending measurement exists |
 | `set_turn_decision_stage` | live turn decision path | updates `decision_stage` to `guard_ok` when measurement is present | Yes, when a live turn exists |
-| `set_turn_cascade_state` | cascade attempt path | updates `cascade_state`, and via `turn_phase_of_cascade_state` also changes `turn_phase` | Yes, when a live turn exists |
+| `set_turn_runtime_state` | runtime attempt path | updates `runtime_state`, and via `turn_phase_of_runtime_state` also changes `turn_phase` | Yes, when a live turn exists |
 | `set_turn_phase` | terminal/compaction/error paths | forces `turn_phase` during terminal/compaction/error paths | Yes, when a live turn exists |
-| `set_turn_selected_model` | successful cascade attempt path | stores `selected_model` after a successful cascade attempt | Yes, when a live turn exists |
+| `set_turn_selected_model` | successful runtime attempt path | stores `selected_model` after a successful runtime attempt | Yes, when a live turn exists |
 | `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
 By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path
@@ -170,7 +170,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 
 | Family | Event names |
 | --- | --- |
-| Coordination / room | `agent_joined`, `agent_left`, `broadcast`, `task_update` |
+| Workspace / workspace | `agent_bound`, `agent_unbound`, `broadcast`, `task_update` |
 | Board and notification compatibility | `board_post`, `masc/board_post`, `board_comment`, `masc/board_comment`, `board_delete`, `masc/board_delete`, `post_created`, `comment_added`, `post_voted`, `comment_voted` |
 | Keeper direct SSE | `keeper_heartbeat`, `keeper_handoff`, `masc/keeper_handoff`, `keeper_compaction`, `masc/keeper_compaction`, `keeper_guardrail`, `masc/keeper_guardrail`, `keeper_phase_changed`, `keeper_composite_changed`, `keeper_tool_call`, `masc/keeper_tool_call`, `keeper_tool_skipped`, `keeper_turn_complete`, `masc/keeper_turn_complete` |
 | Approval / governance | `client_input_approved`, `client_input_rejected`, `client_input_updated`, `governance_param_changed`, `approval:pending`, `approval:resolved` |
@@ -183,7 +183,7 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 
 | Event name | Meaning |
 | --- | --- |
-| `masc:broadcast` | room broadcast observed via Event_bus |
+| `masc:broadcast` | workspace broadcast observed via Event_bus |
 | `masc:heartbeat` | generic heartbeat event |
 | `masc:board_post` | board post created |
 | `masc:task_transition` | task state transition |
@@ -200,7 +200,7 @@ These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridg
 | Event name | Status | Notes |
 | --- | --- | --- |
 | `keeper_lifecycle` | removed legacy direct SSE | Replaced by `keeper_phase_changed` for observer-facing FSM transitions and `oas:masc:keeper:lifecycle` for lifecycle detail. |
-| `room_truth_snapshot` | removed legacy alias | Replaced by `namespace_truth_snapshot`; same payload shape, canonical event name only. |
+| `workspace_truth_snapshot` | removed legacy alias | Replaced by `namespace_truth_snapshot`; same payload shape, canonical event name only. |
 
 ## Representative Messages
 
@@ -315,7 +315,7 @@ Meaning:
 
 Meaning:
 
-- observer and coordinator sessions both receive the live OAS tail
+- observer and agent stream sessions both receive the live OAS tail
 - lifecycle detail now carries `phase`, so the payload can replace the removed legacy direct SSE
 - dashboard runtime state ingests this as OAS telemetry, while main keeper transition journaling still comes from `keeper_phase_changed`
 

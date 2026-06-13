@@ -1,6 +1,6 @@
 (** Tests for Keeper_tool_call_log — truncation, redaction, and read_recent. *)
 
-open Masc_mcp
+open Masc
 
 let eio_test name fn =
   Alcotest.test_case name `Quick (fun () ->
@@ -138,20 +138,20 @@ let test_model_field_stored () =
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"provider_k-4-9b"
-      ~cascade_profile:"local_qwen3_27b_only"
+      ~model:"glm-4-9b"
+      ~runtime_profile:"local_qwen3_27b_only"
       ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "raw model absent" false
-      (String_util.contains_substring entry_str "provider_k-4-9b");
+      (String_util.contains_substring entry_str "glm-4-9b");
     Alcotest.(check (option string)) "model redacted to runtime"
       (Some "runtime")
       (Safe_ops.json_string_opt "model" (List.hd entries));
-    Alcotest.(check (option string)) "cascade profile stored"
+    Alcotest.(check (option string)) "runtime profile stored"
       (Some "local_qwen3_27b_only")
-      (Safe_ops.json_string_opt "cascade_profile" (List.hd entries)))
+      (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
 
 let test_policy_denied_structured_error_gets_semantic_failure () =
   with_tmp_log (fun () ->
@@ -232,11 +232,15 @@ let test_blocked_structured_output_keeps_semantic_category () =
 
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
+    (* Mirrors the production reader (keeper_hooks_oas): context is
+       written to a per-run cell, read back as a record, and passed
+       explicitly to log_call — there is no ambient fallback. *)
+    let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
     Keeper_tool_call_log.set_turn_context
-      ~keeper_name:"k"
+      ~cell
       ~agent_name:"keeper-k-agent"
-      ~lane:"tool_required"
-      ~tool_choice:"required"
+      ~lane:"tool_optional"
+      ~tool_choice:"auto"
       ~thinking_enabled:false
       ~thinking_budget:1024
       ~prompt_fingerprint:"prompt-fp-k"
@@ -252,26 +256,40 @@ let test_turn_context_fields_stored () =
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
       ~approval_mode:"manual"
-      ~tool_surface_class:"execution"
-      ~visible_tool_count:2
-      ~required_tools:["tool_execute"]
-      ~required_tool_candidates:["tool_execute"; "tool_search_files"]
-      ~missing_required_tools:["tool_edit_file"]
-      ~cascade_profile:"tool_use_strict"
+      ~runtime_profile:"tool_use_strict"
       ();
+    let tctx : Keeper_tool_call_log_context.turn_context =
+      Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+    in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"masc_status"
       ~input:(`Assoc [("path", `String "/tmp/k-sandbox/status.json")])
       ~output_text:"ok"
-      ~success:true ~duration_ms:2.0 ();
+      ~success:true ~duration_ms:2.0
+      ?agent_name:tctx.agent_name
+      ?lane:tctx.lane ?tool_choice:tctx.tool_choice
+      ?thinking_enabled:tctx.thinking_enabled
+      ?thinking_budget:tctx.thinking_budget
+      ?prompt_fingerprint:tctx.prompt_fingerprint
+      ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+      ?generation:tctx.generation
+      ?turn:tctx.turn ?keeper_turn_id:tctx.keeper_turn_id
+      ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+      ?sandbox_profile:tctx.sandbox_profile
+      ?sandbox_root:tctx.sandbox_root
+      ?allowed_paths:tctx.allowed_paths
+      ?network_mode:tctx.network_mode
+      ?approval_mode:tctx.approval_mode
+      ?runtime_profile:tctx.runtime_profile
+      ();
     let entries = Keeper_tool_call_log.read_recent () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry = List.hd entries in
     Alcotest.(check (option string)) "lane field"
-      (Some "tool_required")
+      (Some "tool_optional")
       (Safe_ops.json_string_opt "lane" entry);
     Alcotest.(check (option string)) "tool_choice field"
-      (Some "required")
+      (Some "auto")
       (Safe_ops.json_string_opt "tool_choice" entry);
     Alcotest.(check bool) "thinking_enabled present" true
       (match Yojson.Safe.Util.member "thinking_enabled" entry with
@@ -294,9 +312,9 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_int ~default:0 "turn" entry);
     Alcotest.(check int) "keeper_turn_id field" 7
       (Safe_ops.json_int ~default:0 "keeper_turn_id" entry);
-    Alcotest.(check (option string)) "cascade_profile field"
+    Alcotest.(check (option string)) "runtime_profile field"
       (Some "tool_use_strict")
-      (Safe_ops.json_string_opt "cascade_profile" entry);
+      (Safe_ops.json_string_opt "runtime_profile" entry);
     Alcotest.(check (option string)) "task_id field"
       (Some "task-runtime-trust")
       (Safe_ops.json_string_opt "task_id" entry);
@@ -327,23 +345,20 @@ let test_turn_context_fields_stored () =
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
         runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract required_tools"
-      ["tool_execute"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract required_tool_candidates"
-      ["tool_execute"; "tool_search_files"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "required_tool_candidates" |> to_list
-        |> List.map to_string);
-    Alcotest.(check (list string)) "runtime_contract missing_required_tools"
-      ["tool_edit_file"]
-      Yojson.Safe.Util.(
-        runtime_contract |> member "missing_required_tools" |> to_list
-        |> List.map to_string);
-    Alcotest.(check (option string)) "runtime_contract cascade_profile"
+    let omits_field name =
+      match runtime_contract with
+      | `Assoc fields -> not (List.mem_assoc name fields)
+      | _ -> false
+    in
+    Alcotest.(check bool) "runtime_contract omits required_tools" true
+      (omits_field "required_tools");
+    Alcotest.(check bool) "runtime_contract omits required_tool_candidates" true
+      (omits_field "required_tool_candidates");
+    Alcotest.(check bool) "runtime_contract omits missing_required_tools" true
+      (omits_field "missing_required_tools");
+    Alcotest.(check (option string)) "runtime_contract runtime_profile"
       (Some "tool_use_strict")
-      (Safe_ops.json_string_opt "cascade_profile" runtime_contract);
+      (Safe_ops.json_string_opt "runtime_profile" runtime_contract);
     let action_radius = Yojson.Safe.Util.member "action_radius" entry in
     Alcotest.(check (option string)) "action_radius tool"
       (Some "masc_status")
@@ -353,6 +368,38 @@ let test_turn_context_fields_stored () =
       (Safe_ops.json_string_opt "target_path" action_radius);
     Alcotest.(check bool) "action_radius success" true
       (Safe_ops.json_bool ~default:false "success" action_radius))
+
+(* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
+   own cell — setting one must not disturb the other. Under the previous
+   keeper_name-keyed global the second set overwrote the first and the
+   first run's tool calls were logged with the second run's identity. *)
+let test_turn_context_cells_do_not_cross_runs () =
+  let cell_a = Keeper_tool_call_log.create_turn_ctx_cell () in
+  let cell_b = Keeper_tool_call_log.create_turn_ctx_cell () in
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_a ~trace_id:"trace-a" ~keeper_turn_id:1 ();
+  Keeper_tool_call_log.set_turn_context
+    ~cell:cell_b ~trace_id:"trace-b" ~keeper_turn_id:2 ();
+  let ctx_a : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_a ()
+  in
+  let ctx_b : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record ~cell:cell_b ()
+  in
+  Alcotest.(check (option string)) "run A keeps its trace_id"
+    (Some "trace-a") ctx_a.trace_id;
+  Alcotest.(check (option int)) "run A keeps its keeper_turn_id"
+    (Some 1) ctx_a.keeper_turn_id;
+  Alcotest.(check (option string)) "run B keeps its trace_id"
+    (Some "trace-b") ctx_b.trace_id;
+  Alcotest.(check (option int)) "run B keeps its keeper_turn_id"
+    (Some 2) ctx_b.keeper_turn_id;
+  let fresh : Keeper_tool_call_log_context.turn_context =
+    Keeper_tool_call_log_context.get_turn_context_record
+      ~cell:(Keeper_tool_call_log.create_turn_ctx_cell ()) ()
+  in
+  Alcotest.(check (option string)) "fresh cell reads empty" None
+    fresh.trace_id
 
 let test_turn_context_fields_absent_without_context () =
   with_tmp_log (fun () ->
@@ -407,10 +454,10 @@ let test_route_evidence_stored_for_git_push () =
                  "git push -u origin keeper/executor-direct-clone-pr-proof-20260506-1039"
              );
              ( "cwd",
-               `String "repos/masc-mcp-keeper-direct-proof-20260506-1039" );
+               `String "repos/masc-keeper-direct-proof-20260506-1039" );
            ])
       ~output_text:
-        {|{"ok":true,"via":"docker","cwd":"repos/masc-mcp-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
+        {|{"ok":true,"via":"docker","cwd":"repos/masc-keeper-direct-proof-20260506-1039","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}
       ~success:true
       ~duration_ms:42.0
       ();
@@ -443,8 +490,6 @@ let test_route_evidence_stored_for_git_push () =
       Alcotest.(check (option string)) "sandbox profile captured"
         (Some "docker")
         (Safe_ops.json_string_opt "sandbox_profile" evidence);
-      Alcotest.(check bool) "git creds captured" true
-        (Safe_ops.json_bool ~default:false "git_creds_enabled" evidence);
       Alcotest.(check (option string)) "network mode captured"
         (Some "bridge")
         (Safe_ops.json_string_opt "network_mode" evidence);
@@ -456,14 +501,14 @@ let test_route_evidence_stored_for_git_push () =
 
 let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
-    let sentinel =
+    let marker =
       Tool_output.encode_for_oas
         (Tool_output.Stored {
           sha256 = String.make 64 'b';
           bytes = 8192;
           mime = "application/json";
           preview =
-            {|{"ok":true,"via":"docker","sandbox_profile":"docker","git_creds_enabled":true,"network_mode":"bridge","effective_sandbox_image":"masc-keeper-sandbox:local","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
+            {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
         })
     in
     Keeper_tool_call_log.log_call
@@ -473,9 +518,9 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
         (`Assoc
            [
              ("cmd", `String "git push -u origin keeper/large-route-proof");
-             ("cwd", `String "repos/masc-mcp-keeper-direct-proof");
+             ("cwd", `String "repos/masc-keeper-direct-proof");
            ])
-      ~output_text:sentinel
+      ~output_text:marker
       ~success:true
       ~duration_ms:42.0
       ();
@@ -490,8 +535,6 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       Alcotest.(check (option string)) "network mode captured"
         (Some "bridge")
         (Safe_ops.json_string_opt "network_mode" evidence);
-      Alcotest.(check bool) "git creds captured" true
-        (Safe_ops.json_bool ~default:false "git_creds_enabled" evidence);
       let status = Yojson.Safe.Util.member "status" evidence in
       Alcotest.(check (option string)) "status label captured"
         (Some "success")
@@ -505,7 +548,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"ReadFile"
+      ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
       ~success:true
@@ -517,13 +560,13 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
     | [ entry ] ->
       let evidence = Yojson.Safe.Util.member "route_evidence" entry in
       Alcotest.(check (option string)) "tool name"
-        (Some "ReadFile")
+        (Some "Read")
         (Safe_ops.json_string_opt "tool_name" evidence);
       Alcotest.(check (option string)) "descriptor id"
         (Some "agent.read_file")
         (Safe_ops.json_string_opt "descriptor_id" evidence);
       Alcotest.(check (option string)) "public name"
-        (Some "ReadFile")
+        (Some "Read")
         (Safe_ops.json_string_opt "public_name" evidence);
       Alcotest.(check (option string)) "canonical name"
         (Some "tool_read_file")
@@ -612,12 +655,39 @@ let test_route_evidence_records_masc_board_descriptor () =
         (Some "in_process")
         (Safe_ops.json_string_opt "executor" evidence);
       Alcotest.(check (option string)) "effect domain"
-        (Some "masc_coordination")
+        (Some "masc_workspace")
         (Safe_ops.json_string_opt "effect_domain" evidence);
       Alcotest.(check (option string)) "runtime handler"
         (Some "tool_masc_board_dispatch")
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
+
+let route_evidence_for_tool tool_name =
+  match
+    Keeper_tool_call_log.route_evidence_json_of_tool_io
+      ~tool_name
+      ~input:(`Assoc [])
+      ~output_text:"{}"
+  with
+  | Some evidence -> evidence
+  | None -> Alcotest.failf "missing route evidence for %s" tool_name
+;;
+
+let check_eval_tags tool_name expected =
+  let evidence = route_evidence_for_tool tool_name in
+  Alcotest.(check (list string))
+    (tool_name ^ " eval tags")
+    expected
+    (Safe_ops.json_string_list "eval_tags" evidence)
+;;
+
+let test_route_evidence_records_descriptor_eval_tags () =
+  check_eval_tags "keeper_tools_list" [ "capability_introspection" ];
+  check_eval_tags "keeper_tool_search" [ "capability_introspection" ];
+  check_eval_tags "keeper_surface_read" [ "surface_context_read" ];
+  check_eval_tags "masc_agent_card" [ "agent_profile_lookup" ];
+  check_eval_tags "keeper_time_now" []
+;;
 
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
@@ -658,10 +728,10 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~keeper_name:"k1" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"ok"
       ~success:true ~duration_ms:2.0
-      ~model:"provider_k-5.1" ~lane:"tool_required"
-      ~tool_choice:"required"
+      ~model:"glm-5.1" ~lane:"tool_optional"
+      ~tool_choice:"auto"
       ~thinking_enabled:false ~thinking_budget:1024
-      ~cascade_profile:"primary" ();
+      ~runtime_profile:"primary" ();
     Keeper_tool_call_log.log_call
       ~keeper_name:"k2" ~tool_name:"masc_status"
       ~input:(`Assoc []) ~output_text:"error: {\"ok\":false,\"error\":\"boom\"}"
@@ -669,7 +739,7 @@ let test_dashboard_aggregate_groups_runtime_fields () =
       ~model:"qwen3.5-27b-unified" ~lane:"retry"
       ~tool_choice:"auto"
       ~thinking_enabled:true ~thinking_budget:4096
-      ~cascade_profile:"local_qwen3_27b_only" ();
+      ~runtime_profile:"local_qwen3_27b_only" ();
     let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
     Alcotest.(check (option string)) "sampling mode present"
       (Some "recent_n")
@@ -697,27 +767,27 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check bool) "latest age present" true
       (Safe_ops.json_float_opt "latest_age_s" summary |> Option.is_some);
     let by_model = Yojson.Safe.Util.member "by_model" summary in
-    let by_cascade = Yojson.Safe.Util.member "by_cascade" summary in
+    let by_runtime = Yojson.Safe.Util.member "by_runtime" summary in
     let by_lane = Yojson.Safe.Util.member "by_lane" summary in
     let by_thinking = Yojson.Safe.Util.member "by_thinking_mode" summary in
     let by_tool_choice = Yojson.Safe.Util.member "by_tool_choice" summary in
     let runtime_bucket = find_bucket "runtime" by_model in
-    let primary_cascade_bucket = find_bucket "primary" by_cascade in
-    let local_cascade_bucket = find_bucket "local_qwen3_27b_only" by_cascade in
+    let primary_runtime_bucket = find_bucket "primary" by_runtime in
+    let local_runtime_bucket = find_bucket "local_qwen3_27b_only" by_runtime in
     let retry_bucket = find_bucket "retry" by_lane in
     let enabled_bucket = find_bucket "enabled" by_thinking in
     let auto_bucket = find_bucket "auto" by_tool_choice in
     Alcotest.(check int) "runtime bucket calls" 2
       (Safe_ops.json_int ~default:0 "calls" runtime_bucket);
-    Alcotest.(check int) "primary cascade bucket calls" 1
-      (Safe_ops.json_int ~default:0 "calls" primary_cascade_bucket);
-    Alcotest.(check int) "local cascade bucket calls" 1
-      (Safe_ops.json_int ~default:0 "calls" local_cascade_bucket);
+    Alcotest.(check int) "primary runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" primary_runtime_bucket);
+    Alcotest.(check int) "local runtime bucket calls" 1
+      (Safe_ops.json_int ~default:0 "calls" local_runtime_bucket);
     Alcotest.(check int) "retry bucket calls" 1
       (Safe_ops.json_int ~default:0 "calls" retry_bucket);
     Alcotest.(check int) "enabled thinking calls" 1
       (Safe_ops.json_int ~default:0 "calls" enabled_bucket);
-    Alcotest.(check int) "auto tool_choice calls" 1
+    Alcotest.(check int) "auto tool_choice calls" 2
       (Safe_ops.json_int ~default:0 "calls" auto_bucket))
 
 let test_dashboard_hourly_trend_numeric_ts () =
@@ -852,6 +922,36 @@ let test_dashboard_aggregate_surfaces_coverage_gap () =
     Alcotest.(check int) "coverage gap count" 1
       (Safe_ops.json_int ~default:0 "coverage_gap_count" summary))
 
+let test_dashboard_aggregate_ignores_recovered_coverage_gap () =
+  with_tmp_log_dir (fun dir ->
+    let masc_root = Filename.concat dir ".masc" in
+    Telemetry_coverage_gap.record
+      ~masc_root
+      ~source:"tool_call_io"
+      ~producer:"keeper_hooks_oas"
+      ~durable_store:(Filename.concat masc_root "tool_calls")
+      ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+      ~stale_reason:"tool_call_io_append_failed"
+      ~keeper_name:"k"
+      ~trace_id:"trace-gap"
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"masc_status"
+      ~input:(`Assoc []) ~output_text:"ok"
+      ~success:true ~duration_ms:2.0
+      ~trace_id:"trace-recovered" ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check (option string)) "recovered gap health"
+      (Some "ok")
+      (Safe_ops.json_string_opt "health" summary);
+    Alcotest.(check (option string)) "recovered gap stale reason cleared"
+      None
+      (Safe_ops.json_string_opt "stale_reason" summary);
+    Alcotest.(check int) "historical gap count" 1
+      (Safe_ops.json_int ~default:0 "coverage_gap_count" summary);
+    Alcotest.(check int) "active gap count" 0
+      (Safe_ops.json_int ~default:(-1) "active_coverage_gap_count" summary))
+
 (* ── UTF-8 sanitization ────────────────────────────── *)
 
 (* Regression guard: tool output may contain invalid UTF-8 bytes from
@@ -914,14 +1014,14 @@ let test_output_valid_utf8_untouched () =
         Alcotest.(check string) "valid UTF-8 preserved verbatim" korean output
     | _ -> Alcotest.fail "expected exactly one entry")
 
-(* When the tool output is the OCaml [%S]-quoted [masc:blob ...] sentinel
+(* When the tool output is the OCaml [%S]-quoted [masc:blob ...] marker
    produced by Tool_output.encode_for_oas, the persisted record must
    normalize it into a structured _blob object so that telemetry readers
    (UI, jq scripts) see a clean JSON shape instead of doubly-escaped
    string fields. *)
-let test_output_blob_sentinel_normalized () =
+let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
-    let sentinel =
+    let marker =
       Tool_output.encode_for_oas
         (Tool_output.Stored {
           sha256 = String.make 64 'a';
@@ -932,7 +1032,7 @@ let test_output_blob_sentinel_normalized () =
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_blob"
-      ~input:(`Assoc []) ~output_text:sentinel
+      ~input:(`Assoc []) ~output_text:marker
       ~success:true ~duration_ms:1.0 ();
     let results = Keeper_tool_call_log.read_recent ~n:1 () in
     Alcotest.(check int) "entry persisted" 1 (List.length results);
@@ -1060,6 +1160,8 @@ let () =
         ; eio_test "blocked output keeps semantic category"
             test_blocked_structured_output_keeps_semantic_category
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
+        ; Alcotest.test_case "turn context cells do not cross runs" `Quick
+            test_turn_context_cells_do_not_cross_runs
         ; eio_test "turn context fields absent without context"
             test_turn_context_fields_absent_without_context
         ; eio_test "route evidence stored for git push"
@@ -1072,6 +1174,10 @@ let () =
             test_route_evidence_records_internal_descriptor
         ; eio_test "route evidence records masc board descriptor"
             test_route_evidence_records_masc_board_descriptor
+        ; Alcotest.test_case
+            "route evidence records descriptor eval tags"
+            `Quick
+            test_route_evidence_records_descriptor_eval_tags
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"
@@ -1084,6 +1190,8 @@ let () =
             test_append_failure_records_coverage_gap
         ; eio_test "dashboard aggregate surfaces coverage gap"
             test_dashboard_aggregate_surfaces_coverage_gap
+        ; eio_test "dashboard aggregate ignores recovered coverage gap"
+            test_dashboard_aggregate_ignores_recovered_coverage_gap
         ] )
     ; ( "utf8_sanitize",
         [ eio_test "invalid UTF-8 bytes scrubbed before persist"
@@ -1092,8 +1200,8 @@ let () =
             test_output_valid_utf8_untouched
         ] )
     ; ( "blob_normalize",
-        [ eio_test "blob sentinel persists as structured _blob object"
-            test_output_blob_sentinel_normalized
+        [ eio_test "blob marker persists as structured _blob object"
+            test_output_blob_marker_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
         ] )

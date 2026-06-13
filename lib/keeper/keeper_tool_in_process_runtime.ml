@@ -1,0 +1,376 @@
+(** In-process runtime handlers for descriptor-backed workspace tools.
+
+    Each handler reproduces the exact JSON the legacy
+    [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] match arm used
+    to produce. Outcome inference via [classify_tool_result_payload] yields
+    the same Success/Failure label as the legacy
+    [success_tool_result]/[failure_tool_result] forces. *)
+
+open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+let handle_time_now ~args:_ =
+  let now_unix = Time_compat.now () in
+  let now_iso = Masc_domain.now_iso () in
+  Yojson.Safe.to_string
+    (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
+;;
+
+let handle_stay_silent ~args:_ =
+  Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
+;;
+
+let handle_tools_list ~(meta : keeper_meta) ~args:_ =
+  Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
+;;
+
+let handle_tool_search ~search_fn ~(args : Yojson.Safe.t) =
+  let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
+  let max_results =
+    min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
+  in
+  if query = ""
+  then
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             "query is required. Good: query='read file'. Bad: query=''."
+         ])
+  else Yojson.Safe.to_string (search_fn ~query ~max_results)
+;;
+
+let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
+  Keeper_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
+;;
+
+let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
+  Keeper_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
+;;
+
+let handle_memory_write ~config ~(meta : keeper_meta) ~args =
+  Keeper_tool_memory_runtime.keeper_memory_write_json ~config ~meta ~args
+;;
+
+let handle_library_search ~(meta : keeper_meta) ~args =
+  let result =
+    Tool_library.handle_search
+      ~tool_name:"keeper_library_search"
+      ~start_time:0.0
+      Tool_library.{ agent_name = meta.name }
+      args
+
+  in
+  if Tool_result.is_success result
+  then Tool_result.message result
+  else
+    Yojson.Safe.to_string
+      (`Assoc [ "error", `String (Tool_result.message result) ])
+;;
+
+let handle_library_read ~(meta : keeper_meta) ~args =
+  let result =
+    Tool_library.handle_read
+      ~tool_name:"keeper_library_read"
+      ~start_time:0.0
+      Tool_library.{ agent_name = meta.name }
+      args
+
+  in
+  if Tool_result.is_success result
+  then Tool_result.message result
+  else
+    Yojson.Safe.to_string
+      (`Assoc [ "error", `String (Tool_result.message result) ])
+;;
+
+let handle_surface_read ~config ~(meta : keeper_meta) ~args =
+  let surface = Safe_ops.json_string ~default:"" "surface" args in
+  let limit =
+    Safe_ops.json_int ~default:Keeper_surface_read.default_limit "limit" args
+  in
+  let before = Safe_ops.json_float_opt "before" args in
+  let page =
+    Keeper_chat_store.load_page
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ?before
+      ()
+  in
+  let notes =
+    Keeper_person_notes.notes
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  Keeper_surface_read.respond ~surface ~limit
+    ~has_more:page.Keeper_chat_store.has_more
+    ~notes
+    page.Keeper_chat_store.messages
+;;
+
+let handle_person_note_set ~config ~(meta : keeper_meta) ~args =
+  let speaker_id =
+    String.trim (Safe_ops.json_string ~default:"" "speaker_id" args)
+  in
+  (* note is NOT trimmed to emptiness-only: a blank note is the
+     deliberate tombstone (RFC-0229 §3.1). *)
+  let note = Safe_ops.json_string ~default:"" "note" args in
+  if speaker_id = "" then
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ( "error"
+          , `String
+              "speaker_id is required. Use the id field from the \
+               keeper_surface_read roster." )
+        ])
+  else begin
+    Keeper_person_notes.set_note
+      ~base_dir:config.Workspace.base_path
+      ~keeper_name:meta.name
+      ~speaker_id
+      ~note
+      ();
+    Yojson.Safe.to_string
+      (`Assoc
+        [ "ok", `Bool true
+        ; "speaker_id", `String speaker_id
+        ; "cleared", `Bool (String.trim note = "")
+        ])
+  end
+;;
+
+let handle_surface_post ~config ~(meta : keeper_meta) ~args =
+  let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
+  let content = Safe_ops.json_string ~default:"" "content" args in
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  let safe_content = Keeper_secret_redaction.redact_text redaction content in
+  let channel_id =
+    match String.trim (Safe_ops.json_string ~default:"" "channel_id" args) with
+    | "" -> None
+    | id -> Some id
+  in
+  if surface = "" then
+    Keeper_surface_post.error_json
+      "surface is required. Good: surface='dashboard'."
+  else if String.trim content = "" then
+    Keeper_surface_post.error_json "content is required and must be non-empty."
+  else
+    let bound_discord_channels =
+      Channel_gate_discord_state.bound_channels ~keeper_name:meta.name
+    in
+    match
+      Keeper_surface_post.resolve_target ~surface ~channel_id
+        ~bound_discord_channels
+    with
+    | Error message -> Keeper_surface_post.error_json message
+    | Ok Keeper_surface_post.To_dashboard ->
+        Keeper_chat_store.append_assistant_message
+          ~base_dir:config.Workspace.base_path
+          ~keeper_name:meta.name
+          ~content:safe_content
+          ~surface:(Surface_ref.Dashboard { session_id = None })
+          ();
+        Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+          ~source:"dashboard";
+        Keeper_surface_post.ok_json ~surface ()
+    | Ok (Keeper_surface_post.To_discord { channel_id }) -> (
+        match Channel_gate_discord_state.send_message ~channel_id ~content:safe_content () with
+        | Error send_error ->
+            Keeper_surface_post.error_json
+              (Format.asprintf "discord send failed: %a"
+                 Channel_gate_discord_state.pp_send_error send_error)
+        | Ok message_id ->
+            Keeper_chat_store.append_assistant_message
+              ~base_dir:config.Workspace.base_path
+              ~keeper_name:meta.name
+              ~content:safe_content
+              ~surface:
+                (Surface_ref.Discord
+                   {
+                     guild_id = None;
+                     channel_id;
+                     parent_channel_id = None;
+                     thread_id = None;
+                   })
+              ();
+            Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+              ~source:"discord";
+            Keeper_surface_post.ok_json ~surface ~message_id ())
+;;
+
+let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
+  Keeper_tool_ide_runtime.handle_ide_annotate
+    ~config
+    ~keeper_name:meta.name
+    ~args
+;;
+
+let handle_voice ~config ~(meta : keeper_meta) ~name ~args () =
+  Keeper_tool_voice_runtime.handle_voice_tool ~config ~meta ~name ~args ()
+;;
+
+let handle_task ~config ~(meta : keeper_meta) ~name ~args =
+  Keeper_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
+;;
+
+let handle_board ~(meta : keeper_meta) ~name ~args =
+  Keeper_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
+;;
+
+let handle_masc_board ~name ~args =
+  let result =
+    Board_tool_dispatch.handle_tool name args
+  in
+  if Tool_result.is_success result
+  then Tool_result.message result
+  else
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error", `String (Tool_result.message result)
+         ; "tool", `String name
+         ])
+;;
+
+(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
+   returned by [Tool_*.dispatch] to the in_process_runtime string-output
+   convention. [None] means the dispatcher does not recognise the name
+   (the descriptor → dispatcher mapping is misconfigured if this fires
+   for a tool reachable via [descriptors_for_internal]). *)
+let dispatch_option_to_string ~name = function
+  | Some (result : Tool_result.result) ->
+    if Tool_result.is_success result
+    then Tool_result.message result
+    else
+      Yojson.Safe.to_string
+        (`Assoc [ "error", `String (Tool_result.message result) ])
+  | None ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: cluster dispatcher did not recognise %S"
+                name)
+         ])
+;;
+
+let handle_masc_task ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Task.Tool.context =
+    { config; agent_name = meta.name; sw = None }
+  in
+  Task.Tool.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_plan ~(config : Workspace.config) ~name ~args =
+  let ctx : Tool_plan.context = { config } in
+  Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_run ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_run.context = { config; agent_name = Some meta.name } in
+  Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_agent ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_agent.context = { config; agent_name = meta.name } in
+  Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+(* RFC-0182 §3.1 — masc_workspace_ cluster. Tool_workspace lies LATE in module
+   order (depends on Keeper_runtime which depends on much of the keeper
+   layer). Keeper_tool_in_process_runtime is EARLY (transitively imported
+   by Keeper_tool_dispatch_runtime). A direct static import here closes a cycle.
+
+   Resolution: dispatch through [Workspace_dispatch_ref.dispatch]. A late
+   bootstrap module ([Mcp_server_eio_execute]) registers
+   [Tool_workspace.dispatch] into the ref. Until registered the ref returns
+   [None], surfacing a clear projection error rather than silently
+   succeeding with stale state. *)
+let handle_masc_workspace ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let dispatched =
+    !Workspace_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
+  in
+  dispatch_option_to_string ~name dispatched
+;;
+
+(* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec
+   extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
+   back edge that previously cycled Config → ... →
+   Keeper_tool_in_process_runtime. *)
+let handle_masc_misc ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_misc.context = { config; agent_name = meta.name } in
+  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_control.context = { config; agent_name = meta.name } in
+  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
+  Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+(* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
+   returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
+   typed-result migration), same shape as Tool_local_runtime.  Tool_shard
+   has no Keeper/Workspace deps so no cycle concern.
+
+   TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
+   and the upstream [Keeper_tool_dispatch_runtime] dispatch wrapper. *)
+let dashboard_surface_readiness_callback = ref (fun ?surface_id:_ () -> `Assoc [])
+let register_dashboard_surface_readiness fn = dashboard_surface_readiness_callback := fn
+
+(* RFC-0182 §3.1 — masc_surface_audit singleton.  Body is pure
+   ([Dashboard_surface_readiness.json ?surface_id ()]) with no ctx
+   requirements; direct import is cycle-safe.
+
+   TEL-OK: read-only dashboard surface snapshot, telemetry lives in
+   [Dashboard_surface_readiness]. *)
+let handle_masc_surface_audit ~args =
+  let surface_id = Safe_ops.json_string_opt "surface_id" args in
+  Yojson.Safe.to_string (!dashboard_surface_readiness_callback ?surface_id ())
+;;
+
+(* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/
+   (late) but exposes keeper workspace tools.  A direct import here
+   closes a cycle, so we dispatch through [Keeper_dispatch_ref].  Today
+   only [masc_keeper_list] is registered; remaining keeper tools depend
+   on the Eio context and await Phase 5 Eio plumbing.
+
+   TEL-OK: descriptor projection — telemetry lives in the underlying
+   [Keeper_tool_surface] / [Keeper_tool_surface_ops] / [Keeper_status_detail] handlers
+   that the registered ref delegates to. *)
+let handle_masc_keeper
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~name
+      ~args
+      ()
+  =
+  let result =
+    !Keeper_dispatch_ref.dispatch
+      ~config
+      ~agent_name:meta.agent_name
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ~name
+      ~args
+      ()
+  in
+  dispatch_option_to_string ~name result
+;;

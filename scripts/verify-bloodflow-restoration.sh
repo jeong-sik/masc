@@ -3,12 +3,11 @@
 #
 # Phase A bloodflow-restoration verification helper.  Reads operator-side
 # JSONL logs and grep counters for the five Phase A signals defined in
-# planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-sunny-starfish.md
+# planning/claude-plans/me-workspace-yousleepwhen-masc-sunny-starfish.md
 # section 10:
 #
 #   F1 — per-keeper raw token fallback fired
 #   F2 — silent_auth_token_resolve_error volume + would_reject mode mix
-#   F3 — empty_tool_universe blocker observed by lane
 #   F4 — string-match SSOT collapse (no contains_substring outside SSOT)
 #   F5 — typed gh-api / strip_keeper_prefix helpers in use (compile-only;
 #        dynamic check by scanning for legacy literal patterns)
@@ -114,7 +113,7 @@ f1=$(count_pattern_in '"source":"per_keeper_token_file"' "${auth_logs[@]}")
 echo "F1 per_keeper_token_file source events: $f1"
 if [ "$f1" -lt 1 ] && [ "${#auth_logs[@]}" -gt 0 ]; then
   echo "  NOTE: F1 fallback never fired in this log window — either no"
-  echo "  subprocess MCP calls happened, or MASC_MCP_TOKEN was always set."
+  echo "  subprocess MCP calls happened, or MASC_TOKEN was always set."
 fi
 
 # ----- F2: silent_auth + would_reject mode mix ----------------------------
@@ -127,12 +126,6 @@ if [ "$silent" -gt 0 ] && [ "$would" -lt "$silent" ]; then
   echo "  NOTE: silent count > would_reject count — Auth_strict_mode might"
   echo "  be Off in part of the window.  Check MASC_AUTH_STRICT env."
 fi
-
-# ----- F3: empty_tool_universe blocker observed --------------------------
-f3=$(count_pattern_in 'masc_empty_tool_universe_observed_total' "${kp_logs[@]}")
-echo
-echo "F3 empty_tool_universe blocker events:   $f3"
-echo "   (broken down by lane in dashboard via labels turn_lane / fallback_used)"
 
 # ----- F4: contains_substring SSOT --------------------------------------
 # Static check: count call sites of [String_util.contains_substring] only
@@ -215,13 +208,6 @@ elif [ "$would" -ge "$silent" ]; then
   echo "     before promoting Auth_strict_mode default to Strict."
 else
   echo "PR-2 (Strict reject): would_reject lags silent ($would < $silent) — investigate."
-fi
-
-if [ "$f3" -gt 0 ]; then
-  echo "PR-4 (Typed terminal state): empty_tool_universe blocker firing ($f3 events)."
-  echo "  -> Group by 'turn_lane' / 'fallback_used' label to design Tool_universe.t variant."
-else
-  echo "PR-4 (Typed terminal state): no empty_tool_universe events — soak inconclusive."
 fi
 
 echo

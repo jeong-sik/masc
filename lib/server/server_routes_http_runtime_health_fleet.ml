@@ -8,13 +8,7 @@ open Server_auth
 open Server_routes_http_common
 open Server_routes_http_runtime_fleet_scan
 
-let take limit values =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | value :: rest -> loop (remaining - 1) (value :: acc) rest
-  in
-  loop limit [] values
+let take = List.take
 ;;
 
 let keeper_reaction_ledger_health_json () =
@@ -36,9 +30,9 @@ let keeper_reaction_ledger_health_json () =
       ; "keepers", `List []
       ]
   | Some state ->
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.workspace_config in
     let keeper_names =
-      try Keeper_types.keeper_names config |> sorted_unique_strings |> take 64 with
+      try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn
@@ -71,18 +65,19 @@ let bool_field name = function
 (* Scope keeper counts to the active workspace's base_path so a running
    keeper from another workspace cannot mask a local outage in fleet
    safety. `bootable_keeper_count` is already derived from
-   `state.room_config`, so the running count must use the same scope. *)
-let current_room_base_path_opt () =
+   `state.workspace_config`, so the running count must use the same scope. *)
+let runtime_base_path_opt () =
   match current_server_state_opt () with
-  | Some state -> Some state.Mcp_server.room_config.base_path
+  | Some state -> Some state.Mcp_server.workspace_config.base_path
   | None -> None
 
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
     ?(include_reaction_ledger = true)
     () =
-  let base_path = current_room_base_path_opt () in
-  let phase_counts = keeper_phase_counts ?base_path () in
+  let base_path = runtime_base_path_opt () in
+  let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =
     match meta_scan with
@@ -101,7 +96,11 @@ let keeper_fleet_runtime_resolution_base_fields
         ~phase_counts
         ~paused_keepers_json
         ()
-    | None -> keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ()
+    | None ->
+      keeper_fleet_safety_health_json
+        ~phase_counts
+        ~paused_keepers_json
+        ()
   in
   let fields =
     [ "keeper_fibers", `Int keeper_fibers
@@ -163,9 +162,9 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
     ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
     ; "keeper_fibers", `Int keeper_fibers
-    ; "fd_open", fd_accountant |> Yojson.Safe.Util.member "fd_open"
-    ; "fd_limit", fd_accountant |> Yojson.Safe.Util.member "fd_limit"
-    ; "fd_pressure_active", fd_accountant |> Yojson.Safe.Util.member "pressure_active"
+    ; "fd_open", (match Json_util.assoc_member_opt "fd_open" fd_accountant with Some v -> v | None -> `Null)
+    ; "fd_limit", (match Json_util.assoc_member_opt "fd_limit" fd_accountant with Some v -> v | None -> `Null)
+    ; "fd_pressure_active", (match Json_util.assoc_member_opt "pressure_active" fd_accountant with Some v -> v | None -> `Null)
     ]
 ;;
 
@@ -181,7 +180,7 @@ let keeper_fleet_runtime_resolution_light_fields () =
       Some
         (keeper_fleet_meta_scan
            ~include_paused_details:false
-           state.Mcp_server.room_config)
+           state.Mcp_server.workspace_config)
     | None -> None
   in
   keeper_fleet_runtime_resolution_base_fields
@@ -190,13 +189,3 @@ let keeper_fleet_runtime_resolution_light_fields () =
     ()
   @ [ "fd_accountant", fd_accountant_snapshot_json () ]
 ;;
-
-let cdal_health_json () =
-  try Cdal_runtime_health.snapshot_json () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-      Tool_args.error_assoc
-        [
-          ("component", `String "cdal");
-          ("error", `String (Printexc.to_string exn));
-        ]

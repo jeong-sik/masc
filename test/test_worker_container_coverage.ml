@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -20,26 +20,6 @@ let worker_usage ?cost_usd ~input_tokens ~output_tokens () :
     cache_read_input_tokens = 0;
     cost_usd;
   }
-
-let find_tool name tools =
-  List.find (fun (t : Agent_sdk.Tool.t) -> String.equal t.schema.name name) tools
-
-let rec cleanup_path path =
-  if Sys.file_exists path then
-    match Unix.lstat path with
-    | { Unix.st_kind = Unix.S_DIR; _ } ->
-      Array.iter
-        (fun child -> cleanup_path (Filename.concat path child))
-        (Sys.readdir path);
-      Unix.rmdir path
-    | _ -> Unix.unlink path
-
-let explicit_events config =
-  Telemetry_eio.read_all_events config
-  |> List.filter (fun (record : Telemetry_eio.event_record) ->
-         match record.event with
-         | Telemetry_eio.Agent_joined _ -> false
-         | _ -> true)
 
 let test_parse_text_tool_calls_single () =
   let content =
@@ -99,57 +79,157 @@ let test_mcp_endpoint_url_does_not_leak_token () =
     in
     check string "mcp url stays clean" "http://127.0.0.1:8935/mcp" url)
 
-let test_local_shell_failure_class_reaches_tool_called () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Process_eio.reset_for_testing ();
-  Process_eio.init ~cwd_default:(Eio.Stdenv.cwd env)
-    ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
-  let base_dir = Filename.temp_file "worker_container_telemetry_" "" in
-  Sys.remove base_dir;
-  Unix.mkdir base_dir 0o755;
-  Fun.protect
-    ~finally:(fun () ->
-      Process_eio.reset_for_testing ();
-      cleanup_path base_dir)
-    (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See test setup: Coord.init side effect creates the room store. *)
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      let tools =
-        match
-          Worker_container.build_local_shell_tools
-            ~room_config:(Some config)
-            ~worker_name:"local-worker-test"
-            ~workdir:base_dir
-        with
-        | Ok tools -> tools
-        | Error err -> failf "expected local shell tools: %s" err
-      in
-      let shell = find_tool "shell_exec" tools in
-      (match
-         Agent_sdk.Tool.execute shell
-           (`Assoc [ "command", `String "rm -rf /" ])
-       with
-       | Error _ -> ()
-       | Ok _ -> fail "blocked shell command should fail");
-      match
-        explicit_events config
-        |> List.find_opt (fun (record : Telemetry_eio.event_record) ->
-               match record.event with
-               | Telemetry_eio.Tool_called r ->
-                 String.equal r.tool_name "shell_exec" && not r.success
-               | _ -> false)
-      with
-      | Some { Telemetry_eio.event = Telemetry_eio.Tool_called r; _ } ->
-        check (option string) "error_kind"
-          (Some "command_blocked")
-          (Option.map Telemetry_eio.error_kind_to_string r.error_kind);
-        check (option string) "failure_class"
-          (Some "workflow_rejection")
-          (Option.map Tool_result.tool_failure_class_to_string r.failure_class)
-      | Some _ -> fail "expected Tool_called"
-      | None -> fail "missing failed shell_exec telemetry")
+let client_operation_params =
+  `Assoc [ ("name", `String "masc_status"); ("arguments", `Assoc []) ]
+
+let client_operation_labels ?error_type ?rpc_response_status_code () =
+  Worker_container_types.For_testing.mcp_client_operation_duration_labels
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ?error_type
+    ?rpc_response_status_code
+    ()
+
+let test_mcp_client_operation_duration_labels_follow_semconv () =
+  let labels =
+    client_operation_labels ~error_type:"-32602" ~rpc_response_status_code:"-32602" ()
+  in
+  check (list (pair string string)) "client operation labels"
+    [
+      (Otel_genai.Mcp_attr_key.mcp_method_name, Otel_genai.Mcp_value.tools_call_method);
+      ( Otel_genai.Mcp_attr_key.mcp_protocol_version,
+        Mcp_transport_protocol.default_protocol_version );
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+      (Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool");
+      (Otel_genai.Attr_key.gen_ai_tool_name, "masc_status");
+      (Otel_genai.Mcp_attr_key.server_address, "127.0.0.1");
+      (Otel_genai.Mcp_attr_key.server_port, "8935");
+      (Otel_genai.Mcp_attr_key.error_type, "-32602");
+      (Otel_genai.Mcp_attr_key.rpc_response_status_code, "-32602");
+    ]
+    labels;
+  check bool "client operation metric omits session id" false
+    (List.exists
+       (fun (key, _) -> String.equal key Otel_genai.Mcp_attr_key.mcp_session_id)
+       labels)
+
+let test_records_mcp_client_operation_duration_metric () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_operation_duration in
+  let labels = client_operation_labels () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_operation_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ~started_at:(Unix.gettimeofday () -. 0.25)
+    ();
+  check (float 0.0001) "client operation count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
+let test_tools_call_is_error_records_failed_client_operation_duration () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_operation_duration in
+  let labels = client_operation_labels ~error_type:Otel_genai.Mcp_value.tool_error_type () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_operation_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~method_name:Otel_genai.Mcp_value.tools_call_method
+    ~params:client_operation_params
+    ~started_at:(Unix.gettimeofday () -. 0.25)
+    ~tool_result_is_error:true
+    ();
+  check (float 0.0001) "client tool-error count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
+let client_session_labels ?error_type () =
+  Worker_container_types.For_testing.mcp_client_session_duration_labels
+    ~url:"http://127.0.0.1:8935/mcp"
+    ?error_type
+    ()
+
+let test_mcp_client_session_duration_labels_follow_semconv () =
+  let labels = client_session_labels ~error_type:"agent_error" () in
+  check (list (pair string string)) "client session labels"
+    [
+      ( Otel_genai.Mcp_attr_key.mcp_protocol_version,
+        Mcp_transport_protocol.default_protocol_version );
+      (Otel_genai.Mcp_attr_key.network_protocol_name, "http");
+      (Otel_genai.Mcp_attr_key.network_protocol_version, "1.1");
+      (Otel_genai.Mcp_attr_key.network_transport, "tcp");
+      (Otel_genai.Mcp_attr_key.server_address, "127.0.0.1");
+      (Otel_genai.Mcp_attr_key.server_port, "8935");
+      (Otel_genai.Mcp_attr_key.error_type, "agent_error");
+    ]
+    labels;
+  check bool "client session metric omits session id" false
+    (List.exists
+       (fun (key, _) -> String.equal key Otel_genai.Mcp_attr_key.mcp_session_id)
+       labels)
+
+let test_records_mcp_client_session_duration_metric () =
+  let metric_name = Otel_genai.Mcp_metric_name.client_session_duration in
+  let labels = client_session_labels () in
+  let before_count =
+    Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Worker_container_types.For_testing.record_mcp_client_session_duration
+    ~url:"http://127.0.0.1:8935/mcp"
+    ~started_at:(Unix.gettimeofday () -. 0.5)
+    ();
+  check (float 0.0001) "client session count increments"
+    (before_count +. 1.0)
+    (Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ())
+
+let worker_meta ?mcp_client_session_started_at () =
+  {
+    Worker_container_types.version =
+      Worker_container_types.worker_container_version;
+    worker_name = "coverage-worker";
+    mcp_session_id = "coverage-session";
+    workspace_path = "/tmp/coverage-workspace";
+    role = None;
+    selection_note = None;
+    runtime_backend = Worker_execution_backend.Local_playground;
+    thinking_enabled = None;
+    timeout_seconds = None;
+    effective_model = "test-model";
+    checkpoint_path = "/tmp/coverage-checkpoint.json";
+    turn_log_path = "/tmp/coverage-turns.jsonl";
+    mcp_client_session_started_at;
+    last_run_at = None;
+  }
+
+let test_worker_mcp_client_session_preserves_persisted_start () =
+  let started_at = 42.0 in
+  let begun =
+    Worker_oas.For_testing.begin_worker_mcp_client_session
+      (worker_meta ~mcp_client_session_started_at:started_at ())
+  in
+  check (option (float 0.0001)) "persisted start is preserved"
+    (Some started_at)
+    begun.mcp_client_session_started_at;
+  let fresh =
+    Worker_oas.For_testing.begin_worker_mcp_client_session (worker_meta ())
+  in
+  check bool "fresh session receives a start timestamp" true
+    (Option.is_some fresh.mcp_client_session_started_at)
+
+let test_worker_mcp_client_session_finish_clears_started_at () =
+  let completed =
+    Worker_oas.For_testing.finish_worker_mcp_client_session
+      (worker_meta ~mcp_client_session_started_at:42.0 ())
+  in
+  check (option (float 0.0001)) "active session timestamp cleared" None
+    completed.mcp_client_session_started_at;
+  check bool "last_run_at recorded" true (Option.is_some completed.last_run_at)
 
 let () =
   run "Worker_runtime"
@@ -166,7 +246,22 @@ let () =
             test_merge_usage_sums_costs_when_both_present;
           test_case "mcp endpoint url does not leak token" `Quick
             test_mcp_endpoint_url_does_not_leak_token;
-          test_case "local shell failure_class reaches telemetry" `Quick
-            test_local_shell_failure_class_reaches_tool_called;
+          test_case "MCP client operation duration labels follow semconv" `Quick
+            test_mcp_client_operation_duration_labels_follow_semconv;
+          test_case "records MCP client operation duration metric" `Quick
+            test_records_mcp_client_operation_duration_metric;
+          test_case "tools/call isError records failed client operation duration"
+            `Quick
+            test_tools_call_is_error_records_failed_client_operation_duration;
+          test_case "MCP client session duration labels follow semconv" `Quick
+            test_mcp_client_session_duration_labels_follow_semconv;
+          test_case "records MCP client session duration metric" `Quick
+            test_records_mcp_client_session_duration_metric;
+          test_case "worker MCP client session preserves persisted start"
+            `Quick
+            test_worker_mcp_client_session_preserves_persisted_start;
+          test_case "worker MCP client session finish clears active start"
+            `Quick
+            test_worker_mcp_client_session_finish_clears_started_at;
         ] );
     ]

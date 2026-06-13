@@ -133,7 +133,7 @@ PR #88 was merged. Issue closed.
 
 | Issue | State | Date | Summary |
 |---|---|---|---|
-| #965 cohttp-eio: "handle used after calling close" | OPEN | 2023-02-02, 12 comments | FD-after-close panics on body > a few KB; smondet repro. Mirrors masc-mcp's `connection: close` workaround. |
+| #965 cohttp-eio: "handle used after calling close" | OPEN | 2023-02-02, 12 comments | FD-after-close panics on body > a few KB; smondet repro. Mirrors masc's `connection: close` workaround. |
 | #1121 cohttp-eio `expert` mode doesn't allow closing of the stream | OPEN | 2026-03-01 | `Eio.Buf_read` has no close, workaround = `exception Die`. |
 | #676 How to close connections? (cohttp client) | OPEN | 2022-01-02 | Long-standing close-API gap. |
 | #1101 cohttp-eio: take executor pool instead of creating domains | CLOSED | 2024-12-29 | Pool of *domains*, not connections. |

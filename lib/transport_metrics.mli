@@ -1,7 +1,7 @@
-(** Transport_metrics — Prometheus observability for SSE, gRPC,
+(** Transport_metrics — Otel_metric_store observability for SSE, gRPC,
     WebSocket transports + agent heartbeat liveness.
 
-    Metric naming follows Prometheus conventions:
+    Metric naming follows Otel_metric_store conventions:
 
     - [masc_sse_*] for SSE transport
     - [masc_grpc_*] for gRPC transport
@@ -17,7 +17,7 @@
     [grpc_port] / [ws_port] (env-derived), [set_agent_heartbeat_age]
     / [inc_agent_stale] (per-agent labels, internal-only), the
     JSON helpers (\[assoc_field], [int_field], [int_field_opt],
-    [int_option_json], [room_id_from_config], [cluster_summary_json]),
+    [int_option_json], [workspace_id_from_config], [cluster_summary_json]),
     [http_listener_mode], [primary_path], [queue_pressure],
     [tcp_port_reachable], [hot_session_json], the
     [ws_delivery_metric_names] data table + its type.  All
@@ -41,7 +41,7 @@ type hot_queue_session =
 
 (** [set_sse_sessions ~kind count] sets the [masc_sse_sessions]
     gauge labelled with [kind] (typically ["observer"] /
-    ["coordinator"]). *)
+    ["agent_stream"]). *)
 val set_sse_sessions : kind:string -> int -> unit
 
 (** [observe_broadcast_duration ?target seconds] records a
@@ -195,7 +195,7 @@ type ws_frame_json_parse_error_kind =
 (** Increments [masc_server_mcp_ws_frame_json_parse_failures_total] for a
     silent-drop visibility event in [parse_sse_dashboard_event].
     [error_kind] must be one of the closed vocab values
-    [{"yojson_parse_error"; "other"}] — keeps Prometheus cardinality
+    [{"yojson_parse_error"; "other"}] — keeps Otel_metric_store cardinality
     bounded. Iter 28. *)
 val inc_ws_frame_json_parse_failure :
   error_kind:ws_frame_json_parse_error_kind -> unit
@@ -305,8 +305,17 @@ val inc_agent_stale : unit -> unit
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
-    [Prometheus.metric_value_or_zero] — never raises on missing
-    metrics.  [~config] is currently used for room-id
+    [Otel_metric_store.metric_value_or_zero] — never raises on missing
+    metrics.  [~config] is currently used for workspace-id
     derivation; [cluster_summary_json] is intentionally [None]
     to keep transport health metrics-only (no command-plane I/O). *)
-val transport_health_json : config:Coord.config -> Yojson.Safe.t
+val transport_health_json : config:Workspace.config -> Yojson.Safe.t
+
+val register_webrtc_metrics :
+  is_enabled:(unit -> bool) ->
+  pending_count:(unit -> int) ->
+  peers_count:(unit -> int) ->
+  live_count:(unit -> int) ->
+  channels_count:(unit -> int) ->
+  ice_servers_urls:(unit -> string list) ->
+  unit

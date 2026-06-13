@@ -3,7 +3,6 @@
 
     Delegates to sub-modules:
     - Keeper_context_runtime: checkpoint, compaction, model labels
-    - Keeper_coordination: room presence
     - Keeper_prompt: system prompts, mention detection, text processing
 
     Proactive emission and autonomous goal turns are now handled by
@@ -17,7 +16,4 @@ let load_context_from_checkpoint = Keeper_context_runtime.load_context_from_chec
 let compaction_policy_of_keeper = Keeper_context_runtime.compaction_policy_of_keeper
 let generate_trace_id = Keeper_context_runtime.generate_trace_id
 let effective_model_labels_for_turn = Keeper_context_runtime.effective_model_labels_for_turn
-let ensure_keeper_room_presence = Keeper_coordination.ensure_keeper_room_presence
-let room_cursor_for = Keeper_coordination.room_cursor_for
-let set_room_cursor = Keeper_coordination.set_room_cursor
 let memory_check_default_json = Keeper_context_runtime.memory_check_default_json

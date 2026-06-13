@@ -21,18 +21,15 @@ implementation_prs:
   - "#15415"  # PR-10 typed Dispatch_outcome.t 5-arm sum
   - "#15416"  # PR-11 legacy dispatch mli surface removal
   - "#15417"  # PR-12 Host_config typed portability infrastructure
-  - "#15419"  # PR-13 Keeper_disclosure_strategy typed sum
-  # PR-14 (this closeout PR) will be appended on merge.
+  # Closeout PR will be appended on merge.
 follow_up_prs:
   # Deferred items per delegation-not-absorption pattern (PR body §"Plan adjustment"):
-  - "host-config-cleanup-A: credential (host_config_provider.ml:3, 4 refs)"
+  - "host-config-cleanup-A: repo-auth temp root retired"
   - "host-config-cleanup-B: shell (/bin/bash + /bin/zsh, 7 sites)"
   - "host-config-cleanup-C: coreutils (/bin/ls /usr/bin/head etc., 6 sites)"
   - "host-config-cleanup-D: agent-runtime (/tmp/.masc_agent_* 7 sites)"
-  - "host-config-cleanup-E: sandbox-root (worker_dev_tools.ml:85)"
+  - "host-config-cleanup-E: sandbox-root (retired_worker_shell_facade:85)"
   - "host-config-cleanup-F: test-mode (5 String.starts_with sites)"
-  - "disclosure-activation-G: worker_oas.ml Builder.with_disclosure_level wiring"
-  - "disclosure-activation-H: keeper_meta.ml TOML [disclosure] round-trip"
   - "dispatch-observer-I: completed; current Tool_dispatch observer API is dispatch_observer/register_dispatch_observer"
   - "legacy-flag-cleanup-J: MASC_DISPATCH_V2 env flag removal (PR-11 deferred)"
 ---
@@ -41,7 +38,7 @@ follow_up_prs:
 
 ## §0 Summary
 
-masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 서로 다른 권한·trace·telemetry 동작을 갖는다. 본 RFC는 단일 `Tool_dispatch.guarded_dispatch` entry로 수렴하면서 **모든 dispatch가 4-tuple `(Span, Audit, Metric, Trace_id)`을 100% emit하도록 invariant를 강제**한다. 14개의 stacked PR로 분할 진행한다 (1-2주 horizon).
+masc Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 서로 다른 권한·trace·telemetry 동작을 갖는다. 본 RFC는 단일 `Tool_dispatch.guarded_dispatch` entry로 수렴하면서 **모든 dispatch가 4-tuple `(Span, Audit, Metric, Trace_id)`을 100% emit하도록 invariant를 강제**한다. 13개의 stacked PR로 분할 진행한다 (1-2주 horizon).
 
 ### 0.1 North Star
 
@@ -54,7 +51,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 | 비대칭 종류 | 행동 |
 |---|---|
 | **결함** — 권한 게이트 0건, dead pre-hook chain, observer silent skip | 통일 (typed wrapper로 root-fix) |
-| **의도된 경계** — OAS↔masc-mcp boundary, Public MCP vs Internal, Runtime lens carve-out | typed enumeration으로 명시 (통일 금지) |
+| **의도된 경계** — OAS↔masc boundary, Public MCP vs Internal, Runtime lens carve-out | typed enumeration으로 명시 (통일 금지) |
 
 본 RFC는 **결함은 통일, 경계는 명시**. 두 행동이 동시에 typed 방식으로 진행.
 
@@ -64,7 +61,7 @@ masc-mcp Keeper→Tool 실행 사이클은 현재 **3개의 dispatch entry**가 
 
 ### §1.1 3-Entry Dispatch Divergence
 
-masc-mcp `lib/tool_dispatch.ml`에는 2개의 entry function이 있고, `lib/keeper/keeper_tag_dispatch.ml`이 3번째 fallback entry를 형성한다. 각 entry가 서로 다른 caller를 받고 서로 다른 hook/guard를 적용한다.
+masc `lib/tool_dispatch.ml`에는 2개의 entry function이 있고, `lib/keeper/keeper_tag_dispatch.ml`이 3번째 fallback entry를 형성한다. 각 entry가 서로 다른 caller를 받고 서로 다른 hook/guard를 적용한다.
 
 **Entry 1 — `Tool_dispatch.dispatch`** (`lib/tool_dispatch.ml:117-130`):
 
@@ -111,8 +108,8 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result optio
 
 | Caller | Entry | Pre-hook | Observer | Capability gate | Trace span |
 |---|---|---|---|---|---|
-| `agent_tool_remote_mcp_runtime.ml:164` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ unrestricted¹ | ✗ |
-| `agent_tool_remote_mcp_runtime.ml:218` (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ | ✗ |
+| legacy keeper registered-runtime site 1 (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ unrestricted¹ | ✗ |
+| legacy keeper registered-runtime site 2 (keeper turn) | Entry 1 (`dispatch`) | ✗ bypass | ~ if result≠None | ✗ | ✗ |
 | `mcp_server_eio_execute.ml:817` (MCP) | manual `run_pre_hooks` + `dispatch` | ✓ manual | ~ if result≠None | ‖ profile filter² | ✗ |
 | `mcp_server_eio_execute.ml:999` (MCP) | manual `run_pre_hooks` + `dispatch` | ✓ manual | ~ if result≠None | ‖ profile filter² | ✗ |
 | `keeper_tag_dispatch.ml` (fallback) | Entry 3 | ✗ | ? | ✗ | ✗ |
@@ -123,12 +120,12 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.result optio
 
 ### §1.2 Telemetry 4-Tuple Emission Gap
 
-`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc-mcp `lib/tool_dispatch.ml`이나 `lib/keeper/agent_tool_remote_mcp_runtime.ml`에 0건** (verify: `rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/agent_tool_remote_mcp_runtime.ml` = 0 매치).
+`Tracing.with_span`은 oas `lib/agent/agent_tools.ml:161 invoke_hook`에서 hook 호출을 wrap하지만, **masc `lib/tool_dispatch.ml`이나 legacy keeper registered-runtime path에 0건**이었다.
 
 | Tuple slot | 현재 상태 |
 |---|---|
 | `Span` (OTel) | 0 emission. `lib/otel/otel_dispatch_hook.ml:103` 등록만 있고 span 시작/종료 없음. |
-| `Audit` | `Audit_log.record` caller 10+곳 분산 (`dashboard_tool_host_events`, `governance_anomaly`, `mcp_server_eio_call_tool`, `mcp_server_eio_execute`, `operator/operator_control`, `tool_inline_dispatch_comm` 등). dispatch path에서 SSOT 없음. |
+| `Audit` | `Audit_log.record` caller 10+곳 분산 (`dashboard_tool_host_events`, `governance_anomaly`, `mcp_server_eio_call_tool`, `mcp_server_eio_execute`, `operator/operator_control`, `mcp_tool_runtime_comm` 등). dispatch path에서 SSOT 없음. |
 | `Metric` | `tool_metrics.install` (`lib/tool_metrics.ml:127`)가 observer로 등록하지만 `dispatch:127-129`가 handler `None` 반환 시 observer 미호출 → metric silent skip. Tool-selection failure counters now live on the run-tools setup path. |
 | `Trace_id` | propagation 메커니즘 0. LLM turn ↔ tool call ↔ side-effect 연결 단절. |
 
@@ -164,30 +161,24 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 
 | 코드 | 사이클 단계 | binding |
 |---|---|---|
-| `lib/keeper/host_config_provider.ml:3` | guard (cred env) | `let cred_root = "/tmp/keeper-creds"` (4× references) |
+| `Host_config.cred_root` | guard (repo-auth temp root; retired) | temp keeper-cred root no longer feeds repo auth mounts |
 | `lib/keeper/agent_tool_execute_runtime.ml:745, 802` | dispatch (Execute family) | `[ "/bin/bash"; "-lc"; cmd ]` |
-| `lib/keeper/keeper_cascade_resilience.ml:24-43` | scheduling guard | cascade resilience check before autonomous fan-out |
+| `lib/keeper/keeper_runtime_resilience.ml:24-43` | scheduling guard | runtime resilience check before autonomous fan-out |
 | `agent_tool_execute_command_parse.ml:217` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` remaining gh command-parse site |
 | `lib/keeper/keeper_workspace_ops.ml:339,387,661,702,746` | dispatch (shell ops) | `"/bin/ls"`, `"/bin/cat"`, `"/bin/pwd"`, `"/usr/bin/head"`, `"/usr/bin/tail"`, `"/usr/bin/wc"` 6 sites |
-| `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
-| `lib/worker_dev_tools.ml:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |
-| `lib/coord/coord_utils_backend_setup.ml:103`, `config_dir_resolver.ml:59`, `env_config_core.ml:353`, `cdal/adversarial_eval.ml:294, 301` | test-mode auto-detection | `String.starts_with ~prefix:"test_" executable` 5 sites — 보안 risk (binary rename으로 test mode silently 진입) |
+| `lib/mcp_tool_runtime_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
+| `lib/retired_worker_shell_facade:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |
+| `lib/workspace/workspace_utils_backend_setup.ml:103`, `config_dir_resolver.ml:59`, `env_config_core.ml:353`, `cdal/adversarial_eval.ml:294, 301` | test-mode auto-detection | `String.starts_with ~prefix:"test_" executable` 5 sites — 보안 risk (binary rename으로 test mode silently 진입) |
 
 NixOS/Alpine/Linux server에서 silent fail.
 
-### §1.6 Dormant Hybrid Disclosure Infrastructure
-
-OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/stage_parse.ml:42-46` + `lib/pipeline/pipeline_stage_prepare.ml:109-115` wired (since 0.194.0). 그러나 masc-mcp `worker_oas.ml`(886줄)에서 **caller 0** (`rg -n 'with_disclosure_level\|with_disclosure_resolver\|imseonghan' lib/ bin/` = 0).
-
-→ 모든 keeper tool은 현재 Full_schema 단일 사이클. RFC-OAS-013 §1.3 경고가 정확히 main에 실현됨.
-
-### §1.7 Workaround Rejection Signature 매핑 (AGENT-LLM-A.md §워크어라운드 거부 기준)
+### §1.6 Workaround Rejection Signature 매핑 (AGENT-LLM-A.md §워크어라운드 거부 기준)
 
 | 시그니처 | 현재 코드에 있는 hit |
 |---|---|
 | **#2 String/substring classifier** | `keeper_internal_tools` 32-entry string list (`tool_catalog_surfaces.ml:28-96`) + `Tool_dispatch.registry : (string, handler) Hashtbl.t`. 두 repo 횡단 동일 anti-pattern. |
 | **#2 Prefix-gated** | `String.starts_with ~prefix:"masc_"` (`mcp_server_eio_tool_profile.ml:296`), `String.starts_with ~prefix:"test_"` 5 sites |
-| **Unknown → Permissive Default** | `Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID")` (`tool_inline_dispatch_coord.ml:186, 266`) → silent identity collision |
+| **Unknown → Permissive Default** | `Option.value ~default:"default" (Sys.getenv_opt "TERM_SESSION_ID")` (`mcp_tool_runtime_workspace.ml:186, 266`) → silent identity collision |
 | **#1 Scattered hardcoded default** | ~~`/tmp/.masc_agent[_mcp]_<sid>` 7 sites, `/bin/zsh` 5 sites, `.masc-ide` 4 sites~~ — *모두 closed*: `/tmp/.masc_agent` (§1.5 PR-D), `/bin/zsh` (§1.5 PR-B), `.masc-ide` (#15533). `lib/` 잔존 0건; test 에 migration guard 만 유지. |
 | **Telemetry-as-fix** | Counter without fix는 본 RFC가 자체 안 함 — 4-tuple emission은 typed Outcome이 *fix*된 결과. counter는 alarm이 아닌 invariant check. |
 
@@ -205,7 +196,7 @@ OAS측 `Tool.disclosure_level` Hybrid + `Disclosure_resolver`는 `lib/pipeline/s
 |---|---|---|
 | `Span` | `Tracing.with_span ~kind:Tool_dispatch ~name ~tool_id ~trace_id` open/close pair | trace 단절 — root cause 추적 불가 |
 | `Audit` | `Audit_log.record ~event:Tool_dispatched ~outcome ~keeper_id ~tool_id` | audit gap — 어떤 keeper가 무엇을 호출했는지 미상 |
-| `Metric` | `Prometheus.inc_counter tool_dispatch_total{outcome,tool,surface}` | dashboard 0 — alert 미발화 |
+| `Metric` | `Otel_metric_store.inc_counter tool_dispatch_total{outcome,tool,surface}` | dashboard 0 — alert 미발화 |
 | `Trace_id` | LLM turn에서 시작된 `Trace_id.t`가 handler에 전달 + result에 stamp | turn ↔ tool ↔ side-effect 연결 단절 |
 
 PR-14 property test가 100 random tool calls × 모든 entry path에 대해 4-tuple emission count = 4 × 100 = 400임을 검증.
@@ -226,15 +217,14 @@ PR-14 CI lint `ci/lint-no-direct-dispatch.sh`가 강제.
 - **Dispatch outcome** → `Dispatch_outcome.t = Handled | Rejected_by_capability | Rejected_by_pre_hook | No_handler | Handler_error` (5-arm exhaustive, PR-10)
 - **Surface** → `Tool_catalog_surfaces.surface` 8 variant 모두 enumerated (PR-5)
 - **Host config** → `Host_config.t` typed record (PR-12)
-- **Disclosure strategy** → `disclosure_strategy` typed (PR-13)
 
 ### §2.4 Surface 경계 Invariant (의도된 경계 명시)
 
 | 경계 | 코드에 typed enumeration 필수 |
 |---|---|
-| **OAS Agent SDK ↔ masc-mcp keeper runtime** | masc-mcp의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
+| **OAS Agent SDK ↔ masc keeper runtime** | masc의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
 | **Public MCP ↔ Internal** | `Surface.Public_mcp` vs 그 외. 같은 dispatch path, 다른 capability set. |
-| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/cascade/cascade_catalog_runtime.candidate_probe_to_yojson` + `cascade_observation.cascade_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
+| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/runtime/runtime_catalog_runtime.candidate_probe_to_yojson` + `runtime_observation.runtime_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
 | **Boot policy ↔ runtime route** | 같은 `Tool_resolution.resolve` 결과를 *재사용*. 두 번 결정하지 않음 (PR-6). |
 
 ---
@@ -320,28 +310,7 @@ val resolve : base_path:string -> (t, string) result
 val test_mode_token : t -> Test_mode_token.t  (* PR-12: replaces String.starts_with "test_" *)
 ```
 
-### §3.5 `disclosure_strategy` (PR-13)
-
-```ocaml
-(* lib/keeper/keeper_meta.ml — additions *)
-type disclosure_strategy =
-  | Full
-  | Hybrid of { core_tools : string list }
-  | Minimal_index_with_demote_on_error
-
-(* TOML schema:
-   [disclosure]
-   strategy = "hybrid"
-   full_names = ["tool_execute", "keeper_fs_edit"]
-   demote_on_error = true
-*)
-```
-
-RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *config-driven*.
-
----
-
-## §4 Stacked PR Plan — 14 PR
+## §4 Stacked PR Plan — 13 PR
 
 요약 표. line-pinned 세부사항은 plan file `/Users/dancer/.claude/plans/serene-prancing-iverson.md` §3.
 
@@ -359,10 +328,9 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 | PR-10 | `pr-10-dispatch-outcome-total` | PR-9 | `Dispatch_outcome.t` 5-arm + observer total | med | 350-500 |
 | PR-11 | `pr-11-legacy-removal` | PR-10 | `dispatch`/`dispatch_structured`/`MASC_DISPATCH_V2` 제거 | low | 150-250 |
 | PR-12 | `pr-12-host-config-portability` | PR-11 (PR-1 parallel) | `Host_config.t` + 하드코드 11곳 일소 | med | 600-900 |
-| PR-13 | `pr-13-disclosure-activation` | PR-12 | RFC-OAS-013 config-driven activation | med | 400-600 |
-| PR-14 | `pr-14-telemetry-completeness` | PR-13 | Property test + CI lint + RFC closeout | low | 350-500 |
+| PR-13 | `pr-14-telemetry-completeness` | PR-12 | Property test + CI lint + RFC closeout | low | 350-500 |
 
-전체 LoC: 4,000-6,400 across 14 PRs.
+전체 LoC: 3,600-5,800 across 13 PRs.
 
 **Critical decision points** (plan §6 참조):
 - D1 (PR-2 land 전): `Capability.t` granularity → hybrid (per-domain + per-tool override) 권고
@@ -380,13 +348,12 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 | PR-4 | parity test: 기존 5 set 모든 admit이 typed Capability로 동일 결과 | single-PR revert |
 | PR-5 | boot warn 540 → 0 측정 | revert + 4-variant 복귀 |
 | PR-6 | **24h shadow mode**: both paths 동시 실행, divergence log. 0 divergence면 PR-7 진행 | single-PR revert |
-| PR-7 | **Pre-hook log-only mode 1 deploy cycle** → enforce. Capability gate advisory mode 처음 24h | `agent_tool_remote_mcp_runtime.ml` 2-line revert |
+| PR-7 | **Pre-hook log-only mode 1 deploy cycle** → enforce. Capability gate advisory mode 처음 24h | keeper registered-runtime 2-line revert |
 | PR-8~9 | 동일 path 적용 | single-PR revert |
 | PR-10 | observer signature 변경 5 site 일제 (compile-time 강제) | single-PR revert |
 | PR-11 | dead code 제거 (PR-7~10 후) | single-PR revert (cherrry-pick) |
 | PR-12 | macOS+Linux dual host CI matrix | single-PR revert |
-| PR-13 | keeper TOML schema bump, 기본값 `Full` (no-op) | TOML revert |
-| PR-14 | property test + dashboard + closeout | single-PR revert |
+| PR-13 | property test + dashboard + closeout | single-PR revert |
 
 ---
 
@@ -446,16 +413,15 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 | 항목 | 이유 |
 |---|---|
 | **RFC-0080 Phase 3** (13 source pruning) | Multi-sprint. 각 source ownership audit 필요. 본 sprint는 typed shim 유지하고 Phase 3은 별도 RFC. |
-| **oas RFC-OAS-013 closeout** (`resolve_disclosure_level` dedup) | oas repo의 SDK Independence Gate + Draft Auto-Merge Guard. 별도 track. |
 | **Keeper sub-library extraction** | Memory `project_keeper_sublib_extraction_analysis`: 189↔118 cycle. 본 sprint는 typed boundary *준비*. |
 | **TLA+ spec for new dispatch FSM** | AGENT-LLM-A.md TLA+ Bug Model. Property test (PR-14)가 1차 안전선. TLA+ spec은 다음 RFC. |
-| **MCP `_meta` field로 descriptor 전달** | RFC-OAS-012 영역. masc-mcp 변경 0. |
+| **MCP `_meta` field로 descriptor 전달** | RFC-OAS-012 영역. masc 변경 0. |
 
 ---
 
 ## §8 Workaround-Rejection Self-Check (AGENT-LLM-A.md §워크어라운드 거부 기준)
 
-본 RFC의 14 PR이 다음 시그니처에 해당하지 않음을 명시:
+본 RFC의 13 PR이 다음 시그니처에 해당하지 않음을 명시:
 
 | 시그니처 | 해당? | 회피 방법 |
 |---|---|---|
@@ -485,14 +451,13 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/keeper/tool_resolution.ml:56-103` — `resolve` 13-source short-circuit
 - `lib/keeper/tool_resolution.ml:81-86, 143-149` — `surfaces_to_check` 4 variants
 - `lib/keeper/keeper_tool_resolution.ml` — runtime routing projection
-- `lib/keeper/agent_tool_remote_mcp_runtime.ml:164, 218` — keeper turn `dispatch` direct
+- legacy keeper registered-runtime dispatch sites — keeper turn `dispatch` direct
 - `lib/keeper/capability_registry.ml:358-362` — "Internal dispatch unrestricted" 코멘트
 - `lib/mcp_server_eio_execute.ml:817, 999` — manual `run_pre_hooks` + `dispatch`
 - `lib/keeper/keeper_tag_dispatch.ml` — Entry 3 fallback
-- `lib/keeper/host_config_provider.ml:3` — `/tmp/keeper-creds`
+- `Host_config.cred_root` — retired repo-auth temp root
 - `lib/keeper/agent_tool_execute_runtime.ml:745, 802` — `/bin/bash`
-- `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191-570` — `/tmp/.masc_agent[_mcp]_<sid>` 7 sites
-- `lib/worker_oas.ml` (886 lines) — disclosure activation 대상
+- `lib/mcp_tool_runtime_workspace.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191-570` — `/tmp/.masc_agent[_mcp]_<sid>` 7 sites
 
 ### 9.2 분석 보고서 (`~/me/.tmp/keeper-tool-cycle-audit/`)
 
@@ -513,35 +478,33 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 
 - RFC-OAS-008 typed tool identification (oas measured 머지)
 - RFC-OAS-009 v2 sever core→CDAL deps (oas PR-B 머지)
-- RFC-OAS-011 CDAL → masc-mcp migration (완료)
-- RFC-OAS-013 keeper tool disclosure activation (PR-13에서 활성화)
+- RFC-OAS-011 CDAL → masc migration (완료)
 
 ### 9.5 메모리
 
 - `reference_runtime_lens_boundary_carve_out` — 외부 placeholder vs 내부 real lens
-- `feedback_user_rejects_cron_pr_loop` — Draft + human-approved-ready label
-- `feedback_masc_mcp_draft_guard_blocks_agent_ready` — agent ready 자동 차단
+- `feedback_user_rejects_cron_pr_loop` — Draft-only PR flow
+- `feedback_masc_auto_ready_gate_removed` — 자동 ready 차단 거부
 - `feedback_keeper_tool_alias_3_tier_is_overengineered` — 공용 도구 이름 1st-class
 - `feedback_lint_string_classifier_is_workaround_not_fundamental` — string classifier 자체 거부
 - `feedback_rfc_number_reservation_needed` — RFC 번호 race 사고
 
 ### 9.6 Plan file
 
-`/Users/dancer/.claude/plans/serene-prancing-iverson.md` (~530줄) — 14 PR sequence, dependency graph, risk matrix, cadence, exit criteria 1-10.
+`/Users/dancer/.claude/plans/serene-prancing-iverson.md` (~530줄) — original PR sequence, dependency graph, risk matrix, cadence, exit criteria 1-10.
 
 ---
 
 ## §10 Exit Criteria
 
-본 RFC 완료 (모든 14 PR 머지 + exit criteria 만족) 시점에 plan file §13 1-10 모두 만족:
+본 RFC 완료 (모든 13 PR 머지 + exit criteria 만족) 시점에 plan file §13 1-10 모두 만족:
 
-1. 14 PR 모두 머지 (Draft → `human-approved-ready` → squash merge)
+1. 13 PR 모두 머지 (Draft → CI green → squash merge)
 2. `test_telemetry_completeness` property test green (4-tuple emission 100%)
 3. `ci/lint-no-direct-dispatch.sh` green
 4. Production 24h window `is not registered` warn 0
-5. `disclosure_strategy` config 적용 keeper 1+
-6. Grafana dashboard 4-tuple emission tile 100% 유지 24h
-7. RFC-0084, RFC-0080, RFC-OAS-008/009 v2/011/013 모든 `implementation_prs` field 채워짐
-8. B1, B2, B4, B5, B6, B7, B8, B10, B12, B13 close (10/13 bugs)
-9. B3 (Phase 3 source pruning) — 다음 sprint escalate
-10. B11 (oas closeout) — oas repo 별도 track escalate
+5. Grafana dashboard 4-tuple emission tile 100% 유지 24h
+6. RFC-0084, RFC-0080, RFC-OAS-008/009 v2/011 모든 `implementation_prs` field 채워짐
+7. B1, B2, B4, B5, B6, B7, B8, B10, B12, B13 close (10/13 bugs)
+8. B3 (Phase 3 source pruning) — 다음 sprint escalate
+9. B11 closeout — 별도 track escalate

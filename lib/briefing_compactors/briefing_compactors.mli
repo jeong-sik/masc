@@ -6,7 +6,7 @@
 
 (** [relevant_sessions_for_briefing ~current_namespace ~now_ts
     sessions] keeps sessions that either match [current_namespace]
-    (project/room id) and are in a live status, or have a
+    (project/workspace id) and are in a live status, or have a
     [recent_events] entry within the last hour of [now_ts]. *)
 val relevant_sessions_for_briefing :
   current_namespace:string ->

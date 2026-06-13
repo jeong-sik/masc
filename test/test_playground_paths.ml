@@ -149,20 +149,20 @@ let test_parse_playground_repo_path () =
       ~abs_path:(Filename.concat base_path rel)
   in
   check (option (pair string string)) "local sandbox path"
-    (Some ("masc-mcp", "lib/foo.ml"))
-    (parse ".masc/playground/sangsu/repos/masc-mcp/lib/foo.ml");
+    (Some ("masc", "lib/foo.ml"))
+    (parse ".masc/playground/sangsu/repos/masc/lib/foo.ml");
   check (option (pair string string)) "docker sandbox path"
-    (Some ("masc-mcp", "lib/foo.ml"))
-    (parse ".masc/playground/docker/sangsu/repos/masc-mcp/lib/foo.ml");
+    (Some ("masc", "lib/foo.ml"))
+    (parse ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml");
   check (option (pair string string)) "keeper named repos"
-    (Some ("masc-mcp", "lib/foo.ml"))
-    (parse ".masc/playground/repos/repos/masc-mcp/lib/foo.ml");
+    (Some ("masc", "lib/foo.ml"))
+    (parse ".masc/playground/repos/repos/masc/lib/foo.ml");
   check (option (pair string string)) "docker keeper named repos"
-    (Some ("masc-mcp", "lib/foo.ml"))
-    (parse ".masc/playground/docker/repos/repos/masc-mcp/lib/foo.ml");
+    (Some ("masc", "lib/foo.ml"))
+    (parse ".masc/playground/docker/repos/repos/masc/lib/foo.ml");
   check (option (pair string string)) "nested repo-local pattern is not sandbox"
     None
-    (parse "workspace/repo/.masc/playground/sangsu/repos/masc-mcp/lib/foo.ml")
+    (parse "workspace/repo/.masc/playground/sangsu/repos/masc/lib/foo.ml")
 
 let () =
   run "Playground_paths"

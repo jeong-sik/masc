@@ -1,7 +1,7 @@
 (** Env_config_keeper — keeper runtime parameters from environment.
 
     All [MASC_KEEPER_*] env vars in this module can also be set
-    declaratively in [<resolved config root>/keeper_runtime.toml].
+    declaratively in [<resolved config root>/runtime.toml].
     The TOML loader ({!Keeper_runtime_config.load_and_apply}) runs at
     server startup and records unset values in the process-local boot
     override store before this module initializes.
@@ -144,10 +144,8 @@ module KeeperSupervisor = Env_config_keeper_supervisor
     natural event signal — they have to wake up periodically and check.
     Previously hardcoded as inline literals in the fiber loop body,
     making them invisible to the operator and impossible to tune
-    without a rebuild. Same fragmentation class as the watchdog
-    thresholds extracted in {!KeeperWatchdog} (#10740): operator-tunable
-    cadence is a load-bearing config knob in production, not an
-    implementation detail.
+    without a rebuild. Operator-tunable cadence is a load-bearing
+    config knob in production, not an implementation detail.
 
     Precedence: process env > hardcoded default below. *)
 
@@ -161,17 +159,6 @@ module KeeperPollIntervals = struct
       Default: 2.0 — used at {!Keeper_crash_persistence}. *)
   let crash_persistence_drain_sec =
     Float.max 0.1 (get_float ~default:2.0 "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC")
-  ;;
-
-  (** Autonomous-turn semaphore queue poll interval in seconds.
-
-      Polled inside the autonomous-turn admission loop in
-      {!Keeper_keepalive}. Lower values reduce ticket-grant latency
-      under contention; higher values lower idle CPU.
-      Must be >= 0.001 (1ms floor — anything tighter is busy-loop).
-      Default: 0.05. *)
-  let autonomous_queue_poll_sec =
-    Float.max 0.001 (get_float ~default:0.05 "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC")
   ;;
 end
 
@@ -196,7 +183,7 @@ end
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the
     keeper message history before each turn.  Extracted from a hardcoded
-    literal (masc-mcp PR #xxxx) so the reducer cap can be tuned per
+    literal (masc PR #xxxx) so the reducer cap can be tuned per
     deployment without a rebuild.  Default preserves the prior value. *)
 
 module KeeperReducer = struct
@@ -234,12 +221,12 @@ let keepalive_interval_sec_ =
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
 module WorkAsHeartbeat = struct
-  (** Master switch. When true, successful Coord.heartbeat after a
+  (** Master switch. When true, successful Workspace.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
-      the full ensure_keeper_room_presence call. *)
+      the full ensure_keeper_workspace_presence call. *)
   let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
-  (** Maximum seconds since last successful room heartbeat before presence
+  (** Maximum seconds since last successful workspace heartbeat before presence
       sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
     let floor = Float.of_int keepalive_interval_sec_ in
@@ -282,11 +269,6 @@ module KeeperKeepalive = struct
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)
-  let board_debounce_sec =
-    Float.max
-      5.0
-      (Float.min 300.0 (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
-  ;;
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.
@@ -311,7 +293,7 @@ module KeeperKeepalive = struct
       keeper_tool_search with different queries). *)
 
   (** Max idle turns for scheduled autonomous keeper turns.
-      With tool_choice=Any and max_turns=50, keepers have room to
+      With tool_choice=Any and max_turns=50, keepers have workspace to
       explore.  10 idle turns × ~5K tokens = ~50K budget.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =
@@ -329,28 +311,26 @@ module KeeperKeepalive = struct
       No timeout may exceed this value regardless of env override.
 
       Default: 900 (15 minutes), lifted from 600 in PR #13861's
-      RFC-0012/0022 update permitting per-cascade turn_timeout_sec
-      overrides. Local-LLM cascades that legitimately run 27 B turns
-      ≥600 s can now opt in via env or the upcoming cascade.toml
-      override; remote cascades stay at the global default 600.
+      RFC-0012/0022 update permitting per-runtime turn_timeout_sec
+      overrides. Local-LLM runtimes that legitimately run 27 B turns
+      ≥600 s can now opt in via env or the upcoming runtime.toml
+      override; remote runtimes stay at the global default 600.
 
-      Promotion to 1 800 s requires a follow-up RFC plus one week of
-      [masc_keeper_turns_total{terminated_by="turn_timeout"}] and p95
-      duration data — see RFC-0012 §Out of scope. *)
+      Promotion above 900 s requires a follow-up RFC plus one week of
+      retry-admission and p95 duration data — see RFC-0012 §Out of scope. *)
   let timeout_hard_ceiling_sec = 900.0
 
-  (** Wall-clock timeout in seconds for a single unified turn (including all
-      retries and cascade fallbacks). Prevents indefinite blocking when an
-      upstream LLM hangs at the TCP level.
+  (** Retry/admission budget in seconds for a single unified turn (including all
+      retries and runtime fallbacks). This value no longer kills an active turn
+      solely because cumulative wall-clock elapsed.
       Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 900].
 
       The default stays at 600 (the prior hard ceiling) so existing
-      remote cascades keep their budget unchanged; the lifted ceiling
-      only fires when an operator opts in via env or cascade override.
-      RFC-0156: post-removal there is no per-provider OAS cap layered
-      below this — [oas_call_timeout_sec] reuses [turn_timeout_sec]
-      directly; cascade rotation is driven by [stream_idle_timeout_sec]
-      + HTTP error + completion contract. *)
+      remote runtimes keep their budget unchanged; the lifted ceiling
+      only fires when an operator opts in via env or runtime override.
+      Active-runaway detection is driven by [stream_idle_timeout_sec],
+      provider-attempt liveness, tool timeouts, OAS max-turn limits, HTTP error,
+      and the optional supervisor stale-turn watchdog. *)
   let turn_timeout_sec =
     Float.max
       60.0
@@ -359,42 +339,11 @@ module KeeperKeepalive = struct
          (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
   ;;
 
-  (** Maximum time a proactive keeper will wait in the MASC admission queue
-      before abandoning the current OAS attempt.
-
-      With admission max_concurrent=1 (MLX decode serial), a keeper may wait
-      for the full duration of the preceding keeper's turn. Observed turn
-      durations: 180-963s. Default 180s covers the common case (GLM cascade
-      completes in ~180s) while avoiding indefinite waits.
-
-      Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
-      Range: [5, 1200]. *)
-  let admission_wait_timeout_sec =
-    Float.max
-      5.0
-      (Float.min
-         1200.0
-         (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
-  ;;
-
-  (** Maximum time a scheduled autonomous keeper will wait for the local
-      keeper turn gate before skipping the cycle. Reactive turns still wait
-      indefinitely because they correspond to explicit external triggers.
-      Env: [MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC]. Default: 30.0.
-      Range: [5, 300]. *)
-  let autonomous_slot_wait_timeout_sec =
-    Float.max
-      5.0
-      (Float.min
-         300.0
-         (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
-  ;;
 
   (** Per-call OAS timeout override in seconds.
 
       Legacy/env override value is clamped to the active keepalive
-      wall-clock cap so this does not extend a single attempt beyond the
-      keeper turn budget. The override is still parsed for observability
+      retry/admission budget. The override is still parsed for observability
       and to preserve compatibility with existing profiles, but it is not
       guaranteed to represent a distinct timeout policy anymore.
 
@@ -412,47 +361,10 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
-  (** Maximum turns per single OAS Agent.run call.
-      Keeper resumes via checkpoint in the next keepalive cycle when
-      {!Cascade_runner.TurnBudgetExhausted} is returned.
-      Previous default of 200 caused "ambiguous partial commit" errors:
-      the 300s timeout would fire mid-turn after tools had already executed,
-      leaving the keeper in an ambiguous state. With 30 turns per call and
-      adaptive timeout, each turn gets a realistic time budget. Budget=5
-      was too low: mutation boundary blocks tools after the first write,
-      leaving only 1 productive action per cycle.
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
-  let oas_max_turns_per_call =
-    max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
-  ;;
-
-  (** Smaller turn budget for scheduled autonomous cycles so one keeper does
-      not monopolize the autonomous semaphore for minutes at a time.
-      Reactive turns keep the general budget because they correspond to
-      explicit external stimuli.
-
-      Default raised to 10 after Docker oas_env propagation was restored so
-      autonomous keepers can complete deeper handoff tasks without relying on
-      per-profile overrides.
-      Reactive turns retain the larger budget.
-
-      Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS].
-      Default: min(global, 10). Range: [1, global]. *)
-  let oas_max_turns_per_call_scheduled_autonomous =
-    let default = min oas_max_turns_per_call 10 in
-    max
-      1
-      (min
-         oas_max_turns_per_call
-         (min
-            100
-            (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
-  ;;
-
-  (* RFC-0156: OAS total timeout removed. Resolved OAS-call timeout = override
-     when set, else turn_timeout_sec (wall-clock cap). stream_idle_timeout
-     handles per-stream cap; cascade rotation triggers on stream_idle + HTTP
-     error + completion contract. Historic names
+  (* RFC-0156/RFC-020x: OAS total timeout removed. Resolved OAS-call budget =
+     override when set, else turn_timeout_sec. stream_idle_timeout handles
+     per-stream idle; runtime rotation triggers on stream_idle + HTTP error +
+     completion contract. Historic names
      ([oas_timeout_for_estimated_input_tokens] /
      [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored the
      [estimated_input_tokens] and [max_turns] args — function-name-lying. *)
@@ -460,6 +372,24 @@ module KeeperKeepalive = struct
     match oas_timeout_sec_override with
     | Some v -> v
     | None -> turn_timeout_sec
+  ;;
+
+  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
+
+      The keeper runtime must not apply this as a wall-clock timeout around
+      active provider/tool execution. Real liveness policy must live at a
+      narrower boundary: admission/queue wait, provider connect/stream progress,
+      or tool-local policy owned by the tool substrate.
+
+      Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
+      Default: 1800 (30 min). Range: [300, 7200]. *)
+  let attempt_watchdog_safety_cap_sec =
+    Float.max
+      300.0
+      (Float.min
+         7200.0
+         (get_float ~default:1800.0
+            "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"))
   ;;
 
   (** Idle-gap timeout for streaming OAS provider responses.
@@ -471,18 +401,42 @@ module KeeperKeepalive = struct
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
   ;;
 
-  (** Total HTTP body-consumption deadline for one OAS streaming call.
-      Wraps the body callback in [Eio.Time.with_timeout_exn] in agent_sdk;
-      on expiry [Retry.Timeout] surfaces and cascade falls forward to the
-      next provider at the attempt boundary. Complements
-      [stream_idle_timeout_sec] (which only caps inter-line silence):
-      this catches the case where a single bulk read hangs without
-      producing line breaks.
+  (** OAS Agent.run inactivity deadline.
 
-      Opt-in: unset env leaves [None] so {!Cascade_agent_context} skips
-      the builder wiring. Set to a value strictly less than the effective
-      OAS attempt cap for attempt-level fall-forward; set
-      [<= stream_idle_timeout_sec] for a strict overall cap.
+      This is progress-based rather than cumulative wall-clock: OAS resets the
+      timer when the run emits progress. It complements
+      [stream_idle_timeout_sec], which watches transport line gaps; this knob
+      catches Agent-level no-progress stalls that still keep a transport
+      connection superficially alive.
+
+      The keeper path parses this knob but does not forward it until OAS proves
+      active tool execution is excluded from idle accounting.
+
+      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
+      Range when enabled: [5, 600]. Unset, invalid, [0], or a negative
+      value disables it. This stays opt-in because it is an Agent.run-level
+      stall detector, not provider transport policy or tool timeout policy.
+      @category Timeouts
+      @ops_class operator *)
+  let execution_idle_timeout_sec =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+    | None -> None
+    | Some _ ->
+      let value = get_float ~default:0.0 "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" in
+      if (not (Float.is_finite value)) || value <= 0.0
+      then None
+      else Some (Float.max 5.0 (Float.min 600.0 value))
+  ;;
+
+  (** Total HTTP body-consumption deadline for non-streaming OAS completion
+      calls. In agent_sdk this wraps [Complete.complete]'s synchronous HTTP
+      body read; streaming calls deliberately ignore the knob so active
+      long streams are not killed by total duration. Streaming liveness is
+      handled by [stream_idle_timeout_sec] and the attempt liveness observer.
+
+      Opt-in: unset env leaves [None] so {!Runtime_agent_context} skips
+      the builder wiring. Set only for sync completion callers that need a
+      body-read ceiling before the outer turn cap.
 
       Env: [MASC_KEEPER_BODY_TIMEOUT_SEC]. Default: unset → [None].
       Range when set: [10, 600]. *)
@@ -495,9 +449,9 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
-  (** Stdout-idle timeout for CLI subprocess transports (Provider_c CLI today;
-      Claude Code / Provider_f CLI / Codex CLI need an OAS upstream change to
-      expose [stdout_idle_timeout_s] in their transport configs).
+  (** Stdout-idle timeout for CLI subprocess transports (Anthropic CLI today;
+      other CLI providers need an OAS upstream change to expose
+      [stdout_idle_timeout_s] in their transport configs).
       The CLI subprocess is aborted via SIGINT if no stdout line arrives
       within this many seconds. Read fresh per-turn via
       {!Keeper_runtime_resolved.cli_subprocess_idle_sec}.
@@ -519,100 +473,6 @@ module KeeperKeepalive = struct
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
   ;;
-end
-
-(** {1 Keeper Watchdog Configuration}
-
-    Thresholds for the stale-turn watchdog fiber
-    ({!Keeper_stale_watchdog}). Previously hardcoded; extracted so
-    operators can tune per deployment without a rebuild.
-
-    Precedence: process env > hardcoded default below. *)
-
-module KeeperWatchdog = struct
-  (** Seconds since last turn before a Running keeper is considered idle-stale.
-      Must be >= 60. Default: 300 (5 minutes).
-
-      Invariant: [stale_threshold_sec] must not exceed [turn_timeout_sec].
-      If the operator overrides push it above the turn cap, we clamp and log
-      a warning so the watchdog does not declare a keeper stale later than
-      the turn itself could possibly run. *)
-  let stale_threshold_sec =
-    let raw =
-      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC")
-    in
-    if raw > KeeperKeepalive.turn_timeout_sec
-    then (
-      Log.warn
-        "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping \
-         to turn_timeout_sec"
-        raw
-        KeeperKeepalive.turn_timeout_sec;
-      KeeperKeepalive.turn_timeout_sec)
-    else raw
-  ;;
-
-  (** Seconds since the last in-turn progress signal before an active turn is
-      considered mid-turn-stale. Default: 300 (5 minutes).
-
-      This is intentionally separate from [stale_threshold_sec] (idle keepers)
-      and [turn_timeout_sec] (outer wall clock). It catches no-first-token and
-      inter-chunk-idle stalls while preserving the larger total turn budget for
-      turns that continue to make progress.
-
-      @category Timeouts
-      @ops_class operator *)
-  let progress_timeout_sec =
-    let raw =
-      Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_PROGRESS_SEC")
-    in
-    if raw > KeeperKeepalive.turn_timeout_sec
-    then (
-      Log.warn
-        "MASC_KEEPER_WATCHDOG_PROGRESS_SEC (%.1f) exceeds turn_timeout_sec (%.1f); \
-         clamping to turn_timeout_sec"
-        raw
-        KeeperKeepalive.turn_timeout_sec;
-      KeeperKeepalive.turn_timeout_sec)
-    else raw
-  ;;
-
-  (** Watchdog poll interval in seconds. Must be >= 5.
-      Default: 30. *)
-  let poll_sec = Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
-
-  (** Consecutive noop turns before considering the keeper stuck in a
-      failure loop. Must be >= 2. Default: 3. *)
-  let noop_threshold = max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
-
-  (** Grace period after fiber start before idle-stale detection activates.
-      Prevents false positives on server restart when [last_turn_ts] is
-      carried over from a previous server lifecycle.
-      Must be >= 0. Default: 360 (6 minutes — covers proactive warmup
-      up to 255 s plus one heartbeat cycle). *)
-  let grace_period_sec =
-    Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
-  ;;
-
-  (** Sliding window for stale-termination escalation tracking.
-      Default: 21600 (6 hours). *)
-  let termination_window_sec =
-    Float.max 3600.0 (get_float ~default:21600.0 "MASC_KEEPER_TERMINATION_WINDOW_SEC")
-  ;;
-
-  (** Number of stale terminations within [termination_window_sec] before
-      escalating to [Stale_termination_storm]. Default: 5. *)
-  let escalation_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
-
-  (** Fleet batch-termination detection window in seconds.
-      Default: 60. *)
-  let batch_window_sec =
-    Float.max 1.0 (get_float ~default:60.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
-  ;;
-
-  (** Number of distinct keepers terminating within [batch_window_sec] before
-      emitting a fleet batch alert. Default: 5. *)
-  let batch_threshold = max 1 (get_int ~default:5 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -729,79 +589,48 @@ module KeeperTelemetry = struct
   let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
-(** {1 Cascade Saturation Signal (RFC-0153 Phase A.2)}
+(** {1 Runtime Saturation Signal (RFC-0153 Phase A.2)}
 
-    Feature flag for typed [Cascade_saturation_signal.t] emission from
-    structured cascade/provider errors. The signal is consumed by Phase B
-    (tier admission semaphore) and Phase C (adaptive throttling).
+    Feature flag for typed [Runtime_saturation_signal.t] emission from
+    structured runtime/provider errors. The signal is consumed by Phase C
+    (adaptive throttling).
 
     Default off. Phase A.2 emit is purely additive — it increments a new
-    Prometheus counter ([masc_keeper_cascade_saturation_signal_total])
-    with a typed [kind] label sourced from {!Cascade_saturation_signal.kind}. *)
-module CascadeSaturationSignal = struct
+    Otel_metric_store counter ([masc_keeper_runtime_saturation_signal_total])
+    with a typed [kind] label sourced from {!Runtime_saturation_signal.kind}. *)
+module RuntimeSaturationSignal = struct
   let enabled () =
-    get_bool ~default:false "MASC_CASCADE_SATURATION_SIGNAL_ENABLED"
+    get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Cascade Tier Admission (RFC-0153 Phase B.2)}
+(** {1 Runtime Runtime Overrides}
 
-    Runtime kill switch for per-tier inflight admission in the main keeper
-    cascade path. Default on: RFC-0153 Phase B.2 is intended to prevent
-    keeper stampedes before provider dispatch. Operators can set the flag
-    false as an emergency rollback without also disabling the additive Phase
-    A.2 saturation-signal metric. *)
-module CascadeTierAdmission = struct
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_ADMISSION_ENABLED"
-end
-
-module CascadeTierWait = struct
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_CASCADE_TIER_WAIT_ENABLED"
-
-  let timeout_s () =
-    get_float_nonneg ~default:30.0 "MASC_CASCADE_TIER_WAIT_TIMEOUT_S"
-
-  let max_retries () =
-    let v = get_string ~default:"" "MASC_CASCADE_TIER_WAIT_MAX_RETRIES" in
-    match v with
-    | "" | "none" | "unlimited" -> None
-    | s ->
-      (* RFC-0145 — narrow from a wildcard catch-all to the only
-         exception [int_of_string] raises on malformed numeric input.
-         Other runtime exceptions (e.g. [Out_of_memory]) propagate. *)
-      (try Some (int_of_string s) with
-       | Failure _ -> None)
-end
-
-(** {1 Cascade Runtime Overrides}
-
-    Runtime-only narrowing of the MASC cascade provider set. The underlying
-    cascade profile (loaded from [cascade.toml]) is unchanged; this filter is
-    applied by the named-cascade execution path via [~provider_filter] on every
-    keeper turn, so switching between full cascade and a single-provider
+    Runtime-only narrowing of the MASC runtime provider set. The underlying
+    runtime profile (loaded from [runtime.toml]) is unchanged; this filter is
+    applied by the named-runtime execution path via [~provider_filter] on every
+    keeper turn, so switching between full runtime and a single-provider
     fallback is a pure env-var change with no file or code edit.
 
     Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
     hard mode, or A/B testing a single provider. *)
-module KeeperCascade = struct
-  (** Comma-separated provider kind allowlist for every keeper cascade call.
+module KeeperRuntimeProviderFilter = struct
+  (** Comma-separated provider kind allowlist for every keeper runtime call.
       Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [provider_k], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
+      [ollama], [glm], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
       [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
       Matching is case-insensitive; empty entries are dropped.
 
       Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Keeper_turn_driver.run_named], which applies it during MASC cascade
+      into [Keeper_turn_driver.run_named], which applies it during MASC runtime
       provider resolution. The runtime keeps only matching providers from
       the resolved profile; if the filter leaves zero providers, OAS falls back
       to the unfiltered profile (see [apply_provider_filter] safety net).
 
-      [None] (env var unset or blank) = full cascade, unfiltered.
+      [None] (env var unset or blank) = full runtime, unfiltered.
 
-      Env: [MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST]. Default: unset. *)
+      Env: [MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST]. Default: unset. *)
   let provider_allowlist () : string list option =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST" with
+    match Env_config_core.raw_value_opt "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST" with
     | None -> None
     | Some raw ->
       let parts =
@@ -819,7 +648,7 @@ end
 (** {1 Transient Retry Backoff}
 
     Outer-loop retry parameters for transient network errors and
-    recoverable cascade failures.  These govern the keeper's exponential
+    recoverable runtime failures.  These govern the keeper's exponential
     backoff between re-attempts when all OAS providers fail transiently
     (e.g. TCP keepalive expiry).  They do NOT affect OAS internal
     per-provider retry (3 attempts with its own backoff). *)

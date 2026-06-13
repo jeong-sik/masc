@@ -65,7 +65,7 @@ type conn_state =
   ; disconnected : bool Atomic.t
   }
 
-let base_path_of_state state = state.Mcp_server.room_config.base_path
+let base_path_of_state state = state.Mcp_server.workspace_config.base_path
 
 (** Signal connection end — resolves the disconnect promise so
     [Eio.Switch.run] exits and cleans up all associated resources. *)
@@ -96,7 +96,8 @@ let send_response cs id result =
   send cs (Yojson.Safe.to_string resp)
 ;;
 
-(** Send JSON-RPC error. *)
+(** Send JSON-RPC error. [code] is the wire integer — callers use
+    [Mcp_error_code.to_wire_code] for typed codes. *)
 let send_error cs id code msg =
   let resp =
     `Assoc
@@ -212,6 +213,7 @@ let initialize_capabilities_json () =
     ; "selectionRangeProvider", `Bool true
     ; "documentLinkProvider", `Bool true
     ; "codeLensProvider", `Assoc [ "resolveProvider", `Bool false ]
+    ; "codeActionProvider", `Bool true
     ; "inlayHintProvider", `Bool true
     ; ( "diagnosticProvider"
       , `Assoc [ "interFileDependencies", `Bool false; "workspaceDiagnostics", `Bool false ]
@@ -316,14 +318,14 @@ let ensure_lsp_process cs lang_id =
 (** Forward a request to LSP process, await response, relay to client. *)
 let forward_request cs lang_id method_ params id =
   match ensure_lsp_process cs lang_id with
-  | Error msg -> send_error cs id (-32603) msg
+  | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
   | Ok proc ->
     let promise =
       Lsp_message_router.send_request cs.router proc ~method_ ~params ~client_id:(req_id_to_int id)
     in
     (match Eio.Promise.await promise with
      | Ok result -> send_response cs id result
-     | Error msg -> send_error cs id (-32603) msg)
+     | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg)
 ;;
 
 (** Forward a notification to LSP process. *)
@@ -359,7 +361,7 @@ let handle_codelens cs params id =
         (match Eio.Promise.await promise with
          | Ok (`List items) -> send_response cs id (`List (items @ masc))
          | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id (-32603) msg))
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
 (** Handle textDocument/inlayHint — merge LSP response with MASC overlays. *)
@@ -388,7 +390,7 @@ let handle_inlay_hint cs params id =
         (match Eio.Promise.await promise with
          | Ok (`List items) -> send_response cs id (`List (items @ masc))
          | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id (-32603) msg))
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
 (** Handle textDocument/diagnostic — merge LSP response with MASC diagnostics. *)
@@ -442,7 +444,7 @@ let handle_diagnostic cs params id =
            in
            send_response cs id (`Assoc [ "items", `List merged ])
          | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id (-32603) msg))
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
 (** Handle textDocument/hover — enrich LSP response with MASC annotations. *)
@@ -469,7 +471,7 @@ let handle_hover cs params id =
       else send_response cs id `Null)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error msg -> send_error cs id (-32603) msg
+      | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -490,7 +492,223 @@ let handle_hover cs params id =
                   ~line
                   result)
            else send_response cs id result
-         | Error msg -> send_error cs id (-32603) msg))
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/definition — merge LSP response with MASC annotation links. *)
+let handle_definition cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let masc =
+      if line >= 0 then
+        Lsp_overlay_provider.definition_links ~base_dir:base ~file_path:relative ~line
+      else []
+    in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/definition"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/references — merge LSP response with MASC annotation locations. *)
+let handle_references cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let masc =
+      if line >= 0 then
+        Lsp_overlay_provider.reference_locations
+          ~base_dir:base ~file_path:relative ~line ~include_declaration:true
+      else []
+    in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/references"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/completion — merge LSP response with MASC annotation snippets. *)
+let handle_completion cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let masc =
+      if line >= 0 then
+        Lsp_overlay_provider.completion_items ~base_dir:base ~file_path:relative ~line
+      else []
+    in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/completion"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/codeAction — inject MASC annotation actions. *)
+let handle_code_action cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let masc =
+      if line >= 0 then
+        Lsp_overlay_provider.code_actions
+          ~base_dir:base ~file_path:relative ~line ~diagnostics:[]
+      else []
+    in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/codeAction"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/documentSymbol — inject MASC annotation symbols. *)
+let handle_document_symbol cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~file_path:relative in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/documentSymbol"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/foldingRange — inject MASC annotation folding ranges. *)
+let handle_folding_range cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~file_path:relative in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/foldingRange"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
+;;
+
+(** Handle textDocument/documentHighlight — highlight related MASC annotations. *)
+let handle_document_highlight cs params id =
+  match extract_uri params with
+  | None -> send_response cs id (`List [])
+  | Some uri ->
+    let base = cs.base_path in
+    let relative = resolve_relative ~base uri |> Option.value ~default:"" in
+    let line = extract_line params |> Option.value ~default:(-1) in
+    let masc =
+      if line >= 0 then
+        Lsp_overlay_provider.document_highlights ~base_dir:base ~file_path:relative ~line
+      else []
+    in
+    let lang_id = Lsp_process_manager.lang_of_path relative in
+    if lang_id = "unknown"
+    then send_response cs id (`List masc)
+    else (
+      match ensure_lsp_process cs lang_id with
+      | Error _ -> send_response cs id (`List masc)
+      | Ok proc ->
+        let promise =
+          Lsp_message_router.send_request
+            cs.router proc
+            ~method_:"textDocument/documentHighlight"
+            ~params ~client_id:(req_id_to_int id)
+        in
+        (match Eio.Promise.await promise with
+         | Ok (`List items) -> send_response cs id (`List (items @ masc))
+         | Ok other -> send_response cs id other
+         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
 (** Dispatch an incoming LSP message to the appropriate handler. *)
@@ -528,6 +746,13 @@ let dispatch_message cs msg =
        | Some "textDocument/codeLens", Some n -> handle_codelens cs params n
        | Some "textDocument/inlayHint", Some n -> handle_inlay_hint cs params n
        | Some "textDocument/diagnostic", Some n -> handle_diagnostic cs params n
+       | Some "textDocument/definition", Some n -> handle_definition cs params n
+       | Some "textDocument/references", Some n -> handle_references cs params n
+       | Some "textDocument/completion", Some n -> handle_completion cs params n
+       | Some "textDocument/codeAction", Some n -> handle_code_action cs params n
+       | Some "textDocument/documentSymbol", Some n -> handle_document_symbol cs params n
+       | Some "textDocument/foldingRange", Some n -> handle_folding_range cs params n
+       | Some "textDocument/documentHighlight", Some n -> handle_document_highlight cs params n
        (* File notifications → forward to appropriate LSP process *)
        | Some m, _ when String.starts_with ~prefix:"textDocument/did" m ->
          (match extract_uri params with
@@ -553,7 +778,7 @@ let dispatch_message cs msg =
             if lang_id <> "unknown"
             then forward_request cs lang_id m params n
             else send_error cs n (-32801) ("No LSP server for: " ^ relative)
-          | None -> send_error cs n (-32601) ("Unhandled method: " ^ m))
+          | None -> send_error cs n Mcp_error_code.(to_wire_code Method_not_found) ("Unhandled method: " ^ m))
        (* Server-initiated notification broadcast *)
        | Some m, None ->
          Hashtbl.iter
@@ -561,7 +786,7 @@ let dispatch_message cs msg =
               Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
            cs.processes
        (* No method field *)
-       | None, Some n -> send_error cs n (-32600) "Missing method field"
+       | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())
     | _ ->
       (match
@@ -570,7 +795,7 @@ let dispatch_message cs msg =
             | `Assoc f -> f
             | _ -> [])
        with
-       | Some n -> send_error cs n (-32700) "Parse error"
+       | Some n -> send_error cs n Mcp_error_code.(to_wire_code Parse_error) "Parse error"
        | None -> ())
   with
   | exn -> Log.Server.error "LSP dispatch error: %s" (Printexc.to_string exn)

@@ -24,18 +24,6 @@ type t =
   }
 [@@deriving yojson { strict = false }]
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
-
 let rec find_git_root dir =
   let git_marker = Filename.concat dir ".git" in
   if Sys.file_exists git_marker
@@ -69,7 +57,7 @@ let git_capture_output_result ~repo_root args =
       ~actor:(Masc_exec.Agent_id.of_string "system/build_identity")
       ~raw_source
       ~summary:"build identity git probe"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Build_identity ())
+
       argv
   with
   | Unix.WEXITED 0, output -> Ok output
@@ -112,8 +100,8 @@ let observe_probe_failure ~site exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
-      Prometheus.metric_build_identity_probe_failures
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_build_identity_probe_failures
       ~labels:[ "site", site ]
       ();
     Log.Identity.warn "build_identity %s failed: %s" site (Printexc.to_string exn)
@@ -123,8 +111,8 @@ let observe_probe_failure ~site exn =
     executable_dir first so the binary's own source tree wins over
     whatever cwd the user started the process from.
 
-    Rationale: running `cd ~/me && ~/.../masc-mcp/_build/.../main_eio.exe`
-    used to report ~/me's git HEAD instead of masc-mcp's because the old
+    Rationale: running `cd ~/me && ~/.../masc/_build/.../main_eio.exe`
+    used to report ~/me's git HEAD instead of masc's because the old
     implementation sorted candidates with [List.sort_uniq String.compare]
     and cwd happened to sort first alphabetically.
 
@@ -186,7 +174,7 @@ let decimal_digits_only s =
 ;;
 
 (* 2100-01-01T00:00:00Z.  This keeps obviously corrupt/far-future git
-   output out of /health while leaving enough room for normal source history
+   output out of /health while leaving enough workspace for normal source history
    and reproducible-build timestamps. *)
 let max_reasonable_commit_unix_ts = 4_102_444_800L
 
@@ -314,7 +302,7 @@ let age_seconds ~now ts_opt =
 ;;
 
 let started_at_unix = Unix.gettimeofday ()
-let started_at_iso = iso8601_of_unix started_at_unix
+let started_at_iso = Masc_domain.iso8601_of_unix_seconds started_at_unix
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
 

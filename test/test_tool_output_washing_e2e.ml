@@ -4,7 +4,7 @@
     test, against real disk + real module boundaries:
 
       [Tool_blob_store.put]   <- PR 1 (foundation)
-        \u2193 sha256 + sentinel marker
+        \u2193 sha256 + blob marker
       [Tool_output.encode_for_oas]   <- PR 1 (encoder)
         \u2193 marker string
       [Agent_sdk.Types.ToolResult { content = marker }]
@@ -14,15 +14,15 @@
       [Server_routes_http_routes_artifacts.blob_response]   <- PR 5 (endpoint)
         \u2193 JSON envelope with full content
 
-    What this test buys: any cross-PR contract drift (sentinel format
+    What this test buys: any cross-PR contract drift (marker format
     change in PR 1 not reflected in PR 4 decoder, or PR 5 returning a
     different envelope shape than the dashboard FE expects) shows up
     here as a single failure. *)
 
 module B = Tool_blob_store
 module O = Tool_output
-module H = Masc_mcp.Keeper_artifact_hydrator
-module A = Masc_mcp.Server_routes_http_routes_artifacts
+module H = Masc.Keeper_artifact_hydrator
+module A = Server_routes_http_routes_artifacts
 module T = Agent_sdk.Types
 
 let with_temp_base_path f =
@@ -81,9 +81,9 @@ let test_full_flow_externalize_hydrate_serve () =
       Alcotest.(check bool) "blob file exists" true
         (Sys.file_exists expected_path);
 
-      (* Step 3: Encode for OAS (sentinel marker string). *)
+      (* Step 3: Encode for OAS (blob marker string). *)
       let marker = O.encode_for_oas stored_marker_value in
-      Alcotest.(check bool) "marker is sentinel" true (O.is_sentinel marker);
+      Alcotest.(check bool) "blob marker recognized" true (O.is_marker marker);
 
       (* Step 4: Marker round-trips through Tool_output.decode. *)
       (match O.decode_from_oas marker with
@@ -106,6 +106,7 @@ let test_full_flow_externalize_hydrate_serve () =
                   content = marker;
                   is_error = false;
                   json = None;
+                  content_blocks = None;
                 };
             ];
           name = None;
@@ -163,7 +164,12 @@ let test_recency_budget_holds_across_modules () =
           content =
             [
               T.ToolResult
-                { tool_use_id = id; content; is_error = false; json = None };
+                { tool_use_id = id
+                ; content
+                ; is_error = false
+                ; json = None
+                ; content_blocks = None
+                };
             ];
           name = None;
           tool_call_id = Some id;
@@ -188,8 +194,8 @@ let test_recency_budget_holds_across_modules () =
       match contents with
       | [ c1; c2; c3; c4 ] ->
           (* First two stayed as markers; last two got hydrated. *)
-          Alcotest.(check bool) "ancient stays marker" true (O.is_sentinel c1);
-          Alcotest.(check bool) "older stays marker" true (O.is_sentinel c2);
+          Alcotest.(check bool) "ancient stays marker" true (O.is_marker c1);
+          Alcotest.(check bool) "older stays marker" true (O.is_marker c2);
           Alcotest.(check string) "recent hydrated" "recent one" c3;
           Alcotest.(check string) "newest hydrated" "newest one" c4
       | _ -> Alcotest.fail "expected 4 messages"

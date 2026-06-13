@@ -1,7 +1,7 @@
 # RFC 0027 — Multi-Keeper BDI Peek (extends RFC 0024)
 
 - **Status**: Draft
-- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
+- **Author**: Vincent + Agent Runtime A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Extends**: RFC 0024 (BDI Inspector Slot)
 - **Depends on**: RFC 0008 (AgentPresence), RFC 0019 (Keeper Line Ownership), RFC 0024
@@ -14,7 +14,7 @@
 
 RFC 0024 의 inspector slot 은 **single-pinned keeper** 만 다룬다. 그러나 IDE 사용 시 **co-located keeper 들의 BDI 를 동시에 비교** 가 자주 필요하다:
 
-- **Cascade race 진단**: 같은 line 에 cascade 가 떨어진 후 두 keeper 가 같은 commit 영역을 다른 의도로 수정 — 의도 충돌이 conflict 의 cause.
+- **Runtime race 진단**: 같은 line 에 runtime 가 떨어진 후 두 keeper 가 같은 commit 영역을 다른 의도로 수정 — 의도 충돌이 conflict 의 cause.
 - **Pair work 디버깅**: keeper-A 가 implementation 을 작성하는 동안 keeper-B 가 review 또는 test 를 동시 작성하는 경우, 둘의 belief / desire 가 align 되어 있는지.
 - **Cross-keeper dependency**: keeper-A 의 desire 가 "wait for keeper-B's PR ready" 일 때 keeper-B 의 intention 을 같이 봐야 stuck 여부 판단.
 

@@ -141,7 +141,7 @@ let test_scripts_are_syntax_valid () =
 let test_status_warns_on_fd_hotspot () =
   with_temp_dir "docker-playground-status-hotspot" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     let worktrees_dir = Filename.concat repo_dir ".worktrees" in
     mkdir_p (Filename.concat worktrees_dir "task-a");
     mkdir_p (Filename.concat worktrees_dir "task-b");
@@ -153,8 +153,8 @@ let test_status_warns_on_fd_hotspot () =
          {|#!/usr/bin/env bash
 cat <<'EOF'
 COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME
-Docker 4242 dancer 10r REG 1,15 0 1 %s/keeper-a/repos/masc-mcp/lib/a.ml
-Docker 4242 dancer 11r DIR 1,15 0 2 %s/keeper-a/repos/masc-mcp/.worktrees/task-a
+Docker 4242 dancer 10r REG 1,15 0 1 %s/keeper-a/repos/masc/lib/a.ml
+Docker 4242 dancer 11r DIR 1,15 0 2 %s/keeper-a/repos/masc/.worktrees/task-a
 EOF
 |}
          root
@@ -184,7 +184,7 @@ EOF
       (contains_substring stdout
          "worktree_fanout_columns=count keeper repo worktrees_dir");
     check bool "keeper fanout row surfaced" true
-      (contains_substring stdout "2 keeper-a masc-mcp");
+      (contains_substring stdout "2 keeper-a masc");
     check bool "top fanout cleanup command surfaced" true
       (contains_substring stdout
          "top_fanout_cleanup_dry_run_command=");
@@ -200,7 +200,7 @@ EOF
 let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
   with_temp_dir "docker-playground-status-no-lsof" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     let worktrees_dir = Filename.concat repo_dir ".worktrees" in
     mkdir_p (Filename.concat worktrees_dir "task-a");
     mkdir_p (Filename.concat worktrees_dir "task-b");
@@ -233,7 +233,7 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
     check bool "worktree reason surfaced" true
       (contains_substring stdout "hotspot_reasons=worktree_entries");
     check bool "fanout still surfaces on lsof failure" true
-      (contains_substring stdout "2 keeper-a masc-mcp");
+      (contains_substring stdout "2 keeper-a masc");
     check bool "top fanout action still surfaces on lsof failure" true
       (contains_substring stdout
          "top_fanout_cleanup_dry_run_command="))
@@ -241,7 +241,7 @@ let test_status_warns_on_worktree_hotspot_when_lsof_fails () =
 let test_status_cleanup_summary_surfaces_candidate_counts () =
   with_temp_dir "docker-playground-status-cleanup-summary" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     init_repo repo_dir;
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
@@ -298,7 +298,7 @@ let test_status_cleanup_summary_surfaces_candidate_counts () =
 let test_dry_run_lists_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-dry-run" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     init_repo repo_dir;
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
@@ -308,7 +308,7 @@ let test_dry_run_lists_stale_clean_worktree () =
     mark_path_old ~cwd:repo_dir wt_path;
     let stdout, _ =
       run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
-        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc-mcp" |]
+        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc" |]
     in
     check bool "candidate listed" true (contains_substring stdout "CANDID");
     check bool "dry-run reminder" true (contains_substring stdout "Pass --apply");
@@ -317,7 +317,7 @@ let test_dry_run_lists_stale_clean_worktree () =
 let test_recent_checkout_of_old_commit_is_not_candidate () =
   with_temp_dir "docker-playground-gc-recent" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     init_repo repo_dir;
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/recent-task" in
@@ -326,7 +326,7 @@ let test_recent_checkout_of_old_commit_is_not_candidate () =
          [ "worktree"; "add"; "-q"; "-b"; "recent-task"; wt_path ]);
     let stdout, _ =
       run_process_ok ~cwd:(source_root ()) (cleanup_script_path ())
-        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc-mcp" |]
+        [| cleanup_script_path (); "--root"; root; "--days"; "1"; "--repo"; "masc" |]
     in
     check bool "candidate not listed" false (contains_substring stdout "CANDID");
     check bool "recent counted" true (contains_substring stdout "recent=1");
@@ -335,7 +335,7 @@ let test_recent_checkout_of_old_commit_is_not_candidate () =
 let test_apply_removes_stale_clean_worktree () =
   with_temp_dir "docker-playground-gc-apply" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     init_repo repo_dir;
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/stale-task" in
@@ -352,7 +352,7 @@ let test_apply_removes_stale_clean_worktree () =
           "--days";
           "1";
           "--repo";
-          "masc-mcp";
+          "masc";
           "--apply";
         |]
     in
@@ -362,7 +362,7 @@ let test_apply_removes_stale_clean_worktree () =
 let test_apply_skips_dirty_worktree () =
   with_temp_dir "docker-playground-gc-dirty" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
-    let repo_dir = Filename.concat root "keeper-a/repos/masc-mcp" in
+    let repo_dir = Filename.concat root "keeper-a/repos/masc" in
     init_repo repo_dir;
     mkdir_p (Filename.concat repo_dir ".worktrees");
     let wt_path = Filename.concat repo_dir ".worktrees/dirty-task" in
@@ -380,7 +380,7 @@ let test_apply_skips_dirty_worktree () =
           "--days";
           "1";
           "--repo";
-          "masc-mcp";
+          "masc";
           "--apply";
         |]
     in
@@ -391,7 +391,7 @@ let test_include_broken_removes_old_non_git_directory () =
   with_temp_dir "docker-playground-gc-broken" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
     let broken_path =
-      Filename.concat root "keeper-a/repos/masc-mcp/.worktrees/broken-task"
+      Filename.concat root "keeper-a/repos/masc/.worktrees/broken-task"
     in
     mkdir_p broken_path;
     write_file (Filename.concat broken_path "note.txt") "orphan\n";
@@ -405,7 +405,7 @@ let test_include_broken_removes_old_non_git_directory () =
           "--days";
           "1";
           "--repo";
-          "masc-mcp";
+          "masc";
           "--include-broken";
         |]
     in
@@ -421,7 +421,7 @@ let test_include_broken_removes_old_non_git_directory () =
           "--days";
           "1";
           "--repo";
-          "masc-mcp";
+          "masc";
           "--include-broken";
           "--apply";
         |]

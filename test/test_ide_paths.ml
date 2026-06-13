@@ -22,15 +22,15 @@ let check_none ~input () =
 
 let test_https_simple () =
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"https://github.com/jeong-sik/masc-mcp"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"https://github.com/jeong-sik/masc"
     ()
 ;;
 
 let test_https_dot_git () =
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"https://github.com/jeong-sik/masc-mcp.git"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"https://github.com/jeong-sik/masc.git"
     ()
 ;;
 
@@ -43,30 +43,30 @@ let test_http_scheme () =
 
 let test_ssh_url () =
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"ssh://git@github.com/jeong-sik/masc-mcp.git"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"ssh://git@github.com/jeong-sik/masc.git"
     ()
 ;;
 
 let test_scp_form () =
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"git@github.com:jeong-sik/masc-mcp.git"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"git@github.com:jeong-sik/masc.git"
     ()
 ;;
 
 let test_scp_form_no_dot_git () =
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"git@github.com:jeong-sik/masc-mcp"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"git@github.com:jeong-sik/masc"
     ()
 ;;
 
 let test_https_uppercase () =
   (* RFC-0128 §4.1 rule 1: lowercase normalisation precedes parsing. *)
   check_some_slug
-    ~expected:"github.com_jeong-sik_masc-mcp"
-    ~input:"HTTPS://GitHub.com/Jeong-Sik/MASC-MCP.GIT"
+    ~expected:"github.com_jeong-sik_masc"
+    ~input:"HTTPS://GitHub.com/Jeong-Sik/MASC.GIT"
     ()
 ;;
 
@@ -81,9 +81,9 @@ let test_join_invariant_https_ssh () =
   (* RFC-0128 §4.1 invariant: same upstream in different transport
      forms must produce the same slug. Without this property
      sandbox/working-tree join across keepers cannot work. *)
-  let a = Paths.canonical_url_of_remote "https://github.com/jeong-sik/masc-mcp.git" in
-  let b = Paths.canonical_url_of_remote "git@github.com:jeong-sik/masc-mcp.git" in
-  let c = Paths.canonical_url_of_remote "ssh://git@github.com/jeong-sik/masc-mcp" in
+  let a = Paths.canonical_url_of_remote "https://github.com/jeong-sik/masc.git" in
+  let b = Paths.canonical_url_of_remote "git@github.com:jeong-sik/masc.git" in
+  let c = Paths.canonical_url_of_remote "ssh://git@github.com/jeong-sik/masc" in
   check (option string) "https == scp" a b;
   check (option string) "https == ssh-url" a c
 ;;
@@ -114,11 +114,11 @@ let test_by_url_path () =
   let p =
     Paths.by_url_path
       ~base_dir:"/tmp/base"
-      ~canonical_url:"github.com_jeong-sik_masc-mcp"
+      ~canonical_url:"github.com_jeong-sik_masc"
   in
   check string
     "by-url path layout"
-    "/tmp/base/.masc-ide/by-url/github.com_jeong-sik_masc-mcp"
+    "/tmp/base/.masc-ide/by-url/github.com_jeong-sik_masc"
     p
 ;;
 

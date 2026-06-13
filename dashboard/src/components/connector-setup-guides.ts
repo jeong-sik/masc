@@ -21,21 +21,23 @@ interface ConnectorSetupGuide {
 
 export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   discord: {
-    title: 'Discord 봇 등록',
-    intro: 'Bot Token + Message Content Intent + OAuth bot scope가 필요합니다.',
+    title: 'Discord 봇 등록 (서버 내장 게이트웨이)',
+    intro: 'Bot Token + Message Content Intent + OAuth bot scope가 필요합니다. RFC-0203 §Phase 3 이후 별도 사이드카 프로세스 없이 서버 프로세스 내부에서 Discord Gateway 에 직접 연결합니다.',
     steps: [
       {
         text: 'Discord Developer Portal에서 새 Application 생성.',
         link: { href: 'https://discord.com/developers/applications', label: 'Developer Portal' },
       },
-      { text: 'Bot 탭 → Reset Token → 토큰 복사 (DISCORD_BOT_TOKEN).' },
+      { text: 'Bot 탭 → Reset Token → 토큰 복사.' },
+      { text: '쉘 환경변수 DISCORD_BOT_TOKEN 으로 export (예: ~/.zshenv 에 추가).' },
       { text: 'Bot 탭 → Privileged Gateway Intents → Message Content Intent 활성화.' },
       { text: 'OAuth2 → URL Generator → scope: bot, permissions: Send Messages / Embed Links / Read Message History.' },
       { text: '생성된 URL을 열어 봇을 길드에 초대.' },
+      { text: 'masc 서버를 재기동 — 부팅 시 자동으로 Discord Gateway 에 연결됩니다.' },
     ],
     references: [
-      { href: 'https://discordpy.readthedocs.io/', label: 'discord.py docs' },
       { href: 'https://discord.com/developers/docs/topics/gateway#gateway-intents', label: 'Gateway Intents' },
+      { href: 'https://discord.com/developers/docs/reference', label: 'Discord API Reference' },
     ],
   },
   imessage: {

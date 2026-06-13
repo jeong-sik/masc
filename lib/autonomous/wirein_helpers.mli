@@ -5,7 +5,7 @@
 
     These helpers live in [lib/autonomous/] (rather than directly
     inside [lib/keeper/keeper_post_turn]) so they can be unit-tested
-    without pulling the entire [masc_mcp] library into the test
+    without pulling the entire [masc] library into the test
     closure. The keeper post-turn lifecycle dispatches to
     {!masc_autonomous_enabled} and {!upsert_autonomous_meta} from here. *)
 

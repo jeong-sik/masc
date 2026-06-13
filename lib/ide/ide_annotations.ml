@@ -17,11 +17,11 @@ let annotations_file_for ~base_dir partition =
 ;;
 
 let annotations_file ~base_dir =
-  annotations_file_for ~base_dir Ide_paths.Legacy
+  annotations_file_for ~base_dir Ide_paths.Orphan
 ;;
 
 (* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
-   levels deeper than the legacy flat store. Recursive mkdir avoids
+   levels deeper than the flat store. Recursive mkdir avoids
    ENOENT when the parent chain has never been created. *)
 let rec ensure_dir path =
   if path = "" || path = "/" || (Sys.file_exists path && Sys.is_directory path)
@@ -32,7 +32,7 @@ let rec ensure_dir path =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 ;;
 
-let ensure_store ~base_dir ?(partition = Ide_paths.Legacy) () =
+let ensure_store ~base_dir ?(partition = Ide_paths.Orphan) () =
   ensure_dir (partition_dir ~base_dir partition)
 ;;
 
@@ -107,7 +107,7 @@ let write_all_partition ~base_dir partition annotations =
 
 let create
       ~base_dir
-      ?(partition = Ide_paths.Legacy)
+      ?(partition = Ide_paths.Orphan)
       ~keeper_id
       ~file_path
       ~line_start
@@ -170,7 +170,7 @@ let create
     Ok annotation)
 ;;
 
-let list ~base_dir ?(partition = Ide_paths.Legacy) ~filter () =
+let list ~base_dir ?(partition = Ide_paths.Orphan) ~filter () =
   ensure_store ~base_dir ~partition ();
   let all : annotation list = load_all_partition ~base_dir partition in
   let by_file =
@@ -208,12 +208,12 @@ let list ~base_dir ?(partition = Ide_paths.Legacy) ~filter () =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-let compact ~base_dir ?(partition = Ide_paths.Legacy) () =
+let compact ~base_dir ?(partition = Ide_paths.Orphan) () =
   let all = load_all_partition ~base_dir partition in
   write_all_partition ~base_dir partition all
 ;;
 
-let delete ~base_dir ?(partition = Ide_paths.Legacy) ~id ~keeper_id () =
+let delete ~base_dir ?(partition = Ide_paths.Orphan) ~id ~keeper_id () =
   ensure_store ~base_dir ~partition ();
   let all = load_all_partition ~base_dir partition in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with

@@ -1,6 +1,6 @@
 open Alcotest
 
-module WO = Masc_mcp.Keeper_world_observation
+module WO = Masc.Keeper_world_observation
 
 let test_effective_cooldown_no_decay_within_base () =
   let result =

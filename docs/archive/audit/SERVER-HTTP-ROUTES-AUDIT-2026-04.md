@@ -11,7 +11,7 @@
 
 ### 1.1 Domain route modules (16)
 
-`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `cascade`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `room`, `sidecar`, `verification`.
+`server_routes_http_routes_<domain>.ml` for: `activity`, `artifacts`, `attribution`, `autonomous`, `runtime`, `channel_gate`, `dashboard`, `frontend`, `git_graph`, `legendary_bash`, `multimodal`, `provider_runs`, `resilience`, `workspace`, `sidecar`, `verification`.
 
 ### 1.2 Infrastructure (~10)
 
@@ -36,7 +36,7 @@
 
 ### 2.1 Severity rationale
 
-- **C2 = High** — only `/metrics` endpoint (in `frontend.ml`) currently exports Prometheus counters; individual route handlers lack `request_total` / `request_duration_seconds` / `request_errors_total`. Without per-route telemetry, the dashboard observability work (PR #12202/12208) cannot land its Tier P1 instrumentation cleanly.
+- **C2 = High** — only `/metrics` endpoint (in `frontend.ml`) currently exports retired scrape backend counters; individual route handlers lack `request_total` / `request_duration_seconds` / `request_errors_total`. Without per-route telemetry, the dashboard observability work (PR #12202/12208) cannot land its Tier P1 instrumentation cleanly.
 - **C3 = Medium** — mixed error patterns observed: `Error (sprintf "...")` vs `Yojson error objects` vs `Types.masc_error_to_string`. No unified error envelope across modules. Phase 2 will determine if this is semantic inconsistency or cosmetic variance.
 - **C1 = Medium** — `legendary_bash`, `multimodal`, `artifacts` routes accept potentially large bodies. Phase 2 must check whether limits are enforced upstream (HTTP server layer) or per-route.
 - **C4 = Low** — most routes already wrap in `with_tool_auth`; ~33 grep hits. Some routes intentionally public (frontend assets, /metrics, health checks). Phase 2 will whitelist intentional exemptions.
@@ -55,7 +55,7 @@ Three families, descriptive only at Phase 1:
 
 ```
 http_routes_with_telemetry           (INC, floor TBD)
-  Purpose: drive per-route Prometheus counter coverage from current
+  Purpose: drive per-route retired scrape backend counter coverage from current
   baseline (estimated 4–6) toward 16 (one per domain module).
 
 http_routes_error_envelope_shapes    (DEC, floor TBD)
@@ -71,7 +71,7 @@ Floor values intentionally TBD until Phase 2 measurement (per audit pattern §3)
 
 ## 4. Phase 2 plan (next PR)
 
-1. **Telemetry trace**: script that walks each `Http.Router.get/post/put/delete` call site and checks for `Prometheus.observe_*` or `inc_counter` emission inside the handler closure (or via shared middleware).
+1. **Telemetry trace**: script that walks each `Http.Router.get/post/put/delete` call site and checks for `retired scrape backend.observe_*` or `inc_counter` emission inside the handler closure (or via shared middleware).
 2. **Error envelope sample**: pick 3–5 routes from different domains; extract actual error JSON via integration test logs. Classify as truly heterogeneous vs cosmetic variance.
 3. **Auth whitelist**: enumerate routes that intentionally lack `with_tool_auth` (frontend assets, /metrics, health). Update C4 verdict — likely shrinks to 0–1 after whitelist.
 4. **Size limit inheritance**: confirm whether `Http_server_eio` enforces a global body size cap. If yes, C1 collapses to "satisfied-by-platform" and the C1 ratchet drops out.
@@ -103,7 +103,7 @@ Continued reuse confirms portability across heterogeneous domains (boundary, spe
 - PR #12202 / #12208 — Dashboard observability Phase 1+2 (sibling chain)
 - PR #12209 — Auth/credential audit Phase 1 (sibling chain)
 - `lib/server/server_routes_http*.ml` — primary surface
-- `MEMORY.md`: `feedback_module_alias_grep_required_for_test_consumers` (cascade-include surface analysis precedent)
+- `MEMORY.md`: `feedback_module_alias_grep_required_for_test_consumers` (runtime-include surface analysis precedent)
 
 ## 8. Summary table
 

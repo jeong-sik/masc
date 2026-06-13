@@ -2,7 +2,7 @@
 //!
 //! On TRPG entry the runner waits for initial state, then repeatedly POSTs to
 //! the rounds/run endpoint.  SSE polling picks up the resulting events.
-//! Stops when the room status reaches "ended" / "completed" or the safety cap
+//! Stops when the workspace status reaches "ended" / "completed" or the safety cap
 //! is hit.
 
 use bevy::prelude::*;
@@ -488,11 +488,11 @@ async fn fetch_json_post(url: &str, body: &str) -> Result<String, wasm_bindgen::
 fn build_round_body(dm_keeper_fallback: &str, stalled_retries: u32) -> Result<String, String> {
     use serde_json::{json, Map, Value};
 
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     // 1) DM keeper: explicit round-run field > claimed keeper > new-game picker > ECS snapshot.
     let dm_keeper = read_dom_input("round-run-dm")
-        .or_else(read_claimed_keeper_for_current_room)
+        .or_else(read_claimed_keeper_for_current_workspace)
         .or_else(|| read_dom_input("new-game-dm-select"))
         .or_else(|| {
             let fallback = dm_keeper_fallback.trim();
@@ -527,7 +527,7 @@ fn build_round_body(dm_keeper_fallback: &str, stalled_retries: u32) -> Result<St
     }
 
     let body = json!({
-        "room_id": room_id,
+        "workspace_id": workspace_id,
         "dm_keeper": dm_keeper,
         "player_keepers": Value::Object(player_keepers),
         "phase": phase,
@@ -580,14 +580,14 @@ fn normalize_round_phase_input(raw: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn claim_matches_current_room() -> bool {
-    let claimed_room = read_dom_input("claimed-room-id").unwrap_or_default();
-    !claimed_room.is_empty() && claimed_room == config::current_room_id()
+fn claim_matches_current_workspace() -> bool {
+    let claimed_workspace = read_dom_input("claimed-workspace-id").unwrap_or_default();
+    !claimed_workspace.is_empty() && claimed_workspace == config::current_workspace_id()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_claimed_keeper_for_current_room() -> Option<String> {
-    if claim_matches_current_room() {
+fn read_claimed_keeper_for_current_workspace() -> Option<String> {
+    if claim_matches_current_workspace() {
         read_dom_input("claimed-keeper")
     } else {
         None
@@ -718,7 +718,7 @@ fn is_round_in_flight_error(raw: &str) -> bool {
     let lowered = raw.trim().to_ascii_lowercase();
     lowered.contains("round run already in progress")
         || lowered.contains("single-flight")
-        || lowered.contains("already in progress for room")
+        || lowered.contains("already in progress for workspace")
 }
 
 #[cfg(any(target_arch = "wasm32", test))]
@@ -875,20 +875,20 @@ mod tests {
     fn detect_transient_round_conflict_from_message() {
         assert!(is_transient_round_conflict(
             Some(400),
-            "HTTP 400: round run already in progress for room_id=adventure-1",
+            "HTTP 400: round run already in progress for workspace_id=adventure-1",
         ));
         assert!(!is_transient_round_conflict(
             Some(400),
-            "HTTP 400: missing room_id",
+            "HTTP 400: missing workspace_id",
         ));
     }
 
     #[test]
     fn parse_round_response_api_error_payload() {
-        let payload = r#"{"ok":false,"error":"round run already in progress for room_id=abc"}"#;
+        let payload = r#"{"ok":false,"error":"round run already in progress for workspace_id=abc"}"#;
         assert_eq!(
             round_response_api_error(payload),
-            Some("round run already in progress for room_id=abc".to_string())
+            Some("round run already in progress for workspace_id=abc".to_string())
         );
     }
 

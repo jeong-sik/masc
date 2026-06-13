@@ -17,13 +17,13 @@
     Module aliases [Http] / [Http_negotiation] are exposed because
     sibling consumers (e.g. {!Server_h2_gateway},
     {!Server_mcp_transport_http}) reach them via the [include]
-    cascade. *)
+    runtime. *)
 
 include module type of struct
   include Server_mcp_transport_http_session
 end
 
-(** {1 Module aliases (cascade-visible)} *)
+(** {1 Module aliases (runtime-visible)} *)
 
 module Http = Http_server_eio
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
@@ -46,7 +46,7 @@ type deps = Server_mcp_transport_http_types.deps = {
     base_path:string -> Httpun.Request.t -> (unit, string) result;
 }
 (** Transparent alias of {!Server_mcp_transport_http_types.deps}.
-    Re-declared here so cascade consumers see the record fields
+    Re-declared here so runtime consumers see the record fields
     without needing to reach into [Types]. *)
 
 (** {1 Body parsing} *)
@@ -69,10 +69,12 @@ val validate_session_requirement :
 
     - Returns [Ok ()] when [session_was_provided = true] (session
       header / cookie / query-param resolved).
-    - When [session_was_provided = false], inspects the JSON-RPC
-      method via {!method_from_body}.  Permits the bootstrap
-      methods [initialize] / [notifications/initialized] / [ping]
-      to proceed without a session id; everything else rejects:
+    - When [session_was_provided = false], stateless 2026-07-28
+      bodies are admitted without a session.
+    - Otherwise inspects the JSON-RPC method via {!method_from_body}.
+      Permits the bootstrap methods [initialize] /
+      [notifications/initialized] / [ping] / [server/discover] to
+      proceed without a session id; everything else rejects:
 
       [Error "Mcp-Session-Id header required. Call initialize first
       to obtain a session."] *)
@@ -86,10 +88,11 @@ val validate_session_known :
     echoes an [Mcp-Session-Id] the server has no state for. Returns
     [Ok ()] when [session_was_provided = false] (a missing header is
     handled by {!validate_session_requirement}), when [is_known = true],
-    or when the JSON-RPC method is one of the handshake set
-    ([initialize] / [notifications/initialized] / [ping]). Otherwise
-    returns [Error] with a message suitable for a [404 Not Found]
-    response body. *)
+    when the body declares a stateless 2026-07-28 protocol version, or
+    when the JSON-RPC method is one of the bootstrap/probe set
+    ([initialize] / [notifications/initialized] / [ping] /
+    [server/discover]). Otherwise returns [Error] with a message
+    suitable for a [404 Not Found] response body. *)
 
 (** {1 Re-exports} *)
 
@@ -116,6 +119,15 @@ val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
 (** Re-export of
     {!Server_mcp_transport_http_headers.classify_mcp_accept}. *)
+
+val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
+(** Re-export of
+    {!Server_mcp_transport_http_headers.request_uses_stateless_protocol}. *)
+
+val validate_2026_request_headers :
+  Httpun.Request.t -> string -> (unit, string) result
+(** Re-export of
+    {!Server_mcp_transport_http_headers.validate_2026_request_headers}. *)
 
 val should_use_sse_for_body :
   Httpun.Request.t ->

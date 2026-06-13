@@ -5,7 +5,7 @@
     handling; convenience variants without the suffix raise
     {!Config_error} on missing/invalid values.
 
-    {b Cascade chain}: surface re-exposed via
+    {b Runtime chain}: surface re-exposed via
     [include module type of Env_config_core] in
     {!Env_config}, which sibling sub-modules
     ({!Env_config_runtime}, {!Env_config_governance},
@@ -90,8 +90,8 @@ val existing_file : string -> bool
 (* RFC-0085 PR-11 — Env var deprecation mechanism removed (7 entries:
    deprecation_warned, warn_deprecated, deprecated_opt,
    resolve_deprecated, get_float_deprecated, get_int_deprecated,
-   get_bool_deprecated).  Sole caller (keeper_turn_slot's
-   MASC_KEEPER_AUTOBOT_MAX typo fallback) is gone.  Future env
+   get_bool_deprecated).  The sole MASC_KEEPER_AUTOBOT_MAX typo
+   fallback caller is gone.  Future env
    migrations should pick a single name and stick with it; soft
    fallbacks accumulate via the workaround pattern from RFC-0084. *)
 
@@ -192,11 +192,12 @@ val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
 val parse_warn_enabled : unit -> bool
 val governance_level : unit -> string
+val disable_hitl_env_key : string
+val disable_hitl : unit -> bool
 
-(** {1 Build identity / auto respond / pubsub} *)
+(** {1 Build identity / pubsub} *)
 
 val build_git_commit_opt : unit -> string option
-val auto_respond_opt : unit -> string option
 val pubsub_max_messages : unit -> int
 
 (** {1 Keeper defaults} *)

@@ -1,7 +1,7 @@
 (** Quick-win tests for Sse module.
     Covers: max_clients, touch, close_all_clients, cleanup_stale, register/unregister. *)
 
-open Masc_mcp
+open Masc
 
 let () =
   let reset () = ignore (Sse.close_all_clients ()) in

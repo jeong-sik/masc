@@ -1,4 +1,4 @@
-(** Runtime_events event registrations for masc-mcp (Wave 2A).
+(** Runtime_events event registrations for masc (Wave 2A).
 
     Consumed by Olly or custom [Runtime_events.Callbacks] programs.
     [ev_turn] is a span event: consumers receive [Begin]/[End] bounds

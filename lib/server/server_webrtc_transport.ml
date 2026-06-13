@@ -31,25 +31,24 @@ let split_csv value =
 let ice_server_urls (server : Webrtc.Ice.ice_server) = server.Webrtc.Ice.urls
 
 let parse_ice_servers_json raw =
-  let open Yojson.Safe.Util in
   let parse_server json =
     let urls =
-      match member "urls" json with
-      | `String value -> split_csv value
-      | `List values ->
+      match Json_util.assoc_member_opt "urls" json with
+      | Some (`String value) -> split_csv value
+      | Some (`List values) ->
         values
         |> List.filter_map (fun value ->
-             try value |> to_string |> String_util.trim_nonempty
-             with Type_error _ -> None)
+             try (match value with `String s -> s | other -> raise (Yojson.Safe.Util.Type_error ("expected string", other))) |> String_util.trim_nonempty
+             with Yojson.Safe.Util.Type_error _ -> None)
       | _ -> []
     in
     if urls = [] then
       None
     else
       let opt name =
-        match member name json |> to_string_option with
-        | Some value -> String_util.trim_nonempty value
-        | None -> None
+        match Json_util.assoc_member_opt name json with
+        | Some (`String value) -> String_util.trim_nonempty value
+        | _ -> None
       in
       Some
         {
@@ -368,12 +367,12 @@ let handle_offer_request body =
   try
     let json = Yojson.Safe.from_string body in
     let from_agent =
-      Yojson.Safe.Util.(member "agent_name" json |> to_string) in
+      (match Json_util.assoc_member_opt "agent_name" json with Some (`String s) -> s | _ -> "") in
     let ice_candidates =
-      Yojson.Safe.Util.(member "ice_candidates" json |> to_list
-        |> List.map to_string) in
+      (match Json_util.assoc_member_opt "ice_candidates" json with Some (`List l) -> l | _ -> [])
+      |> List.map Yojson.Safe.to_string in
     let dtls_fingerprint =
-      Yojson.Safe.Util.(member "dtls_fingerprint" json |> to_string_option)
+      Json_util.get_string json "dtls_fingerprint"
       |> Option.value ~default:"" in
     let offer_id = create_offer ~from_agent ~ice_candidates ~dtls_fingerprint in
     Ok (Printf.sprintf {|{"offer_id":"%s","status":"pending"}|} offer_id)
@@ -387,14 +386,14 @@ let handle_answer_request body =
   try
     let json = Yojson.Safe.from_string body in
     let offer_id =
-      Yojson.Safe.Util.(member "offer_id" json |> to_string) in
+      (match Json_util.assoc_member_opt "offer_id" json with Some (`String s) -> s | _ -> "") in
     let answerer =
-      Yojson.Safe.Util.(member "agent_name" json |> to_string) in
+      (match Json_util.assoc_member_opt "agent_name" json with Some (`String s) -> s | _ -> "") in
     (* Also accept optional answerer ICE candidates *)
     let answer_ice =
-      match Yojson.Safe.Util.member "ice_candidates" json with
-      | `Null -> []
-      | candidates -> Yojson.Safe.Util.(to_list candidates |> List.map to_string)
+      match Json_util.assoc_member_opt "ice_candidates" json with
+      | None | Some `Null -> []
+      | Some candidates -> (match candidates with `List l -> l | _ -> []) |> List.map Yojson.Safe.to_string
     in
     ignore answer_ice;
     match accept_offer ~offer_id ~answerer_agent:answerer with
@@ -468,3 +467,13 @@ let cleanup_stale_peers ?(max_idle_s = 300.0) () =
   in
   List.iter remove_peer stale;
   List.length stale
+
+let () =
+  Transport_metrics.register_webrtc_metrics
+    ~is_enabled
+    ~pending_count:pending_offer_count
+    ~peers_count:active_peer_count
+    ~live_count:live_webrtc_count
+    ~channels_count:connected_channel_count
+    ~ice_servers_urls:configured_ice_server_urls
+

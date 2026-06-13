@@ -3,7 +3,8 @@ status: reference
 last_verified: 2026-05-01
 code_refs:
   - lib/dashboard/
-  - lib/dashboard.ml
+  - lib/dashboard/dashboard.ml
+  - lib/server/server_dashboard_http.ml
   - dashboard/
 ---
 
@@ -14,7 +15,7 @@ code_refs:
 | Status | Draft |
 | Team | Dashboard |
 | Maps to | `lib/dashboard/dashboard_*.ml`, `lib/server/server_dashboard_http*.ml`, `lib/web_dashboard.ml`, `lib/credits_dashboard.ml`, `dashboard/` |
-| Dependencies | 09-server-transport, 05-keeper-agent, Room, Operator_control, Team_session_store, Governance Pipeline |
+| Dependencies | 09-server-transport, 05-keeper-agent, Workspace, Operator_control, Team_session_store, Governance Pipeline |
 | Modules (OCaml) | 39 (.ml + .mli) |
 | LOC (OCaml) | ~13K |
 | Modules (Frontend) | ~210 TypeScript + ~15 CSS |
@@ -26,7 +27,7 @@ MASC 상태를 실시간으로 시각화하는 웹 대시보드.
 OCaml 서버가 JSON API를 제공하고, Preact SPA가 SSE로 실시간 업데이트를 수신한다.
 
 핵심 역할:
-- Room, Session, Keeper, Agent의 상태를 하나의 운영 콘솔로 통합
+- Workspace, Session, Keeper, Agent의 상태를 하나의 운영 콘솔로 통합
 - 운영자 개입이 필요한 항목(Attention)을 자동 분류하고 우선순위를 부여
 - Governance 심의 흐름, Proof 증거, historical compatibility 상태를 읽기 전용으로 구분해 표시
 - Keeper 메트릭 시계열, 도구 호출 건강도, MDAL 루프 진행을 시각화
@@ -128,7 +129,6 @@ OCaml Backend:
     |-- dashboard_attention.ml        (Attention item detection)
     |-- dashboard_agent_relations.ml  (GraphQL proxy for agent relations)
     |-- dashboard_utils.ml            (ISO timestamp, text normalization)
-    |-- dashboard_provider_runs.ml    (Provider run tracking)
     |
     |-- credits_dashboard.ml          (Standalone OCaml-rendered HTML dashboard)
     |-- web_dashboard.ml              (Static file serving wrapper)
@@ -196,7 +196,7 @@ type slot =
 공유 타입 정의:
 ```ocaml
 type swarm_lane_summary = { label; present; phase; motion_state; age; current_step; hard_flags }
-type room_snapshot = { room_id; is_current; agents; tasks; messages; locks }
+type workspace_snapshot = { workspace_id; is_current; agents; tasks; messages; locks }
 ```
 
 ### 3.3. Semantics Layer (`dashboard_semantics.ml`)
@@ -226,7 +226,7 @@ Dashboard semantics registry는 내부 문서화/테스트용으로 유지되며
 
 ### 3.4. Attention Detection (`dashboard_attention.ml`)
 
-**212 LOC.** 순수 함수. Room snapshot을 스캔하여 운영자 개입이 필요한 항목을 분류한다.
+**212 LOC.** 순수 함수. Workspace snapshot을 스캔하여 운영자 개입이 필요한 항목을 분류한다.
 
 ```ocaml
 type severity = Critical | Warning | Info
@@ -258,7 +258,7 @@ type attention_item = {
 **400 LOC.** 주기적으로 governance factual snapshot을 LLM에 보내고 judgment를 생성하는 daemon fiber.
 
 - `start`: `Eio.Fiber.fork_daemon`으로 시작. `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` (기본 60초) 간격으로 반복
-- `refresh_once`: `Keeper_turn_driver_wrappers.run_named_with_masc_tools`로 `"governance_judge"` cascade 호출 -> judgment 파싱 -> `Dated_jsonl` store에 append
+- `refresh_once`: `Keeper_turn_driver_wrappers.run_named_with_masc_tools`로 `"governance_judge"` runtime 호출 -> judgment 파싱 -> `Dated_jsonl` store에 append
 - **date-split store**: `.masc/governance/judgments/YYYY-MM/DD.jsonl` (legacy 단일 파일 fallback 지원)
 - `compute_judgments`: factual JSON을 prompt로 변환하고 LLM 호출. 결과에서 item별 judgment를 파싱하여 반환
 - **allowed_tool whitelist**: recommended_action의 resolved_tool은 active operator/execute 도구만 허용 (`masc_operator_snapshot`, `masc_operator_action`, `masc_operator_confirm`, `masc_surface_audit`, `masc_execute_dry_run`, `masc_execute`)
@@ -272,7 +272,7 @@ type attention_item = {
 ```ocaml
 val json :
   ?actor:string -> ?fixture:string -> ?light:bool ->
-  config:Room.config -> sw:Eio.Switch.t -> clock:'a Eio.Time.clock ->
+  config:Workspace.config -> sw:Eio.Switch.t -> clock:'a Eio.Time.clock ->
   proc_mgr:_ option -> unit -> Yojson.Safe.t
 ```
 
@@ -289,7 +289,7 @@ val json :
 #### 렌더링 흐름
 
 1. `since_unix` 24h cutoff으로 session 필터링 (최대 100개)
-2. `Operator_control.snapshot_json`으로 전체 room snapshot 구성
+2. `Operator_control.snapshot_json`으로 전체 workspace snapshot 구성
 3. (full mode) `Operator_control.digest_json`에서 session_cards 추출
 4. session/operation/execution_queue/worker/continuity context 구축
 5. 크기 제한 적용: sessions max 15, operations max 20 (active만), queue max 10, tasks max 50
@@ -302,12 +302,12 @@ val json :
 
 ### 3.8. Mission Surface (`dashboard_mission.ml` + 하위 모듈)
 
-**~1,975 LOC (3 sub-modules 포함).** Room 인시던트와 다음 액션을 위한 트리아지 우선 랜딩 뷰.
+**~1,975 LOC (3 sub-modules 포함).** Workspace 인시던트와 다음 액션을 위한 트리아지 우선 랜딩 뷰.
 
 `.mli` 시그니처:
 ```ocaml
 val json :
-  ?actor:string -> config:Room.config -> sw:Eio.Switch.t ->
+  ?actor:string -> config:Workspace.config -> sw:Eio.Switch.t ->
   clock:'a Eio.Time.clock -> proc_mgr:_ option -> unit -> Yojson.Safe.t
 ```
 
@@ -319,7 +319,7 @@ val json :
 
 `dashboard_mission_briefing.mli`는 테스트용 `For_test` sig를 노출한다:
 - `compact_session_json`, `compact_keeper_json`, `compact_agent_json`: briefing 입력 압축
-- `relevant_sessions_for_briefing`: 현재 room의 active session 필터링
+- `relevant_sessions_for_briefing`: 현재 workspace의 active session 필터링
 - `collect_metadata_gaps`: session/keeper/agent의 metadata 누락 감지
 - `build_briefing_sections`: 요약 텍스트 + section JSON 빌드
 
@@ -331,7 +331,7 @@ val json :
 ```ocaml
 val json :
   ?actor:string -> ?session_id:string -> ?operation_id:string ->
-  config:Room.config -> unit -> Yojson.Safe.t
+  config:Workspace.config -> unit -> Yojson.Safe.t
 ```
 
 | 모듈 | LOC | 역할 |
@@ -404,8 +404,8 @@ CPU-heavy 대시보드 계산을 `Eio.Executor_pool`에 위임하여 main Eio do
 
 ```ocaml
 val run_dashboard_compute :
-  sw:_ -> clock:_ -> config:Room.config ->
-  (config:Room.config -> sw:Eio.Switch.t -> 'a) -> 'a
+  sw:_ -> clock:_ -> config:Workspace.config ->
+  (config:Workspace.config -> sw:Eio.Switch.t -> 'a) -> 'a
 ```
 
 Dashboard computation은 filesystem-backed runtime snapshot을 읽는다. PostgreSQL runtime backend는 지원하지 않는다.
@@ -514,7 +514,7 @@ const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
    - `sessions -> agents`
    - `activity|live -> observatory` (+ `view=live` when applicable)
    - `telemetry|fleet|tool-quality|governance|attribution -> fleet-health` (+ `view`)
-   - `cascade-inspector|cost -> runtime` (+ `view`)
+   - `runtime-inspector|cost -> runtime` (+ `view`)
    - `git-graph -> workspace.repositories&view=graph`
    - `intervene|governance|inspector -> operations`
    - `workspace.goals -> workspace.planning`
@@ -664,9 +664,9 @@ dashboard prefix:
 | Endpoint | Method | 용도 |
 |----------|--------|------|
 | `/api/v1/dashboard/execution` | GET | Historical execution projection (current v1 nav의 primary surface는 아님) |
-| `/api/v1/dashboard/mission` | GET | Historical mission projection |
+| `/api/v1/dashboard/briefing` | GET | Mission briefing projection |
 | `/api/v1/dashboard/session?session_id=X` | GET | Mission session detail |
-| `/api/v1/dashboard/mission/briefing` | GET | Mission briefing (LLM 생성) |
+| `/api/v1/dashboard/briefing/sections` | GET | Mission briefing sections (LLM 생성) |
 | `/api/v1/dashboard/proof?session_id=X` | GET | Historical proof projection |
 | `/api/v1/dashboard/governance` | GET | Historical governance projection |
 | `/api/v1/dashboard/config` | GET | Config introspection snapshot |

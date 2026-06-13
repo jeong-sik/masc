@@ -1,7 +1,7 @@
 (** Lazy artifact hydrator reducer.
 
     Reads ToolResult blocks whose [content] is a [Tool_output.Stored]
-    sentinel marker and re-inflates the bytes from [Tool_blob_store]
+    blob marker and re-inflates the bytes from [Tool_blob_store]
     just before the LLM call. Older messages keep their markers, which
     cap the on-disk + on-wire token cost of historical context.
 

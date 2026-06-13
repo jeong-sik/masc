@@ -6,11 +6,11 @@
    If this test fails after adding a variant, update both functions.
 
    Also checks that oas Runtime.phase yojson variants are recognized
-   by the masc-mcp bridge layer (cross-repo drift detection).
+   by the masc bridge layer (cross-repo drift detection).
    Reference: specs/AgentLifecycle.tla, specs/AgentCancellation.tla
 *)
 
-module KSM = Masc_mcp.Keeper_state_machine
+module KSM = Keeper_state_machine
 
 (* ── Keeper phase round-trip completeness ─────────────────── *)
 
@@ -47,7 +47,7 @@ let all_phases_unique () =
 
 (* These strings come from oas Runtime.phase [@@deriving yojson].
    When oas adds a new phase variant, this list must be updated.
-   Failure here means masc-mcp may silently drop events from newer oas. *)
+   Failure here means masc may silently drop events from newer oas. *)
 let oas_runtime_phase_strings =
   [ "Bootstrapping"
   ; "Running"
@@ -70,7 +70,7 @@ let oas_terminal_count_is_3 =
 let oas_terminal_is_subset_of_all () =
   List.for_all (fun t -> List.mem t oas_runtime_phase_strings) oas_terminal_phases
 
-(* masc-mcp bridge maps oas stop reasons to keeper transitions.
+(* masc bridge maps oas stop reasons to keeper transitions.
    This test ensures the mapping surface is documented and complete. *)
 let oas_stop_reason_strings =
   [ "completed"

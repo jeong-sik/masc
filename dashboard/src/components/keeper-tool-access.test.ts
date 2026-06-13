@@ -7,12 +7,12 @@ import type { KeeperConfig } from '../types'
 
 function makeConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
-    execution: { selected_cascade_name: 'spark' },
+    execution: { selected_runtime_id: 'spark' },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     handoff: { auto: true, threshold: 0.8 },
     proactive: { enabled: true, idle_sec: 300 },
-    coordination: { mention_targets: ['alpha', 'beta'] },
+    workspace: { mention_targets: ['alpha', 'beta'] },
     tools: { resolved_allowlist: ['tool1', 'tool2'], tool_denylist: ['bad1'] },
     ...overrides,
   } as KeeperConfig
@@ -22,19 +22,19 @@ describe('KeeperToolAccessSummary', () => {
   it('renders all summary fields', () => {
     const container = document.createElement('div')
     render(h(KeeperToolAccessSummary, { config: makeConfig() }), container)
-    expect(container.textContent).toContain('cascade')
+    expect(container.textContent).toContain('runtime')
     expect(container.textContent).toContain('spark')
     expect(container.textContent).toContain('sandbox')
     expect(container.textContent).toContain('network')
     expect(container.textContent).toContain('auto handoff')
     expect(container.textContent).toContain('proactive idle')
     expect(container.textContent).toContain('mention targets')
-    expect(container.textContent).toContain('allow / deny')
+    expect(container.textContent).toContain('candidate / deny')
   })
 
-  it('shows em dash for null cascade name', () => {
+  it('shows em dash for null runtime name', () => {
     const container = document.createElement('div')
-    render(h(KeeperToolAccessSummary, { config: makeConfig({ execution: { selected_cascade_name: null } }) }), container)
+    render(h(KeeperToolAccessSummary, { config: makeConfig({ execution: { selected_runtime_id: null } }) }), container)
     const dds = container.querySelectorAll('dd')
     expect(dds[0]!.textContent).toBe('—')
   })
@@ -55,15 +55,15 @@ describe('KeeperToolAccessSummary', () => {
 
   it('shows em dash for empty mention targets', () => {
     const container = document.createElement('div')
-    render(h(KeeperToolAccessSummary, { config: makeConfig({ coordination: { mention_targets: [] } }) }), container)
+    render(h(KeeperToolAccessSummary, { config: makeConfig({ workspace: { mention_targets: [] } }) }), container)
     const dds = container.querySelectorAll('dd')
     expect(dds[5]!.textContent).toBe('—')
   })
 
-  it('shows allow/deny counts', () => {
+  it('shows candidate/deny counts', () => {
     const container = document.createElement('div')
     render(h(KeeperToolAccessSummary, { config: makeConfig() }), container)
-    expect(container.textContent).toContain('2 allow')
+    expect(container.textContent).toContain('2 candidate')
     expect(container.textContent).toContain('1 deny')
   })
 

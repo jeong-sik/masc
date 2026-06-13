@@ -2,7 +2,7 @@
 status: reference
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
   - lib/keeper/keeper_heartbeat_smart.ml
 ---
@@ -12,7 +12,7 @@ code_refs:
 **Status**: Draft, follow-up enforcement gate
 **Date**: 2026-03-29
 **Scope**: gRPC heartbeat phi-accrual enforcement semantics, transport overlay state, safe rollback boundaries
-**One sentence**: Phi-accrual을 production에서 enforcement 할 때도 keeper supervisor와 room freshness ownership을 건드리지 않도록, transport-only enforcement contract를 잠근다.
+**One sentence**: Phi-accrual을 production에서 enforcement 할 때도 keeper supervisor와 workspace freshness ownership을 건드리지 않도록, transport-only enforcement contract를 잠근다.
 
 ## Related Documents
 
@@ -31,7 +31,7 @@ code_refs:
 목표는 세 가지다:
 
 - phi-accrual enforcement의 최대 권한을 transport overlay로 제한한다.
-- network loss signal이 local room ownership이나 keeper restart state로 번역되지 않게 막는다.
+- network loss signal이 local workspace ownership이나 keeper restart state로 번역되지 않게 막는다.
 - operator가 advisory mode와 enforcement mode의 차이를 명확히 이해할 수 있게 한다.
 
 ## 2. Preconditions
@@ -42,7 +42,7 @@ code_refs:
 - gRPC/Phi rollout RFC의 G0-G4 완료
 - phi shadow mode 14일 evidence 보유
 - advisory alerts가 noisy 하지 않음
-- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 gRPC/Phi 시나리오 구현 완료
+- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 gRPC/Phi 시나리오 구현 완료
 
 이 전제 하나라도 빠지면 phi enforcement는 `No-Go` 다.
 
@@ -51,7 +51,7 @@ code_refs:
 - phi crossing만으로 keeper를 `Crashed` 또는 `Dead` 로 전이하지 않는다.
 - phi를 reconcile ownership predicate에 사용하지 않는다.
 - phi를 `last_successful_heartbeat_ts` 갱신/차단의 SSOT로 쓰지 않는다.
-- phi를 room presence `consecutive_failures` reset에 사용하지 않는다.
+- phi를 workspace presence `consecutive_failures` reset에 사용하지 않는다.
 - local keepalive fiber를 phi로 stop 하지 않는다.
 
 ## 4. Enforcement Model
@@ -83,7 +83,7 @@ Production에서 phi enforcement가 할 수 있는 일은 아래로 제한한다
 | current gRPC heartbeat stream voluntary close | yes | transport reset only |
 | gRPC reconnect backoff escalate | yes | separate from keeper restart budget |
 | keeper `Crashed` / `Dead` transition | no | forbidden |
-| room freshness lease mutation | no | forbidden |
+| workspace freshness lease mutation | no | forbidden |
 | reconcile suppression / resume | no | forbidden |
 | supervisor restart budget consumption | no | forbidden |
 
@@ -178,7 +178,7 @@ These must remain zero during phi enforcement rollout:
 - `masc_keeper_unplanned_self_preservation_total`
 - `masc_keeper_phi_state_violation_total`
 
-`masc_keeper_phi_state_violation_total` means phi enforcement changed local keeper state, room freshness lease, or supervisor restart accounting.
+`masc_keeper_phi_state_violation_total` means phi enforcement changed local keeper state, workspace freshness lease, or supervisor restart accounting.
 
 ## 7. Validation Requirements
 

@@ -16,16 +16,6 @@
       "title": "fix(keeper): force-release stale turn slots from supervisor crash path"
     },
     {
-      "number": 13190,
-      "state": "MERGED",
-      "title": "fix(keeper): allow partial stale recovery restarts"
-    },
-    {
-      "number": 13123,
-      "state": "MERGED",
-      "title": "fix(keeper): wake alive-stuck keepers"
-    },
-    {
       "number": 13124,
       "state": "MERGED",
       "title": "fix: run provider health probes at bootstrap"

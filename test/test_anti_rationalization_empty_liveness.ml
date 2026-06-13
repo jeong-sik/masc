@@ -1,4 +1,4 @@
-(** Ratchet: [Anti_rationalization.review] treats an empty evaluator
+(** Ratchet: [Task.Anti_rationalization.review] treats an empty evaluator
     response as "evaluator unavailable" (approve by liveness) rather
     than rejecting the completing keeper.
 
@@ -15,7 +15,7 @@
     empty input, the branch silently falls through to [Format_reject]
     again and this assertion surfaces the regression. *)
 
-module AR = Masc_mcp.Anti_rationalization
+module AR = Masc.Task.Anti_rationalization
 
 let test_empty_verdict_emits_canonical_error () =
   match AR.parse_verdict "" with

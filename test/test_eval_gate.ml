@@ -1,6 +1,6 @@
 (** Unit tests for Eval_gate module — Pre/Post execution gates. *)
 
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -17,7 +17,7 @@ let with_tmpdir f =
 let make_acc dir =
   Trajectory.create_accumulator
     ~masc_root:dir ~keeper_name:"test-keeper"
-    ~trace_id:"gate-test" ~generation:0
+    ~trace_id:"gate-test" ~generation:0 ()
 
 let default_config = Eval_gate.default_config
 
@@ -100,7 +100,7 @@ let test_pre_allowlist_pass () =
   | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "Should pass: %s" r)
 
 (* ================================================================ *)
-(* Test: pre_check — cost budget                                     *)
+(* Test: pre_check — advisory cost threshold                         *)
 (* ================================================================ *)
 
 let test_pre_cost_exceeded () =
@@ -108,12 +108,9 @@ let test_pre_cost_exceeded () =
     ~config:default_config ~accumulated_cost:0.60 ~trajectory_acc:None
     ~tool_name:"tool_execute" ~args_json:"{\"command\": \"echo hi\"}" in
   match decision with
-  | Trajectory.Reject reason ->
-      Alcotest.(check bool) "cost exceeded reason" true
-        (let r = String.lowercase_ascii reason in
-         try ignore (Str.search_forward (Str.regexp_string "cost") r 0); true
-         with Not_found -> false)
-  | Trajectory.Pass -> Alcotest.fail "Should reject when cost exceeded"
+  | Trajectory.Pass -> ()
+  | Trajectory.Reject r ->
+      Alcotest.fail (Printf.sprintf "Cost threshold must be advisory: %s" r)
 
 let test_pre_cost_within_budget () =
   let decision = Eval_gate.pre_check
@@ -164,6 +161,7 @@ let test_pre_entropy () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     (* Add 3 consecutive same-tool calls with same args *)
     Trajectory.record_entry acc (mk "tool_execute" repeated_args);
@@ -196,6 +194,7 @@ let test_pre_entropy_different_args () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     (* Add 3 consecutive same-tool calls but with different args *)
     Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo a\"}");
@@ -226,6 +225,7 @@ let test_pre_turn_limit () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk "tool_execute");
     Trajectory.record_entry acc (mk "tool_read_file");
@@ -382,7 +382,7 @@ let () =
       Alcotest.test_case "deny list" `Quick test_pre_deny_list;
       Alcotest.test_case "allowlist reject" `Quick test_pre_allowlist_reject;
       Alcotest.test_case "allowlist pass" `Quick test_pre_allowlist_pass;
-      Alcotest.test_case "cost exceeded" `Quick test_pre_cost_exceeded;
+      Alcotest.test_case "cost threshold is advisory" `Quick test_pre_cost_exceeded;
       Alcotest.test_case "cost within budget" `Quick test_pre_cost_within_budget;
       Alcotest.test_case "destructive bash" `Quick test_pre_destructive_bash;
       Alcotest.test_case "safe bash" `Quick test_pre_safe_bash;

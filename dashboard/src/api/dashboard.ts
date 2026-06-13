@@ -12,6 +12,7 @@ import {
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { currentDashboardActor, get, post, withRetries, type AbortableRequestOptions } from './core'
+import { ensureDevToken } from './dev-token'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
@@ -83,45 +84,6 @@ export type {
   ConfigEntrySource,
   DashboardConfigResponse,
 } from './schemas/dashboard-config'
-export {
-  fetchCascadeAuditRuns,
-  fetchCascadeClientCapacity,
-  fetchCascadeClientCapacityHistory,
-  fetchCascadeConfig,
-  fetchCascadeConfigRaw,
-  fetchCascadeHealth,
-  fetchCascadeProfiles,
-  fetchCascadeSlo,
-  fetchCascadeStrategyTrace,
-  updateCascadeConfigRaw,
-  updateKeeperCascade,
-} from './dashboard-cascade'
-export type {
-  CascadeAuditHop,
-  CascadeAuditHopStatus,
-  CascadeAuditRun,
-  CascadeAuditRunsResponse,
-  CascadeCandidate,
-  CascadeCapacityEventKind,
-  CascadeClientCapacityEntry,
-  CascadeClientCapacityHistoryEvent,
-  CascadeClientCapacityHistoryResponse,
-  CascadeClientCapacityResponse,
-  CascadeConfigResponse,
-  CascadeHealthProvider,
-  CascadeHealthResponse,
-  CascadeProviderStatus,
-  CascadeInvalidProfile,
-  CascadeKeeperProfile,
-  CascadeProfile,
-  CascadeRawConfigResponse,
-  CascadeSloResponse,
-  CascadeSloStatus,
-  CascadeStrategyTraceEvent,
-  CascadeStrategyTraceKind,
-  CascadeStrategyTraceResponse,
-  CascadeValidationStatus,
-} from './dashboard-cascade'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 
@@ -316,7 +278,7 @@ export type ToolQualityResponse = TelemetryFreshnessMetadata & {
   success_rate: number
   by_tool: ToolQualityToolStat[]
   by_keeper: ToolQualityKeeperStat[]
-  by_cascade?: ToolQualityKeeperStat[]
+  by_runtime?: ToolQualityKeeperStat[]
   failure_categories: ToolQualityFailureCategory[]
   hourly_trend?: ToolQualityHourlyPoint[]
 }
@@ -565,8 +527,12 @@ export async function decideGovernanceExecutionOrder(
   throw governanceCasesRetiredError()
 }
 
+export function fetchDashboardBriefing(): Promise<DashboardMissionResponse> {
+  return get('/api/v1/dashboard/briefing')
+}
+
 export function fetchDashboardMission(): Promise<DashboardMissionResponse> {
-  return get('/api/v1/dashboard/mission')
+  return fetchDashboardBriefing()
 }
 
 export function fetchDashboardMissionSession(
@@ -588,13 +554,23 @@ interface DashboardRuntimeProviderDiscovery {
 
 export interface DashboardRuntimeProviderSnapshot {
   provider: string
+  runtime_id?: string | null
+  provider_id?: string | null
+  provider_display_name?: string | null
+  model_id?: string | null
+  model_api_name?: string | null
+  protocol?: string | null
+  transport?: string | null
   kind?: string | null
   runtime_kind?: string | null
   auth_kind?: string | null
   status?: string | null
   available?: boolean
-  supports_single_agent_run?: boolean
-  default_model?: string | null
+  is_default_runtime?: boolean
+  max_context?: number | null
+  tools_support?: boolean
+  thinking_support?: boolean
+  streaming?: boolean
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -607,9 +583,11 @@ export interface DashboardRuntimeProvidersResponse {
   updated_at?: string
   summary?: {
     providers?: number
+    runtimes?: number
     local_models?: number
     cloud_models?: number
     cli_models?: number
+    default_runtime_id?: string | null
   } | null
   providers: DashboardRuntimeProviderSnapshot[]
 }
@@ -649,10 +627,8 @@ export interface DashboardRuntimeModelMetric {
   max_peak_memory_gb?: number | null
   /**
    * Fraction [0.0, 1.0] of turns in the window where the model received
-   * think=true. Reflects the Keeper_turn_intent adaptive classifier decision
-   * (Cognitive=true → thinking, Mechanical=false → no thinking). Null when no
-   * entry in the window reported thinking_enabled (older rows or providers
-   * that don't expose the field).
+   * think=true. Null when no entry in the window reported thinking_enabled
+   * (older rows or providers that don't expose the field).
    */
   thinking_fraction?: number | null
   avg_latency_ms?: number | null
@@ -661,6 +637,7 @@ export interface DashboardRuntimeModelMetric {
   total_input_tokens?: number | null
   total_output_tokens?: number | null
   total_cache_read_tokens?: number | null
+  total_cache_creation_tokens?: number | null
   total_reasoning_tokens?: number | null
   usage_sample_count?: number | null
   telemetry_sample_count?: number | null
@@ -695,6 +672,9 @@ export interface DashboardRuntimeModelMetric {
     usage_anomaly_reasons?: string[] | null
     coverage_reason?: string | null
     coverage_stage?: string | null
+    streaming_ttfrc_ms?: number | null
+    streaming_inter_chunk_count?: number | null
+    streaming_inter_chunk_avg_ms?: number | null
   }> | null
   buckets?: BucketMetric[] | null
 }
@@ -736,17 +716,27 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
   if (!provider) return null
   return {
     provider,
-    kind: 'runtime',
+    runtime_id: asNullableString(raw.runtime_id),
+    provider_id: asNullableString(raw.provider_id),
+    provider_display_name: asNullableString(raw.provider_display_name),
+    model_id: asNullableString(raw.model_id),
+    model_api_name: asNullableString(raw.model_api_name),
+    protocol: asNullableString(raw.protocol),
+    transport: asNullableString(raw.transport),
+    kind: asNullableString(raw.kind),
     runtime_kind: asNullableString(raw.runtime_kind),
     auth_kind: asNullableString(raw.auth_kind),
     status: asNullableString(raw.status),
     available: asBoolean(raw.available),
-    supports_single_agent_run: asBoolean(raw.supports_single_agent_run),
-    default_model: null,
+    is_default_runtime: asBoolean(raw.is_default_runtime),
+    max_context: asNumber(raw.max_context) ?? null,
+    tools_support: asBoolean(raw.tools_support),
+    thinking_support: asBoolean(raw.thinking_support),
+    streaming: asBoolean(raw.streaming),
     model_count: asNumber(raw.model_count) ?? null,
-    models: [],
+    models: asStringArray(raw.models),
     source: asNullableString(raw.source),
-    endpoint_url: null,
+    endpoint_url: asNullableString(raw.endpoint_url),
     note: asNullableString(raw.note),
     discovery: decodeRuntimeProviderDiscovery(raw.discovery),
   }
@@ -760,9 +750,11 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
     summary: summary
       ? {
           providers: asNumber(summary.providers),
+          runtimes: asNumber(summary.runtimes),
           local_models: asNumber(summary.local_models),
           cloud_models: asNumber(summary.cloud_models),
           cli_models: asNumber(summary.cli_models),
+          default_runtime_id: asNullableString(summary.default_runtime_id),
         }
       : null,
     providers: asRecordArray(raw.providers)
@@ -796,6 +788,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
     total_input_tokens: asNumber(raw.total_input_tokens) ?? null,
     total_output_tokens: asNumber(raw.total_output_tokens) ?? null,
     total_cache_read_tokens: asNumber(raw.total_cache_read_tokens) ?? null,
+    total_cache_creation_tokens: asNumber(raw.total_cache_creation_tokens) ?? null,
     total_reasoning_tokens: asNumber(raw.total_reasoning_tokens) ?? null,
     usage_sample_count: asNumber(raw.usage_sample_count) ?? null,
     telemetry_sample_count: asNumber(raw.telemetry_sample_count) ?? null,
@@ -847,6 +840,9 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
               : null,
             coverage_reason: asNullableString(r.coverage_reason),
             coverage_stage: asNullableString(r.coverage_stage),
+            streaming_ttfrc_ms: asNumber(r.streaming_ttfrc_ms) ?? null,
+            streaming_inter_chunk_count: asNumber(r.streaming_inter_chunk_count) ?? null,
+            streaming_inter_chunk_avg_ms: asNumber(r.streaming_inter_chunk_avg_ms) ?? null,
           }))
       : null,
     buckets: Array.isArray(raw.buckets)
@@ -892,7 +888,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
 export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
   const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
   const decoded = decodeRuntimeProvidersResponse(raw)
-  if (!decoded) throw new Error('유효하지 않은 runtime providers payload')
+  if (!decoded) throw new Error('유효하지 않은 runtime lanes payload')
   return decoded
 }
 
@@ -1081,246 +1077,12 @@ export async function fetchKeeperDecisions(
   return decoded
 }
 
-export interface HeuristicEvent {
-  module: string
-  site: string
-  raw_value: number
-  threshold: number
-  triggered: boolean
-  provenance: { type: string; detail: string }
-  timestamp: number
-  detail?: string
-}
-
-export interface HeuristicFiring {
-  id: string
-  ts: number
-  rule_id: string
-  agent?: string
-  action: string
-  cooldown_remaining_ms?: number
-}
-
-export interface HeuristicsResponse extends DashboardFeedMetadata {
-  limit: number
-  count: number
-  events: HeuristicEvent[]
-  heuristics: HeuristicFiring[]
-}
-
-function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
-  if (!isRecord(raw)) return null
-  const prov = isRecord(raw.provenance) ? raw.provenance : null
-  return {
-    module: asString(raw.module) ?? '',
-    site: asString(raw.site) ?? '',
-    raw_value: asNumber(raw.raw_value) ?? 0,
-    threshold: asNumber(raw.threshold) ?? 0,
-    triggered: asBoolean(raw.triggered) ?? false,
-    provenance: prov
-      ? { type: asString(prov.type) ?? '', detail: asString(prov.detail) ?? '' }
-      : { type: '', detail: '' },
-    timestamp: asNumber(raw.timestamp) ?? 0,
-    detail: asNullableString(raw.detail) ?? undefined,
-  }
-}
-
-function decodeHeuristicFiring(raw: unknown): HeuristicFiring | null {
-  if (!isRecord(raw)) return null
-  return {
-    id: asString(raw.id) ?? '',
-    ts: asNumber(raw.ts) ?? 0,
-    rule_id: asString(raw.rule_id) ?? '',
-    agent: asNullableString(raw.agent) ?? undefined,
-    action: asString(raw.action) ?? '',
-    cooldown_remaining_ms: raw.cooldown_remaining_ms === undefined
-      ? undefined
-      : (asInt(raw.cooldown_remaining_ms) ?? 0),
-  }
-}
-
-function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
-  if (!isRecord(raw)) return null
-  return {
-    ...decodeDashboardFeedMetadata(raw),
-    limit: asInt(raw.limit) ?? 0,
-    count: asInt(raw.count) ?? 0,
-    events: asRecordArray(raw.events)
-      .map(decodeHeuristicEvent)
-      .filter((e): e is HeuristicEvent => e !== null),
-    heuristics: asRecordArray(raw.heuristics)
-      .map(decodeHeuristicFiring)
-      .filter((e): e is HeuristicFiring => e !== null),
-  }
-}
-
-export async function fetchHeuristics(
-  limit = 100,
-  opts?: AbortableRequestOptions,
-): Promise<HeuristicsResponse> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics?limit=${limit}`, { signal: opts?.signal })
-  const decoded = decodeHeuristicsResponse(raw)
-  if (!decoded) throw new Error('유효하지 않은 heuristics payload')
-  return decoded
-}
-
-export interface StressKind {
-  type: string
-  count?: number
-  consecutive?: number
-  threshold?: number
-  counted_toward_crash?: boolean
-  recoverable?: boolean
-  error_kind?: string
-}
-
-export interface StressEvent {
-  agent_name: string
-  room_id: string
-  kind: StressKind
-  timestamp: number
-}
-
-export interface StressResponse extends DashboardFeedMetadata {
-  limit: number
-  count: number
-  events: StressEvent[]
-  agent_stress: AgentStressRow[]
-}
-
-export interface AgentStressRow {
-  agent: string
-  budget_pressure: number
-  ctx_pressure: number
-  queue_depth: number
-  blocked_on?: string
-  ts: number
-  budget_pressure_source?: string
-  ctx_pressure_source?: string
-  queue_depth_source?: string
-}
-
-function decodeStressKind(raw: unknown): StressKind | null {
-  if (!isRecord(raw)) return null
-  return {
-    type: asString(raw.type) ?? '',
-    count: asInt(raw.count) ?? undefined,
-    consecutive: asInt(raw.consecutive) ?? undefined,
-    threshold: asInt(raw.threshold) ?? undefined,
-    counted_toward_crash: raw.counted_toward_crash === undefined ? undefined : (asBoolean(raw.counted_toward_crash) ?? false),
-    recoverable: raw.recoverable === undefined ? undefined : (asBoolean(raw.recoverable) ?? false),
-    error_kind: asNullableString(raw.error_kind) ?? undefined,
-  }
-}
-
-function decodeStressEvent(raw: unknown): StressEvent | null {
-  if (!isRecord(raw)) return null
-  const kind = decodeStressKind(raw.kind)
-  if (!kind) return null
-  return {
-    agent_name: asString(raw.agent_name) ?? '',
-    room_id: asString(raw.room_id) ?? '',
-    kind,
-    timestamp: asNumber(raw.timestamp) ?? 0,
-  }
-}
-
-function decodeAgentStressRow(raw: unknown): AgentStressRow | null {
-  if (!isRecord(raw)) return null
-  return {
-    agent: asString(raw.agent) ?? '',
-    budget_pressure: asNumber(raw.budget_pressure) ?? 0,
-    ctx_pressure: asNumber(raw.ctx_pressure) ?? 0,
-    queue_depth: asInt(raw.queue_depth) ?? 0,
-    blocked_on: asNullableString(raw.blocked_on) ?? undefined,
-    ts: asNumber(raw.ts) ?? 0,
-    budget_pressure_source: asNullableString(raw.budget_pressure_source) ?? undefined,
-    ctx_pressure_source: asNullableString(raw.ctx_pressure_source) ?? undefined,
-    queue_depth_source: asNullableString(raw.queue_depth_source) ?? undefined,
-  }
-}
-
-function decodeStressResponse(raw: unknown): StressResponse | null {
-  if (!isRecord(raw)) return null
-  return {
-    ...decodeDashboardFeedMetadata(raw),
-    limit: asInt(raw.limit) ?? 0,
-    count: asInt(raw.count) ?? 0,
-    events: asRecordArray(raw.events)
-      .map(decodeStressEvent)
-      .filter((e): e is StressEvent => e !== null),
-    agent_stress: asRecordArray(raw.agent_stress)
-      .map(decodeAgentStressRow)
-      .filter((row): row is AgentStressRow => row !== null),
-  }
-}
-
-export async function fetchStress(
-  limit = 100,
-  opts?: AbortableRequestOptions,
-): Promise<StressResponse> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/stress?limit=${limit}`, { signal: opts?.signal })
-  const decoded = decodeStressResponse(raw)
-  if (!decoded) throw new Error('유효하지 않은 stress payload')
-  return decoded
-}
-
-export interface CoverageSite {
-  module: string
-  site: string
-  count: number
-  triggered_count: number
-}
-
-export interface HeuristicCoverage extends DashboardFeedMetadata {
-  total_events: number
-  decision_shape_count: number
-  mixed_outcome_sites: number
-  unique_decision_tuples: number
-  sites: CoverageSite[]
-}
-
-function decodeCoverageSite(raw: unknown): CoverageSite | null {
-  if (!isRecord(raw)) return null
-  return {
-    module: asString(raw.module) ?? '',
-    site: asString(raw.site) ?? '',
-    count: asInt(raw.count) ?? 0,
-    triggered_count: asInt(raw.triggered_count) ?? 0,
-  }
-}
-
-function decodeHeuristicCoverage(raw: unknown): HeuristicCoverage | null {
-  if (!isRecord(raw)) return null
-  const decisionShapeCount = asInt(raw.decision_shape_count) ?? asInt(raw.unique_decision_tuples) ?? 0
-  return {
-    ...decodeDashboardFeedMetadata(raw),
-    total_events: asInt(raw.total_events) ?? 0,
-    decision_shape_count: decisionShapeCount,
-    mixed_outcome_sites: asInt(raw.mixed_outcome_sites) ?? 0,
-    unique_decision_tuples: decisionShapeCount,
-    sites: asRecordArray(raw.sites)
-      .map(decodeCoverageSite)
-      .filter((s): s is CoverageSite => s !== null),
-  }
-}
-
-export async function fetchHeuristicCoverage(
-  limit = 100,
-  opts?: AbortableRequestOptions,
-): Promise<HeuristicCoverage> {
-  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics/coverage?limit=${limit}`, { signal: opts?.signal })
-  const decoded = decodeHeuristicCoverage(raw)
-  if (!decoded) throw new Error('유효하지 않은 heuristic coverage payload')
-  return decoded
-}
-
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },
 ): Promise<DashboardMissionBriefingResponse> {
   const query = force ? '?force=1' : ''
-  return get(`/api/v1/dashboard/mission/briefing${query}`, { signal: opts?.signal })
+  return get(`/api/v1/dashboard/briefing/sections${query}`, { signal: opts?.signal })
 }
 
 export function fetchDashboardPlanning(): Promise<DashboardPlanningResponse> {
@@ -1331,11 +1093,9 @@ function decodeGoalVerificationPrincipal(
   raw: unknown,
 ): GoalVerificationRequest['requested_by'] | null {
   if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
   const id = asString(raw.id)
-  if (!kind || !id) return null
+  if (!id) return null
   return {
-    kind,
     id,
     display_name: asNullableString(raw.display_name),
   }
@@ -1515,23 +1275,13 @@ function decodeGoalKeeperTrustApprovalState(raw: unknown): GoalKeeperTrustApprov
 function decodeGoalKeeperTrustExecutionSummary(raw: unknown): GoalKeeperTrustExecutionSummary | null {
   if (!isRecord(raw)) return null
   return {
-    tool_contract_result: asNullableString(raw.tool_contract_result),
-    runtime_proof_status: asNullableString(raw.runtime_proof_status),
-    required_tools: asStringArray(raw.required_tools),
-    missing_required_tools: asStringArray(raw.missing_required_tools),
-    requested_tools: asStringArray(raw.requested_tools),
-    tools_used: asStringArray(raw.tools_used),
-    unexpected_tools: asStringArray(raw.unexpected_tools),
-    requested_tool_count: asInt(raw.requested_tool_count) ?? null,
-    tools_used_count: asInt(raw.tools_used_count) ?? null,
-    unexpected_tool_count: asInt(raw.unexpected_tool_count) ?? null,
     provider_attempt_count: asInt(raw.provider_attempt_count) ?? null,
     provider_fallback_applied:
       typeof raw.provider_fallback_applied === 'boolean'
         ? raw.provider_fallback_applied
         : null,
     provider_selected_model: asNullableString(raw.provider_selected_model),
-    cascade_outcome: asNullableString(raw.cascade_outcome),
+    runtime_outcome: asNullableString(raw.runtime_outcome),
     sandbox_summary: asNullableString(raw.sandbox_summary),
     sandbox_root: asNullableString(raw.sandbox_root),
     mutation_guard_summary: asNullableString(raw.mutation_guard_summary),
@@ -1775,8 +1525,8 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
   const agentName = asString(raw.agent_name)
   const sandboxProfile = asString(raw.sandbox_profile)
   const networkMode = asString(raw.network_mode)
-  const cascadeName = asString(raw.cascade_name)
-  if (!name || !agentName || !sandboxProfile || !networkMode || !cascadeName) return null
+  const runtimeName = asString(raw.runtime_id)
+  if (!name || !agentName || !sandboxProfile || !networkMode || !runtimeName) return null
   return {
     name,
     agent_name: agentName,
@@ -1784,9 +1534,9 @@ function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
     active_goal_ids: asStringArray(raw.active_goal_ids),
     sandbox_profile: sandboxProfile,
     network_mode: networkMode,
-    cascade_name: cascadeName,
+    runtime_id: runtimeName,
     approval_profile: asNullableString(raw.approval_profile),
-    cascade_outcome: asNullableString(raw.cascade_outcome),
+    runtime_outcome: asNullableString(raw.runtime_outcome),
     latest_execution_outcome: asNullableString(raw.latest_execution_outcome),
     latest_execution_at: asNullableString(raw.latest_execution_at),
     latest_receipt: isRecord(raw.latest_receipt) ? raw.latest_receipt : null,
@@ -1970,8 +1720,46 @@ interface DashboardRuntimeProbeAssessment {
   limitation?: string | null
 }
 
-interface DashboardRuntimeProbePayload {
+export interface DashboardRuntimeProviderProbe {
+  runtime_id?: string | null
+  provider_id?: string | null
+  provider_display_name?: string | null
+  model_id?: string | null
+  model_api_name?: string | null
+  protocol?: string | null
+  runtime_kind?: string | null
+  transport?: string | null
+  auth_kind?: string | null
+  credential_required?: boolean | null
+  auth_present?: boolean | null
+  status?: string | null
+  reachable?: boolean | null
+  http_status?: number | null
+  latency_ms?: number | null
+  model_count?: number | null
+  content_type?: string | null
+  downloaded_bytes?: number | null
+  endpoint_url?: string | null
+  probe_url?: string | null
+  error?: string | null
+  checked_at?: string | null
+}
+
+export interface DashboardRuntimeProviderProbeSummary {
+  runtimes?: number
+  probed?: number
+  reachable?: number
+  failed?: number
+  skipped?: number
+  default_runtime_id?: string | null
+}
+
+export interface DashboardRuntimeProbePayload {
   source?: string
+  status?: string | null
+  checked_at?: string | null
+  summary?: DashboardRuntimeProviderProbeSummary | null
+  providers?: DashboardRuntimeProviderProbe[]
   server_url?: string
   ps_endpoint?: string
   generate_endpoint?: string
@@ -2013,11 +1801,12 @@ export function fetchToolMetrics(): Promise<ToolMetricsResponse> {
   return get('/api/v1/tool-metrics')
 }
 
-export function fetchDashboardRuntimeProbe(
+export async function fetchDashboardRuntimeProbe(
   force = false,
   opts?: AbortableRequestOptions,
 ): Promise<DashboardRuntimeProbeResponse> {
   const query = force ? '?force=1' : ''
+  await ensureDevToken()
   return get(`/api/v1/dashboard/runtime-probe${query}`, { signal: opts?.signal })
 }
 
@@ -2027,6 +1816,11 @@ export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promi
     ...t,
     category: t.category ?? 'uncategorized',
     tier: t.tier ?? '(unknown tier)',
+    // Tool-layer decoupling groundwork: surface membership is consumer-owned
+    // metadata, not an execution constraint. Totalize here so the field is
+    // never absent downstream; consumers keep working with [] and the surface
+    // filter simply degrades to zero counts. Mirrors category/tier above.
+    surfaces: t.surfaces ?? [],
   }))
   return {
     ...raw,
@@ -2152,7 +1946,7 @@ function normalizeKeeperHookSlots(raw: unknown): Record<string, KeeperHookSlot> 
   return slots
 }
 
-function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['coordination']['active_goals'] {
+function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['workspace']['active_goals'] {
   return asRecordArray(raw)
     .map((item) => {
       const id = asNullableString(item.id)
@@ -2161,7 +1955,7 @@ function normalizeKeeperConfigActiveGoals(raw: unknown): KeeperConfig['coordinat
       if (!id || !title || !horizon) return null
       return { id, title, horizon }
     })
-    .filter((item): item is KeeperConfig['coordination']['active_goals'][number] => item !== null)
+    .filter((item): item is KeeperConfig['workspace']['active_goals'][number] => item !== null)
 }
 
 function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string; source: string; text: string } {
@@ -2190,38 +1984,13 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
-function normalizeCascadeCatalogSourceKind(
-  value: unknown,
-): KeeperConfig['sources']['cascade_catalog_source_kind'] {
-  const sourceKind = asNullableString(value)
-  switch (sourceKind) {
-    case 'json':
-    case 'toml':
-      return sourceKind
-    default:
-      return null
-  }
-}
-
-
-function normalizeKeeperSandboxEnvironment(
+function normalizePerProviderTimeoutMode(
   raw: unknown,
-): KeeperConfig['sandbox_environment'] {
-  if (!isRecord(raw)) return undefined
-  return {
-    base_path: asNullableString(raw.base_path),
-    project_root: asNullableString(raw.project_root),
-    docker_playground_enabled: asLooseBoolean(raw.docker_playground_enabled),
-    docker_container_name: asNullableString(raw.docker_container_name),
-    container_playground_root: asNullableString(raw.container_playground_root),
-    docker_image: asNullableString(raw.docker_image),
-    pids_limit: asInt(raw.pids_limit),
-    memory: asNullableString(raw.memory),
-    tmpfs_size: asNullableString(raw.tmpfs_size),
-    seccomp_profile: asNullableString(raw.seccomp_profile),
-    require_rootless: asLooseBoolean(raw.require_rootless),
-    require_userns: asLooseBoolean(raw.require_userns),
-  }
+  perProviderTimeoutSec: number | null,
+): KeeperConfig['execution']['per_provider_timeout_mode'] {
+  return asNullableString(raw) === 'override' || perProviderTimeoutSec != null
+    ? 'override'
+    : 'turn_budget_default'
 }
 
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
@@ -2236,11 +2005,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
-  const coordination = isRecord(data.coordination) ? data.coordination : {}
+  const workspace = isRecord(data.workspace) ? data.workspace : {}
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
-  const sandboxEnvironment = normalizeKeeperSandboxEnvironment(data.sandbox_environment)
   const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
@@ -2250,9 +2018,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
-    effective_sandbox_image: asNullableString(data.effective_sandbox_image),
-    private_workspace_root: asNullableString(data.private_workspace_root),
-    sandbox_environment: sandboxEnvironment,
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
@@ -2270,6 +2035,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         capabilities: normalizePromptBlock(promptBlocks.capabilities, 'keeper.capabilities'),
       },
       effective_system_prompt: asNullableString(prompt.effective_system_prompt) ?? '',
+      unified_system_prompt: asNullableString(prompt.unified_system_prompt) ?? '',
+      unified_user_message_preview:
+        asNullableString(prompt.unified_user_message_preview) ?? '',
     },
     execution: {
       models: normalizeStringList(execution.models),
@@ -2277,17 +2045,17 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: null,
       last_model_used_label: null,
       per_provider_timeout_sec: perProviderTimeoutSec,
-      per_provider_timeout_mode:
-        asNullableString(execution.per_provider_timeout_mode)
-        ?? (perProviderTimeoutSec != null
-            ? 'override'
-            : 'turn_budget_heuristic'),
+      per_provider_timeout_mode: normalizePerProviderTimeoutMode(
+        execution.per_provider_timeout_mode,
+        perProviderTimeoutSec,
+      ),
       verify: asLooseBoolean(execution.verify),
-      selected_cascade_name: asNullableString(execution.selected_cascade_name) ?? '',
-      selected_cascade_canonical:
-        asNullableString(execution.selected_cascade_canonical)
-        ?? asNullableString(execution.selected_cascade_name)
+      selected_runtime_id: asNullableString(execution.selected_runtime_id) ?? '',
+      selected_runtime_canonical:
+        asNullableString(execution.selected_runtime_canonical)
+        ?? asNullableString(execution.selected_runtime_id)
         ?? '',
+      runtime_options: normalizeStringList(execution.runtime_options),
     },
     compaction: {
       profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
@@ -2331,8 +2099,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       keepalive_running: asLooseBoolean(runtime.keepalive_running),
       registry_state: asNullableString(runtime.registry_state),
       fiber_health: asNullableString(runtime.fiber_health) ?? 'unknown',
-      presence_keepalive: asLooseBoolean(runtime.presence_keepalive),
-      presence_keepalive_sec: asInt(runtime.presence_keepalive_sec) ?? 0,
       runtime_blocker_class: asKeeperRuntimeBlockerClass(runtime.runtime_blocker_class),
       active_model_label: null,
       last_model_used_label: null,
@@ -2340,13 +2106,13 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
-    coordination: {
-      mention_targets: normalizeStringList(coordination.mention_targets),
-      joined_room_ids: normalizeStringList(coordination.joined_room_ids),
-      active_goal_ids: normalizeStringList(coordination.active_goal_ids),
-      active_goals: normalizeKeeperConfigActiveGoals(coordination.active_goals),
-      active_goal_count: asInt(coordination.active_goal_count) ?? 0,
-      missing_active_goal_ids: normalizeStringList(coordination.missing_active_goal_ids),
+    workspace: {
+      mention_targets: normalizeStringList(workspace.mention_targets),
+      bound_workspace_ids: normalizeStringList(workspace.bound_workspace_ids),
+      active_goal_ids: normalizeStringList(workspace.active_goal_ids),
+      active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
+      active_goal_count: asInt(workspace.active_goal_count) ?? 0,
+      missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
     },
     tools: {
       tool_access: tools.tool_access ?? {},
@@ -2363,10 +2129,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       precedence: normalizeStringList(sources.precedence),
       has_live_override: asLooseBoolean(sources.has_live_override),
       override_fields: normalizeStringList(sources.override_fields),
-      cascade_catalog_source_kind:
-        normalizeCascadeCatalogSourceKind(sources.cascade_catalog_source_kind),
-      cascade_catalog_source_path:
-        asNullableString(sources.cascade_catalog_source_path),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,
@@ -2396,9 +2158,10 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 
 export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
-export type SharedMemoryScope = 'disabled' | 'room'
+export type SharedMemoryScope = 'disabled' | 'workspace'
 
 export type KeeperConfigUpdatePayload = {
+  runtime_id?: string
   active_goal_ids?: string[]
   allowed_paths?: string[]
   // Sandbox
@@ -2428,14 +2191,48 @@ export type KeeperConfigUpdatePayload = {
   handoff_cooldown_sec?: number
 }
 
-export function patchKeeperConfig(
+export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
 ): Promise<KeeperConfig> {
+  await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))
+}
+
+// --- Runtime config (raw runtime.toml editor) ---
+
+export interface RuntimeTomlConfig {
+  ok: boolean
+  path: string | null
+  file_name: string
+  source_text: string
+  reloaded: boolean
+}
+
+function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
+  const record = isRecord(raw) ? raw : {}
+  return {
+    ok: asBoolean(record.ok) ?? true,
+    path: asNullableString(record.path),
+    file_name: asString(record.file_name) ?? 'runtime.toml',
+    source_text: asString(record.source_text, ''),
+    reloaded: asBoolean(record.reloaded) ?? false,
+  }
+}
+
+export async function fetchRuntimeTomlConfig(): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  return get<unknown>('/api/v1/runtime/config/raw').then(normalizeRuntimeTomlConfig)
+}
+
+export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/raw', {
+    source_text: sourceText,
+  }).then(normalizeRuntimeTomlConfig)
 }
 
 // --- Keeper trajectory (tool call history) ---
@@ -2450,6 +2247,8 @@ export type TrajectoryEntry = {
   ts: number
   ts_iso: string
   turn: number
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
   // Tool-call fields (absent on thinking entries)
   round?: number
   tool_name?: string
@@ -2486,10 +2285,13 @@ export function fetchKeeperTrajectory(
   // so omitting the param means "don't include".
   params.set('include_thinking', includeThinking ? 'true' : 'false')
   // Request full output for session trace detail view.
-  // Backend caps at 10000 for results, 50000 for thinking content.
+  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
+  // detail view (남김없이). The backend persists thinking untruncated and
+  // treats 0 as "no truncation"; size is intentionally accepted here, this is
+  // the drill-in surface (the timeline list keeps the default preview cap).
   if (fullOutput) {
     params.set('result_max_len', '10000')
-    params.set('content_max_len', '50000')
+    params.set('content_max_len', '0')
   }
   const qs = params.toString()
   return get<TrajectoryResponse>(
@@ -2746,6 +2548,8 @@ export type ToolCallEntry = {
   keeper_turn_id?: number
   task_id?: string
   lane?: string
+  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  execution_id?: string
 }
 
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
@@ -2796,6 +2600,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     keeper_turn_id: asNumber(raw.keeper_turn_id),
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
+    execution_id: asString(raw.execution_id),
   }
 }
 
@@ -2825,6 +2630,150 @@ export function fetchKeeperToolCalls(
   ).then((raw) => {
     const decoded = decodeToolCallsResponse(raw)
     if (!decoded) throw new Error('유효하지 않은 keeper tool call payload')
+    return decoded
+  })
+}
+
+// ── Keeper turn records (RFC-0233 PR-4) ─────────────────
+
+export type TurnBlock = {
+  block: string
+  bytes: number
+  digest: string
+}
+
+export type TurnRecordEntry = {
+  execution_ids: string[]
+  keeper: string
+  trace_id: string
+  absolute_turn: number
+  blocks: TurnBlock[]
+  runtime_profile: string
+  temperature?: number
+  thinking_budget?: number
+  enable_thinking?: boolean
+  input_tokens?: number
+  output_tokens?: number
+  ts: number
+}
+
+export type TurnBlockDiff = {
+  added: TurnBlock[]
+  removed: TurnBlock[]
+  changed: { prev: TurnBlock; next: TurnBlock }[]
+}
+
+export type TurnRecordRow = {
+  record: TurnRecordEntry
+  // null on the first record of a trace (no same-trace predecessor)
+  diff_vs_prev: TurnBlockDiff | null
+}
+
+export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
+  keeper: string
+  count: number
+  // malformed JSONL rows the server refused to decode (never repaired)
+  skipped_rows: number
+  entries: TurnRecordRow[]
+}
+
+function decodeTurnBlock(raw: unknown): TurnBlock | null {
+  if (!isRecord(raw)) return null
+  const block = asString(raw.block)
+  const digest = asString(raw.digest)
+  const bytes = asNumber(raw.bytes)
+  if (!block || !digest || bytes == null) return null
+  return { block, bytes, digest }
+}
+
+function decodeTurnBlockList(raw: unknown): TurnBlock[] {
+  return asRecordArray(raw)
+    .map(decodeTurnBlock)
+    .filter((block): block is TurnBlock => block !== null)
+}
+
+function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  const trace_id = asString(raw.trace_id)
+  const absolute_turn = asNumber(raw.absolute_turn)
+  const runtime_profile = asString(raw.runtime_profile)
+  const ts = asNumber(raw.ts)
+  if (!keeper || !trace_id || absolute_turn == null || !runtime_profile || ts == null) {
+    return null
+  }
+  const execution_ids = Array.isArray(raw.execution_ids)
+    ? raw.execution_ids.filter((id): id is string => typeof id === 'string')
+    : []
+  return {
+    execution_ids,
+    keeper,
+    trace_id,
+    absolute_turn,
+    blocks: decodeTurnBlockList(raw.blocks),
+    runtime_profile,
+    temperature: asNumber(raw.temperature),
+    thinking_budget: asNumber(raw.thinking_budget),
+    enable_thinking: typeof raw.enable_thinking === 'boolean' ? raw.enable_thinking : undefined,
+    input_tokens: asNumber(raw.input_tokens),
+    output_tokens: asNumber(raw.output_tokens),
+    ts,
+  }
+}
+
+function decodeTurnBlockDiff(raw: unknown): TurnBlockDiff | null {
+  if (!isRecord(raw)) return null
+  const changed = asRecordArray(raw.changed)
+    .map((pair) => {
+      const prev = decodeTurnBlock(pair.prev)
+      const next = decodeTurnBlock(pair.next)
+      return prev && next ? { prev, next } : null
+    })
+    .filter((pair): pair is { prev: TurnBlock; next: TurnBlock } => pair !== null)
+  return {
+    added: decodeTurnBlockList(raw.added),
+    removed: decodeTurnBlockList(raw.removed),
+    changed,
+  }
+}
+
+function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
+  if (!isRecord(raw)) return null
+  const record = decodeTurnRecordEntry(raw.record)
+  if (!record) return null
+  return {
+    record,
+    diff_vs_prev: decodeTurnBlockDiff(raw.diff_vs_prev),
+  }
+}
+
+function decodeTurnRecordsResponse(raw: unknown): TurnRecordsResponse | null {
+  if (!isRecord(raw)) return null
+  const keeper = asString(raw.keeper)
+  if (!keeper) return null
+  return {
+    ...decodeTelemetryFreshnessMetadata(raw),
+    keeper,
+    count: asNumber(raw.count, 0),
+    skipped_rows: asNumber(raw.skipped_rows, 0),
+    entries: asRecordArray(raw.entries)
+      .map(decodeTurnRecordRow)
+      .filter((row): row is TurnRecordRow => row !== null),
+  }
+}
+
+export function fetchKeeperTurnRecords(
+  name: string,
+  limit?: number,
+  opts?: AbortableRequestOptions,
+): Promise<TurnRecordsResponse> {
+  const params = limit != null ? `?limit=${limit}` : ''
+  return get<Record<string, unknown>>(
+    `/api/v1/keepers/${encodeURIComponent(name)}/turn-records${params}`,
+    { signal: opts?.signal },
+  ).then((raw) => {
+    const decoded = decodeTurnRecordsResponse(raw)
+    if (!decoded) throw new Error('유효하지 않은 keeper turn record payload')
     return decoded
   })
 }
@@ -2859,6 +2808,8 @@ export type TelemetryResponse = {
   query?: Record<string, unknown>
   count: number
   total_matching_entries?: number
+  offset?: number
+  has_more?: boolean
   truncated?: boolean
   entries: TelemetryEntry[]
 }
@@ -2948,6 +2899,8 @@ function decodeTelemetryResponse(raw: unknown): TelemetryResponse | null {
     query: isRecord(raw.query) ? raw.query : undefined,
     count: asNumber(raw.count, 0),
     total_matching_entries: asNumber(raw.total_matching_entries, asNumber(raw.count, 0)),
+    offset: asNumber(raw.offset, 0),
+    has_more: asBoolean(raw.has_more, false),
     truncated: asBoolean(raw.truncated, false),
     entries: asRecordArray(raw.entries)
       .map(decodeTelemetryEntry)
@@ -3036,6 +2989,7 @@ export function fetchTelemetry(opts?: {
   since_ms?: number
   until_ms?: number
   n?: number
+  offset?: number
   signal?: AbortSignal
 }): Promise<TelemetryResponse> {
   const params = new URLSearchParams()
@@ -3047,6 +3001,7 @@ export function fetchTelemetry(opts?: {
   if (typeof opts?.since_ms === 'number') params.set('since_ms', String(opts.since_ms))
   if (typeof opts?.until_ms === 'number') params.set('until_ms', String(opts.until_ms))
   if (typeof opts?.n === 'number') params.set('n', String(opts.n))
+  if (typeof opts?.offset === 'number') params.set('offset', String(opts.offset))
   const qs = params.toString()
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {

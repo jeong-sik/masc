@@ -10,10 +10,10 @@ module Types = Masc_domain
 
     @since 2.199.0 — Phase 0 of keeper tool selection eval (#4306) *)
 
-open Masc_mcp
+open Masc
 
 (** Build a default keeper_meta via JSON deserialization (same helper as
-    test_tool_keeper.ml). Only name and defaults are needed. *)
+    test_keeper_tool_surface.ml). Only name and defaults are needed. *)
 let make_meta () =
   let json = `Assoc [
     ("name", `String "eval-keeper");
@@ -30,8 +30,8 @@ let make_meta () =
 let build_keeper_index () =
   let meta = make_meta () in
   (* Inject masc_* schemas so the universe includes governance, agent, etc. *)
-  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  let tool_schemas = Agent_tool_dispatch_runtime.keeper_universe_model_tools meta in
+  Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  let tool_schemas = Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let tool_entries =
@@ -60,6 +60,28 @@ let assert_retrieves ~label index query expected_tool =
     Alcotest.failf "%s: %s NOT in top-20 for query '%s'. Top 5: [%s]"
       label expected_tool query (String.concat ", " top5));
   rank
+
+let assert_ranks_before ~label index query ~preferred ~discouraged =
+  let retrieved = Agent_sdk.Tool_index.retrieve index query in
+  let names = List.map fst retrieved in
+  let rank name =
+    List.find_index (String.equal name) names |> Option.map (( + ) 1)
+  in
+  match rank preferred, rank discouraged with
+  | Some p, Some d ->
+    Alcotest.(check bool)
+      (Printf.sprintf "%s: %s rank %d before %s rank %d" label preferred p discouraged d)
+      true
+      (p < d)
+  | Some _, None ->
+    Alcotest.(check bool)
+      (Printf.sprintf "%s: %s present and %s absent" label preferred discouraged)
+      true
+      true
+  | None, _ ->
+    let top5 = List.filteri (fun i _ -> i < 5) names in
+    Alcotest.failf "%s: %s NOT in top-20 for query '%s'. Top 5: [%s]"
+      label preferred query (String.concat ", " top5)
 
 (* ================================================================ *)
 (* Scenarios: file operations                                       *)
@@ -138,7 +160,12 @@ let test_board_post_en () =
 let test_board_read_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"board_read_kr" idx
-    "게시판 글 읽기 조회" "keeper_board_get")
+    "게시판 글 상세 단건 post_id 읽기" "keeper_board_get")
+
+let test_board_list_kr () =
+  let idx = build_keeper_index () in
+  ignore (assert_retrieves ~label:"board_list_kr" idx
+    "게시판 목록 조회 post_id 찾기" "keeper_board_list")
 
 (* ================================================================ *)
 (* Scenarios: build and test                                        *)
@@ -223,6 +250,28 @@ let test_tool_execute_worktree_kr () =
     "워크트리 생성 브랜치" "tool_execute")
 
 (* ================================================================ *)
+(* Scenarios: connected surface lanes                               *)
+(* ================================================================ *)
+
+let test_connected_lane_question_kr_prefers_surface_read () =
+  let idx = build_keeper_index () in
+  assert_ranks_before
+    ~label:"connected_lane_question_kr"
+    idx
+    "다른 디스코드 채널 목록 뭐 있음"
+    ~preferred:"keeper_surface_read"
+    ~discouraged:"keeper_tools_list"
+
+let test_connected_lane_question_en_prefers_surface_read () =
+  let idx = build_keeper_index () in
+  assert_ranks_before
+    ~label:"connected_lane_question_en"
+    idx
+    "what other discord channels or connected surface lanes are available"
+    ~preferred:"keeper_surface_read"
+    ~discouraged:"keeper_tools_list"
+
+(* ================================================================ *)
 (* Discrimination: fs_edit vs bash for file writes                  *)
 (* ================================================================ *)
 
@@ -256,9 +305,9 @@ let test_index_size () =
 
 let test_search_alias_entries_target_keeper_universe () =
   let meta = make_meta () in
-  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let tool_names =
-    Agent_tool_dispatch_runtime.keeper_universe_model_tools meta
+    Keeper_tool_dispatch_runtime.keeper_universe_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let missing =
@@ -280,7 +329,7 @@ let test_tool_search_self_en () =
     "discover tools by describing what I need" "keeper_tool_search")
 
 (** Full-universe search should find the Execute-backed worktree workflow even
-    for a minimal-preset keeper. *)
+    for a narrowly scoped keeper. *)
 let test_full_universe_worktree_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"full_worktree" idx
@@ -293,8 +342,6 @@ let test_full_universe_worktree_en () =
 (* ================================================================ *)
 
 let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "keeper_retrieval_quality"
     [
       ( "file_ops",
@@ -317,6 +364,7 @@ let () =
         [
           Alcotest.test_case "board post (en)" `Quick test_board_post_en;
           Alcotest.test_case "board read (kr)" `Quick test_board_read_kr;
+          Alcotest.test_case "board list (kr)" `Quick test_board_list_kr;
         ] );
       ( "build_test",
         [
@@ -343,6 +391,13 @@ let () =
           Alcotest.test_case "tool search files (kr)" `Quick test_tool_search_files_kr;
           Alcotest.test_case "tool search files (en)" `Quick test_tool_search_files_en;
           Alcotest.test_case "tool execute worktree (kr)" `Quick test_tool_execute_worktree_kr;
+        ] );
+      ( "surfaces",
+        [
+          Alcotest.test_case "connected lane question prefers surface read (kr)" `Quick
+            test_connected_lane_question_kr_prefers_surface_read;
+          Alcotest.test_case "connected lane question prefers surface read (en)" `Quick
+            test_connected_lane_question_en_prefers_surface_read;
         ] );
       ( "discrimination",
         [

@@ -8,8 +8,8 @@
     1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
-    2. [Masc_mcp.Worker_dev_tools.validate_command_tool_execute_with_allowlist]
-       worker verdict also matches the recorded baseline so any future
+    2. [Masc.Exec_policy.validate_command_tool_execute]
+       policy verdict also matches the recorded baseline so any future
        behavior change (Phase 2+) is visible as a corpus diff, not as
        a silent flip.
     3. Phase 1 facade-specific Plan invariants that the JSONL corpus
@@ -18,14 +18,12 @@
        typed-pipeline lowering through [lower_typed_pipeline]. *)
 
 module Gate = Masc_exec_command_gate.Shell_command_gate
-module W = Masc_mcp.Worker_dev_tools
+module Policy = Exec_policy
 
-let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
-
-let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
-  Gate.gate_raw ?caller ~text:raw ~allowlist ~path_policy ~sandbox ()
-let allowlist : Gate.allowlist_policy =
-  { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
+let gate_from_raw ~raw ~syntax_policy ~path_policy ~sandbox () =
+  Gate.gate_raw ~text:raw ~syntax_policy ~path_policy ~sandbox ()
+let syntax_policy : Gate.syntax_policy =
+  { redirect_allowed = false; allow_pipes = true }
 ;;
 
 (* {1 Baseline corpus} *)
@@ -33,7 +31,7 @@ let allowlist : Gate.allowlist_policy =
 type fixture = {
   raw_cmd : string;
   category : string;
-  expected_worker_verdict : string;
+  expected_policy_verdict : string;
   expected_ir_verdict : string;
   ir_detail : string option;
   note : string;
@@ -74,7 +72,7 @@ let parse_fixture_line line =
   let json = Yojson.Safe.from_string line in
   { raw_cmd = assoc_string "raw_cmd" json
   ; category = assoc_string "category" json
-  ; expected_worker_verdict = assoc_string "expected_worker_verdict" json
+  ; expected_policy_verdict = assoc_string "expected_worker_verdict" json
   ; expected_ir_verdict = assoc_string "expected_ir_verdict" json
   ; ir_detail = assoc_string_opt "ir_detail" json
   ; note = assoc_string "note" json
@@ -99,25 +97,22 @@ let load_corpus () =
   fixtures
 ;;
 
-(* Worker verdict tagging — short string aligned with the JSONL
-   schema. The {!W.block_reason} variant is private to the module,
-   so we use {!W.block_reason_to_string} indirectly via tag mapping. *)
-let worker_tag (result : (unit, W.block_reason) result) : string =
+(* Policy verdict tagging — short string aligned with the JSONL schema. *)
+let policy_tag (result : (unit, Policy.block_reason) result) : string =
   match result with
   | Ok () -> "ok"
-  | Error W.Empty_command -> "empty_command"
-  | Error W.Chain_or_redirect -> "chain_or_redirect"
-  | Error W.Injection -> "injection"
-  | Error W.Process_substitution -> "process_substitution"
-  | Error W.Unsafe_redirect -> "unsafe_redirect"
-  | Error W.Pipes_not_allowed -> "pipes_not_allowed"
-  | Error W.Direct_dune_invocation -> "direct_dune_invocation"
-  | Error (W.Command_not_allowed _) -> "command_not_allowed"
+  | Error Policy.Empty_command -> "empty_command"
+  | Error Policy.Chain_or_redirect -> "chain_or_redirect"
+  | Error Policy.Injection -> "injection"
+  | Error Policy.Process_substitution -> "process_substitution"
+  | Error Policy.Unsafe_redirect -> "unsafe_redirect"
+  | Error Policy.Pipes_not_allowed -> "pipes_not_allowed"
+  | Error Policy.Direct_dune_invocation -> "direct_dune_invocation"
 ;;
 
-let validate_worker_execute_raw ~allowed_commands raw =
-  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Tool_execute raw with
-  | Ok ir -> W.validate_command_tool_execute_with_allowlist ~allowed_commands ir
+let validate_policy_execute_raw raw =
+  match Policy.parse_string_to_ir ~mode:Tool_execute raw with
+  | Ok ir -> Policy.validate_command_tool_execute ir
   | Error reason -> Error reason
 ;;
 
@@ -137,17 +132,15 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let worker =
-    validate_worker_execute_raw ~allowed_commands:allowed fixture.raw_cmd
-  in
+  let policy = validate_policy_execute_raw fixture.raw_cmd in
   Alcotest.(check string)
-    (label ^ " worker verdict")
-    fixture.expected_worker_verdict
-    (worker_tag worker);
+    (label ^ " policy verdict")
+    fixture.expected_policy_verdict
+    (policy_tag policy);
   let ir =
     gate_from_raw
       ~raw:fixture.raw_cmd
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -208,7 +201,7 @@ let test_quoted_pipe_single_stage_shape () =
   match
     gate_from_raw
       ~raw:"rg 'foo|bar' lib"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -232,7 +225,7 @@ let test_real_three_stage_pipeline_ordering () =
   match
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -265,30 +258,34 @@ let test_real_three_stage_pipeline_ordering () =
       (Gate.verdict_tag other)
 ;;
 
-let test_pipeline_segment_rejection_carries_stage_index () =
+let test_pipeline_preserves_all_stage_bins () =
   match
     gate_from_raw
       ~raw:"rg foo | sed s/a/b/ | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
   with
-  | Gate.Reject { reason = Gate.Pipeline_segment_disallowed { stage = 2; bin = "sed" }; _ } -> ()
+  | Gate.Allow context ->
+    Alcotest.(check (list string))
+      "stage bins"
+      [ "rg"; "sed"; "head" ]
+      context.Gate.stage_bins
   | other ->
     Alcotest.failf
-      "expected stage 2 sed rejection, got %s"
+      "expected all pipeline stages to be allowed, got %s"
       (Gate.verdict_tag other)
 ;;
 
 let test_pipes_disabled () =
-  let policy : Gate.allowlist_policy =
-    { redirect_allowed = false; allowed_commands = allowed; allow_pipes = false }
+  let policy : Gate.syntax_policy =
+    { redirect_allowed = false; allow_pipes = false }
   in
   match
     gate_from_raw
       ~raw:"rg foo | head -20"
-      ~allowlist:policy
+      ~syntax_policy:policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -359,7 +356,7 @@ let test_lower_typed_three_stage_matches_raw () =
   let raw =
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -402,7 +399,7 @@ let test_path_policy_rejects () =
   match
     gate_from_raw
       ~raw:"cat /etc/shadow"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:policy
       ~sandbox:Gate.host_sandbox
       ()
@@ -426,7 +423,7 @@ let test_path_policy_rejects_redirect_target () =
   match
     gate_from_raw
       ~raw:"ls > /tmp/out"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:policy
       ~sandbox:Gate.host_sandbox
       ()
@@ -443,6 +440,71 @@ let test_path_policy_rejects_redirect_target () =
       (Gate.verdict_tag other)
 ;;
 
+let test_masc_internal_state_policy_blocks_backlog () =
+  match
+    gate_from_raw
+      ~raw:"cat .masc/backlog.json"
+      ~syntax_policy
+      ~path_policy:Gate.forbid_masc_internal_state_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Reject
+      { reason =
+          Gate.Path_outside_policy
+            { stage = 1; raw_path = ".masc/backlog.json"; _ }
+      ; diagnostic
+      ; _
+      } ->
+    if not (String.starts_with ~prefix:"task_state_file_probe_blocked" diagnostic)
+    then
+      Alcotest.failf
+        "diagnostic must contain task_state_file_probe_blocked, got %s"
+        diagnostic
+  | other ->
+    Alcotest.failf
+      "expected Path_outside_policy for .masc/backlog.json, got %s"
+      (Gate.verdict_tag other)
+;;
+
+let test_masc_internal_state_policy_blocks_nested () =
+  let policy = Gate.forbid_masc_internal_state_paths in
+  let check_path path expected =
+    match (Option.get policy.classify) ~raw_path:path with
+    | `Deny _ when not expected ->
+      Alcotest.failf "expected Allow for %s, got Deny" path
+    | `Allow when expected ->
+      Alcotest.failf "expected Deny for %s, got Allow" path
+    | _ -> ()
+  in
+  check_path ".masc/backlog.json" true;
+  check_path "./.masc/backlog.json" true;
+  check_path ".masc/goal-loop/foo" true;
+  check_path ".masc/traces/abc" true;
+  check_path ".masc" true;
+  check_path "./.masc" true;
+  check_path "foo.ml" false;
+  check_path "lib/bar.ml" false;
+  check_path "cat" false;
+  check_path ".masc-not-backlog/foo" false
+;;
+
+let test_masc_internal_state_policy_allows_normal_commands () =
+  match
+    gate_from_raw
+      ~raw:"cat README.md"
+      ~syntax_policy
+      ~path_policy:Gate.forbid_masc_internal_state_paths
+      ~sandbox:Gate.host_sandbox
+      ()
+  with
+  | Gate.Allow _ -> ()
+  | other ->
+    Alcotest.failf
+      "expected Allow for cat README.md, got %s"
+      (Gate.verdict_tag other)
+;;
+
 let test_sandbox_target_propagates_to_every_stage () =
   (* Plan: sandbox context is echoed through the IR so downstream
      dispatch does not re-parse. Verify every stage carries the
@@ -451,7 +513,7 @@ let test_sandbox_target_propagates_to_every_stage () =
   match
     gate_from_raw
       ~raw:"rg foo lib | sort | head -20"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox
       ()
@@ -503,7 +565,7 @@ let test_backslash_pipe_in_double_quotes_allows () =
   match
     gate_from_raw
       ~raw:"rg \"a\\|b\""
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -525,7 +587,7 @@ let test_brace_expansion_is_too_complex_glob_brace () =
   match
     gate_from_raw
       ~raw:"ls {a,b}.txt"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -549,7 +611,7 @@ let test_absolute_path_traversal_phase1_allows () =
   match
     gate_from_raw
       ~raw:"cat /etc/passwd"
-      ~allowlist
+      ~syntax_policy
       ~path_policy:Gate.allow_all_paths
       ~sandbox:Gate.host_sandbox
       ()
@@ -587,9 +649,9 @@ let () =
             `Quick
             test_real_three_stage_pipeline_ordering
         ; Alcotest.test_case
-            "pipeline rejection carries 1-indexed stage"
+            "pipeline stages stay admitted"
             `Quick
-            test_pipeline_segment_rejection_carries_stage_index
+            test_pipeline_preserves_all_stage_bins
         ; Alcotest.test_case
             "allow_pipes=false yields Pipes_not_allowed"
             `Quick
@@ -622,6 +684,18 @@ let () =
             "path policy sees file redirect target"
             `Quick
             test_path_policy_rejects_redirect_target
+        ; Alcotest.test_case
+            "masc internal state policy blocks .masc/backlog.json"
+            `Quick
+            test_masc_internal_state_policy_blocks_backlog
+        ; Alcotest.test_case
+            "masc internal state policy classifies paths correctly"
+            `Quick
+            test_masc_internal_state_policy_blocks_nested
+        ; Alcotest.test_case
+            "masc internal state policy allows normal commands"
+            `Quick
+            test_masc_internal_state_policy_allows_normal_commands
         ] )
     ; ( "phase_1_telemetry"
       , [ Alcotest.test_case

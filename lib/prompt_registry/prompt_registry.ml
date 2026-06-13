@@ -525,8 +525,10 @@ let to_json () : Yojson.Safe.t =
 (** Import registry from JSON *)
 let of_json (json : Yojson.Safe.t) : (int, string) result =
   try
-    let open Yojson.Safe.Util in
-    let entries = to_list json in
+    let entries = match json with
+      | `List items -> items
+      | _ -> raise (Yojson.Safe.Util.Type_error ("expected list", json))
+    in
     let count = ref 0 in
     List.iter (fun entry_json ->
       match prompt_entry_of_yojson entry_json with
@@ -617,25 +619,12 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ("description", `String meta.description);
       ("current", `String resolved.effective);
       ( "default",
-        match resolved.file_value with
-        | Some value -> `String value
-        | None -> (
-            match resolved.default_value with
-            | Some value -> `String value
-            | None -> `Null) );
+        ((match resolved.file_value with Some _ as v -> v | None -> resolved.default_value)
+         |> fun v -> match v with Some s -> `String s | None -> `Null) );
       ("effective", `String resolved.effective);
-      ( "file_value",
-        match resolved.file_value with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "override_value",
-        match resolved.override_value with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "file_path",
-        match resolved.file_path with
-        | Some value -> `String value
-        | None -> `Null );
+      ( "file_value", Json_util.string_opt_to_json resolved.file_value );
+      ( "override_value", Json_util.string_opt_to_json resolved.override_value );
+      ( "file_path", Json_util.string_opt_to_json resolved.file_path );
       ("file_exists", `Bool resolved.file_exists);
       ("source", `String resolved.source);
       ("has_override", `Bool resolved.has_override);
@@ -932,7 +921,7 @@ let prompts_json () =
 
 (** Persist overrides to JSON file *)
 let persist_overrides base_path =
-  let masc_dir = Coord_utils.masc_dir_from_base_path ~base_path in
+  let masc_dir = Workspace_utils.masc_dir_from_base_path ~base_path in
   Fs_compat.mkdir_p masc_dir;
   let path = Filename.concat masc_dir "prompt_overrides.json" in
   let json = with_mutex (fun () ->
@@ -957,7 +946,7 @@ let record_override_restore_failure () =
 let restore_overrides base_path =
   let path =
     Filename.concat
-      (Coord_utils.masc_dir_from_base_path ~base_path)
+      (Workspace_utils.masc_dir_from_base_path ~base_path)
       "prompt_overrides.json"
   in
   if Sys.file_exists path then begin

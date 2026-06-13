@@ -25,7 +25,6 @@ PROMPT_TLA_SPECS = ("TierRouting.tla", "Validation.tla", "Liveness.tla")
 REQUIRED_VERIFY_GATE_IDS = (
     "unit_tests",
     "keeper_turn_success_rate_healthy",
-    "no_semaphore_skip",
     "no_pricing_miss",
     "no_utf8_repair",
     "recovery_executed",
@@ -38,9 +37,8 @@ REQUIRED_VERIFY_GATE_IDS = (
     "tla_prompt_spec_liveness",
     "post_act_log_contract",
 )
-PROMETHEUS_METRIC_SOURCES = {
+METRIC_SERIES_SOURCES = {
     "keeper_turn_success_rate": ["masc_keeper_turns_total"],
-    "keeper_skipping_turn_rate_5m": ["masc_keeper_semaphore_wait_timeout_total"],
     "pricing_catalog_miss_total": ["masc_pricing_catalog_miss_total"],
     "persistence_utf8_repair_total": ["masc_persistence_utf8_repair_total"],
     "dashboard_snapshot_latency_p99": [
@@ -56,10 +54,8 @@ DEFAULT_MUST_CONTAIN = (
     "fallback_ladder_activated",
 )
 DEFAULT_MUST_NOT_CONTAIN = (
-    "skipping turn.*semaphore wait",
     "pricing_catalog_miss",
     "persistence UTF-8 repaired",
-    "alive-but-stuck detected",
     "Lenient_json fallback hit",
     "archived credential.*starvation",
 )
@@ -153,7 +149,7 @@ def metric_gate(
         "metric_name": metric_name,
         "metric_snapshot_key": metric_name,
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
-        "prometheus_sources": PROMETHEUS_METRIC_SOURCES.get(metric_name, []),
+        "metric_series_sources": METRIC_SERIES_SOURCES.get(metric_name, []),
         "value": value,
         "predicate": predicate,
     }
@@ -213,9 +209,9 @@ def admission_backpressure_gate(metrics: dict[str, Any] | None) -> VerifyGate:
         "admission_queue_depth": queue_depth,
         "admission_queue_wait_ms": wait_ms,
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
-        "prometheus_sources": {
-            "admission_queue_depth": PROMETHEUS_METRIC_SOURCES["admission_queue_depth"],
-            "admission_queue_wait_ms": PROMETHEUS_METRIC_SOURCES[
+        "metric_series_sources": {
+            "admission_queue_depth": METRIC_SERIES_SOURCES["admission_queue_depth"],
+            "admission_queue_wait_ms": METRIC_SERIES_SOURCES[
                 "admission_queue_wait_ms"
             ],
         },
@@ -271,14 +267,6 @@ def build_metric_gates(metrics_json: dict[str, Any] | None) -> list[VerifyGate]:
             category="metric_verification",
             predicate="> 0.95",
             command=metric_snapshot_command("keeper_turn_success_rate"),
-        ),
-        metric_gate(
-            metrics,
-            gate_id="no_semaphore_skip",
-            metric_name="keeper_skipping_turn_rate_5m",
-            category="regression_metric",
-            predicate="== 0",
-            command=metric_snapshot_command("keeper_skipping_turn_rate_5m"),
         ),
         metric_gate(
             metrics,

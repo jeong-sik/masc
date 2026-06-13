@@ -79,7 +79,7 @@ This is the **same coverage limit** as iter 38 KCL Finding 2 (`KcafPhaseSet` 3:6
 |---|---|---|
 | **R-H-1.a** | KCtxL header — add Zombie to line 83 unmodeled list OR to mapping table with explicit "(terminal-terminal, no context events possible)" note.  Doc-only.  Matches iter 27/35/37/39 honest-doc pattern. | LOW (doc only) |
 | **R-H-1.b** | Sweep all observer specs (KeeperGenerationLineage, KeeperReconcileLiveness, KCL, etc.) for mapping tables that pre-date Zombie addition.  Add Zombie line to each that's missing.  Multi-spec audit + fix. | LOW (doc-only sweep, but multi-file) |
-| **R-H-1.c** | Doc-validation script — for each observer spec with a mapping table, verify every OCaml `phase` constructor is named (either mapped or in unmodeled list).  bash + AST-ish parsing.  Extends R-B-1.c chain to doc-only mapping comments. | MID — parsing TLA+ comments is fragile; might use sentinel markers like `\* OCaml ↔ TLA+ mapping`. |
+| **R-H-1.c** | Doc-validation script — for each observer spec with a mapping table, verify every OCaml `phase` constructor is named (either mapped or in unmodeled list).  bash + AST-ish parsing.  Extends R-B-1.c chain to doc-only mapping comments. | MID — parsing TLA+ comments is fragile; might use guard markers like `\* OCaml ↔ TLA+ mapping`. |
 
 **Recommended**: R-H-1.a (immediate single-spec fix) + queue R-H-1.b sweep as separate iter to find other Zombie-missing observer docs.  R-H-1.c is structural but premature without evidence of more than 2-3 instances.
 

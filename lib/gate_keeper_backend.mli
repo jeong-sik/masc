@@ -1,7 +1,7 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
 
-    This module owns the coupling to [Tool_keeper], [Agent_identity],
-    and [Coord].  The gate orchestrator ([Channel_gate]) calls
+    This module owns the coupling to [Keeper_tool_surface], [Client_identity],
+    and [Workspace].  The gate orchestrator ([Channel_gate]) calls
     {!dispatch} without knowing how keeper dispatch works internally.
 
     The return type {!Gate_protocol.dispatch_result} lives in
@@ -15,37 +15,50 @@ val dispatch :
   clock:_ Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option ->
-  config:Coord.config ->
+  config:Workspace.config ->
   channel:string ->
   channel_user_id:string ->
   channel_user_name:string ->
-  channel_room_id:string ->
+  channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
-(** Build a keeper context, call [Tool_keeper.dispatch], and parse
+(** Build a keeper context, call [Keeper_tool_surface.dispatch], and parse
     the response.  The [channel] and [channel_user_id] are used to
-    construct the agent name ([gate:<channel>:<room_id>:<user_id>]).  The other
+    construct the agent name ([gate:<channel>:<workspace_id>:<user_id>]).  The other
     connector fields are injected into the keeper-visible message body so
     external user identity survives memory and handoff boundaries. *)
 
 val agent_name_for_channel_actor :
   channel:string ->
-  channel_room_id:string ->
+  channel_workspace_id:string ->
   channel_user_id:string ->
   string
 (** Deterministic keeper session key for one external actor inside one
-    external room/thread. *)
+    external workspace/thread. *)
 
 val contextualize_message :
   channel:string ->
   channel_user_id:string ->
   channel_user_name:string ->
-  channel_room_id:string ->
+  channel_workspace_id:string ->
+  metadata:(string * string) list ->
   content:string ->
   string
 (** Render a stable external-channel context envelope ahead of the raw
     user message so keeper memory can retain actor/channel metadata. *)
+
+val persist_connector_assistant_reply :
+  base_dir:string ->
+  keeper_name:string ->
+  source:string ->
+  ?conversation_id:string ->
+  reply:string ->
+  unit ->
+  unit
+(** Persist a completed connector direct reply on the same chat lane that
+    received the inbound user line. Empty replies are ignored. *)
 
 val filesystem_safe_or_unknown : string -> string
 (** Sanitize a value for use as a filesystem path component.

@@ -1,0 +1,15 @@
+(include_subdirs no)
+
+(library
+ (name discovery_cache)
+ (public_name masc.discovery_cache)
+ (wrapped false)
+ (modules discovery_cache discovery_history)
+ (libraries
+  agent_sdk.llm_provider
+  dated_jsonl
+  eio
+  masc_core
+  masc_log
+  time_compat
+  yojson))

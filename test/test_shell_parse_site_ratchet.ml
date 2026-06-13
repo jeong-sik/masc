@@ -204,10 +204,10 @@ let classify_path ~needle path =
     else "parser_consumer"
   end
   else begin
-    if path_has ~needle:"lib/coord/" path
+    if path_has ~needle:"lib/workspace/" path
        || path_has ~needle:"lib/repo_manager/" path
        || path_has ~needle:"lib/dashboard/" path
-    then "argv_coord"
+    then "argv_workspace"
     else if path_has ~needle:"lib/keeper/" path
     then "argv_keeper"
     else if path_has ~needle:"lib/tool_" path
@@ -225,7 +225,7 @@ let known_labels =
   [ "parser_primary"
   ; "parser_consumer"
   ; "exec_core"
-  ; "argv_coord"
+  ; "argv_workspace"
   ; "argv_keeper"
   ; "argv_dispatch"
   ; "argv_subsystem"

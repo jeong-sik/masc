@@ -4,6 +4,8 @@
    Public sub-module included by [Keeper_unified_turn]. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 (** Interval (seconds) for the per-turn background fiber that drains the
@@ -12,18 +14,14 @@ val default_turn_event_bus_drain_interval_sec : float
 
 val turn_event_bus_drain_interval_sec : unit -> float
 
-val substring_matches_at : needle:string -> string -> int -> bool
-(** [substring_matches_at ~needle haystack start_idx] checks whether
-    [needle] occurs in [haystack] starting at [start_idx]. *)
-
 val string_contains_substring : needle:string -> string -> bool
-(** Case-sensitive substring test. *)
+(** Delegates to [String_util.string_contains_substring]. *)
 
 val string_contains_substring_ci : needle:string -> string -> bool
-(** Case-insensitive substring test. *)
+(** Delegates to [String_util.string_contains_substring_ci]. *)
 
 val report_keeper_cycle_side_effect_issue :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   side_effect:string ->
   ?severity:[< `Warn | `Error > `Warn ] ->
@@ -31,14 +29,14 @@ val report_keeper_cycle_side_effect_issue :
 (** Log and record a side-effect failure for a keeper cycle. *)
 
 val dispatch_keeper_phase_event_checked :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   side_effect:string ->
   Keeper_state_machine.event -> unit
 (** Dispatch a phase event and log on error instead of raising. *)
 
 val finalize_trajectory_acc :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   Trajectory.accumulator ->
   Trajectory.trajectory_outcome -> unit
@@ -46,7 +44,7 @@ val finalize_trajectory_acc :
     rather than raising (except cancellation). *)
 
 val record_execution_receipt_gap :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   stale_reason:string ->
   error:string ->
@@ -66,10 +64,10 @@ val pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface
 (** Default tool surface for pre-dispatch receipts (no tools dispatched). *)
 
 val record_pre_dispatch_terminal_observation :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   generation:int ->
-  cascade_name:Cascade_name.t ->
+  runtime_id:string ->
   outcome:Keeper_execution_receipt.outcome_kind ->
   terminal_reason_code:string ->
   activity_kind:string ->

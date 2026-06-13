@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name provider_tool_support)
+ (public_name masc.provider_tool_support)
+ (wrapped false)
+ (libraries agent_sdk agent_sdk.llm_provider))

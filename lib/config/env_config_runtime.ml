@@ -17,9 +17,11 @@ end
 (** {1 Lock Configuration} *)
 
 module Lock = struct
-  (** Default lock timeout (seconds) *)
+  (** Default lock timeout (seconds).
+      Reduced from 1800s (30 min) to 120s (2 min) — file locks should
+      fail fast; a 30-minute wait masks contention bugs. *)
   let timeout_seconds =
-    get_float ~default:1800.0 "MASC_LOCK_TIMEOUT_SEC"
+    get_float ~default:120.0 "MASC_LOCK_TIMEOUT_SEC"
 
   (** Lock expiry warning threshold (seconds before expiry) *)
   let expiry_warning_seconds =
@@ -36,6 +38,11 @@ module Session = struct
   (** Rate limit window (seconds) *)
   let rate_limit_window_seconds =
     get_float ~default:60.0 "MASC_SESSION_RATE_LIMIT_WINDOW_SEC"
+
+  (** Grace period after SSE disconnect before reaping transport session (seconds).
+      Prevents "Unknown Mcp-Session-Id" errors on brief SSE interruptions. *)
+  let sse_grace_period_seconds =
+    get_float ~default:300.0 "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
 end
 
 (** {1 Tempo (Polling Interval) Configuration} *)
@@ -125,10 +132,6 @@ module Spawn = struct
       Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
   let timeout_seconds =
     int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
-
-  (** Extended timeout for coding mode (seconds). Default 2 hours. *)
-  let coding_timeout_seconds =
-    int_of_float (get_float ~default:7200.0 "MASC_SPAWN_CODING_TIMEOUT_SEC")
 
   (** Grace period before timeout — sends SIGTERM for checkpoint opportunity (seconds). *)
   let grace_period_seconds =
@@ -220,7 +223,7 @@ end
 (** {1 Message GC Configuration} *)
 
 module Message = struct
-  (** Maximum number of message files to retain per room (default 200).
+  (** Maximum number of message files to retain per workspace (default 200).
       Oldest messages (by filename sort) are deleted when count exceeds this. *)
   let max_count =
     get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
@@ -310,9 +313,6 @@ module Transport = struct
     |> trim_opt
     |> Option.map agent_transport_of_string
 
-  (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
-  let openai_compat_enabled = Feature_flag_registry.get_bool "MASC_OPENAI_COMPAT"
-
   let _http_auth_strict_registry =
     Feature_flag_registry.get_bool "MASC_HTTP_AUTH_STRICT"
 
@@ -362,33 +362,6 @@ module Verification = struct
     get_float ~default:60.0 "MASC_VERIFICATION_TIMEOUT_CHECK_INTERVAL_SEC"
 end
 
-(** {1 Goal Janitor}
-
-    #10405: Goal_janitor.run was only invoked from the dashboard
-    DELETE handler.  4 goals stagnated for 4 days with [last_review_at
-    = null] and [goals_snapshots/] empty.  Add a periodic background
-    fiber that sweeps stagnated goals on a 1-hour cadence by default. *)
-module Goal_janitor = struct
-  (** Enable the periodic goal_janitor sweep fiber.  Default: true.
-      Set MASC_GOAL_JANITOR_ENABLED=false to disable when debugging. *)
-  let enabled () =
-    get_bool ~default:true "MASC_GOAL_JANITOR_ENABLED"
-
-  (** Sweep interval in seconds.  Default: 3600 (1 hour).
-      Goal stagnation is measured in days, so the cadence does not need
-      to be tight; a coarse sweep keeps the fleet log uncluttered. *)
-  let interval_seconds =
-    get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
-
-  (** Stagnate threshold (days) for auto-generated goals.  Default: 7.
-      Auto-generated = title suffix [" (auto)"] from
-      [Keeper_goal_repair.goal_title_of_purpose].  Separate from the
-      manual [stagnant_days] (30) so keeper-repair leftovers do not
-      accumulate while operator-authored long-running goals survive. *)
-  let auto_stagnant_days () =
-    get_int ~default:7 "MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS"
-end
-
 (** {1 Approval Janitor}
 
     HITL approval queue dead-end fix.  [Keeper_approval_queue.expire_stale]
@@ -414,8 +387,8 @@ module Approval_janitor = struct
   (** Sweep interval in seconds.  Default: 60s (every minute).
       Operators tolerate up to a minute of "approval still pending"
       after the policy timeout has elapsed; a tighter cadence buys
-      nothing but log churn.  Mirrors [Goal_janitor]'s exposure
-      pattern (interval is operational cadence, not policy). *)
+      nothing but log churn.  The interval is operational cadence,
+      not policy. *)
   let interval_seconds =
     get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
 end
@@ -623,13 +596,6 @@ module Oas_sse = struct
     if v < 0.1 then 2.0 else v
 end
 
-(** {1 Memory OAS Bridge Configuration} *)
-
-module Memory_oas = struct
-  (** Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. *)
-  let default_importance = max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
-end
-
 (** {1 Smart Heartbeat Tuning} *)
 
 module SmartHeartbeatTuning = struct
@@ -739,7 +705,7 @@ module Dashboard = struct
       [server_dashboard_http_core.ml:624,633,678] (mission projections).
       Default 25s preserves the pre-extraction inline literal. Floor 1s
       protects against degenerate operator config. *)
-  let mission_timeout_sec =
+  let briefing_timeout_sec =
     Float.max 1.0
       (get_float ~default:25.0 "MASC_DASHBOARD_MISSION_TIMEOUT_SEC")
 
@@ -769,9 +735,9 @@ module Dashboard = struct
       Wraps the entire render pipeline including PG stalls and cold-start
       projection hydration. Default 60s preserves the pre-extraction
       literal at [dashboard_execution.ml:204]. Floor 5s ensures even
-      aggressive operator overrides leave room for cold-start hydration.
+      aggressive operator overrides leave workspace for cold-start hydration.
       Render budget should comfortably exceed the longest inner compute
-      budget (currently [mission_timeout_sec] = 25s). *)
+      budget (currently [briefing_timeout_sec] = 25s). *)
   let render_timeout_sec =
     Float.max 5.0
       (get_float ~default:60.0 "MASC_DASHBOARD_RENDER_TIMEOUT_SEC")
@@ -918,9 +884,9 @@ module Sidecar = struct
       (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
 end
 
-(** {1 Coord local git operation timeouts}
+(** {1 Workspace local git operation timeouts}
 
-    Inline literals extracted from {!Coord_git} (#10426 audit).
+    Inline literals extracted from {!Workspace_git} (#10426 audit).
     These sites share the same semantic bucket: local-only git
     operations such as [rev-parse], [status], and [branch] with no
     network IO.  Network-bound git ops (fetch, push) already use
@@ -934,9 +900,9 @@ end
     needlessly.  Conversely, an operator narrowing local ops on a
     fast workstation would not expect to also narrow network ops. *)
 
-module Coord_git = struct
+module Workspace_git = struct
   (** Budget (seconds) for local-only git operations under
-      [Masc_exec.Exec_gate.run_argv*] in {!Coord_git}: [rev-parse],
+      [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse],
       [status], [branch], etc.
 
       Default 30.0 preserves the four inline literals.  Floor 5.0
@@ -945,10 +911,12 @@ module Coord_git = struct
       would silently kill perfectly healthy commands.
 
       Network-bound ops (fetch, push) intentionally use a separate
-      knob — see {!Env_config_core.git_fetch_timeout_sec}. *)
+      knob — see {!Env_config_core.git_fetch_timeout_sec}.
+      @category Timeouts
+      @ops_class operator *)
   let local_op_timeout_sec =
     Float.max 5.0
-      (get_float ~default:30.0 "MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC")
+      (get_float ~default:30.0 "MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC")
 end
 
 (** {1 Internal Safety Configuration} *)

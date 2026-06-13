@@ -55,7 +55,7 @@ const SummarySchema = object({
 
 const SseOuterSchema = object({
   sessions_observer: fallback(number(), 0),
-  sessions_coordinator: fallback(number(), 0),
+  sessions_agent_stream: fallback(number(), 0),
   sessions_presence: fallback(number(), 0),
   sessions_total: fallback(number(), 0),
   external_subscribers: fallback(number(), 0),
@@ -77,7 +77,7 @@ const SseOuterSchema = object({
 
 interface SseSection {
   sessions_observer: number
-  sessions_coordinator: number
+  sessions_agent_stream: number
   sessions_presence: number
   sessions_total: number
   external_subscribers: number
@@ -110,7 +110,7 @@ const GrpcSchema = object({
 
 // Diagnostic counters for the WS delivery path.  Each field falls back
 // to 0 so this remains forward-compatible with servers that have not
-// yet landed the corresponding Prometheus metric (e.g. a dashboard
+// yet landed the corresponding OTel metric (e.g. a dashboard
 // pointed at an older build should not surface schema errors, it
 // should show zeroes and let the operator know the metric is absent).
 const WebsocketDeliverySchema = object({
@@ -177,7 +177,7 @@ const Http2Schema = object({
 
 const ClusterSchema = object({
   cluster: fallback(string(), 'default'),
-  room_id: fallback(string(), 'default'),
+  workspace_id: fallback(string(), 'default'),
   topology_available: fallback(boolean(), false),
   topology_source: fallback(string(), 'unknown'),
   // These five use `asNumber(x) ?? null` — absent → null, not undefined.
@@ -268,7 +268,7 @@ export function parseTransportHealthData(data: unknown): TransportHealthData {
     summary: outer.summary,
     sse: {
       sessions_observer: outer.sse.sessions_observer,
-      sessions_coordinator: outer.sse.sessions_coordinator,
+      sessions_agent_stream: outer.sse.sessions_agent_stream,
       sessions_presence: outer.sse.sessions_presence,
       sessions_total: outer.sse.sessions_total,
       external_subscribers: outer.sse.external_subscribers,

@@ -7,11 +7,11 @@
     - keeper_runtime_resolved:75 default=1200 (stale)
 
     Math: 1200 - 30 (oas_timeout_guard_sec) = 1170s — exact match for
-    #10388 cascade ollama timeout walls.
+    #10388 runtime ollama timeout walls.
 
     The audit hard-ceiling pass later lowered the SSOT default to 600 so the
     keeper turn envelope cannot hide long OAS provider stalls. RFC-0012/0022
-    then lifted only the opt-in hard ceiling to 900 so local-LLM cascades can
+    then lifted only the opt-in hard ceiling to 900 so local-LLM runtimes can
     opt in without changing the checked-in remote default.
 
     This test pins the SSOT, source-level literal, and generated env snapshot

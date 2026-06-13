@@ -118,13 +118,13 @@ describe('keeperActionVisibility', () => {
     })
   })
 
-  describe('stuck keeper (cascade_exhausted)', () => {
+  describe('stuck keeper (runtime_exhausted)', () => {
     it('can wake and is running so can pause/shutdown', () => {
       const k = makeKeeper({
         status: 'active',
         phase: 'Running',
         paused: false,
-        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_class: 'runtime_exhausted',
       })
       const v = keeperActionVisibility(k)
       expect(v.canWake).toBe(true)

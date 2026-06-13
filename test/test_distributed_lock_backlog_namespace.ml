@@ -53,7 +53,7 @@ let with_eio_backend f =
           let backend = Backend.FileSystem.create ~fs config in
           f backend clock))
 
-let lock_key namespace = Coord_eio.lock_key namespace
+let lock_key namespace = Workspace_eio.lock_key namespace
 
 let test_backlog_lock_key () =
   check string "backlog key uses lock namespace"

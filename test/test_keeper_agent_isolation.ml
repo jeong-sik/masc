@@ -3,21 +3,22 @@ module Types = Masc_domain
 (** Tests for keeper-agent tool isolation.
 
     Validates the structural invariant that keeper tools and agent
-    coordination tools occupy disjoint namespaces.
+    workspace tools occupy disjoint namespaces.
 
-	    The isolation boundary is between keeper tools and agent coordination tools
+	    The isolation boundary is between keeper tools and agent workspace tools
     (spawned_agent_public).
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Agent_tool_dispatch_runtime = Masc_mcp.Agent_tool_dispatch_runtime
-module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
-module Tool_shard = Masc_mcp.Tool_shard
-module Tool_catalog = Masc_mcp.Tool_catalog
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_identity = Masc_mcp.Keeper_identity
-module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
-module Config = Masc_mcp.Config
+module Keeper_tool_dispatch_runtime = Masc.Keeper_tool_dispatch_runtime
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
+module Tool_shard = Masc.Tool_shard
+module Keeper_types = Keeper_types
+module Keeper_identity = Masc.Keeper_identity
+module Keeper_tool_registry = Masc.Keeper_tool_registry
+module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
+module Config = Masc.Config
 
 (* ============================================================
    Helper: create keeper_meta via meta_of_json (canonical pattern)
@@ -28,7 +29,7 @@ let make_meta
     ?(policy_voice_enabled = false)
     
     ()
-  : Keeper_types.keeper_meta =
+  : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [
       ("name", `String name);
@@ -48,60 +49,111 @@ let has_keeper_prefix name =
   String.length name >= 7 && String.sub name 0 7 = "keeper_"
 
 (** Non-keeper_ tool names legitimately granted to keepers.
-    Derived from actual module exports — no prefix guessing.
-    Must be a function (not a let-binding) because injected_masc_tool_names
-    depends on inject_masc_schemas which runs after module init. *)
-let known_non_keeper_tool_names () : string list =
-  (Tool_shard.all_keeper_tool_schemas
-   |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
-   |> List.filter (fun name -> not (has_keeper_prefix name)))
-  @ Keeper_tool_registry.injected_masc_tool_names ()
+    Derived from actual candidate-source exports -- no prefix guessing.
+    Must be a function because injected_masc_tool_names depends on
+    inject_masc_schemas, which runs after module init. *)
+let descriptor_tool_names () : string list =
+  Keeper_tool_descriptor.all_descriptors ()
+  |> List.concat_map (fun descriptor ->
+       Keeper_tool_descriptor.public_names_of_descriptor descriptor
+       @ Keeper_tool_descriptor.internal_names descriptor)
   |> List.sort_uniq String.compare
 
-let known_shared_agent_keeper_tool_names : string list =
+let shard_tool_names () : string list =
+  Tool_shard.all_keeper_tool_schemas
+  |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
+  |> List.sort_uniq String.compare
+
+let known_non_keeper_tool_names () : string list =
+  (shard_tool_names ()
+   |> List.filter (fun name -> not (has_keeper_prefix name)))
+  @ Keeper_tool_registry.core_always_tools
+  @ Keeper_tool_registry.effective_core_tools ()
+  @ Keeper_tool_registry.injected_masc_tool_names ()
+  @ Keeper_tool_dispatch_runtime.effective_core_tools ()
+  @ Keeper_tool_dispatch_runtime.keeper_internal_candidate_tool_names
+  @ descriptor_tool_names ()
+  |> List.filter (fun name -> not (has_keeper_prefix name))
+  |> List.sort_uniq String.compare
+
+(** The spawned-agent surface is the SSOT for workspace tools that may also
+    appear in keeper-selected candidates.  Avoid duplicating it here: stale
+    hardcoded overlap lists were the source of misleading boundary failures. *)
+let approved_shared_agent_keeper_tool_names () : string list =
+  Keeper_tool_surfaces.spawned_agent_public_tool_names
+
+let retired_tool_admin_surface_names : string list =
   [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_add_task";
-    "masc_broadcast";
-    "masc_heartbeat";
+    "masc_tool_admin_snapshot"
+  ; "masc_tool_admin_update"
+  ; "tool_admin_snapshot"
+  ; "tool_admin_update"
   ]
 
-let test_known_shared_tools_exist_on_agent_surface () =
-  let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  List.iter
-    (fun name ->
-      Alcotest.(check bool)
-        (name ^ " is exposed on spawned agent surface")
-        true (List.mem name agent_names))
-    known_shared_agent_keeper_tool_names
+let assert_no_retired_tool_admin_surface label names =
+  let leaked =
+    List.filter
+      (fun name -> List.mem name retired_tool_admin_surface_names)
+      names
+  in
+  Alcotest.(check (list string)) label [] leaked
+
+let assert_non_keeper_tools_from_known_sources label names =
+  let non_keeper = List.filter (fun name -> not (has_keeper_prefix name)) names in
+  let unexpected =
+    List.filter
+      (fun name -> not (List.mem name (known_non_keeper_tool_names ())))
+      non_keeper
+  in
+  Alcotest.(check (list string)) label [] unexpected
+
+let test_registered_surfaces_exclude_retired_tool_admin () =
+  assert_no_retired_tool_admin_surface
+    "public MCP surface excludes retired tool-admin surface"
+    Tool_catalog_surfaces.public_mcp_surface_tools;
+  assert_no_retired_tool_admin_surface
+    "spawned agent surface excludes retired tool-admin surface"
+    Keeper_tool_surfaces.spawned_agent_public_tool_names;
+  assert_no_retired_tool_admin_surface
+    "local worker surface excludes retired tool-admin surface"
+    Keeper_tool_surfaces.local_worker_public_tool_names;
+  assert_no_retired_tool_admin_surface
+    "raw schema registry excludes retired tool-admin surface"
+    (Config.raw_all_tool_schemas
+     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
+  assert_no_retired_tool_admin_surface
+    "keeper shard registry excludes retired tool-admin surface"
+    (Tool_shard.all_keeper_tool_schemas
+     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
+  assert_no_retired_tool_admin_surface
+    "keeper descriptor registry excludes retired tool-admin surface"
+    (descriptor_tool_names ())
 
 (* ============================================================
-   Invariant 1: Non-research keepers only get keeper_* tools plus
-   curated canonical masc_* keeper workflows
+   Invariant 1: Non-research keepers only get keeper_* tools plus known
+   candidate-source tools; retired tool-admin surface never
+   re-enters keeper candidate sets.
    ============================================================ *)
 
-let test_heuristic_only_keeper_prefixed () =
+let test_heuristic_non_keeper_tools_are_known () =
   let meta = make_meta () in
-  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
-  let unexpected =
-    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
-  in
-  Alcotest.(check (list string))
-    "heuristic keeper only has keeper_* or curated masc_* tools" [] unexpected
+  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  assert_non_keeper_tools_from_known_sources
+    "heuristic keeper only has keeper_* or known candidate-source tools"
+    names;
+  assert_no_retired_tool_admin_surface
+    "heuristic keeper excludes retired tool-admin surface"
+    names
 
-let test_learned_only_keeper_prefixed () =
+let test_learned_non_keeper_tools_are_known () =
   let meta = make_meta ~policy_voice_enabled:true () in
-  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
-  let unexpected =
-    List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
-  in
-  Alcotest.(check (list string))
-    "learned keeper only has keeper_* or curated masc_* tools" [] unexpected
+  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  assert_non_keeper_tools_from_known_sources
+    "learned keeper only has keeper_* or known candidate-source tools"
+    names;
+  assert_no_retired_tool_admin_surface
+    "learned keeper excludes retired tool-admin surface"
+    names
 
 (* ============================================================
    Invariant 2: Research keepers still use only known curated tools
@@ -110,122 +162,87 @@ let test_learned_only_keeper_prefixed () =
 let test_research_extra_tools_are_research_only () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
-  let unexpected = List.filter (fun n ->
-    not (List.mem n (known_non_keeper_tool_names ()))) non_keeper in
-  Alcotest.(check (list string))
-    "non-keeper tools come from known sources" [] unexpected
+  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  assert_non_keeper_tools_from_known_sources
+    "non-keeper tools come from known sources"
+    names;
+  assert_no_retired_tool_admin_surface
+    "research keeper excludes retired tool-admin surface"
+    names
 
 let test_write_done_returns_empty () =
   let meta = make_meta () in
-  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
+  let names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
   Alcotest.(check (list string)) "write_done returns empty" [] names
 
 (* ============================================================
-   Invariant 3: Agent coordination tools never contain keeper_*
+   Invariant 3: Agent workspace tools never contain keeper_*
    ============================================================ *)
 
 let test_agent_surface_no_keeper_tools () =
-  let names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+  let names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   let leaked = List.filter has_keeper_prefix names in
   Alcotest.(check (list string)) "no keeper_* in agent surface" [] leaked
 
 (* ============================================================
-   Invariant 4: Keeper tools never overlap with agent coordination
+   Invariant 4: Keeper tools never overlap with agent workspace
    ============================================================ *)
 
 let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
-  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Some MASC coordination tools are intentionally shared between spawned
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
+  (* Some MASC workspace tools are intentionally shared between spawned
      agents and keeper-selected surfaces. *)
   let overlap =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (approved_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
-    "heuristic keeper only shares approved coordination tools with agent surface"
+    "heuristic keeper only shares approved workspace tools with agent surface"
     [] overlap
 
 let test_no_overlap_research_vs_agent () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
+  let keeper_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let agent_names = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   let overlap =
     List.filter
       (fun n ->
         List.mem n agent_names
-        && not (List.mem n known_shared_agent_keeper_tool_names))
+        && not (List.mem n (approved_shared_agent_keeper_tool_names ())))
       keeper_names
   in
   Alcotest.(check (list string))
-    "research keeper only shares approved coordination tools with agent surface"
+    "research keeper only shares approved workspace tools with agent surface"
     [] overlap
 
 let test_shard_tools_overlap_with_agent_documented () =
-  (* Shards may include approved shared coordination tools that also appear in
+  (* Shards may include approved shared workspace tools that also appear in
      the agent surface. *)
   let keeper_tools = Tool_shard.keeper_model_tools
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.name) in
-  let agent_tools = Agent_tool_surfaces.spawned_agent_public_tool_names in
+  let agent_tools = Keeper_tool_surfaces.spawned_agent_public_tool_names in
   let overlap = List.filter (fun name -> List.mem name agent_tools) keeper_tools in
   List.iter (fun name ->
     Alcotest.(check bool) (name ^ " is approved shared tool") true
-      (List.mem name known_shared_agent_keeper_tool_names)
+      (List.mem name (approved_shared_agent_keeper_tool_names ()))
   ) overlap
 
 (* ============================================================
-   Invariant 5: Research shard tools that overlap with admin list
-   (documenting the intentional design — keeper shard bypasses
-   the dispatch pre-hook permission check for these tools)
-   ============================================================ *)
-
-let test_research_admin_overlap_documented () =
-  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
-  let meta = make_meta  () in
-  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* These research tools are intentionally in both lists.
-     Keepers access them via shard allocation, not dispatch pre-hook.
-     This test documents the overlap rather than preventing it. *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is a research tool") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 6: All keepers now have admin-listed tools (mode removed).
-   Document the overlap rather than preventing it.
-   ============================================================ *)
-
-let test_non_research_admin_tools_documented () =
-  let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
-  let meta = make_meta ~policy_voice_enabled:true () in
-  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
-  (* Mode removal: all keepers get all tools. Admin-listed tools that
-     appear in keeper tool set come from known sources (coding, research shards). *)
-  List.iter (fun name ->
-    Alcotest.(check bool) (name ^ " is from known source") true
-      (List.mem name (known_non_keeper_tool_names ()))
-  ) overlap
-
-(* ============================================================
-   Invariant 7: Tool count consistency across policy modes
+   Invariant 5: Tool count consistency across policy modes
    ============================================================ *)
 
 let test_heuristic_has_fewer_tools_than_learned () =
   let heuristic = make_meta () in
   let learned = make_meta ~policy_voice_enabled:true
        () in
-  let h_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names heuristic) in
-  let l_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names learned) in
+  let h_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names heuristic) in
+  let l_count = List.length (Keeper_tool_dispatch_runtime.keeper_allowed_tool_names learned) in
   Alcotest.(check bool)
     "learned mode has >= heuristic tools"
     true (l_count >= h_count)
@@ -254,13 +271,13 @@ let test_keeper_agent_sender_plain_name () =
   let meta = make_meta ~name:"sangsu" () in
   Alcotest.(check string)
     "returns meta.agent_name" "sangsu"
-    (Masc_mcp.Agent_tool_shared_runtime.keeper_agent_sender ~meta)
+    (Masc.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_sender_prefixed_name () =
   let meta = make_meta ~name:"keeper-admin" () in
   Alcotest.(check string)
     "returns meta.agent_name" "keeper-admin"
-    (Masc_mcp.Agent_tool_shared_runtime.keeper_agent_sender ~meta)
+    (Masc.Keeper_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_name_plain () =
   Alcotest.(check string)
@@ -307,21 +324,21 @@ let test_canonical_keeper_name_from_legacy_keeper_name () =
 let test_canonical_keeper_name_preserves_plain_hyphenated_name () =
   Alcotest.(check (option string))
     "plain hyphenated keeper name is preserved"
-    (Some "masc-mcp-smoke")
-    (Keeper_identity.canonical_keeper_name "masc-mcp-smoke")
+    (Some "masc-smoke")
+    (Keeper_identity.canonical_keeper_name "masc-smoke")
 
 (* ============================================================
    Test runner
    ============================================================ *)
 
 let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
+  Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [
-      Alcotest.test_case "heuristic only keeper_*" `Quick test_heuristic_only_keeper_prefixed;
-      Alcotest.test_case "learned only keeper_*" `Quick test_learned_only_keeper_prefixed;
+      Alcotest.test_case "heuristic non-keeper tools are known" `Quick
+        test_heuristic_non_keeper_tools_are_known;
+      Alcotest.test_case "learned non-keeper tools are known" `Quick
+        test_learned_non_keeper_tools_are_known;
     ]);
     ("research_boundary", [
       Alcotest.test_case "research extras are research-only" `Quick
@@ -332,16 +349,11 @@ let () =
       Alcotest.test_case "spawned agent surface" `Quick test_agent_surface_no_keeper_tools;
     ]);
     ("disjoint_namespaces", [
-      Alcotest.test_case "shared tool whitelist stays real" `Quick
-        test_known_shared_tools_exist_on_agent_surface;
+      Alcotest.test_case "registered surfaces exclude retired tool-admin" `Quick
+        test_registered_surfaces_exclude_retired_tool_admin;
       Alcotest.test_case "heuristic vs agent" `Quick test_no_overlap_heuristic_vs_agent;
       Alcotest.test_case "research vs agent" `Quick test_no_overlap_research_vs_agent;
       Alcotest.test_case "shard vs agent" `Quick test_shard_tools_overlap_with_agent_documented;
-    ]);
-    ("admin_boundary", [
-      Alcotest.test_case "research admin overlap documented" `Quick
-        test_research_admin_overlap_documented;
-      Alcotest.test_case "non-research admin documented" `Quick test_non_research_admin_tools_documented;
     ]);
     ("policy_consistency", [
       Alcotest.test_case "learned >= heuristic" `Quick test_heuristic_has_fewer_tools_than_learned;

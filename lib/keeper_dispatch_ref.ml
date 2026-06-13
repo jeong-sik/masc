@@ -3,9 +3,9 @@
     See [keeper_dispatch_ref.mli] for the rationale. *)
 
 (* TEL-OK: dependency-inversion ref module — telemetry lives in the
-   registered backing dispatch (Tool_keeper / Tool_keeper_ops handlers). *)
+   registered backing dispatch (Keeper_tool_surface / Keeper_tool_surface_ops handlers). *)
 let dispatch
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -18,5 +18,10 @@ let dispatch
      -> Tool_result.result option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name:_ ~args:_ () -> None)
+  ref (fun ~config:_ ~agent_name:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name ~args:_ () ->
+    failwith
+      (Printf.sprintf
+         "keeper_dispatch_ref: dispatch called for tool %S before boot registration — \
+          ensure Server_bootstrap registers the keeper dispatch backing"
+         name))
 ;;

@@ -18,11 +18,11 @@ Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: HTTP transport surface (`POST /mcp`) — chunked-first default, auto-upgrade to SSE on demand, `Mcp-Session-Id` header, legacy `GET /sse` deprecation window
 Out of scope: provider-side streaming wire-up ([[RFC-0095]], merged), error envelope shape ([[RFC-0098]]), session lifecycle events ([[RFC-0099]] — *consumed* by this RFC for resume/eviction), FD accounting (IMPROVE-03), TTFT measurement ([[RFC-OAS-020]] in oas)
-Series: **IMPROVE-02** of the masc-mcp + oas improvement series.
+Series: **IMPROVE-02** of the masc + oas improvement series.
 
 ## 1. Problem
 
-MCP spec 2025-03-26 deprecates the legacy HTTP+SSE transport pair and introduces **Streamable HTTP**: a single chunked HTTP response that optionally upgrades to SSE when the server has a long-running response to deliver. masc-mcp's current HTTP transport is the *legacy* pair:
+MCP spec 2025-03-26 deprecates the legacy HTTP+SSE transport pair and introduces **Streamable HTTP**: a single chunked HTTP response that optionally upgrades to SSE when the server has a long-running response to deliver. masc's current HTTP transport is the *legacy* pair:
 
 - `POST /mcp` — synchronous JSON response (blocking until full body ready)
 - `GET /sse?sse_kind=...&session_id=...` — long-lived SSE channel for events
@@ -46,7 +46,7 @@ Production tests observed 20/22 SSE GET connections dropped within 60 s when fro
 
 ## 2. Non-goals
 
-- **Replacing [[RFC-0095]]'s provider-side streaming.** RFC-0095 is about `Custom_openai_compat` emitting chunks *into* masc-mcp. This RFC is about masc-mcp emitting chunks *out to* clients. Orthogonal layers.
+- **Replacing [[RFC-0095]]'s provider-side streaming.** RFC-0095 is about `Custom_openai_compat` emitting chunks *into* masc. This RFC is about masc emitting chunks *out to* clients. Orthogonal layers.
 - **Changing [[RFC-0098]]'s error envelope shape.** Codes, message, data field — all unchanged. This RFC affects the *delivery shape* (chunked vs synchronous), not the body.
 - **Implementing session-lifecycle event publishing.** [[RFC-0099]] owns that. This RFC's `Mcp-Session-Id` header is the *carrier*; the lifecycle events live on RFC-0099's bus.
 - **Implementing Last-Event-ID resume.** [[RFC-0099]] PR-6 owns the resume machinery. This RFC defines *that the header is honored*; the ring-buffer / replay implementation is RFC-0099's.

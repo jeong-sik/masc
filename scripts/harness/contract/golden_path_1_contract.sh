@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Golden Path 1 Contract — Core coordination e2e verification.
+# Golden Path 1 Contract — Core workspace collaboration e2e verification.
 #
 # Tests the fundamental 8-step MASC workflow:
 #   join → add_task → claim → plan_set_task → heartbeat → broadcast → status → done
 #
 # This is the minimum viable path that must always work.
-# If this contract fails, MASC coordination is broken.
+# If this contract fails, MASC workspace collaboration is broken.
 #
 # Usage:
 #   MCP_URL=http://127.0.0.1:8935/mcp ./golden_path_1_contract.sh
@@ -47,14 +47,14 @@ step_fail() { FAIL=$((FAIL + 1)); echo "  FAIL: $1"; }
 
 cleanup() {
   if [ "$JOINED" -eq 1 ]; then
-    call_tool 1099 "masc_leave" "{\"agent_name\":\"$AGENT_NAME\"}" >/dev/null 2>&1 || true
+    call_tool 1099 "masc_unbind" "{\"agent_name\":\"$AGENT_NAME\"}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
 
 # ── Step 1/8: join ──
-echo "[1/8] masc_join"
-r1="$(call_tool 1001 "masc_join" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities\":[\"test\",\"contract\"]}")"
+echo "[1/8] masc_bind"
+r1="$(call_tool 1001 "masc_bind" "{\"agent_name\":\"$AGENT_NAME\",\"capabilities\":[\"test\",\"contract\"]}")"
 if require_ok "$r1"; then
   JOINED=1
   step_pass
@@ -137,7 +137,7 @@ fi
 
 # ── Step 8/8: done ──
 echo "[8/8] masc_transition (done)"
-r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: joined room, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
+r8="$(call_tool 1008 "masc_transition" "{\"task_id\":\"$task_id\",\"agent_name\":\"$AGENT_NAME\",\"action\":\"done\",\"notes\":\"Completed GP1 contract flow: bound workspace, created and claimed task, set current task, sent heartbeat, broadcast progress, and verified masc_status returned success.\"}")"
 if require_ok "$r8"; then
   step_pass
 else

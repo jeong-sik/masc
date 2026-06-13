@@ -27,7 +27,7 @@ The repo has **two TLA-related PPX systems**, with separate purposes and adoptio
 |---|---|
 | Implementation | `ppx_tla/ppx_tla.ml` + `lib/keeper/keeper_fsm_guard_runtime.{ml,mli}` (33 + 36 LOC) |
 | Behaviour | Identity helper wrapping any value with `try assert(<expr>); v with Assert_failure -> incr counter; v` |
-| Metric | `metric_fsm_guard_violation` (`lib/prometheus.mli:293`) |
+| Metric | `metric_fsm_guard_violation` (`lib/otel_metric_store.ml`) |
 | Runtime gate | fail-closed: `Assert_failure` always re-raises after the violation counter increments |
 
 This is the canonical "spec-action as runtime invariant" hook documented in AGENT-LLM-A.md (`feedback_fsm_guard_identity_helper_counter_wrap_pattern`).
@@ -116,7 +116,7 @@ The 9 existing guards cover 3 keeper subsystems. Other keeper subsystems (`keepe
 | 14 zero-coverage domains | **Medium** | Documented mappings rot silently; depends on manual review at PR time. Adding `[@@deriving tla]` per domain is bounded work. |
 | `check-tla-variant-sync.sh` warn-only & narrow scope | Low–Medium | Heuristic; produces drift signal but doesn't gate. Could be tightened to AST-based once PPX coverage rises. |
 | `[@@fsm_guard]` adoption gap in keeper subsystems | Low | Optional layer. Existing 9 guards in 3 files captured the highest-value invariants from `KeeperOASAdvanced` work. |
-| boundary domain (25 specs, 0 hooks) | Medium | Largest unhooked surface. Spot-check whether boundary specs even have ADTs to derive — many model cross-domain protocols (e.g. cascade resolver) without a single OCaml type. |
+| boundary domain (25 specs, 0 hooks) | Medium | Largest unhooked surface. Spot-check whether boundary specs even have ADTs to derive — many model cross-domain protocols (e.g. runtime resolver) without a single OCaml type. |
 
 ## 8. Recommended ratchet (descriptive, not enforced)
 

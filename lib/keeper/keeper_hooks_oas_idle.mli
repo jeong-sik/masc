@@ -20,7 +20,7 @@ val on_idle_decision
   -> Agent_sdk.Hooks.hook_decision
 
 val keeper_idle_decision
-  :  meta_ref:Keeper_types.keeper_meta ref
+  :  meta_ref:Keeper_meta_contract.keeper_meta ref
   -> consecutive_idle_turns:int
   -> tool_names:string list
   -> Agent_sdk.Hooks.hook_decision

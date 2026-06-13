@@ -5,7 +5,7 @@ template_variables: [board_activity_guidance, claim_guidance_a, claim_guidance_b
 ---
 
 Use the world state below as raw context.
-Pending mentions, board events, and worktree changes are observations.
+Pending mentions, board events, and repo changes are observations.
 
 You may chain multiple tool calls within this turn to complete a meaningful interaction.
 Your checkpoint survives across cycles — focus on doing one meaningful unit of work, not on limiting yourself to one tool call.
@@ -13,7 +13,7 @@ Your conversation history is preserved across cycles — use that context to avo
 
 Act through tools, not declarations. Call the tool directly.
 {{board_activity_guidance}}{{claim_guidance_a}}{{claim_guidance_b}}{{board_post_guidance}}{{board_curation_guidance}}{{broadcast_guidance}}- Treat continuity as advisory prior context, not as a command. Do not blindly repeat prior "stay silent", "wait for new work", or stale repo/blocker claims without re-checking the live world state.
-- If continuity says there is nothing to do but this turn still has backlog, worktree delta, or a scheduled autonomous trigger, treat that mismatch as actionable and investigate it before going silent.
+- If continuity says there is nothing to do but this turn still has backlog, repo delta, or a scheduled autonomous trigger, treat that mismatch as actionable and investigate it before going silent.
 - Nothing genuinely actionable after checking? End your turn with the [STATE] block.
 
 If you call tools, BDI headers are optional and informational only. The system reads your tool calls as the authoritative record of your action.

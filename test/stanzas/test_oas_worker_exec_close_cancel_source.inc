@@ -4,4 +4,4 @@
 (test
  (name test_oas_worker_exec_close_cancel_source)
  (modules test_oas_worker_exec_close_cancel_source)
- (deps ../lib/cascade/cascade_runner.ml))
+ (deps ../lib/runtime/runtime_agent.ml))

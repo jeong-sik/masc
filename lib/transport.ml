@@ -91,16 +91,18 @@ module JsonRpc = struct
 
   (** Parse JSON-RPC request *)
   let parse_request (json : Yojson.Safe.t) : (request, string) result =
-    let module U = Yojson.Safe.Util in
     try
-      let jsonrpc = json |> U.member "jsonrpc" |> U.to_string in
+      let jsonrpc = Json_util.get_string_with_default json ~key:"jsonrpc" ~default:"" in
       if jsonrpc <> version then
         Error (Printf.sprintf "Invalid JSON-RPC version: %s" jsonrpc)
       else
-        let id = json |> U.member "id" |> U.to_string_option in
-        let method_name = json |> U.member "method" |> U.to_string in
-        let params = json |> U.member "params" in
-        Ok { id; method_name; params; headers = [] }
+        let id = Json_util.get_string json "id" in
+        let method_name = Json_util.get_string_with_default json ~key:"method" ~default:"" in
+        if String.trim method_name = "" then
+          Error "Missing JSON-RPC method"
+        else
+          let params = Yojson.Safe.Util.member "params" json in
+          Ok { id; method_name; params; headers = [] }
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e -> Error (Printexc.to_string e)
@@ -175,7 +177,7 @@ module Rest = struct
     | Public ->
         "No bearer token is required for this route."
     | Conditional_bearer ->
-        "Bearer token auth is required when room auth/token enforcement is active; loopback-local development may allow access without a bearer."
+        "Bearer token auth is required when workspace auth/token enforcement is active; loopback-local development may allow access without a bearer."
     | Same_origin_or_bearer ->
         "Loopback browser requests may use same-origin checks; non-browser clients should use Authorization: Bearer <token>."
     | Bearer_required ->
@@ -196,7 +198,6 @@ module Rest = struct
     | "masc_operator_confirm" -> Some Bearer_required
     | "masc_status"
     | "masc_tasks"
-    | "masc_who"
     | "masc_messages"
     | "masc_operator_snapshot"
     | "masc_operator_digest"
@@ -220,7 +221,6 @@ module Rest = struct
     [
       ("masc_status", [ (GET, "/api/v1/status") ]);
       ("masc_tasks", [ (GET, "/api/v1/tasks") ]);
-      ("masc_who", [ (GET, "/api/v1/agents") ]);
       ("masc_messages", [ (GET, "/api/v1/messages") ]);
       ("masc_operator_snapshot", [ (GET, "/api/v1/operator") ]);
       ("masc_operator_digest", [ (GET, "/api/v1/operator/digest") ]);
@@ -337,7 +337,6 @@ module Rest = struct
           "masc_add_task";
           "masc_batch_add_tasks";
           "masc_transition";
-          "masc_claim_next";
         ] );
       ( "planning",
         [
@@ -654,7 +653,7 @@ module Rest = struct
                           ("bearerFormat", `String "opaque-token");
                           ( "description",
                             `String
-                              "MASC room bearer token. Some loopback-local routes may additionally permit same-origin browser access." );
+                              "MASC workspace bearer token. Some loopback-local routes may additionally permit same-origin browser access." );
                         ] );
                   ] );
             ] );
@@ -709,36 +708,36 @@ let get_bindings ~host ~port : binding list =
     ]
   in
   let bindings =
-    if Masc_grpc_server.is_enabled () then
+    if Env_config.Transport.grpc_enabled () then
       bindings
       @ [
           {
             protocol = Grpc;
             url =
               Printf.sprintf "grpc://%s:%d" host
-                (Masc_grpc_server.configured_port ());
-            options = [ ("health_service", Masc_grpc_server.health_service_name) ];
+                Env_config.Transport.grpc_port;
+            options = [ ("health_service", "grpc.health.v1.Health") ];
           };
         ]
     else
       bindings
   in
   let bindings =
-    if Server_ws_standalone.is_enabled () then
+    if Env_config.Transport.ws_enabled () then
       bindings
       @ [
           {
             protocol = Ws;
             url =
               Printf.sprintf "ws://%s:%d/" host
-                (Server_ws_standalone.configured_port ());
+                Env_config.Transport.ws_port;
             options = [ ("mode", "standalone"); ("discovery_path", "/ws") ];
           };
         ]
     else
       bindings
   in
-  if Server_webrtc_transport.is_enabled () then
+  if Env_config.Transport.webrtc_enabled () then
     bindings
     @ [
         {

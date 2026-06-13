@@ -7,8 +7,8 @@
 
 open Alcotest
 
-module Rate_limit = Masc_mcp.Rate_limit
-module Server_auth = Masc_mcp.Server_auth
+module Rate_limit = Masc.Rate_limit
+module Server_auth = Server_auth
 
 let unique_key prefix =
   Printf.sprintf "%s_%d" prefix (Unix.getpid ())

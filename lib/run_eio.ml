@@ -4,66 +4,45 @@
     Stores:
     - run.json (metadata)
     - plan.md
-    - deliverable.md
-    - log.jsonl (append-only)
 *)
 
-open Coord_utils
+open Workspace_utils
 
 (** Run metadata *)
 type run_record = {
   task_id: string;
   agent_name: string option;
   plan: string;
-  deliverable: string;
   created_at: string;
   updated_at: string;
 }
 
-(** Log entry *)
-type log_entry = {
-  timestamp: string;
-  note: string;
-}
+let now_iso () = Masc_domain.now_iso ()
 
 let run_record_to_json (r : run_record) : Yojson.Safe.t =
   `Assoc [
     ("task_id", `String r.task_id);
     ("agent_name", Json_util.string_opt_to_json r.agent_name);
     ("plan", `String r.plan);
-    ("deliverable", `String r.deliverable);
     ("created_at", `String r.created_at);
     ("updated_at", `String r.updated_at);
   ]
 
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
-  match Safe_ops.json_string_opt "task_id" json,
-        Safe_ops.json_string_opt "created_at" json,
-        Safe_ops.json_string_opt "updated_at" json with
+  let task_id = Safe_ops.json_string_opt "task_id" json in
+  let created_at = Safe_ops.json_string_opt "created_at" json in
+  let updated_at = Safe_ops.json_string_opt "updated_at" json in
+  match task_id, created_at, updated_at with
   | Some task_id, Some created_at, Some updated_at ->
     let agent_name = Safe_ops.json_string_opt "agent_name" json in
     let plan = Safe_ops.json_string ~default:"" "plan" json in
-    let deliverable = Safe_ops.json_string ~default:"" "deliverable" json in
-    Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
+    Some { task_id; agent_name; plan; created_at; updated_at }
   | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
-    Log.Misc.error "run_of_json: missing required fields";
-    None
-
-let log_entry_to_json (e : log_entry) : Yojson.Safe.t =
-  `Assoc [
-    ("timestamp", `String e.timestamp);
-    ("note", `String e.note);
-  ]
-
-let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
-  match Safe_ops.json_string_opt "timestamp" json,
-        Safe_ops.json_string_opt "note" json with
-  | Some timestamp, Some note ->
-    Some { timestamp; note }
-  | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
-    Log.Misc.error "log_entry_of_json: missing required fields";
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
+    Log.Misc.error "run_of_json: missing required fields (task_id=%s created_at=%s updated_at=%s)"
+      (match task_id with Some s -> s | None -> "(absent)")
+      (match created_at with Some s -> s | None -> "(absent)")
+      (match updated_at with Some s -> s | None -> "(absent)");
     None
 
 let runs_dir (config : config) =
@@ -78,17 +57,9 @@ let run_json_path config task_id =
 let plan_path config task_id =
   Filename.concat (run_dir config task_id) "plan.md"
 
-let deliverable_path config task_id =
-  Filename.concat (run_dir config task_id) "deliverable.md"
-
-let log_path config task_id =
-  Filename.concat (run_dir config task_id) "log.jsonl"
-
 let ensure_run_dir config task_id =
   let dir = run_dir config task_id in
   if not (Sys.file_exists dir) then mkdir_p dir
-
-let now_iso () = Masc_domain.now_iso ()
 
 let read_text_file path =
   if Sys.file_exists path then
@@ -107,7 +78,10 @@ let write_run config (run : run_record) =
 let read_run config task_id : (run_record, string) result =
   let path = run_json_path config task_id in
   if not (path_exists config path) then
-    Error (Printf.sprintf "Run not found for task %s (expected at %s)" task_id path)
+    Error
+      (Printf.sprintf
+         "No execution run record exists yet for task %s (expected run.json at %s)."
+         task_id path)
   else
     match run_record_of_json (read_json config path) with
     | Some r -> Ok r
@@ -125,12 +99,11 @@ let init config ~task_id ~agent_name : (run_record, string) result =
   try
     ensure_initialized config;
     ensure_run_dir config task_id;
-    let created_at = now_iso () in
+    let created_at = Masc_domain.now_iso () in
     let run = {
       task_id;
       agent_name;
       plan = "";
-      deliverable = "";
       created_at;
       updated_at = created_at;
     } in
@@ -138,14 +111,6 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     let plan_file = plan_path config task_id in
     if not (path_exists config plan_file) then
       write_text_file plan_file "# Run Plan\n\n";
-    let deliverable_file = deliverable_path config task_id in
-    if not (path_exists config deliverable_file) then
-      write_text_file deliverable_file "";
-    let log_file = log_path config task_id in
-    if not (path_exists config log_file) then begin
-      mkdir_p (Filename.dirname log_file);
-      Fs_compat.save_file log_file ""
-    end;
     write_run config run;
     Ok run
   with
@@ -158,9 +123,8 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     on [run.json]; two concurrent callers (different fibers handling
     [tool_run] MCP requests for the same task) would each read the
     same snapshot and the later writer would overwrite the earlier
-    [plan] / [deliverable] update.  The sibling [append_log] already
-    uses [with_file_lock] on its log file; extend the same discipline
-    to [run.json] writes.  The [plan.md] mirror at [plan_path] is a
+    [plan] update.  Wrapped in a [with_file_lock] on [run.json] to
+    serialise those writes.  The [plan.md] mirror at [plan_path] is a
     single full-content overwrite, so it does not need a separate
     lock — writing the mirror and the [run.json] record inside the
     same critical section keeps them consistent. *)
@@ -171,7 +135,7 @@ let update_plan config ~task_id ~content : (run_record, string) result =
       match read_run config task_id with
       | Error e -> Error e
       | Ok run ->
-          let updated = { run with plan = content; updated_at = now_iso () } in
+          let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
           let path = plan_path config task_id in
           write_text_file path content;
           write_run config updated;
@@ -180,106 +144,28 @@ let update_plan config ~task_id ~content : (run_record, string) result =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)
 
-(** Append log entry *)
-let append_log config ~task_id ~note : (log_entry, string) result =
-  try
-    ensure_initialized config;
-    ensure_run_dir config task_id;
-    let entry = { timestamp = now_iso (); note } in
-    let file = log_path config task_id in
-    with_file_lock config file (fun () ->
-      Fs_compat.append_jsonl file (log_entry_to_json entry)
-    );
-    Ok entry
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
-
-(** Set deliverable.  Same lost-update concern as [update_plan] —
-    read_run → modify → write_run is a read-modify-write on
-    [run.json] that two concurrent fibers could each read from the
-    same snapshot and clobber.  Wrapped in the same [run.json] file
-    lock for identical reasons. *)
-let set_deliverable config ~task_id ~content : (run_record, string) result =
-  try
-    let run_file = run_json_path config task_id in
-    with_file_lock config run_file (fun () ->
-      match read_run config task_id with
-      | Error e -> Error e
-      | Ok run ->
-          let updated = { run with deliverable = content; updated_at = now_iso () } in
-          let path = deliverable_path config task_id in
-          write_text_file path content;
-          write_run config updated;
-          Ok updated)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Printexc.to_string e)
-
-(** Read logs (optionally tail N).
-
-    When [limit] is given the fold drives a bounded [Queue.t] sized to
-    [n] (drop-oldest on overflow), so peak live memory is O(n) instead
-    of O(file_line_count) and the post-fold [List.length] / [mapi] /
-    [filter] / [map snd] trim chain is gone.
-
-    Same ring-buffer pattern as
-    [institution_eio.load_recent_episodes_jsonl] (PR #14873) and
-    [Log.Ring.load_from_file] (PR #14904 after Copilot review): for
-    tail-N over an unbounded append-only JSONL the streaming fold
-    should *also* be the trim, otherwise the win from
-    [Fs_compat.fold_jsonl_lines] is canceled by a downstream list
-    materialisation. *)
-let read_logs config ~task_id ?limit () : log_entry list =
-  let file = log_path config task_id in
-  if not (Sys.file_exists file) then []
-  else
-    match limit with
-    | None ->
-      Fs_compat.fold_jsonl_lines
-        ~init:[]
-        ~f:(fun acc ~line_no:_ j ->
-          match log_entry_of_json j with
-          | Some e -> e :: acc
-          | None -> acc)
-        file
-      |> List.rev
-    | Some n when n <= 0 -> []
-    | Some n ->
-      let ring : log_entry Queue.t = Queue.create () in
-      Fs_compat.fold_jsonl_lines
-        ~init:()
-        ~f:(fun () ~line_no:_ j ->
-          match log_entry_of_json j with
-          | None -> ()
-          | Some e ->
-            Queue.add e ring;
-            if Queue.length ring > n then ignore (Queue.pop ring))
-        file;
-      List.of_seq (Queue.to_seq ring)
-
-(** Get run details *)
-let get config ~task_id : (Yojson.Safe.t, string) result =
-  match read_run config task_id with
+(** Get run details. Missing runs are bootstrapped so resume/read paths do
+    not block autonomous keeper turns before any explicit masc_run_init call. *)
+let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
+  let read_or_create_run () =
+    let path = run_json_path config task_id in
+    if path_exists config path then
+      read_run config task_id
+    else
+      init config ~task_id ~agent_name
+  in
+  match read_or_create_run () with
   | Error e -> Error e
   | Ok run ->
-      let plan_content =
-        let text = read_text_file (plan_path config task_id) in
-        if text = "" then run.plan else text
-      in
-      let deliverable_content =
-        let text = read_text_file (deliverable_path config task_id) in
-        if text = "" then run.deliverable else text
-      in
-      let logs = read_logs config ~task_id ~limit:50 () in
-      let json = `Assoc [
-        ("run", run_record_to_json run);
-        ("plan", `String plan_content);
-        ("deliverable", `String deliverable_content);
-        ("logs", `List (List.map log_entry_to_json logs));
-        ("log_count", `Int (List.length logs));
-      ] in
-      Ok json
+    let plan_content =
+      let text = read_text_file (plan_path config task_id) in
+      if text = "" then run.plan else text
+    in
+    let json = `Assoc [
+      ("run", run_record_to_json run);
+      ("plan", `String plan_content);
+    ] in
+    Ok json
 
 (** List runs *)
 let list config : Yojson.Safe.t =

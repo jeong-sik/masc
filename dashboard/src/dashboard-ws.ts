@@ -31,10 +31,6 @@ type PendingRpc = {
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
 }
-type ParseWorkerJob = {
-  data: string
-  timeout: ReturnType<typeof setTimeout>
-}
 type DashboardRouteState = Pick<RouteState, 'tab' | 'params'>
 
 interface DashboardWsDiscovery {
@@ -49,7 +45,6 @@ interface DashboardWsDiscoveryResult {
   fromCache: boolean
 }
 
-const DASHBOARD_WS_PARSE_TIMEOUT_MS = 5_000
 const DASHBOARD_WS_DISCOVERY_CACHE_KEY = 'masc.dashboard.ws.discovery.v1'
 
 let socket: WebSocket | null = null
@@ -127,62 +122,6 @@ export function clearDashboardWsDiscoveryCacheForTests(): void {
 // lets batch() coalesce all signal mutations in a single frame.
 const pendingInbound: Array<string | unknown> = []
 let flushHandle = 0
-
-// Phase 2 (PR-4.5): Offload JSON/SSE parsing to a Web Worker so the
-// main thread never blocks on large payloads.
-let parseWorker: Worker | null = null
-let workerJobId = 0
-const workerJobs = new Map<number, ParseWorkerJob>()
-
-function deliverParsedPayloads(payloads: unknown[]): void {
-  for (const payload of payloads) {
-    pendingInbound.push(payload)
-  }
-  scheduleFlush()
-}
-
-function fallbackParseWorkerJob(id: number): void {
-  const job = workerJobs.get(id)
-  if (!job) return
-  workerJobs.delete(id)
-  clearTimeout(job.timeout)
-  pendingInbound.push(job.data)
-  scheduleFlush()
-}
-
-function fallbackAllParseWorkerJobs(): void {
-  for (const id of Array.from(workerJobs.keys())) {
-    fallbackParseWorkerJob(id)
-  }
-  parseWorker?.terminate()
-  parseWorker = null
-}
-
-function initParseWorker(): Worker | null {
-  if (parseWorker) return parseWorker
-  if (typeof Worker === 'undefined') return null
-  try {
-    parseWorker = new Worker(
-      new URL('./workers/dashboard-ws.worker.ts', import.meta.url),
-    )
-    parseWorker.onmessage = (event) => {
-      const { id, payloads } = event.data as {
-        id: number
-        payloads: unknown[]
-      }
-      const job = workerJobs.get(id)
-      if (!job) return
-      workerJobs.delete(id)
-      clearTimeout(job.timeout)
-      deliverParsedPayloads(Array.isArray(payloads) ? payloads : [])
-    }
-    parseWorker.onerror = fallbackAllParseWorkerJobs
-    parseWorker.onmessageerror = fallbackAllParseWorkerJobs
-    return parseWorker
-  } catch {
-    return null
-  }
-}
 
 function scheduleFlush(): void {
   if (flushHandle) return
@@ -267,9 +206,12 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
     slices.add('execution')
     slices.add('goals')
   }
-  if (routeState.tab === 'workspace' && routeState.params.section === 'board') {
-    slices.add('board')
-  }
+  // Board rows are actor/filter scoped (`voter`, blind-vote policy, author and
+  // hearth filters) and are loaded through refreshBoard's HTTP query. The WS
+  // snapshot provider is route-scoped only, so subscribing the board slice here
+  // can hydrate the list with a different query immediately after the route HTTP
+  // refresh. Raw board SSE events still reach the client and schedule/increment
+  // board refreshes through sse-store.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
     if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
@@ -562,23 +504,10 @@ function processInboundMessage(data: string): void {
 
 function handleMessage(data: unknown): void {
   if (typeof data !== 'string') return
-  const worker = initParseWorker()
-  if (worker) {
-    const id = ++workerJobId
-    workerJobs.set(id, {
-      data,
-      timeout: setTimeout(() => {
-        fallbackParseWorkerJob(id)
-      }, DASHBOARD_WS_PARSE_TIMEOUT_MS),
-    })
-    try {
-      worker.postMessage({ id, data })
-    } catch {
-      fallbackParseWorkerJob(id)
-      parseWorker = null
-    }
-    return
-  }
+  // Inbound frames are parsed inline on the main thread. The PR-4.5 worker
+  // parse-offload path was retired when its source module
+  // (workers/dashboard-ws.worker.ts) was removed in dead-store sweep #18352;
+  // the worker had been failing to load and falling back here ever since.
   pendingInbound.push(data)
   scheduleFlush()
 }

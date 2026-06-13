@@ -71,12 +71,12 @@ Related RFCs:
 
 ## 1. Problem statement
 
-The literal string `"runtime"` is used today as a **boundary redaction label** for external surfaces (dashboard SSE, OAS bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. The label is **scattered as inline literals or local module-level constants** across `lib/cascade/` and `lib/keeper/` with no compiler-enforced SSOT.
+The literal string `"runtime"` is used today as a **boundary redaction label** for external surfaces (dashboard SSE, OAS bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. The label is **scattered as inline literals or local module-level constants** across `lib/runtime/` and `lib/keeper/` with no compiler-enforced SSOT.
 
 Direct measurement on `origin/main` (commit `aceefd562a`, 2026-05-19):
 
 ```
-$ rg -n '"runtime"' lib/cascade/ lib/keeper/ | wc -l
+$ rg -n '"runtime"' lib/runtime/ lib/keeper/ | wc -l
 ~31 hit
 ```
 
@@ -86,9 +86,9 @@ Decomposed by shape:
 
 | File | Line | Shape |
 |---|---|---|
-| `lib/cascade/cascade_runner.ml` | 412–413 | `~provider_id:"runtime" ~model_id:"runtime"` (Dashboard_oas_bridge.record_response) |
-| `lib/cascade/cascade_event_bridge.ml` | 247 | `"runtime", \`String "runtime"` (assoc emit) |
-| `lib/cascade/cascade_runtime_candidate.ml` | 295 | bare literal |
+| `lib/runtime/runtime_runner.ml` | 412–413 | `~provider_id:"runtime" ~model_id:"runtime"` (Dashboard_oas_bridge.record_response) |
+| `lib/runtime/runtime_event_bridge.ml` | 247 | `"runtime", \`String "runtime"` (assoc emit) |
+| `lib/runtime/runtime_runtime_candidate.ml` | 295 | bare literal |
 | `lib/keeper/keeper_agent_run.ml` | 763 | `let model = "runtime" in` |
 | `lib/keeper/keeper_generation_lineage.ml` | 120, 169 | `let model = "runtime" in` (2 sites) |
 | `lib/keeper/keeper_oas_checkpoint.ml` | 71 | record field `model = "runtime"` |
@@ -100,18 +100,18 @@ Decomposed by shape:
 
 | File | Line | Constant name |
 |---|---|---|
-| `lib/cascade/cascade_catalog_runtime_probe.ml` | 14–15 | `public_runtime_provider_label`, `public_runtime_model_label` |
-| `lib/cascade/cascade_observation.ml` | 49 | `public_runtime_model_label` |
-| `lib/cascade/cascade_attempt_liveness_observer.ml` | 34 | `public_runtime_provider_label` |
-| `lib/cascade/cascade_attempt_fsm.ml` | 556 | `public_runtime_provider_label` |
-| `lib/cascade/cascade_attempt_liveness_config.ml` | 92 | `runtime_candidate_key` |
+| `lib/runtime/runtime_catalog_runtime_probe.ml` | 14–15 | `public_runtime_provider_label`, `public_runtime_model_label` |
+| `lib/runtime/runtime_observation.ml` | 49 | `public_runtime_model_label` |
+| `lib/runtime/runtime_attempt_liveness_observer.ml` | 34 | `public_runtime_provider_label` |
+| `lib/runtime/runtime_attempt_fsm.ml` | 556 | `public_runtime_provider_label` |
+| `lib/runtime/runtime_attempt_liveness_config.ml` | 92 | `runtime_candidate_key` |
 | `lib/keeper/keeper_runtime_contract.ml` | 214 | `runtime_lane_label` |
 | `lib/keeper/keeper_turn_driver.ml` | 205 | `runtime_candidate_label` |
 | `lib/keeper/keeper_unified_turn_success.ml` | 8 | `runtime_lane_label` |
 | `lib/keeper/keeper_unified_turn.ml` | 18 | `runtime_lane_label` |
 | `lib/keeper/keeper_agent_result.ml` | 62 | `runtime_lane_label` |
 | `lib/keeper/keeper_hooks_oas.ml` | 48 | `runtime_lane_label` |
-| `lib/keeper/keeper_hooks_oas_types.ml` | 11 | `runtime_lane_label` |
+| `lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml` | 11 | `runtime_lane_label` |
 | `lib/keeper/keeper_unified_metrics_support.ml` | 79, 187 | `runtime_lane_label`, literal |
 | `lib/keeper/keeper_status_runtime.ml` | 13, 219 | array literal members |
 
@@ -125,7 +125,7 @@ Sites in `keeper_unified_metrics.mli` (lines 113, 141) are doc-comment mentions 
 
 ### Why this is a problem
 
-1. **No compiler enforcement.** A new Cascade or Keeper module can introduce `"runtime"` as an inline literal without any lint or type signal. The `feedback_runtime_lens_boundary_carve_out` regression (#15040 / #15070 / #15089) is the empirical case — three separate PRs reintroduced inline literals because the boundary discipline lived only in commit history and runbooks.
+1. **No compiler enforcement.** A new Runtime or Keeper module can introduce `"runtime"` as an inline literal without any lint or type signal. The `feedback_runtime_lens_boundary_carve_out` regression (#15040 / #15070 / #15089) is the empirical case — three separate PRs reintroduced inline literals because the boundary discipline lived only in commit history and runbooks.
 2. **Drift surface.** Group B's local constants encode the *same* policy at 12+ sites independently. Any future change to the redaction label (e.g., `"runtime"` → `"redacted"` for downstream observability tooling) requires a manual sweep across 23+ sites. This is the canonical *Scattered Hardcoded Defaults* anti-pattern.
 3. **Boundary ambiguity.** Without a typed surface, it is not visible at call sites *whether* a string is meant to cross the boundary (redact) or remain internal (real provider). Reviewers must trace data flow to verify. This makes Group B's local SSOTs especially fragile — they document a policy that cannot be enforced.
 
@@ -198,7 +198,7 @@ The two labels are *currently equal strings*. The private type still serves a pu
 
 ### 2.2 Module location
 
-`lib/types_boundary/` is a new sub-library directory. Rationale: keep the module out of `lib/cascade/` and `lib/keeper/` so neither subsystem owns the policy. A future RFC may move other boundary-redaction concerns (e.g., persona name redaction) here.
+`lib/types_boundary/` is a new sub-library directory. Rationale: keep the module out of `lib/runtime/` and `lib/keeper/` so neither subsystem owns the policy. A future RFC may move other boundary-redaction concerns (e.g., persona name redaction) here.
 
 If a new sub-library introduces a build-graph cycle with existing godfiles (RFC-0085 territory), PR-1 will fall back to placing the module at `lib/types/boundary_redaction.{ml,mli}` instead. The directory choice is **not load-bearing for the RFC's typed-surface guarantee**.
 
@@ -225,7 +225,7 @@ Replace Group A (inline literals) and Group B (local constants) with `Boundary_r
 - The classification is recorded in the PR-2 body as a table with reviewer cross-check expectation.
 
 **Split option**: If the codemod PR exceeds ~400 LoC or reviewer prefers smaller chunks, split into:
-- **PR-2a**: `lib/cascade/` sites (~6 files).
+- **PR-2a**: `lib/runtime/` sites (~6 files).
 - **PR-2b**: `lib/keeper/` sites (~12 files).
 - Split is a *reviewer-comfort* choice, not an *N-of-M workaround* — both halves land in the same sprint, neither half stands alone as a value claim.
 
@@ -267,8 +267,8 @@ Once PR-3 is merged, any future PR that adds an inline `"runtime"` literal at an
 |---|---|
 | PR-1 | Alcotest: `runtime_provider_label \|> to_string = "runtime"` and `runtime_model_label \|> to_string = "runtime"`. Compile-time: attempting `let x : Boundary_redaction.public_label = "foo"` outside the module fails the build. |
 | PR-2 | For each of the 23 sites: dashboard SSE / OAS bridge / keeper telemetry output byte-equality regression test. The boundary-emit byte stream must be identical to pre-codemod main. Regression count target: 0. |
-| PR-3 | Adding a test fixture that places `let _ = "runtime"` at `lib/cascade/foo.ml` causes a build failure with the lint rule error message. Removing the fixture restores the build. |
-| Overall | After PR-3 merge, `rg -n '"runtime"' lib/cascade/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_status_runtime.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |
+| PR-3 | Adding a test fixture that places `let _ = "runtime"` at `lib/runtime/foo.ml` causes a build failure with the lint rule error message. Removing the fixture restores the build. |
+| Overall | After PR-3 merge, `rg -n '"runtime"' lib/runtime/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_status_runtime.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |
 
 ---
 

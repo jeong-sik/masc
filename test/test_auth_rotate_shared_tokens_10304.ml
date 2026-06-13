@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** #10304 — pin the shared-token rotation contract.
 
     #9786 shipped detection only ([Auth.audit_token_uniqueness] +
-    boot-time WARN + Prometheus counter).  #10304 reports the
+    boot-time WARN + Otel_metric_store counter).  #10304 reports the
     detection fires again in production: 14 agents shared one token
     (3 distinct [token_hash_prefix] in one day).  The WARN message
     instructs operators to "rotate via Auth.create_token" but no
@@ -27,7 +27,7 @@ module Types = Masc_domain
        sorted by [token_hash_prefix] for stable log diffs. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* [generate_token] inside [Auth.create_token] / [rotate_shared_tokens]
    pulls from Mirage_crypto_rng — needs an explicit unix init in

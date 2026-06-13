@@ -267,7 +267,7 @@ let request_is_actionable (req : verification_request) =
 
     Prior implementation (#7544) combined [Time_compat.now ()] with
     [Hashtbl.hash (Unix.gettimeofday ())], which collided inside the
-    same millisecond. Now shared with [Coord_task]'s verification_id
+    same millisecond. Now shared with [Workspace_task]'s verification_id
     generation via [Random_id], so the algorithm is defined once. *)
 let generate_id () =
   Random_id.prefixed ~prefix:"vrf-" ~bytes:16
@@ -323,23 +323,25 @@ let evaluate_all output criteria =
   | [] -> Pass  (* No criteria = auto-pass *)
   | _ ->
       let results = List.map (evaluate_criterion output) criteria in
-      let fails = List.filter (function Fail _ -> true | _ -> false) results in
-      let partials = List.filter (function Partial _ -> true | _ -> false) results in
+      let fails = List.filter (function Fail _ -> true | Pass | Partial _ -> false) results in
+      let partials = List.filter (function Partial _ -> true | Pass | Fail _ -> false) results in
       if fails <> [] then
+        (* [fails] was filtered to [Fail _] only; [Pass]/[Partial] are dead. *)
         let reasons = List.filter_map (function
           | Fail r -> Some r
-          | _ -> None
+          | Pass | Partial _ -> None
         ) fails in
         Fail (String.concat "; " reasons)
       else if partials <> [] then
+        (* [partials] was filtered to [Partial _] only; [Pass]/[Fail] are dead. *)
         let scores = List.filter_map (function
           | Partial (s, _) -> Some s
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         let avg = List.fold_left (+.) 0.0 scores /. Float.of_int (List.length scores) in
         let reasons = List.filter_map (function
           | Partial (_, r) -> Some r
-          | _ -> None
+          | Pass | Fail _ -> None
         ) partials in
         Partial (avg, String.concat "; " reasons)
       else
@@ -354,10 +356,10 @@ let validate_cross_agent ~worker ~verifier =
 
 (** File-based storage *)
 
-let verifications_dir = Coord_verification_store.verifications_dir
+let verifications_dir = Workspace_verification_store.verifications_dir
 
 let request_path base_path req_id =
-  Coord_verification_store.request_path base_path req_id
+  Workspace_verification_store.request_path base_path req_id
 
 (* [list_requests] used to walk [verifications/*.json] on every dashboard
    refresh: one [Safe_ops.list_dir_safe] for the directory followed by
@@ -415,6 +417,22 @@ let save_request base_path req =
            req.id
            (Printexc.to_string exn))
 
+(* RFC-0221 §3.1: compensation for atomic submit. Remove a verification record
+   when the status commit it was written for did not land, so the record store
+   and [task_status] are never left disagreeing. A missing file is success
+   (idempotent), so the caller can compensate without first checking existence. *)
+let delete_request base_path req_id =
+  try
+    let path = request_path base_path req_id in
+    if Sys.file_exists path then Sys.remove path;
+    invalidate_list_requests_cache ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Error
+        (Printf.sprintf "delete_request %s: %s" req_id (Printexc.to_string exn))
+
 let load_request base_path req_id =
   let path = request_path base_path req_id in
   if Sys.file_exists path then
@@ -429,7 +447,7 @@ let load_request base_path req_id =
 let list_requests_uncached base_path =
   let surface = "verification" in
   let observe_drop ~reason =
-    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
       ~labels:[("surface", surface); ("reason", reason)] ()
   in
   let report_drop ~reason ~path ~detail =
@@ -547,17 +565,17 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
           | Ok _ -> Ok updated
           | Error e -> Error e
 
-(* Sentinel verifier recorded when auto_verify transitions a request to
+(* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
    dashboard projection so operators can distinguish rule-based passes
    from peer-agent verdicts ("operator:*") and peer keepers (bare names). *)
-let auto_verifier_sentinel = "auto"
+let auto_verifier_marker = "auto"
 
 let auto_verify ~base_path ~req_id =
   match load_request base_path req_id with
   | Error e -> Error e
   | Ok req ->
-      let has_custom = List.exists (function Custom _ -> true | _ -> false) req.criteria in
+      let has_custom = List.exists (function Custom _ -> true | Schema_match _ | Contains _ | Not_contains _ -> false) req.criteria in
       if has_custom then
         Error "Cannot auto-verify: custom criteria require agent judgment"
       else
@@ -565,7 +583,7 @@ let auto_verify ~base_path ~req_id =
         let verifier =
           match req.verifier with
           | Some _ as v -> v
-          | None -> Some auto_verifier_sentinel
+          | None -> Some auto_verifier_marker
         in
         let updated = { req with status = Completed verdict; verifier } in
         match save_request base_path updated with
@@ -627,9 +645,7 @@ let evidence_of_request (req : verification_request) : Yojson.Safe.t =
     ("request_id", `String req.id);
     ("task_id", `String req.task_id);
     ("worker", `String req.worker);
-    ("verifier", (match req.verifier with
-                  | Some v -> `String v
-                  | None -> `Null));
+    ("verifier", Json_util.string_opt_to_json req.verifier);
     ("criteria_counts", criteria_counts req.criteria);
   ]
 

@@ -114,8 +114,8 @@ let build_turn_context
         -> messages:Agent_sdk.Types.message list
         -> Keeper_agent_prompt_metrics.turn_prompt)
       ~(user_message : string)
-      ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(history_user_source : string)
       ~(is_retry : bool)
       ~(start_turn_count : int)
@@ -141,17 +141,7 @@ let build_turn_context
     in
     append_dynamic_context dynamic_context recent_failure_context
   in
-  let memory_episode_limit = 30 in
-  let memory_procedure_limit = 10 in
-  let memory_context =
-    Memory_hooks.render_memory_context
-      ~agent_name:meta.agent_name
-      ~config
-      ~episode_limit:memory_episode_limit
-      ~procedure_limit:memory_procedure_limit
-      ()
-    |> Option.value ~default:""
-  in
+  let memory_context = "" in
   let temporal_context =
     Masc_context_injector.render_temporal_summary shared_context
     |> Option.value ~default:""

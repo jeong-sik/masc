@@ -28,7 +28,7 @@ TURN_ID=""
 MODE="provider"
 SERVER_URL=""
 LIMIT=200
-REQUIRE_TOOL_CALL=0
+EXPECT_TOOL_CALL_LOG=0
 SELF_TEST=0
 
 usage() {
@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
     --mode) MODE="$2"; shift 2 ;;
     --server-url) SERVER_URL="${2%/}"; shift 2 ;;
     --limit) LIMIT="$2"; shift 2 ;;
-    --require-tool-call) REQUIRE_TOOL_CALL=1; shift ;;
+    --expect-tool-call-log) EXPECT_TOOL_CALL_LOG=1; shift ;;
     --self-test) SELF_TEST=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown flag: $1" >&2; usage; exit 64 ;;
@@ -88,27 +88,23 @@ if [[ "$SELF_TEST" = "1" ]]; then
     "$keeper" "$trace" "$turn" >"$receipt_path"
   manifest_path="$manifest_dir/$trace.jsonl"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_loaded",cascade_name:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_loaded",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",cascade_name:"fixture",status:"resolved",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false,requested_tool_names:["keeper_tool_search"],required_tool_names:["keeper_tool_search"],materialized_tool_names:["keeper_tool_search"],missing_required_tool_names_after_lane:[],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,requested_tool_names:["keeper_tool_search"],materialized_tool_names:["keeper_tool_search"],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",cascade_name:"fixture",status:"started",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:03Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:2,event:"provider_attempt_finished",cascade_name:"fixture",status:"provider_returned",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:03Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:2,event:"provider_attempt_finished",runtime_id:"fixture",status:"provider_returned",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$checkpoint_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:04Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_saved",cascade_name:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:$p,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:04Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"checkpoint_saved",runtime_id:null,status:"ok",decision:{},links:{receipt_path:null,checkpoint_path:$p,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$receipt_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",cascade_name:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"event_bus_correlated",cascade_name:null,status:"observed",decision:{correlation_id:"corr-self-test",run_id:"run-self-test",caused_by:null,overflow_imminent:null,context_compact_started_count:0,context_compacted_count:0,last_compaction:null},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
-  jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:07Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:1,event:"memory_injected",cascade_name:null,status:"skipped",decision:{memory_context_present:false,episode_limit:30,procedure_limit:10,existing_extra_system_context_present:false,existing_extra_system_context_chars:0},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
-  jq -cn --arg k "$keeper" --arg t "$trace" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:08Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:1,event:"memory_flushed",cascade_name:null,status:"success",decision:{episodes_flushed:0,procedures_flushed:0,duration_s:0.0},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"event_bus_correlated",runtime_id:null,status:"observed",decision:{correlation_id:"corr-self-test",run_id:"run-self-test",caused_by:null,overflow_imminent:null,context_compact_started_count:0,context_compacted_count:0,last_compaction:null},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$manifest_path"
   jq -cn --arg k "$keeper" --arg t "$trace" --arg p "$tool_log_path" --argjson turn "$turn" \
-    '{schema_version:1,ts:"2026-05-12T00:00:09Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",cascade_name:null,status:"success",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:$p}}' >>"$manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:00:09Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",runtime_id:null,status:"success",decision:{},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:$p}}' >>"$manifest_path"
   "$0" --base-path "$tmp" --keeper "$keeper" --trace-id "$trace" \
-    --turn-id "$turn" --mode provider --require-tool-call
+    --turn-id "$turn" --mode provider --expect-tool-call-log
   fail_keeper="runtime-truth-gate-timeout"
   fail_trace="trace-self-test-timeout"
   fail_turn="8"
@@ -121,17 +117,15 @@ if [[ "$SELF_TEST" = "1" ]]; then
     "$fail_keeper" "$fail_trace" "$fail_turn" >"$fail_receipt_path"
   fail_manifest_path="$fail_manifest_dir/$fail_trace.jsonl"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",cascade_name:"fixture",status:"resolved",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false,requested_tool_names:[],required_tool_names:[],materialized_tool_names:[],missing_required_tool_names_after_lane:[],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:00Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_lane_resolved",runtime_id:"fixture",status:"resolved",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,requested_tool_names:[],materialized_tool_names:[],resolved_lane:"inline"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",cascade_name:"fixture",status:"started",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:01Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_started",runtime_id:"fixture",status:"started",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_finished",cascade_name:"fixture",status:"timeout",decision:{cascade_engine:"masc_keeper_named_cascade",oas_dispatch_mode:"single_provider_agent_run",oas_internal_cascade_allowed:false,exception_kind:"outer_oas_timeout",error:"Timeout after 120.0s"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
-  jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:04Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:0,event:"memory_injected",cascade_name:null,status:"skipped",decision:{memory_context_present:false,episode_limit:30,procedure_limit:10},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:02Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"provider_attempt_finished",runtime_id:"fixture",status:"timeout",decision:{runtime_engine:"masc_keeper_named_runtime",oas_dispatch_mode:"single_provider_agent_run",oas_internal_runtime_allowed:false,exception_kind:"outer_oas_timeout",error:"Timeout after 120.0s"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --arg p "$fail_receipt_path" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",cascade_name:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:05Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"receipt_appended",runtime_id:null,status:"ok",decision:{},links:{receipt_path:$p,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   jq -cn --arg k "$fail_keeper" --arg t "$fail_trace" --argjson turn "$fail_turn" \
-    '{schema_version:1,ts:"2026-05-12T00:01:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",cascade_name:null,status:"error",decision:{terminal_reason_code:"api_error_timeout"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
+    '{schema_version:1,ts:"2026-05-12T00:01:06Z",keeper_name:$k,agent_name:null,trace_id:$t,generation:1,keeper_turn_id:$turn,oas_turn_count:null,event:"turn_finished",runtime_id:null,status:"error",decision:{terminal_reason_code:"api_error_timeout"},links:{receipt_path:null,checkpoint_path:null,tool_call_log_path:null}}' >>"$fail_manifest_path"
   "$0" --base-path "$tmp" --keeper "$fail_keeper" --trace-id "$fail_trace" \
     --turn-id "$fail_turn" --mode provider
   exit 0
@@ -203,7 +197,6 @@ if [[ "$MODE" = "provider" ]]; then
   require_event "provider_lane_resolved"
   require_event "provider_attempt_started"
   require_event "provider_attempt_finished"
-  require_event "memory_injected"
 
   attempt_started_count="$(printf '%s\n' "$turn_rows" | jq -s '
     [ .[] | select(.event == "provider_attempt_started") ] | length
@@ -237,19 +230,11 @@ if [[ "$MODE" = "provider" ]]; then
   fi
 
   printf '%s\n' "$turn_rows" | jq -e '
-    select(.event == "memory_injected")
-    | (.decision.memory_context_present | type == "boolean")
-      and (.decision.episode_limit | type == "number")
-      and (.decision.procedure_limit | type == "number")
-  ' >/dev/null || fail "memory_injected is missing memory injection summary fields"
-
-  printf '%s\n' "$turn_rows" | jq -e '
     select(.event == "provider_lane_resolved")
-    | .decision.cascade_engine == "masc_keeper_named_cascade"
+    | .decision.runtime_engine == "masc_keeper_named_runtime"
       and .decision.oas_dispatch_mode == "single_provider_agent_run"
-      and .decision.oas_internal_cascade_allowed == false
+      and .decision.oas_internal_runtime_allowed == false
       and (.decision.materialized_tool_names | type == "array")
-      and (.decision.missing_required_tool_names_after_lane | type == "array")
   ' >/dev/null || fail "provider_lane_resolved is missing keeper/OAS boundary or lane fields"
 fi
 
@@ -288,8 +273,8 @@ tool_log_path="$(printf '%s\n' "$turn_rows" | jq -r '
   | .links.tool_call_log_path // empty
 ' | tail -n1)"
 
-if [[ "$REQUIRE_TOOL_CALL" = "1" || "$tools_used_count" -gt 0 ]]; then
-  [[ -n "$tool_log_path" ]] || fail "tool use was present/required but turn_finished lacks tool_call_log_path"
+if [[ "$EXPECT_TOOL_CALL_LOG" = "1" || "$tools_used_count" -gt 0 ]]; then
+  [[ -n "$tool_log_path" ]] || fail "tool use was present/expected but turn_finished lacks tool_call_log_path"
   [[ -f "$tool_log_path" ]] || fail "linked tool-call log path missing: $tool_log_path"
 fi
 
@@ -305,8 +290,6 @@ if [[ -n "$SERVER_URL" ]]; then
     and ((.manifest_rows // []) | length) > 0
 	    and ((.linked_artifacts.receipts // []) | length) > 0
 	    and ((.turn_identity.manifest_keeper_turn_ids // []) | index($turn) != null)
-	    and ((.turn_identity.memory_injected_count // 0) > 0)
-	    and ((.memory.memory_injected_count // 0) > 0)
 	    and ((.turn_identity.receipt_appended_count // 0) > 0)
 	  ' >/dev/null || fail "runtime-trace API response does not cover manifest/receipt chain"
   log "runtime-trace API ok: $api_url"

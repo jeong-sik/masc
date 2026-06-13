@@ -11,9 +11,6 @@ let all_categories : A.category list =
     ConfidenceEvaluated;
     DegradationTriggered;
     DegradationRecovered;
-    SpeculativeBranchStarted;
-    SpeculativeBranchCompleted;
-    SpeculativeWinnerSelected;
     RecoveryClassified;
     RecoveryAttempted;
     RecoverySucceeded;
@@ -130,7 +127,7 @@ let test_make_entry_id_and_ts_set () =
 let test_entry_json_roundtrip () =
   let e =
     A.make_entry
-      ~category:A.SpeculativeWinnerSelected
+      ~category:A.RecoveryClassified
       ~keeper_name:"k1"
       ~payload:(`Assoc [ "winner", `String "branch-2" ])
       ~prev_hash:(Some "deadbeef")
@@ -145,7 +142,7 @@ let test_entry_json_roundtrip () =
       assert (e'.E.prev_hash = e.E.prev_hash);
       (* category_of_entry must lift the wire string back. *)
       (match A.category_of_entry e' with
-       | Some A.SpeculativeWinnerSelected -> ()
+       | Some A.RecoveryClassified -> ()
        | _ -> assert false)
   | Error msg ->
       Printf.eprintf "entry_of_json: %s\n" msg;

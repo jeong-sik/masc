@@ -1,4 +1,4 @@
-(** Meta_cognition_types — types and utilities for room-level meta-cognition.
+(** Meta_cognition_types — types and utilities for workspace-level meta-cognition.
 
     Shared type definitions and leaf utility functions used across the
     meta-cognition sub-modules.
@@ -105,7 +105,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_room
+  | Stagnant_workspace
 
 type interpretation = {
   primary_salience : salience;
@@ -133,9 +133,6 @@ val take : int -> 'a list -> 'a list
 
 (** Trim, drop empty, and dedup a list of strings (ASCII compare order). *)
 val unique_non_empty : string list -> string list
-
-(** [clamp ~min_v ~max_v v] clips [v] into the closed interval [[min_v, max_v]]. *)
-val clamp : min_v:'a -> max_v:'a -> 'a -> 'a
 
 val salience_to_string : salience -> string
 

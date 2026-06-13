@@ -16,9 +16,12 @@
 
     The phase-event publisher [publish_phase_lifecycle] is injected
     explicitly so this module does not need to know about the
-    [Keeper_lifecycle_events] / [Cascade_events] surface. *)
+    [Keeper_lifecycle_events] / [Runtime_events] surface. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 open Keeper_supervisor_types
 
@@ -85,7 +88,7 @@ let handle_crash_auto_pause
           keeper cannot run while paused and (b) other keepers see the
           claim and skip.  The released task ID is not separately audited
           here; [last_blocker] in [runtime] already carries the pause
-          reason, and Prometheus [keeper_paused_total] is incremented
+          reason, and Otel_metric_store [keeper_paused_total] is incremented
           below.  Discovered 2026-05-05 fleet-stuck. *)
      (match
         write_meta_with_merge
@@ -101,7 +104,7 @@ let handle_crash_auto_pause
       with
       | Ok () -> ()
       | Error err ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[ "keeper", entry.name; "phase", "blocker_pause" ]
           ();
@@ -116,17 +119,17 @@ let handle_crash_auto_pause
        "%s: %s pause: meta missing, cannot persist paused=true"
        entry.name
        reason_tag;
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_meta_missing" ]
        ()
    | Error err ->
      Log.Keeper.warn "%s: %s pause read_meta failed: %s" entry.name reason_tag err;
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_read_meta" ]
        ());
-  Prometheus.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
+  Otel_metric_store.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
   publish_phase_lifecycle
     ~phase:Keeper_state_machine.Paused
     entry.name
@@ -154,7 +157,7 @@ let handle_stale_storm_pause
       (Printf.sprintf
          "STALE STORM AUTO-PAUSED (count=%d in 6h window). Auto-resume is disabled \
           until the root cause clears; operator must resume manually via masc_keeper_up \
-          or API after investigating the underlying cascade/tool/runtime loop. See \
+          or API after investigating the underlying runtime/tool/runtime loop. See \
           issue #10765."
          count)
 ;;
@@ -179,7 +182,7 @@ let handle_provider_timeout_pause
          "PROVIDER TIMEOUT LOOP AUTO-PAUSED (count=%d). Supervisor will attempt \
           self-healing auto-resume with exponential back-off (see \
           MASC_KEEPER_AUTO_RESUME_INITIAL_SEC). Operator may also tune or reroute the \
-          cascade/model before resuming manually; restarting into the same slow-provider \
+          runtime/model before resuming manually; restarting into the same slow-provider \
           timeout loop is avoided by the back-off delay."
          count)
 ;;
@@ -205,10 +208,6 @@ let failure_reason_policy_decision
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Stale_turn { progress_seen = false }))
-  | Some (Keeper_registry.Tool_required_unsatisfied _) ->
-    Some
-      (Keeper_failure_policy.decide
-         Keeper_failure_policy.Required_tool_contract_violation)
   | Some (Keeper_registry.Ambiguous_partial_commit _) ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Ambiguous_partial_commit)
   | Some (Keeper_registry.Turn_consecutive_failures count) ->
@@ -218,13 +217,30 @@ let failure_reason_policy_decision
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
   | Some Keeper_registry.Turn_livelock_pause ->
     Some (Keeper_failure_policy.decide Keeper_failure_policy.Turn_livelock_pause)
-  | Some
-      ( Keeper_registry.Heartbeat_consecutive_failures _
-      | Keeper_registry.Stale_fleet_batch _
-      | Keeper_registry.Provider_runtime_error _
-      | Keeper_registry.Fiber_unresolved
-      | Keeper_registry.Exception _ )
-  | None ->
+  | Some (Keeper_registry.Provider_runtime_error { reason = Some reason; _ }) ->
+    (* Typed retryability: read the carried [runtime_exhaustion_reason]
+       directly instead of reparsing the stringified [code]. The former
+       [String.starts_with ~prefix:"runtime_exhausted_"] + [_ -> false]
+       reparse biased transient/connectivity reasons to non-retryable. *)
+    let retryable = Keeper_meta_contract.runtime_exhaustion_reason_retryable reason in
+    Some
+      (Keeper_failure_policy.decide
+         (Keeper_failure_policy.Runtime_exhausted { retryable }))
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; reason = None; _ }) ->
+    (match
+       Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ~code
+         ~detail
+     with
+     | Keeper_provider_runtime_boundary.Provider_timeout timeout ->
+       Some
+         (Keeper_failure_policy.decide
+            (Keeper_provider_runtime_boundary.provider_timeout_failure
+               ~strikes:None
+               ~liveness:Keeper_failure_policy.Unknown_liveness
+               timeout))
+     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure -> None)
+  | Some _ | None ->
     None
 ;;
 
@@ -235,7 +251,7 @@ let failure_reason_policy_decision
     Unlike [handle_crash_auto_pause] (which operates on a supervisor
     registry [entry] and receives an injected publisher), this
     function works with the [config] + [meta] pair available inside
-    turn logic (S3 overflow, S5 livelock, S4 cascade-exhausted).  It
+    turn logic (S3 overflow, S5 livelock, S4 runtime-exhausted).  It
     writes [paused=true] via [write_meta_with_merge] (heartbeat-field
     CAS merge, same as the overflow path), updates the registry,
     dispatches [Operator_pause] via
@@ -298,7 +314,7 @@ let handle_auto_pause_from_meta
   | Ok () ->
     (match metric_name with
      | Some name ->
-       Prometheus.inc_counter name ~labels:[ "keeper", meta.name ] ()
+       Otel_metric_store.inc_counter name ~labels:[ "keeper", meta.name ] ()
      | None -> ());
     Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
     Keeper_turn_helpers.dispatch_keeper_phase_event_checked
@@ -309,7 +325,7 @@ let handle_auto_pause_from_meta
     Log.Keeper.error "%s: %s" meta.name log_message;
     Ok paused_meta
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name
               ; "phase", Printf.sprintf "%s_pause" reason_tag

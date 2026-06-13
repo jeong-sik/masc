@@ -1,5 +1,5 @@
 [@@@warning "-32-69"]
-module Tui_decode = Masc_mcp.Tui_decode
+module Tui_decode = Masc.Tui_decode
 
 (** TUI shared types — split from masc_tui.ml (#3808) *)
 
@@ -57,13 +57,13 @@ type state = {
   mutable msg_history: msg_entry list;
   mutable msg_sending: bool;
   mutable detail_scroll: int;
-  room: string;
+  workspace: string;
   port: int;
   refresh_interval: float;
 }
 
 (** Create initial state *)
-let create_state ~room ~port ~refresh_interval = {
+let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
   tasks = [];
   events = [];
@@ -82,7 +82,7 @@ let create_state ~room ~port ~refresh_interval = {
   msg_history = [];
   msg_sending = false;
   detail_scroll = 0;
-  room;
+  workspace;
   port;
   refresh_interval;
 }

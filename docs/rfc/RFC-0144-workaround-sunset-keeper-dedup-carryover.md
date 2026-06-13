@@ -11,7 +11,7 @@ implementation_prs: []
 - **Status**: Active (frontmatter SSOT)
 - **Created**: 2026-05-20
 - **Owner**: keeper observability
-- **Predecessors**: masc-mcp #16389, masc-mcp #16470
+- **Predecessors**: masc #16389, masc #16470
 - **Evidence base**: `~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md` §Cluster E
 
 ## 1. Motivation
@@ -22,7 +22,7 @@ PR audit (2026-05-20) classified two recently-merged PRs as Cluster E (cap / ded
 - **No replacement RFC linked at merge time.**
 - **No `removal target: <date or RFC>` in PR body.**
 
-Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, Prometheus counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (AGENT-LLM-A.md "누적 메커니즘").
+Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, legacy metrics backend counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (AGENT-LLM-A.md "누적 메커니즘").
 
 This RFC declares both layers as *carryover* workarounds with explicit per-`error_kind` removal dependencies and a measurable sunset criterion.
 
@@ -51,7 +51,7 @@ PR #16389 `error_kind` arms map to known root work:
 | `Fiber_unresolved` | 18 | TBD — Eio fiber cancellation audit | Unassigned. |
 | `State_machine_guard` | (sub-threshold) | RFC-0072 keeper sub-FSM transitions typed | Implemented. Residual events likely indicate spec drift. |
 | `Expected_version_mismatch` | (sub-threshold) | CAS contention — design-bounded; expected non-zero | Acceptable; dedup retains for noise control until rate >50/day. |
-| `Cascade_resolution_failure` | (sub-threshold) | RFC-0058 cascade typed errors | Implemented. Re-audit after PR #15040/15070/15089 settle. |
+| `Runtime_resolution_failure` | (sub-threshold) | RFC-0058 runtime typed errors | Implemented. Re-audit after PR #15040/15070/15089 settle. |
 | `Unknown_phase_transition` | (sub-threshold) | RFC-0072 + KSM exhaustive arms | Implemented. Residual events = bug, file issue. |
 | `Auth_token_mismatch` | (sub-threshold) | Identity layer — outside this RFC | Track separately. |
 | `Other` | 59 | Re-classification work | This RFC's removal criterion does not apply; `Other` must shrink via re-classification, not via root fix. |
@@ -67,8 +67,8 @@ PR #16470 retry dedup applies uniformly to *all* tool retry failures. Its root-f
 
 | 추가 항목 | PR | 시그니처 | Override 부여 | removal target |
 |---|---|---|---|---|
-| `tool_call_pair_fabrication` counter | masc-mcp#15792 | Repair / Sanitize | Counter retroactive sunset | RFC-0145 §5 PR-1 머지 후 |
-| `compact_audit_drain_burst` counter | masc-mcp#15808 | Telemetry-as-fix | Counter retroactive sunset | RFC-0145 §5 PR-2 머지 후 |
+| `tool_call_pair_fabrication` counter | masc#15792 | Repair / Sanitize | Counter retroactive sunset | RFC-0145 §5 PR-1 머지 후 |
+| `compact_audit_drain_burst` counter | masc#15808 | Telemetry-as-fix | Counter retroactive sunset | RFC-0145 §5 PR-2 머지 후 |
 
 ## 4. Sunset criteria
 
@@ -84,7 +84,7 @@ When all three conditions hold, the `error_kind` arm is removed in a single PR t
 
 - Drops the variant from the `error_kind` sum.
 - Removes the classifier branch.
-- Drops the matching Prometheus label.
+- Drops the matching legacy metrics backend label.
 - Leaves the dedup layer intact for remaining arms.
 
 When the **last** arm is removed, the entire `keeper_recording_error_state` sub-library is deleted in the same PR that removes it.

@@ -15,7 +15,6 @@ type t =
   | Heartbeat_failures
   | Turn_failures
   | Provider_runtime_error of string
-  | Tool_required_unsatisfied of string
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
@@ -31,7 +30,7 @@ let to_wire = function
   | Stale_turn_timeout_no_progress
   | Stale_turn_timeout_noop ->
     (* Existing wire emission collapses the three sub-classes into one
-         cohort key. Preserved here so dashboards / Prometheus labels do
+         cohort key. Preserved here so dashboards / Otel_metric_store labels do
          not see a sudden cardinality change at PR-3 cutover. *)
     "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"
@@ -39,7 +38,6 @@ let to_wire = function
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
-  | Tool_required_unsatisfied code -> code
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
@@ -92,15 +90,13 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Provider_timeout_loop _ ->
     Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
-  | Keeper_registry.Tool_required_unsatisfied { code; _ } ->
-    Tool_required_unsatisfied code
   | Keeper_registry.Ambiguous_partial_commit
       { kind = Keeper_registry.Post_commit_timeout; _ } ->
     Ambiguous_partial_commit_post_commit_timeout
   | Keeper_registry.Ambiguous_partial_commit
       { kind = Keeper_registry.Post_commit_failure; _ } ->
     Ambiguous_partial_commit_post_commit_failure
-  | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
+  | Keeper_registry.Fiber_unresolved _ -> Fiber_unresolved
   | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
   | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
   | Keeper_registry.Exception msg -> Exception_unhandled msg

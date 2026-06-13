@@ -1,6 +1,6 @@
 (** Test Board_dispatch - routing and JSONL backend integration *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
@@ -82,7 +82,7 @@ let test_create_and_get_post () =
             "dispatch test post" fetched.content
 
 let test_keeper_signal_hook_failure_does_not_abort_create_post () =
-  Board_dispatch.set_keeper_board_signal_hook (fun _ ->
+  Board_dispatch.set_board_signal_hook (fun _ ->
       failwith "keeper signal hook failed");
   match
     Board_dispatch.create_post ~author:"test-agent"
@@ -95,7 +95,7 @@ let test_keeper_signal_hook_failure_does_not_abort_create_post () =
         "post must survive keeper wake failure" post.content
 
 let test_keeper_signal_hook_cancellation_propagates () =
-  Board_dispatch.set_keeper_board_signal_hook (fun _ ->
+  Board_dispatch.set_board_signal_hook (fun _ ->
       raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")));
   let raised = ref false in
   (try
@@ -109,7 +109,7 @@ let test_keeper_signal_hook_cancellation_propagates () =
 let test_dedup_hit_does_not_emit_post_created_fanout () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
-  Board_dispatch.set_keeper_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
   Board_dispatch.set_board_sse_hook (function
     | Board_dispatch.Post_created _ -> incr sse_post_created
     | _ -> ());

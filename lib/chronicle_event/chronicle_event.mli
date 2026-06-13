@@ -15,7 +15,7 @@
 
     - Pure (no Eio, no I/O, no global state).
     - Additive only at the variant level — adding a new
-      {!actor_kind} or {!event_type} requires a coordinated
+      {!actor_kind} or {!event_type} requires a synchronized
       dashboard release because the read model rejects unknown
       strings.
     - JSON-shape stable: serialisation uses a custom codec, not
@@ -145,7 +145,7 @@ type t = {
 (** {1 String round-trips for the variant taxonomies}
 
     These are exposed because they are useful in tests and in
-    Prometheus label code; the JSON codecs ({!to_yojson} / {!of_yojson})
+    Otel_metric_store label code; the JSON codecs ({!to_yojson} / {!of_yojson})
     use them internally. *)
 
 val actor_kind_to_string : actor_kind -> string

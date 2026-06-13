@@ -28,7 +28,7 @@ let run_git ~repo args =
     ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"dashboard branches git"
-    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
+    ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
     argv
 ;;
 
@@ -169,7 +169,7 @@ let list_entries ~config =
 
    The legacy [list_entries] above issues one [for-each-ref] and then
    three more git processes per branch ([current_branch],
-   [upstream_for_branch], [ahead_behind_for_branch]).  On masc-mcp
+   [upstream_for_branch], [ahead_behind_for_branch]).  On masc
    (~290 local branches) that fanned out to ~870 synchronous git
    subprocesses on the Eio main domain — measured at 30-53s for
    /api/v1/dashboard/branches.
@@ -233,7 +233,7 @@ let run_git_single_pass ~repo =
     ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"dashboard branches git single-pass"
-    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
+    ~timeout_sec:Env_config_runtime.Workspace_git.local_op_timeout_sec
     argv
 ;;
 

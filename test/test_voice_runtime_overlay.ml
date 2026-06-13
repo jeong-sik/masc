@@ -1,5 +1,5 @@
 open Alcotest
-module Voice = Masc_mcp.Voice_runtime_overlay
+module Voice = Voice_runtime_overlay
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
@@ -12,6 +12,59 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+  then (
+    Sys.readdir path |> Array.iter (fun entry -> rm_rf (Filename.concat path entry));
+    Unix.rmdir path)
+  else Sys.remove path
+;;
+
+let voice_session_test_base =
+  let path = Filename.temp_file "voice-runtime-overlay-" "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let () =
+  Unix.putenv "MASC_BASE_PATH" voice_session_test_base;
+  Unix.putenv "MASC_BASE_PATH_INPUT" voice_session_test_base;
+  at_exit (fun () -> rm_rf voice_session_test_base)
+;;
+
+let test_config () = Masc.Workspace.default_config voice_session_test_base
+
+let read_lines path =
+  if not (Sys.file_exists path)
+  then []
+  else (
+    let ic = open_in path in
+    let rec loop acc =
+      match input_line ic with
+      | line -> loop (line :: acc)
+      | exception End_of_file ->
+        close_in ic;
+        List.rev acc
+      | exception exn ->
+        close_in_noerr ic;
+        raise exn
+    in
+    loop [])
+;;
+
+let write_file path contents =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc contents)
+;;
+
+let mkdir_if_missing path =
+  if not (Sys.file_exists path) then Unix.mkdir path 0o755
 ;;
 
 let test_resolve_voice_aliases () =
@@ -36,18 +89,11 @@ let test_voice_auth_env_resolution () =
     (Voice.auth_env_name ~endpoint_api_key_env:"VOICE_PROXY_KEY" openai_compat)
 ;;
 
-let test_default_agent_voices_preserve_runtime_defaults () =
+let test_default_agent_voices_are_config_driven () =
   check
     (list (pair string string))
-    "agent voice defaults"
-    [ "llama", "Laura"
-    ; "agent_llm_a", "Sarah"
-    ; "agent_code", "George"
-    ; "provider_f", "Roger"
-    ; "agent_llm_a-api", "Sarah"
-    ; "agent_code-api", "George"
-    ; "provider_f-api", "Roger"
-    ]
+    "agent voice defaults are not hardcoded"
+    []
     (Voice.default_agent_voices ())
 ;;
 
@@ -64,10 +110,87 @@ let test_voice_mcp_env_no_longer_overrides_default_session_url () =
               (Voice.default_session_url ~path:"/mcp"))))))
 ;;
 
+let elevenlabs_tts_endpoint : Voice_config.endpoint =
+  { id = "test-tts"
+  ; kind = Voice_config.Elevenlabs_direct
+  ; base_url = Some "https://api.elevenlabs.io/v1"
+  ; mcp_url = None
+  ; health_url = None
+  ; api_key_env = Some "ELEVENLABS_API_KEY"
+  ; enabled = true
+  ; timeout_seconds = Some 30.0
+  ; max_retries = Some 2
+  }
+;;
+
+let default_voice_tuning : Voice_config.voice_tuning =
+  { stability = 0.55; similarity_boost = 0.75; style = 0.0 }
+;;
+
+let test_elevenlabs_voice_id = "testvoiceid0123456789"
+
+let test_tts_request_elevenlabs_accepts_voice_id () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:test_elevenlabs_voice_id
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok req ->
+    check
+      string
+      "url uses configured voice_id"
+      ("https://api.elevenlabs.io/v1/text-to-speech/" ^ test_elevenlabs_voice_id)
+      req.url
+  | Error err -> fail (Printf.sprintf "expected Ok, got Error: %s" err)
+;;
+
+let test_tts_request_elevenlabs_rejects_blank_voice () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:""
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok _ -> fail "expected Error for blank ElevenLabs voice"
+  | Error err ->
+    check
+      bool
+      "error explains configured voice_id requirement"
+      true
+      (String_util.contains_substring err "configured voice_id")
+;;
+
+let test_tts_request_elevenlabs_rejects_unknown_name () =
+  match
+    Voice.http_request_for_tts
+      elevenlabs_tts_endpoint
+      ~api_key:"test-key-123"
+      ~message:"hello"
+      ~voice:"Charlotte"
+      ~model:"eleven_multilingual_v2"
+      ~tuning:default_voice_tuning
+  with
+  | Ok _ -> fail "expected Error for unknown ElevenLabs voice name"
+  | Error err ->
+    check
+      bool
+      "error explains voice_id requirement"
+      true
+      (String_util.contains_substring err "voice_id"
+       && String_util.contains_substring err "Charlotte")
+;;
+
 let test_stt_request_elevenlabs_direct () =
-  let endpoint : Masc_mcp.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-stt"
-    ; kind = Elevenlabs_direct
+    ; kind = Voice_config.Elevenlabs_direct
     ; base_url = Some "https://api.elevenlabs.io/v1"
     ; mcp_url = None
     ; health_url = None
@@ -104,9 +227,9 @@ let test_stt_request_elevenlabs_direct () =
 ;;
 
 let test_stt_request_openai_compat () =
-  let endpoint : Masc_mcp.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-provider_d-stt"
-    ; kind = Openai_compat
+    ; kind = Voice_config.Openai_compat
     ; base_url = Some "https://api.provider_d.com/v1"
     ; mcp_url = None
     ; health_url = None
@@ -139,9 +262,9 @@ let test_stt_request_openai_compat () =
 ;;
 
 let test_stt_request_mcp_rejected () =
-  let endpoint : Masc_mcp.Voice_config.endpoint =
+  let endpoint : Voice_config.endpoint =
     { id = "test-mcp-stt"
-    ; kind = Voice_mcp
+    ; kind = Voice_config.Voice_mcp
     ; base_url = None
     ; mcp_url = Some "http://localhost:8936"
     ; health_url = None
@@ -162,6 +285,289 @@ let test_stt_request_mcp_rejected () =
   | Error _ -> ()
 ;;
 
+let make_keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String name
+          ; "trace_id", `String "voice-queue-test"
+          ; ( "tool_access"
+            , Json_util.json_string_list
+                [ "keeper_voice_speak" ] )
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("make_keeper_meta: " ^ err)
+;;
+
+(* Regression for the 2026-06-10 voice repeat incident: the speak tool is
+   synchronous again. With no TTS endpoint configured in the sandbox, the
+   failure must surface to the caller as status=error — never as a
+   fire-and-forget "queued" pseudo-success the model would mistake for
+   completed playback. *)
+let test_keeper_voice_speak_surfaces_tts_failure () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-sync-keeper" in
+    let raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
+        ~meta
+        ~name:"keeper_voice_speak"
+        ~args:(`Assoc [ "message", `String "hello from sync voice test" ])
+        ()
+    in
+    let json = Yojson.Safe.from_string raw in
+    check string "error status" "error"
+      Yojson.Safe.Util.(member "status" json |> to_string);
+    check string "failure reason surfaced" "no configured TTS endpoint"
+      Yojson.Safe.Util.(member "message" json |> to_string))
+;;
+
+let test_keeper_voice_speak_failure_writes_no_memory_row () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-memory-keeper" in
+    let message = "unspoken voice must not be recorded" in
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
+         ~meta
+         ~name:"keeper_voice_speak"
+         ~args:(`Assoc [ "message", `String message; "priority", `Int 3 ])
+         ());
+    let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+    let rows =
+      read_lines memory_path
+      |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
+    in
+    let row =
+      rows
+      |> List.find_opt (fun row ->
+        String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+        && String.equal row.text message)
+    in
+    check bool "no voice_output row for failed speak" true (Option.is_none row))
+;;
+
+let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
+  let config = test_config () in
+  let meta = make_keeper_meta "voice-fallback-memory-keeper" in
+  let message = "fallback speech should be durable" in
+  let raw =
+    Masc.Keeper_tool_voice_runtime.handle_voice_tool
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:(`Assoc [ "message", `String message ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  check string "text fallback status" "text_fallback"
+    Yojson.Safe.Util.(member "status" json |> to_string);
+  check bool "fallback memory recorded" true
+    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let rows =
+    read_lines memory_path
+    |> List.filter_map Masc.Keeper_memory_bank.parse_memory_bank_row
+  in
+  let row =
+    rows
+    |> List.find_opt (fun row ->
+      String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+      && String.equal row.kind "progress"
+      && String.equal row.text message)
+  in
+  match row with
+  | Some row ->
+    check string "fallback memory execution" "text_fallback"
+      Yojson.Safe.Util.(member "execution" row.json |> to_string)
+  | None -> fail "expected fallback voice_output progress memory row"
+;;
+
+let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-session-name-regression" in
+    let session_name = "shutup-shutup-shutup" in
+    let raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
+        ~meta
+        ~name:"keeper_voice_session_start"
+        ~args:(`Assoc [ "session_name", `String session_name ])
+        ()
+    in
+    let json = Yojson.Safe.from_string raw in
+    let voice = Yojson.Safe.Util.(member "voice" json |> to_string) in
+    check bool "session_name is not persisted as voice" true
+      (not (String.equal session_name voice));
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
+         ~meta
+         ~name:"keeper_voice_session_end"
+         ~args:(`Assoc [])
+         ()))
+;;
+
+let test_keeper_voice_session_end_reports_ended () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
+  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () ->
+    let config = test_config () in
+    let meta = make_keeper_meta "voice-session-end-keeper" in
+    ignore
+      (Masc.Keeper_tool_voice_runtime.handle_voice_tool
+         ~config
+         ~meta
+         ~name:"keeper_voice_session_start"
+         ~args:(`Assoc [ "session_name", `String "end regression" ])
+         ());
+    let end_raw =
+      Masc.Keeper_tool_voice_runtime.handle_voice_tool
+        ~config
+        ~meta
+        ~name:"keeper_voice_session_end"
+        ~args:(`Assoc [])
+        ()
+    in
+    let end_json = Yojson.Safe.from_string end_raw in
+    check string "session ended" "ended"
+      Yojson.Safe.Util.(member "status" end_json |> to_string);
+    (* The fire-and-forget speak queue was removed with the synchronous
+       speak contract; session_end no longer reports discarded jobs. *)
+    check bool "no queue discard field" true
+      (Yojson.Safe.Util.member "discarded_voice_queue_jobs" end_json = `Null))
+;;
+
+let test_playback_timeout_parsers_and_budget () =
+  check (option (float 0.001)) "afinfo duration line parses"
+    (Some 236.6)
+    (Voice_bridge_core.parse_afinfo_duration
+       "File: x.mp3\nestimated duration: 236.600 sec\naudio bytes: 1\n");
+  check (option (float 0.001)) "afinfo garbage is None" None
+    (Voice_bridge_core.parse_afinfo_duration "no duration here");
+  check (option (float 0.001)) "ffprobe bare seconds parses"
+    (Some 61.25)
+    (Voice_bridge_core.parse_ffprobe_duration "61.25\n");
+  check (option (float 0.001)) "ffprobe N/A is None" None
+    (Voice_bridge_core.parse_ffprobe_duration "N/A");
+  check (float 0.001) "known duration gets margin"
+    (100.0 +. Voice_bridge_core.playback_timeout_margin_sec)
+    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:(Some 100.0));
+  check (float 0.001) "unknown duration uses generous default"
+    Voice_bridge_core.unknown_duration_playback_timeout_sec
+    (Voice_bridge_core.playback_timeout_sec_for ~duration_sec:None)
+;;
+
+let write_local_playback_config () =
+  let config_path = Voice_config.config_path () in
+  mkdir_if_missing (Filename.dirname config_path);
+  write_file config_path
+    {|
+{
+  "tts": {
+    "default_model": "test-tts",
+    "default_voice": "test-voice",
+    "default_voice_settings": {
+      "stability": 0.5,
+      "similarity_boost": 0.75,
+      "style": 0.0
+    },
+    "agent_voices": {},
+    "agent_voice_settings": {},
+    "endpoints": [
+      {
+        "id": "test-tts",
+        "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      }
+    ]
+  },
+  "stt": {
+    "default_model": "test-stt",
+    "endpoints": [
+      {
+        "id": "test-stt",
+        "kind": "elevenlabs_direct",
+        "api_key_env": "ELEVENLABS_API_KEY",
+        "enabled": true
+      }
+    ]
+  },
+  "session": {
+    "endpoints": []
+  },
+  "local_playback": {
+    "enabled": true,
+    "agents": []
+  }
+}
+|}
+;;
+
+let test_playback_open_fallback_reports_handoff () =
+  Eio_main.run
+  @@ fun _env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  write_local_playback_config ();
+  let bin_dir = Filename.concat voice_session_test_base "fake-playback-bin" in
+  mkdir_if_missing bin_dir;
+  let fake_afplay = Filename.concat bin_dir "afplay" in
+  let fake_open = Filename.concat bin_dir "open" in
+  write_file fake_afplay "#!/bin/sh\nexit 1\n";
+  write_file fake_open "#!/bin/sh\nexit 0\n";
+  Unix.chmod fake_afplay 0o755;
+  Unix.chmod fake_open 0o755;
+  let audio_file = Filename.concat voice_session_test_base "voice-open-fallback.mp3" in
+  write_file audio_file "fake audio bytes";
+  with_env "PATH" (Some bin_dir) (fun () ->
+    match
+      Voice_bridge_core.run_local_playback
+        ~sw
+        ~agent_id:"sangsu"
+        ~message:"open fallback regression"
+        ~audio_file
+        ()
+    with
+    | `Opened _ -> ()
+    | `Dedup_hit -> fail "expected open handoff, got dedup"
+    | `Failed reason -> fail ("expected open handoff, got failed: " ^ reason)
+    | `Played _ -> fail "expected open handoff, got played"
+    | `Skipped reason -> fail ("expected open handoff, got skipped: " ^ reason))
+;;
+
 let () =
   run
     "voice_runtime_overlay"
@@ -169,9 +575,9 @@ let () =
       , [ test_case "resolve voice aliases" `Quick test_resolve_voice_aliases
         ; test_case "voice auth env resolution" `Quick test_voice_auth_env_resolution
         ; test_case
-            "default agent voices preserve runtime defaults"
+            "default agent voices are config driven"
             `Quick
-            test_default_agent_voices_preserve_runtime_defaults
+            test_default_agent_voices_are_config_driven
         ; test_case
             "voice mcp env no longer overrides default session url"
             `Quick
@@ -184,6 +590,52 @@ let () =
             test_stt_request_elevenlabs_direct
         ; test_case "stt request provider_d compat" `Quick test_stt_request_openai_compat
         ; test_case "stt request mcp rejected" `Quick test_stt_request_mcp_rejected
+        ] )
+    ; ( "tts"
+      , [ test_case
+            "tts request elevenlabs accepts voice_id"
+            `Quick
+            test_tts_request_elevenlabs_accepts_voice_id
+        ; test_case
+            "tts request elevenlabs rejects blank voice"
+            `Quick
+            test_tts_request_elevenlabs_rejects_blank_voice
+        ; test_case
+            "tts request elevenlabs rejects unknown name"
+            `Quick
+            test_tts_request_elevenlabs_rejects_unknown_name
+        ] )
+    ; ( "keeper_voice_speak"
+      , [ test_case
+            "keeper_voice_speak surfaces TTS failure"
+            `Quick
+            test_keeper_voice_speak_surfaces_tts_failure
+        ; test_case
+            "failed speak writes no memory row"
+            `Quick
+            test_keeper_voice_speak_failure_writes_no_memory_row
+        ; test_case
+            "keeper_voice_speak fallback records memory"
+            `Quick
+            test_keeper_voice_speak_text_fallback_records_memory_bank_row
+        ; test_case
+            "session_start does not store session_name as voice"
+            `Quick
+            test_keeper_voice_session_start_does_not_store_session_name_as_voice
+        ; test_case
+            "session_end reports ended without queue field"
+            `Quick
+            test_keeper_voice_session_end_reports_ended
+        ] )
+    ; ( "playback_timeout"
+      , [ test_case
+            "duration parsers and timeout budget"
+            `Quick
+            test_playback_timeout_parsers_and_budget
+        ; test_case
+            "open fallback reports handoff"
+            `Quick
+            test_playback_open_fallback_reports_handoff
         ] )
     ]
 ;;

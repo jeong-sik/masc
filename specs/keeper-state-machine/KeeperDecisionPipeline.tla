@@ -23,7 +23,7 @@
 (*                      |   | Decision_guard_ok                    | (mli mirror at keeper_registry.mli — type decision_stage_active) *)
 (*                      |   | Decision_gate_rejected               | *)
 (*                      |   | Decision_tool_policy_selected        | *)
-(*   cascade_state      | type cascade_state = ...                 | lib/keeper/keeper_registry.ml — type cascade_state *)
+(*   runtime_state      | type runtime_state = ...                 | lib/keeper/keeper_registry.ml — type runtime_state *)
 (*   measurement_bound  | observation.measurement_bound : bool     | record on observation *)
 (*                                                                         *)
 (* Authoritative write points (lib/keeper/keeper_registry.ml).             *)
@@ -51,12 +51,12 @@
 (*   runtime drift.                                                        *)
 (*                                                                         *)
 (* Scope projection: this spec is the per-turn DECISION lane only --       *)
-(*   - sibling KeeperCascadeLifecycle covers cascade_state for the same    *)
+(*   - sibling KeeperRuntimeLifecycle covers runtime_state for the same    *)
 (*     turn (selecting / trying / done / exhausted),                       *)
 (*   - sibling KeeperConditionsGovernPhase covers the divergent-conditions *)
 (*     handoff signal that runs orthogonally.                              *)
 (*   The full keeper lifecycle FSM (Offline / Running / Crashed / etc.)    *)
-(*   in lib/keeper/keeper_state_machine.ml is OUT OF SCOPE here.           *)
+(*   in lib/keeper_registry/keeper_state_machine.ml is OUT OF SCOPE here.     *)
 (*                                                                         *)
 (* Spec evolution note: an earlier draft modelled a Thompson/tool_count    *)
 (* feedback loop. The runtime no longer carries that information on the    *)
@@ -72,20 +72,20 @@ VARIABLES
     turn_live,          \* current_turn_observation = Some _
     turn_phase,         \* Keeper_registry.turn_phase
     decision_stage,     \* Keeper_registry.decision_stage
-    cascade_state,      \* Keeper_registry.cascade_state
+    runtime_state,      \* Keeper_registry.runtime_state
     measurement_bound   \* mark_turn_measurement already consumed
 
-vars == <<turn_live, turn_phase, decision_stage, cascade_state, measurement_bound>>
+vars == <<turn_live, turn_phase, decision_stage, runtime_state, measurement_bound>>
 
 TurnPhaseSet == {"idle", "prompting", "routing", "executing", "compacting", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
-CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
+RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
-    "CascadeTrying",
+    "RuntimeTrying",
     "GateRejected",
     "RetryAfterCompaction",
     "FinishTurn"
@@ -96,7 +96,7 @@ InvariantSet == {
     "GuardOkRequiresMeasurement",
     "DecisionBoundaryRequiresMeasurement",
     "GateRejectedRequiresFinalizing",
-    "NonIdleCascadeRequiresDecisionBoundary",
+    "NonIdleRuntimeRequiresDecisionBoundary",
     "SelectingRequiresPrompting"
 }
 
@@ -104,14 +104,14 @@ TypeOK ==
     /\ turn_live \in BOOLEAN
     /\ turn_phase \in TurnPhaseSet
     /\ decision_stage \in DecisionSet
-    /\ cascade_state \in CascadeSet
+    /\ runtime_state \in RuntimeSet
     /\ measurement_bound \in BOOLEAN
 
 Init ==
     /\ turn_live = FALSE
     /\ turn_phase = "idle"
     /\ decision_stage = "undecided"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ measurement_bound = FALSE
 
 StartTurn ==
@@ -119,17 +119,17 @@ StartTurn ==
     /\ turn_live' = TRUE
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
 
 BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "undecided"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
-    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, cascade_state>>
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, runtime_state>>
 
 GuardOk ==
     /\ turn_live
@@ -137,29 +137,29 @@ GuardOk ==
     /\ measurement_bound
     /\ decision_stage = "undecided"
     /\ decision_stage' = "guard_ok"
-    /\ UNCHANGED <<turn_live, turn_phase, cascade_state, measurement_bound>>
+    /\ UNCHANGED <<turn_live, turn_phase, runtime_state, measurement_bound>>
 
 \* Runtime may surface policy selection from undecided or from guard_ok, but
 \* the measurement is already bound by the time the policy is committed.
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
-    /\ cascade_state' = "selecting"
+    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
 \* Entering the provider attempt preserves the decision stage but advances the
-\* cascade lane into the live trying state.
-CascadeTrying ==
+\* runtime lane into the live trying state.
+RuntimeTrying ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "tool_policy_selected"
-    /\ cascade_state = "selecting"
+    /\ runtime_state = "selecting"
     /\ turn_phase' = "executing"
-    /\ cascade_state' = "trying"
+    /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
 \* Guards short-circuit during pre_tool_use while the live attempt is trying.
@@ -167,10 +167,10 @@ GateRejected ==
     /\ turn_live
     /\ turn_phase = "executing"
     /\ decision_stage = "tool_policy_selected"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
     /\ decision_stage' = "gate_rejected"
-    /\ UNCHANGED <<turn_live, cascade_state, measurement_bound>>
+    /\ UNCHANGED <<turn_live, runtime_state, measurement_bound>>
 
 \* Overflow retry resets the decision lane to a fresh post-guard posture.
 RetryAfterCompaction ==
@@ -178,7 +178,7 @@ RetryAfterCompaction ==
     /\ turn_phase = "compacting"
     /\ decision_stage = "tool_policy_selected"
     /\ decision_stage' = "guard_ok"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ turn_phase' = "prompting"
     /\ UNCHANGED <<turn_live, measurement_bound>>
 
@@ -188,7 +188,7 @@ FinishTurn ==
     /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
 
 Next ==
@@ -196,7 +196,7 @@ Next ==
     \/ BindMeasurement
     \/ GuardOk
     \/ SelectToolPolicy
-    \/ CascadeTrying
+    \/ RuntimeTrying
     \/ GateRejected
     \/ RetryAfterCompaction
     \/ FinishTurn
@@ -208,7 +208,7 @@ NoLiveTurnClearsDecision ==
     ~turn_live =>
         /\ turn_phase = "idle"
         /\ decision_stage = "undecided"
-        /\ cascade_state = "idle"
+        /\ runtime_state = "idle"
         /\ ~measurement_bound
 
 IdleRequiresUndecided ==
@@ -219,7 +219,7 @@ GuardOkRequiresMeasurement ==
         /\ turn_live
         /\ turn_phase = "prompting"
         /\ measurement_bound
-        /\ cascade_state = "idle"
+        /\ runtime_state = "idle"
 
 DecisionBoundaryRequiresMeasurement ==
     decision_stage \in {"guard_ok", "tool_policy_selected", "gate_rejected"} =>
@@ -231,13 +231,13 @@ GateRejectedRequiresFinalizing ==
         /\ turn_live
         /\ turn_phase = "finalizing"
 
-NonIdleCascadeRequiresDecisionBoundary ==
-    cascade_state \in {"selecting", "trying", "done", "exhausted"} =>
+NonIdleRuntimeRequiresDecisionBoundary ==
+    runtime_state \in {"selecting", "trying", "done", "exhausted"} =>
         /\ turn_live
         /\ decision_stage \in {"tool_policy_selected", "gate_rejected"}
 
 SelectingRequiresPrompting ==
-    cascade_state = "selecting" =>
+    runtime_state = "selecting" =>
         /\ turn_live
         /\ turn_phase = "prompting"
 
@@ -248,7 +248,7 @@ Safety ==
     /\ GuardOkRequiresMeasurement
     /\ DecisionBoundaryRequiresMeasurement
     /\ GateRejectedRequiresFinalizing
-    /\ NonIdleCascadeRequiresDecisionBoundary
+    /\ NonIdleRuntimeRequiresDecisionBoundary
     /\ SelectingRequiresPrompting
 
 DecisionEventuallyClears ==
@@ -260,11 +260,11 @@ Liveness ==
 BugSelectWithoutMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ decision_stage = "undecided"
     /\ ~measurement_bound
     /\ decision_stage' = "tool_policy_selected"
-    /\ cascade_state' = "selecting"
+    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound>>
 
 SpecBuggy == Init /\ [][Next \/ BugSelectWithoutMeasurement]_vars /\ WF_vars(FinishTurn)

@@ -48,7 +48,7 @@ type keeper =
 type response =
   { keepers : keeper list
   ; cycle : int
-  ; room : string option
+  ; workspace : string option
   ; generated_at : string        (* ISO-8601 UTC *)
   ; fetch_status : fetch_status
   }
@@ -126,7 +126,7 @@ let keeper_of_yojson json =
 let response_of_yojson json =
   { keepers = list_field keeper_of_yojson json "keepers"
   ; cycle = int_field json "cycle"
-  ; room = string_opt_field json "room"
+  ; workspace = string_opt_field json "workspace"
   ; generated_at = string_field json "generated_at"
   ; fetch_status = Fetch_fresh
   }
@@ -151,7 +151,7 @@ let fetch_status_reason = function
 let fixture : response =
   { keepers = []
   ; cycle = 0
-  ; room = None
+  ; workspace = None
   ; generated_at = ""
   ; fetch_status = Fetch_pending
   }

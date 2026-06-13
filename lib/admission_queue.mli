@@ -1,12 +1,12 @@
 (** Admission_queue — MASC-layer admission observability for inference calls.
 
     Current runtime mode is passthrough: provider-level throttling and retry
-    ownership live in the OAS cascade layer. This module still records
+    ownership live in the OAS runtime layer. This module still records
     MASC-visible inflight state, host-resource rejection, and the configured
     capacity hint used by dashboards.
 
     The waiter metadata and priority helpers are retained as observability
-    scaffolding for the RFC-0026 cascade-layer admission router. They are not
+    scaffolding for the RFC-0026 runtime-layer admission router. They are not
     an active MASC-side scheduler in the current call path.
 
     @since 3.0.0 *)
@@ -14,7 +14,7 @@
 (** Metadata carried per waiter — for observability, not scheduling. *)
 type waiter_info = {
   keeper_name : string;
-  cascade_name : Cascade_name.t;
+  runtime_id : string;
   enqueue_ts : float;
   priority : Llm_provider.Request_priority.t;
 }
@@ -39,20 +39,20 @@ val with_permit :
   ?wait_timeout_sec:float ->
   priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
-  cascade_name:Cascade_name.t ->
+  runtime_id:string ->
   (unit -> 'a) ->
   ('a, [> `Host_resource_saturated of string ]) result
 (** Run [f] in passthrough mode and record inflight observation for metrics
     and snapshots. Returns [Error (`Host_resource_saturated msg)] if host FD
     count exceeds the safety threshold. Otherwise returns [Ok (f ())].
 
-    No MASC-side concurrency gate is applied here; OAS cascade owns provider
+    No MASC-side concurrency gate is applied here; OAS runtime owns provider
     capacity, retry, and timeout behavior. *)
 
 val try_with_permit :
   priority:Llm_provider.Request_priority.t ->
   keeper_name:string ->
-  cascade_name:Cascade_name.t ->
+  runtime_id:string ->
   (unit -> 'a) ->
   'a option
 (** Non-blocking variant. Returns [None] if host resources are saturated. *)

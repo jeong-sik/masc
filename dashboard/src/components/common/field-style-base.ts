@@ -1,10 +1,9 @@
 /**
  * Form-field base class string.
  *
- * Two component files (`credential-settings.ts`, `keeper-config-panel.ts`)
- * each shipped a byte-identical
+ * `keeper-config-panel.ts` used this byte-identical
  * `const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'`
- * and used it for `<input>` / `<select>` / `<textarea>` elements with
+ * value for `<input>` / `<select>` / `<textarea>` elements with
  * `class="${fieldStyle}"` (and a couple of `${fieldStyle} resize-y …`
  * extensions for textarea variants).
  *

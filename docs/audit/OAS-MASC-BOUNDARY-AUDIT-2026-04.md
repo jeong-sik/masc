@@ -10,7 +10,7 @@
 
 ## 1. Purpose
 
-Map the *current* coupling between MASC (Multi-Agent Streaming Coordination, this repo) and OAS (Open Agent SDK, external `Oas.*` package). Verify that the intended **3-layer boundary discipline** (§3) is upheld, and enumerate the modules that violate, blur, or test it.
+Map the *current* coupling between MASC (Multi-Agent Shared Context, this repo) and OAS (Open Agent SDK, external `Oas.*` package). Verify that the intended **3-layer boundary discipline** (§3) is upheld, and enumerate the modules that violate, blur, or test it.
 
 This document is a *survey*, not a design proposal. Design changes that follow from the survey are out of scope (each one needs its own RFC).
 
@@ -52,7 +52,7 @@ Source coverage:
 |---|---|---|---|
 | **A. Upstream OAS SDK** | `Oas.Agent`, `Oas.Hooks`, `Oas.Tool`, `Oas.Error`, `Oas.Types.inference_telemetry` | OAS → nothing MASC-specific | **No `masc_` / `Masc.` references**. Memory: `feedback_oas-must-not-know-masc`. |
 | **B. MASC-side OAS adapter** | `lib/masc_oas_bridge`, `lib/oas_event_bridge`, `lib/oas_log_bridge`, `lib/oas_worker*.ml`, `lib/keeper/keeper_hooks_oas`, `lib/keeper/keeper_tools_oas` | both directions | Bidirectional translation; converts `Oas.Types.*` ↔ MASC types. |
-| **C. MASC core** | `lib/keeper/keeper_run_tools`, `lib/coord/*`, `lib/server/*`, `lib/dashboard/*` | MASC → A only via B | Direct `Oas.*` import permitted only inside Layer B. Layer C should call helpers in Layer B (e.g. `Masc_oas_bridge.run_with_caller`). |
+| **C. MASC core** | `lib/keeper/keeper_run_tools`, `lib/workspace/*`, `lib/server/*`, `lib/dashboard/*` | MASC → A only via B | Direct `Oas.*` import permitted only inside Layer B. Layer C should call helpers in Layer B (e.g. `Masc_oas_bridge.run_with_caller`). |
 
 The audit checks (a) Layer A purity, (b) Layer B's coverage, (c) Layer C's usage discipline.
 
@@ -77,7 +77,7 @@ val run_with_caller :
   ('a, Oas.Error.sdk_error) result
 ```
 
-Every OAS-bound operation in MASC core *should* go through `run_with_caller` so the per-caller timeout label is attached to Prometheus counters. Confirmed: the `caller` parameter is a typed enum (`Env_config_oas_bridge.caller`), not a string — caller-typo defenses are real.
+Every OAS-bound operation in MASC core *should* go through `run_with_caller` so the per-caller timeout label is attached to Otel_metric_store counters. Confirmed: the `caller` parameter is a typed enum (`Env_config_oas_bridge.caller`), not a string — caller-typo defenses are real.
 
 **Evidence**: `Caller of "unknown" for backwards compatibility` in the `.mli` — backward-compat path exists but is documented and labelled distinctly. No silent default.
 
@@ -91,9 +91,9 @@ Routes OAS structured logs into the MASC log sink with provider/model labels. Sy
 
 #### 4.2.4 `lib/oas_worker*.ml` (~30 files) — adapter sprawl — RISK
 
-`oas_worker.ml` (95 references) is the largest single MASC-side OAS user. Its sub-modules (`oas_worker_exec`, `oas_worker_exec_agent`, `oas_worker_exec_checkpoint`, `oas_worker_exec_transport`, `oas_worker_named*`, `oas_worker_cascade`) are an *agent-runtime translation layer* between OAS `Agent.run` semantics and MASC's keeper turn loop.
+`oas_worker.ml` (95 references) is the largest single MASC-side OAS user. Its sub-modules (`oas_worker_exec`, `oas_worker_exec_agent`, `oas_worker_exec_checkpoint`, `oas_worker_exec_transport`, `oas_worker_named*`, `oas_worker_runtime`) are an *agent-runtime translation layer* between OAS `Agent.run` semantics and MASC's keeper turn loop.
 
-The sprawl is justified by the surface area of `Oas.Agent.run` (cascade fallback, named-error variants, transport pluggability), but it is **not a single boundary** — it is a fan-out. A future reader cannot answer "where does MASC call OAS?" with a single file. Suggest follow-up: a `lib/oas_worker/dune` sub-library + a single re-export module (`Keeper_turn_driver.t`) so Layer C consumers see one symbol.
+The sprawl is justified by the surface area of `Oas.Agent.run` (runtime fallback, named-error variants, transport pluggability), but it is **not a single boundary** — it is a fan-out. A future reader cannot answer "where does MASC call OAS?" with a single file. Suggest follow-up: a `lib/oas_worker/dune` sub-library + a single re-export module (`Keeper_turn_driver.t`) so Layer C consumers see one symbol.
 
 #### 4.2.5 `lib/keeper/keeper_hooks_oas`, `lib/keeper/keeper_tools_oas` — hook factories — GOOD
 

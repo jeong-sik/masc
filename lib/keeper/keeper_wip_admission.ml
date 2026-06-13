@@ -59,9 +59,12 @@ let task_repo ~default_repo (task : Masc_domain.task) =
   ignore task;
   default_repo
 
-let scope_of_task ~default_repo (task : Masc_domain.task) =
+let scope_of_task ?(task_goal_index = Hashtbl.create 0) ~default_repo (task : Masc_domain.task) =
+  let goal_id =
+    try Some (List.hd (Hashtbl.find task_goal_index task.id)) with Not_found -> None
+  in
   { repo = task_repo ~default_repo task
-  ; goal_id = task.goal_id
+  ; goal_id
   ; category = title_category task.title
   }
 
@@ -92,13 +95,13 @@ let task_is_active_wip (task : Masc_domain.task) =
   | Masc_domain.Done _
   | Masc_domain.Cancelled _ -> false
 
-let active_item_of_task ~default_repo (task : Masc_domain.task) =
-  { id = task.id; scope = scope_of_task ~default_repo task }
+let active_item_of_task ?task_goal_index ~default_repo (task : Masc_domain.task) =
+  { id = task.id; scope = scope_of_task ?task_goal_index ~default_repo task }
 
-let active_items_of_tasks ~default_repo tasks =
+let active_items_of_tasks ?task_goal_index ~default_repo tasks =
   tasks
   |> List.filter task_is_active_wip
-  |> List.map (active_item_of_task ~default_repo)
+  |> List.map (active_item_of_task ?task_goal_index ~default_repo)
 
 type reject_reason =
   | Global_cap

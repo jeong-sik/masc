@@ -441,7 +441,7 @@ let json_string ?(default = "") key json =
   | `String s -> s
   | _ -> default
 
-(* Small LLMs (including some keepers under the local cascade) routinely
+(* Small LLMs (including some keepers under the local runtime) routinely
    stringify numeric tool-call arguments: max_results:"0.0", offset:"100.0",
    timeout_sec:"0.0". The JSON schema says "number" but the wire form is a
    string. Prior to 2026-04-18 these fell through to [default] (0), which

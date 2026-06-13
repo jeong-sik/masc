@@ -51,7 +51,7 @@ class GateClient(GateClientBase):
             "channel": "telegram",
             "channel_user_id": str(user_id),
             "channel_user_name": username,
-            "channel_room_id": str(chat_id),
+            "channel_workspace_id": str(chat_id),
         }
 
     async def send_telegram_message(

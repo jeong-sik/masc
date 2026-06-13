@@ -50,8 +50,8 @@ fn normalize_message_event_type(raw: &str) -> &str {
     match raw {
         "masc/broadcast" => "broadcast",
         "masc/heartbeat" => "heartbeat",
-        "masc/agent_joined" => "agent_joined",
-        "masc/agent_left" => "agent_left",
+        "masc/agent_bound" => "agent_bound",
+        "masc/agent_unbound" => "agent_unbound",
         "masc/task_update" => "task_update",
         _ => raw,
     }
@@ -125,7 +125,7 @@ pub fn poll_masc_events(
             "heartbeat" => {
                 log::debug!("MASC heartbeat received");
             }
-            "agent_joined" => {
+            "agent_bound" => {
                 let agent = extract_field(&data, "agent_name")
                     .or_else(|| extract_field(&data, "agent"))
                     .unwrap_or("unknown");
@@ -134,7 +134,7 @@ pub fn poll_masc_events(
                 let summary = format!("{} joined", agent);
                 event_log.entries.push(MascLogEntry {
                     timestamp: now,
-                    event_type: "agent_joined".to_string(),
+                    event_type: "agent_bound".to_string(),
                     summary: summary.clone(),
                 });
 
@@ -146,7 +146,7 @@ pub fn poll_masc_events(
                     event_log.agent_count
                 );
             }
-            "agent_left" => {
+            "agent_unbound" => {
                 let agent = extract_field(&data, "agent_name")
                     .or_else(|| extract_field(&data, "agent"))
                     .unwrap_or("unknown");
@@ -155,7 +155,7 @@ pub fn poll_masc_events(
                 let summary = format!("{} left", agent);
                 event_log.entries.push(MascLogEntry {
                     timestamp: now,
-                    event_type: "agent_left".to_string(),
+                    event_type: "agent_unbound".to_string(),
                     summary: summary.clone(),
                 });
 
@@ -328,7 +328,7 @@ fn update_monitor_agents(_count: u32, _summary: &str) {
     }
 }
 
-/// Update the Monitor panel "Room Activity" event feed.
+/// Update the Monitor panel "Workspace Activity" event feed.
 fn update_monitor_events(_summary: &str) {
     #[cfg(target_arch = "wasm32")]
     {

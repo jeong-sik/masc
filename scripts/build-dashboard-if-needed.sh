@@ -83,8 +83,12 @@ if needs_rebuild; then
     if [ "$log_file" != "/dev/null" ]; then
       rm -f "$log_file"
     fi
-    echo "[dashboard] Build failed (non-fatal)." >&2
-    exit 0
+    echo "[dashboard] Build FAILED. Dashboard SPA is stale — fix vite errors or pass --non-fatal." >&2
+    if [[ "${MASC_DASHBOARD_BUILD_NON_FATAL:-}" == "1" ]]; then
+      echo "[dashboard] Continuing (MASC_DASHBOARD_BUILD_NON_FATAL=1)." >&2
+      exit 0
+    fi
+    exit 1
   fi
   tail -n 6 "$log_file" >&2 || true
   if [ "$log_file" != "/dev/null" ]; then

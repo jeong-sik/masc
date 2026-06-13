@@ -3,7 +3,7 @@
     Round-trip property for every outcome variant, wire-format tagged-union
     shape, parse error paths, and smart-constructor invariants. *)
 
-module A = Masc_mcp.Attribution
+module A = Attribution
 
 let evidence_sample : Yojson.Safe.t =
   `Assoc
@@ -37,7 +37,7 @@ let test_roundtrip_passed () =
 
 let test_roundtrip_policy_failed () =
   let t =
-    A.policy_failed ~origin:Det ~gate:"worker_dev_tools" ~evidence:`Null
+    A.policy_failed ~origin:Det ~gate:"exec_policy" ~evidence:`Null
       ~reason:"command not allowed"
   in
   let json = A.to_yojson t in

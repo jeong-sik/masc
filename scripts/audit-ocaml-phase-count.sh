@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # audit-ocaml-phase-count.sh — detect OCaml docstring/comment mentions
-# of "N-state" / "N-phase" / "N phases" in lib/keeper/*.{ml,mli} that
+# of "N-state" / "N-phase" / "N phases" in keeper FSM source files that
 # disagree with the concrete `type phase` constructor count reached from
 # keeper_state_machine.ml.
 #
@@ -15,13 +15,13 @@
 #
 # Rule (mirrors audit-tla-phase-count.sh, OCaml comment syntax):
 #   - SSOT: resolve the concrete `phase` constructor source from
-#     lib/keeper/keeper_state_machine.ml, then count `  | <CamelCase>`
+#     lib/keeper_registry/keeper_state_machine.ml, then count `  | <CamelCase>`
 #     constructors between `type phase =` and the next blank line.
-#   - Sweep `lib/keeper/*.{ml,mli}` for `\b(\d{1,2})[ -]state\b` and
+#   - Sweep keeper FSM source files for `\b(\d{1,2})[ -]state\b` and
 #     `\b(\d{1,2})[ -]phase(s)?\b` inside comment lines (`(*`/`(**` or
 #     continuation lines of a comment block).
 #   - Range filter [SSOT-3 .. SSOT+5]: out-of-range numbers refer to
-#     sibling FSMs (cascade=6, decision=5, turn-phase=7, etc.) and
+#     sibling FSMs (runtime=6, decision=5, turn-phase=7, etc.) and
 #     are intentionally not flagged.
 #   - Qualifier whitelist: if the line contains `non-`, `fragment`,
 #     `projection`, `subset`, `relevant`, `out of scope`, `models`,
@@ -45,8 +45,20 @@ for tool in rg awk grep; do
 done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-KEEPER_DIR="${REPO_ROOT}/lib/keeper"
-SSOT_FILE="${REPO_ROOT}/lib/keeper/keeper_state_machine.ml"
+KEEPER_DIR_CANDIDATES=(
+  "${REPO_ROOT}/lib/keeper"
+  "${REPO_ROOT}/lib/keeper_registry"
+  "${REPO_ROOT}/lib/keeper_state"
+)
+KEEPER_DIRS=()
+for keeper_dir in "${KEEPER_DIR_CANDIDATES[@]}"; do
+  [[ -d "${keeper_dir}" ]] && KEEPER_DIRS+=("${keeper_dir}")
+done
+if [[ "${#KEEPER_DIRS[@]}" -eq 0 ]]; then
+  echo "error: no keeper source directories found" >&2
+  exit 2
+fi
+SSOT_FILE="${REPO_ROOT}/lib/keeper_registry/keeper_state_machine.ml"
 
 VERBOSE=0
 BASELINE_FILE=""
@@ -94,7 +106,18 @@ module_file() {
   local normalized
   normalized="$(printf '%s' "${module_name}" \
     | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
-  printf '%s/lib/keeper/%s.ml' "${REPO_ROOT}" "${normalized}"
+  local candidate
+  for candidate in \
+    "${REPO_ROOT}/lib/keeper_registry/${normalized}.ml" \
+    "${REPO_ROOT}/lib/keeper_state/${normalized}.ml" \
+    "${REPO_ROOT}/lib/keeper/${normalized}.ml"
+  do
+    if [[ -f "${candidate}" ]]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+  printf '%s/lib/keeper_registry/%s.ml' "${REPO_ROOT}" "${normalized}"
 }
 
 phase_file() {
@@ -217,10 +240,10 @@ trap 'rm -f "${tmpfile}"' EXIT
 rg_exit=0
 rg -n --no-heading --glob '*.ml' --glob '*.mli' \
   -e '\b([0-9]{1,2})[ -](state|phase(s)?)\b' \
-  "${KEEPER_DIR}" > "${tmpfile}" 2>/dev/null || rg_exit=$?
+  "${KEEPER_DIRS[@]}" > "${tmpfile}" 2>/dev/null || rg_exit=$?
 # rg exit 1 = no matches (treat as clean); exit 2+ = error (regex / I/O / glob).
 if [[ "${rg_exit}" -ge 2 ]]; then
-  echo "ERROR: ripgrep failed with exit ${rg_exit} while scanning ${KEEPER_DIR}" >&2
+  echo "ERROR: ripgrep failed with exit ${rg_exit} while scanning ${KEEPER_DIRS[*]}" >&2
   exit "${rg_exit}"
 fi
 
@@ -279,7 +302,7 @@ while IFS= read -r entry; do
     continue
   fi
 
-  # Range filter — sibling FSMs (cascade=6, decision=5, turn=7, etc.)
+  # Range filter — sibling FSMs (runtime=6, decision=5, turn=7, etc.)
   # use the same "N-state" / "N-phase" idiom and are intentionally not
   # the keeper-count drift class.
   range_lo=$((SSOT_COUNT - 3))
@@ -304,7 +327,7 @@ while IFS= read -r entry; do
     continue
   fi
 
-  printf 'drift: %s — mentions "%s" but SSOT (lib/keeper/keeper_state_machine.ml type phase) has %s constructors\n' \
+  printf 'drift: %s — mentions "%s" but SSOT (lib/keeper_registry/keeper_state_machine.ml type phase) has %s constructors\n' \
     "${key}" "${matched_n}-state/phase" "${SSOT_COUNT}"
   drift_count=$((drift_count + 1))
 done < "${tmpfile}"

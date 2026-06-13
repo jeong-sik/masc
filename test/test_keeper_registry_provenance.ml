@@ -11,14 +11,15 @@
     - the [None / None] forms remain byte-identical to pre-PR-1 output
     - JSON serializer round-trips the optional fields
 
-    Data flow (cascade [Provider_error.ServerError] → these fields) is
-    PR-2 scope; PR-1 only ships the typed carrier. *)
+    The runtime-error → these-fields data flow was never wired; the dead
+    [Core.Provider_error] carrier it would have used has since been removed.
+    This test only covers the typed carrier itself. *)
 
 open Alcotest
 
-module KSM = Masc_mcp.Keeper_state_machine
-module KSM_json = Masc_mcp.Keeper_state_machine_json
-module R = Masc_mcp.Keeper_registry
+module KSM = Keeper_state_machine
+module KSM_json = Keeper_state_machine_json
+module R = Masc.Keeper_registry
 
 let test_fiber_terminated_carrier_none () =
   let ev =
@@ -76,7 +77,8 @@ let test_provider_runtime_error_carrier_none () =
       ; detail = "provider_c unicode crash"
       ; provider_id = None
       ; http_status = None
-      ; cascade_name = None
+      ; runtime_id = None
+      ; reason = None
       }
   in
   (check string)
@@ -91,7 +93,8 @@ let test_provider_runtime_error_carrier_some () =
       ; detail = "Timeout after 300.0s"
       ; provider_id = Some "runpod_mtp"
       ; http_status = Some 502
-      ; cascade_name = None
+      ; runtime_id = None
+      ; reason = None
       }
   in
   let s = R.failure_reason_to_string r in

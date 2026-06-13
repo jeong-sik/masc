@@ -36,8 +36,8 @@
 #   2. Otherwise — treat as an OCaml module name (CamelCase or with `.`
 #      separator).  Convert to a filename stem by lower-casing the first
 #      component before `.`, then look for a matching `.ml` or `.mli` under
-#      `lib/`.  E.g. `Keeper_cascade_routing.select_cascade` →
-#           look for `lib/**/keeper_cascade_routing.ml`.
+#      `lib/`.  E.g. `Keeper_runtime_routing.select_runtime` →
+#           look for `lib/**/keeper_runtime_routing.ml`.
 
 set -euo pipefail
 
@@ -78,7 +78,7 @@ verbose() {
 resolve_mirrors_ref() {
   local ref="$1"
 
-  # Strip trailing parenthetical annotation, e.g. "(SelectCascade action)"
+  # Strip trailing parenthetical annotation, e.g. "(SelectRuntime action)"
   ref="${ref%% (*}"
   ref="${ref%% [*}"
 

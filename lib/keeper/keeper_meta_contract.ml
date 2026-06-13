@@ -5,7 +5,51 @@
     parsing and store I/O. *)
 
 open Keeper_types_profile
-include Keeper_meta_tool_access
+
+let now_iso () = Masc_domain.now_iso ()
+
+let normalize_tool_names names =
+  names
+  |> List.map String.trim
+  |> List.filter (fun name -> name <> "")
+  |> dedupe_keep_order
+;;
+
+let string_list_field_result ?label ~field_name (json : Yojson.Safe.t) =
+  let label = Option.value ~default:field_name label in
+  match Json_util.assoc_member_opt field_name json with
+  | Some (`List items) ->
+    let rec collect acc index = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> collect (value :: acc) (index + 1) rest
+      | bad :: _ ->
+        Error
+          (Printf.sprintf "keeper %s[%d] must be a string (received %s)" label
+             index (Json_util.kind_name bad))
+    in
+    collect [] 0 items
+  | Some `Null | None -> Error (Printf.sprintf "keeper %s must be an array of strings" label)
+  | Some other ->
+    Error
+      (Printf.sprintf "keeper %s must be an array of strings (received %s)"
+         label (Json_util.kind_name other))
+;;
+
+let tool_access_of_meta_json (json : Yojson.Safe.t) =
+  match Json_util.assoc_member_opt "tool_access" json with
+  | Some `Null | None -> Error "keeper tool_access must be an array of strings"
+  | Some (`List _ as list_json) ->
+    (match
+       string_list_field_result ~field_name:"tool_access"
+         (`Assoc [ "tool_access", list_json ])
+     with
+     | Ok tools -> Ok (normalize_tool_names tools)
+     | Error msg -> Error msg)
+  | Some other ->
+    Error
+      (Printf.sprintf "keeper tool_access must be an array of strings (received %s)"
+         (Json_util.kind_name other))
+;;
 
 (* -- Policy types (remain in keeper_meta top-level) -- *)
 
@@ -21,17 +65,6 @@ type compaction_policy =
        (consumed by [Agent_sdk.Context_reducer.stub_tool_results
        ~keep_recent]).  Default 2; parsers clamp to
        [[0, Keeper_config.keep_recent_tool_results_max]]. *)
-  ; tool_heavy_msg_threshold : int
-    (* Per-keeper message-count floor for the tool-heavy compaction
-       gate.  Default {!Keeper_config.default_tool_heavy_msg_threshold}
-       (40); preserves prior global behavior in
-       [Keeper_compact_policy].  Heavy-tool keepers can lower this
-       to compact sooner without code change.  Wired by PR-B. *)
-  ; tool_heavy_ratio_floor : float
-    (* Per-keeper context-ratio floor for the tool-heavy compaction
-       gate.  Default
-       {!Keeper_config.default_tool_heavy_ratio_floor} (0.15);
-       preserves prior global behavior.  Wired by PR-B. *)
   }
 
 type proactive_policy =
@@ -83,37 +116,44 @@ type proactive_runtime =
 
 (* ── Structured blocker classification ──────────────────────── *)
 
-type cascade_exhaustion_reason =
+type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
-    (** RFC-0142 PR-2 (2026-05-22): typed surface for the dominant Other_detail
-        message ["failed to resolve hostname: ..."] (50% live share on 5/21).
-        Producer-side typed signal already exists at
-        [Llm_provider.Http_client.network_error_kind] as [Dns_failure];
-        previously [keeper_turn_driver.ml]'s NetworkError branch only honoured
-        [Connection_refused] and let [Dns_failure] fall through the
-        string/substring SSOT, manifesting as [Other_detail "failed to resolve
-        hostname: ..."].  This variant closes that typed→string→typed
-        roundtrip without adding any new substring matcher. *)
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
   | Other_detail of string
 
+(** Total typed retryability for a runtime-exhaustion reason.
+
+    Replaces a former string-prefix reparse in
+    [keeper_supervisor_pause_policy] that matched on the wire form of
+    [runtime_exhaustion_reason_code] and biased every unlisted reason to
+    non-retryable via a [_ -> false] catch-all.  That polarity was wrong
+    for transient/connectivity faults (Connection_refused, Dns_failure,
+    No_providers_available, All_providers_failed,
+    Structural_attempt_timeout), which the supervisor should retry.
+
+    Exhaustive match: adding a new [runtime_exhaustion_reason] variant
+    fails compilation here, forcing an explicit retryability decision
+    rather than silently defaulting. *)
+let runtime_exhaustion_reason_retryable (reason : runtime_exhaustion_reason) : bool =
+  Keeper_internal_error.runtime_exhaustion_reason_retryable reason
+;;
+
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
-  | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
     (** 2026-05-05: turn fiber finished without invoking [resolve_done]
@@ -135,7 +175,7 @@ type blocker_class =
         cohort during a fleet stall (observed: 6/14 keepers in
         cohort=stale_turn_timeout). *)
   | Stale_fleet_batch
-    (** Legacy blocker class for pre-existing fleet-batch state. Current
+    (** Retired blocker class for pre-existing fleet-batch state. Current
         fleet-batch detection is observation-only and should not stamp keeper
         meta; stale keepers use their per-keeper watchdog blocker instead. *)
   | Oas_agent_execution_timeout
@@ -144,24 +184,21 @@ type blocker_class =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Cascade_exhausted _ -> "cascade_exhausted"
+  | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
   | Ambiguous_post_commit_failure -> "ambiguous_post_commit_failure"
-  | Autonomous_slot_wait_timeout -> "autonomous_slot_wait_timeout"
   | Admission_queue_wait_timeout -> "admission_queue_wait_timeout"
   | Turn_timeout_after_queue_wait -> "turn_timeout_after_queue_wait"
   | Turn_timeout -> "turn_timeout"
   | Turn_livelock_blocked -> "turn_livelock_blocked"
   | Completion_contract_violation -> "completion_contract_violation"
-  | No_tool_capable_provider -> "no_tool_capable_provider"
   | Stay_silent_loop -> "stay_silent_loop"
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
@@ -172,7 +209,6 @@ let blocker_class_to_string = function
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
   | Sdk_unrecognized_stop_reason -> "sdk_unrecognized_stop_reason"
   | Sdk_idle_detected -> "sdk_idle_detected"
-  | Sdk_tool_retry_exhausted -> "sdk_tool_retry_exhausted"
   | Sdk_guardrail_violation -> "sdk_guardrail_violation"
   | Sdk_tripwire_violation -> "sdk_tripwire_violation"
   | Sdk_exit_condition_met -> "sdk_exit_condition_met"
@@ -180,17 +216,15 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "cascade_exhausted" -> Some (Cascade_exhausted (Other_detail "cascade_exhausted"))
+  | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
   | "ambiguous_post_commit_failure" -> Some Ambiguous_post_commit_failure
-  | "autonomous_slot_wait_timeout" -> Some Autonomous_slot_wait_timeout
   | "admission_queue_wait_timeout" -> Some Admission_queue_wait_timeout
   | "turn_timeout_after_queue_wait" -> Some Turn_timeout_after_queue_wait
   | "turn_timeout" -> Some Turn_timeout
   | "turn_livelock_blocked" -> Some Turn_livelock_blocked
   | "completion_contract_violation" -> Some Completion_contract_violation
-  | "no_tool_capable_provider" -> Some No_tool_capable_provider
   | "stay_silent_loop" -> Some Stay_silent_loop
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
@@ -201,7 +235,6 @@ let blocker_class_of_serialized_string = function
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
   | "sdk_unrecognized_stop_reason" -> Some Sdk_unrecognized_stop_reason
   | "sdk_idle_detected" -> Some Sdk_idle_detected
-  | "sdk_tool_retry_exhausted" -> Some Sdk_tool_retry_exhausted
   | "sdk_guardrail_violation" -> Some Sdk_guardrail_violation
   | "sdk_tripwire_violation" -> Some Sdk_tripwire_violation
   | "sdk_exit_condition_met" -> Some Sdk_exit_condition_met
@@ -209,36 +242,36 @@ let blocker_class_of_serialized_string = function
   | _ -> None
 ;;
 
-let cascade_exhaustion_summary = function
+let runtime_exhaustion_summary = function
   | Connection_refused ->
-    "Cascade exhausted after provider failures; local runtime connection refused."
+    "Runtime exhausted after provider failures; local runtime connection refused."
   | Dns_failure ->
-    "Cascade exhausted; hostname resolution failed (DNS)."
-  | No_providers_available -> "Cascade exhausted; no providers were available."
+    "Runtime exhausted; hostname resolution failed (DNS)."
+  | No_providers_available -> "Runtime exhausted; no providers were available."
   | All_providers_failed ->
-    "Cascade exhausted after all configured providers failed; inspect per-attempt root causes."
+    "Runtime exhausted after all configured providers failed; inspect per-attempt root causes."
   | Candidates_filtered_after_cycles ->
-    "Cascade exhausted after provider candidates were filtered; inspect candidate filter reasons."
+    "Runtime exhausted after provider candidates were filtered; inspect candidate filter reasons."
   | Max_turns_exceeded ->
-    "Cascade exhausted after a provider hit its per-call turn budget."
+    "Runtime exhausted after a provider hit its per-call turn budget."
   | Structural_attempt_timeout _ ->
-    "Cascade exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
+    "Runtime exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
+  | Capacity_exhausted ->
+    "Runtime exhausted; all providers reported capacity backpressure."
   | Other_detail _ ->
-    "Cascade exhausted; inspect cascade attempts for the dominant root cause."
+    "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
 
 let blocker_class_continue_gate = function
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure -> true
-  | Cascade_exhausted _
+  | Runtime_exhausted _
   | Capacity_backpressure
-  | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
@@ -249,45 +282,17 @@ let blocker_class_continue_gate = function
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
   | Sdk_input_required -> false
 ;;
 
-let cascade_exhaustion_reason_to_json = function
-  | Connection_refused -> `String "connection_refused"
-  | Dns_failure -> `String "dns_failure"
-  | No_providers_available -> `String "no_providers_available"
-  | All_providers_failed -> `String "all_providers_failed"
-  | Candidates_filtered_after_cycles -> `String "candidates_filtered_after_cycles"
-  | Max_turns_exceeded -> `String "max_turns_exceeded"
-  | Structural_attempt_timeout { detail } ->
-    `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
-  | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
-;;
+let runtime_exhaustion_reason_to_json reason =
+  Keeper_internal_error.runtime_exhaustion_reason_to_json reason
 
-let cascade_exhaustion_reason_of_json = function
-  | `String "connection_refused" -> Some Connection_refused
-  | `String "dns_failure" -> Some Dns_failure
-  | `String "no_providers_available" -> Some No_providers_available
-  | `String "all_providers_failed" -> Some All_providers_failed
-  | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
-  | `String "max_turns_exceeded" -> Some Max_turns_exceeded
-  | `Assoc fields ->
-    (match List.assoc_opt "tag" fields with
-     | Some (`String "structural_attempt_timeout") ->
-       (match List.assoc_opt "detail" fields with
-        | Some (`String detail) -> Some (Structural_attempt_timeout { detail })
-        | _ -> None)
-     | Some (`String "other_detail") ->
-       (match List.assoc_opt "message" fields with
-        | Some (`String msg) -> Some (Other_detail msg)
-        | _ -> None)
-     | _ -> None)
-  | _ -> None
-;;
+let runtime_exhaustion_reason_of_json json =
+  Keeper_internal_error.runtime_exhaustion_reason_of_json json
 
 (* ── Unified blocker_info: typed klass + free-form detail ───────
    Replaces the historic split blocker fields. The string-only field was used
@@ -295,7 +300,7 @@ let cascade_exhaustion_reason_of_json = function
    pattern called out in CLAUDE.md
    "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
    [blocker_class] the only authoritative class eliminates that recovery path;
-   [detail] carries free-form context for UI / Prometheus labels (no
+   [detail] carries free-form context for UI / Otel_metric_store labels (no
    classification semantics). *)
 type blocker_info = {
   klass : blocker_class;
@@ -306,9 +311,9 @@ let blocker_info_of_class ?(detail = "") klass = { klass; detail }
 
 let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   let klass_payload = match info.klass with
-    | Cascade_exhausted reason ->
-      `Assoc [ "name", `String "cascade_exhausted"
-             ; "reason", cascade_exhaustion_reason_to_json reason
+    | Runtime_exhausted reason ->
+      `Assoc [ "name", `String "runtime_exhausted"
+             ; "reason", runtime_exhaustion_reason_to_json reason
              ]
     | _ -> `String (blocker_class_to_string info.klass)
   in
@@ -327,16 +332,16 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
       | Some (`String s) -> blocker_class_of_serialized_string s
       | Some (`Assoc kfields) ->
         (match List.assoc_opt "name" kfields with
-         | Some (`String "cascade_exhausted") ->
+         | Some (`String "runtime_exhausted") ->
            let reason =
              match List.assoc_opt "reason" kfields with
              | Some r ->
-               (match cascade_exhaustion_reason_of_json r with
+               (match runtime_exhaustion_reason_of_json r with
                 | Some r -> r
-                | None -> Other_detail "cascade_exhausted")
-             | None -> Other_detail "cascade_exhausted"
+                | None -> Other_detail "runtime_exhausted")
+             | None -> Other_detail "runtime_exhausted"
            in
-           Some (Cascade_exhausted reason)
+           Some (Runtime_exhausted reason)
          | Some (`String s) -> blocker_class_of_serialized_string s
          | _ -> None)
       | _ -> None
@@ -352,27 +357,27 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
   | _ -> None
 ;;
 
-type cascade_attempt_record =
+type runtime_attempt_record =
   { provider_id : string
   ; http_status : int option
   ; outcome : [ `Success | `Failure of string ]
   ; timestamp : float
   }
 
-let cascade_attempt_outcome_to_json = function
+let runtime_attempt_outcome_to_json = function
   | `Success -> `Assoc [ "kind", `String "success" ]
   | `Failure message ->
     `Assoc [ "kind", `String "failure"; "message", `String message ]
 ;;
 
-let cascade_attempt_outcome_of_json = function
+let runtime_attempt_outcome_of_json = function
   | `Assoc fields ->
     (match List.assoc_opt "kind" fields with
      | Some (`String "success") -> Some `Success
      | Some (`String "failure") ->
        (match List.assoc_opt "message" fields with
         | Some (`String message) -> Some (`Failure message)
-        (* DET-OK: legacy attempt rows encoded failure without a message;
+        (* DET-OK: retired attempt rows encoded failure without a message;
            keep the lossy historical record instead of dropping it. *)
         | _ -> Some (`Failure ""))
      | _ -> None)
@@ -381,20 +386,20 @@ let cascade_attempt_outcome_of_json = function
   | _ -> None
 ;;
 
-let cascade_attempt_record_to_json (record : cascade_attempt_record) : Yojson.Safe.t =
+let runtime_attempt_record_to_json (record : runtime_attempt_record) : Yojson.Safe.t =
   `Assoc
     [ "provider_id", `String record.provider_id
     ; ( "http_status"
       , match record.http_status with
         | Some status -> `Int status
         | None -> `Null )
-    ; "outcome", cascade_attempt_outcome_to_json record.outcome
+    ; "outcome", runtime_attempt_outcome_to_json record.outcome
     ; "timestamp", `Float record.timestamp
     ]
 ;;
 
-let cascade_attempt_record_of_json (json : Yojson.Safe.t)
-  : cascade_attempt_record option
+let runtime_attempt_record_of_json (json : Yojson.Safe.t)
+  : runtime_attempt_record option
   =
   match json with
   | `Null -> None
@@ -412,7 +417,7 @@ let cascade_attempt_record_of_json (json : Yojson.Safe.t)
     in
     let outcome =
       match List.assoc_opt "outcome" fields with
-      | Some value -> cascade_attempt_outcome_of_json value
+      | Some value -> runtime_attempt_outcome_of_json value
       | None -> None
     in
     let timestamp =
@@ -435,7 +440,6 @@ type usage_metrics =
   ; total_tokens : int
   ; total_cost_usd : float
   ; last_turn_ts : float
-  ; last_model_used : string
   ; last_input_tokens : int
   ; last_output_tokens : int
   ; last_total_tokens : int
@@ -469,9 +473,12 @@ type agent_runtime_state =
   ; last_active_desire : string
   ; last_current_intention : string
   ; last_blocker : blocker_info option
-  ; last_cascade_attempt : cascade_attempt_record option
+  ; last_runtime_attempt : runtime_attempt_record option
   ; last_need : string
   ; last_turn_tool_calls : tool_call_summary list
+  ; last_seen_message_seq : int
+    (** Highest message seq this keeper has scanned for direct
+        mentions. Persisted across heartbeats so mentions are not re-surfaced. *)
   }
 
 type keeper_meta =
@@ -479,29 +486,24 @@ type keeper_meta =
     id : Ids.Keeper_id.t option [@default None]
   ; name : string
   ; agent_name : string
+  ; persona : string option
   ; goal : string
   ; short_goal : string
   ; mid_goal : string
   ; long_goal : string
   ; social_model : string
-  ; models : string list
-  ; cascade_ref : Cascade_ref.cascade_ref option
   ; will : string
   ; needs : string
   ; desires : string
   ; instructions : string
   ; (* -- Policy -- *)
-    sandbox_profile : sandbox_profile
+    sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
-  ; network_mode : network_mode
+  ; network_mode : Keeper_types_profile.network_mode
   ; allowed_paths : string list
-  ; tool_access : tool_access
-  ; tool_preset_source : string option
+  ; tool_access : string list
   ; tool_denylist : string list
   ; mention_targets : string list
-  ; room_signal_prompt_enabled : bool
-  ; joined_room_ids : string list
-  ; last_seen_seq_by_room : (string * int) list
   ; proactive : proactive_policy
   ; compaction : compaction_policy
   ; auto_handoff : bool
@@ -531,7 +533,6 @@ type keeper_meta =
       Propagated to trajectory accumulator for per-task cost tracking. *)
   ; telemetry_feedback_enabled : bool option
   ; telemetry_feedback_window_hours : int option
-  ; per_provider_timeout_s : float option
   ; always_approve : bool option
   ; (* -- Agent runtime state (usage, tracing, autonomy metrics) -- *)
     runtime : agent_runtime_state
@@ -541,19 +542,146 @@ type keeper_meta =
   ; meta_version : int
   }
 
-let cascade_name_of_meta (m : keeper_meta) : string =
-  match m.cascade_ref with
-  | Some ref_ -> Cascade_name.to_string ref_.Cascade_ref.group
-  | _ -> (Keeper_config.default_cascade_name ())
+let apply_profile_default opt current =
+  match opt with
+  | Some value -> value
+  | None -> current
 ;;
 
-let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
-  match Cascade_name.of_string name with
-  | Ok group ->
-    { m with cascade_ref = Some Cascade_ref.{ group; item = None } }
-  | Error (`Invalid_prefix | `Empty) ->
-    (* Non-canonical cascade name — keep existing cascade_ref unchanged *)
-    m
+let apply_profile_default_opt opt current =
+  match opt with
+  | Some _ -> opt
+  | None -> current
+;;
+
+let invalid_profile_defaults_error ~keeper_name detail =
+  if String_util.contains_substring detail "runtime_id" then
+    Printf.sprintf
+      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
+      keeper_name detail
+  else
+    Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
+;;
+
+let missing_required_sandbox_profile_error ~keeper_name
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  let manifest_hint =
+    match defaults.manifest_path with
+    | Some path -> Printf.sprintf " (loaded from %s)" path
+    | None -> ""
+  in
+  Printf.sprintf
+    "keeper %s rejected: sandbox_profile is required (allowed: %s)%s. \
+     Add e.g. `sandbox_profile = \"docker\"` to the keeper TOML."
+    keeper_name
+    (String.concat ", " Keeper_types_profile.valid_sandbox_profile_strings)
+    manifest_hint
+;;
+
+let effective_meta_of_profile_defaults
+    (defaults : Keeper_types_profile.keeper_profile_defaults)
+    (meta : keeper_meta) : (keeper_meta, string) result =
+  let open Keeper_types_profile in
+  let has_profile_source = Option.is_some defaults.manifest_path in
+  let target_sandbox_profile =
+    match defaults.sandbox_profile, defaults.manifest_path with
+    | Some profile, _ -> Ok profile
+    | None, _ -> Error (missing_required_sandbox_profile_error ~keeper_name:meta.name defaults)
+  in
+  match target_sandbox_profile with
+  | Error _ as err -> err
+  | Ok sandbox_profile ->
+      let default_network_mode =
+        if has_profile_source then default_network_mode_for_profile sandbox_profile
+        else meta.network_mode
+      in
+      let network_mode =
+        apply_profile_default defaults.network_mode default_network_mode
+      in
+      let tool_access =
+        match defaults.tool_access with
+        | Some tools -> normalize_tool_names tools
+        | None -> meta.tool_access
+      in
+      Ok
+        { meta with
+          persona = apply_profile_default_opt defaults.persona_name meta.persona;
+          proactive =
+            {
+              enabled =
+                apply_profile_default defaults.proactive_enabled
+                  Keeper_config.default_proactive_enabled;
+              idle_sec =
+                apply_profile_default defaults.proactive_idle_sec
+                  Keeper_config.default_proactive_idle_sec;
+              cooldown_sec =
+                apply_profile_default defaults.proactive_cooldown_sec
+                  Keeper_config.default_proactive_cooldown_sec;
+            };
+          tool_denylist =
+            apply_profile_default defaults.tool_denylist meta.tool_denylist;
+          social_model =
+            apply_profile_default defaults.social_model meta.social_model;
+          goal = apply_profile_default defaults.goal meta.goal;
+          short_goal =
+            apply_profile_default defaults.short_goal meta.short_goal;
+          mid_goal = apply_profile_default defaults.mid_goal meta.mid_goal;
+          long_goal = apply_profile_default defaults.long_goal meta.long_goal;
+          will = apply_profile_default defaults.will meta.will;
+          needs = apply_profile_default defaults.needs meta.needs;
+          desires = apply_profile_default defaults.desires meta.desires;
+          instructions =
+            apply_profile_default defaults.instructions meta.instructions;
+          autoboot_enabled =
+            apply_profile_default defaults.autoboot_enabled
+              meta.autoboot_enabled;
+          mention_targets =
+            (match defaults.mention_targets with
+             | [] -> meta.mention_targets
+             | targets -> targets);
+          active_goal_ids =
+            apply_profile_default defaults.active_goal_ids meta.active_goal_ids;
+          tool_access;
+          sandbox_profile;
+          sandbox_image =
+            apply_profile_default_opt defaults.sandbox_image meta.sandbox_image;
+          network_mode;
+          allowed_paths =
+            apply_profile_default defaults.allowed_paths
+              (if has_profile_source then [] else meta.allowed_paths);
+          telemetry_feedback_enabled =
+            apply_profile_default_opt defaults.telemetry_feedback_enabled
+              meta.telemetry_feedback_enabled;
+          telemetry_feedback_window_hours =
+            apply_profile_default_opt defaults.telemetry_feedback_window_hours
+              meta.telemetry_feedback_window_hours;
+          always_approve =
+            apply_profile_default_opt defaults.always_approve
+              meta.always_approve;
+          oas_env =
+            (match defaults.oas_env with
+             | [] -> meta.oas_env
+             | env -> env);
+        }
+;;
+
+let effective_meta_result (meta : keeper_meta) : (keeper_meta, string) result =
+  match Keeper_types_profile.load_keeper_profile_defaults_result meta.name with
+  | Error detail ->
+      Error (invalid_profile_defaults_error ~keeper_name:meta.name detail)
+  | Ok defaults -> effective_meta_of_profile_defaults defaults meta
+;;
+
+(* persona⊥{model,runtime}: a keeper's runtime is assigned in runtime.toml
+   ([[runtime.assignments]], the sole SSOT), keyed by keeper name — NOT read
+   from the persona profile [model] field. An unassigned keeper falls to the
+   default runtime (the designed fallback; RFC-0206 §2.1 fail-fast still applies
+   to the default itself). The id is opaque here; only the OAS adapter parses
+   it. *)
+let runtime_id_of_meta (meta : keeper_meta) =
+  match Runtime.runtime_id_for_keeper meta.name with
+  | Some runtime_id when String.trim runtime_id <> "" -> String.trim runtime_id
+  | Some _ | None -> Runtime.get_default_runtime_id ()
 ;;
 
 let proactive_cycle_outcome_to_string = function
@@ -613,7 +741,9 @@ let () =
     ]
 ;;
 
-(* -- Updater helpers for nested record updates -- *)
+(* -- Updater helpers -- *)
+
+let now_iso () = Masc_domain.now_iso ()
 
 let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta)
   : keeper_meta
@@ -632,7 +762,6 @@ let zero_usage : usage_metrics =
   ; total_tokens = 0
   ; total_cost_usd = 0.0
   ; last_turn_ts = 0.0
-  ; last_model_used = ""
   ; last_input_tokens = 0
   ; last_output_tokens = 0
   ; last_total_tokens = 0
@@ -656,24 +785,29 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
 ;;
 
-let now_iso () = Masc_domain.now_iso ()
-let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
+let removed_keeper_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 
-let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
+let reject_removed_model_args ~tool_name (args : Yojson.Safe.t) =
   let present =
-    keeper_legacy_model_arg_names
+    removed_keeper_model_arg_names
     |> List.filter (fun key ->
-      match Yojson.Safe.Util.member key args with
-      | `Null -> false
-      | _ -> true)
+      (* A legacy arg counts as "present" only when supplied with a real value.
+         [assoc_member_opt] returns [None] for an absent key; the prior
+         [| _ -> true] arm classified that [None] as present, so a request
+         that simply omitted all three keys (e.g. the [{name}] used by base
+         autoboot materialization) was rejected as if it had passed them.
+         Absent ([None]) and explicit-null are both "not supplied". *)
+      match Json_util.assoc_member_opt key args with
+      | None | Some `Null -> false
+      | Some _ -> true)
   in
   match present with
   | [] -> Ok ()
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
-          provider/model identity is OAS-owned."
+         "removed keeper model args for %s: %s. Use runtime_id; concrete \
+          provider/model identity is resolved from the default runtime."
          tool_name
          (String.concat ", " fields))
 ;;

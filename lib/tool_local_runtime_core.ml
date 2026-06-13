@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 
@@ -120,7 +120,7 @@ let discover_processes () =
       ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime process discovery"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
+
       argv
   in
   match status with
@@ -182,20 +182,19 @@ let fetch_models_at base_url =
       ~actor:(Masc_exec.Agent_id.of_string "tool/local_runtime")
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime fetch models"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
+
       argv
   in
   match status with
   | Unix.WEXITED 0 -> (
       try
         let json = Yojson.Safe.from_string body in
-        let open Yojson.Safe.Util in
         let models =
-          match member "data" json with
-          | `List items ->
+          match Json_util.get_array json "data" with
+          | Some (`List items) ->
               items
               |> List.filter_map (fun item ->
-                     item |> member "id" |> to_string_option)
+                     Json_util.get_string item "id")
           | _ -> []
         in
         Ok (url, models)

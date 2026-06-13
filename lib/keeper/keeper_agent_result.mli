@@ -16,18 +16,15 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; ctx_composition : Keeper_agent_prompt_metrics.ctx_composition_metrics
-  ; cascade_observation : Cascade_observation.cascade_observation option
+  ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
-  ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; proof : Masc_mcp_cdal_runtime.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Cascade_runner.stop_reason
+  ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; pre_dispatch_compacted : bool
@@ -41,9 +38,12 @@ val tool_call_detail_to_json : tool_call_detail -> Yojson.Safe.t
     [include Keeper_agent_result] chain in [Keeper_agent_run], where
     the public surface is exposed under [Keeper_agent_run.mli]. *)
 
+val tool_names_of_calls : tool_call_detail list -> string list
+val tool_names : run_result -> string list
+val tool_call_count : run_result -> int
+
 val runtime_lane_label : string
 (** Boundary-redacted label used wherever MASC's keeper metrics surface
     exposes a model identity field. OAS owns concrete provider/model
     identity; the keeper-side surface collapses to this single label
     via [Boundary_redaction]. *)
-

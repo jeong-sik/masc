@@ -63,4 +63,52 @@ describe('refreshShell auth failure handling', () => {
       6000,
     )
   })
+
+  it('preserves request-bound auth when hydrating a pushed shell slice', async () => {
+    const sessionActor = await import('./lib/dashboard-session-actor')
+    const store = await import('./store')
+
+    const verifiedAuth = {
+      enabled: true,
+      require_token: true,
+      token_present: true,
+      requested_agent: 'dashboard',
+      effective_agent: 'dashboard',
+      effective_role: 'admin',
+      default_role: 'worker',
+      token_valid: true,
+      token_agent: 'dashboard',
+      auth_error_code: null,
+      auth_error_detail: null,
+      can_keeper_msg: true,
+      keeper_msg_error: null,
+    } as const
+
+    sessionActor.setCanonicalDashboardActor('dashboard')
+    store.shellAuthSummary.value = verifiedAuth
+
+    store.hydrateShellSnapshot(
+      {
+        generated_at: '2026-06-04T13:26:17Z',
+        status: { project: 'me' },
+        counts: { agents: 0, tasks: 1, keepers: 1, total_runtimes: 1 },
+        auth: {
+          enabled: true,
+          require_token: true,
+          token_present: false,
+          token_valid: false,
+          effective_agent: 'dashboard',
+          effective_role: null,
+          auth_error_code: 'missing_token',
+          auth_error_detail: 'Authentication required',
+          can_keeper_msg: false,
+          keeper_msg_error: 'Authentication required',
+        },
+      } as never,
+      { light: true, preserveAuth: true },
+    )
+
+    expect(store.shellAuthSummary.value).toBe(verifiedAuth)
+    expect(sessionActor.currentCanonicalDashboardActor()).toBe('dashboard')
+  })
 })

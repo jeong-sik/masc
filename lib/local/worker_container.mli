@@ -3,14 +3,14 @@
 
     Sits between {!Worker_container_types} (cycle 191) and
     {!Worker_container_runners} (which does
-    [include Worker_container] + a top-level cascade-include
+    [include Worker_container] + a top-level runtime-include
     in its .mli).  Type identity propagates end-to-end via
     [include module type of struct include M end]
     (cycle 187 rationale).
 
     External surface (15 entries — 11 dotted callers + 4
     additional helpers consumed unqualified by
-    {!Worker_container_runners} through the cascade):
+    {!Worker_container_runners} through the runtime):
     - File paths: {!worker_container_dir},
       {!worker_raw_trace_path},
       {!ensure_worker_container_dirs}.
@@ -21,8 +21,7 @@
     - Session id: {!resolved_mcp_session_id},
       {!evidence_session_id_of_worker_run}.
     - Tool catalogue: {!session_min_tool_names}.
-    - Tool builders: {!build_oas_mcp_tools},
-      {!build_local_shell_tools}.
+    - Tool builders: {!build_oas_mcp_tools}.
     - Provider: {!oas_provider_of_label},
       {!resolve_oas_provider_of_label}.
     - Audit + run helpers: {!append_worker_completion_log},
@@ -64,7 +63,7 @@ val worker_raw_trace_path :
 val ensure_worker_container_dirs :
   base_path:string -> worker_name:string -> unit
 (** Creates the {!worker_container_dir} chain if missing.
-    Idempotent — touches a [.keep] sentinel and removes
+    Idempotent — touches a [.keep] marker and removes
     it, so the directory always exists before subsequent
     writers run. *)
 
@@ -100,7 +99,10 @@ val make_worker_meta :
   worker_container_meta
 (** Builds a fresh {!worker_container_meta} with derived
     [checkpoint_path] / [turn_log_path], [version =
-    {!worker_container_version}], and [last_run_at = None]. *)
+    {!worker_container_version}], no active
+    [mcp_client_session_started_at], and [last_run_at =
+    None].  The bounded client session opens immediately before
+    [Agent.run]. *)
 
 (** {1 Checkpoint persistence} *)
 
@@ -154,24 +156,13 @@ val build_oas_mcp_tools :
     dispatches via {!call_masc_tool}, and converts MASC
     errors into [Agent_sdk.Types.tool_result]. *)
 
-val build_local_shell_tools :
-  room_config:Coord.config option ->
-  worker_name:string ->
-  workdir:string ->
-  (Agent_sdk.Tool.t list, string) result
-(** Builds the local-shell tool subset (process exec /
-    file IO).  Errors when {!Process_eio.get_proc_mgr} or
-    {!Process_eio.get_clock} are unavailable.  Hooks
-    telemetry through [room_config] when an Eio fs is
-    present; missing either drops telemetry silently. *)
-
 (** {1 Provider resolution} *)
 
 val oas_provider_of_label :
   string -> (Agent_sdk.Provider.config, string) result
 (** Parses a model label (e.g. ["openai:gpt-4.1"]) into an
     {!Agent_sdk.Provider.config}.  Errors when
-    {!Cascade_config.parse_model_string} returns [None]. *)
+    {!Runtime_model_string.parse_model_string} returns [None]. *)
 
 val resolve_oas_provider_of_label :
   string -> (Agent_sdk.Provider.config * string, string) result
@@ -214,7 +205,6 @@ val build_resume_config :
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?periodic_callbacks:Agent_sdk.Agent.periodic_callback list ->
   ?guardrails:Agent_sdk.Guardrails.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
   unit ->
   Agent_sdk.Types.agent_config * Agent_sdk.Agent.options
 (** Assembles the [(config, options)] pair consumed by

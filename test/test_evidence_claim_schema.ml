@@ -45,9 +45,9 @@ let test_unknown_variant_rejected () =
   | Error _ -> ()
 
 let test_human_string_compact () =
-  let claim = EC.PR_merged { repo = "jeong-sik/masc-mcp"; pr_number = 19108 } in
+  let claim = EC.PR_merged { repo = "jeong-sik/masc"; pr_number = 19108 } in
   let s = EC.to_human_string claim in
-  check string "compact" "pr_merged(jeong-sik/masc-mcp#19108)" s
+  check string "compact" "pr_merged(jeong-sik/masc#19108)" s
 
 let test_human_string_no_newline () =
   let claims =

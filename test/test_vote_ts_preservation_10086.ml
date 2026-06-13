@@ -22,7 +22,7 @@
    since the record is logically a new cast — the sibling invariant
    from the #10086 fix. *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()

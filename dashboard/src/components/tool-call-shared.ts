@@ -55,9 +55,9 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
   // Web — network access
   { match: n => n.includes('web') || n.includes('fetch'),
     icon: 'W', color: TOOL_TONE.info, label: 'web' },
-  // Coordination — tasks, transitions, heartbeat
+  // Workspace — tasks, transitions, heartbeat
   { match: n => n.includes('task') || n.includes('transition') || n.includes('claim') || n.includes('heartbeat') || n.includes('broadcast'),
-    icon: 'C', color: 'text-[var(--color-status-warn)]', label: 'coord' },
+    icon: 'C', color: 'text-[var(--color-status-warn)]', label: 'workspace' },
   // Memory — recall, context, memory search
   { match: n => n.includes('memory') || n.includes('recall') || n.includes('context'),
     icon: 'M', color: TOOL_TONE.ok, label: 'memory' },

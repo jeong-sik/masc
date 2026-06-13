@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type recommendation = {
   keeper_profile : string;
@@ -91,15 +93,7 @@ let compare_recommendation left right =
       | cmp -> cmp)
   | cmp -> cmp
 
-let generated_at_utc () =
-  let tm = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
+let generated_at_utc () = Masc_domain.now_iso ()
 
 let build_manifest ?source_summary_path
     (summary : Tool_call_quality_benchmark.benchmark_summary) : manifest =
@@ -180,8 +174,8 @@ let parse_manifest json =
           generated_at = Safe_ops.json_string ~default:"" "generated_at" json;
           source_summary_path = Safe_ops.json_string_opt "source_summary_path" json;
           recommendations =
-            (match Yojson.Safe.Util.member "recommendations" json with
-             | `List items -> items
+            (match Json_util.assoc_member_opt "recommendations" json with
+             | Some (`List items) -> items
              | _ -> [])
             |> List.filter_map parse_recommendation;
         }

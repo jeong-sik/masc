@@ -46,7 +46,8 @@ type grader =
 (* ================================================================ *)
 
 type tool_expectation = {
-  tool_name : string;            (** Expected tool to be called *)
+  tool_name : string;            (** Legacy diagnostic label / exact tool fallback *)
+  selector : Eval_tool_selector.t;    (** Descriptor-aware selector to match *)
   required : bool;               (** Must this tool be called? *)
   max_calls : int option;        (** Max times this tool should be called *)
   args_contain : string option;  (** Args should contain this substring *)
@@ -63,7 +64,7 @@ type scenario = {
   tool_expectations : tool_expectation list;
   graders : grader list;
   max_turns : int;                    (** Max turns before timeout *)
-  max_cost_usd : float;              (** Cost budget for this scenario *)
+  max_cost_usd : float;              (** Advisory cost threshold for this scenario *)
   tags : string list;                 (** Filtering tags: "regression", "smoke", etc. *)
 }
 
@@ -94,6 +95,8 @@ type eval_run = {
   error : string option;
 }
 
+let min_runs_for_ci = 5
+
 type eval_result = {
   scenario : scenario;
   runs : eval_run list;
@@ -101,6 +104,9 @@ type eval_result = {
   mean_score : float;       (** Mean weighted score across runs *)
   consistency : float;      (** Std dev of scores (lower = more consistent) *)
   total_cost_usd : float;   (** Sum of all run costs *)
+  ci95_low : float;         (** Lower bound of 95% confidence interval for mean_score *)
+  ci95_high : float;        (** Upper bound of 95% confidence interval for mean_score *)
+  min_runs_met : bool;      (** Whether the [min_runs_for_ci] requirement is satisfied *)
 }
 
 type eval_suite_result = {
@@ -157,12 +163,17 @@ let apply_deterministic_grader (g : deterministic_grader) (value : string) : gra
   }
 
 (** Check tool expectations against actual tool calls made. *)
-let check_tool_expectations
+let check_tool_expectations_with_evidence
     (expectations : tool_expectation list)
-    (actual_calls : string list)
+    (actual_calls : Eval_tool_selector.call list)
     : grader_result list =
   List.map (fun (exp : tool_expectation) ->
-    let call_count = List_util.count_if (fun c -> c = exp.tool_name) actual_calls in
+    let selector_label = Eval_tool_selector.label exp.selector in
+    let call_count =
+      List_util.count_if
+        (fun call -> Eval_tool_selector.matches exp.selector call)
+        actual_calls
+    in
     let required_ok = if exp.required then call_count > 0 else true in
     let max_ok = match exp.max_calls with
       | None -> true
@@ -171,20 +182,34 @@ let check_tool_expectations
     let passed = required_ok && max_ok in
     let detail =
       if not required_ok then
-        Printf.sprintf "required tool '%s' was not called" exp.tool_name
-      else if not max_ok then
-        Printf.sprintf "tool '%s' called %d times (max: %d)"
-          exp.tool_name call_count (Option.value ~default:0 exp.max_calls)
-      else
-        Printf.sprintf "tool '%s' called %d times — OK" exp.tool_name call_count
+        Printf.sprintf "required tool selector '%s' was not called" selector_label
+      else (
+        match exp.max_calls with
+        | Some max when call_count > max ->
+          Printf.sprintf
+            "tool selector '%s' called %d times (max: %d)"
+            selector_label
+            call_count
+            max
+        | _ ->
+        Printf.sprintf "tool selector '%s' called %d times — OK"
+          selector_label call_count)
     in
-    { grader_desc = Printf.sprintf "tool_expectation: %s" exp.tool_name;
+    { grader_desc = Printf.sprintf "tool_expectation: %s" selector_label;
       score = if passed then 1.0 else 0.0;
       weight = 0.5;  (* tool expectations are secondary to content graders *)
       passed;
       detail;
     }
   ) expectations
+
+let check_tool_expectations expectations actual_calls =
+  let calls =
+    actual_calls
+    |> List.map (fun tool_name ->
+           ({ tool_name; route_evidence = None } : Eval_tool_selector.call))
+  in
+  check_tool_expectations_with_evidence expectations calls
 
 (* ================================================================ *)
 (* Score computation                                                 *)
@@ -222,6 +247,52 @@ let score_std_dev (scores : float list) : float =
         acc +. (s -. mean) ** 2.0) 0.0 scores /. n in
       sqrt variance
 
+let score_sample_std_dev (scores : float list) : float =
+  match scores with
+  | [] | [_] -> 0.0
+  | _ ->
+      let n = float_of_int (List.length scores) in
+      let mean = List.fold_left (+.) 0.0 scores /. n in
+      let variance =
+        List.fold_left (fun acc s -> acc +. (s -. mean) ** 2.0) 0.0 scores
+        /. (n -. 1.0)
+      in
+      sqrt variance
+
+let t_critical_95_for_df = function
+  | df when df <= 0 -> 0.0
+  | 1 -> 12.706
+  | 2 -> 4.303
+  | 3 -> 3.182
+  | 4 -> 2.776
+  | 5 -> 2.571
+  | 6 -> 2.447
+  | 7 -> 2.365
+  | 8 -> 2.306
+  | 9 -> 2.262
+  | 10 -> 2.228
+  | 11 -> 2.201
+  | 12 -> 2.179
+  | 13 -> 2.160
+  | 14 -> 2.145
+  | 15 -> 2.131
+  | 16 -> 2.120
+  | 17 -> 2.110
+  | 18 -> 2.101
+  | 19 -> 2.093
+  | 20 -> 2.086
+  | 21 -> 2.080
+  | 22 -> 2.074
+  | 23 -> 2.069
+  | 24 -> 2.064
+  | 25 -> 2.060
+  | 26 -> 2.056
+  | 27 -> 2.052
+  | 28 -> 2.048
+  | 29 -> 2.045
+  | 30 -> 2.042
+  | _ -> 1.960
+
 (** Build eval_result from a list of eval_runs for one scenario. *)
 let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : eval_result =
   let n = List.length runs in
@@ -230,12 +301,25 @@ let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : ev
   let mean = if n = 0 then 0.0
     else List.fold_left (+.) 0.0 scores /. float_of_int n in
   let total_cost = List.fold_left (fun a (r : eval_run) -> a +. r.total_cost_usd) 0.0 runs in
+  let std_dev = score_std_dev scores in
+  let ci95_margin =
+    if n > 1 then
+      t_critical_95_for_df (n - 1)
+      *. score_sample_std_dev scores
+      /. sqrt (float_of_int n)
+    else 0.0
+  in
+  let ci95_low = Float.max 0.0 (mean -. ci95_margin) in
+  let ci95_high = Float.min 1.0 (mean +. ci95_margin) in
   { scenario;
     runs;
     pass_at_k = compute_pass_at_k ~k ~n ~c;
     mean_score = mean;
-    consistency = score_std_dev scores;
+    consistency = std_dev;
     total_cost_usd = total_cost;
+    ci95_low;
+    ci95_high;
+    min_runs_met = n >= min_runs_for_ci;
   }
 
 (* ================================================================ *)
@@ -283,6 +367,9 @@ let eval_result_to_json (r : eval_result) : Yojson.Safe.t =
     ("consistency", `Float r.consistency);
     ("total_cost_usd", `Float r.total_cost_usd);
     ("num_runs", `Int (List.length r.runs));
+    ("ci95_low", `Float r.ci95_low);
+    ("ci95_high", `Float r.ci95_high);
+    ("min_runs_met", `Bool r.min_runs_met);
     ("runs", `List (List.map eval_run_to_json r.runs));
   ]
 
@@ -318,40 +405,39 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
 (** Parse a scenario from JSON (loaded from YAML→JSON or direct JSON). *)
 let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
   try
-    let open Yojson.Safe.Util in
-    let str key = json |> member key |> to_string in
+    let str key = Json_util.get_string_with_default json ~key ~default:"" in
     let str_opt key default =
-      match json |> member key with
-      | `String s -> s
+      match Json_util.assoc_member_opt key json with
+      | Some (`String s) -> s
       | _ -> default
     in
     let int_opt key default =
-      match json |> member key with
-      | `Int i -> i
+      match Json_util.assoc_member_opt key json with
+      | Some (`Int i) -> i
       | _ -> default
     in
     let float_opt key default =
-      match json |> member key with
-      | `Float f -> f
-      | `Int i -> float_of_int i
+      match Json_util.assoc_member_opt key json with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
       | _ -> default
     in
     let str_list key =
-      match json |> member key with
-      | `List items -> List.filter_map (function `String s -> Some s | _ -> None) items
+      match Json_util.assoc_member_opt key json with
+      | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
       | _ -> []
     in
 
     (* Per-grader JSON field helpers (using grader JSON, not scenario JSON) *)
     let g_str_opt g key default =
-      match g |> member key with
-      | `String s -> s
+      match Json_util.assoc_member_opt key g with
+      | Some (`String s) -> s
       | _ -> default
     in
     let g_float_opt g key default =
-      match g |> member key with
-      | `Float f -> f
-      | `Int i -> float_of_int i
+      match Json_util.assoc_member_opt key g with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
       | _ -> default
     in
 
@@ -365,28 +451,28 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
     let parse_deterministic g mode =
       Deterministic {
         field = g_str_opt g "field" "result";
-        expected = (match g |> member "expected" with
-          | `String s -> s
-          | _ -> g |> member "pattern" |> to_string);
+        expected = (match g |> Json_util.assoc_member_opt "expected" with
+          | Some (`String s) -> s
+          | _ -> Json_util.get_string g "pattern" |> Option.value ~default:"");
         mode;
         weight = g_float_opt g "weight" 1.0;
         description = g_str_opt g "description" "unnamed grader";
       }
     in
     let graders =
-      match json |> member "graders" with
-      | `List items ->
+      match Json_util.assoc_member_opt "graders" json with
+      | Some (`List items) ->
           List.filter_map (fun g ->
-            match g |> member "type" |> to_string with
-            | "exact" -> Some (parse_deterministic g Exact)
-            | "contains" -> Some (parse_deterministic g Contains)
-            | "not_contains" -> Some (parse_deterministic g NotContains)
-            | "regex" ->
+            match Json_util.get_string g "type" with
+            | Some "exact" -> Some (parse_deterministic g Exact)
+            | Some "contains" -> Some (parse_deterministic g Contains)
+            | Some "not_contains" -> Some (parse_deterministic g NotContains)
+            | Some "regex" ->
                 Some (parse_deterministic g
-                        (Regex (g |> member "pattern" |> to_string)))
-            | "model" ->
+                        (Regex (Json_util.get_string g "pattern" |> Option.value ~default:"")))
+            | Some "model" ->
                 Some (ModelBased {
-                  prompt_template = g |> member "prompt" |> to_string;
+                  prompt_template = Json_util.get_string g "prompt" |> Option.value ~default:"";
                   rubric = g_str_opt g "rubric" "";
                   weight = g_float_opt g "weight" 1.0;
                   description = g_str_opt g "description" "MODEL grader";
@@ -398,18 +484,41 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
 
     (* Parse tool expectations *)
     let tool_expectations =
-      match json |> member "tool_expectations" with
-      | `List items ->
+      match Json_util.assoc_member_opt "tool_expectations" json with
+      | Some (`List items) ->
           List.filter_map (fun te ->
-            try Some {
-              tool_name = te |> member "tool" |> to_string;
-              required = (match te |> member "required" with
-                | `Bool b -> b | _ -> false);
-              max_calls = (match te |> member "max_calls" with
-                | `Int i -> Some i | _ -> None);
-              args_contain = (match te |> member "args_contain" with
-                | `String s -> Some s | _ -> None);
-            }
+            try
+              let legacy_tool =
+                match Json_util.get_string te "tool" with
+                | Some tool -> tool
+                | None -> (
+                  match Json_util.get_string te "tool_name" with
+                  | Some tool_name -> tool_name
+                  | None -> "")
+              in
+              let selector =
+                match Json_util.assoc_member_opt "selector" te with
+                | Some selector_json -> (
+                    match Eval_tool_selector.of_yojson selector_json with
+                    | Ok selector -> selector
+                    | Error _ -> Eval_tool_selector.Tool_name legacy_tool)
+                | None -> Eval_tool_selector.Tool_name legacy_tool
+              in
+              let tool_name =
+                if String.trim legacy_tool = ""
+                then Eval_tool_selector.label selector
+                else legacy_tool
+              in
+              Some {
+                tool_name;
+                selector;
+                required = (match Json_util.assoc_member_opt "required" te with
+                  | Some (`Bool b) -> b | _ -> false);
+                max_calls = (match Json_util.assoc_member_opt "max_calls" te with
+                  | Some (`Int i) -> Some i | _ -> None);
+                args_contain = (match Json_util.assoc_member_opt "args_contain" te with
+                  | Some (`String s) -> Some s | _ -> None);
+              }
             with Yojson.Safe.Util.Type_error _ -> None
           ) items
       | _ -> []

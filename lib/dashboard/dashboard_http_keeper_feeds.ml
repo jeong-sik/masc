@@ -10,8 +10,8 @@ open Dashboard_http_keeper_types
     This closes the Phase-2 gap between runtime metrics (already in
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
 let keeper_cost_aggregates_json
-    ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(config : Workspace.config)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ~(window_minutes : int)
   : Yojson.Safe.t =
   let now_ts = Unix.gettimeofday () in
@@ -19,7 +19,7 @@ let keeper_cost_aggregates_json
   let start_ts = now_ts -. window_sec in
   let keeper_items =
     List.map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines =
           let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
@@ -134,8 +134,8 @@ let keeper_cost_aggregates_json
     the dashboard can render a single chronology without knowing the
     original schema variants. *)
 let keeper_decisions_json
-    ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(config : Workspace.config)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
@@ -143,7 +143,7 @@ let keeper_decisions_json
   let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
@@ -159,19 +159,19 @@ let keeper_decisions_json
               try
                 let json = Yojson.Safe.from_string line in
                 let ts =
-                  match Yojson.Safe.Util.member "ts_unix" json with
-                  | `Float f -> f
-                  | `Int i -> float_of_int i
+                  match Json_util.assoc_member_opt "ts_unix" json with
+                  | Some (`Float f) -> f
+                  | Some (`Int i) -> float_of_int i
                   | _ -> 0.0
                 in
                 let event_type =
-                  match Yojson.Safe.Util.member "event" json with
-                  | `String s -> s
+                  match Json_util.assoc_member_opt "event" json with
+                  | Some (`String s) -> s
                   | _ -> "turn"
                 in
                 let keeper_name =
-                  match Yojson.Safe.Util.member "keeper_name" json with
-                  | `String s -> s
+                  match Json_util.assoc_member_opt "keeper_name" json with
+                  | Some (`String s) -> s
                   | _ -> m.name
                 in
                 Some (ts, json, event_type, keeper_name)
@@ -190,7 +190,7 @@ let keeper_decisions_json
   let items =
     List.map
       (fun (_ts, json, event_type, keeper_name) ->
-        let m = Yojson.Safe.Util.member in
+        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let string_member_opt key source =
           match m key source with
           | `String s ->
@@ -267,9 +267,7 @@ let keeper_decisions_json
           | value -> value
         in
         let terminal_reason_code =
-          match terminal_reason_code_of_decision_json json with
-          | Some value -> `String value
-          | None -> `Null
+          Json_util.string_opt_to_json (terminal_reason_code_of_decision_json json)
         in
         `Assoc
           [ "ts_unix", float_or_null "ts_unix"
@@ -311,125 +309,174 @@ let keeper_decisions_json
     ]
 ;;
 
+(* Bounded most-recent window per keeper feed: caps the in-memory ring so an
+   unbounded multi-MB log projects to a fixed footprint. Kept >= any
+   per_keeper_limit so the global sort/take below still sees every candidate it
+   could surface; the cap only drops events too old to ever appear. *)
+let keeper_feed_max_events = 512
+let keeper_feed_tail_bytes = 1_000_000
+
+(* Keep the most-recent [keeper_feed_max_events]. The accumulator is built
+   most-recent-first by the incremental fold (each new line is prepended). *)
+let keeper_feed_retain (events : (float * Yojson.Safe.t) list) :
+    (float * Yojson.Safe.t) list =
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  take keeper_feed_max_events events
+
+(* Per-keeper decision-log feed projection. Decision logs are append-only and
+   streamed several times per second under active turns, growing to multiple MB.
+   Re-tailing and re-parsing them per request — even behind a whole-file cache,
+   which a streamed log invalidates on every append — is O(tail) per read.
+   [Jsonl_incremental_projection] folds only newly appended lines into a bounded
+   recent ring, so a warm read costs O(bytes appended since the last read). The
+   per-request [generated_at] and the global sort/take below stay live. *)
+(* Typed projection of a keeper decision-log line. Parsing each line once into a
+   record — rather than carrying a raw Yojson and doing stringly-keyed lookups at
+   every field — keeps the field set and the missing-field defaults in one place;
+   [decision_event_to_yojson] renders the dashboard payload. *)
+type decision_event = {
+  ts_unix : float;
+  id : string;
+  ts : string;
+  keeper : string;
+  decision_type : string;
+  summary : string;
+  terminal_reason_code : string option;
+  duration_ms : float option;
+  evidence_refs : string list;
+}
+
+let parse_decision_event ~keeper_name line : decision_event option =
+  try
+    let json = Yojson.Safe.from_string line in
+    let str key =
+      match Json_util.assoc_member_opt key json with
+      | Some (`String s) -> s
+      | _ -> ""
+    in
+    let ts_unix =
+      match Json_util.assoc_member_opt "ts_unix" json with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
+      | _ -> 0.0
+    in
+    let keeper =
+      let raw = str "keeper_name" in
+      if raw = "" then keeper_name else raw
+    in
+    let id =
+      let raw = str "id" in
+      if raw <> ""
+      then raw
+      else k2_stable_id ~prefix:"dec" ~keeper_name:keeper ~ts_unix ~raw:line
+    in
+    let ts =
+      let raw = str "ts" in
+      if raw <> "" then raw else k2_iso8601_of_unix ts_unix
+    in
+    let decision_type =
+      let sa = str "speech_act" in
+      if sa <> ""
+      then sa
+      else (
+        let outcome = str "outcome" in
+        if outcome <> "" then outcome else "turn")
+    in
+    let terminal_reason_code = terminal_reason_code_of_decision_json json in
+    let duration_ms =
+      let number key =
+        match Json_util.assoc_member_opt key json with
+        | Some (`Float value) -> Some value
+        | Some (`Int value) -> Some (float_of_int value)
+        | _ -> None
+      in
+      match number "duration_ms" with
+      | Some _ as value -> value
+      | None -> number "latency_ms"
+    in
+    let belief_summary = str "belief_summary" in
+    let current_intention = str "current_intention" in
+    let blocker = str "blocker" in
+    let channel = str "channel" in
+    let summary_parts =
+      List.filter
+        (fun s -> s <> "")
+        [ decision_type
+        ; (if channel <> "" then "via " ^ channel else "")
+        ; (match terminal_reason_code with
+           | Some code -> "reason: " ^ code
+           | None -> "")
+        ; (if current_intention <> "" then "\xe2\x86\x92 " ^ current_intention else "")
+        ; (if blocker <> "" then "blocked: " ^ blocker else "")
+        ; (if belief_summary <> "" then belief_summary else "")
+        ]
+    in
+    let summary = String.concat " \xc2\xb7 " summary_parts in
+    let evidence_refs =
+      let refs = Json_util.get_string_list json "evidence_refs" in
+      if refs <> []
+      then refs
+      else Json_util.get_string_list json "raw_evidence_refs"
+    in
+    Some
+      {
+        ts_unix;
+        id;
+        ts;
+        keeper;
+        decision_type;
+        summary;
+        terminal_reason_code;
+        duration_ms;
+        evidence_refs;
+      }
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
+let decision_event_to_yojson (e : decision_event) : Yojson.Safe.t =
+  `Assoc
+    [ "id", `String e.id
+    ; "ts", `String e.ts
+    ; "ts_unix", `Float e.ts_unix
+    ; "keeper", `String e.keeper
+    ; "decision_type", `String e.decision_type
+    ; "summary", `String e.summary
+    ; ("terminal_reason_code", Json_util.string_opt_to_json e.terminal_reason_code)
+    ; ("duration_ms", Json_util.float_opt_to_json e.duration_ms)
+    ; "evidence_refs", `List (List.map (fun v -> `String v) e.evidence_refs)
+    ]
+
+let decisions_feed_cache :
+    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
+
 let keeper_decisions_log_json
-    ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(config : Workspace.config)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let per_keeper_limit = limit * 2 in
   let all_events =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
-        else (
-          let lines =
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_turn_spans"
-              path
-              ~max_bytes:500_000
-              ~max_lines:per_keeper_limit
-          in
-          List.filter_map
-            (fun line ->
-              try
-                let json = Yojson.Safe.from_string line in
-                let str key =
-                  match Yojson.Safe.Util.member key json with
-                  | `String s -> s
-                  | _ -> ""
-                in
-                let ts_unix =
-                  match Yojson.Safe.Util.member "ts_unix" json with
-                  | `Float f -> f
-                  | `Int i -> float_of_int i
-                  | _ -> 0.0
-                in
-                let keeper_name =
-                  let raw = str "keeper_name" in
-                  if raw = "" then m.name else raw
-                in
-                let id =
-                  let raw = str "id" in
-                  if raw <> ""
-                  then raw
-                  else k2_stable_id ~prefix:"dec" ~keeper_name ~ts_unix ~raw:line
-                in
-                let ts =
-                  let raw = str "ts" in
-                  if raw <> "" then raw else k2_iso8601_of_unix ts_unix
-                in
-                let decision_type =
-                  let sa = str "speech_act" in
-                  if sa <> ""
-                  then sa
-                  else (
-                    let outcome = str "outcome" in
-                    if outcome <> "" then outcome else "turn")
-                in
-                let terminal_reason_code = terminal_reason_code_of_decision_json json in
-                let duration_ms =
-                  let number key =
-                    match Yojson.Safe.Util.member key json with
-                    | `Float value -> Some value
-                    | `Int value -> Some (float_of_int value)
-                    | _ -> None
-                  in
-                  match number "duration_ms" with
-                  | Some _ as value -> value
-                  | None -> number "latency_ms"
-                in
-                let belief_summary = str "belief_summary" in
-                let current_intention = str "current_intention" in
-                let blocker = str "blocker" in
-                let channel = str "channel" in
-                let summary_parts =
-                  List.filter
-                    (fun s -> s <> "")
-                    [ decision_type
-                    ; (if channel <> "" then "via " ^ channel else "")
-                    ; (match terminal_reason_code with
-                       | Some code -> "reason: " ^ code
-                       | None -> "")
-                    ; (if current_intention <> "" then "\xe2\x86\x92 " ^ current_intention else "")
-                    ; (if blocker <> "" then "blocked: " ^ blocker else "")
-                    ; (if belief_summary <> "" then belief_summary else "")
-                    ]
-                in
-                let summary = String.concat " \xc2\xb7 " summary_parts in
-                let evidence_refs =
-                  let refs = json_string_list_member "evidence_refs" json in
-                  let refs =
-                    if refs <> []
-                    then refs
-                    else json_string_list_member "raw_evidence_refs" json
-                  in
-                  List.map (fun value -> `String value) refs
-                in
-                Some
-                  ( ts_unix
-                  , `Assoc
-                      [ "id", `String id
-                      ; "ts", `String ts
-                      ; "ts_unix", `Float ts_unix
-                      ; "keeper", `String keeper_name
-                      ; "decision_type", `String decision_type
-                      ; "summary", `String summary
-                      ; ( "terminal_reason_code"
-                        , match terminal_reason_code with
-                          | Some code -> `String code
-                          | None -> `Null )
-                      ; ( "duration_ms"
-                        , match duration_ms with
-                          | Some value -> `Float value
-                          | None -> `Null )
-                      ; "evidence_refs", `List evidence_refs
-                      ] )
-              with
-              | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-            lines))
+        else
+          Jsonl_incremental_projection.read decisions_feed_cache
+            ~key:path ~path ~empty:[]
+            ~initial_tail_bytes:keeper_feed_tail_bytes
+            ~add:(fun acc line ->
+              match parse_decision_event ~keeper_name:m.name line with
+              | Some ev ->
+                  keeper_feed_retain
+                    ((ev.ts_unix, decision_event_to_yojson ev) :: acc)
+              | None -> acc))
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events in
@@ -448,31 +495,33 @@ let keeper_decisions_log_json
     ]
 ;;
 
+(* Per-keeper memory-bank feed cache, mirroring [decisions_feed_cache]: the
+   transformed (ts_unix, entry) list per source file, keyed by
+   (path, per_keeper_limit) so output is identical to the uncached path. *)
+let memory_feed_cache :
+    (float * Yojson.Safe.t) list Jsonl_incremental_projection.t =
+  Jsonl_incremental_projection.create ()
+
 let keeper_memory_log_json
-    ~(config : Coord.config)
-    ~(keepers : Keeper_types.keeper_meta list)
+    ~(config : Workspace.config)
+    ~(keepers : Keeper_meta_contract.keeper_meta list)
     ?(limit = 200)
     ()
   : Yojson.Safe.t =
   let limit = k2_feed_limit limit in
-  let per_keeper_limit = limit * 2 in
   let all_entries =
     List.concat_map
-      (fun (m : Keeper_types.keeper_meta) ->
+      (fun (m : Keeper_meta_contract.keeper_meta) ->
         let path = Keeper_types_support.keeper_memory_bank_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
-        else (
-          let lines =
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_memory_log"
-              path
-              ~max_bytes:500_000
-              ~max_lines:per_keeper_limit
-          in
-          List.filter_map
-            (fun line ->
+        else
+          Jsonl_incremental_projection.read memory_feed_cache
+            ~key:path ~path ~empty:[]
+            ~initial_tail_bytes:keeper_feed_tail_bytes
+            ~add:(fun acc line ->
               match Keeper_memory.parse_memory_bank_row line with
-              | None -> None
+              | None -> acc
               | Some (row : Keeper_memory.keeper_memory_row_raw) ->
                 let kind = memory_kind_for_log row.kind in
                 let ts = k2_iso8601_of_unix row.ts_unix in
@@ -483,17 +532,17 @@ let keeper_memory_log_json
                     ~ts_unix:row.ts_unix
                     ~raw:line
                 in
-                Some
-                  ( row.ts_unix
-                  , `Assoc
-                      [ "id", `String id
-                      ; "ts", `String ts
-                      ; "ts_unix", `Float row.ts_unix
-                      ; "keeper", `String m.name
-                      ; "kind", `String kind
-                      ; "summary", `String row.text
-                      ] ))
-            lines))
+                keeper_feed_retain
+                  (( row.ts_unix
+                   , `Assoc
+                       [ "id", `String id
+                       ; "ts", `String ts
+                       ; "ts_unix", `Float row.ts_unix
+                       ; "keeper", `String m.name
+                       ; "kind", `String kind
+                       ; "summary", `String row.text
+                       ] )
+                   :: acc)))
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_entries in

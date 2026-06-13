@@ -12,7 +12,7 @@ import {
 } from './fsm-hub-types'
 import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import {
-  isFailingAfterCascadeExhausted,
+  isFailingAfterRuntimeExhausted,
   isCompactionActive,
 } from '../lib/keeper-operational-state'
 
@@ -34,10 +34,10 @@ function invariantDetail(
       return ok
         ? 'KSM/KTC/KMC agree — 지금 누가 compaction 을 소유하는지 일치.'
         : `KSM=${snapshot.phase}, KTC=${snapshot.turn_phase}, KMC=${snapshot.compaction.stage} 가 일치하지 않음.`
-    case 'no_cascade_before_measurement':
+    case 'no_runtime_before_measurement':
       return ok
-        ? 'measurement 가 captured 된 뒤에만 cascade work 가 진행됨.'
-        : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.cascade.state}.`
+        ? 'measurement 가 captured 된 뒤에만 runtime work 가 진행됨.'
+        : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.runtime.state}.`
     case 'compaction_atomicity':
       return ok
         ? 'compaction 은 parent Compacting phase 밖에서 실행되지 않음.'
@@ -64,8 +64,8 @@ function invariantDetail(
 function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (!snapshot.is_live) {
     return snapshot.last_outcome
-      ? '다음 live turn 이 idle placeholder 로부터 KTC/KDP/KCL 을 repopulate 해야 함.'
-      : '아직 완료된 턴 없음 — first live turn 이 observer 를 채워야 함.'
+      ? '다음 live turn 이 시작되면 KTC/KDP/KCL 이 실제 turn 값으로 갱신되어야 함.'
+      : '아직 완료된 turn 없음 — 첫 live turn 이 시작되면 관측값이 채워져야 함.'
   }
   // `collapsed_from` carries the raw KSM phase when the composite has folded
   // it under a parent projection. When present it is the operator-actionable
@@ -75,7 +75,7 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.collapsed_from) {
     return `lifecycle 가 raw phase ${snapshot.collapsed_from} 에서 carrier phase 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
   }
-  if (isFailingAfterCascadeExhausted(snapshot)) {
+  if (isFailingAfterRuntimeExhausted(snapshot)) {
     return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
   }
   if (snapshot.phase === 'overflowed') {
@@ -91,24 +91,24 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
     return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
-    return 'blocked turn 은 cascade/tool execution 진입 없이 idle 로 finalize 되어야 함.'
+    return 'blocked turn 은 runtime/tool execution 진입 없이 idle 로 finalize 되어야 함.'
   }
-  if (snapshot.cascade.state === 'selecting' || snapshot.cascade.state === 'trying') {
+  if (snapshot.runtime.state === 'selecting' || snapshot.runtime.state === 'trying') {
     return 'provider routing 이 반환되면 KCL 이 done 또는 exhausted 로 정착해야 함.'
   }
   switch (snapshot.turn_phase) {
     case 'prompting':
       return 'prompt assembly 완료 시 KTC 가 executing 으로 진행해야 함.'
     case 'routing':
-      return 'cascade routing 이 완료되면 KCL 이 trying 으로 진행해야 함.'
+      return 'runtime routing 이 완료되면 KCL 이 trying 으로 진행해야 함.'
     case 'executing':
-      return 'execution 은 turn 을 finalize 하거나 cascade/compaction transition 을 유도해야 함.'
+      return 'execution 은 turn 을 finalize 하거나 runtime/compaction transition 을 유도해야 함.'
     case 'compacting':
       return 'turn finalization 이 compaction 종료를 대기 중.'
     case 'finalizing':
       return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
     case 'exhausted':
-      return 'cascade 가 소진됨. 다음 관측에서 idle 또는 retry 로 전이해야 함.'
+      return 'runtime 가 소진됨. 다음 관측에서 idle 또는 retry 로 전이해야 함.'
     default:
       return '다음 meaningful edge 는 다음 관측된 lifecycle event 에서 시작되어야 함.'
   }
@@ -130,22 +130,22 @@ export function deriveOperationalInsight(
       evidence: [
         `KSM ${snapshot.phase}`,
         `KTC ${snapshot.turn_phase}`,
-        `KCL ${snapshot.cascade.state}`,
+        `KCL ${snapshot.runtime.state}`,
       ],
     }
   }
 
   const lanes = precomputedLanes ?? deriveObservedLaneSummaries(snapshot, observations, now)
   const stalledLane = lanes.find(lane => lane.stalled)
-  if (isFailingAfterCascadeExhausted(snapshot)) {
+  if (isFailingAfterRuntimeExhausted(snapshot)) {
     return {
       tone: 'error',
-      headline: 'cascade exhaustion 후 실패',
-      detail: 'keeper 가 남은 cascade path 없이 recovery 에 진입 — turn 이 provider failover 로 self-heal 불가능.',
+      headline: 'runtime exhaustion 후 실패',
+      detail: 'keeper 가 남은 runtime path 없이 recovery 에 진입 — turn 이 provider failover 로 self-heal 불가능.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
-        `KCL ${snapshot.cascade.state}`,
+        `KCL ${snapshot.runtime.state}`,
         snapshot.measurement.captured ? 'measurement captured' : 'measurement missing',
       ],
     }
@@ -179,7 +179,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'info',
       headline: 'Compaction 가 현재 턴 소유',
-      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active coordination point 임을 가리킴.',
+      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active workspace point 임을 가리킴.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
@@ -209,10 +209,10 @@ export function deriveOperationalInsight(
       : 'no completed turn yet'
     return {
       tone: 'ok',
-      headline: 'Idle 스냅샷 정상',
+      headline: '대기 상태 정상',
       detail: snapshot.last_outcome
-        ? `sub-FSM 들이 idle placeholder 로 fallback 됨; 마지막 완료 turn 은 ${idleSince} 전 종료.`
-        : 'observer 가 idle — has not captured a completed turn yet.',
+        ? `현재 live turn 없음. KTC/KDP/KCL 은 대기값이며, 마지막 완료 turn 은 ${idleSince} 전 종료.`
+        : '현재 live turn 없음. 아직 완료된 turn 을 관측하지 못함.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
@@ -220,15 +220,15 @@ export function deriveOperationalInsight(
       ],
     }
   }
-  if (snapshot.cascade.state === 'selecting' || snapshot.cascade.state === 'trying') {
+  if (snapshot.runtime.state === 'selecting' || snapshot.runtime.state === 'trying') {
     return {
       tone: 'info',
       headline: 'Provider 작업이 활성 frontier',
-      detail: 'cascade 가 live turn 의 ownership 을 가져감 — 중요한 next edge 는 provider completion 또는 exhaustion.',
+      detail: 'runtime 가 live turn 의 ownership 을 가져감 — 중요한 next edge 는 provider completion 또는 exhaustion.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KTC ${snapshot.turn_phase}`,
-        `KCL ${snapshot.cascade.state}`,
+        `KCL ${snapshot.runtime.state}`,
       ],
     }
   }

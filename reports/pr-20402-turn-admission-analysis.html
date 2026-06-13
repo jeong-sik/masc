@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PR 20402 Turn Admission Report</title>
+  <style>
+    :root {
+      --bg: #f5f7fa;
+      --panel: #fff;
+      --ink: #17212b;
+      --muted: #607080;
+      --line: #d9e0e8;
+      --line2: #aeb8c4;
+      --blue: #1d5f99;
+      --green: #24724f;
+      --amber: #9a6700;
+      --red: #b42318;
+      --purple: #6941c6;
+      --code: #eef2f6;
+      --shadow: 0 1px 2px rgba(16,24,40,.06), 0 12px 32px rgba(16,24,40,.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      padding: 0 4px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: var(--code);
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .layout {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 285px minmax(0, 1fr);
+    }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 24px 18px;
+      border-right: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    nav h1 { margin: 0 0 8px; font-size: 18px; line-height: 1.25; }
+    nav .meta { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+    nav a {
+      display: block;
+      padding: 6px 8px;
+      border-radius: 6px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    nav a:hover { background: #edf2f7; text-decoration: none; }
+    main { max-width: 1440px; padding: 28px 34px 56px; }
+    section {
+      margin: 0 0 20px;
+      overflow: hidden;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    section > header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    section > header h2 { margin: 0; font-size: 19px; line-height: 1.3; }
+    section > header p { margin: 6px 0 0; color: var(--muted); }
+    .body { padding: 18px 20px 22px; }
+    .grid { display: grid; gap: 14px; }
+    .cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 15px; }
+    .card p { margin: 6px 0; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 8px;
+      border: 1px solid var(--line2);
+      border-radius: 999px;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .green { color: var(--green); border-color: #b7dec9; background: #effaf3; }
+    .amber { color: var(--amber); border-color: #efd08a; background: #fff8e6; }
+    .red { color: var(--red); border-color: #f3b8b2; background: #fff2f0; }
+    .blue { color: var(--blue); border-color: #b7d4ef; background: #eef6ff; }
+    .purple { color: var(--purple); border-color: #d3c4f4; background: #f5f0ff; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 9px 10px; border: 1px solid var(--line); vertical-align: top; text-align: left; }
+    th { background: #f4f7fa; font-weight: 700; }
+    td:first-child.code-ish { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    ul { margin: 8px 0 0 18px; padding: 0; }
+    li { margin: 5px 0; }
+    .callout {
+      margin: 12px 0;
+      padding: 11px 13px;
+      border-left: 4px solid var(--blue);
+      border-radius: 6px;
+      background: #eef6ff;
+    }
+    .callout.good { border-left-color: var(--green); background: #effaf3; }
+    .callout.warn { border-left-color: var(--amber); background: #fff8e6; }
+    .callout.bad { border-left-color: var(--red); background: #fff2f0; }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .step {
+      position: relative;
+      min-height: 92px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .step:not(:last-child)::after {
+      content: ">";
+      position: absolute;
+      right: -10px;
+      top: 42%;
+      color: var(--line2);
+      font-weight: 700;
+    }
+    .step strong { display: block; margin-bottom: 5px; }
+    .step small { color: var(--muted); }
+    .mono {
+      white-space: pre-wrap;
+      overflow: auto;
+      padding: 12px;
+      border-radius: 7px;
+      background: #101828;
+      color: #f2f4f7;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .risk-high { color: var(--red); font-weight: 700; }
+    .risk-med { color: var(--amber); font-weight: 700; }
+    .risk-low { color: var(--green); font-weight: 700; }
+    .footnote { color: var(--muted); font-size: 12px; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      nav { position: relative; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+      main { padding: 18px; }
+      .cols-2, .cols-3, .flow { grid-template-columns: 1fr; }
+      .step:not(:last-child)::after { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <h1>PR 20402 진행 보고서</h1>
+      <div class="meta">
+        feat(keeper): add global turn admission switch<br>
+        PR HEAD <code>9061fc24c1</code><br>
+        갱신: 2026-06-07 23:22:38 KST
+      </div>
+      <a href="#summary">1. 현재 결론</a>
+      <a href="#progress">2. 진행상황</a>
+      <a href="#scope">3. 변경 범위</a>
+      <a href="#logic">4. 현재 로직</a>
+      <a href="#scenarios">5. 시나리오</a>
+      <a href="#dashboard">6. Dashboard/Tool</a>
+      <a href="#shell-ir">7. Shell IR</a>
+      <a href="#validation">8. 검증/CI</a>
+      <a href="#risks">9. 남은 문제</a>
+      <a href="#ideal">10. 이상 모델</a>
+      <a href="#plan">11. 이후 작업 계획</a>
+      <a href="#next">12. 즉시 순서</a>
+      <a href="#evidence">13. 근거</a>
+	      <a href="#concurrency">14. 동시성 안전성 분석 (2026-06-08)</a>
+    </nav>
+
+    <main>
+      <section id="summary">
+        <header>
+          <h2>1. 현재 결론</h2>
+          <p>이 보고서는 2026-06-08 16:00 KST 기준 main HEAD <code>666f051978</code>로 갱신했다. #20438(admission gate 전체 제거), #20482(command_blocked_hint dead code 제거) 반영.</p>
+        </header>
+        <div class="body">
+          <div class="grid cols-3">
+            <div class="card">
+              <h3>Turn_slot purge</h3>
+              <p><span class="badge green">대부분 진행됨</span></p>
+              <p><code>Keeper_turn_slot</code>, <code>keeper_turn_slot_types</code>, 관련 slot tests/spec cfg가 삭제되고 <code>Keeper_turn_holders</code>가 새 diagnostics 모듈로 들어왔다.</p>
+            </div>
+            <div class="card">
+              <h3>Pool model</h3>
+              <p><span class="badge green">Capacity gate 전체 제거 완료</span></p>
+              <p><code>Keeper_turn_capacity</code>(global 32 + per-keeper 2)과 <code>Runtime_lane_capacity</code>(per-provider max-concurrent)가 #20438에서 제거됨. 현재는 per-keeper fiber + holder diagnostics 구조. 동시성 제한은 FD/disk pressure와 operator keeper 수 조절만.</p>
+            </div>
+            <div class="card">
+              <h3>Merge readiness</h3>
+              <p><span class="badge green">PR #20402 MERGED</span></p>
+              <p>후속 PR 진행 중: #20438(admission gate 제거), #20482(dead code 정리). Capacity gate 전체가 main에서 제거됨.</p>
+            </div>
+          </div>
+
+          <div class="callout bad">
+            <strong>가장 중요한 gate:</strong>
+            <code>test_exec_shell_command_gate</code>에서 <code>rg foo lib | sed s/a/b/</code>가 기존 baseline 기대값 <code>command_not_allowed</code>가 아니라 현재 <code>ok</code>로 통과한다.
+            사용자 기준으로 <code>command_not_allowed</code>는 제거 개념이므로, 이 실패는 sed 허용 회귀가 아니라 stale fixture/test taxonomy 문제로 봐야 한다.
+          </div>
+
+          <div class="callout good">
+            <strong>Pool 결론:</strong>
+            PR #20398, #20400, #20404는 모두 closed 상태이며, 현재 판단 기준은 열린 #20402 최신 head다.
+            최신 코드에서는 <code>Keeper_turn_slot</code> 공유 turn semaphore/pool이 사라졌고, <code>Keeper_turn_holders.mli</code>가 명시적으로 "runtime capacity 또는 semaphore를 acquire하지 않는다"고 선언한다.
+            그래서 "공유 Turn Pool에서 벗어났다"는 맞지만, "각 Keeper가 독립 capacity Pool을 가진다"는 아직 아니다.
+          </div>
+
+          <div class="callout warn">
+            <strong>프로덕션 판단:</strong>
+            핵심 방향은 맞지만 설정/경계 표면은 아직 production-clean이 아니다.
+            <code>MASC_KEEPER_HEARTBEAT_INTERVAL_SEC</code>와 <code>MASC_SMART_HB_BASE_INTERVAL_SEC</code>가 같은 cadence를 나눠 갖고,
+            <code>MASC_KEEPER_BOARD_DEBOUNCE_SEC</code>는 두 의미로 재사용된다.
+            이 정리는 #20402 merge 후 follow-up PR로 자르는 것이 맞다.
+          </div>
+
+          <table>
+            <tbody>
+              <tr><th>PR URL</th><td><a href="https://github.com/jeong-sik/masc/pull/20402">https://github.com/jeong-sik/masc/pull/20402</a> <span class="footnote">(gh CLI가 반환한 URL)</span></td></tr>
+              <tr><th>요청 링크</th><td><a href="https://github.com/jeong-sik/masc-mcp/pull/20402">https://github.com/jeong-sik/masc-mcp/pull/20402</a></td></tr>
+              <tr><th>head</th><td><code>9061fc24c17e6a04219ef12ee7681c86f3fa0e8e</code></td></tr>
+              <tr><th>current merge state</th><td><code>BLOCKED</code>, checks pending after latest push</td></tr>
+              <tr><th>local worktree</th><td><code>/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/keeper-turn-admission-20402-followup2</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="progress">
+        <header>
+          <h2>2. 진행상황</h2>
+          <p>PR head가 계속 바뀌었지만, 큰 판단은 동일하다. #20402는 shared Turn Pool 제거 PR이고, config/scheduler 정리는 후속 PR로 분리한다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>항목</th><th>이전 관찰</th><th>현재 기준 9061fc24c1</th><th>판정</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>central admission token</td>
+                <td><code>Keeper_turn_admission</code> 신규 중심</td>
+                <td>별도 capacity semaphore 모델이 아니라 holder diagnostics 중심</td>
+                <td><span class="risk-med">설계가 다시 바뀜</span></td>
+              </tr>
+              <tr>
+                <td>Turn Pool ownership</td>
+                <td>shared slot / central admission 후보가 공존</td>
+                <td>shared turn semaphore 없음. per-keeper holder 기록만 있음</td>
+                <td><span class="risk-low">공유 Turn Pool 제거는 진행됨</span></td>
+              </tr>
+              <tr>
+                <td>Turn_slot module</td>
+                <td>compat/diagnostics로 남음</td>
+                <td>production 방향은 삭제/비참조가 목표. stale local worktree에는 잔재가 있으므로 PR head 기준 재검증 필요</td>
+                <td><span class="risk-low">좋음</span></td>
+              </tr>
+              <tr>
+                <td>holder diagnostics</td>
+                <td><code>turn_slot_holders</code></td>
+                <td><code>Keeper_turn_holders</code> 신규 492 LoC</td>
+                <td><span class="risk-low">방향 맞음</span></td>
+              </tr>
+              <tr>
+                <td>Dashboard stopped state</td>
+                <td><code>stopped</code> flow state 추가</td>
+                <td><code>FlowState</code>는 <code>unknown|initializing|running|paused</code>만 유지</td>
+                <td><span class="risk-med">fleet stop UX는 이번 PR 범위에서 빠짐</span></td>
+              </tr>
+              <tr>
+                <td>Tool control</td>
+                <td>workspace pause + fleet admission pause hook</td>
+                <td>workspace pause/resume + keeper pause status만 남음</td>
+                <td><span class="risk-low">단순화됨</span></td>
+              </tr>
+              <tr>
+                <td>Shell IR</td>
+                <td>별도 이슈로만 언급</td>
+                <td>PR diff에 직접 포함. retired taxonomy 제거 기준으로 corpus/test 정리가 필요</td>
+                <td><span class="risk-high">retired taxonomy 제거 필요</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="scope">
+        <header>
+          <h2>3. 변경 범위</h2>
+          <p>최신 PR은 Keeper Turn_slot purge와 Shell IR gate 변경이 같이 들어간 큰 PR이다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>영역</th><th>주요 변경</th><th>코드 기준</th><th>해석</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Keeper holder</td>
+                <td><code>Keeper_turn_holders</code> 추가</td>
+                <td><code>lib/keeper/keeper_turn_holders.ml</code>, <code>.mli</code></td>
+                <td>runtime gate가 아니라 holder rows, force-release markers, semaphore wait metrics, provider timeout strike counter를 기록한다.</td>
+              </tr>
+              <tr>
+                <td>Keeper slot purge</td>
+                <td><code>Keeper_turn_slot</code> 삭제</td>
+                <td><code>lib/keeper/keeper_turn_slot.ml/.mli</code> deleted, <code>keeper_turn_slot_types</code> deleted</td>
+                <td>사용자가 지적한 "Turn_slot 개념"은 production code에서 상당히 제거됐다.</td>
+              </tr>
+              <tr>
+                <td>Heartbeat path</td>
+                <td>FD/disk gate 후 holder 기록</td>
+                <td><code>keeper_heartbeat_loop.ml:292-324</code></td>
+                <td>turn 실행 전 shared pool 또는 per-keeper pool capacity token을 잡지 않고, <code>with_recorded_turn_holder</code>로 diagnostics row만 감싼다.</td>
+              </tr>
+              <tr>
+                <td>Supervisor/manual stop</td>
+                <td>stale holder row force release</td>
+                <td><code>keeper_supervisor.ml:204</code>, <code>keeper_keepalive.ml:632</code></td>
+                <td>stale watchdog/manual stop은 holder diagnostics row를 정리한다. central admission release는 없다.</td>
+              </tr>
+              <tr>
+                <td>Tool control</td>
+                <td>fleet admission hook 제거</td>
+                <td><code>lib/tool_control.ml</code></td>
+                <td><code>masc_pause_status</code>는 workspace paused/running/initializing + keeper_pause만 반환한다.</td>
+              </tr>
+              <tr>
+                <td>Dashboard</td>
+                <td>flow control은 stopped 없이 admission queue telemetry만 표시</td>
+                <td><code>dashboard/src/components/flow-control</code></td>
+                <td>operator snapshot의 <code>admission_queue</code>를 보여주지만 fleet stopped state 모델은 아니다.</td>
+              </tr>
+              <tr>
+                <td>Shell IR</td>
+                <td>pipeline stage preservation / typed lowering 확장</td>
+                <td><code>lib/exec/command_gate/shell_command_gate.ml</code>, <code>test/test_exec_shell_command_gate.ml</code></td>
+                <td>quoted pipe와 real pipeline을 분리하는 방향은 맞다. 남은 충돌은 <code>command_not_allowed</code>라는 old taxonomy를 baseline이 아직 기대한다는 점이다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="logic">
+        <header>
+          <h2>4. 현재 로직</h2>
+          <p>최신 head 기준 turn 실행 순서다.</p>
+        </header>
+        <div class="body">
+          <div class="flow">
+            <div class="step">
+              <strong>1. Observe</strong>
+              <small>board events, world observation, scheduling decision</small>
+            </div>
+            <div class="step">
+              <strong>2. Resource gates</strong>
+              <small><code>Keeper_fd_pressure.admit_turn</code>, <code>Keeper_disk_pressure.admit_turn</code></small>
+            </div>
+            <div class="step">
+              <strong>3. Record holder</strong>
+              <small><code>Keeper_turn_holders.with_recorded_turn_holder</code></small>
+            </div>
+            <div class="step">
+              <strong>4. Run cycle</strong>
+              <small><code>run_keeper_cycle_with_slot</code> calls unified turn with liveness pulse</small>
+            </div>
+            <div class="step">
+              <strong>5. Cleanup</strong>
+              <small>Switch finalizer / protect releases holder rows</small>
+            </div>
+          </div>
+
+          <div class="callout warn">
+            <strong>명명상 남은 문제:</strong>
+            <code>run_keeper_cycle_with_slot</code>는 더 이상 slot control이 아니다. 실제 역할은 "recorded holder 아래에서 unified turn 실행 + liveness pulse/error triage"다.
+            다음 rename 후보는 <code>run_keeper_cycle_with_holder</code> 또는 <code>run_admitted_keeper_cycle</code>보다 더 정확한 <code>run_keeper_cycle_with_liveness_pulse</code> 쪽이다.
+          </div>
+
+          <div class="callout">
+            <strong>현재 pool-like controls:</strong>
+            <code>Keeper_registry_spawn_slots</code>는 fleet-level <code>max_active_keepers</code> spawn guard이고,
+            <code>Keeper_fd_pressure</code>/<code>Keeper_disk_pressure</code>는 resource admission guard다.
+            <code>keeper.turn.slot_pool_size</code>는 deterministic pinning용 slot id 설정으로, turn capacity pool과 별개다.
+          </div>
+        </div>
+      </section>
+
+      <section id="scenarios">
+        <header>
+          <h2>5. 시나리오</h2>
+          <p>운영 관점으로 본 정상/비정상 흐름이다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>시나리오</th><th>현재 흐름</th><th>관측 포인트</th><th>리스크</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>정상 turn</td>
+                <td>resource gate 통과 후 holder row 기록, unified turn 실행, finalizer가 holder row 제거</td>
+                <td><code>turn_holders</code>, <code>SemaphoreWaitSeconds</code>, unified turn logs</td>
+                <td><span class="risk-low">낮음</span></td>
+              </tr>
+              <tr>
+                <td>FD/disk pressure</td>
+                <td>turn body 진입 전 skip</td>
+                <td><code>skipping turn because projected FD budget...</code>, disk free-space log</td>
+                <td><span class="risk-low">낮음</span></td>
+              </tr>
+              <tr>
+                <td>manual stop</td>
+                <td><code>stop_keepalive</code>가 stop/wakeup 설정 후 holder row를 force-release</td>
+                <td><code>manual stop force-released holder row(s)</code></td>
+                <td><span class="risk-med">로그 문자열에 <code>holder_slot(s)</code> stale</span></td>
+              </tr>
+              <tr>
+                <td>stale watchdog</td>
+                <td>supervisor가 unresolved watchdog-stopped keeper를 crashed로 처리하고 holder rows release</td>
+                <td><code>force-released stale holder rows after watchdog crash</code></td>
+                <td><span class="risk-low">증상 방어는 유지</span></td>
+              </tr>
+              <tr>
+                <td>dashboard pause</td>
+                <td>workspace pause가 primary truth, keeper pause는 nested payload</td>
+                <td><code>masc_pause_status</code> status <code>paused/running/initializing</code></td>
+                <td><span class="risk-med">fleet admission stopped 개념은 표시하지 않음</span></td>
+              </tr>
+              <tr>
+                <td>shell pipeline</td>
+                <td>typed parser가 stages를 보존하고 policy가 검증</td>
+                <td><code>rg foo lib | sed s/a/b/</code> mismatch</td>
+                <td><span class="risk-high">baseline이 제거 대상 taxonomy를 기대</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="dashboard">
+        <header>
+          <h2>6. Dashboard/Tool</h2>
+          <p>Dashboard는 stopped flow state보다 admission queue telemetry 표시 쪽으로 바뀌었다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>표면</th><th>현재 상태</th><th>판정</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>masc_pause</code></td>
+                <td><code>Workspace.pause</code>만 수행</td>
+                <td>fleet admission pause hook 제거로 scope가 명확해졌다.</td>
+              </tr>
+              <tr>
+                <td><code>masc_resume</code></td>
+                <td><code>Workspace.resume</code>만 수행</td>
+                <td>이전의 admission resume side effect가 사라졌다.</td>
+              </tr>
+              <tr>
+                <td><code>masc_pause_status</code></td>
+                <td>workspace pause/running/initializing + keeper_pause nested payload</td>
+                <td>backend model은 단순하고 테스트도 통과한다.</td>
+              </tr>
+              <tr>
+                <td>Flow state</td>
+                <td><code>unknown | initializing | running | paused</code></td>
+                <td>fleet stopped state를 직접 표시하지 않는다. 이번 PR 목적이 Turn_slot purge라면 과한 surface를 뺀 셈이다.</td>
+              </tr>
+              <tr>
+                <td>Admission queue display</td>
+                <td><code>operatorSnapshot.value?.admission_queue</code>를 mode/owner/active/max로 표시</td>
+                <td>좋다. 다만 이것은 OAS/runtime admission telemetry이며 keeper Turn_slot purge와 혼동되지 않게 라벨이 중요하다.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="shell-ir">
+        <header>
+          <h2>7. Shell IR</h2>
+          <p>남은 Shell IR 개선이 PR에 포함되었고, 현재 유일한 로컬 실패는 제거 대상 taxonomy 잔재다.</p>
+        </header>
+        <div class="body">
+          <div class="grid cols-2">
+            <div class="card">
+              <h3>좋은 방향</h3>
+              <ul>
+                <li>quoted pipe는 single-stage argument로 유지된다.</li>
+                <li>real pipeline은 ordered stage list로 보존된다.</li>
+                <li>typed pipeline lowering이 raw pipeline과 같은 <code>stage_bins</code>를 가진다.</li>
+                <li>nested pipeline은 <code>Unsupported_nested_pipeline</code>으로 구분된다.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>현재 실패</h3>
+              <p><code>test_exec_shell_command_gate</code> corpus row:</p>
+              <p><code>rg foo lib | sed s/a/b/</code></p>
+              <p>Expected <code>command_not_allowed</code>, received <code>ok</code>.</p>
+              <p>해석: <code>command_not_allowed</code> 자체가 제거 개념이므로 expected side가 stale이다.</p>
+            </div>
+          </div>
+
+          <div class="callout warn">
+            <strong>수정 방향:</strong>
+            이 PR의 Shell IR 방향은 "typed stage를 보존하고 typed capability/risk 쪽에서 판단"으로 보인다.
+            따라서 <code>Command_not_allowed</code> / <code>command_not_allowed</code>를 baseline verdict와 사용자-facing concept에서 제거하고,
+            필요한 경우 더 구체적인 capability/risk denial reason으로 치환하는 쪽이 맞다.
+          </div>
+        </div>
+      </section>
+
+      <section id="validation">
+        <header>
+          <h2>8. 검증/CI</h2>
+          <p>PR head가 새로 push되어 GitHub checks가 다시 pending 상태다. 아래 로컬 focused 검증은 이전 local state의 참고 근거이며, merge 판단은 최신 CI 완료 후 다시 해야 한다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>검증</th><th>상태</th><th>메모</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>ocamlformat --check</code></td>
+                <td><span class="badge amber">previous pass</span></td>
+                <td>이전 focused set 기준. 최신 PR head <code>9061fc24c1</code> 기준 재실행 필요.</td>
+              </tr>
+              <tr>
+                <td>focused dune build</td>
+                <td><span class="badge amber">previous pass</span></td>
+                <td>이전 local worktree 기준. current PR head는 GitHub checks를 우선 본다.</td>
+              </tr>
+              <tr>
+                <td><code>test_tool_control_coverage.exe</code></td>
+                <td><span class="badge amber">previous pass</span></td>
+                <td>11 tests run, 이전 local state 기준.</td>
+              </tr>
+              <tr>
+                <td><code>test_exec_shell_command_gate.exe</code></td>
+                <td><span class="badge red">fail</span></td>
+                <td>1 failure / 19 tests: <code>rg foo lib | sed s/a/b/</code> expected retired <code>command_not_allowed</code>, got <code>ok</code></td>
+              </tr>
+              <tr>
+                <td><code>pnpm --dir dashboard typecheck</code></td>
+                <td><span class="badge amber">previous pass</span></td>
+                <td><code>tsc --noEmit</code> completed, 이전 local state 기준.</td>
+              </tr>
+              <tr>
+                <td>GitHub PR checks</td>
+                <td><span class="badge amber">pending</span></td>
+                <td>2026-06-07 23:16 KST 기준 latest push 후 checks가 다시 pending. <code>mergeStateStatus=BLOCKED</code>.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="risks">
+        <header>
+          <h2>9. 남은 문제</h2>
+          <p>최신 head 기준 merge 전 봐야 할 문제다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>Severity</th><th>문제</th><th>왜 중요한가</th><th>권장 조치</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="risk-high" style="text-decoration:line-through">High</span> → <span class="badge green">해결</span></td>
+                <td>Shell IR corpus가 retired <code>command_not_allowed</code>를 기대</td>
+                <td><code>Command_not_allowed</code> variant는 이미 main에서 제거됨. <code>command_blocked_hint</code> 65줄 dead function도 PR #20482에서 정리.</td>
+                <td>완료. PR #20478(close) + #20482(merged).</td>
+              </tr>
+              <tr>
+                <td><span class="risk-high">High</span></td>
+                <td>Capacity gate 전체 제거 후 동시성 안전성</td>
+                <td>#20438이 <code>Keeper_turn_capacity</code>와 <code>Runtime_lane_capacity</code>를 모두 제거. 모든 keeper가 동시에 turn을 실행할 수 있음. OAS provider overload 가능. 안전성은 다음에 의존: (1) per-keeper single-fiber (2) FD/disk pressure (3) OAS HTTP timeout (4) operator가 keeper 수로 조절.</td>
+                <td>아래 §14 동시성 분석 참조. 현재 구조는 single-fiber-by-construction으로 per-keeper 안전. cross-keeper는 operator 책임.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td>"개별 Keeper Pool"이라고 부르면 현재 구현보다 강한 주장</td>
+                <td>현재 코드에는 keeper별 capacity semaphore/pool이 없고, holder diagnostics만 있다. 운영 문서/PR 설명이 과하게 쓰이면 다음 설계 판단이 꼬인다.</td>
+                <td>"shared Turn Pool removed; per-keeper holder/fiber execution"으로 표현 고정. 정말 개별 pool이 필요하면 별도 typed capacity owner를 설계.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td><code>run_keeper_cycle_with_slot</code> 이름과 주석 stale</td>
+                <td>slot control이 제거된 상태에서 file/function/docstring이 여전히 slot control로 읽힌다.</td>
+                <td><code>keeper_heartbeat_loop_cycle_with_holder</code> 또는 liveness pulse/error triage 중심 이름으로 rename.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td><code>Keeper_turn_holders</code>가 diagnostics 이상의 책임을 가짐</td>
+                <td>provider timeout strike counter와 semaphore wait metric까지 포함해 holder diagnostics boundary가 다시 두꺼워졌다.</td>
+                <td>후속 PR에서 provider timeout strikes를 observations/runtime_budget 쪽으로 이동.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td>heartbeat cadence 설정이 둘로 갈라짐</td>
+                <td><code>MASC_KEEPER_HEARTBEAT_INTERVAL_SEC</code>와 <code>MASC_SMART_HB_BASE_INTERVAL_SEC</code>가 둘 다 "기본 heartbeat interval"로 읽힌다. smart heartbeat가 켜졌을 때 어느 값을 바꿔야 하는지 운영자가 예측하기 어렵다.</td>
+                <td><code>MASC_KEEPER_HEARTBEAT_INTERVAL_SEC</code>를 canonical로 남기고, smart base interval은 제거 또는 deprecated alias로 격리.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td><code>MASC_KEEPER_BOARD_DEBOUNCE_SEC</code>가 두 의미를 가짐</td>
+                <td>board wakeup debounce는 기본 60초/5..300 범위이고, board signal coalesce window는 기본 2초/0..30 범위다. 같은 env 이름이 두 정책을 동시에 바꾼다.</td>
+                <td><code>MASC_KEEPER_BOARD_WAKEUP_DEBOUNCE_SEC</code>와 <code>MASC_KEEPER_BOARD_COALESCE_WINDOW_SEC</code>로 분리.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td>proactive scheduling knobs가 과다</td>
+                <td>per-keeper <code>proactive_idle_sec</code>/<code>proactive_cooldown_sec</code> 위에 global min interval, min cooldown, task divisor/floor, noop backoff, random oscillation이 겹친다.</td>
+                <td>사용자-facing 설정은 keeper intent/cooldown 중심으로 축소하고, floor/decay/random path는 internal policy 또는 feature flag로 이동.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-low">Low</span></td>
+                <td>hardcoded entropic wake path</td>
+                <td><code>entropic_oscillation_interval_sec = 600</code>, probability 5%가 코드에 고정되어 있어 "왜 깼는가" 설명성이 낮다.</td>
+                <td>production 기본 off 또는 explicit feature flag로 이동.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-med">Medium</span></td>
+                <td>문서/spec의 <code>with_keeper_turn_slot</code>, <code>KeeperTurnSlot</code> 잔재</td>
+                <td>production code purge와 문서/모델이 어긋나면 다음 작업자가 stale 개념을 되살릴 수 있다.</td>
+                <td>현재형 docs는 rename/update, historical audit docs는 archive marker 유지.</td>
+              </tr>
+              <tr>
+                <td><span class="risk-low">Low</span></td>
+                <td>로그 문자열 <code>holder_slot(s)</code></td>
+                <td>운영 로그에서 제거한 개념이 계속 보인다.</td>
+                <td><code>holder_row(s)</code> 또는 <code>turn_holder(s)</code>로 rename.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="ideal">
+        <header>
+          <h2>10. 이상 모델</h2>
+          <p>근본 목표는 "Keeper가 자기 일만 알고, Runtime/OAS가 provider capacity를 소유하며, Dashboard는 관측/제어 표면으로만 남는 구조"다.</p>
+        </header>
+        <div class="body">
+          <div class="flow">
+            <div class="step">
+              <strong>1. Signal</strong>
+              <small>Board/Event queue/Task/Goal/mention이 wake reason을 만든다.</small>
+            </div>
+            <div class="step">
+              <strong>2. Keeper scheduler</strong>
+              <small>reactive 우선, proactive는 cooldown/max silence 정책만 본다.</small>
+            </div>
+            <div class="step">
+              <strong>3. Local resource gate</strong>
+              <small>FD/disk/process health만 MASC가 본다. provider slot은 보지 않는다.</small>
+            </div>
+            <div class="step">
+              <strong>4. Runtime/OAS</strong>
+              <small>provider admission, timeout, retry, cooldown은 runtime layer가 소유한다.</small>
+            </div>
+            <div class="step">
+              <strong>5. Receipt</strong>
+              <small>turn result, holder diagnostics, Otel, dashboard snapshot만 남긴다.</small>
+            </div>
+          </div>
+
+          <table>
+            <thead><tr><th>경계</th><th>소유해야 하는 책임</th><th>소유하면 안 되는 책임</th><th>청소 방향</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>Keeper</td>
+                <td>신호 해석, turn 실행 요청, per-keeper lifecycle, holder diagnostics</td>
+                <td>provider capacity 직접 체크, shared turn semaphore, runtime retry policy</td>
+                <td><code>with_slot</code> 명명 제거, holder 모듈은 diagnostics-only로 축소</td>
+              </tr>
+              <tr>
+                <td>Runtime/OAS</td>
+                <td>provider 선택, provider admission, stream/body/CLI timeout, retry/cooldown</td>
+                <td>Keeper dashboard UX, board/task policy</td>
+                <td>provider timeout strike/cooldown 신호를 runtime budget/observation 쪽으로 이동</td>
+              </tr>
+              <tr>
+                <td>Board/Event layer</td>
+                <td>durable stimulus, coalescing, wake hint, queue drain contract</td>
+                <td>heartbeat cadence, provider capacity, turn budget</td>
+                <td>wakeup debounce와 event coalesce window를 다른 설정 이름으로 분리</td>
+              </tr>
+              <tr>
+                <td>Tool/Shell IR</td>
+                <td>typed shell pipeline, stage preservation, capability/risk verdict</td>
+                <td>legacy <code>command_not_allowed</code> taxonomy, argv 메타문자 오판</td>
+                <td>old denial concept 제거, typed denial reason만 남김</td>
+              </tr>
+              <tr>
+                <td>Dashboard</td>
+                <td>runtime/keeper 상태 표시, runtime.toml 편집, 명시적 pause/resume</td>
+                <td>숨은 admission policy, 별도 scheduler 해석</td>
+                <td>settings 표면은 canonical runtime.toml key만 보여주고 deprecated env는 접음</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout">
+            <strong>아이디얼한 사용자-facing 설정:</strong>
+            <code>heartbeat.interval_sec</code>, <code>heartbeat.sleep_chunk_sec</code>는 advanced,
+            <code>board.wakeup_debounce_sec</code>, <code>board.coalesce_window_sec</code>는 명확히 분리,
+            proactive는 <code>proactive.enabled</code>, <code>proactive.cooldown_sec</code>, <code>proactive.max_silence_sec</code> 정도로 축소한다.
+            나머지는 internal policy 또는 deprecated alias다.
+          </div>
+        </div>
+      </section>
+
+      <section id="plan">
+        <header>
+          <h2>11. 이후 작업 계획</h2>
+          <p>#20402 merge 후 바로 따라갈 cleanup PR 계획이다. admission fix와 scheduler/config redesign을 분리한다.</p>
+        </header>
+        <div class="body">
+          <table>
+            <thead><tr><th>순서</th><th>PR 목표</th><th>내용</th><th>검증</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td>Config cadence 단일화</td>
+                <td><code>MASC_SMART_HB_BASE_INTERVAL_SEC</code>를 제거 또는 deprecated alias로 격리하고, smart heartbeat base interval은 <code>heartbeat.interval_sec</code>만 사용하게 한다.</td>
+                <td>runtime.toml override test, env snapshot, grep ratchet: duplicate heartbeat base 없음</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td>Board debounce split</td>
+                <td><code>MASC_KEEPER_BOARD_DEBOUNCE_SEC</code>를 wakeup debounce와 queue coalesce window로 분리한다. 기존 이름은 compatibility alias로만 읽거나 migration note를 남긴다.</td>
+                <td>event queue drain test, wakeup debounce test, runtime-tunables docs update</td>
+              </tr>
+              <tr>
+                <td>3</td>
+                <td>Scheduler surface 축소</td>
+                <td><code>MASC_KEEPER_SMART_HEARTBEAT</code>는 default-on internal kill switch로 내리고, jitter/sleep chunk는 dashboard 일반 설정에서 숨긴다.</td>
+                <td>dashboard settings snapshot, feature flag registry, health/config JSON 확인</td>
+              </tr>
+              <tr>
+                <td>4</td>
+                <td>Proactive policy 단순화</td>
+                <td>사용자-facing proactive 설정을 enabled/cooldown/max-silence 중심으로 재정의한다. task divisor/floor/noop/random oscillation은 internal policy로 격리한다.</td>
+                <td>keeper_cycle_decision table tests, bootstrap/min silence/backlog scenarios</td>
+              </tr>
+              <tr>
+                <td>5</td>
+                <td>Boundary cleanup</td>
+                <td><code>Keeper_turn_holders</code>를 holder diagnostics-only로 줄이고, provider timeout strike/cooldown은 runtime budget/observation 모듈로 이동한다.</td>
+                <td>module ownership grep, focused dune build, Otel metric name continuity</td>
+              </tr>
+              <tr>
+                <td>6</td>
+                <td>Dashboard runtime.toml editor</td>
+                <td>대시보드에서 full <code>runtime.toml</code> 편집/검증/preview/apply flow를 제공한다. deprecated env alias는 접힌 "compat" 영역으로 표시한다.</td>
+                <td>dashboard typecheck, Playwright smoke, invalid TOML validation scenario</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="flow">
+            <div class="step">
+              <strong>Merge #20402</strong>
+              <small>Turn Pool purge only. CI green required.</small>
+            </div>
+            <div class="step">
+              <strong>Follow-up A</strong>
+              <small>Config names/cadence cleanup.</small>
+            </div>
+            <div class="step">
+              <strong>Follow-up B</strong>
+              <small>Scheduler/proactive simplification.</small>
+            </div>
+            <div class="step">
+              <strong>Follow-up C</strong>
+              <small>Runtime/Keeper boundary cleanup.</small>
+            </div>
+            <div class="step">
+              <strong>Follow-up D</strong>
+              <small>Dashboard runtime.toml editor UX.</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="next">
+        <header>
+          <h2>12. 즉시 순서</h2>
+          <p>#20402 안에서 지금 처리할 일과 merge 후로 넘길 일을 나눈다.</p>
+        </header>
+        <div class="body">
+          <div class="flow">
+            <div class="step">
+              <strong>1. CI settle</strong>
+              <small>latest head checks 완료 대기/실패 로그 확인</small>
+            </div>
+            <div class="step">
+              <strong>2. Merge gate fix</strong>
+              <small><code>command_not_allowed</code> stale oracle 제거</small>
+            </div>
+            <div class="step">
+              <strong>3. Narrow rename</strong>
+              <small>slot 이름/로그 중 merge blocker만 정리</small>
+            </div>
+            <div class="step">
+              <strong>4. Recheck</strong>
+              <small>focused dune + PR checks</small>
+            </div>
+            <div class="step">
+              <strong>5. Follow-up PR</strong>
+              <small>config/scheduler/boundary cleanup 시작</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="evidence">
+        <header>
+          <h2>13. 근거</h2>
+          <p>현재성 정보는 명령 출력으로 확인했다.</p>
+        </header>
+        <div class="body">
+          <div class="mono">Commands:
+date '+%Y-%m-%d %H:%M:%S %Z'
+gh pr view 20402 --repo jeong-sik/masc-mcp --json headRefOid,updatedAt,state,mergeStateStatus
+gh pr checks 20402 --repo jeong-sik/masc-mcp
+git fetch origin pull/20402/head:refs/tmp/pr-20402-20402
+git show refs/tmp/pr-20402-20402:lib/config/env_config_keeper.ml
+git show refs/tmp/pr-20402-20402:lib/config/env_config_runtime.ml
+git show refs/tmp/pr-20402-20402:lib/keeper_runtime/keeper_runtime_config.ml
+git show refs/tmp/pr-20402-20402:lib/keeper/keeper_config.ml
+git show refs/tmp/pr-20402-20402:lib/keeper/keeper_heartbeat_smart.ml
+git grep -n 'MASC_KEEPER_BOARD_DEBOUNCE_SEC|keeper_board_debounce_window_sec|board_reactive_debounce_sec' refs/tmp/pr-20402-20402 -- lib test docs
+git grep -n 'MASC_SMART_HB_BASE_INTERVAL_SEC|SmartHeartbeatTuning|MASC_KEEPER_HEARTBEAT_INTERVAL_SEC|keepalive_interval_sec' refs/tmp/pr-20402-20402 -- lib test docs
+git grep -n 'proactive_idle_sec|proactive_cooldown_sec|keeper_proactive_min_interval_sec|keeper_proactive_min_cooldown_sec|keeper_proactive_task' refs/tmp/pr-20402-20402 -- lib/keeper lib/dashboard lib/operator test
+gh pr view 20402 --repo jeong-sik/masc-mcp --json number,title,state,isDraft,mergeable,mergeStateStatus,headRefOid,baseRefName,headRefName,updatedAt,url,reviewDecision,additions,deletions,changedFiles
+gh pr checks 20402 --repo jeong-sik/masc-mcp
+gh pr view 20398 --repo jeong-sik/masc-mcp --json number,title,state,mergedAt,headRefName,headRefOid,url
+gh pr view 20400 --repo jeong-sik/masc-mcp --json number,title,state,mergedAt,headRefName,headRefOid,url
+gh pr view 20404 --repo jeong-sik/masc-mcp --json number,title,state,mergedAt,headRefName,headRefOid,url
+git rev-parse --short HEAD
+git diff --stat origin/main...HEAD
+rg --files | rg 'keeper_turn_(admission|holders|slot|runtime_budget)|semaphore|flow-control|tool_control|shell_command_gate|typed_input|tool_execute_safety'
+rg -n 'Turn_slot|turn_slot|Keeper_turn_slot|with_keeper_turn_slot|Keeper_turn_holders|fleet_admission|admission_queue|run_keeper_cycle_with_slot' lib dashboard test docs specs scripts
+rg -n 'turn.*pool|pool.*turn|keeper.*pool|pool.*keeper|Semaphore\.make|Eio\.Semaphore|with_recorded_turn_holder|spawn_slots_decision|keeper_slot_pool_size' lib test dashboard specs docs
+opam exec -- ocamlformat --check ...
+env DUNE_CACHE=disabled DUNE_BUILD_DIR=_build_codex_20402_progress dune build --root . test/test_tool_control_coverage.exe test/test_exec_shell_command_gate.exe
+./_build_codex_20402_progress/default/test/test_tool_control_coverage.exe
+./_build_codex_20402_progress/default/test/test_exec_shell_command_gate.exe
+pnpm --dir dashboard typecheck</div>
+          <p class="footnote">
+            [근거] PR/CI 상태: <code>gh pr view</code>, <code>gh pr checks</code>, 확인시각 2026-06-07 23:16 KST, 신뢰도 High.
+            설정/경계 판단: <code>git show refs/tmp/pr-20402-20402:...</code>, <code>git grep</code>, 확인시각 2026-06-07 23:22 KST, 신뢰도 High.
+            로컬 focused 검증: 이전 local state 기준 참고 근거, current PR head merge 판단에는 GitHub checks 재확인 필요.
+          </p>
+        </div>
+      </section>
+
+      <section id="concurrency">
+        <header>
+          <h2>14. 동시성 안전성 분석</h2>
+          <p>2026-06-08 16:00 KST, main HEAD <code>666f051978</code> 기준. #20438 이후 capacity gate가 전부 제거된 상태에서의 안전성 검증.</p>
+        </header>
+        <div class="body">
+          <div class="grid cols-2">
+            <div class="card">
+              <h3>Per-Keeper 격리</h3>
+              <p><span class="badge green">안전</span></p>
+              <p>Single-fiber-by-construction. supervisor가 keeper당 정확히 1개 fiber를 fork(<code>keeper_supervisor_launch.ml:120</code>). heartbeat loop는 동기 꼬리재귀(<code>let rec loop () = ...; loop ()</code>). 같은 keeper가 2개 turn을 동시에 실행할 방법이 구조적으로 없음.</p>
+              <p><code>turn_running</code> ref는 fiber-local. 주석에 명시: "Single-fiber by construction -- only this loop body reads/writes the ref."</p>
+            </div>
+            <div class="card">
+              <h3>Cross-Keeper 동시성</h3>
+              <p><span class="badge amber">제한 없음</span></p>
+              <p><code>Keeper_turn_capacity</code>(global 32 + per-keeper 2)와 <code>Runtime_lane_capacity</code>(per-provider max-concurrent)가 #20438에서 제거됨. 모든 keeper가 동시에 turn 실행 가능. OAS provider overload 가능.</p>
+              <p>안전성 의존: (1) FD/disk pressure circuit breaker (2) OAS HTTP timeout (3) operator가 keeper 수로 조절.</p>
+            </div>
+          </div>
+
+          <div class="grid cols-2">
+            <div class="card">
+              <h3>공유 상태 동기화</h3>
+              <p><span class="badge green">안전</span></p>
+              <ul>
+                <li><code>registry</code>: <code>Atomic.t</code> + CAS 루프. single-domain Eio에서 정확함.</li>
+                <li><code>budget_exhaustions</code>: <code>Stdlib.Mutex</code> 보호. bump/reset이 원자적.</li>
+                <li><code>FD/disk pressure</code>: <code>Atomic.t</code> + <code>cas_monotonic_max</code>. cooldown이 줄어들지 않음.</li>
+                <li><code>mark_turn_started/finished</code>: CAS 루프. per-keeper single-fiber로 자체 경쟁 불가.</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>Fiber 취소 안전성</h3>
+              <p><span class="badge green">안전</span></p>
+              <p><code>Eio.Cancel.Cancelled</code> 처리가 전체 체인에서 정확함:</p>
+              <ul>
+                <li>본문: re-raise (전파 보장)</li>
+                <li>cleanup: swallow (정리가 취소 전파 방해 안 함)</li>
+                <li><code>Fun.protect</code> 의도적 미사용 — <code>Fun.Finally_raised</code>가 outer <code>Cancelled</code>를 덮는 것 방지</li>
+                <li><code>mark_turn_finished</code> 멱등 설계 — 중복 호출 안전</li>
+              </ul>
+            </div>
+          </div>
+
+          <table>
+            <thead><tr><th>항목</th><th>판정</th><th>상세</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>같은 keeper 2개 turn 동시 실행</td>
+                <td><span class="risk-low">불가능</span></td>
+                <td>Single-fiber, 동기 꼬리재귀. 구조적으로 차단.</td>
+              </tr>
+              <tr>
+                <td>여러 keeper 동시 provider 호출</td>
+                <td><span class="risk-med">제한 없음 (의도)</span></td>
+                <td>Capacity gate 전부 제거. operator가 keeper 수로 용량 조절. FD/disk pressure만 local guard.</td>
+              </tr>
+              <tr>
+                <td>FD pressure gate 효과</td>
+                <td><span class="risk-low">유효</span></td>
+                <td>Point-in-time projection. turn 시작 후 pressure 증가해도 turn은 완료됨. circuit breaker로 후속 turn 차단.</td>
+              </tr>
+              <tr>
+                <td>Disk pressure gate 효과</td>
+                <td><span class="risk-low">유효</span></td>
+                <td>동일 패턴. df probe 30s TTL.</td>
+              </tr>
+              <tr>
+                <td>Holder diagnostics race</td>
+                <td><span class="risk-low">없음</span></td>
+                <td>Single-fiber로 자체 경쟁 불가. Cross-keeper는 Mutex/Atomic 보호. Advisory data라 over-counting은 보수적(이른 backoff).</td>
+              </tr>
+              <tr>
+                <td>Crash 후 stale current_turn_observation</td>
+                <td><span class="risk-med">Medium</span></td>
+                <td>Crash와 supervisor restart 사이에 dashboard가 stale "Executing" 표시. Restart 시 clean entry 생성으로 해소.</td>
+              </tr>
+              <tr>
+                <td>Budget exhaustion counter → 취소 시 누적</td>
+                <td><span class="risk-low">Low</span></td>
+                <td>Advisory. Over-counting은 보수적(이른 backoff). 정확한 정리보다 안전한 방향.</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="callout warn">
+            <strong>Cross-keeper 동시성 결론:</strong>
+            현재 구조는 "operator가 keeper 수로 provider 용량을 조절한다"는 철학. Capacity gate가 없으므로 N개 keeper가 모두 동시에 OAS provider를 호출할 수 있음.
+            이것이 acceptable하려면: (1) keeper 수 < provider concurrency limit이 운영 보장되어야 함 (2) FD/disk pressure가 host resource 고갈을 막아야 함 (3) OAS HTTP timeout이 provider overload 시 graceful degradation을 제공해야 함.
+            Per-runtime-lane gate가 다시 필요하면 #20438 revert가 아니라 typed capacity owner(RFC 단위)로 재설계.
+          </div>
+
+          <div class="callout good">
+            <strong>Per-keeper 안전성 결론:</strong>
+            Single-fiber-by-construction, 올바른 Eio.Cancel 처리, idempotent mark_turn_finished, Mutex/Atomic 보호.
+            같은 keeper의 동시 실행은 구조적으로 불가능하며, 이것이 이 분석에서 가장 중요한 결론이다.
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

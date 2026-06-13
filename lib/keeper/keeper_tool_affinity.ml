@@ -9,7 +9,7 @@
       - recency_weight = exp(-lambda * age_hours)  (lambda = 0.01, ~3-day half-life)
 
     @since 2.251.0
-    @see <https://github.com/jeong-sik/masc-mcp/issues/5566> *)
+    @see <https://github.com/jeong-sik/masc/issues/5566> *)
 
 (* ================================================================ *)
 (* Configuration                                                     *)

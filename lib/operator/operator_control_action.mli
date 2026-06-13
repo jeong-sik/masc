@@ -9,7 +9,7 @@
       backoff).
     - {!preview_of_action} for UI confirmation panes.
 
-    {b Include cascade:} starts with [include Operator_control_snapshot]
+    {b Include runtime:} starts with [include Operator_control_snapshot]
     so {!Operator_control}'s [include] propagates the snapshot
     surface (notably the [\\'a context] type) through.  Internal
     helpers ([judgment_surface_enums], [normalize_judgment_*],
@@ -29,7 +29,7 @@ val judgment_write_json :
     {!Operator_judgment} entry parsed from [args].  Required fields:
 
     - [surface]: ["command.namespace"] or ["intervene"].
-    - [target_type]: ["root"].
+    - [target_type]: ["workspace"].
     - [summary] (non-empty after trim).
 
     Optional: [target_id], [fresh_ttl_sec] (default 60s for
@@ -67,7 +67,7 @@ val canonical_action_type : string -> string
     longer accepted here; callers must use canonical action types. *)
 
 val generate_confirm_token :
-  clock:_ Eio.Time.clock -> Coord.config -> (string, string) result
+  clock:_ Eio.Time.clock -> Workspace.config -> (string, string) result
 (** [generate_confirm_token ~clock config] returns a 36-char token
     of the form ["opc_" ^ <32-char-token-suffix>].  Handles
     collisions:

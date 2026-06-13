@@ -114,10 +114,10 @@ jobs:
 
           # Heavy CI runs whenever the PR is live (OPEN), regardless of draft
           # status. Earlier we skipped draft PRs to save CI minutes, but the
-          # masc-mcp fast-track pattern (open Draft → mark ready → admin-merge
+          # masc fast-track pattern (open Draft → mark ready → admin-merge
           # within seconds) means the build/lint/test surfaces almost never
           # got a chance to run. Two visible failures from that gap this week:
-          # - masc-mcp #15531 (Tool_args / Tool_result sub-lib extract) merged
+          # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
           #   main in a non-building state; recovered by #15540.
           # - oas #1596 (turn_ready_tool_names signature narrow) — same shape,
           #   recovered by oas #1599.
@@ -153,6 +153,8 @@ jobs:
       oas_pin: ${{ steps.scope.outputs.oas_pin }}
       spec_refs: ${{ steps.scope.outputs.spec_refs }}
       nav_event_parity: ${{ steps.scope.outputs.nav_event_parity }}
+      shell_ir: ${{ steps.scope.outputs.shell_ir }}
+      keeper_cwd: ${{ steps.scope.outputs.keeper_cwd }}
 
     steps:
       - name: Checkout
@@ -172,7 +174,7 @@ jobs:
           set -euo pipefail
 
           emit_all_true() {
-            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity; do
+            for key in build lint dashboard health health_snapshot lib_deps doc_truth tla oas_pin spec_refs nav_event_parity shell_ir keeper_cwd; do
               echo "${key}=true" >> "$GITHUB_OUTPUT"
             done
           }
@@ -224,6 +226,8 @@ jobs:
           oas_pin=false
           spec_refs=false
           nav_event_parity=false
+          shell_ir=false
+          keeper_cwd=false
 
           if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
             ci_core=true
@@ -233,7 +237,15 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.sh$|scripts/lint/no-hardcoded-colors-dashboard\.allowlist$|scripts/lint/dashboard-ssot-keeper-state\.sh$|scripts/lint/dashboard-ssot-keeper-state\.allowlist$|scripts/lint/dashboard-ssot-agent-status\.sh$|scripts/lint/dashboard-ssot-agent-status\.allowlist$|scripts/ci/|scripts/check-variants\.sh$|dashboard/src/)'; then
+          # The lint trigger set must stay a superset of every path the Lint
+          # job reads. scripts/check-ssot.sh R6 scans bin/ lib/ scripts/ docs/,
+          # so docs/ and scripts/ (whole tree, not just the curated entries)
+          # must trigger Lint — otherwise a docs-only or scripts-only PR can
+          # merge gate-skipped while pushing an R6 count past its baseline,
+          # breaking Lint for every subsequent PR (#20729: RFC docs #20717 /
+          # #20718 landed bare ~/.masc paths and took main's Lint red).
+          # scripts/ subsumes the previously enumerated scripts/* entries.
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|scripts/|dune-project$|dune-workspace$|.*\.opam$|dashboard/src/)'; then
             lint=true
           fi
 
@@ -249,7 +261,7 @@ jobs:
             health_snapshot=true
           fi
 
-          if has_match '^(\.github/workflows/ci\.yml|lib/|dune-project$|dune-workspace$|.*\.opam$|scripts/analyze_lib_deps\.py$|scripts/lib_dep_report\.py$|scripts/lib_dep_delta_ci\.sh$)'; then
+          if has_match '^(\.github/workflows/ci\.yml|lib/|dune-project$|dune-workspace$|.*\.opam$|scripts/analyze_lib_deps\.py$|scripts/lib_dep_report\.py$|scripts/lib_dep_delta_ci\.sh$|scripts/audit-sublib-cycle\.py$)'; then
             lib_deps=true
           fi
 
@@ -257,11 +269,11 @@ jobs:
             doc_truth=true
           fi
 
-          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/oas_.*\.ml$|Makefile$)'; then
+          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/keeper_registry/|lib/oas_.*\.ml$|Makefile$)'; then
             tla=true
           fi
 
-          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|dune-project$|masc_mcp\.opam$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
+          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|dune-project$|.*\.opam$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
             oas_pin=true
           fi
 
@@ -273,6 +285,14 @@ jobs:
             nav_event_parity=true
           fi
 
+          if has_match '^(lib/|scripts/audit-shell-ir-consumption\.sh$|scripts/shell-ir-consumption-baseline\.json$|\.github/workflows/ci\.yml$)'; then
+            shell_ir=true
+          fi
+
+          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|\.github/workflows/ci\.yml$)'; then
+            keeper_cwd=true
+          fi
+
           if [ "${ci_core}" = true ]; then
             build=true
             lint=true
@@ -281,6 +301,8 @@ jobs:
             lib_deps=true
             doc_truth=true
             oas_pin=true
+            shell_ir=true
+            keeper_cwd=true
             # Note: dashboard/spec_refs/tla stay path-scoped. Pure CI
             # workflow/action edits should still validate the core OCaml/repo
             # guard lanes and Health, but they should not fan out into every
@@ -298,9 +320,11 @@ jobs:
           echo "oas_pin=${oas_pin}" >> "$GITHUB_OUTPUT"
           echo "spec_refs=${spec_refs}" >> "$GITHUB_OUTPUT"
           echo "nav_event_parity=${nav_event_parity}" >> "$GITHUB_OUTPUT"
+          echo "shell_ir=${shell_ir}" >> "$GITHUB_OUTPUT"
+          echo "keeper_cwd=${keeper_cwd}" >> "$GITHUB_OUTPUT"
 
-          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s\n' \
-            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}"
+          printf 'CI scope => build=%s lint=%s dashboard=%s health=%s health_snapshot=%s lib_deps=%s doc_truth=%s tla=%s oas_pin=%s nav_event_parity=%s shell_ir=%s keeper_cwd=%s\n' \
+            "${build}" "${lint}" "${dashboard}" "${health}" "${health_snapshot}" "${lib_deps}" "${doc_truth}" "${tla}" "${oas_pin}" "${nav_event_parity}" "${shell_ir}" "${keeper_cwd}"
 
   meta:
     name: Meta Guards
@@ -346,6 +370,24 @@ jobs:
             --recent-main 50 \
             --duplicate-policy warn
 
+      - name: RFC numbering + ledger claim guard
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Runs on every PR (not gated on a changes output) so the gate
+          # cannot be skipped by the very class of mismatch it guards
+          # against (#20776). Cheap: pure git metadata + one gh call.
+          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=200
+          PR_BODY="$(gh pr view "$PR_NUMBER" --json body --jq .body || echo "")"
+          export PR_BODY
+          python3 scripts/rfc_enforcer.py \
+            --check-numbering --base-ref "$BASE_REF" --head-ref "$HEAD_REF"
+          python3 scripts/rfc_enforcer.py --check-ledger-monotonic
+
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
@@ -363,6 +405,13 @@ jobs:
       - name: Run report self-test
         if: needs.changes.outputs.lib_deps == 'true'
         run: python3 scripts/lib_dep_report.py --self-test
+
+      - name: Check Execute async surface contract
+        run: bash scripts/check-execute-async-surface.sh
+
+      - name: Sublib boundary gate self-test (RFC-0056 G1)
+        if: needs.changes.outputs.lib_deps == 'true'
+        run: python3 scripts/audit-sublib-cycle.py --self-test
 
       - name: Generate lib dependency delta
         if: needs.changes.outputs.lib_deps == 'true'
@@ -399,7 +448,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
           BRANCH_PROTECTION_BRANCH: ${{ github.base_ref || github.ref_name }}
-          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
+          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate
           BRANCH_PROTECTION_ALLOW_UNREADABLE: 1
         run: |
           chmod +x scripts/ci/*.sh
@@ -557,21 +606,81 @@ jobs:
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
         env:
           # Reduce parallelism to minimize Eio fiber scheduling flakes in tests.
-          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          # See: https://github.com/jeong-sik/masc/issues/2957
           DUNE_JOBS: 1
         run: |
-          opam exec -- dune build
+          set -euo pipefail
 
-      - name: Cascade TOML validity gate
-        # RFC-0058 §9: config/cascade.toml is the authoring SSOT.
-        # cascade.json is no longer generated or committed, so the old
-        # cascade_materialize CLI is retired. This focused test renders
-        # the TOML in memory, validates the declarative catalog, and
-        # proves config/cascade.json has not reappeared as a tracked
-        # second source of truth.
-        # See: test/test_cascade_config_validity.ml.
+          opam exec -- dune build &
+          build_pid=$!
+
+          (
+            elapsed=0
+            while kill -0 "${build_pid}" 2>/dev/null; do
+              sleep 60
+              elapsed=$((elapsed + 60))
+              if kill -0 "${build_pid}" 2>/dev/null; then
+                echo "[ci-heartbeat] dune build still running (${elapsed}s elapsed)"
+              fi
+            done
+          ) &
+          heartbeat_pid=$!
+
+          set +e
+          wait "${build_pid}"
+          build_status=$?
+          set -e
+
+          kill "${heartbeat_pid}" 2>/dev/null || true
+          wait "${heartbeat_pid}" 2>/dev/null || true
+          exit "${build_status}"
+
+      - name: Sublib boundary gate against real dune graph (RFC-0056 G1)
+        # The self-test (in the Meta Guards job) only validates the checker
+        # against synthetic fixtures. This step runs the SAME checker against
+        # the REAL dependency graph emitted by `dune describe`, asserting that
+        # the extracted leaf libraries (masc_goal, attribution, exec_policy,
+        # keeper_state, masc_tool_dispatch) never re-acquire a transitive
+        # `requires` edge back into the flat mega-library `masc`.
+        #
+        # Hard-fail (no continue-on-error): a future PR that re-couples a leaf
+        # to the mega-lib via its dune (libraries ...) must block merge. As of
+        # wiring (2026-06-04) the real graph is CLEAN, so --fail mode is safe.
+        #
+        # Why here and not next to the self-test (Meta Guards, ~L385): that job
+        # is shell-only (ripgrep, no OCaml toolchain). `dune describe` requires
+        # the toolchain that only this Build job sets up. We invoke dune through
+        # `opam exec` (bare `dune` is not on PATH in CI) and feed the captured
+        # describe sexp to the pure-python checker via --describe-file.
+        # See: docs/rfc/RFC-0056-incremental-sublib-extraction.md G1, #19824.
         run: |
-          opam exec -- dune build @test/runtest-test_cascade_config_validity
+          opam exec -- dune describe --root . > "$RUNNER_TEMP/sublib-describe.sexp"
+          python3 scripts/audit-sublib-cycle.py --describe-file "$RUNNER_TEMP/sublib-describe.sexp"
+
+      - name: Runtime TOML validity gate
+        # RFC-0058 §9: config/keeper_runtime.toml is the authoring SSOT.
+        # runtime.json is no longer generated or committed, so the old
+        # runtime_materialize CLI is retired. This focused test renders
+        # the TOML in memory, validates the declarative catalog, and
+        # proves config/runtime.json has not reappeared as a tracked
+        # second source of truth.
+        # See: test/test_runtime_config_validity.ml.
+        run: |
+          opam exec -- dune build @test/runtest-test_runtime_config_validity
+
+      - name: Shell IR differential-safety harness gate
+        # RFC-0208: the differential harness asserts the monotone-safety
+        # invariant (the composed verdict is never below the word-list
+        # floor, so the typed path can only escalate) and pins the
+        # structurally-typed ratchet (git checkout -> R1, reset -> R2).
+        # Hard-fail (no continue-on-error) so a typed arm weakened below
+        # the floor blocks merge. The quick suite runs it too via
+        # `dune test`, but that step is continue-on-error (non-gating) and
+        # is also superseded under main churn — which let the P4 gh-parser
+        # commit drop silently from #19762. This focused gate is the fix.
+        # See: lib/exec/test/test_shell_ir_differential.ml.
+        run: |
+          opam exec -- dune build @lib/exec/test/runtest-test_shell_ir_differential
 
       - name: Env knob catalog drift gate
         # Detects when lib/config/env_config_*.ml has been edited
@@ -623,7 +732,7 @@ jobs:
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
           # Reduce parallelism to minimize Eio fiber scheduling flakes.
-          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          # See: https://github.com/jeong-sik/masc/issues/2957
           DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
@@ -742,16 +851,16 @@ jobs:
         run: |
           echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
 
-      - name: Config doctor drift report
+      - name: Config diagnostic drift report
         if: ${{ always() && steps.build_step.outcome == 'success' }}
         continue-on-error: true
         run: |
           if [ -f _build/default/bin/main_eio.exe ]; then
-            echo "::group::Config doctor report"
-            _build/default/bin/main_eio.exe doctor config --json || true
+            echo "::group::Config diagnostic report"
+            _build/default/bin/main_eio.exe diagnostic config --json || true
             echo "::endgroup::"
           else
-            echo "::notice::main_eio.exe not found, skipping config-doctor"
+            echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
       - name: Summarize advisory build status
         if: ${{ always() }}
@@ -859,6 +968,9 @@ jobs:
           chmod +x scripts/check-toml-syntax.sh
           scripts/check-toml-syntax.sh
 
+      - name: Check YAML syntax
+        run: python3 scripts/ci/check-yaml-syntax.py
+
       - name: Check keeper prompt paths drift (#6527 iter9)
         run: |
           chmod +x scripts/validate-prompt-paths.sh
@@ -902,9 +1014,10 @@ jobs:
     # Non-PR events (push to main/develop, schedule, workflow_dispatch):
     # ignore path scope and always run, so a dashboard test regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
-    # or a dashboard-touching Draft merged via admin-merge fast-track while
+    # or a dashboard-touching PR merged via admin fast-track while
     # the dashboard job was red) is detected on the next main/develop push
-    # rather than persisting silently. Mirrors the tla-specs job; root cause:
+    # rather than persisting silently. Same main-push safety-net pattern as
+    # tla-main.yml; root cause:
     # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
     # after #14252/#14380 because no main-push run re-checked them.
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.dashboard == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
@@ -953,7 +1066,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
 
     steps:
       - name: Checkout
@@ -963,26 +1076,35 @@ jobs:
         run: sudo apt-get install -y -qq ripgrep
 
       - name: Run OCaml structure ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/ocaml-structure-ratchet.sh
 
       - name: Run stringly boundary ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/stringly-boundary-ratchet.sh
 
       - name: Run OAS boundary ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/oas-boundary-ratchet.sh
 
       - name: Run keeper tool boundary matrix ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/audit-keeper-tool-boundary-matrix.sh
 
       - name: Run silent-failure ratchet
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
         run: scripts/silent-failure-ratchet.sh
+
+      - name: Run keeper cwd leak gate
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/keeper-cwd-leak-gate.sh
 
   shell-ir-ratchet:
     name: Shell IR Consumption Ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.shell_ir == 'true' || needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
 
     steps:
       - name: Checkout
@@ -996,39 +1118,16 @@ jobs:
       - name: Run Shell IR consumption ratchet
         run: scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
 
-  keeper-cwd-leak-gate:
-    name: Keeper Cwd Leak Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [pr-live-gate]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-
-      - name: Run keeper cwd leak gate
-        run: scripts/keeper-cwd-leak-gate.sh
-
   tla-specs:
     name: TLA+ Model Checking
     runs-on: ubuntu-latest
     timeout-minutes: 40
     needs: [pr-live-gate, changes]
-    # PR mode: stay path-scoped (tla=true only when specs/keeper/oas/Makefile change).
-    # main push / schedule / workflow_dispatch: ignore path scope and always run,
-    # so a spec violation introduced by a non-tla-path PR (e.g. dashboard-only
-    # Draft via admin-merge fast-track) is detected on the next main run rather
-    # than persisting silently. See #14668 root cause analysis.
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.tla == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
-    # Per-job concurrency: each main commit gets its own queue slot keyed by
-    # sha, so workflow-level cancel-in-progress doesn't abort an in-flight TLA
-    # check when a subsequent push lands. PR runs use run_id so they still
-    # supersede on synchronize (workflow-level behaviour preserved at the
-    # workflow concurrency block — this job-level block is additive).
-    concurrency:
-      group: tla-specs-${{ github.event_name == 'push' && github.sha || github.run_id }}
-      cancel-in-progress: false
+    # PR-only required check: branch protection currently requires CI Gate,
+    # so path-scoped PR TLA must remain inside ci.yml to keep failures
+    # merge-blocking. Main push, schedule, and manual full-suite ownership live
+    # in tla-main.yml.
+    if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.tla == 'true' }}
 
     steps:
       - name: Checkout
@@ -1046,7 +1145,7 @@ jobs:
             -o specs/keeper-state-machine/tla2tools.jar \
             https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 
-      - name: Run TLA+ model checking
+      - name: Run PR-scoped TLA+ model checking
         run: |
           make -C specs check-clean
           make -C specs check-buggy
@@ -1062,189 +1161,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Enforce agent draft policy on merge gate
-        if: github.event_name == 'pull_request'
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_IS_DRAFT: ${{ github.event.pull_request.draft }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          GH_TOKEN: ${{ github.token }}
-          AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
-          AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
-          AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
-        run: |
-          if command -v gh >/dev/null 2>&1 && [ -n "${PR_NUMBER:-}" ]; then
-            live_is_draft="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
-            if [ "$live_is_draft" = "true" ] || [ "$live_is_draft" = "false" ]; then
-              export PR_LIVE_IS_DRAFT="$live_is_draft"
-            else
-              echo "::warning::Could not resolve live PR draft state; falling back to pull_request event payload."
-            fi
-            if live_labels="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null)"; then
-              export PR_LIVE_LABELS="$live_labels"
-            else
-              echo "::warning::Could not resolve live PR labels; falling back to pull_request event payload."
-            fi
-            # #10192: CI Gate runs that fire after auto-merge can
-            # see the bypass label cleaned up by post-merge
-            # automation; pass live state to the policy script so
-            # it skips the check when the PR is no longer open.
-            live_state="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' 2>/dev/null || true)"
-            if [ -n "$live_state" ]; then
-              export PR_LIVE_STATE="$live_state"
-            fi
-            export PR_EFFECTIVE_LABELS="${PR_LIVE_LABELS:-$PR_LABELS}"
-            fetch_approval_comments() {
-              local output_file="$1"
-              local after=""
-              local page=""
-              : > "$output_file"
-              while :; do
-                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
-                if [ -n "$after" ]; then
-                  args+=(-f after="$after")
-                else
-                  args+=(-F after=null)
-                fi
-                page="$(
-                  gh api graphql "${args[@]}" \
-                    -f query='
-                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
-                        repository(owner: $owner, name: $repo) {
-                          pullRequest(number: $number) {
-                            comments(first: 100, after: $after) {
-                              pageInfo { hasNextPage endCursor }
-                              nodes {
-                                body
-                                createdAt
-                                author { __typename login }
-                              }
-                            }
-                          }
-                        }
-                      }'
-                )"
-                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.comments.nodes[]' >> "$output_file"
-                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.hasNextPage')" != "true" ]; then
-                  break
-                fi
-                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.comments.pageInfo.endCursor // ""')"
-                if [ -z "$after" ]; then
-                  break
-                fi
-              done
-            }
-            fetch_approval_label_events() {
-              local output_file="$1"
-              local after=""
-              local page=""
-              : > "$output_file"
-              while :; do
-                local args=(-f owner="${GITHUB_REPOSITORY%/*}" -f repo="${GITHUB_REPOSITORY#*/}" -F number="$PR_NUMBER")
-                if [ -n "$after" ]; then
-                  args+=(-f after="$after")
-                else
-                  args+=(-F after=null)
-                fi
-                page="$(
-                  gh api graphql "${args[@]}" \
-                    -f query='
-                      query($owner: String!, $repo: String!, $number: Int!, $after: String) {
-                        repository(owner: $owner, name: $repo) {
-                          pullRequest(number: $number) {
-                            timelineItems(first: 100, after: $after, itemTypes: [LABELED_EVENT, UNLABELED_EVENT]) {
-                              pageInfo { hasNextPage endCursor }
-                              nodes {
-                                __typename
-                                ... on LabeledEvent {
-                                  createdAt
-                                  label { name }
-                                }
-                                ... on UnlabeledEvent {
-                                  createdAt
-                                  label { name }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }'
-                )"
-                printf '%s\n' "$page" | jq -c '.data.repository.pullRequest.timelineItems.nodes[]' >> "$output_file"
-                if [ "$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasNextPage')" != "true" ]; then
-                  break
-                fi
-                after="$(printf '%s\n' "$page" | jq -r '.data.repository.pullRequest.timelineItems.pageInfo.endCursor // ""')"
-                if [ -z "$after" ]; then
-                  break
-                fi
-              done
-            }
-            approval_gate_payload="$(
-              comments_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-comments.XXXXXX")"
-              events_file="$(mktemp "${RUNNER_TEMP:-/tmp}/masc-approval-label-events.XXXXXX")"
-              trap 'rm -f "$comments_file" "$events_file"' EXIT
-              fetch_approval_comments "$comments_file"
-              fetch_approval_label_events "$events_file"
-              jq -n --slurpfile comments "$comments_file" --slurpfile timeline "$events_file" \
-                '{data:{repository:{pullRequest:{comments:{nodes:$comments}, timelineItems:{nodes:$timeline}}}}}'
-            )" || approval_gate_payload=""
-            approval_gate_present="$(
-              if [ -n "$approval_gate_payload" ]; then
-                printf '%s\n' "$approval_gate_payload" | jq -r '
-                  def csv($s):
-                    ($s // "")
-                    | split(",")
-                    | map(gsub("^\\s+|\\s+$"; "") | ascii_downcase | select(length > 0));
-                  def event_label:
-                    (.label.name // "" | ascii_downcase);
-                  def event_kind:
-                    if .__typename == "LabeledEvent" then "labeled"
-                    elif .__typename == "UnlabeledEvent" then "unlabeled"
-                    else ""
-                    end;
-                  def marker_for($root; $label; $label_ts; $previous_label_ts):
-                    any($root.data.repository.pullRequest.comments.nodes[];
-                      (.author.__typename == "Bot") and
-                      ((.body // "") | contains("<!-- masc-human-approval-gate -->")) and
-                      (((.body // "") | ascii_downcase) | contains("`" + $label + "`")) and
-                      ((.body // "") | contains("/actions/runs/")) and
-                      ((.createdAt | fromdateiso8601) as $comment_ts |
-                        (($previous_label_ts == null) or ($comment_ts > $previous_label_ts)) and
-                        ($comment_ts >= $label_ts and $comment_ts <= ($label_ts + 300)))
-                    );
-                  . as $root
-                  |
-                  (csv(env.PR_EFFECTIVE_LABELS)) as $present_labels
-                  | (csv(if (env.AGENT_DRAFT_GUARD_BYPASS_LABELS == null or env.AGENT_DRAFT_GUARD_BYPASS_LABELS == "") then "human-approved-ready" else env.AGENT_DRAFT_GUARD_BYPASS_LABELS end)
-                     | map(select(. != "allow-auto-merge"))) as $bypass_labels
-                  | any($bypass_labels[]; . as $label |
-                      ($present_labels | index($label)) and
-                      (([$root.data.repository.pullRequest.timelineItems.nodes[]
-                         | select(event_label == $label)]) as $label_events
-                       | ($label_events | last) as $latest
-                       | ($latest != null)
-                         and (($latest | event_kind) == "labeled")
-                         and ((if ($label_events | length) > 1
-                               then ($label_events[($label_events | length) - 2].createdAt | fromdateiso8601)
-                               else null
-                               end) as $previous_label_ts
-                              | (($latest.createdAt | fromdateiso8601) as $label_ts |
-                                  marker_for($root; $label; $label_ts; $previous_label_ts)))))
-                ' 2>/dev/null || echo false
-              else
-                echo false
-              fi
-            )"
-            if printf '%s\n' "$approval_gate_present" | grep -qx true; then
-              export PR_HUMAN_APPROVAL_GATE_PRESENT=true
-            fi
-          fi
-          scripts/ci/check-agent-draft-policy.sh
-
       - name: Aggregate required check status
         env:
           PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}
@@ -1256,6 +1172,7 @@ jobs:
           DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           HEALTH_RESULT: ${{ needs.health.result }}
           STRUCTURE_RATCHET_RESULT: ${{ needs.structure-ratchet.result }}
+          SHELL_IR_RATCHET_RESULT: ${{ needs.shell-ir-ratchet.result }}
           TLA_RESULT: ${{ needs.tla-specs.result }}
           BUILD_ADVISORY_STATUS: ${{ needs.build.outputs.advisory_status }}
         run: |
@@ -1264,7 +1181,7 @@ jobs:
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 cascade):
+          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 runtime):
           #   - dune build (compile-only) is HARD REQUIRED — Build step now lacks
           #     continue-on-error, so a compile failure makes the job result =
           #     failure → check "build" required = block merge. This catches
@@ -1308,5 +1225,6 @@ jobs:
           check "dashboard"       "$DASHBOARD_RESULT"
           check "health"          "$HEALTH_RESULT"
           check "structure-ratchet" "$STRUCTURE_RATCHET_RESULT"
+          check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
           check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]

@@ -5,4 +5,4 @@
   (setenv MASC_BASE_PATH /tmp/test-phase2
    (setenv MASC_BASE_PATH_INPUT /tmp/test-phase2
     (run %{test}))))
- (libraries masc_test_deps masc_mcp masc_mcp.config alcotest eio eio_main unix fs_compat))
+ (libraries masc_test_deps masc masc.config alcotest eio eio_main unix fs_compat))

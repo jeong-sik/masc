@@ -1,13 +1,11 @@
-(** Keeper_tool_progress - tool progress classification and required-action
-    contract helpers.
+(** Keeper_tool_progress - tool progress classification helpers.
 
     This module owns whether a tool call is passive, claim/context binding,
     execution progress, or completion. It is deliberately separate from tool
     disclosure/selection so liveness and contract semantics do not live in the
     prompt-surface module. *)
 
-(** Tool progress class shared by required-tool validation, runtime receipts,
-    and liveness metrics. *)
+(** Tool progress class shared by runtime receipts and liveness metrics. *)
 type tool_progress_class =
   | Passive_status
   | Claim_context
@@ -47,7 +45,7 @@ val effect_of_progress_class : tool_progress_class -> turn_effect
 val classify_tool_progress_with_outcome
   : string -> Keeper_tool_outcome.t option -> turn_effect
 
-(** Canonical names of claim-context tools (Task_claim, Claim_next). *)
+(** Canonical names of claim-context tools (Task_claim). *)
 val claim_context_tool_names : string list
 
 (** Canonical names of completion tools (Task_done variants, Stay_silent,
@@ -58,38 +56,8 @@ val is_claim_tool_name : string -> bool
 val is_claim_context_tool_name : string -> bool
 val is_completion_tool_name : string -> bool
 
-(** [true] iff the tool name represents productive execution progress for a
-    required-action gate. Completion tools are exempted even when read-only;
-    passive keeper observation tools remain [false]. *)
-val tool_name_can_satisfy_required_contract : string -> bool
-
-(** Validate an observed generic [Require_tool_use] call. This accepts mutating
-    tools and completion tools. Keeper-local observation/discovery tools and
-    LLM-native read/search aliases remain passive. *)
-val required_tool_satisfaction
-  :  ?satisfying_tools:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
-(** Variant of [required_tool_satisfaction] for an explicit [required_tools]
-    contract. A non-keeper read-only tool can satisfy the turn only when the
-    operator/task contract named that exact tool. *)
-val required_tool_satisfaction_for_required_names
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
-
-(** OAS-level satisfaction callback for keeper turns.
-
-    Generic required-tool gates use OAS to enforce tool presence only; MASC
-    classifies passive-only / no-execution-progress calls after the run.
-    Explicit [required_tool_names] still require the named tool. *)
-val required_tool_satisfaction_for_turn
-  :  ?satisfying_tools:string list
-  -> required_tool_names:string list
-  -> Agent_sdk.Completion_contract.tool_call
-  -> (unit, string) result
+(** [true] iff the canonicalized name is keeper_stay_silent. *)
+val is_stay_silent_tool_name : string -> bool
 
 (** Extract OAS completion-contract satisfying-tool hints from an error reason.
     Returns [] when the reason has no hint or the hint is empty. *)
@@ -100,20 +68,9 @@ val classify_tool_progress : string -> tool_progress_class
 
 val is_passive_status_tool_name : string -> bool
 val is_execution_progress_tool_name : string -> bool
+val is_owned_task_progress_tool_name : string -> bool
 
-(** Increment the [keeper_require_tool_use_violations] Prometheus counter with
-    [keeper] / [has_current_task] / [contract_status] labels. *)
-val record_require_tool_use_violation
-  :  keeper_name:string
-  -> has_current_task:bool
-  -> contract_status:string
-  -> unit
-
-(** Build an actionable contract-violation reason describing why the keeper
-    failed [Require_tool_use], or [None] when the actionable signal context does
-    not apply. *)
-val actionable_tool_contract_violation_reason
-  :  claim_context_allowed:bool
-  -> actionable_signal_context:Keeper_contract_classifier.actionable_signal_context
-  -> tool_names:string list
-  -> string option
+val tool_result_has_material_progress
+  :  tool_name:string
+  -> output_text:string
+  -> bool

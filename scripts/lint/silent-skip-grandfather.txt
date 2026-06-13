@@ -18,11 +18,10 @@
 # updated in the same PR — the line-stability check fails otherwise.
 # When a site is migrated to typed propagation, REMOVE its line.
 
-# E1 + E2 sites (| Error _ -> ()) — 13 baseline
-lib/goal/goal_janitor.ml:194:E2
-lib/coord/coord_agent.ml:184:E2
+# E1 + E2 sites (| Error _ -> ()) — 12 baseline
+lib/workspace/workspace_agent.ml:184:E2
 lib/mcp_server_eio_resource.ml:46:E2
-lib/cascade/cascade_event_bridge.ml:573:E1
+lib/runtime/runtime_event_bridge.ml:573:E1
 lib/auth.ml:1291:E1
 lib/board_core.ml:1370:E1
 lib/board_core.ml:1595:E1
@@ -31,7 +30,7 @@ lib/tool_task.ml:736:E1
 lib/tool_task.ml:1160:E1
 lib/keeper/keeper_tool_emission_hook.ml:80:E1
 lib/shared_audit/store.ml:40:E1
-lib/keeper/agent_tool_execute_runtime.ml:666:E2
+lib/keeper/keeper_tool_execute_runtime.ml:666:E2
 
 # T1 sites (try ... with _ -> ()) — 3 baseline in code
 # (note: many doc comments mention this pattern; lint excludes

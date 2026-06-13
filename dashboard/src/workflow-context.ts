@@ -222,10 +222,10 @@ export function workflowActionLabel(actionType?: string | null): string {
     case 'broadcast':
       return 'Broadcast'
     case 'namespace_pause':
-    case 'room_pause':
+    case 'workspace_pause':
       return 'Pause Namespace'
     case 'namespace_resume':
-    case 'room_resume':
+    case 'workspace_resume':
       return 'Resume Namespace'
     case 'task_inject':
       return 'Inject Task'

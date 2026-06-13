@@ -1,0 +1,6 @@
+# Tool -> Keeper boundary ratchet baseline (frozen debt list).
+# Files here still call a Keeper_<module> from the tool surface.
+# This list may SHRINK (severance PRs remove entries) but must NOT GROW.
+# Regenerate with: bash scripts/lint/tool-keeper-boundary-ratchet.sh --regenerate
+# See: docs/audit/2026-05-31-tool-keeper-boundary-severance.md
+#

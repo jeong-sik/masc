@@ -2,13 +2,15 @@
     keeper_unified_metrics.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
-let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
+let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(result : Keeper_agent_run.run_result) ~(latency_ms : int)
     ~(turn_cost : float)
@@ -76,24 +78,23 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
      overridable).  Emitted once per snapshot write so the
      counter rate matches the JSONL row rate. *)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
-  let cascade_profile =
-    match result.cascade_observation with
+  let runtime_profile =
+    match result.runtime_observation with
     | Some observation ->
-      Cascade_name.to_string
-        observation.Cascade_observation.cascade_name
-    | None -> (cascade_name_of_meta meta)
+        observation.Runtime_observation.runtime_id
+    | None -> (runtime_id_of_meta meta)
   in
-  (* #9933: same latency bucket, split by provider/model/cascade.
+  (* #9933: same latency bucket, split by provider/model/runtime.
      This keeps the existing keeper-only counter stable while making
      timeout-budget burn attributable to the redacted runtime lane. *)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
     ~channel
-    ~cascade_profile
+    ~runtime_profile
     ~latency_ms;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnCompleted)
-    ~labels:[("keeper_name", meta.name)]
+    ~labels:[("keeper", meta.name)]
     ();
   let snapshot =
     `Assoc
@@ -152,8 +153,6 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | Some outcome ->
               `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
-        ("tool_call_count", `Int result.tool_calls_made);
-        ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
         ( "action_source",
           match deliberation_execution with
           | Some execution ->
@@ -165,9 +164,9 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | Some execution ->
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
-        ("cascade",
-         match result.cascade_observation with
-         | Some observation -> redacted_cascade_observation_to_json observation
+        ("runtime",
+         match result.runtime_observation with
+         | Some observation -> redacted_runtime_observation_to_json observation
          | None -> `Null);
         ("snapshot_source", `String snapshot_source);
         ("memory_check", memory_check_default_json ());
@@ -191,24 +190,6 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           | Some validation ->
               Agent_sdk.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
-        ("cdal_proof",
-         match result.proof with
-         | Some p ->
-           `Assoc [
-             ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
-             ("effective_mode",
-              Masc_mcp_cdal_runtime.Execution_mode.to_yojson p.effective_execution_mode);
-             ("result_status",
-              Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status);
-             ("violation_count",
-              `Int (cdal_violation_ref_count p));
-             ("raw_evidence_ref_count",
-              `Int (cdal_raw_evidence_ref_count p));
-             ("tool_trace_count",
-              `Int (List.length p.tool_trace_refs));
-             ("mode_source", `String p.mode_decision_source);
-           ]
-         | None -> `Null);
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
@@ -232,7 +213,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
        (* Closed label set (5 values) keeps the metric cardinality bound; the
           full numerical detail is preserved in the snapshot's
           [compaction_trigger_detail] JSON above. *)
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CompactionNoop)
          ~labels:
            [ ("keeper", meta.name)

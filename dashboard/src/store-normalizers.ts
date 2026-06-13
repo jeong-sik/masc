@@ -1,6 +1,7 @@
 import { isRecord, asString, asNumber, asBoolean, asStringArray, toIsoTimestamp } from './components/common/normalize'
 import { normalizeKeeperTrust } from './keeper-store-normalize'
 import { normalizeStopCause } from './lib/stop-cause'
+import { parseAgentStatus } from './lib/agent-status'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -38,19 +39,11 @@ import type {
 
 export function normalizeAgentStatus(value: unknown): Agent['status'] {
   const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (
-    raw === 'active'
-    || raw === 'busy'
-    || raw === 'listening'
-    || raw === 'idle'
-    || raw === 'inactive'
-    || raw === 'offline'
-  ) {
-    return raw
-  }
+  // Backend aliases that normalize to canonical AgentStatus tokens.
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
   if (raw === 'dead' || raw === 'left') return 'offline'
-  return undefined
+  // Canonical tokens — validated by parseAgentStatus SSOT.
+  return parseAgentStatus(raw) ?? undefined
 }
 
 export function normalizeTaskStatus(value: unknown): Task['status'] {
@@ -162,7 +155,7 @@ export function normalizeMessage(raw: unknown): Message | null {
   const from = asString(raw.from) ?? asString(raw.from_agent)
   const content = asString(raw.content) ?? ''
   const timestamp = asString(raw.timestamp)
-  const room = asString(raw.room) ?? asString(raw.room_id) ?? asString(raw.channel) ?? asString(raw.channel_name)
+  const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel) ?? asString(raw.channel_name)
   return {
     id: asString(raw.id),
     seq: asNumber(raw.seq),
@@ -170,7 +163,7 @@ export function normalizeMessage(raw: unknown): Message | null {
     content,
     timestamp,
     type: asString(raw.type),
-    room,
+    workspace,
   }
 }
 
@@ -374,8 +367,6 @@ export function normalizeExecutionContinuityBrief(raw: unknown): DashboardExecut
     recent_input_preview: asString(raw.recent_input_preview) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
     recent_tool_names: asStringArray(raw.recent_tool_names) ?? [],
-    allowed_tool_count: asNumber(raw.allowed_tool_count) ?? null,
-    allowed_tool_preview: asStringArray(raw.allowed_tool_preview) ?? [],
     latest_tool_names: asStringArray(raw.latest_tool_names) ?? [],
     latest_tool_call_count: asNumber(raw.latest_tool_call_count) ?? null,
     tool_audit_source: asString(raw.tool_audit_source) ?? null,
@@ -470,18 +461,18 @@ export function normalizeDashboardConfigResolution(
   if (!isRecord(raw)) return null
   const status = asString(raw.status)
   const configRoot = normalizeDashboardConfigResolutionItem(raw.config_root)
-  const cascadeAuthoring = normalizeDashboardConfigResolutionItem(raw.cascade_authoring)
-  const cascade = normalizeDashboardConfigResolutionItem(raw.cascade)
+  const runtimeAuthoring = normalizeDashboardConfigResolutionItem(raw.runtime_authoring)
+  const runtime = normalizeDashboardConfigResolutionItem(raw.runtime)
   const prompts = normalizeDashboardConfigResolutionItem(raw.prompts)
   const keepers = normalizeDashboardConfigResolutionItem(raw.keepers)
   const personas = normalizeDashboardConfigResolutionItem(raw.personas)
-  if (!status || !configRoot || !cascadeAuthoring || !cascade || !prompts || !keepers || !personas) return null
+  if (!status || !configRoot || !runtimeAuthoring || !runtime || !prompts || !keepers || !personas) return null
   return {
     status: status as DashboardConfigResolution['status'],
     warnings: asStringArray(raw.warnings),
     config_root: configRoot,
-    cascade_authoring: cascadeAuthoring,
-    cascade,
+    runtime_authoring: runtimeAuthoring,
+    runtime,
     prompts,
     keepers,
     personas,

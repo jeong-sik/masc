@@ -1,6 +1,6 @@
 # Design Spec Correction — 2026-04-29
 
-- **Trigger**: external spec review at `~/Downloads/masc-mcp-design-system-spec.md`
+- **Trigger**: external spec review at `~/Downloads/masc-design-system-spec.md`
   (175 KB, 2026-04-29).
 - **Scope**: spot corrections where the spec's static analysis diverges
   from runtime ground truth. Spec authors did not have access to the
@@ -136,7 +136,7 @@ button defect; they do not invalidate the roadmap.
 
 ## 6. References
 
-- `~/Downloads/masc-mcp-design-system-spec.md` — external spec
+- `~/Downloads/masc-design-system-spec.md` — external spec
 - `dashboard/design-system/CSS-ARCHITECTURE.md` — Two-Tier SSOT
 - `dashboard/design-system/audits/2026-04-28-production-css-drift.md`
   — Phase 0 baseline (90 unique hex, 75.6% token ratio)

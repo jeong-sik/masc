@@ -1,7 +1,7 @@
 (** Dashboard_execution_builders — agent / keeper brief builders
     for the execution dashboard.
 
-    {b Cascade chain}: starts with
+    {b Runtime chain}: starts with
     [include Dashboard_execution_sessions] (which itself includes
     Dashboard_execution_helpers).
     {!Dashboard_execution} does
@@ -20,7 +20,7 @@ include module type of struct
   include Dashboard_execution_sessions
 end
 
-(** {1 Brief builders (cascade-visible)} *)
+(** {1 Brief builders (runtime-visible)} *)
 
 val task_assignee : Masc_domain.task -> string option
 (** [task_assignee task] returns [Some assignee] when [task] is in

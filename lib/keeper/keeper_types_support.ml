@@ -8,18 +8,21 @@ include Keeper_config
 
 let ensure_dir_ = Keeper_fs.ensure_dir
 
-let keeper_dir_ (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
+let keeper_dir_ (config : Workspace.config) =
+  let d = Workspace.keepers_runtime_dir config in
   ensure_dir_ d
 
-let session_base_dir_ (config : Coord.config) =
-  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
+let session_base_dir_ (config : Workspace.config) =
+  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
   ensure_dir_ d
 
-(** Check API key availability using model label strings.
-    Delegates to Cascade_runtime which owns MASC cascade resolution. *)
-let ensure_api_keys_for_labels (labels : string list) : (unit, string) result =
-  Cascade_runtime.ensure_api_keys_for_labels labels
+(** RFC-0206 single-binding: API keys for the default runtime are resolved at
+    startup, so there is no per-label key check. Retained as a total no-op so
+    callers keep their result-shaped contract.
+    Runtime behavior changed: per-label key availability is no longer probed;
+    verify keeper turn startup at deploy. *)
+let ensure_api_keys_for_labels (_labels : string list) : (unit, string) result =
+  Ok ()
 
 (** Single-file metrics path kept for fallback reads. *)
 let keeper_metrics_path config name =
@@ -60,6 +63,22 @@ let keeper_execution_receipt_store config name : Dated_jsonl.t =
       store
   in
   Eio_guard.with_mutex execution_receipt_store_mu lookup
+
+(* RFC-0233 PR-3: TurnRecord JSONL store next to the receipt store. *)
+let turn_record_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
+let turn_record_store_mu = Eio.Mutex.create ()
+
+let keeper_turn_record_store config name : Dated_jsonl.t =
+  let dir = Filename.concat (keeper_dir_ config) (name ^ "/turn-records") in
+  let lookup () =
+    match Hashtbl.find_opt turn_record_store_cache dir with
+    | Some store -> store
+    | None ->
+      let store = Dated_jsonl.create ~base_dir:dir () in
+      Hashtbl.replace turn_record_store_cache dir store;
+      store
+  in
+  Eio_guard.with_mutex turn_record_store_mu lookup
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")
@@ -130,14 +149,12 @@ let maybe_rotate_file path =
           for i = max_rotated downto 2 do
             let src = Printf.sprintf "%s.%d" path (i - 1) in
             let dst = Printf.sprintf "%s.%d" path i in
-            try ignore (Fs_compat.rename_if_exists ~src ~dst : bool) with
-            | Sys_error msg ->
-              Log.Misc.warn "rotate: cannot rename %s -> %s: %s" src dst msg
+            let _renamed = Fs_compat.rename_if_exists ~src ~dst in
+            ()
           done;
           let rotated = Printf.sprintf "%s.1" path in
-          try ignore (Fs_compat.rename_if_exists ~src:path ~dst:rotated : bool) with
-          | Sys_error msg ->
-            Log.Misc.warn "rotate: cannot rename %s -> %s: %s" path rotated msg
+          let _renamed = Fs_compat.rename_if_exists ~src:path ~dst:rotated in
+          ()
         end
 
 let append_jsonl_line path (json : Yojson.Safe.t) =

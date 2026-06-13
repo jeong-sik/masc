@@ -1,12 +1,15 @@
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
-  sendKeeperMessageDetailed,
+  cancelQueuedKeeperMessage,
+  fetchKeeperChatHistory,
   streamKeeperMessage,
 } from './api/keeper'
+import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
+  KeeperConversationAttachment,
   KeeperConversationDelivery,
   KeeperDiagnostic,
   KeeperStatusDetail,
@@ -20,10 +23,13 @@ import {
   keeperSending,
   keeperStatusDetails,
   keeperStreamStartedAt,
+  keeperStreamLastEventAt,
   keeperThreads,
   appendThreadEntry,
+  chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
+  mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
   normalizeStatusDetail,
@@ -34,8 +40,6 @@ import {
 import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
-  KEEPER_STREAM_IDLE_POLL_MS,
-  KEEPER_STREAM_IDLE_TIMEOUT_MS,
 } from './config/constants'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
@@ -115,6 +119,70 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
   }
 }
 
+// Keepers whose persisted chat history was already merged this page
+// lifetime. Hydration is once-per-keeper: live entries appended after
+// the merge are the fresher copy, and re-merging mid-session would
+// race the in-flight stream entries.
+const hydratedChatKeepers = new Set<string>()
+
+/** Test-only: reset the once-per-keeper hydration guard. */
+export function _resetChatHydrationForTests(): void {
+  hydratedChatKeepers.clear()
+}
+
+/** Merge the server-persisted chat transcript
+ *  (`GET /api/v1/keepers/:name/chat/history`, backed by
+ *  `.masc/keeper_chat/<name>.jsonl`) into the in-memory thread.
+ *  Called on conversation-panel mount so the transcript survives full
+ *  page reloads — the server file is the cross-connector SSOT
+ *  (dashboard / Discord / Slack all append to it). */
+export async function hydrateKeeperChatHistory(
+  name: string,
+  options: { force?: boolean } = {},
+): Promise<void> {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  if (!options.force && hydratedChatKeepers.has(keeperName)) return
+  hydratedChatKeepers.add(keeperName)
+  setRecordValue(keeperHydrating, keeperName, true)
+  try {
+    const history = await fetchKeeperChatHistory(keeperName)
+    if (history.length === 0) return
+    mergeServerHistoryEntries(keeperName, chatHistoryEntriesFromRest(keeperName, history))
+  } catch (err) {
+    // Allow a later mount to retry instead of caching the failure.
+    hydratedChatKeepers.delete(keeperName)
+    const message = err instanceof Error ? err.message : `Failed to load chat history for ${keeperName}`
+    console.warn(`[keeper] chat history hydration failed for ${keeperName}:`, message)
+    setRecordValue(keeperActionErrors, keeperName, `이전 대화 불러오기 실패: ${message}`)
+  } finally {
+    setRecordValue(keeperHydrating, keeperName, false)
+  }
+}
+
+// Trailing per-keeper debounce for keeper_chat_appended pushes so a
+// burst of turns (queue drain, multi-connector traffic) coalesces into
+// one history refetch instead of one round-trip per message.
+const chatRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const CHAT_APPENDED_REFRESH_DELAY_MS = 400
+
+/** React to a server `keeper_chat_appended` push: re-merge the
+ *  persisted transcript so messages arriving through other connectors
+ *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
+ *  whose transcript was never hydrated are skipped — the mount
+ *  hydration fetches the full window when the panel first opens. */
+export function noteKeeperChatAppended(name: string): void {
+  const keeperName = name.trim()
+  if (!keeperName) return
+  if (!hydratedChatKeepers.has(keeperName)) return
+  const pending = chatRefreshTimers.get(keeperName)
+  if (pending) clearTimeout(pending)
+  chatRefreshTimers.set(keeperName, setTimeout(() => {
+    chatRefreshTimers.delete(keeperName)
+    void hydrateKeeperChatHistory(keeperName, { force: true })
+  }, CHAT_APPENDED_REFRESH_DELAY_MS))
+}
+
 export async function loadFullKeeperHistory(name: string): Promise<void> {
   const keeperName = name.trim()
   if (!keeperName) return
@@ -122,7 +190,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   try {
     const text = await callMcpTool('masc_keeper_status', {
       name: keeperName,
-      fast: true,
+      fast: false,
       include_context: false,
       include_metrics_overview: false,
       include_memory_bank: false,
@@ -155,10 +223,16 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   }
 }
 
-export async function sendKeeperThreadMessage(name: string, prompt: string): Promise<void> {
+export async function sendKeeperThreadMessage(
+  name: string,
+  prompt: string,
+  options: { attachments?: KeeperConversationAttachment[] } = {},
+): Promise<void> {
   const keeperName = name.trim()
   const message = prompt.trim()
   if (!keeperName || !message) return
+  const attachments =
+    options.attachments && options.attachments.length > 0 ? options.attachments : undefined
   abortKeeperThreadMessage(keeperName)
   const localId = `local-${Date.now()}`
   const assistantId = `reply-${Date.now()}`
@@ -171,6 +245,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     timestamp: new Date().toISOString(),
     delivery: 'sending',
     streamState: null,
+    attachments,
     details: null,
   })
   appendThreadEntry(keeperName, {
@@ -190,23 +265,18 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
-  let idleTimeoutId: ReturnType<typeof setInterval> | null = null
+  let requestId: string | null = null
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
-    let lastEventAt = Date.now()
-    idleTimeoutId = setInterval(() => {
-      if (Date.now() - lastEventAt > KEEPER_STREAM_IDLE_TIMEOUT_MS) {
-        if (idleTimeoutId != null) clearInterval(idleTimeoutId)
-        idleTimeoutId = null
-        abortKeeperThreadMessage(keeperName)
-      }
-    }, KEEPER_STREAM_IDLE_POLL_MS)
-
-    await streamKeeperMessage(keeperName, message, {
+    const outcome = await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
+      attachments,
       onEvent: event => {
-        lastEventAt = Date.now()
+        setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
+          requestId = asString(event.value.request_id, '').trim() || requestId
+        }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
           throw new Error(error)
@@ -216,48 +286,53 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
 
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
-    const finalText = finalEntry?.text.trim() || '(empty reply)'
+    const finalText = finalEntry?.text.trim() ?? ''
+
+    if (!outcome.terminal) {
+      // The SSE connection closed without RUN_FINISHED / RUN_ERROR —
+      // keep the partial text but mark the entry so the operator can
+      // tell a cut stream from a completed reply.
+      const cutMessage = '스트림이 종료 신호 없이 끊겼습니다. 응답이 불완전할 수 있습니다.'
+      finalizeAssistantEntry(keeperName, assistantId, {
+        text: finalText,
+        delivery: 'interrupted',
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        error: cutMessage,
+      })
+      setRecordValue(keeperActionErrors, keeperName, cutMessage)
+      return
+    }
+
+    const finalDelivery =
+      !finalText && finalEntry?.delivery === 'queued'
+        ? 'queued' as KeeperConversationDelivery
+        : 'delivered' as KeeperConversationDelivery
 
     finalizeAssistantEntry(keeperName, assistantId, {
-      text: finalText,
-      delivery: 'delivered',
+      text: finalText || (finalDelivery === 'queued' ? '' : '(empty reply)'),
+      delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
     })
   } catch (err) {
     if (isAbortError(err)) {
+      if (requestId) {
+        try {
+          await cancelQueuedKeeperMessage(requestId)
+        } catch (cancelErr) {
+          console.warn(`[keeper] queue cancel failed for ${keeperName}`, cancelErr instanceof Error ? cancelErr.message : cancelErr)
+        }
+      }
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
         streamState: null,
-        error: '스트림 취소됨',
+        error: '요청 취소됨',
         timestamp: new Date().toISOString(),
       })
-      setRecordValue(keeperActionErrors, keeperName, '스트림 취소됨')
+      setRecordValue(keeperActionErrors, keeperName, '요청 취소됨')
       throw err
-    }
-
-    const fallbackAllowed =
-      !((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId)?.text.trim())
-
-    if (fallbackAllowed) {
-      try {
-        const reply = await sendKeeperMessageDetailed(keeperName, message)
-        finalizeAssistantEntry(keeperName, assistantId, {
-          text: reply.text.trim() || '(empty reply)',
-          rawText: reply.details?.replyText ?? (reply.text.trim() || '(empty reply)'),
-          delivery: 'delivered',
-          streamState: null,
-          details: reply.details,
-          error: null,
-          timestamp: new Date().toISOString(),
-        })
-        finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered', error: null })
-        await refreshDashboardState()
-        return
-      } catch (fallbackErr) {
-        console.warn(`[keeper] stream fallback also failed for ${keeperName}`, fallbackErr instanceof Error ? fallbackErr.message : fallbackErr)
-      }
     }
 
     const errorMessage =
@@ -275,11 +350,14 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    if (idleTimeoutId != null) clearInterval(idleTimeoutId)
     clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
     setRecordValue(keeperStreamStartedAt, keeperName, null)
-    await refreshDashboardState()
+    setRecordValue(keeperStreamLastEventAt, keeperName, null)
+    // No refreshDashboardState() here: forcing a full dashboard
+    // refetch after every chat message re-rendered every panel and was
+    // the main "the screen keeps refreshing" complaint. Keeper status
+    // updates arrive through the WS/SSE live path instead.
   }
 }
 

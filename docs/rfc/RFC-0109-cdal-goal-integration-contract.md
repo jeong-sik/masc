@@ -141,7 +141,7 @@ no string classifiers, no N-of-M, no cap/cooldown.
 | Site | Field shape | Count of caller in main | Maps to variant |
 |------|-------------|-------------------------|-----------------|
 | `lib/keeper/keeper_cdal_contract.ml:21` | `kind: "keeper_turn_capture_v1"` + 10 fields (keeper_name, agent_name, sandbox_profile, sandbox_image, network_mode, tool_access, tool_denylist, allowed_paths, active_goal_ids, current_task_id_at_start) | 1 (all keeper turn captures) | `Keeper_turn_capture_v1` |
-| `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (cascade_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
+| `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (runtime_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
 | `lib/jsonl_writer/jsonl_writer_contract_fixture.ml:88` | same as catalog | 0 (orphan — no caller reads it) | typed via `of_yojson` auto-route; emit-side stays raw JSON to preserve `jsonl_writer` leaf-lib boundary |
 
 The original draft's `Active_goals` projection would have lost the
@@ -269,7 +269,7 @@ let persist ~config verdict =
 (** lib/keeper/goal_phase_bridge.mli *)
 
 val maybe_react :
-  config:Coord.config ->
+  config:Workspace.config ->
   Cdal_types.contract_verdict ->
   unit
 (** [maybe_react] inspects the verdict and, when its [contract_id] is
@@ -303,7 +303,7 @@ val maybe_react :
 | `lib/cdal/cdal_eval_v1.ml` | Call `Goal_phase_bridge.maybe_react` after persist |
 | `lib/goal/goal_verification.{ml,mli}` | Add `policy_allows_cdal_auto_approve : bool` (default `false`) |
 | `test/test_goal_phase_bridge.ml` | New — 3 cases (Violated→Reject, Satisfied+opt-in→Approve, Inconclusive→noop) |
-| Prometheus counter | `cdal_goal_phase_transitions_total{outcome=...}` |
+| legacy metrics backend counter | `cdal_goal_phase_transitions_total{outcome=...}` |
 
 Estimated change: ~300 LoC.
 
@@ -334,7 +334,7 @@ called** against the keeper's most recent turn for that goal's
 ### 6.2 Wiring
 
 ```ocaml
-(* lib/coord_goals.ml — handle_goal_transition *)
+(* lib/workspace_goals.ml — handle_goal_transition *)
 let handle_goal_transition ~action goal =
   let next_phase = Goal_phase.decide_transition goal.phase action in
   match next_phase with
@@ -350,9 +350,9 @@ let handle_goal_transition ~action goal =
 | File | Change |
 |---|---|
 | `lib/cdal_runtime/triggers.{ml,mli}` | New module — `evaluate_for_goal` |
-| `lib/coord_goals.ml` | Call trigger on transition into Awaiting_verification |
+| `lib/workspace_goals.ml` | Call trigger on transition into Awaiting_verification |
 | `lib/goal/goal_verification.ml` | CDAL verdict counted as vote (new vote kind `Cdal_verdict`) |
-| `test/test_coord_goals.ml` | Update transition tests |
+| `test/test_workspace_goals.ml` | Update transition tests |
 | `test/test_goal_verification.ml` | New — CDAL vote case |
 
 Estimated change: ~250 LoC.
@@ -406,7 +406,7 @@ queryable via `Cdal_verdict_gate.lookup_latest_verdict ~task_id`:
 (* lib/tool_task.ml — replace the inline call site *)
 let submit_evidence_error =
   match requested_action with
-  | Submit_for_verification | Submit_pr_evidence
+  | Submit_for_verification
   | Done_action when done_redirects_to_verification ->
     (match Cdal_verdict_gate.lookup_latest_verdict ~task_id with
      | Some { status = Satisfied; _ } -> None
@@ -441,12 +441,12 @@ Estimated change: ~350 LoC.
 ### 6.5.5 Operator-visible improvement
 
 Today's reject message (from `text_has_verification_artifact_ref` hint):
-> "submit_for_verification requires verification evidence: include pr_url for the draft PR, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
+> "submit_for_verification requires verification evidence: include a review artifact reference, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
 
 Phase D reject message (from typed CDAL verdict):
 > "CDAL verdict for task `task-cdal-001` is Violated. Findings:
 > - `check_id=invariant_keeper_lifecycle.zombie_phase_reports_to_supervisor`: observed `fiber_zombie`, expected `KH_zombie reported within 30s`. trace_ref=proof-store://run-789/tool_traces/trace-004
-> - `check_id=invariant_dashboard_telemetry.cascade_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
+> - `check_id=invariant_dashboard_telemetry.runtime_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
 
 This is the user-visible payoff of typed integration: the operator
 sees *which contract clause failed* instead of "add a PR URL".
@@ -476,7 +476,7 @@ earlier; Phase C is the long-tail completeness work.
 
 | Risk | Mitigation |
 |---|---|
-| Bridge cascade — verdict triggers transition triggers verdict | `Goal_phase_bridge` does NOT call back into `Cdal_eval_v1`. Single-direction reaction |
+| Bridge runtime — verdict triggers transition triggers verdict | `Goal_phase_bridge` does NOT call back into `Cdal_eval_v1`. Single-direction reaction |
 | Stale verdict applied to wrong-version goal | `goal_store.version` checked before transition; mismatch = log warning + skip |
 | `Free` escape hatch becomes long-term workaround | `pr-rfc-check.sh` §10 lint guard + 30-day sunset for accepting `Free` from CDAL evaluator (read-side strict after sunset) |
 | Phase C breaks existing verification flows | Phase C feature-flagged (`MASC_CDAL_GOAL_VERIFIER_ENFORCE=false` default). Operator opts in per-goal via `policy_allows_cdal_auto_approve` |
@@ -512,7 +512,7 @@ block" pain that triggered this amendment.
 - Phase D: a task with `Cdal_verdict.Satisfied` passes
   `keeper_task_done` without any notes-string artifact ref; a task
   with `Cdal_verdict.Violated` rejects with typed findings in the
-  error payload, NOT the legacy "include pr_url..." hint string.
+  error payload, NOT a URL-specific legacy hint string.
 - Operator override path tested end-to-end (manual
   `Approve_completion` wins over CDAL bridge auto-reject).
 
@@ -525,7 +525,7 @@ block" pain that triggered this amendment.
 | Unit (Phase A) | Catalog spec → `Contract_catalog_invariants` typed projection (see `test/test_masc_contract_catalog.ml`) |
 | Unit (Phase B) | `Goal_phase_bridge.maybe_react` decision matrix |
 | Integration (Phase B) | Temp Goal Store + Cdal_eval_v1 + bridge; verify phase advances |
-| Integration (Phase C) | `Coord_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
+| Integration (Phase C) | `Workspace_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
 | Unit (Phase D) | 5-case decision matrix from §6.5.2: Satisfied → pass; Violated → reject with findings; Inconclusive → required_evidence check; None + contract=None → bypass; None + contract=Some → missing-verdict rejection |
 | Integration (Phase D) | End-to-end keeper_task_done with a bound Cdal verdict; assert workflow_rejection payload carries typed `findings[]` not just hint string |
 | Property | Bridge idempotence — re-applying same verdict yields no second transition |
@@ -535,7 +535,7 @@ block" pain that triggered this amendment.
 ## 12. Out of scope (future work)
 
 - Cross-keeper CDAL verdict aggregation (one goal, multiple keepers).
-- CDAL verdict as input to cascade routing decisions.
+- CDAL verdict as input to runtime routing decisions.
 - Real-time SSE event for `cdal_goal_phase_transition` (separate from
   existing `'cdal_verdict'` / `'verification'`).
 - Frontend UI for displaying verdict ↔ phase lineage (research HTML

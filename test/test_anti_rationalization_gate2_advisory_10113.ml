@@ -10,10 +10,10 @@
 
    The fix demoted gate 2 to an advisory hint by default.  This
    test pins the resulting state machine WITHOUT calling the LLM
-   evaluator (Gate 3 needs an OAS cascade we don't stand up here),
+   evaluator (Gate 3 needs an OAS runtime we don't stand up here),
    so the assertions focus on:
 
-     1. The Prometheus counter labels are correct for each
+     1. The Otel_metric_store counter labels are correct for each
         decision branch — operators read these to triangulate
         false-positive rate vs true-positive rate per pattern.
      2. The build_prompt advisory section appears with the
@@ -28,7 +28,7 @@
         normal engineering context" instruction is the contract.
 *)
 
-(* MASC_BASE_PATH must be set BEFORE Masc_mcp module init. *)
+(* MASC_BASE_PATH must be set BEFORE Masc module init. *)
 let () =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -37,13 +37,13 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module AR = Masc_mcp.Anti_rationalization
-module Prom = Masc_mcp.Prometheus
+module AR = Masc.Task.Anti_rationalization
+module Metrics = Masc.Otel_metric_store
 
-let metric = Prom.metric_anti_rationalization_excuse_pattern
+let metric = Metrics.metric_anti_rationalization_excuse_pattern
 
 let counter_for ~pattern ~decision =
-  Prom.metric_value_or_zero metric
+  Metrics.metric_value_or_zero metric
     ~labels:[ ("pattern", pattern); ("decision", decision) ]
     ()
 
@@ -101,12 +101,37 @@ let test_build_prompt_no_advisory_section_without_input () =
     false
     (String_util.contains_substring prompt "<gate2_advisory>")
 
+let test_build_prompt_includes_verification_contract () =
+  let req =
+    make_request
+      ~notes:"Implemented feature X, ran test_feature_x, and attached PR #123."
+  in
+  let prompt =
+    AR.build_prompt
+      ~completion_contract:
+        [ "test_feature_x passes"; "PR artifact is attached" ]
+      req
+  in
+  let contains needle = String_util.contains_substring prompt needle in
+  Alcotest.(check bool)
+    "contract section appears in prompt"
+    true
+    (contains "<verification_contract>");
+  Alcotest.(check bool)
+    "first contract item appears"
+    true
+    (contains "test_feature_x passes");
+  Alcotest.(check bool)
+    "prompt tells LLM to reject unmet contract items"
+    true
+    (contains "Reject if the notes do not provide concrete evidence")
+
 (* Counter label vocabulary contract — pin each decision string
    so dashboards keyed on these labels do not silently break.
    These three strings are the only valid values; adding a new
    one is an explicit change.
 
-   We exercise the labels by directly calling Prometheus
+   We exercise the labels by directly calling Otel_metric_store
    inc_counter with the exact strings the production code will
    emit.  This pins the [decision=...] vocabulary independently
    of whether the gate-3 LLM is reachable in the test env. *)
@@ -115,11 +140,11 @@ let test_counter_label_vocabulary () =
   let before_advisory = counter_for ~pattern ~decision:"advisory_to_llm" in
   let before_terminal = counter_for ~pattern ~decision:"terminal_reject" in
   let before_safety = counter_for ~pattern ~decision:"advisory_safety_net_reject" in
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "advisory_to_llm") ] ();
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "terminal_reject") ] ();
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[ ("pattern", pattern); ("decision", "advisory_safety_net_reject") ] ();
   Alcotest.(check (float 0.0001))
     "advisory_to_llm bucket +1"
@@ -142,7 +167,7 @@ let test_pattern_label_isolation () =
   let before_other =
     counter_for ~pattern:"out of scope" ~decision:"advisory_to_llm"
   in
-  Prom.inc_counter metric
+  Metrics.inc_counter metric
     ~labels:[
       ("pattern", "follow-up");
       ("decision", "advisory_to_llm");
@@ -161,6 +186,8 @@ let () =
             `Quick test_build_prompt_includes_advisory_when_supplied;
           Alcotest.test_case "no advisory section without input"
             `Quick test_build_prompt_no_advisory_section_without_input;
+          Alcotest.test_case "verification contract included"
+            `Quick test_build_prompt_includes_verification_contract;
         ] );
       ( "counter_labels",
         [

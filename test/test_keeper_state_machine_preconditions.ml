@@ -6,9 +6,9 @@
 
 open Alcotest
 
-module SM = Masc_mcp.Keeper_state_machine
-module IC = Masc_mcp.Keeper_invariant_check
-module A = Masc_mcp.Attribution
+module SM = Keeper_state_machine
+module IC = Masc.Keeper_invariant_check
+module A = Attribution
 
 (** Healthy running conditions. *)
 let running_conditions : SM.conditions =

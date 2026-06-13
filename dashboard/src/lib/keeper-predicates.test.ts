@@ -26,6 +26,9 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
   it('returns true on FSM phase Paused', () => {
     expect(isKeeperPaused(k({ phase: 'Paused' }))).toBe(true)
   })
+  it('returns true on lifecycle_phase Paused even when phase is stale', () => {
+    expect(isKeeperPaused(k({ lifecycle_phase: 'Paused', phase: 'Running' }))).toBe(true)
+  })
   it('returns true on lowercase phase paused from operator snapshots', () => {
     expect(isKeeperPaused({ phase: 'paused' })).toBe(true)
   })
@@ -51,6 +54,9 @@ describe('isKeeperOffline', () => {
     ['Offline'], ['Stopped'], ['Dead'], ['Crashed'], ['Zombie'],
   ])('phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline(k({ phase }))).toBe(true)
+  })
+  it('lifecycle_phase overrides stale phase for offline classification', () => {
+    expect(isKeeperOffline(k({ lifecycle_phase: 'Offline', phase: 'Running' }))).toBe(true)
   })
   it.each(['offline', 'stopped', 'dead', 'crashed', 'zombie'])('lowercase phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline({ phase })).toBe(true)
@@ -102,6 +108,9 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   it('undefined phase ⇒ NOT crashed', () => {
     expect(isKeeperCrashed(k())).toBe(false)
   })
+  it('lifecycle_phase overrides stale phase for crashed classification', () => {
+    expect(isKeeperCrashed(k({ lifecycle_phase: 'Dead', phase: 'Running' }))).toBe(true)
+  })
 })
 
 describe('isCrashedPhase — SSE-safe casing checker', () => {
@@ -126,7 +135,7 @@ describe('isCrashedPhase — SSE-safe casing checker', () => {
 
 describe('keeperIsStuckOnRecoverableBlocker', () => {
   it.each([
-    ['cascade_exhausted'], ['turn_timeout'],
+    ['runtime_exhausted'], ['turn_timeout'],
   ])('blocker_class=%s ⇒ stuck-recoverable', (cls) => {
     expect(keeperIsStuckOnRecoverableBlocker(k({ runtime_blocker_class: cls as Keeper['runtime_blocker_class'] }))).toBe(true)
   })

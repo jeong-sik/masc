@@ -76,7 +76,7 @@ generate_graph() {
     done
     echo ""
     echo "  // Target domain categories"
-    for cat in Cascade Keeper Masc Dashboard Auth Coord Pulse Briefing Board; do
+    for cat in Runtime Keeper Masc Dashboard Auth Workspace Pulse Briefing Board; do
       echo "  \"${cat}_*\" [style=filled, fillcolor=\"#e3f2fd\"];"
     done
     echo ""
@@ -84,7 +84,7 @@ generate_graph() {
     for f in lib/oas_*.ml; do
       [ -f "$f" ] || continue
       base=$(basename "$f" .ml)
-      for cat in Cascade Keeper Masc Dashboard Auth Coord Pulse Briefing Board; do
+      for cat in Runtime Keeper Masc Dashboard Auth Workspace Pulse Briefing Board; do
         count=$(rg -c "\\b${cat}_[a-z]" "$f" 2>/dev/null || true)
         count=${count:-0}
         if [ "$count" -gt 0 ]; then

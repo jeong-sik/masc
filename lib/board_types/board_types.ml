@@ -31,6 +31,10 @@ type board_error =
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
 
+(* Shared regex for alphanumeric ID validation (Post_id, Board_id, Sub_board_id).
+   Single [Re.compile] DFA build instead of 3 identical copies. *)
+let alphanumeric_id_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+
 module Post_id : sig
   type t
   val of_string : string -> (t, board_error) result
@@ -40,7 +44,7 @@ end = struct
   type t = string
 
   (* Only alphanumeric, dash, underscore. Max 64 chars. *)
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in
@@ -61,7 +65,7 @@ module Comment_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in
@@ -83,14 +87,14 @@ end = struct
 
   (* Issue #8633: pattern was [^[a-zA-Z0-9._-]+$] which rejected the
      [keeper:foo] colon-namespacing supported by the canonical
-     [Validation.Agent_id] (used by masc_join / masc_claim_next).
-     Real callers exist (server_routes_http_keeper_stream:413,
-     server_openai_compat:153). Pattern is now a strict superset of
-     both: optional single colon namespace + previously-allowed dots.
+     [Validation.Agent_id] (used by session-bound task workspace).
+     Real callers exist (server_routes_http_keeper_stream:413).
+     Pattern is now a strict superset of both: optional single colon
+     namespace + previously-allowed dots.
 
      Issue #8625: length cap was 32 — also raised to 64 to match
      [Validation.Agent_id.validate]. Generated worker IDs like
-     [agent_code-task-claimer-20260419t102609z] (36 chars) joined fine but
+     [agent_code-task-claimer-20260419t102609z] (36 chars) bound fine but
      were rejected by board posts. (Supersedes PR #8631.) *)
   let max_agent_id_len = 64
   let valid_pattern =
@@ -125,6 +129,19 @@ type post_kind =
   | Automation_post [@tla.symbol "automation_post"]
   | System_post [@tla.symbol "system_post"]
 [@@deriving tla]
+
+(* Closed sum for the legacy automation-author classification. Relocated
+   here from board_core_classify so the board metric hook surface
+   (board_metrics_hooks.ml / board_metric_hooks_adapter.ml) can reference it
+   without a board_core_classify -> board_metrics_hooks -> board_core_classify
+   cycle. board_core_classify re-exports it via [include Board_types]. *)
+type automation_label =
+  | Auto_prefixed       (* "auto-" prefix *)
+  | Qa_prefixed         (* "qa-" prefix *)
+  | Researcher_named    (* contains "researcher" *)
+  | Harness_named       (* contains "harness" *)
+  | Smoke_named         (* contains "smoke" *)
+  | Probe_named         (* contains "probe" *)
 
 type post = {
   id: Post_id.t;
@@ -195,7 +212,7 @@ module Sub_board_id : sig
 end = struct
   type t = string
 
-  let valid_pattern = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+  let valid_pattern = alphanumeric_id_re
 
   let of_string s =
     let s = String.trim s in

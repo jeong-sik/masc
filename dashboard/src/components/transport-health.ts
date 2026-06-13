@@ -135,8 +135,8 @@ export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   if (!type) return false
   if (type === 'keeper_heartbeat') return false
   if (type === 'broadcast' || type === 'masc/broadcast') return true
-  if (type === 'agent_joined' || type === 'masc/agent_joined') return true
-  if (type === 'agent_left' || type === 'masc/agent_left') return true
+  if (type === 'agent_bound' || type === 'masc/agent_bound') return true
+  if (type === 'agent_unbound' || type === 'masc/agent_unbound') return true
   if (type.startsWith('task_') || type.startsWith('masc/task_')) return true
   if (type.startsWith('keeper_') || type.startsWith('masc/keeper_')) return true
   if (type.startsWith('decision_') || type === 'governance_param_changed') return true
@@ -207,13 +207,8 @@ export function statusDot(status: StatusTone): string {
   return 'bg-[var(--color-status-err)]'
 }
 
-// Renamed from `toneClass` to encode the direction of the conversion.
-// `lib/tone.ts` ships a separate `toneClass(string): 'ok' | 'warn' | 'bad'`
-// — a classifier going from free-form status strings to a closed tone
-// label — which is the *inverse* direction of this function (closed
-// `StatusTone` enum to a text-color Tailwind class). The two used to
-// share a name and could be confused on import; the new name pairs
-// nominally with the sibling `statusDot(StatusTone): bg-class` helper
+// Converts the closed `StatusTone` enum to a text-color Tailwind class.
+// The name pairs with the sibling `statusDot(StatusTone): bg-class` helper
 // just above.
 export function toneTextClass(status: StatusTone): string {
   if (status === 'ok') return 'text-[var(--color-status-ok)]'
@@ -415,8 +410,8 @@ export function TransportHealthPanel() {
     : `topology ${data.cluster.topology_source}`
   const namespaceChip =
     data.cluster.cluster && data.cluster.cluster !== 'unknown' && data.cluster.cluster !== 'default'
-      ? `${data.cluster.cluster} / namespace ${data.cluster.room_id}`
-      : `namespace ${data.cluster.room_id}`
+      ? `${data.cluster.cluster} / namespace ${data.cluster.workspace_id}`
+      : `namespace ${data.cluster.workspace_id}`
   const truthLine = transportTruthLine(data)
 
   return html`
@@ -484,7 +479,7 @@ export function TransportHealthPanel() {
             <${SectionCard} label="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
-                <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+                <${MetricRow} label="에이전트 스트림" value=${data.sse.sessions_agent_stream} />
                 <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
                 <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
                 <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />

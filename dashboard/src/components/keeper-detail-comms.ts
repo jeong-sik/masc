@@ -13,22 +13,24 @@ export function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   // keeper-store-normalize.ts for the parallel migration.
   const isOffline = isKeeperOffline(keeper)
 
+  // The conversation panel stays mounted even while the keeper is
+  // offline: a transient offline flip during a status poll used to
+  // unmount the panel and drop the draft text and scroll position.
+  // Past transcript stays readable; only new sends need a live keeper.
   return html`
-    <div class="border-t border-[var(--color-border-divider)] pt-5">
-      <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[var(--track-sub)]">직접 통신</h3>
-
+    <div class="flex flex-col gap-3">
       ${isOffline ? html`
-        <div class="px-4 py-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-sm text-[var(--color-fg-muted)]">
-          이 키퍼는 현재 비활동 상태입니다. 기동 후 메시지를 볼 수 있습니다.
+        <div class="px-4 py-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] text-sm text-[var(--color-status-warn)]">
+          이 키퍼는 현재 비활동 상태입니다. 지난 대화는 그대로 볼 수 있으며, 새 메시지는 기동 후 전달됩니다.
         </div>
-      ` : html`
-        <div class="w-full">
-          <${KeeperConversationPanel}
-            keeperName=${keeper.name}
-            placeholder=${'이 키퍼에게 직접 프롬프트 전송'}
-          />
-        </div>
-      `}
+      ` : null}
+      <div class="w-full">
+        <${KeeperConversationPanel}
+          keeperName=${keeper.name}
+          placeholder=${'이 키퍼에게 직접 프롬프트 전송'}
+          layout="primary"
+        />
+      </div>
     </div>
   `
 }

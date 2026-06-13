@@ -3,7 +3,7 @@
     Pins the threshold contract:
     - small payloads (< threshold) flow through verbatim
     - large payloads (> threshold) are stored and replaced with
-      [Tool_output.Stored] sentinel marker
+      [Tool_output.Stored] blob marker
     - boundary cases (exactly == threshold) follow [<=] semantics
     - externalization is silently skipped when [MASC_BASE_PATH] is unset
       OR when [MASC_TOOL_EXTERNALIZE=0] is set
@@ -11,7 +11,7 @@
     The actual blob store is exercised in [test_tool_blob_store]; here we
     only verify the bridge's wiring decisions. *)
 
-module B = Masc_mcp.Tool_bridge
+module B = Masc.Tool_bridge
 module O = Tool_output
 
 let tool_ok ?(tool_name = "") message =
@@ -107,7 +107,7 @@ let test_to_oas_typed_small_inlined () =
   match B.to_oas_typed_result (tool_ok ~tool_name:"test" small) with
   | Ok { content } ->
       Alcotest.(check string) "inlined verbatim" small content;
-      Alcotest.(check bool) "no sentinel" false (O.is_sentinel content)
+      Alcotest.(check bool) "no marker" false (O.is_marker content)
   | Error _ -> Alcotest.fail "expected Ok"
 
 let test_to_oas_typed_error_inlined () =
@@ -190,7 +190,7 @@ let test_round_trip_through_oas () =
            Alcotest.fail "did not expect Stored when externalize=0")
   | Error _ -> Alcotest.fail "expected Ok"
 
-(* --- Sentinel encoding round-trip via the bridge --- *)
+(* --- Marker encoding round-trip via the bridge --- *)
 
 let test_externalize_with_temp_base_path () =
   with_temp_base_path (fun dir ->
@@ -205,7 +205,7 @@ let test_externalize_with_temp_base_path () =
       let result = B.maybe_externalize payload in
       if String.length result < String.length payload then begin
         Alcotest.(check bool)
-          "encoded as sentinel" true (O.is_sentinel result);
+          "encoded as marker" true (O.is_marker result);
         match O.decode_from_oas result with
         | O.Stored { sha256; bytes; _ } ->
             Alcotest.(check int) "byte count" (String.length payload) bytes;

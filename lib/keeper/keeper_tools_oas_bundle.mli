@@ -5,8 +5,8 @@
     internal payloads. The cleanup thunk releases per-turn sandbox
     runtimes (Docker case). *)
 val make_tool_bundle
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
@@ -16,8 +16,8 @@ val make_tool_bundle
 
 (** Convenience over [make_tool_bundle] returning only [.tools]. *)
 val make_tools
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)

@@ -1,7 +1,7 @@
 (** Tests for Governance_anomaly — behavioral baseline & deviation detection. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let agent_id = "test-agent"
 
@@ -46,7 +46,7 @@ let profile_file base_path agent_id =
     (agent_id ^ ".json")
 
 let anomaly_profile_drop_value reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", "governance_anomaly_profile"); ("reason", reason)]
     ()
 
@@ -62,7 +62,7 @@ let gen_entries ~end_ts ~spacing_sec ~count ~tool_names ~outcomes ~token_counts 
       Audit_log.timestamp;
       agent_id;
       action = Audit_log.ToolCall tool_name;
-      room_id = None;
+      workspace_id = None;
       details = `Null;
       outcome;
       cost_estimate = None;
@@ -82,7 +82,7 @@ let test_build_profile_insufficient_entries () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let entries = gen_entries ~end_ts:(Unix.gettimeofday ()) ~spacing_sec:3600.
         ~count:2 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in
       write_entries config entries;
@@ -97,7 +97,7 @@ let test_build_profile_success () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
         ~count:10 ~tool_names:["read"; "write"] ~outcomes:[Audit_log.Success]
@@ -121,7 +121,7 @@ let test_detect_deviations () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       (* baseline: 10 entries, 1 per hour, all Success, single tool *)
       let baseline = gen_entries ~end_ts:now ~spacing_sec:3600.
@@ -149,7 +149,7 @@ let test_save_load_profile_roundtrip () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
         ~count:10 ~tool_names:["read"; "write"] ~outcomes:[Audit_log.Success; Audit_log.Failure "err"]
@@ -181,7 +181,7 @@ let test_check_agent_pipeline () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       (* Dense entries (5-min spacing, all within 45 min) produce a single batch,
          so stddev = 0 and z_score = 0 -> no deviations. *)
@@ -203,7 +203,7 @@ let test_detect_deviations_empty_entries () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
         ~count:10 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in
@@ -223,7 +223,7 @@ let test_detect_deviations_no_token_volume () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       (* No token_count logged -> profile.token_volume = None *)
       let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
@@ -292,7 +292,7 @@ let test_check_agent_insufficient_entries () =
   Fun.protect
     ~finally:(fun () -> cleanup_tmpdir dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let now = Unix.gettimeofday () in
       let entries = gen_entries ~end_ts:now ~spacing_sec:3600.
         ~count:2 ~tool_names:["read"] ~outcomes:[Audit_log.Success] ~token_counts:[100] in

@@ -44,15 +44,16 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
     [initialize] response.  Operator-visible — drift in these
     strings changes how clients describe / discover the server. *)
 
-val default_instructions : string
-(** [Full] profile instructions.  Describes MASC project /
+val default_instructions : unit -> string
+(** [default_instructions ()] returns [Full] profile instructions. Describes MASC project /
     cluster / read / write conventions and points clients at
-    [masc_tool_help]. *)
+    [masc_tool_help]. Tool lifecycle prose is loaded from
+    [config/prompts/tool_contract.task_lifecycle_workflow.md]. *)
 
 val managed_agent_instructions : string
 (** [Managed_agent] profile instructions.  Names the canonical
     task-control tools ([masc_status], [masc_tasks],
-    [masc_claim_next], [masc_transition], [masc_plan_set_task])
+    [keeper_task_claim], [masc_transition], [masc_plan_set_task])
     and warns that the public /mcp surface and managed-agent
     surface diverge in inventory. *)
 
@@ -66,17 +67,18 @@ val operator_remote_instructions : string
 
 val tool_schemas_for_profile :
   ?include_hidden:bool ->
-  ?include_keeper_internal:bool ->
+  ?include_agent_internal:bool ->
   Mcp_server.server_state ->
   tool_profile ->
   Masc_domain.tool_schema list
-(** [tool_schemas_for_profile ?include_hidden ?include_keeper_internal
+(** [tool_schemas_for_profile ?include_hidden ?include_agent_internal
       state profile] returns the schema
     list visible on [profile]:
 
-    - [Full]: union of [Config.visible_tool_schemas] (gated by
-      [include_hidden]) plus optional keeper-internal tools when
-      [include_keeper_internal = true], deduped by name.
+    - [Full]: [Config.visible_tool_schemas] (gated by [include_hidden]),
+      deduped by name.  [include_agent_internal] is a retained no-op:
+      the Agent_internal surface was empty and was deleted in the
+      surface-cut refactor, so it adds no schema.
     - [Managed_agent]: SDK tool contract +
       [managed_agent_passthrough_tool_names] subset.
     - [Operator_remote]: pinned [Tool_operator.remote_schemas].
@@ -95,9 +97,10 @@ val tool_allowed_in_profile :
       list-time {!tool_schemas_for_profile}):
 
     - [Full]: [tool_name] is in
-      [Config.visible_tool_schemas].  [Tool_catalog.Keeper_internal]
-      tools are gated by [internal_keeper_runtime] (default
-      [false]) — see #8699 for the exhaustive-match rationale.
+      [Config.visible_tool_schemas].  [internal_keeper_runtime] is a
+      retained no-op (default [false]): the Agent_internal surface was
+      empty and was deleted in the surface-cut refactor, so no tool is
+      gated by it.
     - [Managed_agent]: SDK binding by name, OR present in the
       managed-agent profile schema list.
     - [Operator_remote]: in [Tool_operator.remote_tool_names]. *)
@@ -130,7 +133,7 @@ val tool_output_schema_field : string -> Yojson.Safe.t option
     every tool — outputSchema advertising is intentionally
     disabled until handlers can guarantee structuredContent.
     Pinned at the contract seam: drift here breaks strict clients
-    (Provider_c/FastMCP) which reject malformed tool results.  See the
+    (Anthropic/FastMCP) which reject malformed tool results.  See the
     inline rationale in the implementation. *)
 
 val tool_json_for_profile :

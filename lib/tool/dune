@@ -1,0 +1,47 @@
+(include_subdirs no)
+
+;; Tool dispatch substrate — the neutral Tool layer, decoupled from the
+;; masc mega-library (PR-S3, RFC-0056 LANE 2). The compiler now enforces
+;; "Tool is just Tool": this library CANNOT reference keeper / runtime / goal /
+;; task / board modules because none of them appear in (libraries) below.
+;;
+;; Modules:
+;;   - tool_name              : domain-partitioned tool-name sum (PR-S1 submodules
+;;                              Task_name / Board_name / Goal_name / Operator_name /
+;;                              Masc held internally; self-only deps)
+;;   - tool_token             : opaque dispatch token (stdlib only)
+;;   - dispatch_outcome       : typed dispatch outcome variant (ppx show/eq)
+;;   - tool_catalog_inference : effect_domain / tool_group inference tables over
+;;                              Tool_name (was a private_module in lib/dune)
+;;   - tool_catalog           : per-surface membership SSOT (Tool_catalog_surfaces +
+;;                              Env_config + Masc_domain)
+;;   - tool_registry          : call-stat counters (Json_util / Eio_guard / Config /
+;;                              Masc_time_constants). warm_up takes structural
+;;                              stats now (Telemetry_eio dependency inverted to the
+;;                              composition root — see server_runtime_bootstrap.ml).
+;;   - tool_dispatch          : single dispatch entry (registry + hooks). The
+;;                              Otel/Otel_metric_store span wrapper is injected via
+;;                              [set_span_wrapper] (default identity) so this lib no
+;;                              longer code-depends on tool_telemetry. The composition
+;;                              root registers Tool_telemetry.with_span — see
+;;                              server_bootstrap_maintenance.ml.
+;;
+;; (wrapped false) keeps bare [Tool_dispatch.X] / [Tool_catalog.X] / ... working in
+;; the mega-lib and tests without a Masc. prefix.
+
+(library
+ (name masc_tool_dispatch)
+ (public_name masc.masc_tool_dispatch)
+ (wrapped false)
+ (libraries
+  masc_types
+  masc_core
+  masc_config
+  masc.tool_types
+  masc.tool_catalog_surfaces
+  time_compat
+  yojson
+  eio
+  unix)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq)))

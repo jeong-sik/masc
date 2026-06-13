@@ -20,12 +20,25 @@ let oas_runtime =
   {
     bus_name = "oas_runtime";
     buffer_size = 256;
-    policy = Block;
+    policy = Drop_oldest;
     rationale =
-      "Block + 256 buffer: turn-pipeline events must not be dropped; \
-       slow subscriber back-pressures publishers so the keeper hold \
-       state surfaces as observable back-pressure rather than silent \
-       loss.";
+      "Drop_oldest + 256 buffer: oas_runtime carries OBSERVATIONAL \
+       turn-pipeline events (telemetry counter [Keeper_telemetry_consumer], \
+       SSE dashboard relay [Keeper_event_bridge], best-effort compaction \
+       audit [Keeper_compact_audit], metrics [Agent_sdk_metrics_bridge]). \
+       Durable turn/event replay reads the JSONL telemetry surface \
+       (dashboard_oas_bridge.durable_replay_surface, \
+       /api/v1/dashboard/telemetry?source=oas_event), NOT this live bus, so \
+       no subscriber requires completeness. Under [Block] a slow subscriber \
+       fills the 256 buffer and back-pressure freezes EVERY keeper publisher \
+       inside Event_bus.publish with no timeout, suspending the whole fleet \
+       until restart (RCA 2026-06-10: sustained multi-minute keeper freeze, \
+       keepers wedged in turn-pipeline publish; not the HTTP/idle path). \
+       Drop_oldest sheds the stalest observational event instead of freezing \
+       the fleet; the durable surface retains the data. Trade-off: a \
+       sustained >256 backlog can rarely orphan a compaction-audit \
+       start/complete pair (acceptable for a best-effort audit). \
+       masc_domain keeps Block (workspace-invariant events).";
   }
 ;;
 
@@ -36,14 +49,14 @@ let masc_domain =
     policy = Block;
     rationale =
       "Block + 256 buffer: broadcast/heartbeat/keeper/autonomy/harness/ \
-       trust events carry coordination invariants; dropping any would \
+       trust events carry workspace invariants; dropping any would \
        silently break MASC's task hand-off semantics.";
   }
 ;;
 
 let () =
-  Prometheus.register_gauge
-    ~name:Prometheus.metric_oas_bus_capacity
+  Otel_metric_store.register_gauge
+    ~name:Otel_metric_store.metric_oas_bus_capacity
     ~help:
       "Configured [Eio.Stream] buffer size per subscriber on each MASC \
        event bus.  Labels: [bus] (oas_runtime | masc_domain | ...) and \
@@ -60,8 +73,8 @@ let create_bus (t : t) : Agent_sdk.Event_bus.t =
       ~policy:t.policy
       ()
   in
-  Prometheus.set_gauge
-    Prometheus.metric_oas_bus_capacity
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_oas_bus_capacity
     ~labels:
       [ ("bus", t.bus_name)
       ; ("policy", to_policy_label t.policy)

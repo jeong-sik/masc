@@ -87,7 +87,7 @@ let list_all () =
     Hashtbl.fold (fun _id task acc -> task :: acc) tasks [])
 
 let record_failure ~task ~phase =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string RecurringFailures)
     ~labels:[("task", task.id); ("phase", phase)]
     ()
@@ -139,7 +139,7 @@ let dispatch_due ~keeper_name ~now_ts ~dispatch =
    tasks auto-disabled by [dispatch_due]'s [max_failures] guard
    never return to [enabled = true] within the process lifetime,
    permanently silencing the keeper's heartbeat broadcasts and
-   eventually triggering stale-kill cascades across dependent
+   eventually triggering stale-kill runtimes across dependent
    keepers. *)
 let reenable_due_tasks ~keeper_name ~now_ts =
   let count = ref 0 in

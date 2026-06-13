@@ -14,9 +14,7 @@ type continuity_judgment =
 (** SSOT list of identity fields tracked across generations.
     Each pair is [(field_name, getter)]. *)
 val identity_fields :
-  (string * (Keeper_types.keeper_meta -> string)) list
-
-val string_list_to_json : string list -> Yojson.Safe.t
+  (string * (Keeper_meta_contract.keeper_meta -> string)) list
 
 (** Compose the canonical [<keeper>:<generation>:<trace_id>]
     generation identifier. *)
@@ -26,11 +24,11 @@ val generation_id :
 (** Project [meta] to its identity field pairs in [identity_fields]
     declaration order. *)
 val identity_pairs :
-  Keeper_types.keeper_meta -> (string * string) list
+  Keeper_meta_contract.keeper_meta -> (string * string) list
 
 (** Render [meta]'s identity pairs as a JSON object keyed by field. *)
 val identity_snapshot_json :
-  Keeper_types.keeper_meta -> Yojson.Safe.t
+  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
 (** Compare [previous] vs [current] identity field pairs.
     Returns [(inherited, changed, dropped)] in declaration order. *)
@@ -42,8 +40,8 @@ val classify_identity_fields :
 (** Render the parent→child identity diff as JSON for the
     manifest's [inheritance_delta] field. *)
 val inheritance_delta_json :
-  parent:Keeper_types.keeper_meta ->
-  child:Keeper_types.keeper_meta ->
+  parent:Keeper_meta_contract.keeper_meta ->
+  child:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t
 
 (** Run Drift_guard against [original] vs [received] and project
@@ -54,8 +52,8 @@ val continuity_judgment :
 (** Build the per-rollover manifest JSON document
     ([keeper_generation_lineage_v1] schema). *)
 val manifest_json :
-  parent:Keeper_types.keeper_meta ->
-  child:Keeper_types.keeper_meta ->
+  parent:Keeper_meta_contract.keeper_meta ->
+  child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
@@ -65,8 +63,8 @@ val manifest_json :
     generation-index JSONL. *)
 val index_entry_json :
   manifest_path:string ->
-  parent:Keeper_types.keeper_meta ->
-  child:Keeper_types.keeper_meta ->
+  parent:Keeper_meta_contract.keeper_meta ->
+  child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
@@ -76,9 +74,9 @@ val index_entry_json :
     (JSONL append) for the given handoff. Logs and swallows
     non-cancel exceptions — best-effort lineage telemetry. *)
 val record_handoff_artifacts :
-  config:Coord.config ->
-  parent:Keeper_types.keeper_meta ->
-  child:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  parent:Keeper_meta_contract.keeper_meta ->
+  child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
@@ -100,7 +98,7 @@ val take : int -> 'a list -> 'a list
     generation/trace, manifest path, recent index entries (capped
     to [recent_limit]). *)
 val surface_json :
-  Coord.config ->
-  Keeper_types.keeper_meta ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
   recent_limit:int ->
   Yojson.Safe.t

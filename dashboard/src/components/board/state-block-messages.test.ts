@@ -60,7 +60,7 @@ describe('StateBlockMessages', () => {
         id: 'state-1',
         from: 'nick0cave',
         seq: 8,
-        content: 'status changed\n[STATE]\nGoal: restore room\nNext: notify sangsu\n[/STATE]\nready',
+        content: 'status changed\n[STATE]\nGoal: restore workspace\nNext: notify sangsu\n[/STATE]\nready',
       }),
     ]
 
@@ -69,7 +69,7 @@ describe('StateBlockMessages', () => {
     expect(screen.getByRole('heading', { name: 'State-block messages' })).toBeInTheDocument()
     expect(await screen.findByText('status changed')).toBeInTheDocument()
     expect(screen.getByText('Goal')).toBeInTheDocument()
-    expect(screen.getByText('restore room')).toBeInTheDocument()
+    expect(screen.getByText('restore workspace')).toBeInTheDocument()
     expect(screen.getByText('Next')).toBeInTheDocument()
     expect(screen.getByText('notify sangsu')).toBeInTheDocument()
   })

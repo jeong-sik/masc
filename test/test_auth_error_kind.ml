@@ -2,13 +2,13 @@ module Types = Masc_domain
 
 (** Round-trip + classification tests for [Auth_error_kind].
 
-    Guards the closed-enum contract that prometheus dashboards depend on
+    Guards the closed-enum contract that otel_metric_store dashboards depend on
     (issue #11266 Track 2a). Stable string labels must round-trip and
     every modelled [Masc_domain.t] constructor must classify to a non-[Other]
     label. *)
 
 open Alcotest
-module Aek = Masc_mcp.Auth_error_kind
+module Aek = Masc.Auth_error_kind
 
 let test_to_of_string_round_trip () =
   List.iter
@@ -47,7 +47,8 @@ let test_classify_token_expired () =
         (Aek.to_string other)
 
 let test_classify_unauthorized () =
-  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized "x")) with
+  match Aek.classify (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+    { reason = Generic; message = "x" })) with
   | Aek.Unauthorized -> ()
   | other ->
       Alcotest.failf
@@ -97,7 +98,7 @@ let test_classify_unmodelled_falls_to_other () =
         (Aek.to_string other)
 
 let test_label_set_stable () =
-  (* Lock the prometheus dashboard contract. If a label is renamed,
+  (* Lock the otel_metric_store dashboard contract. If a label is renamed,
      this test must be updated together with the dashboard query. *)
   let expected =
     [ "token_mismatch"

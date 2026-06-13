@@ -23,54 +23,11 @@ module Float = Stdlib.Float
 open Tool_args
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
 (* Handlers *)
-
-let keeper_pause_status_json ctx =
-  let names = Keeper_types.keeper_names ctx.config in
-  (* Triple accumulator folded over [names].  All three lists are kept in
-     reverse-prepend order during the fold; downstream consumers
-     ([List.rev], [List.rev_map]) restore the natural order. *)
-  let read_errors_rev, paused_by_meta_rev, paused_by_phase_rev =
-    List.fold_left
-      (fun (errs, by_meta, by_phase) name ->
-        let by_meta, errs =
-          match Keeper_types.read_meta ctx.config name with
-          | Ok (Some meta) when meta.paused -> (meta.name :: by_meta, errs)
-          | Ok _ -> (by_meta, errs)
-          | Error err -> (by_meta, (name, err) :: errs)
-        in
-        let by_phase =
-          match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
-          | Some Keeper_state_machine.Paused -> name :: by_phase
-          | Some _ | None -> by_phase
-        in
-        (errs, by_meta, by_phase))
-      ([], [], [])
-      names
-  in
-  let meta_paused_names = List.rev paused_by_meta_rev in
-  let phase_paused_names = List.rev paused_by_phase_rev in
-  let paused_names =
-    Keeper_types.dedupe_keep_order (meta_paused_names @ phase_paused_names)
-  in
-  `Assoc
-    [
-      ("paused", `Bool (paused_names <> []));
-      ("paused_count", `Int (List.length paused_names));
-      ("paused_names", `List (List.map (fun name -> `String name) paused_names));
-      ("meta_paused_count", `Int (List.length meta_paused_names));
-      ("phase_paused_count", `Int (List.length phase_paused_names));
-      ( "read_errors",
-        `List
-          (List.rev_map
-             (fun (name, error) ->
-               `Assoc [ ("name", `String name); ("error", `String error) ])
-             read_errors_rev) );
-    ]
 
 (* RFC-0189 PR-1b: typed [Tool_result.result] success helper. Mirrors the
    round-trip-safe [text_ok] pattern introduced in #18767 — if [body] is
@@ -87,13 +44,13 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 
 let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
   let reason = get_string args "reason" "Manual pause" in
-  Coord.pause ctx.config ~by:ctx.agent_name ~reason;
+  Workspace.pause ctx.config ~by:ctx.agent_name ~reason;
   text_ok ~tool_name ~start_time
     (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
 ;;
 
 let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
-  match Coord.resume ctx.config ~by:ctx.agent_name with
+  match Workspace.resume ctx.config ~by:ctx.agent_name with
   | `Resumed ->
     text_ok ~tool_name ~start_time
       (Printf.sprintf "Resumed by %s" ctx.agent_name)
@@ -103,7 +60,7 @@ let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
 
 let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   let keeper_pause =
-    if not (Coord.is_initialized ctx.config)
+    if not (Workspace.is_initialized ctx.config)
     then
       `Assoc
         [
@@ -114,7 +71,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
           ("phase_paused_count", `Null);
           ("read_errors", `List []);
         ]
-    else keeper_pause_status_json ctx
+    else Pause_status_backend.keeper_pause_status_json ctx.config
   in
   let keeper_paused =
     match keeper_pause with
@@ -125,13 +82,12 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
     | _ -> false
   in
   let pause_state =
-    if not (Coord.is_initialized ctx.config) then `Initializing
+    if not (Workspace.is_initialized ctx.config) then `Initializing
     else
-      let state = Coord.read_state ctx.config in
+      let state = Workspace.read_state ctx.config in
       if state.paused then
         `Paused (state.paused_by, state.pause_reason, state.paused_at)
-      else
-        `Running
+      else `Running
   in
   let payload =
     match pause_state with
@@ -145,7 +101,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", Json_util.string_opt_to_json by);
             ("pause_reason", Json_util.string_opt_to_json reason);
             ("paused_at", Json_util.string_opt_to_json at);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool true);
             ("keeper_pause", keeper_pause);
             ("message", `String "Server is paused");
@@ -160,7 +116,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Bool keeper_paused);
             ("keeper_pause", keeper_pause);
             ( "message",
@@ -179,7 +135,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
             ("paused_by", `Null);
             ("pause_reason", `Null);
             ("paused_at", `Null);
-            ("pause_scope", `String "coord_room");
+            ("pause_scope", `String "workspace");
             ("any_pause_active", `Null);
             ("keeper_pause", keeper_pause);
             ( "message",
@@ -210,11 +166,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_required_permission = function
-  | "masc_pause_status" -> Some Masc_domain.CanReadState
-  | "masc_pause" | "masc_resume" -> Some Masc_domain.CanBroadcast
-  | _ -> None
-
 (* RFC-0057 PR-1: control tool schemas now come from
    Tool_descriptors_gen via Tool_schemas_misc.schemas. Filter to the
    two control tools so they register with Mod_control. *)
@@ -233,6 +184,5 @@ let () =
              ~module_tag:Tool_dispatch.Mod_control
              ~input_schema:s.input_schema
              ~handler_binding:Tag_dispatch
-             ?required_permission:(tool_required_permission s.name)
              ()))
     Tool_schemas_misc.schemas

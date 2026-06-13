@@ -206,7 +206,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/governance/params/audit" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.workspace_config.base_path in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let entries = Runtime_params.recent_audit ~base_path limit in
          let json = `Assoc [
@@ -218,7 +218,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/audit" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.workspace_config in
          let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
          let actor_filter    = query_param req "actor" in
          let kind_filter     = query_param req "kind" in
@@ -266,7 +266,7 @@ let add_routes ~sw ~clock router =
          let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let include_moderation =
            include_moderation_projection
-             ~base_path:state.Mcp_server.room_config.base_path
+             ~base_path:state.Mcp_server.workspace_config.base_path
              req
          in
          let posts =
@@ -290,7 +290,7 @@ let add_routes ~sw ~clock router =
          let reactions_for = board_reactions_lookup reaction_rows in
          let contributor_quality_for =
            board_contributor_quality_lookup
-             ~config:state.Mcp_server.room_config ()
+             ~config:state.Mcp_server.workspace_config ()
          in
          let posts_json =
            List.map
@@ -374,7 +374,7 @@ let add_routes ~sw ~clock router =
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
               | Error e ->
                   Http.Response.json_value ~status:`Bad_request
-                    (`Assoc [("error", `String (Tool_board.board_error_to_string e))])
+                    (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                     reqd)
            with Yojson.Json_error msg ->
              Http.Response.json_value ~status:`Bad_request
@@ -395,7 +395,7 @@ let add_routes ~sw ~clock router =
                  Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
              | Error e ->
                  Http.Response.json_value ~status:`Not_found
-                   (`Assoc [("error", `String (Tool_board.board_error_to_string e))])
+                   (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                    reqd)))
 
   |> Http.Router.prefix_delete "/api/v1/board/sub-boards/" (fun request reqd ->
@@ -413,7 +413,7 @@ let add_routes ~sw ~clock router =
                    Http.Response.json_value (`Assoc [("deleted", `Bool true)]) reqd
                | Error e ->
                    Http.Response.json_value ~status:`Not_found
-                     (`Assoc [("error", `String (Tool_board.board_error_to_string e))])
+                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                      reqd)))
          request reqd)
 
@@ -444,7 +444,7 @@ let add_routes ~sw ~clock router =
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->
                        Http.Response.json_value ~status:`Bad_request
-                         (`Assoc [("error", `String (Tool_board.board_error_to_string e))])
+                         (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                          reqd))
            with Yojson.Json_error msg ->
              Http.Response.json_value ~status:`Bad_request
@@ -476,12 +476,12 @@ let add_routes ~sw ~clock router =
               in
               let include_moderation =
                 include_moderation_projection
-                  ~base_path:state.Mcp_server.room_config.base_path
+                  ~base_path:state.Mcp_server.workspace_config.base_path
                   req
               in
               let (status, body) =
                 board_post_detail_json ~include_moderation ~blind_votes ~voter
-                  ~config:(Some state.Mcp_server.room_config)
+                  ~config:(Some state.Mcp_server.workspace_config)
                   ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)
@@ -510,7 +510,7 @@ let add_routes ~sw ~clock router =
              in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
-             let result = Tool_board.handle_tool "masc_board_vote" args in
+             let result = Board_tool.handle_tool "masc_board_vote" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
@@ -551,7 +551,7 @@ let add_routes ~sw ~clock router =
                else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Tool_board.handle_tool "masc_board_post" args in
+             let result = Board_tool.handle_tool "masc_board_post" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -587,7 +587,7 @@ let add_routes ~sw ~clock router =
              in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
-             let result = Tool_board.handle_tool "masc_board_comment" args in
+             let result = Board_tool.handle_tool "masc_board_comment" args in
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -631,11 +631,11 @@ let add_routes ~sw ~clock router =
           | Some agent_name ->
               let limit = standard_limit request in
               let mentions =
-                Mention_inbox.read_mentions state.Mcp_server.room_config
+                Mention_inbox.read_mentions state.Mcp_server.workspace_config
                   ~target_agent:agent_name ~limit
               in
               let unread =
-                Mention_inbox.unread_count state.Mcp_server.room_config
+                Mention_inbox.unread_count state.Mcp_server.workspace_config
                   ~target_agent:agent_name
               in
               let json = `Assoc [
@@ -657,11 +657,11 @@ let add_routes ~sw ~clock router =
                 ~status:`Bad_request reqd
           | Some agent_name ->
               let rep =
-                Agent_reputation.compute_reputation
-                  state.Mcp_server.room_config ~agent_name
+                Reputation.compute_reputation
+                  state.Mcp_server.workspace_config ~agent_name
               in
               Http.Response.json_value
-                (Agent_reputation.reputation_to_json rep) reqd)
+                (Reputation.reputation_to_json rep) reqd)
        ) request reqd)
 
   (* Activity Feed API *)
@@ -670,7 +670,7 @@ let add_routes ~sw ~clock router =
          let agent_name = query_param req "agent" in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let items =
-           Activity_feed.recent_activity state.Mcp_server.room_config
+           Activity_feed.recent_activity state.Mcp_server.workspace_config
              ?agent_name ~limit ()
          in
          let json = `Assoc [
@@ -693,9 +693,9 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let key = Yojson.Safe.Util.(member "key" args |> to_string_option)
+             let key = Json_util.get_string args "key"
                |> Option.value ~default:"" in
-             let action = Yojson.Safe.Util.(member "action" args |> to_string_option)
+             let action = Json_util.get_string args "action"
                |> Option.value ~default:"set" in
              if key = "" then
                respond_json_value_with_cors ~status:`Bad_request request reqd
@@ -706,18 +706,18 @@ let add_routes ~sw ~clock router =
                  | "clear" ->
                    Prompt_registry.clear_prompt_override key;
                    (try Prompt_registry.persist_overrides
-                          state.Mcp_server.room_config.base_path
+                          state.Mcp_server.workspace_config.base_path
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Pages.warn "prompt override persist (clear) failed: %s"
                         (Printexc.to_string exn));
                    Ok "override cleared"
                  | "set" | _ ->
-                   let value = Yojson.Safe.Util.(member "value" args |> to_string_option)
+                   let value = Json_util.get_string args "value"
                      |> Option.value ~default:"" in
                    match Prompt_registry.set_override key value with
                    | Ok () ->
                      (try Prompt_registry.persist_overrides
-                            state.Mcp_server.room_config.base_path
+                            state.Mcp_server.workspace_config.base_path
                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         Log.Pages.warn "prompt override persist (set) failed: %s"
                           (Printexc.to_string exn));
@@ -756,15 +756,14 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let base_path = state.Mcp_server.room_config.base_path in
+             let base_path = state.Mcp_server.workspace_config.base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-             let param_key = Yojson.Safe.Util.(member "param_key" args
-               |> to_string_option) |> Option.value ~default:"" |> String.trim in
-             let value_json = match Yojson.Safe.Util.member "value" args with
-               | `Null -> None | v -> Some v in
+             let param_key = Json_util.get_string args "param_key"
+               |> Option.value ~default:"" |> String.trim in
+             let value_json = Json_util.assoc_member_opt "value" args in
             if param_key = "" then
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
@@ -832,9 +831,9 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let param_key = Yojson.Safe.Util.(member "param_key" args
-               |> to_string_option) |> Option.value ~default:"" in
-             let base_path = state.Mcp_server.room_config.base_path in
+             let param_key = Json_util.get_string args "param_key"
+               |> Option.value ~default:"" in
+             let base_path = state.Mcp_server.workspace_config.base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"

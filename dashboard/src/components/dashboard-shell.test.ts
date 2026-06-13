@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { waitFor } from '@testing-library/preact'
-import { DashboardMain, dashboardHealthChips } from './dashboard-shell'
+import { DashboardMain, dashboardHealthChips, isKeeperDetailDashboardRoute } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 import { dashboardLoading } from '../store'
@@ -40,9 +40,27 @@ describe('DashboardMain solo mode', () => {
 
     render(h(DashboardMain, {}), container)
 
-    await waitFor(() => expect(document.title).toBe('MASC · Cascade & Runtime'))
+    await waitFor(() => expect(document.title).toBe('MASC · Runtime'))
     expect(container.querySelector('[data-testid="dashboard-widget-solo-bar"]')).not.toBeNull()
     expect(container.querySelector('[aria-label="Active observability filters"]')).not.toBeNull()
+  })
+})
+
+describe('isKeeperDetailDashboardRoute', () => {
+  it('detects monitor keeper detail drilldowns', () => {
+    expect(isKeeperDetailDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'agents', keeper: 'sangsu' },
+      postId: null,
+    })).toBe(true)
+  })
+
+  it('does not treat the fleet list as keeper detail', () => {
+    expect(isKeeperDetailDashboardRoute({
+      tab: 'monitoring',
+      params: { section: 'agents' },
+      postId: null,
+    })).toBe(false)
   })
 })
 
@@ -73,9 +91,106 @@ describe('dashboardHealthChips', () => {
       'execution-error',
     ])
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
-      .toBe('키퍼 활성 1 / 일시정지 1 / 설정 2')
+      .toBe('키퍼 런타임 가동 1 / 일시정지 1 / 설정 2')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('활성=shell runtime, paused=상세 행 lifecycle, 설정=shell keeper inventory.')
+      .toBe('런타임 가동=shell; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=shell keeper 설정.')
+    expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
+      .toBe('일시정지 keeper 1')
+    expect(chips.find(chip => chip.key === 'paused-keepers')?.detail)
+      .toBe('재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
+  })
+
+  it('does not label an intentional server/base split as data source mismatch', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'warn',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: true,
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips.find(chip => chip.key === 'source-mismatch')).toBeUndefined()
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'server-workspace-split',
+      label: 'Server/base split',
+      tone: 'muted',
+      route: { tab: 'monitoring', params: { section: 'runtime' } },
+    }))
+  })
+
+  it('promotes runtime provider probe failures into a routed health chip', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: false,
+      } as any,
+      runtimeProviderProbe: {
+        status: 'unreachable',
+        summary: {
+          runtimes: 1,
+          probed: 1,
+          reachable: 0,
+          failed: 1,
+          skipped: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
+        },
+        providers: [{
+          runtime_id: 'runpod_mtp.qwen',
+          provider_id: 'runpod_mtp',
+          status: 'missing_auth',
+          reachable: false,
+          credential_required: true,
+          auth_present: false,
+        }],
+      },
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'runtime-provider-health',
+      label: 'Runtime auth missing 1',
+      tone: 'bad',
+      detail: 'default=runpod_mtp.qwen, reachable=0, failed=1, skipped=0, providers=runpod_mtp.qwen: missing_auth',
+      route: { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } },
+    }))
+  })
+
+  it('surfaces runtime probe fetch failures when provider status is unavailable', () => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 1, configured_keepers: 1 },
+      keepers: [{ name: 'keeper-a', status: 'running' } as any],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        source_mismatch: false,
+        server_workspace_mismatch: false,
+      } as any,
+      runtimeProviderProbe: null,
+      runtimeProviderProbeError: 'runtime probe fetch failed: 503',
+      executionError: null,
+      loading: false,
+    })
+
+    expect(chips).toContainEqual(expect.objectContaining({
+      key: 'runtime-probe-unavailable',
+      label: 'Runtime probe unavailable',
+      tone: 'warn',
+      detail: 'runtime probe fetch failed: 503',
+      route: { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } },
+    }))
   })
 
   it('uses namespace truth as the configured keeper count authority in health chips', () => {
@@ -91,9 +206,9 @@ describe('dashboardHealthChips', () => {
     })
 
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
-      .toBe('키퍼 활성 2 / 설정 16')
+      .toBe('키퍼 런타임 가동 2 / 설정 16')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('활성=shell runtime, paused=상세 행 lifecycle, 설정=project snapshot keeper inventory.')
+      .toBe('런타임 가동=shell; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=project snapshot keeper 설정.')
   })
 
   it('returns a healthy chip when no runtime risk is visible', () => {

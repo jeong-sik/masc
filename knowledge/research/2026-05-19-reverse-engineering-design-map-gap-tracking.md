@@ -1,7 +1,7 @@
 # Reverse Engineering Design Map — Gap Tracking
 
 **Date**: 2026-05-19
-**Plan SSOT**: `/Users/dancer/Downloads/MASC-MCP Reverse Engineering Design Map.html` (1545 lines)
+**Plan SSOT**: `/Users/dancer/Downloads/MASC Reverse Engineering Design Map.html` (1545 lines)
 **Plan baseline commit**: `23a5dd1521` (2026-05-18 generated)
 **Current main HEAD**: `e5b73669d8` (2026-05-19)
 **Commits between**: 205
@@ -37,7 +37,7 @@ LOC moves since plan (size monolith-reduction proxy):
 | `lib/server/server_mcp_transport_http.ml` | (H1/H2 split) | 870 | — |
 | `lib/server/server_h2_gateway.ml` | (H1/H2 split) | 1,006 | — |
 | `lib/auth.ml` | 1,651 | 1,651 | 0 |
-| `lib/coord_goals.ml` | 1,095 | 1,001 | −94 |
+| `lib/workspace_goals.ml` | 1,095 | 1,001 | −94 |
 
 ---
 
@@ -77,7 +77,7 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ### Plan claim
 - Plan `#gaps` row 4: *"Boundary doc enumerates many compatibility keys that must emit neutral runtime/null values."*
-- Plan `#cascade-flow` `boundary contract`: *"compatibility fields are redacted to `runtime`, `null`, or non-identifying lane values."*
+- Plan `#runtime-flow` `boundary contract`: *"compatibility fields are redacted to `runtime`, `null`, or non-identifying lane values."*
 - Plan refactor advice: *"Centralize redaction helpers and make dashboard normalizers consume only redacted projection types."*
 
 ### Current state (file:line evidence)
@@ -85,11 +85,11 @@ LOC moves since plan (size monolith-reduction proxy):
 
 | Site | Purpose |
 |---|---|
-| `lib/cascade/cascade_catalog_runtime_probe.ml:14-15` | `public_runtime_provider_label = "runtime"`, `public_runtime_model_label = "runtime"` (local constants) |
-| `lib/cascade/cascade_legacy_runner.ml:49` | `public_runtime_model_label = "runtime"` (duplicate local) |
-| `lib/cascade/cascade_attempt_liveness_observer.ml:34` | `public_runtime_provider_label = "runtime"` (duplicate local) |
-| `lib/cascade/cascade_attempt_fsm.ml:556` | `public_runtime_provider_label = "runtime"` (duplicate local) |
-| `lib/cascade/cascade_runner.ml:412-413` | Inline `~provider_id:"runtime" ~model_id:"runtime"` |
+| `lib/runtime/runtime_catalog_runtime_probe.ml:14-15` | `public_runtime_provider_label = "runtime"`, `public_runtime_model_label = "runtime"` (local constants) |
+| `lib/runtime/runtime_legacy_runner.ml:49` | `public_runtime_model_label = "runtime"` (duplicate local) |
+| `lib/runtime/runtime_attempt_liveness_observer.ml:34` | `public_runtime_provider_label = "runtime"` (duplicate local) |
+| `lib/runtime/runtime_attempt_fsm.ml:556` | `public_runtime_provider_label = "runtime"` (duplicate local) |
+| `lib/runtime/runtime_runner.ml:412-413` | Inline `~provider_id:"runtime" ~model_id:"runtime"` |
 | `lib/keeper/keeper_agent_run.ml:763` | Inline `let model = "runtime"` |
 | `lib/keeper/keeper_generation_lineage.ml:120, 169` | Inline `let model = "runtime"` (2 sites) |
 | `lib/keeper/keeper_oas_checkpoint.ml:71` | Inline `model = "runtime"` |
@@ -113,10 +113,10 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ### RFC candidate
 **Title**: *OAS-MASC boundary redaction SSOT — closed public-label types*
-**Scope**: One-sentence — replace 11+ inline `"runtime"` string literals across `lib/cascade/*` and `lib/keeper/*` with a single `Boundary_redaction` module exporting a private type that makes the neutral-lane projection the only constructible value at the OAS↔MASC boundary, so future regressions fail to type-check rather than silently leak provider identity.
+**Scope**: One-sentence — replace 11+ inline `"runtime"` string literals across `lib/runtime/*` and `lib/keeper/*` with a single `Boundary_redaction` module exporting a private type that makes the neutral-lane projection the only constructible value at the OAS↔MASC boundary, so future regressions fail to type-check rather than silently leak provider identity.
 
 ### Classification
-**RFC required** — touches `lib/keeper/*` (covered in `agent_delegation` subsystem list indirectly via cascade), introduces a new module with cross-cutting type boundary; *not* a narrow cleanup because the boundary doc (`docs/OAS-MASC-BOUNDARY.md:62-68, :108-188`) lists many compatibility keys that need a coherent treatment.
+**RFC required** — touches `lib/keeper/*` (covered in `agent_delegation` subsystem list indirectly via runtime), introduces a new module with cross-cutting type boundary; *not* a narrow cleanup because the boundary doc (`docs/OAS-MASC-BOUNDARY.md:62-68, :108-188`) lists many compatibility keys that need a coherent treatment.
 
 ---
 
@@ -203,8 +203,8 @@ LOC moves since plan (size monolith-reduction proxy):
 - **PR-able**: each domain projection (keeper, OAS telemetry, planning, governance) can wrap independently. **RFC required** for the envelope contract version 2 if cache state / stale fallback / broadcast hook fields need extension.
 
 ### Plan #refactor row "Metrics SSOT transitional" — substantial progress
-- 6 prometheus-split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/cascade/oas/policy/runtime metric names split into separate modules.
-- Plan `#gaps` row 10 (cascade vs prometheus drift) likely resolved. Recommend close.
+- 6 metrics-backend split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/runtime/oas/policy/runtime metric names split into separate modules.
+- Plan `#gaps` row 10 (runtime vs retired metrics backend drift) likely resolved. Recommend close.
 
 ---
 
@@ -233,7 +233,7 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ## Provenance
 
-- Plan SSOT: `/Users/dancer/Downloads/MASC-MCP Reverse Engineering Design Map.html` lines 409–1545.
+- Plan SSOT: `/Users/dancer/Downloads/MASC Reverse Engineering Design Map.html` lines 409–1545.
 - Code evidence: `git log --oneline 23a5dd1521..origin/main | wc -l = 205`; `wc -l` of 8 plan-tracked files; `rg` for `"runtime"`, `Server_mcp_actor_injection`, `turn_plan`, `Server_dashboard_surface`, `Jsonl_writer`, `internal_keeper_runtime`.
 - Cross-referenced MEMORY entries: `feedback_runtime_lens_boundary_carve_out.md`, `project_godfile_decomp_track_a_b_synthesis.md`, `feedback_fallback_constant_to_discriminated_union.md`.
 - Not committed — author review pending.

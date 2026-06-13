@@ -18,11 +18,11 @@ Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: SSE / WS / gRPC / WebRTC session lifecycle uniformity at the transport layer
 Out of scope: timeout layering (covered by `docs/TIMEOUT-MATRIX.md`), Streamable HTTP migration (IMPROVE-02, awaits in-flight #15722/#15725), FD accounting (IMPROVE-03)
-Series: **IMPROVE-05** of the masc-mcp + oas improvement series. Sibling RFCs: [[RFC-0098]] (typed envelope, IMPROVE-01).
+Series: **IMPROVE-05** of the masc + oas improvement series. Sibling RFCs: [[RFC-0098]] (typed envelope, IMPROVE-01).
 
 ## 1. Problem
 
-masc-mcp runs four streaming transports today (SSE, WebSocket, gRPC, WebRTC). Each has its own client-cap, eviction, idle-cleanup, and keep-alive policies. The current state has three concrete defects.
+masc runs four streaming transports today (SSE, WebSocket, gRPC, WebRTC). Each has its own client-cap, eviction, idle-cleanup, and keep-alive policies. The current state has three concrete defects.
 
 ### 1.1 Silent eviction at the SSE 200-client cap
 

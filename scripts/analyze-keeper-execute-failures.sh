@@ -93,7 +93,7 @@ def category:
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
+  elif (combined | test("tool_approval_required|destructive|blocked for all tool_access lists|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
@@ -133,7 +133,7 @@ def category:
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
+  elif (combined | test("tool_approval_required|destructive|blocked for all tool_access lists|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
@@ -223,10 +223,6 @@ else
     echo "$COUNTERS_JSON" | jq -r '
       def n($key): (.[$key] // 0);
       "shell_gate_caller\tallow\treject\tcannot_parse",
-      ("worker_dev_tools\t"
-       + (n("shell_gate_worker_dev_tools_allow") | tostring) + "\t"
-       + (n("shell_gate_worker_dev_tools_reject") | tostring) + "\t"
-       + (n("shell_gate_worker_dev_tools_cannot_parse") | tostring)),
       ("tool_search_files_bash\t"
        + (n("shell_gate_tool_search_files_bash_allow") | tostring) + "\t"
        + (n("shell_gate_tool_search_files_bash_reject") | tostring) + "\t"

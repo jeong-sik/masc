@@ -1,13 +1,13 @@
 (** RFC-0182 §3.1 — keeper dispatch dependency inversion ref.
 
-    Same pattern as [Coord_dispatch_ref] and [Persona_dispatch_ref].
-    [Tool_keeper] lives in lib/ (late in module order) but is the
-    natural home of keeper coordination tools.  Importing it from
-    [Agent_tool_in_process_runtime] (early in lib/keeper) would close
+    Same pattern as [Workspace_dispatch_ref].
+    [Keeper_tool_surface] lives in lib/ (late in module order) but is the
+    natural home of keeper workspace tools.  Importing it from
+    [Keeper_tool_in_process_runtime] (early in lib/keeper) would close
     a cycle.
 
-    Resolution: register ctx-free entry points from [Tool_keeper] into
-    the ref at module load.  [Agent_tool_in_process_runtime] reads the
+    Resolution: register ctx-free entry points from [Keeper_tool_surface] into
+    the ref at module load.  [Keeper_tool_in_process_runtime] reads the
     ref at dispatch time.
 
     The [~agent_name] parameter carries the caller keeper's agent name
@@ -24,7 +24,7 @@
     when the optional defaults apply. *)
 
 val dispatch
-  : (config:Coord.config
+  : (config:Workspace.config
      -> agent_name:string
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

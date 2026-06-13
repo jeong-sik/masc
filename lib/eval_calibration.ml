@@ -40,21 +40,21 @@ let label_verdict_of_string = function
   | _ -> None
 
 let verdict_to_string = function
-  | Anti_rationalization.Approve -> "approve"
-  | Anti_rationalization.Reject "" -> "reject"
-  | Anti_rationalization.Reject reason -> "reject:" ^ reason
+  | Task.Anti_rationalization.Approve -> "approve"
+  | Task.Anti_rationalization.Reject "" -> "reject"
+  | Task.Anti_rationalization.Reject reason -> "reject:" ^ reason
 
 let verdict_of_string raw =
   match String.split_on_char ':' raw with
-  | ["approve"] -> Some Anti_rationalization.Approve
-  | ["reject"] -> Some (Anti_rationalization.Reject "")
+  | ["approve"] -> Some Task.Anti_rationalization.Approve
+  | ["reject"] -> Some (Task.Anti_rationalization.Reject "")
   | "reject" :: reason_parts ->
-      Some (Anti_rationalization.Reject (String.concat ":" reason_parts))
+      Some (Task.Anti_rationalization.Reject (String.concat ":" reason_parts))
   | _ -> None
 
 let label_verdict_of_verdict = function
-  | Anti_rationalization.Approve -> Approve_label
-  | Anti_rationalization.Reject _ -> Reject_label
+  | Task.Anti_rationalization.Approve -> Approve_label
+  | Task.Anti_rationalization.Reject _ -> Reject_label
 
 type verdict_record = {
   record_type : record_type;
@@ -62,10 +62,10 @@ type verdict_record = {
   task_id : string;
   task_title : string;
   agent_name : string;
-  verdict : Anti_rationalization.verdict;
-  gate : Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
-  evaluator_cascade : string;
-  generator_cascade : string option;
+  verdict : Task.Anti_rationalization.verdict;
+  gate : Task.Anti_rationalization.gate;  (** Typed gate — was stringly-typed *)
+  evaluator_runtime : string;
+  generator_runtime : string option;
   fallback_reason : string option; (** Error message when gate=Fallback *)
   timestamp : float;
 }
@@ -81,7 +81,7 @@ type label_record = {
 
 type divergence = {
   notes_hash : string;
-  evaluator_verdict : Anti_rationalization.verdict;
+  evaluator_verdict : Task.Anti_rationalization.verdict;
   human_verdict : label_verdict;
   gate : string;
   task_title : string;
@@ -137,9 +137,9 @@ let verdict_record_to_json (r : verdict_record) : Yojson.Safe.t =
     ("task_title", `String r.task_title);
     ("agent_name", `String r.agent_name);
     ("verdict", `String (verdict_to_string r.verdict));
-    ("gate", `String (Anti_rationalization.gate_to_string r.gate));
-    ("evaluator_cascade", `String r.evaluator_cascade);
-    ("generator_cascade", Json_util.string_opt_to_json r.generator_cascade);
+    ("gate", `String (Task.Anti_rationalization.gate_to_string r.gate));
+    ("evaluator_runtime", `String r.evaluator_runtime);
+    ("generator_runtime", Json_util.string_opt_to_json r.generator_runtime);
     ("timestamp", `Float r.timestamp);
   ] in
   let extra = match r.fallback_reason with
@@ -168,13 +168,13 @@ let label_record_to_json (r : label_record) : Yojson.Safe.t =
 let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
   let passed =
     match r.verdict with
-    | Anti_rationalization.Approve -> true
-    | Anti_rationalization.Reject _ -> false
+    | Task.Anti_rationalization.Approve -> true
+    | Task.Anti_rationalization.Reject _ -> false
   in
   let score = if passed then Some 1.0 else Some 0.0 in
   let evidence = [
-    Printf.sprintf "gate=%s" (Anti_rationalization.gate_to_string r.gate);
-    Printf.sprintf "evaluator=%s" r.evaluator_cascade;
+    Printf.sprintf "gate=%s" (Task.Anti_rationalization.gate_to_string r.gate);
+    Printf.sprintf "evaluator=%s" r.evaluator_runtime;
     Printf.sprintf "task_id=%s" r.task_id;
   ] in
   let detail =
@@ -183,7 +183,7 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
     else
       Some
         (Printf.sprintf "rejected at %s gate: %s"
-           (Anti_rationalization.gate_to_string r.gate)
+           (Task.Anti_rationalization.gate_to_string r.gate)
            (verdict_to_string r.verdict))
   in
   { Agent_sdk.Harness.passed; score; evidence; detail }
@@ -194,8 +194,8 @@ let to_harness_verdict (r : verdict_record) : Agent_sdk.Harness.verdict =
 
 let record_verdict
     ~(task_id : string)
-    ~(req : Anti_rationalization.review_request)
-    ~(result : Anti_rationalization.review_result)
+    ~(req : Task.Anti_rationalization.review_request)
+    ~(result : Task.Anti_rationalization.review_result)
     ?(on_harness_verdict : (Agent_sdk.Harness.verdict -> unit) option)
     () : unit =
   let hash = notes_hash ~task_title:req.task_title ~notes:req.completion_notes in
@@ -207,8 +207,8 @@ let record_verdict
     agent_name = req.agent_name;
     verdict = result.verdict;
     gate = result.gate;
-    evaluator_cascade = result.evaluator_cascade;
-    generator_cascade = result.generator_cascade;
+    evaluator_runtime = result.evaluator_runtime;
+    generator_runtime = result.generator_runtime;
     fallback_reason = result.fallback_reason;
     timestamp = Unix.gettimeofday ();
   } in
@@ -241,8 +241,7 @@ let record_human_label
 (* ================================================================ *)
 
 let string_field json key =
-  try Yojson.Safe.Util.(json |> member key |> to_string)
-  with Yojson.Safe.Util.Type_error _ | Not_found -> ""
+  Json_util.get_string_with_default json ~key ~default:""
 
 (* ================================================================ *)
 (* Divergence analysis                                               *)
@@ -302,10 +301,10 @@ let select_examples ~(max_examples : int) : calibration_example list =
   (* Prioritize false positives: evaluator approved but human rejected *)
   let false_positives, others = List.partition (fun d ->
     match d.evaluator_verdict, d.human_verdict with
-    | Anti_rationalization.Approve, Reject_label -> true
-    | Anti_rationalization.Approve, Approve_label -> false
-    | Anti_rationalization.Reject _, Reject_label -> false
-    | Anti_rationalization.Reject _, Approve_label -> false
+    | Task.Anti_rationalization.Approve, Reject_label -> true
+    | Task.Anti_rationalization.Approve, Approve_label -> false
+    | Task.Anti_rationalization.Reject _, Reject_label -> false
+    | Task.Anti_rationalization.Reject _, Approve_label -> false
   ) divs in
   let sorted = false_positives @ others in
   let limited =
@@ -349,7 +348,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
       Dated_jsonl.read_range store ~since:s ~until:u
   in
   let max_fallback_reasons = 5 in
-  let fallback_tag = Anti_rationalization.gate_to_string Fallback in
+  let fallback_tag = Task.Anti_rationalization.gate_to_string Fallback in
   (* Single fold to accumulate all counters and maps immutably *)
   let total_verdicts, approve_count, reject_count,
       gate_counts, verdict_hashes, labeled_hashes,
@@ -364,19 +363,19 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
           | Some v ->
               let ac', rc' =
                 match v with
-                | Anti_rationalization.Approve -> ac + 1, rc
-                | Anti_rationalization.Reject _ -> ac, rc + 1
+                | Task.Anti_rationalization.Approve -> ac + 1, rc
+                | Task.Anti_rationalization.Reject _ -> ac, rc + 1
               in
               let gate = string_field json "gate" in
               let prev = Option.value ~default:0 (StringMap.find_opt gate gc) in
               let gc' = StringMap.add gate (prev + 1) gc in
               let vh' = StringMap.add hash v vh in
-              let ev_cascade = string_field json "evaluator_cascade" in
-              let gen_cascade = string_field json "generator_cascade" in
+              let ev_runtime = string_field json "evaluator_runtime" in
+              let gen_runtime = string_field json "generator_runtime" in
               let vwg', cmm' =
-                if gen_cascade <> "" && ev_cascade <> "" then
+                if gen_runtime <> "" && ev_runtime <> "" then
                   vwg + 1,
-                  (if not (String.equal gen_cascade ev_cascade) then cmm + 1 else cmm)
+                  (if not (String.equal gen_runtime ev_runtime) then cmm + 1 else cmm)
                 else
                   vwg, cmm
               in
@@ -413,7 +412,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
             (fp, fn, ag + 1)
           else
             match ev, hv with
-            | Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
+            | Task.Anti_rationalization.Approve, Reject_label -> (fp + 1, fn, ag)
             | _ -> (fp, fn + 1, ag)
     ) verdict_hashes (0, 0, 0)
   in
@@ -425,7 +424,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let gate_json = StringMap.bindings gate_counts |> List.map (fun (k, v) -> (k, `Int v)) in
   let fallback_count =
     Option.value ~default:0
-      (StringMap.find_opt (Anti_rationalization.gate_to_string Fallback) gate_counts)
+      (StringMap.find_opt (Task.Anti_rationalization.gate_to_string Fallback) gate_counts)
   in
   let cross_model_rate =
     if verdicts_with_generator = 0 then 0.0
@@ -441,7 +440,7 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
     ("false_negative_count", `Int false_neg);
     ("agreement_rate", `Float agreement_rate);
     ("fallback_count", `Int fallback_count);
-    ("verdicts_with_generator_cascade", `Int verdicts_with_generator);
+    ("verdicts_with_generator_runtime", `Int verdicts_with_generator);
     ("cross_model_match_count", `Int cross_model_match);
     ("cross_model_rate", `Float cross_model_rate);
     ("recent_fallback_reasons",

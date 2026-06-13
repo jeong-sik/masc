@@ -3,7 +3,7 @@
 
     Centralises the heuristics that turn LLM turn output into structured
     keeper memory: extracting the [STATE] block emitted by the persona
-    template, scoring "interesting" room messages for alerting, capping
+    template, scoring "interesting" workspace messages for alerting, capping
     snapshot fields to the prompt budget, and round-tripping snapshots
     through assistant messages so a fresh keeper generation can resume
     from disk. *)
@@ -18,33 +18,6 @@ val state_start_re : Re.re
 
 val state_end_re : Re.re
 (** Closing fence of the [STATE]…[/STATE] block. *)
-
-(** {1 Room observation} *)
-
-type keeper_policy_observation = {
-  source_kind : string;
-  room_id : string option;
-  from_agent : string;
-  message : string;
-  direct_mention : bool;
-  has_question : bool;
-  message_chars : int;
-  total_turns : int;
-  active_goal_count : int;
-  joined_room_count : int;
-  last_turn_ago_s : float;
-}
-(** Structured view of a single room message used by the alerting
-    scorer.  Populated from a [Masc_domain.message] plus keeper meta context. *)
-
-val observation_has_question : string -> bool
-(** Heuristic: does [text] contain a question that warrants attention? *)
-
-val keeper_policy_observation_of_room_message :
-  meta:Keeper_types.keeper_meta ->
-  room_id:string -> Masc_domain.message -> keeper_policy_observation
-(** Build a [keeper_policy_observation] from a room message in [meta]'s
-    context. *)
 
 (** {1 Interesting-message alerting} *)
 
@@ -97,11 +70,14 @@ val empty_keeper_state_snapshot : keeper_state_snapshot
 (** All-empty snapshot used as a default when no [STATE] block was
     emitted. *)
 
+val state_snapshot_source_is_synthetic : string -> bool
+(** True for runtime-synthesized continuity snapshots. Synthetic snapshots may
+    remain in checkpoints/sidecars for resume, but must not be promoted as
+    model-authored durable memory or active work. *)
+
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 (** Closed-sum variant distinguishing which subsystem initiated a
     compaction. Replaces the previous generic "compacted" string. *)
@@ -197,6 +173,16 @@ val parse_state_snapshot_from_reply : string -> keeper_state_snapshot option
 (** Convenience: locate the [STATE] block in a full assistant reply
     and parse it. *)
 
+val structured_state_snapshot_schema :
+  keeper_state_snapshot Agent_sdk.Structured.schema
+(** Provider-native structured-output schema for keeper state snapshots. *)
+
+val parse_structured_state_snapshot_from_reply :
+  string -> keeper_state_snapshot option
+(** Parse a full assistant reply that is itself structured JSON.  Accepts
+    raw snapshot JSON, the versioned [state_snapshot] envelope, or replay
+    metadata. *)
+
 val state_snapshot_of_summary_text : string -> keeper_state_snapshot option
 (** Re-parse the rendered summary text back into a snapshot.  Inverse
     of [keeper_state_snapshot_to_summary_text]. *)
@@ -275,11 +261,11 @@ val prompt_memory_sections_of_snapshot :
     long) from a snapshot, optionally tagging the source generation. *)
 
 val read_progress_snapshot :
-  config:Coord.config -> name:string -> keeper_state_snapshot option
+  config:Workspace.config -> name:string -> keeper_state_snapshot option
 (** Read the persisted snapshot for [name] under [config]. *)
 
 val read_progress_snapshot_cache :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string -> progress_snapshot_cache option
 (** Read the persisted snapshot together with its generation tag. *)
 

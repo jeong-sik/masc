@@ -3,7 +3,7 @@
  *
  * Mirrors the keeper-state.ts module-level signal pattern. Keeps a
  * flat array of nodes plus an expansion set, derives the visible
- * subset on demand. Seed data is supplied by the IDE data coordinator
+ * subset on demand. Seed data is supplied by the IDE data workspace store
  * from the workspace tree route.
  *
  * Headless-friendly: the store has zero DOM/render dependencies and
@@ -19,7 +19,7 @@
 import { signal, computed } from '@preact/signals'
 
 export interface FileTreeNode {
-  readonly path: string         // 'runtime/cascade/router.ts'
+  readonly path: string         // 'runtime/runtime/router.ts'
   readonly label: string        // 'router.ts' (display, last segment)
   readonly depth: number        // 0 = root
   readonly parent: string | null

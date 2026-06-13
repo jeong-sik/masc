@@ -10,7 +10,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MASC_URL="${MASC_URL:-http://127.0.0.1:8935/mcp}"
 MASC_AGENT="${MASC_AGENT:-bench}"
 MASC_TOKEN="${MASC_TOKEN:-}"
-BENCH_ROOM_PATH="${BENCH_ROOM_PATH:-$ROOT_DIR}"
+BENCH_WORKSPACE_PATH="${BENCH_WORKSPACE_PATH:-$ROOT_DIR}"
 BENCH_ITERATIONS="${BENCH_ITERATIONS:-5}"
 BENCH_WARMUP_ITERATIONS="${BENCH_WARMUP_ITERATIONS:-0}"
 CURL_TIMEOUT_SEC="${CURL_TIMEOUT_SEC:-25}"
@@ -163,13 +163,7 @@ bench_call_tool() {
 }
 
 bench_bootstrap_agent() {
-  bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_ROOM_PATH" '{path:$path}')" >/dev/null
-}
-
-bench_leave_agent() {
-  if [[ -n "$MCP_SESSION_ID" ]]; then
-    bench_call_tool "masc_leave" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent}')" >/dev/null 2>&1 || true
-  fi
+  bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_WORKSPACE_PATH" '{path:$path}')" >/dev/null
 }
 
 measure_avg() {
@@ -199,13 +193,12 @@ measure_avg() {
 echo "=== MASC Quick Benchmark ==="
 echo "URL: $MASC_URL"
 echo "Agent: $MASC_AGENT"
-echo "Room: $BENCH_ROOM_PATH"
+echo "Workspace: $BENCH_WORKSPACE_PATH"
 echo "Iterations: $BENCH_ITERATIONS"
 echo "Warmup iterations: $BENCH_WARMUP_ITERATIONS"
 echo ""
 
 bench_initialize_session
-trap bench_leave_agent EXIT
 
 echo "Operation                     Latency"
 echo "──────────────────────────────────────────────"

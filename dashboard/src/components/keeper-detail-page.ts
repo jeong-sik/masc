@@ -192,9 +192,9 @@ export function KeeperDetailPage() {
   }
 
   return html`
-    <div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-8" data-route-focused-keeper=${keeper.name}>
-      <div class="sticky top-0 z-20 overflow-hidden rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] shadow-[var(--shadow-raised)] backdrop-blur-xl">
-        <div class="flex flex-col items-stretch justify-between gap-4 border-b border-[var(--color-border-default)] px-5 py-4 sm:flex-row sm:items-center sm:px-6">
+    <div class="mx-auto flex w-full max-w-[1380px] flex-col gap-5 pb-8" data-route-focused-keeper=${keeper.name}>
+      <div class="sm:sticky sm:top-0 z-20 mx-auto w-full max-w-[1180px] overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] shadow-none backdrop-blur-xl">
+        <div class="flex flex-col items-stretch justify-between gap-3 px-4 py-2.5 sm:flex-row sm:items-center sm:px-5">
           <${KeeperDetailHeaderInfo}
             keeper=${keeper}
             titleId=${titleId}

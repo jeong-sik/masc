@@ -52,57 +52,76 @@ let dashboard_retention_json =
 let json ~agent_name () : Yojson.Safe.t =
   let collaborators =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:collaborators_query ~variables () with
+    match Graphql_client.query ~query:collaborators_query ~variables () with
     | Ok data ->
-      let open Yojson.Safe.Util in
-      data |> member "agentCollaborationNetworkByName" |> to_list
+      (match Json_util.assoc_member_opt "agentCollaborationNetworkByName" data with
+       | Some (`List items) -> items
+       | _ -> [])
       |> List.map (fun edge ->
+        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key edge) in
         `Assoc [
-          ("name", member "name" edge);
-          ("collaborations", member "collaborations" edge);
-          ("last_collab", member "lastCollab" edge);
+          ("name", m "name");
+          ("collaborations", m "collaborations");
+          ("last_collab", m "lastCollab");
         ])
     | Error _ -> []
   in
   let agent_data =
     let variables = `Assoc [("name", `String agent_name)] in
-    match Graphql_client.query ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~query:trusts_query ~variables () with
+    match Graphql_client.query ~query:trusts_query ~variables () with
     | Ok data ->
-      let open Yojson.Safe.Util in
-      let agent = data |> member "agent" in
-      if agent = `Null then None
-      else Some agent
+      (match Json_util.assoc_member_opt "agent" data with
+       | Some `Null | None -> None
+       | Some agent -> Some agent)
     | Error _ -> None
   in
   let interests = match agent_data with
     | Some agent ->
-      let open Yojson.Safe.Util in
       Safe_ops.protect ~default:[] (fun () ->
-        agent |> member "interests" |> to_list)
+        match Json_util.assoc_member_opt "interests" agent with
+        | Some (`List items) -> items
+        | _ -> [])
     | None -> []
   in
   let relations = match agent_data with
     | Some agent ->
-      let open Yojson.Safe.Util in
       Safe_ops.protect ~default:[] (fun () ->
-        agent |> member "relations" |> member "edges" |> to_list
-        |> List.map (fun edge ->
-          let node = edge |> member "node" in
+        let edges = match Json_util.assoc_member_opt "relations" agent with
+          | Some rel -> (match Json_util.assoc_member_opt "edges" rel with
+            | Some (`List e) -> e
+            | _ -> [])
+          | None -> []
+        in
+        edges |> List.map (fun edge ->
+          let node = match Json_util.assoc_member_opt "node" edge with
+            | Some n -> n
+            | None -> `Null
+          in
+          let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key node) in
           let participants =
-            node |> member "participants" |> member "edges" |> to_list
-            |> List.map (fun p ->
-              let pn = p |> member "node" in
+            let p_edges = match Json_util.assoc_member_opt "participants" node with
+              | Some part -> (match Json_util.assoc_member_opt "edges" part with
+                | Some (`List e) -> e
+                | _ -> [])
+              | None -> []
+            in
+            p_edges |> List.map (fun p ->
+              let pn = match Json_util.assoc_member_opt "node" p with
+                | Some n -> n
+                | None -> `Null
+              in
+              let pm key = Option.value ~default:`Null (Json_util.assoc_member_opt key pn) in
               `Assoc [
-                ("kind", member "kind" pn);
-                ("display_name", member "displayName" pn);
-                ("role", member "role" pn);
+                ("kind", pm "kind");
+                ("display_name", pm "displayName");
+                ("role", pm "role");
               ])
           in
           `Assoc [
-            ("type", member "type" node);
-            ("category", member "category" node);
-            ("confidence", member "confidence" node);
-            ("note", member "note" node);
+            ("type", m "type");
+            ("category", m "category");
+            ("confidence", m "confidence");
+            ("note", m "note");
             ("participants", `List participants);
           ]))
     | None -> []

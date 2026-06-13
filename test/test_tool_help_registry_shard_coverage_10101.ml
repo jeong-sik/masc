@@ -31,9 +31,9 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module Config = Masc_mcp.Config
-module Shard = Masc_mcp.Tool_shard
-module Registry = Masc_mcp.Tool_help_registry
+module Config = Masc.Config
+module Shard = Masc.Tool_shard
+module Registry = Tool_help_registry
 
 let registry_has name =
   Option.is_some (Registry.find_entry Config.raw_all_tool_schemas name)

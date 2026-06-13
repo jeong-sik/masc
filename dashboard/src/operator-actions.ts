@@ -16,7 +16,7 @@ import { UI_REFRESH_TTL_MS } from './config/constants'
 import { UNKNOWN_STATUS_LABEL } from './lib/format-string'
 import {
   operatorSnapshot,
-  operatorRoomDigest,
+  operatorWorkspaceDigest,
   operatorLoading,
   operatorError,
   operatorErrorStatus,
@@ -31,9 +31,9 @@ import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-n
 let nextLogId = 1
 
 let snapshotRefreshInflight: Promise<void> | null = null
-let roomDigestRefreshInflight: Promise<void> | null = null
+let workspaceDigestRefreshInflight: Promise<void> | null = null
 let lastSnapshotRefreshAt = 0
-let lastRoomDigestRefreshAt = 0
+let lastWorkspaceDigestRefreshAt = 0
 
 function stringifyUnknown(value: unknown): string {
   if (typeof value === 'string') return value
@@ -96,27 +96,27 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
   return snapshotRefreshInflight
 }
 
-export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<void> {
-  if (roomDigestRefreshInflight) return roomDigestRefreshInflight
-  if (isFresh(lastRoomDigestRefreshAt, opts)) return
+export async function refreshOperatorWorkspaceDigest(opts?: RefreshOptions): Promise<void> {
+  if (workspaceDigestRefreshInflight) return workspaceDigestRefreshInflight
+  if (isFresh(lastWorkspaceDigestRefreshAt, opts)) return
   operatorDigestLoading.value = true
   operatorDigestError.value = null
   operatorDigestErrorStatus.value = null
-  roomDigestRefreshInflight = (async () => {
+  workspaceDigestRefreshInflight = (async () => {
     try {
       const raw = await fetchOperatorDigest({ targetType: 'namespace' })
-      operatorRoomDigest.value = normalizeOperatorDigest(raw)
-      lastRoomDigestRefreshAt = Date.now()
+      operatorWorkspaceDigest.value = normalizeOperatorDigest(raw)
+      lastWorkspaceDigestRefreshAt = Date.now()
     } catch (err) {
       const summary = extractApiError(err, 'operator 다이제스트 로드 실패')
       operatorDigestError.value = summary.message
       operatorDigestErrorStatus.value = summary.status
     } finally {
       operatorDigestLoading.value = false
-      roomDigestRefreshInflight = null
+      workspaceDigestRefreshInflight = null
     }
   })()
-  return roomDigestRefreshInflight
+  return workspaceDigestRefreshInflight
 }
 
 export async function dispatchOperatorAction(request: OperatorActionRequest): Promise<OperatorActionResult> {
@@ -134,7 +134,7 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
       tool_name: result.tool_name,
     })
     await refreshOperatorSnapshot({ force: true })
-    await refreshOperatorRoomDigest({ force: true })
+    await refreshOperatorWorkspaceDigest({ force: true })
     return result
   } catch (err) {
     const summary = extractApiError(err, 'operator 액션 실패')
@@ -173,7 +173,7 @@ export async function confirmOperatorPendingAction(
       tool_name: result.tool_name,
     })
     await refreshOperatorSnapshot({ force: true })
-    await refreshOperatorRoomDigest({ force: true })
+    await refreshOperatorWorkspaceDigest({ force: true })
     return result
   } catch (err) {
     const summary = extractApiError(err, 'operator 확인 실패')
@@ -195,5 +195,5 @@ export async function confirmOperatorPendingAction(
 
 registerOperatorRefresh(() => {
   void refreshOperatorSnapshot()
-  void refreshOperatorRoomDigest()
+  void refreshOperatorWorkspaceDigest()
 })

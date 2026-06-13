@@ -4,21 +4,14 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let json_int_opt = Scan_summary.json_int_opt
-let memory_summary_json = Scan_summary.memory_summary_json
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
 let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
-  let ( tool_decision
-      , lane_decision
-      , requested_tools
-      , required_tools
-      , materialized_tools
-      , missing_required_tools )
-    =
-    Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_tool_surface_parts
-      scan
+  let lane_decision =
+    match scan.latest_provider_lane_decision with
+    | Some decision -> decision
+    | None -> `Assoc []
   in
   let keeper_turn_id = selected_keeper_turn_id ?turn_id scan in
   let terminal_event_present =
@@ -43,13 +36,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       ~config
       ~keeper_name
   in
-  let runtime_proof =
-    Server_dashboard_http_keeper_runtime_lens_proof.runtime_lens_runtime_proof_json
-      ~keeper_name
-      ~trace_id
-      ?turn_id
-      ()
-  in
   let gaps =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
       ~terminal_event_present
@@ -67,46 +53,14 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       (fun row -> row.Keeper_runtime_manifest.status)
       scan.latest_provider_lane_row
   in
-  let tool_runtime_status =
-    if missing_required_tools <> [] then "missing_required_tool"
-    else if
-      runtime_lens_event_count scan
-        Keeper_runtime_manifest.Tool_surface_selected
-      > 0
-    then "selected"
-    else "empty"
-  in
-  let tool_lineage_stage_counts () =
-    match scan.latest_tool_lineage_decision with
-    | None -> []
-    | Some decision ->
-      let stages =
-        [ "searched"
-        ; "visible"
-        ; "materialized"
-        ; "emitted"
-        ; "executed"
-        ; "verified"
-        ]
-      in
-      List.filter_map
-        (fun stage ->
-           match Yojson.Safe.Util.member stage decision with
-           | `Assoc _ as obj -> (
-             match Yojson.Safe.Util.member "count" obj with
-             | `Int count when count > 0 -> Some (stage, count)
-             | _ -> None)
-           | _ -> None)
-        stages
-  in
   `Assoc
     [
       ( "turn_clock",
         `Assoc
           [
             ("trace_id", `String trace_id);
-            ("keeper_turn_id", json_int_opt keeper_turn_id);
-            ("max_oas_turn_count", json_int_opt scan.max_oas_turn_count);
+            ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
+            ("max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count);
             ("terminal_event_present", `Bool terminal_event_present);
             ( "terminal_event",
               if terminal_event_present then `String "turn_finished" else `Null );
@@ -144,89 +98,15 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                          ~terminal_event_present
                          scan) );
                 ] );
-            ( "tool_surface",
-              `Assoc
-                [
-                  ("requested_tools", Json_util.json_string_list requested_tools);
-                  ("required_tools", Json_util.json_string_list required_tools);
-                  ("materialized_tools", Json_util.json_string_list materialized_tools);
-                  ( "missing_required_tools",
-                    Json_util.json_string_list missing_required_tools );
-                  ( "turn_lane",
-                    json_string_opt
-                      (json_string_member_opt "turn_lane" tool_decision) );
-                  ( "tool_surface_class",
-                    json_string_opt
-                      (json_string_member_opt "tool_surface_class"
-                         tool_decision) );
-                  ( "tool_requirement",
-                    json_string_opt
-                      (first_string_opt
-                         [
-                           json_string_member_opt "tool_requirement"
-                             tool_decision;
-                           json_string_member_opt "tool_requirement"
-                             lane_decision;
-                         ]) );
-                  ( "visible_tool_count",
-                    json_int_opt
-                      (first_int_opt
-                         [
-                           json_int_member_opt "visible_tool_count"
-                             tool_decision;
-                           json_int_member_opt "effective_tool_count"
-                             lane_decision;
-                         ]) );
-                  ( "tool_gate_enabled",
-                    match
-                      json_bool_member_opt "tool_gate_enabled" tool_decision
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
-                  ( "tool_surface_fallback_used",
-                    match
-                      json_bool_member_opt "tool_surface_fallback_used"
-                        tool_decision
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
-                  ("terminal_status", `String tool_runtime_status);
-                ] );
             ( "provider_lane",
               `Assoc
                 [
                   ("resolved", `Bool has_provider_lane);
-                  ("status", json_string_opt provider_lane_status);
+                  ("status", Json_util.string_opt_to_json provider_lane_status);
                   ( "resolved_lane",
-                    json_string_opt
-                      (json_string_member_opt "resolved_lane" lane_decision)
+                    Json_util.string_opt_to_json
+                      (Json_util.get_string lane_decision "resolved_lane")
                   );
-                  ( "effective_tool_count",
-                    json_int_opt
-                      (json_int_member_opt "effective_tool_count"
-                         lane_decision) );
-                  ( "runtime_mcp_policy_present",
-                    match
-                      json_bool_member_opt "runtime_mcp_policy_present"
-                        lane_decision
-                    with
-                    | Some value -> `Bool value
-                    | None -> `Null );
-                  ("required_tools", Json_util.json_string_list required_tools);
-                  ("materialized_tools", Json_util.json_string_list materialized_tools);
-                  ( "missing_required_tools",
-                    Json_util.json_string_list missing_required_tools );
-                ] );
-            ( "tool_lineage",
-              `Assoc
-                [
-                  ( "recorded",
-                    `Bool (Option.is_some scan.latest_tool_lineage_decision)
-                  );
-                  ( "decision",
-                    match scan.latest_tool_lineage_decision with
-                    | Some value -> value
-                    | None -> `Null );
                 ] );
             ( "payload_role",
               `Assoc
@@ -244,14 +124,13 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   ("started_count", `Int scan.provider_started_count);
                   ("finished_count", `Int scan.provider_finished_count);
                   ( "terminal_status",
-                    json_string_opt
+                    Json_util.string_opt_to_json
                       (Option.map
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );
                 ] );
             ("claim_scope", claim_scope);
             ("config_drift", config_drift);
-            ("runtime_proof", runtime_proof);
             ( "context",
               `Assoc
                 [
@@ -290,7 +169,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     | Some value -> value
                     | None -> `Null );
                 ] );
-            ("memory", memory_summary_json scan);
           ] );
       ( "swimlanes",
         `Assoc
@@ -310,12 +188,12 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                   (runtime_lens_keeper_terminal_status ~terminal_event_present scan)
                 ~synthetic_events:[]
             );
-            ( "masc_policy_cascade",
+            ( "masc_policy_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps
-                ~lane:"masc_policy_cascade" ~label:"MASC Cascade"
+                ~lane:"masc_policy_runtime" ~label:"MASC Runtime"
                 ~events:
                   [
-                    Keeper_runtime_manifest.Cascade_routed;
+                    Keeper_runtime_manifest.Runtime_routed;
                     Keeper_runtime_manifest.Provider_lane_resolved;
                   ]
                 ~terminal_status:
@@ -361,13 +239,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
             ( "tool_runtime",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"tool_runtime"
                 ~label:"Tool Runtime"
-                ~events:
-                  [
-                    Keeper_runtime_manifest.Tool_surface_selected;
-                    Keeper_runtime_manifest.Tool_lineage_recorded;
-                  ]
-                ~synthetic_events:(tool_lineage_stage_counts ())
-                ~terminal_status:tool_runtime_status );
+                ~events:[]
+                ~synthetic_events:[]
+                ~terminal_status:"not_observed" );
             ( "memory_context",
               runtime_lens_swimlane_json swimlane_scan gaps ~lane:"memory_context"
                 ~label:"Memory/Context/Checkpoint"
@@ -376,8 +250,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     Keeper_runtime_manifest.Context_injected;
                     Keeper_runtime_manifest.Context_compacted;
                     Keeper_runtime_manifest.Event_bus_correlated;
-                    Keeper_runtime_manifest.Memory_injected;
-                    Keeper_runtime_manifest.Memory_flushed;
                     Keeper_runtime_manifest.Checkpoint_loaded;
                     Keeper_runtime_manifest.Checkpoint_saved;
                     Keeper_runtime_manifest.State_snapshot_sidecar_saved;

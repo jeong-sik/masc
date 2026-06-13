@@ -3,7 +3,7 @@ open Server_utils
 
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.room_config.base_path
+let base_path_of_state state = state.Mcp_server.workspace_config.base_path
 
 let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]
@@ -51,7 +51,6 @@ let repository_json (repo : Repo_manager_types.repository) =
       ("local_path", `String repo.local_path);
       ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
       ("default_branch", `String repo.default_branch);
-      ("credential_id", `String repo.credential_id);
       ("keepers", `List (List.map (fun s -> `String s) repo.keepers));
       ("status", `String status);
       ("auto_sync", `Bool repo.auto_sync);
@@ -180,7 +179,6 @@ let parse_repository_json body_str =
             let* raw_default_branch =
               get_string_field fields "default_branch"
             in
-            let* raw_credential_id = get_string_field fields "credential_id" in
             let* aliases = get_string_list_field fields "aliases" [] in
             let* keepers = get_string_list_field fields "keepers" [] in
             let* auto_sync = get_bool_field fields "auto_sync" false in
@@ -197,7 +195,6 @@ let parse_repository_json body_str =
                     raw_local_path;
                 aliases;
                 default_branch = Option.value ~default:"main" raw_default_branch;
-                credential_id = Option.value ~default:"default" raw_credential_id;
                 keepers;
                 status = Active;
                 auto_sync;
@@ -344,34 +341,29 @@ let handle_sync_repository state _agent_name req reqd =
       | Error msg ->
           json_response ~status:`Not_found req reqd (json_error msg)
       | Ok repo -> (
-          match Credential_store.find ~base_path repo.credential_id with
+          match Repo_sync.sync_repository ~base_path repo with
           | Error msg ->
-              json_response ~status:`Bad_request req reqd
-                (json_error ("credential not found: " ^ msg))
-          | Ok credential -> (
-              match Repo_sync.sync_repository ~base_path repo credential with
-              | Error msg ->
-                  json_response ~status:`Internal_server_error req reqd
-                    (json_error msg)
-              | Ok () ->
-                  let branches =
-                    match Repo_store.list_branches ~base_path id with
-                    | Ok branches ->
-                        `List
-                          (List.map
-                             (branch_json ~default_branch:repo.default_branch)
-                             branches)
-                    | Error _ -> `List []
-                  in
-                  let json =
-                    `Assoc
-                      [
-                        ("id", `String id);
-                        ("status", `String "active");
-                        ("branches", branches);
-                      ]
-                  in
-                  Http.Response.json_value ~request:req json reqd)))
+              json_response ~status:`Internal_server_error req reqd
+                (json_error msg)
+          | Ok () ->
+              let branches =
+                match Repo_store.list_branches ~base_path id with
+                | Ok branches ->
+                    `List
+                      (List.map
+                         (branch_json ~default_branch:repo.default_branch)
+                         branches)
+                | Error _ -> `List []
+              in
+              let json =
+                `Assoc
+                  [
+                    ("id", `String id);
+                    ("status", `String "active");
+                    ("branches", branches);
+                  ]
+              in
+              Http.Response.json_value ~request:req json reqd))
 
 let handle_discover_repositories state _agent_name req reqd =
   let base_path = base_path_of_state state in

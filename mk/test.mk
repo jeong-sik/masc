@@ -4,7 +4,7 @@
 test: test-unit
 
 # Unit tests only (no server required)
-test-unit: doctor-oas-pin
+test-unit: diagnostics-oas-pin
 	scripts/ci-run-tests.sh "scripts/dune-local.sh test"
 
 # Contract harness (self-bootstrapping, hermetic local server)

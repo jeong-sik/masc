@@ -6,10 +6,10 @@
     2. A write to a read-only directory returns [Error _], not an
        exception. *)
 
-open Masc_mcp
+open Masc
 open Alcotest
 
-module CP = Keeper_oas_checkpoint
+module CP = Runtime_oas_checkpoint
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -45,6 +45,7 @@ let dummy_checkpoint : Agent_sdk.Checkpoint.t =
     top_k = None;
     min_p = None;
     enable_thinking = None;
+    preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;

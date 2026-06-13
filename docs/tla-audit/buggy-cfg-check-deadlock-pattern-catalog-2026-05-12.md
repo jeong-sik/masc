@@ -23,12 +23,12 @@ For each active canonical `<Spec>-buggy.cfg` in `specs/keeper-state-machine/`:
 
 | Spec | `NextBuggy` shape |
 |---|---|
-| `KeeperCascadeAttemptFSM` | `Next \/ BugHardQuotaBypass` |
-| `KeeperCascadeRouting` | `Next \/ BugIgnoreHealth(k)` |
+| `KeeperRuntimeAttemptFSM` | `Next \/ BugHardQuotaBypass` |
+| `KeeperRuntimeRouting` | `Next \/ BugIgnoreHealth(k)` |
 | `KeeperPostTurnOrchestration` | `Next \/ BugWireinOutOfOrder` |
 | `KeeperReactionLiveness` | `Next \/ BugSilentStimulusDrop` |
 | `KeeperSocialModelMagenticLedger` | `Next \/ BugStalledWithoutCause` |
-| `KeeperToolSurface` | `Next \/ BugRequiredEscapesValidate` |
+| `retired surface pipeline spec` | `Next \/ BugAllowedEscapesValidate` |
 | `KeeperTurnCycle` | `Next \/ BugSelectingWithoutToolPolicy` |
 
 Eight specs. The `CHECK_DEADLOCK FALSE` is *defensive belt-and-braces* here — the option matters only if `Next` itself can reach a deadlock (no enabled actions), which would already be a bug in the clean spec.
@@ -54,7 +54,7 @@ Ten specs. Here `CHECK_DEADLOCK FALSE` is *load-bearing*: if the redefined `Next
 
 | Spec | Reason |
 |---|---|
-| `KeeperCascadeLifecycle` | Bug action defined inline in `Spec` body, not separate `NextBuggy` |
+| `KeeperRuntimeLifecycle` | Bug action defined inline in `Spec` body, not separate `NextBuggy` |
 | `KeeperCompactionLifecycle` | Same |
 | `KeeperConditionsGovernPhase` | Same |
 | `KeeperCounterCausality` | Same |
@@ -102,7 +102,7 @@ Zero active specs. The R-12.a fix added `CHECK_DEADLOCK FALSE` to OPB, so the ac
 1. **OPB was unique in Class E before iter 97** — the only `-buggy.cfg` in `specs/keeper-state-machine/` where the combination of a missing `CHECK_DEADLOCK FALSE` *and* a redefined `NextBuggy` could (and did) mask the intended property violation. iter 97 closed it and moved OPB into active Class B.
 2. **Class D (6 specs) is the only remaining ambiguity** — `add-bug` shape preserves clean transitions but can expand reachability; this is not empirically confirmed per-spec. None has been reported to mask its violation.
 3. **No structural fix is needed in this PR** — adding `CHECK_DEADLOCK FALSE` to Class D specs would be a defensive change without an observed failure mode. AGENT-LLM-A.md §Workaround Rejection Bar's *inverse anti-pattern* (single-instance infrastructure) applies in *miniature* here: 6 unconfirmed-deadlock specs do not motivate pre-emptive cfg widening. Re-evaluate only if a Class D spec is observed to mask a violation (then fix at that time).
-4. **Cross-dir parallel** — `specs/cascade/CascadeAttemptLiveness-buggy.cfg` and `specs/multimodal/MultimodalArtifact-buggy.cfg` both already carry `CHECK_DEADLOCK FALSE`. The same Class-by-shape sweep across non-keeper spec dirs is a follow-up (see below).
+4. **Cross-dir parallel** — `specs/runtime/RuntimeAttemptLiveness-buggy.cfg` and `specs/multimodal/MultimodalArtifact-buggy.cfg` both already carry `CHECK_DEADLOCK FALSE`. The same Class-by-shape sweep across non-keeper spec dirs is a follow-up (see below).
 
 ## Why this is not a workaround
 
@@ -111,7 +111,7 @@ AGENT-LLM-A.md §워크어라운드 거부 기준 #3 ("N-of-M 패치") targets "
 ## Follow-up
 
 - **Class D empirical verification** (deferred): run TLC on each of the 6 Class D specs and confirm the buggy run exits via property violation, not deadlock. Time-bounded; low priority because no Class D failure has been observed.
-- **Non-keeper-state-machine dirs**: `specs/cascade/`, `specs/bug-models/`, `specs/multimodal/`, `specs/server-state/`, `specs/state-product/`, `specs/admission-queue/`, `specs/auth/`, `specs/task-lifecycle/`, and `specs/keeper-turn-fsm/` have their own `-buggy.cfg` populations. A corpus-wide sweep would close the last classification gap. Out of this memo's scope.
+- **Non-keeper-state-machine dirs**: `specs/runtime/`, `specs/bug-models/`, `specs/multimodal/`, `specs/server-state/`, `specs/state-product/`, `specs/admission-queue/`, `specs/auth/`, `specs/task-lifecycle/`, and `specs/keeper-turn-fsm/` have their own `-buggy.cfg` populations. A corpus-wide sweep would close the last classification gap. Out of this memo's scope.
 - **`-buggy.cfg` authoring guide**: this catalog is a candidate baseline for a short `specs/AUTHORING-BUGGY-CFGS.md` (or a section of an existing README) covering: (a) class shape rules, (b) when `CHECK_DEADLOCK FALSE` is required vs defensive, (c) precedent citations. Deferred — corpus must stabilize first.
 
 ## Verification

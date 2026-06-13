@@ -2,133 +2,206 @@
 ; Tests depend on masc_test_deps instead of repeating 30+ libraries.
 ; All deps use re_export so consumers see the modules directly.
 ; Keep sorted. Add new deps here, not in individual test stanzas.
+
 (library
  (name masc_test_deps)
+ (modules masc_test_deps)
  (foreign_stubs
   (language c)
   (names test_env_stubs))
  (libraries
-   (re_export agent_sdk)
-   (re_export agent_sdk.base)
-   (re_export agent_sdk.llm_provider)
-   (re_export alcotest)
-   (re_export astring)
-   (re_export base64)
-   (re_export cohttp)
-   (re_export cohttp-eio)
-   (re_export cstruct)
-   (re_export dated_jsonl)
-   (re_export digestif)
-   (re_export eio)
-   (re_export eio_main)
-   (re_export fmt)
-   (re_export fs_compat)
-   (re_export grpc-direct)
-   (re_export httpun)
-   (re_export masc_backend)
-   (re_export masc_compression)
-   (re_export masc_core)
-   (re_export masc_eio_context)
-   ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
-   (re_export masc_mcp.http_client)
-   (re_export masc_log)
-   (re_export masc_mcp)
-   (re_export masc_mcp.oas_compat)
-   (re_export masc_mcp.activity_graph)
-   ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
-   ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
-   ;; tests need it re-exported so [Masc_mcp_cdal_runtime.*] resolves.
-   (re_export masc_mcp.cdal_runtime)
-   ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/.
-   ;; Hosts Cdal_types + Adversarial_eval + Labeling. Re-exported so
-   ;; test_cdal_types / test_labeling / test_adversarial_eval and other
-   ;; consumers keep resolving these unprefixed module names.
-   (re_export masc_mcp.cdal)
-   ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
-   ;; Tests previously wrote `Masc_mcp.Trajectory.X` (wrapped pattern);
-   ;; after this re-export they use bare `Trajectory.X` per the
-   ;; G5 qualifier-removal budget.
-   (re_export masc_mcp.trajectory)
-   ;; RFC-0056 Phase 1B — Keeper_skill_routing leaf utility sub-library.
-   (re_export masc_mcp.keeper_skill_routing)
-   ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
-   (re_export masc_mcp.host_config)
-   ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
-   (re_export masc_mcp.briefing_compactors)
-   ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
-   (re_export masc_mcp.dashboard_eval_feed)
-   ;; RFC-0056 Phase 1F — Memory_jsonl leaf module sub-library.
-   (re_export masc_mcp.memory_jsonl)
-   ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
-   (re_export masc_mcp.chronicle_event)
-   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
-   (re_export masc_mcp.tool_call_quality_benchmark)
-   ;; RFC-0056 Phase 1I — Keeper_event_queue leaf module sub-library
-   ;; (first lib/keeper/ promotion).
-   (re_export masc_mcp.keeper_event_queue)
-   ;; RFC-0056 Phase 1J — Keeper_invariant leaf module sub-library
-   ;; (second lib/keeper/ promotion).
-   (re_export masc_mcp.keeper_invariant)
-   ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
-   (re_export masc_mcp.compaction_trigger)
-   ;; RFC-0058 Phase 1 — Declarative cascade TOML parser sub-library.
-   (re_export masc_mcp.cascade_decl)
-   (re_export masc_mcp.ag_ui)
-   (re_export masc_mcp.config)
-   (re_export masc_mcp.fs_compat)
-   (re_export masc_mcp.gate)
-   (re_export masc_mcp.ide)
-   (re_export masc_mcp.masc_backend)
-   (re_export masc_mcp.masc_compression)
-   (re_export masc_mcp.mcp_session)
-   (re_export masc_mcp.mcp_transport_protocol)
-   (re_export masc_mcp.multimodal)
-   (re_export masc_mcp.prompt_registry)
-   (re_export masc_mcp.pulse)
-   (re_export masc_mcp.repo_manager)
-   (re_export masc_mcp.resilience)
-   (re_export masc_mcp.response)
-   (re_export masc_mcp.shared_audit)
-   (re_export masc_mcp.tool_schemas)
-   (re_export masc_mcp.tool_catalog_surfaces)
-   (re_export masc_mcp.config_dir_resolver)
-   ;; RFC-0086 PR-2F — Cascade_ref leaf extracted to lib/cascade_ref/.
-   ;; Re-export so test code using bare `Cascade_ref.X` resolves.
-   (re_export masc_mcp.cascade_ref)
-   ;; RFC-0163 Phase D1 — Cascade_name leaf extracted to lib/cascade_name/.
-   ;; Re-export so test code using bare `Cascade_name.X` resolves.
-   (re_export masc_mcp.cascade_name)   ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
-   ;; lib/tool_types/. Re-export so test code using bare
-   ;; `Tool_args.X` / `Tool_result.X` resolves.
-   (re_export masc_mcp.tool_types)
-   (re_export masc_mcp.masc_tool_blob_store)
-   (re_export masc_process)
-   (re_export masc_mcp.masc_exec)
-   ;; Exec shell command gate SSOT. Re-exported so test code can use
-   ;; [Masc_exec_command_gate.Shell_command_gate] directly.
-   (re_export masc_mcp.masc_exec_command_gate)
-   (re_export masc_mcp.masc_exec_bash_parser)
-   (re_export masc_coord)
-   (re_export masc_types)
-   (re_export mirage-crypto)
-   (re_export mirage-crypto-rng)
-   (re_export mirage-crypto-rng.unix)
-   (re_export multimodal)
-   (re_export ocaml-protoc-plugin)
-   (re_export ocaml-webrtc)
-   ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
-   ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.
-   (re_export piaf)
-   (re_export piaf.stream)
-   (re_export qcheck-alcotest)
-   (re_export qcheck-core)
-   (re_export re)
-   (re_export runtime_events)
-   (re_export str)
-   (re_export time_compat)
-   (re_export unix)
-   (re_export uri)
-   (re_export uuidm)
-   (re_export otoml)
-   (re_export yojson)
-   (re_export zstd)))
+  (re_export agent_sdk)
+  (re_export agent_sdk.base)
+  (re_export agent_sdk.llm_provider)
+  (re_export alcotest)
+  (re_export astring)
+  (re_export base64)
+  (re_export cohttp)
+  (re_export cohttp-eio)
+  (re_export cstruct)
+  (re_export dated_jsonl)
+  (re_export digestif)
+  (re_export eio)
+  (re_export eio_main)
+  (re_export fmt)
+  (re_export fs_compat)
+  (re_export grpc-direct)
+  (re_export httpun)
+  (re_export masc_backend)
+  (re_export masc_compression)
+  (re_export masc_core)
+  (re_export masc_eio_context)
+  ; RFC-0107 Phase D.2d — pool unit tests need access to Pool module.
+  (re_export masc.http_client)
+  (re_export masc.discovery_cache)
+  (re_export masc.json_field)
+  (re_export masc.local_runtime_pool)
+  (re_export masc.lockfree_atomic)
+  (re_export masc.worker_execution_backend)
+  (re_export masc.worker_execution_spec)
+  (re_export masc.worker_runtime_config)
+  (re_export masc.otel_dispatch_hook)
+  (re_export masc.otel_genai)
+  (re_export masc.otel_metrics)
+  (re_export masc.otel_spans)
+  (re_export otel_metric_test_store)
+  (re_export masc.telemetry_coverage_gap)
+  (re_export masc.telemetry_unified)
+  (re_export masc.telemetry_unified_source)
+  (re_export masc.voice_bridge_core)
+  (re_export masc.voice_config)
+  (re_export masc.voice_runtime_overlay)
+  (re_export masc_log)
+  (re_export masc)
+  (re_export masc.activity_graph)
+  ;; Board handler shim removal — tests need direct access to
+  ;; Masc_board_handlers for modules no longer re-exported via masc.
+  (re_export masc.board_handlers)
+  (re_export masc.board_tool_adapter)
+  ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
+  ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
+  ;; tests need it re-exported so [Masc_cdal_runtime.*] resolves.
+  (re_export masc.cdal_runtime)
+  ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/.
+  ;; Hosts Cdal_types + Adversarial_eval + Labeling. Re-exported so
+  ;; test_cdal_types / test_labeling / test_adversarial_eval and other
+  ;; consumers keep resolving these unprefixed module names.
+  (re_export masc.cdal)
+  ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
+  ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
+  ;; after this re-export they use bare `Trajectory.X` per the
+  ;; G5 qualifier-removal budget.
+  (re_export masc.trajectory)
+  ;; RFC-0056 keeper domain group libraries.
+  (re_export masc.keeper_tooling)
+  ;; RFC-0056 Phase 1C — Host_config leaf utility sub-library.
+  (re_export masc.host_config)
+  ;; RFC-0056 Phase 1D — Briefing_compactors leaf utility sub-library.
+  (re_export masc.briefing_compactors)
+  ;; RFC-0056 Phase 1E — Dashboard_eval_feed leaf module sub-library.
+  (re_export masc.dashboard_eval_feed)
+  ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module sub-library.
+  ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
+  ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
+  (re_export masc.dashboard_tla_specs)
+  ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
+  (re_export masc.chronicle_event)
+  ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
+  (re_export masc.tool_call_quality_benchmark)
+  (re_export masc.keeper_runtime)
+  (re_export masc.keeper_contract)
+  ;; RFC-0056 Phase 1K — Compaction_trigger leaf sub-library.
+  (re_export masc.compaction_trigger)
+  ;; RFC-0056 Phase 1L — Attribution leaf sub-library.
+  (re_export masc.attribution)
+  ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
+  (re_export masc.exec_policy)
+  (re_export masc.keeper_registry)
+  (re_export masc.keeper_metrics)
+  (re_export masc.keeper_failure_taxonomy)
+  (re_export masc.keeper_types)
+  (re_export masc.keeper_types_profile_sandbox)
+  (re_export masc.keeper_usage_trust)
+  (re_export masc.keeper_event_bus)
+  (re_export masc.keeper_toml)
+  (re_export masc.keeper_failure_policy)
+  (re_export masc.keeper_social)
+  ;; Model inference metrics + runtime provider label leaves.
+  (re_export masc.runtime_provider_labels)
+  (re_export masc.model_inference_metrics)
+  ;; RFC-0058 Phase 1 — Declarative runtime TOML parser sub-library.
+  (re_export masc.ag_ui)
+  (re_export masc.config)
+  (re_export masc.fs_compat)
+  (re_export masc.gate)
+  (re_export masc.command_descriptor)
+  (re_export masc.agent_observation)
+  (re_export masc.ide)
+  (re_export masc.masc_backend)
+  (re_export masc.masc_compression)
+  (re_export masc.mcp_session)
+  (re_export masc.mcp_transport_protocol)
+  (re_export masc.multimodal)
+  (re_export masc.prompt_registry)
+  (re_export masc.pulse)
+  (re_export masc.repo_manager)
+  (re_export masc.resilience)
+  (re_export masc.dashboard)
+  (re_export masc.operator)
+  (re_export masc.server)
+  (re_export masc.runtime)
+  (re_export masc.masc_event_bus)
+  (re_export masc.provider_tool_support)
+  (re_export masc.pool_metrics)
+  (re_export masc.auth)
+  (re_export masc.fd_accountant)
+  (re_export masc.response)
+  (re_export masc.shared_audit)
+  (re_export masc.tool_schemas)
+  (re_export masc.tool_catalog_surfaces)
+  (re_export masc.config_dir_resolver)
+  ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.
+  ;; Re-export so test code using bare `Runtime_name.X` resolves.
+  ;; RFC-0086 PR-2H — Tool_args + Tool_result shared types extracted to
+  ;; lib/tool_types/. Re-export so test code using bare
+  ;; `Tool_args.X` / `Tool_result.X` resolves.
+  (re_export masc.tool_types)
+  (re_export masc.masc_tool_blob_store)
+  (re_export masc_process)
+  (re_export masc.masc_exec)
+  ;; Exec shell command gate SSOT. Re-exported so test code can use
+  ;; [Masc_exec_command_gate.Shell_command_gate] directly.
+  (re_export masc.masc_exec_command_gate)
+  (re_export masc.masc_exec_bash_parser)
+  (re_export masc_workspace)
+  ;; Goal domain extracted to lib/goal/ (masc_goal). Re-export so test code
+  ;; using bare Goal_store.X / Goal_phase.X resolves after decoupling.
+  (re_export masc_goal)
+  ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
+  ;; code using bare Turn_fsm.X resolves after the FSM carve.
+  (re_export masc_turn)
+  ;; Agent token-ledger extracted to lib/agent_economy/ (masc_economy).
+  ;; Re-export so test code using bare Economy.X resolves after the carve.
+  (re_export masc_economy)
+  ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
+  ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
+  ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X /
+  ;; Tool_catalog_inference.X resolves after the carve.
+  (re_export masc.masc_tool_dispatch)
+  ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
+  ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /
+  ;; Tool_capability.X / Tool_shard_types*.X / Board_tool.X etc. resolves.
+  (re_export masc.masc_tool_surface)
+  (re_export masc.tool_contract_prompts)
+  ;; Thompson Sampling extracted to lib/thompson/ (masc_thompson). Re-export so
+  ;; test code using bare Thompson_sampling.X resolves after the carve.
+  (re_export masc_thompson)
+  (re_export masc_types)
+  (re_export mirage-crypto)
+  (re_export mirage-crypto-rng)
+  (re_export mirage-crypto-rng.unix)
+  (re_export multimodal)
+  (re_export ocaml-protoc-plugin)
+  (re_export ocaml-webrtc)
+  (re_export opentelemetry)
+  ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
+  ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.
+  (re_export piaf)
+  (re_export piaf.stream)
+  (re_export qcheck-alcotest)
+  (re_export qcheck-core)
+  (re_export re)
+  (re_export runtime_events)
+  (re_export str)
+  (re_export time_compat)
+  (re_export unix)
+  (re_export uri)
+  (re_export uuidm)
+  (re_export otoml)
+  (re_export yojson)
+  (re_export zstd)))
+
+(library
+ (name otel_metric_test_store)
+ (wrapped false)
+ (modules otel_metric_store))

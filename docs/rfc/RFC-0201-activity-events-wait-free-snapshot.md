@@ -58,7 +58,7 @@ Each call:
 3. Splits, parses, and concatenates into a single in-memory list.
 4. Sorts the full list by `seq`.
 
-Concrete sizes today (`~/.masc/activity-events/2026-05/`):
+Concrete sizes today (`<MASC_BASE>/.masc/activity-events/2026-05/`):
 
 ```
 01.jsonl  1.0 MB
@@ -295,7 +295,7 @@ The RFC is *complete* when:
   sidecar files (seq → byte offset) to allow byte-seek by sequence
   number. Useful only if cursor-bearing requests become hot; out of
   scope here.
-- **Multi-process activity coordination.** Single-process is enough at
+- **Multi-process activity workspace collaboration.** Single-process is enough at
   current scale.
 - **Schema migration of JSONL rows.** This RFC preserves the existing
   row schema.
@@ -306,7 +306,7 @@ The RFC is *complete* when:
   2026-05-20).
 - PR #19150 (cache+offload wrap on activity endpoints, merged 2026-05-27).
 - Live measurement transcript:
-  `~/.masc/activity-events/2026-05/{01,03,18,25,27}.jsonl` sizes
+  `<MASC_BASE>/.masc/activity-events/2026-05/{01,03,18,25,27}.jsonl` sizes
   + curl timing 2026-05-27 ~21:30 KST.
 - `lib/activity_graph/activity_graph.ml:203 read_all_events`,
   `lib/dashboard/dashboard_snapshot.ml:9 type t`.

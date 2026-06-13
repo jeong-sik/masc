@@ -6,9 +6,9 @@ created: 2026-05-09
 status: Draft
 supersedes: -
 related:
-  - RFC-0038 Phase 1 (opaque identifier types — Provider_id, Cascade_name)
+  - RFC-0038 Phase 1 (opaque identifier types — Provider_id, Runtime_name)
   - RFC-0020 (keeper event queue layer separation — identity transport)
-  - RFC-0041 (cascade routing group/item hierarchy — identity 참조)
+  - RFC-0041 (runtime routing group/item hierarchy — identity 참조)
   - PR #14038 (fix: compare task owners by stable identity — reference fix)
 ---
 
@@ -18,7 +18,7 @@ related:
 
 ## §0 Summary
 
-RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `Cascade_name.t = private string`)를 도입했으나 keeper identity는 여전히 raw string으로 비교된다. 이로 인해:
+RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `Runtime_name.t = private string`)를 도입했으나 keeper identity는 여전히 raw string으로 비교된다. 이로 인해:
 - `nick0cave` vs `keeper-nick0cave-agent` vs generated nickname이 **같은 keeper를 참조하나 string equality로 reject**
 - task ownership `release/done/cancel` 경로에서 false rejection
 - agent-code-connector P1 review: alias 매칭 통과 후 `transition_task_r`이 canonical assignee의 `current_task` 클리어를 누락 → backlog/agent metadata drift
@@ -31,10 +31,10 @@ RFC-0038 Phase 1이 opaque identifier types (`Provider_id.t = private string`, `
 
 **sub-agent 발견: `same_task_actor`는 현재 코드베이스에 존재하지 않음.**
 
-RFC 초안에서 인용한 `coord_task.ml:109`의 `same_task_actor`는 과거 commit(`3904e285b8`)의 코드로, 현재 HEAD에서는 리팩토링되어 `Coord_task_lifecycle.decide` 낙에 `same_agent` closure로 이동:
+RFC 초안에서 인용한 `workspace_task.ml:109`의 `same_task_actor`는 과거 commit(`3904e285b8`)의 코드로, 현재 HEAD에서는 리팩토링되어 `Workspace_task_lifecycle.decide` 낙에 `same_agent` closure로 이동:
 
 ```ocaml
-(* lib/coord/coord_task_lifecycle.ml:48 *)
+(* lib/workspace/workspace_task_lifecycle.ml:48 *)
 let same_agent assignee = String.equal assignee agent_name in
 ```
 
@@ -44,11 +44,11 @@ let same_agent assignee = String.equal assignee agent_name in
 
 | 파일 | 라인 | 패턴 | 역할 |
 |------|------|------|------|
-| `coord_task_lifecycle.ml` | 48 | `String.equal assignee agent_name` | **FSM ownership core** |
-| `coord_task.ml` | 129 | `a <> agent_name` | assignee mismatch hint |
-| `coord_task.ml` | 149 | `a = agent_name` | remediation ownership |
-| `coord_task.ml` | 841 | `assignee = agent_name` | cancel_task_r guard |
-| `coord_task_schedule.ml` | 293, 423 | `String.equal assignee agent_name` | scheduling match |
+| `workspace_task_lifecycle.ml` | 48 | `String.equal assignee agent_name` | **FSM ownership core** |
+| `workspace_task.ml` | 129 | `a <> agent_name` | assignee mismatch hint |
+| `workspace_task.ml` | 149 | `a = agent_name` | remediation ownership |
+| `workspace_task.ml` | 841 | `assignee = agent_name` | cancel_task_r guard |
+| `workspace_task_schedule.ml` | 293, 423 | `String.equal assignee agent_name` | scheduling match |
 | `tool_task.ml` | 235, 379 | `String.equal assignee agent_name` | tool-layer check |
 
 → **0개 typed identity comparison**. `Keeper_identity.canonical_keeper_name_from_agent_name` 등 canonicalization helper가 존재하나 task FSM에서는 전혀 사용되지 않음.
@@ -67,7 +67,7 @@ sub-agent가 3개의 dual-name matching workaround를 발견:
 let matches_you assignee =
   String.equal assignee ctx.agent_name || String.equal assignee actual_name
 
-(* lib/tool_coord.ml:424 *)
+(* lib/tool_workspace.ml:424 *)
 let matches_you assignee =
   String.equal assignee ctx.agent_name || String.equal assignee actual_name
 
@@ -105,14 +105,14 @@ let keeper_name_from_agent_name agent_name =
 
 ### §1.3 RFC-0038 Phase 1과의 격차
 
-Phase 1은 `Provider_id.t = private string`, `Cascade_name.t = private string`를 도입.
+Phase 1은 `Provider_id.t = private string`, `Runtime_name.t = private string`를 도입.
 Phase 2는 keeper identity를 동일 패턴으로 확장: `Keeper_identity.t = private string` with **canonical form guarantee**.
 
 ## §2 Goals / Non-goals
 
 ### Goals
 - keeper identity alias 생성 경로를 canonical form으로 normalize
-- `Keeper_identity.t` opaque type 도입 (`Provider_id`, `Cascade_name` 패턴 확장)
+- `Keeper_identity.t` opaque type 도입 (`Provider_id`, `Runtime_name` 패턴 확장)
 - `same_task_actor`를 type level 강제: alias 매칭이 아니라 canonical comparison
 - `transition_task_r`에서 canonical assignee로 state 갱신
 
@@ -181,7 +181,7 @@ let transition_task_r ~identity ~task_state =
 - backward-compat: 기존 string 비교는 deprecation 경고
 
 ### PR-C: Task FSM migration
-- `coord_task.ml` `same_task_actor` → `Keeper_identity.equal`
+- `workspace_task.ml` `same_task_actor` → `Keeper_identity.equal`
 - `transition_task_r` → canonical form으로 state 갱신
 - PR #14038의 test coverage 재사용
 
@@ -190,7 +190,7 @@ let transition_task_r ~identity ~task_state =
 
 ## §5 Alternatives
 
-| 접근법 | Canonical Form | Stability | Uniqueness | masc-mcp 적합도 |
+| 접근법 | Canonical Form | Stability | Uniqueness | masc 적합도 |
 |---|---|---|---|---|
 | ActivityPub `id` | HTTPS URI | ✅ Stable | ✅ Global (URI) | **높음** — `keeper_name`을 canonical ID로, `agent_name`을 alias로 |
 | OIDC `iss`+`sub` | issuer-scoped string | ✅ Immutable | ✅ Global (iss+sub) | **높음** — `keeper_name`을 immutable `sub`로 취급 |
@@ -204,7 +204,8 @@ let transition_task_r ~identity ~task_state =
 **채택: ActivityPub + OIDC Hybrid Model**
 - `keeper_name`을 canonical identifier로 명시. 속성: immutable, never reassigned, locally unique within masc instance.
 - `agent_name`을 display/handle로 분리. `preferredUsername`처럼 mutable, non-unique. UI 표시용.
-- `persona_name` = `keeper_name` (1:1). `credential_stem` = `keeper_name` (1:1). 이 관계를 타입으로 보증.
+- `persona_name` = `keeper_name` (1:1). Credential selection is not a keeper
+  identity field; it is resolved by the credential store / repo mapping layer.
 - `canonical_keeper_name`의 4가지 prefix/suffix 조합 처리를 "legacy alias resolution"으로 재명명. 새 코드는 canonical `keeper_name`만 사용.
 - 단점: 기존 `agent_name`과 `keeper_name`이 다른 keeper들의 마이그레이션 필요. `keeper_name_from_agent_name`의 4-way match는 deprecation path 필요.
 
@@ -212,7 +213,7 @@ let transition_task_r ~identity ~task_state =
 
 1. nickname → canonical form mapping table의 persistence (SQLite? pgvector? memory-only?)
 2. generated nickname이 셔플되면 이전 identity mapping은 invalid? or versioned?
-3. `Keeper_identity.t`가 RFC-0038의 `Provider_id`, `Cascade_name`와 동일한 module (opaque) convention을 따르는가, or separate?
+3. `Keeper_identity.t`가 RFC-0038의 `Provider_id`, `Runtime_name`와 동일한 module (opaque) convention을 따르는가, or separate?
 4. agent-code-connector P1 review에서 지적한 `transition_task_r` backward-compat: 기존 task record의 `owner` 필드는 그대로 두고 비교 시점만 canonicalize하는 방식 vs migration
 5. sub-agent Topic C.2 결과로 alias 생성 사이트 추가
 
@@ -229,7 +230,7 @@ let transition_task_r ~identity ~task_state =
 
 ### 사내
 
-- RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Cascade_name.t`)
+- RFC-0038 Phase 1 (opaque identifier types — `Provider_id.t`, `Runtime_name.t`)
 - PR #14038 — reference fix + agent-code-connector P1 review
 - `instructions/software-development.md` §2 Unknown → Permissive Default anti-pattern
 - (sub-agent Topic C.1) `same_task_actor` caller 전수 + `transition_task_r` 연결 — `.tmp/rfc-0038-p2-caller-context.md`

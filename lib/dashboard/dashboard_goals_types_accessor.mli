@@ -25,7 +25,7 @@ type tree_node = {
 }
 
 type goal_detail_keeper = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
   runtime_trust : Yojson.Safe.t;
 }
@@ -35,8 +35,10 @@ type attainment_unit =
   | Count
   | Unknown
 
-val task_is_linked_to_goal : Masc_domain.task -> string -> bool
-val task_linkage_source_opt : Masc_domain.task -> string -> string option
+val task_is_linked_to_goal :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
+val task_linkage_source_opt :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
 val task_status_label : Masc_domain.task -> string
 val task_is_terminal : Masc_domain.task -> bool
@@ -50,9 +52,9 @@ val receipt_error_kind : Yojson.Safe.t -> string option
 val receipt_error_message : Yojson.Safe.t -> string option
 val receipt_sandbox_kind : Yojson.Safe.t -> string option
 val receipt_approval_profile : Yojson.Safe.t -> string option
-val receipt_cascade_name : Yojson.Safe.t -> string option
-val receipt_cascade_outcome : Yojson.Safe.t -> string option
-val receipt_cascade_fallback_applied : Yojson.Safe.t -> bool
+val receipt_runtime_id : Yojson.Safe.t -> string option
+val receipt_runtime_outcome : Yojson.Safe.t -> string option
+val receipt_runtime_fallback_applied : Yojson.Safe.t -> bool
 val receipt_outcome : Yojson.Safe.t -> string option
 val receipt_started_at : Yojson.Safe.t -> string option
 val receipt_ended_at : Yojson.Safe.t -> string option
@@ -68,11 +70,11 @@ val trust_latest_event : Yojson.Safe.t -> Yojson.Safe.t option
 val trust_latest_event_ts : Yojson.Safe.t -> string option
 val trust_latest_event_ts_unix : Yojson.Safe.t -> float option
 val trust_sandbox_risk : Yojson.Safe.t -> bool
-val trust_cascade_risk : Yojson.Safe.t -> bool
+val trust_runtime_risk : Yojson.Safe.t -> bool
 
 val receipt_has_error : Yojson.Safe.t -> bool
 val receipt_has_sandbox_risk : Yojson.Safe.t -> bool
-val receipt_has_cascade_risk : Yojson.Safe.t -> bool
+val receipt_has_runtime_risk : Yojson.Safe.t -> bool
 
 val iso_max : string -> string -> string
 val latest_iso : ?fallback:string -> string list -> string option

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 let test_extract_html_preview_fields () =
   let html =
@@ -19,7 +19,7 @@ let test_extract_html_preview_fields () =
     |}
   in
   let extracted =
-    Lib.Server_dashboard_http_link_preview.extract_html_preview_fields
+    Server_dashboard_http_link_preview.extract_html_preview_fields
       ~url:"https://example.com/blog/post" html
   in
   check (option string) "title" (Some "OG Title") extracted.title;
@@ -35,15 +35,15 @@ let test_extract_html_preview_fields () =
 
 let test_image_url_detection () =
   check bool "png is image" true
-    (Lib.Server_dashboard_http_link_preview.infer_image_url
+    (Server_dashboard_http_link_preview.infer_image_url
        "https://example.com/demo.png");
   check bool "html is not image" false
-    (Lib.Server_dashboard_http_link_preview.infer_image_url
+    (Server_dashboard_http_link_preview.infer_image_url
        "https://example.com/page.html")
 
 let test_normalize_request_url_rejects_non_http () =
   match
-    Lib.Server_dashboard_http_link_preview.normalize_request_url
+    Server_dashboard_http_link_preview.normalize_request_url
       "file:///tmp/example.html"
   with
   | Error _ -> ()

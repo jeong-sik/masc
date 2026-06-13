@@ -3,7 +3,7 @@
     Covers the deterministic ADT mappers that don't require a
     [keeper_meta] / [working_context] fixture. *)
 
-open Masc_mcp
+open Masc
 module KCP = Keeper_compact_policy
 
 let check_string label expected actual =
@@ -67,19 +67,6 @@ let test_emergency_threshold_in_range () =
   Alcotest.(check bool) "emergency threshold is a meaningful ratio (0,1]"
     true (v > 0.0 && v <= 1.0)
 
-let test_tool_heavy_threshold_positive () =
-  Alcotest.(check bool)
-    "default_tool_heavy_msg_threshold > 0"
-    true
-    (Keeper_config.default_tool_heavy_msg_threshold > 0)
-
-let test_tool_heavy_floor_in_range () =
-  let v = Keeper_config.default_tool_heavy_ratio_floor in
-  Alcotest.(check bool)
-    "default_tool_heavy_ratio_floor is a meaningful ratio [0,1]"
-    true
-    (v >= 0.0 && v <= 1.0)
-
 (* ── pure gate decision ─────────────────────────────────────────────── *)
 
 let decide
@@ -90,10 +77,6 @@ let decide
     ?(message_gate = 0)
     ?(token_gate = 0)
     ?(cooldown_sec = 60)
-    ?(tool_heavy_msg_threshold =
-      Keeper_config.default_tool_heavy_msg_threshold)
-    ?(tool_heavy_ratio_floor =
-      Keeper_config.default_tool_heavy_ratio_floor)
     ?(last_continuity_update_ts = 0.0)
     ?(last_proactive_ts = 0.0)
     ?(now_ts = 100.0)
@@ -106,8 +89,6 @@ let decide
     ~message_gate
     ~token_gate
     ~cooldown_sec
-    ~tool_heavy_msg_threshold
-    ~tool_heavy_ratio_floor
     ~last_continuity_update_ts
     ~last_proactive_ts
     ~now_ts
@@ -154,23 +135,48 @@ let test_decide_emergency_bypasses_cooldown () =
       ("expected emergency ratio compaction, got "
        ^ KCP.compaction_decision_to_string other)
 
-let test_decide_tool_heavy_bypasses_cooldown () =
+(* Regression for the removed tool_heavy trigger: the production churn
+   profile (fleet logs 2026-06-10: tech_glutton msgs=67, ratio=0.2695,
+   default gates ratio=0.85 / message=disabled / token=196608) compacted
+   every 2-9 minutes via tool_heavy.  With the trigger gone the same
+   state must NOT compact once the reflection cooldown is satisfied. *)
+let test_decide_tool_heavy_profile_blocked () =
   match
     decide
-      ~ratio:(Keeper_config.default_tool_heavy_ratio_floor +. 0.01)
-      ~msg_count:(Keeper_config.default_tool_heavy_msg_threshold + 1)
-      ~ratio_gate:0.99
+      ~ratio:0.2695
+      ~msg_count:67
+      ~tok_count:17246
+      ~ratio_gate:0.85
       ~message_gate:0
-      ~token_gate:0
+      ~token_gate:196608
+      ~last_continuity_update_ts:0.0
+      ~now_ts:100.0
+      ~cooldown_sec:15
+      ()
+  with
+  | KCP.Blocked_below_thresholds -> ()
+  | other ->
+    Alcotest.fail
+      ("expected no compaction for tool-heavy-but-low-pressure state, got "
+       ^ KCP.compaction_decision_to_string other)
+
+(* The cooldown skip must hold even at high message counts: only the
+   emergency ratio floor bypasses it. *)
+let test_decide_tool_heavy_profile_respects_cooldown () =
+  match
+    decide
+      ~ratio:0.2695
+      ~msg_count:67
+      ~ratio_gate:0.25 (* below current ratio: gate would fire if ready *)
       ~last_continuity_update_ts:99.0
       ~now_ts:100.0
       ~cooldown_sec:60
       ()
   with
-  | KCP.Applied (Compaction_trigger.Tool_heavy _) -> ()
+  | KCP.Skipped_continuity_reflection _ -> ()
   | other ->
     Alcotest.fail
-      ("expected tool-heavy compaction, got "
+      ("expected continuity skip at high msg_count, got "
        ^ KCP.compaction_decision_to_string other)
 
 (* ── runner ──────────────────────────────────────────────────────────── *)
@@ -204,10 +210,6 @@ let () =
         [
           Alcotest.test_case "emergency threshold in (0,1]" `Quick
             test_emergency_threshold_in_range;
-          Alcotest.test_case "tool_heavy msg threshold > 0" `Quick
-            test_tool_heavy_threshold_positive;
-          Alcotest.test_case "tool_heavy ratio in [0,1]" `Quick
-            test_tool_heavy_floor_in_range;
         ] );
       ( "decide_compaction",
         [
@@ -217,7 +219,9 @@ let () =
             test_decide_recent_state_blocks_non_emergency;
           Alcotest.test_case "emergency bypasses cooldown" `Quick
             test_decide_emergency_bypasses_cooldown;
-          Alcotest.test_case "tool-heavy bypasses cooldown" `Quick
-            test_decide_tool_heavy_bypasses_cooldown;
+          Alcotest.test_case "churn profile no longer compacts" `Quick
+            test_decide_tool_heavy_profile_blocked;
+          Alcotest.test_case "high msg_count respects cooldown" `Quick
+            test_decide_tool_heavy_profile_respects_cooldown;
         ] );
     ]

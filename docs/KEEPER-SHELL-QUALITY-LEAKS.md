@@ -28,18 +28,18 @@ Adjacent tool-surface sample from the same 240h window:
 | legacy code-edit surface | 119 | 51 | 70.00% |
 | `tool_search_files` | 166 | 399 | 29.38% |
 | `tool_execute` | 174 | 948 | 15.51% |
-| public `EditFile` | 41 | 15 | 73.21% |
-| public `WriteFile` | 103 | 8 | 92.79% |
+| public `Edit` | 41 | 15 | 73.21% |
+| public `Write` | 103 | 8 | 92.79% |
 
 ## Leak Map
 
 | Leak class | Baseline count | Code boundary | Current fix path |
 |---|---:|---|---|
 | `shape_block:pipe_or_redirect` | 2,606 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Retired for public `Execute`. Unsafe shell syntax no longer enters `tool_execute` as a raw string; callers must use typed `executable`/`argv` or explicit typed pipeline/stage input. The historical bucket remains only for old runtime samples and adjacent shell surfaces. |
-| Missing path or wrong cwd | 1,602 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_sandbox_docker.ml` | Preserve path validation, but make public `Execute` expose `cwd`, make retry hints use the typed `Execute { executable, argv, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
+| Missing path or wrong cwd | 1,602 | `lib/keeper/keeper_sandbox_docker.ml`, typed public `Execute` | Preserve path validation, but make public `Execute` expose `cwd`, make retry hints use the typed `Execute { executable, argv, cwd }` shape, and allow the safe `/dev/null` marker instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | `shape_block:chaining` | 1,275 | historical `tool_execute` raw command logs | Retired for public `Execute`. `cd repos/... && ...` is not normalized into a keeper command; callers must pass typed `cwd` plus `executable`/`argv`. |
 | Non-zero command exits | 846 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
-| Retired path-tokenizer diagnostic | 540 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml` | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. |
+| Retired path-tokenizer diagnostic | 540 | `lib/keeper/keeper_path_check_error.ml`, Shell IR path checks | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. |
 | `other` / unclassified failures | 459 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | `shape_block:unknown` | 352 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Historical only for public `Execute`; new calls fail typed input validation before raw shape parsing. Keep the bucket for old samples and adjacent shell surfaces that still report parser-unknown shape blocks. |
 | Multi-repo cwd required | 286 | `lib/keeper/keeper_sandbox_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Return a typed public `Execute { executable, argv, cwd }` retry shape when sandbox-root git/gh cannot be resolved. Do not infer repository scope from `cd ... &&` command text. |
@@ -66,7 +66,7 @@ indirectly: those paths inlined review prose into a shell command, so markdown,
 globs, quotes, or code snippets could be classified by the wrong layer before
 `gh` ran.
 
-The retired code-edit surface, public `EditFile`, and public `WriteFile` showed a separate writable
+The retired code-edit surface, public `Edit`, and public `Write` showed a separate writable
 path leak: `repos/<repo>/...` already mapped to the keeper's own playground, but
 repo-top paths such as `lib/foo.ml` were interpreted against the root checkout
 and then blocked as outside the writable sandbox. When exactly one repo exists
@@ -95,7 +95,7 @@ scripts/analyze-keeper-execute-failures.sh /Users/dancer/me 240
 The same command now emits both the Execute-specific census and a
 `[surface summary]`/`[surface failure categories]` section for
 `tool_execute`, `tool_search_files`, the retired code-shell/code-edit surfaces, and public
-`EditFile`/`WriteFile`, plus the PR review read/comment/reply surfaces that showed the
+`Edit`/`Write`, plus the PR review read/comment/reply surfaces that showed the
 same path-syntax leak. This lets the `<10%` target be checked across the related
 shell, code-edit, and review surfaces after the PR is merged and a fresh runtime
 window exists.

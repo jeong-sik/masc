@@ -39,13 +39,13 @@ The audit assumed `turn_state` was the *data product* of a turn (so that "constr
 
 ### 2.2 Receipt is built once, at one site, near turn-end
 
-`Keeper_execution_receipt.append` is called from a single region (`keeper_agent_run.ml:1290-1343`). Receipt construction depends on the entire turn's accumulated state: response text, tool calls, prompt metrics, cascade attempts, etc.
+`Keeper_execution_receipt.append` is called from a single region (`keeper_agent_run.ml:1290-1343`). Receipt construction depends on the entire turn's accumulated state: response text, tool calls, prompt metrics, runtime attempts, etc.
 
-Most early-fail emit sites (e.g. `cascade_unavailable` at line 215, `livelock_blocked` at line 350) fire **before** receipt assembly is possible. Adding `receipt: Receipt.t` to `Failed` would force these sites to either fabricate a partial receipt at emit time (defeats the durability guarantee) or defer the emit until a receipt is built (defeats the "we got past phase X" telemetry semantic).
+Most early-fail emit sites (e.g. `runtime_unavailable` at line 215, `livelock_blocked` at line 350) fire **before** receipt assembly is possible. Adding `receipt: Receipt.t` to `Failed` would force these sites to either fabricate a partial receipt at emit time (defeats the durability guarantee) or defer the emit until a receipt is built (defeats the "we got past phase X" telemetry semantic).
 
 ### 2.3 Module dependency cycle
 
-`Keeper_execution_receipt.t` is a flat record with ~40 fields including provenance, tool surface, cascade rotations, prompt metrics. It is currently a leaf-level type module. `Keeper_turn_fsm` does not depend on it: the `.mli` references `Keeper_turn_fsm` only in comments (`keeper_execution_receipt.mli:64-65`).
+`Keeper_execution_receipt.t` is a flat record with ~40 fields including provenance, tool surface, runtime rotations, prompt metrics. It is currently a leaf-level type module. `Keeper_turn_fsm` does not depend on it: the `.mli` references `Keeper_turn_fsm` only in comments (`keeper_execution_receipt.mli:64-65`).
 
 Adding `Keeper_execution_receipt.t` as a `turn_state` constructor payload requires `Keeper_turn_fsm` → `Keeper_execution_receipt`. Receipt's existing `assert_receipt_authoritative` API takes `turn_state: string` rather than the typed value precisely so this cycle stays broken. The RFC must keep that property.
 
@@ -164,7 +164,7 @@ This RFC must wait for explicit approval before the PR series starts because:
 
 ## 10. Reference
 
-- Audit: `~/Downloads/Kimi_Agent_Keeper FSM 검토/MASC-MCP_Keeper_종합진단보고서.md` §1.2.2, §8.3
+- Audit: `~/Downloads/Kimi_Agent_Keeper FSM 검토/MASC_Keeper_종합진단보고서.md` §1.2.2, §8.3
 - Cycle 5 site: `lib/keeper/keeper_agent_run.ml:1290-1343` (Result.Error promotion comment)
 - TLA invariants: `specs/keeper-turn-fsm/KeeperTurnFSM.tla:314-327` (`EveryTurnHasTerminalReceipt`, `ReceiptMatchesState`, `ReceiptOutcomeSet`)
 - Plan: `~/me/planning/claude-plans/greedy-sleeping-blossom.md` (PPX rigor track gap-fill)

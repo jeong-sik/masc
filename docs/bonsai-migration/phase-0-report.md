@@ -7,10 +7,10 @@ plan against reality instead of assumptions.
 
 ## Timeline
 
-- 2026-04-19 — plan approved (`planning/claude-plans/masc-mcp-eventual-parrot.md`).
+- 2026-04-19 — plan approved (`planning/claude-plans/masc-eventual-parrot.md`).
 - 2026-04-19 — worktree `feature/bonsai-phase-0` created from `origin/main`.
 - 2026-04-19 — OxCaml switch `bonsai-dashboard` (`ocaml-variants.5.2.0+ox`) created.
-- 2026-04-19 — `/dashboard/b/*` server routes added, masc-mcp main build green.
+- 2026-04-19 — `/dashboard/b/*` server routes added, masc main build green.
 - 2026-04-19 — `dashboard_bonsai/` scaffold written.
 - TBD — `dune build` green on OxCaml switch.
 - TBD — first end-to-end smoke (`curl /dashboard/b/hello`).
@@ -28,7 +28,7 @@ plan against reality instead of assumptions.
    fork plus patched packages, including a working `basement`. ARM64 macOS is
    a first-class supported platform.
 3. **Dedicated switch.** `bonsai-dashboard` is a hard isolation boundary from
-   the masc-mcp main switch (stock OCaml 5.4.1). `dune` in the repo root
+   the masc main switch (stock OCaml 5.4.1). `dune` in the repo root
    excludes `dashboard_bonsai/` from the main project tree. Each tree builds
    in its own switch with its own dune-project. No shared OCaml link graph.
 4. **Preact coexistence.** `/dashboard/*` continues to serve Vite output.

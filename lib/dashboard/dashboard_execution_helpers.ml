@@ -11,7 +11,7 @@ type session_seed = {
   session_id : string;
   goal : string;
   namespace : string option;
-  status : string;
+  status : string option;
   health : string;
   member_names : string list;
   last_activity_at : string option;
@@ -62,7 +62,6 @@ type continuity_context = {
 }
 
 type tool_audit_snapshot = {
-  allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
   latest_action_source : string option;
@@ -70,59 +69,23 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
-let json_string_option value =
-  match value with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
-
 let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
-  | _ -> `Null
-
-let string_field ?(default = "") key json =
-  match member_assoc key json with
-  | `String value -> value
-  | _ -> default
-
-let string_field_opt key json =
-  match member_assoc key json with
-  | `String value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then Some trimmed else None
-  | _ -> None
-
-let take n lst = List.filteri (fun i _ -> i < n) lst
-
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int value -> value
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float value -> int_of_float value
-  | _ -> default
-
-let list_field key json =
-  match member_assoc key json with
-  | `List items -> items
-  | _ -> []
-
-let compact_text ?(max_len = 160) raw =
-  let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun value -> value <> "")
-    |> String.concat " "
-    |> String.trim
-  in
-  if normalized = "" then ""
-  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
+let member_assoc = Dashboard_utils.member_assoc
+let string_field = Dashboard_utils.string_field
+let take = List.take
+let list_field = Dashboard_utils.list_field
+let compact_text = String_util.compact_text
+let session_payload_json = Dashboard_utils.session_payload_json
+let session_meta_json = Dashboard_utils.session_meta_json
+let session_summary_json = Dashboard_utils.session_summary_json
+let session_team_health_json = Dashboard_utils.session_team_health_json
+let session_communication_json = Dashboard_utils.session_communication_json
+let session_status_opt = Dashboard_utils.session_status_opt
+let session_recent_events = Dashboard_utils.session_recent_events
+let event_detail_json = Dashboard_utils.event_detail_json
 
 
 let latest_iso_timestamp values =
@@ -153,16 +116,8 @@ let execution_tool_preview_limit = 8
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
 
-let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
-  let preview = cap_string_list ~limit values in
-  [
-    (field ^ "_count", `Int (List.length values));
-    (field ^ "_preview", Json_util.json_string_list preview);
-  ]
-
 let tool_audit_snapshot agent_name =
   {
-    allowed_tool_names = [];
     latest_tool_names = [];
     latest_tool_call_count = None;
     latest_action_source = None;
@@ -203,12 +158,10 @@ let skill_route_summary_of_keeper keeper =
                 source;
               ]))
 
-let dedup_strings items =
-  List.sort_uniq String.compare
-    (List.filter_map String_util.trim_to_option items)
+let dedup_strings = Dashboard_utils.dedup_strings
 
 (** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
-    Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)
+    Used by dashboard_briefing / dashboard_briefing_assembly for external JSON data. *)
 let severity_rank = function
   | "bad" | "critical" | "failed" -> 2
   | "warn" | "blocked" | "paused" | "interrupted" -> 1
@@ -268,14 +221,13 @@ let load_persona_profile (persona_name : string) : agent_profile option =
     match Safe_ops.read_json_file_safe path with
     | Error _ -> None
     | Ok json ->
-        let open Yojson.Safe.Util in
         let name_val =
           Safe_ops.json_string_opt "name" json
           |> Option.value ~default:persona_name
         in
         let keeper_json =
           Safe_ops.protect ~default:None (fun () ->
-            Some (json |> member "keeper"))
+            Some (Option.value ~default:`Null (Json_util.assoc_member_opt "keeper" json)))
         in
         let model =
           match keeper_json with
@@ -317,21 +269,21 @@ let populate_neo4j_identity_cache_locked () =
   let body =
     {|{"query":"{ agents(first: 50) { edges { node { name emoji koreanName model traits interests activityLevel primaryValue } } } }"}|}
   in
-  match Graphql_client.request ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) body with
+  match Graphql_client.request body with
   | Error e when is_neo4j_identity_context_error e ->
       Log.Dashboard.info "neo4j identity cache skipped: %s" e
   | Error e -> Log.Dashboard.warn "neo4j identity cache load failed: %s" e
   | Ok output -> (
       try
         let json = Yojson.Safe.from_string output in
-        let open Yojson.Safe.Util in
+        let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
         let edges =
-          json |> member "data" |> member "agents" |> member "edges"
-          |> to_list
+          (match json |> m "data" |> m "agents" |> m "edges" with
+           | `List l -> l | _ -> [])
         in
         List.iter
           (fun edge ->
-            let node = edge |> member "node" in
+            let node = edge |> m "node" in
             let name = Safe_ops.json_string ~default:"" "name" node in
             if name <> "" then begin
               let emoji =
@@ -345,11 +297,11 @@ let populate_neo4j_identity_cache_locked () =
               let model = Safe_ops.json_string_opt "model" node in
               let traits =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> member "traits" |> to_list |> List.map to_string)
+                  (match node |> m "traits" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
               in
               let interests =
                 Safe_ops.protect ~default:[] (fun () ->
-                  node |> member "interests" |> to_list |> List.map to_string)
+                  (match node |> m "interests" with `List l -> List.filter_map (function `String s -> Some s | _ -> None) l | _ -> []))
               in
               let activity_level = Safe_ops.json_float_opt "activityLevel" node in
               let primary_value = Safe_ops.json_string_opt "primaryValue" node in

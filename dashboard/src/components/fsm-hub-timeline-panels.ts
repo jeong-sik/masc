@@ -3,6 +3,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { DashedNotice } from './common/dashed-notice'
 import { TextInput } from './common/input'
+import { ringFocusClasses } from './common/ring'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { unixSecondsToDate } from '../lib/format-time'
 
@@ -46,7 +47,7 @@ const SWIMLANE_LANES: Array<{
   { key: 'phase', label: 'Keeper 생명주기', short: 'KSM' },
   { key: 'turn', label: '턴 주기', short: 'KTC' },
   { key: 'decision', label: '의사결정', short: 'KDP' },
-  { key: 'cascade', label: '캐스케이드', short: 'KCL' },
+  { key: 'runtime', label: '런타임', short: 'KCL' },
   { key: 'compaction', label: '컨텍스트 압축', short: 'KMC' },
 ]
 
@@ -236,7 +237,7 @@ export function SwimlaneTimeline({
                       data-lane-key=${lane.key}
                       data-lane-index=${laneIndex}
                       data-seg-index=${segIndex}
-                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-inset ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
+                      class=${`${swimlaneSegmentColor(seg.value)} h-full transition-[filter,opacity,box-shadow] duration-[var(--t-med)] border-r border-[var(--color-border-default)] last:border-r-0 cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, inset: true })} ${isHovered ? 'ring-1 ring-[var(--color-accent-fg)] brightness-125' : ''} ${dimmed ? 'opacity-40' : ''}`}
                       style=${`width: ${pct.toFixed(2)}%`}
                       title=${`${lane.label} (${lane.short}) · ${displayState(seg.value)} (${seg.value})\n${fmtAbs(seg.from)} → ${fmtAbs(seg.to)} · ${holdFor}`}
                       aria-label=${ariaLabel}
@@ -283,7 +284,7 @@ export function SwimlaneTimeline({
                 prev.phase !== obs.phase ||
                 prev.turn !== obs.turn ||
                 prev.decision !== obs.decision ||
-                prev.cascade !== obs.cascade ||
+                prev.runtime !== obs.runtime ||
                 prev.compaction !== obs.compaction
               )
               const dotCls = hasTransition
@@ -293,7 +294,7 @@ export function SwimlaneTimeline({
                 ...(prev.phase !== obs.phase ? ['KSM'] : []),
                 ...(prev.turn !== obs.turn ? ['KTC'] : []),
                 ...(prev.decision !== obs.decision ? ['KDP'] : []),
-                ...(prev.cascade !== obs.cascade ? ['KCL'] : []),
+                ...(prev.runtime !== obs.runtime ? ['KCL'] : []),
                 ...(prev.compaction !== obs.compaction ? ['KMC'] : []),
               ]
               const tip = `${fmtAbs(obs.ts)}${changedLanes.length > 0 ? ` · ${changedLanes.join(', ')} changed` : ' · no change'}`
@@ -456,7 +457,7 @@ export function TransitionTrail({
 
 /** Top-N transition frequency ranking. Surfaces the (from → to) pairs the
     keeper takes most often inside the in-memory observation window — useful
-    for spotting churn (e.g. KCL idle ↔ trying repeating means cascade is
+    for spotting churn (e.g. KCL idle ↔ trying repeating means runtime is
     flapping) and for confirming the keeper exercises every lane it owns. */
 export function TopTransitionsPanel({
   transitions,

@@ -20,17 +20,11 @@ Do not assume access to any other MASC tool from this endpoint."
 
 let managed_agent_instructions =
   "MASC managed-agent profile exposes the internal agent control surface. \
-Prefer canonical task-control tools such as masc_status, masc_tasks, masc_claim_next, masc_transition, and masc_plan_set_task. \
+Prefer canonical task-control tools such as masc_status, masc_tasks, keeper_task_claim, masc_transition, and masc_plan_set_task. \
 Do not assume that the public /mcp surface and the managed-agent surface have the same inventory."
 
 let managed_agent_passthrough_tool_names =
-  Agent_tool_surfaces.spawned_agent_public_tool_names
-  |> List.filter (fun name ->
-         not
-           (List.mem name
-             [
-                "masc_a2a_delegate";
-              ]))
+  Keeper_tool_surfaces.spawned_agent_public_tool_names
 
 (* O(1) membership view of [managed_agent_passthrough_tool_names].
    Used by [tool_schemas_for_profile Managed_agent] to filter
@@ -58,49 +52,41 @@ let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =
   in
   List.rev result
 
-let default_instructions =
-  "MASC (Multi-Agent Streaming Coordination) enables AI agent collaboration. \
-PROJECT: Agents sharing the same base path (.masc/ folder) coordinate together. \
-CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (otherwise tool surfaces use the configured cluster/default label). \
+let default_instructions () =
+  Printf.sprintf
+    "MASC (Multi-Agent Streaming Workspace) enables AI agent collaboration. \
+PROJECT: Agents sharing the same base path (.masc/ folder) align together. \
+CLUSTER: Set MASC_CLUSTER_NAME for multi-machine workspace (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
+WORKFLOW: %s. \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
+    (Tool_contract_guidance.task_lifecycle_workflow ())
 
 let tool_schemas_for_profile ?(include_hidden = false)
-    ?(include_keeper_internal = false) _state
+    ?(include_agent_internal = false) _state
     profile =
   let schemas =
     match profile with
     | Full ->
         let show_all = include_hidden || Tool_catalog.full_surface_override () in
-        let keeper_internal_schemas =
-          if not include_keeper_internal then []
-          else
-            Tool_shard.all_keeper_tool_schemas
-            |> List.filter (fun (schema : Masc_domain.tool_schema) ->
-                   Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
-                     schema.name
-                   && Tool_catalog.is_visible ~include_hidden:true schema.name)
-        in
+        (* The Agent_internal surface was empty (agent_internal_surface_tools =
+           []), so no schema was ever agent-internal.  Surface deleted in the
+           surface-cut refactor; [include_agent_internal] no longer adds any
+           schema and the per-schema agent-internal branch is unreachable. *)
         let all =
           Config.visible_tool_schemas
-            ~include_hidden:(show_all || include_keeper_internal)
+            ~include_hidden:(show_all || include_agent_internal)
             ()
-          @ keeper_internal_schemas
           |> dedupe_tool_schemas_by_name
         in
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              let is_keeper_internal =
-                Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
-              in
-              (not (Tool_catalog.is_on_surface Tool_catalog.System_internal schema.name))
-              && (if is_keeper_internal then include_keeper_internal
-                  else show_all || Tool_catalog.is_public_mcp schema.name))
+              (not (Tool_catalog_surfaces.is_system_internal_hidden schema.name))
+              && (show_all || Tool_catalog.is_public_mcp schema.name))
             all
         in
         full_profile_tools
@@ -113,7 +99,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         in
         dedupe_tool_schemas_by_name
           (Sdk_tool_contract.sdk_tool_schemas @ passthrough)
-    | Operator_remote -> Tool_operator.remote_schemas
+    | Operator_remote -> Tool_operator.remote_schemas ()
   in
   schemas
 
@@ -121,35 +107,36 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
     tool_name =
   match profile with
   | Full ->
-      if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name then
-        internal_keeper_runtime
-      else
-        (* Equivalent to [List.mem tool_name (names from
-           visible_tool_schemas ~include_hidden:true)]: that helper
-           composes raw schemas → dedupe → canonicalize → filter
-           is_visible.  Dedupe and
-           canonicalize do not change the name set, so the name set is
-           exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
-           Two O(1) checks replace ~150 schema canonicalizations + a
-           List.mem per dispatch. *)
-        Config.is_raw_tool_name tool_name
-        && Tool_catalog.is_visible ~include_hidden:true tool_name
+      (* The Agent_internal surface was empty, so no tool was ever
+         agent-internal; [internal_keeper_runtime] no longer gates anything.
+         Surface deleted in the surface-cut refactor.
+         Equivalent to [List.mem tool_name (names from
+         visible_tool_schemas ~include_hidden:true)]: that helper
+         composes raw schemas → dedupe → canonicalize → filter
+         is_visible.  Dedupe and
+         canonicalize do not change the name set, so the name set is
+         exactly { n | n ∈ raw_all_tool_schemas.names ∧ is_visible n }.
+         Two O(1) checks replace ~150 schema canonicalizations + a
+         List.mem per dispatch. *)
+      ignore (internal_keeper_runtime : bool);
+      Config.is_raw_tool_name tool_name
+      && Tool_catalog.is_visible ~include_hidden:true tool_name
   | Managed_agent ->
       Option.is_some (Sdk_tool_contract.sdk_binding_by_name tool_name)
       || (tool_schemas_for_profile state Managed_agent
           |> List.exists (fun (schema : Masc_domain.tool_schema) ->
                  String.equal schema.name tool_name))
-  | Operator_remote -> List.mem tool_name Tool_operator.remote_tool_names
+  | Operator_remote -> List.mem tool_name (Tool_operator.remote_tool_names ())
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
   in
   let destructive =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
   in
   let idempotent =
-    Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
+    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
   in
   (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
      interact with systems outside the server's closed world.
@@ -184,7 +171,7 @@ let add_metadata_field_if_absent key value fields =
 ;;
 
 let descriptor_metadata_fields tool_name fields =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> fields
   | Some descriptor ->
     let fields =
@@ -204,13 +191,13 @@ let descriptor_metadata_fields tool_name fields =
          (`String descriptor.internal_name)
     |> add_metadata_field_if_absent
          "descriptorExecutor"
-         (`String (Agent_tool_descriptor.executor_to_string descriptor.executor))
+         (`String (Keeper_tool_descriptor.executor_to_string descriptor.executor))
     |> add_metadata_field_if_absent
          "descriptorBackend"
-         (`String (Agent_tool_descriptor.backend_to_string descriptor.backend))
+         (`String (Keeper_tool_descriptor.backend_to_string descriptor.backend))
     |> add_metadata_field_if_absent
          "descriptorSandbox"
-         (`String (Agent_tool_descriptor.sandbox_to_string descriptor.sandbox))
+         (`String (Keeper_tool_descriptor.sandbox_to_string descriptor.sandbox))
 ;;
 
 let label_words_from_identifier ident =
@@ -227,26 +214,20 @@ let label_words_from_identifier ident =
 (** Custom human-readable titles for key tools.
     Falls back to auto-generated Title Case when absent. *)
 let custom_tool_titles : (string * string) list = [
-  (* Coord lifecycle *)
-  ("masc_join", "Join Project");
-  ("masc_leave", "Leave Project");
+  (* Workspace lifecycle *)
   ("masc_status", "Project Status");
   ("masc_reset", "Reset Project");
-  ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
   (* Task management *)
   ("masc_tasks", "List Tasks");
   ("masc_add_task", "Add Task");
   ("masc_batch_add_tasks", "Batch Add Tasks");
   ("masc_transition", "Transition Task State");
-  ("masc_claim_next", "Claim Next Task");
   ("masc_update_priority", "Update Task Priority");
   ("masc_task_history", "Task Event History");
   (* Communication *)
   ("masc_broadcast", "Broadcast Message");
   ("masc_messages", "Read Messages");
-  ("masc_a2a_delegate", "Agent-to-Agent Delegate");
-  ("masc_a2a_subscribe", "Subscribe to Agent Events");
   (* Planning *)
   ("masc_plan_init", "Initialize Plan");
   ("masc_plan_get", "Get Plan");
@@ -256,9 +237,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_plan_clear_task", "Clear Current Task");
   ("masc_note_add", "Add Note");
   ("masc_deliver", "Deliver Result");
-  (* Agents *)
-  ("masc_agents", "List Agent Details");
-  ("masc_agent_update", "Update Agent Profile");
   (* Heartbeat *)
   ("masc_heartbeat", "Send Heartbeat");
   (* Operations *)
@@ -266,20 +244,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
-  (* Keeper *)
-  ("masc_keeper_up", "Start Keeper");
-  ("masc_keeper_msg", "Send Keeper Message");
-  ("masc_keeper_repair", "Keeper Repair");
-  ("masc_keeper_status", "Keeper Status");
-  ("masc_keeper_sandbox_status", "Keeper Sandbox Status");
-  ("masc_keeper_sandbox_start", "Start Keeper Sandbox");
-  ("masc_keeper_sandbox_stop", "Stop Keeper Sandbox");
-  ("masc_keeper_down", "Stop Keeper");
-  ("masc_keeper_compact", "Compact Keeper Context");
-  ("masc_keeper_clear", "Clear Keeper Context");
-  ("masc_keeper_create_from_persona", "Create Keeper from Persona");
   (* SDK projections *)
-  ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");
 
@@ -304,7 +269,7 @@ let tool_title_of_name name =
 
 let tool_icons_for_name name =
   let icon =
-    if Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
+    if Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
       Mcp_server.themed_icon ~label:"RD" ~bg:"#0F766E" ~fg:"#F0FDFA"
     else
       Mcp_server.themed_icon ~label:"WR" ~bg:"#9A3412" ~fg:"#FFF7ED"
@@ -318,7 +283,7 @@ let maybe_assoc_field name = function
 let tool_output_schema_field _ =
   (* Public MCP tools still return text-first envelopes and only some handlers
      opportunistically emit structuredContent. Advertising outputSchema before
-     structuredContent is guaranteed breaks strict clients such as Provider_c/FastMCP,
+     structuredContent is guaranteed breaks strict clients such as Anthropic/FastMCP,
      which reject the tool result as malformed. Keep outputSchema disabled until
      the call path can produce typed payloads from the handler itself. *)
   None
@@ -371,26 +336,24 @@ let strict_assoc_params params =
            (Json_util.kind_name other))
 
 let cursor_param payload =
-  let open Yojson.Safe.Util in
-  match payload |> member "cursor" with
-  | `Null -> Ok None
-  | `String value ->
+  match Json_util.assoc_member_opt "cursor" payload with
+  | None -> Ok None
+  | Some (`String value) ->
       let trimmed = String.trim value in
       if trimmed = "" then
         Error "Invalid params: cursor must not be empty"
       else
         Ok (Some trimmed)
-  | other ->
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: cursor must be a string (received %s)"
            (Json_util.kind_name other))
 
 let bool_param payload key =
-  let open Yojson.Safe.Util in
-  match payload |> member key with
-  | `Null -> Ok false
-  | `Bool value -> Ok value
-  | other ->
+  match Json_util.assoc_member_opt key payload with
+  | None -> Ok false
+  | Some (`Bool value) -> Ok value
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: %s must be a boolean (received %s)"
            key (Json_util.kind_name other))
@@ -453,16 +416,15 @@ let cursor_only_params params =
            (Json_util.kind_name other))
 
 let validate_optional_meta payload =
-  match Yojson.Safe.Util.member "_meta" payload with
-  | `Null
-  | `Assoc _ -> Ok ()
-  | other ->
+  match Json_util.assoc_member_opt "_meta" payload with
+  | None
+  | Some (`Assoc _) -> Ok ()
+  | Some other ->
       Error
         (Printf.sprintf "Invalid params: _meta must be an object (received %s)"
            (Json_util.kind_name other))
 
 let requested_tool_list_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed =
     [ "_meta"; "names"; "include_hidden"; "include_usage"; "cursor" ]
@@ -480,9 +442,9 @@ let requested_tool_list_params params =
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
     let* names =
-      match payload |> member "names" with
-      | `Null -> Ok None
-      | `List items ->
+      match Json_util.assoc_member_opt "names" payload with
+      | None -> Ok None
+      | Some (`List items) ->
           items
           |> List.fold_left
                (fun acc item ->
@@ -497,7 +459,7 @@ let requested_tool_list_params params =
                           (Json_util.kind_name bad)))
                (Ok [])
           |> Result.map (fun names -> Some (List.rev names))
-      | other ->
+      | Some other ->
           Error
             (Printf.sprintf
                "Invalid params: names must be an array of strings (received %s)"
@@ -515,7 +477,6 @@ let requested_tool_list_params params =
       }
 
 let parse_cursor_only_params params =
-  let open Yojson.Safe.Util in
   let* fields = strict_assoc_params params in
   let allowed = [ "_meta"; "cursor" ] in
   let unknown =
@@ -530,10 +491,10 @@ let parse_cursor_only_params params =
   else
     let payload = `Assoc fields in
     let* () = validate_optional_meta payload in
-    match payload |> member "cursor" with
-    | `Null -> Ok { cursor = None }
-    | `String cursor -> Ok { cursor = Some cursor }
-    | other ->
+    match Json_util.assoc_member_opt "cursor" payload with
+    | None -> Ok { cursor = None }
+    | Some (`String cursor) -> Ok { cursor = Some cursor }
+    | Some other ->
         Error
           (Printf.sprintf
              "Invalid params: cursor must be a string (received %s)"

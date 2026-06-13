@@ -10,8 +10,8 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - **Lifeline** — 60s heartbeat sparkline
 - **Sidebar** — Fleet list with keeper heartbeats + Goals list
 - **Swimlanes** — 5 keepers × timeline with brass "now" column
-- **Deck** — tab group (Board / Tasks / Goals / Verified / Providers / Cascade) with content
-- **Rail** — activity feed + cascade trace
+- **Deck** — tab group (Board / Tasks / Goals / Verified / Providers / Runtime) with content
+- **Rail** — activity feed + runtime trace
 - **Composer** — keeper.claim() input
 - **Status Bar** — build + online providers
 - **Planes / Crew / Drawer / Focus / WidgetSolo / StatusTray** — extended surfaces (multi-plane layout with a reachable Crew mode, multi-keeper crew, slide-out drawer, focus overlay, single-widget solo view, status tray)
@@ -28,16 +28,16 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 - `drawer.css`, `focus-mode.css`, `status-tray.css`, `widget-solo.css` — surface-specific styles
 
 ### Seed data
-- `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, cascade)
-- `data-p2.js` — Phase 2 seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes — sourced from real `.masc/*` records)
-- `data-crew.js` — Phase 3 crew seed data (multi-keeper crew / Planes view)
+- `data.js` — Phase 1 seed data (keepers, goals, tasks, events, providers, runtime)
+- `data-p2.js` — Phase 2 synthetic seed data (branches, nudges, board posts, messages, audit, costs, decisions, episodes)
+- `data-crew.js` — empty synthetic crew seed; repository previews must not embed `.masc` dumps
 
 ### App shell
 - `App.jsx` — root layout + state (mode, density, selected keeper/goal)
 - `Chrome.jsx` — `Topbar` · `Ticker` · `KpiStrip` · `Lifeline` (top-of-screen surfaces)
 - `Panels.jsx` — `Sidebar` · `Swimlanes` · `Deck` · `Rail` · `Composer` · `StatusBar` (main work area)
 - `Planes.jsx` — multi-plane (Work / Comms / Observe / Cognition / IDE) layout
-- `CrewPlane.jsx` — Crew plane (multi-keeper inspector grid)
+- `CrewPlane.jsx` — Crew plane shell (multi-keeper inspector grid, no repository-shipped live dump)
 
 ### Surface components
 - `Drawer.jsx` — slide-out drawer (terminal / inspector surfaces; referenced by RFC 0025)
@@ -53,5 +53,5 @@ Interactive recreation of the MASC single-pane cockpit. One HTML, React-driven, 
 
 - Surfaces are grouped into shared JSX files (`Chrome.jsx`, `Panels.jsx`, `cb-group-*.jsx`) rather than one file per surface — related components share a file to keep the module count low.
 - All components publish themselves on `window` so Babel-compiled scripts can use them without explicit imports.
-- Seed data in `data.js`, `data-p2.js`, and `data-crew.js` mirrors real `.masc/` records (fleet IDs, goal IDs, board posts, decisions). For a per-component design library see `../../preview/components.html`.
+- Seed data in `data.js`, `data-p2.js`, and `data-crew.js` is synthetic. Do not mirror `.masc/` records, keeper prompts, runtime profile names, decision logs, or operator transcripts into repository previews. For a per-component design library see `../../preview/components.html`.
 - Consolidated from the previously parallel `dashboard/cockpit-kit/` standalone build on 2026-05-13. RFC 0013 references this directory as the migration source for the KpiStrip / Lifeline / Ticker production ports.

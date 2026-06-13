@@ -8,7 +8,7 @@
       never raises, never empties the block.
     - Non-ToolResult blocks (Text, ToolUse, etc.) pass through. *)
 
-module H = Masc_mcp.Keeper_artifact_hydrator
+module H = Masc.Keeper_artifact_hydrator
 module B = Tool_blob_store
 module O = Tool_output
 module T = Agent_sdk.Types
@@ -43,7 +43,8 @@ let store_a_blob store payload =
   | O.Inline _ -> failwith "expected Stored"
 
 let tool_result_block ~tool_use_id ~content : T.content_block =
-  T.ToolResult { tool_use_id; content; is_error = false; json = None }
+  T.ToolResult
+    { tool_use_id; content; is_error = false; json = None; content_blocks = None }
 
 let make_tool_message ~tool_use_id ~content : T.message =
   {
@@ -155,7 +156,7 @@ let test_non_tool_result_unchanged () =
 let test_hydration_miss_keeps_marker () =
   with_temp_dir (fun dir ->
       let store = B.create ~base_path:dir in
-      (* Construct a sentinel marker for content that was NEVER stored. *)
+      (* Construct a blob marker for content that was NEVER stored. *)
       let phantom =
         O.encode_for_oas
           (O.Stored

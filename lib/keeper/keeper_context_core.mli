@@ -79,24 +79,30 @@ val text_of_history_jsonl_json : Yojson.Safe.t -> string
 
 (** {1 Message repair} *)
 
-(** Insert dangling-tool-use placeholders + drop orphan tool
-    results so OAS checkpoint replay never sees a mismatched pair. *)
+(** Drop dangling tool-use and orphan tool-result blocks so OAS checkpoint
+    replay never sees a mismatched pair.  The repair is intentionally
+    metadata-only: it must not fabricate visible text that can leak to the
+    model or dashboard. *)
 val repair_broken_tool_call_pairs :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
 type tool_pair_repair_stats =
-  { downgraded_tool_uses : int
-  ; downgraded_tool_results : int
+  { dropped_tool_uses : int
+  ; dropped_tool_results : int
+  ; dropped_tool_use_samples : (string * string) list
+  ; dropped_tool_result_ids : string list
   }
 
 val tool_pair_repair_stats_changed : tool_pair_repair_stats -> bool
+val pair_repair_diagnostic_max_bytes : int
+val bound_pair_repair_diagnostic_string : string -> string
 
 val pair_repair_metadata_key : string
 (** Message metadata key carrying bounded provenance for tool-pair repair
-    fabrications. Repaired messages also carry [was_fabricated=true]. *)
+    drops. Repaired messages also carry [was_repaired=true]. *)
 
 (** Same repair as {!repair_broken_tool_call_pairs}, plus counters for
-    ToolUse/ToolResult blocks downgraded to plain text. This keeps the
+    ToolUse/ToolResult blocks dropped from visible content. This keeps the
     repair path observable without changing the legacy return type. *)
 val repair_broken_tool_call_pairs_with_stats :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
@@ -153,7 +159,6 @@ val save_oas_checkpoint :
   max_checkpoint_messages:int ->
   session:session_context ->
   agent_name:string ->
-  model:string ->
   ctx:working_context ->
   generation:int ->
   (Agent_sdk.Checkpoint.t, string) result
@@ -165,11 +170,14 @@ val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** Drop orphan [tool_result] blocks (those without a matching
     preceding [tool_use]) so a checkpoint payload satisfies the
-    Provider_a API invariant that every tool_result references a known
+    Anthropic API invariant that every tool_result references a known
     tool_use. Public so [Keeper_rollover] / [Keeper_post_turn] can
     reuse it before persisting a checkpoint. *)
 val repair_orphan_tool_result_messages :
   Agent_sdk.Types.message list -> Agent_sdk.Types.message list
+
+val repair_orphan_tool_result_messages_with_stats :
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list * tool_pair_repair_stats
 
 type checkpoint_sanitize_stats = {
   dropped_messages : int;
@@ -177,13 +185,15 @@ type checkpoint_sanitize_stats = {
   dropped_chars : int;
   truncated_blocks : int;
   truncated_chars : int;
+  tool_pair_repair : tool_pair_repair_stats;
 }
 
 (** Apply [sanitize_checkpoint_messages] (cap blocks / drop oversize
     payloads) and, when [repair_orphans] is [true] (default), also
     drop orphan tool_use/tool_result pairs so the resulting checkpoint
-    is safe to persist. Returns the cleaned checkpoint plus
-    aggregated stats. *)
+    is safe to persist. Returns the cleaned checkpoint plus aggregated
+    stats, including bounded pair-repair diagnostics so dropped
+    structural blocks are observable without becoming visible text. *)
 val sanitize_oas_checkpoint :
   ?repair_orphans:bool ->
   Agent_sdk.Checkpoint.t ->
@@ -194,7 +204,7 @@ val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 
 val default_max_checkpoint_tool_result_chars : int
 (** Per-tool-result text cap (in chars) applied when projecting
-    Provider_a [tool_result] blocks into a checkpoint. Beyond this
+    Anthropic [tool_result] blocks into a checkpoint. Beyond this
     threshold the payload collapses to a stub so a single
     orphan-repair pass cannot inflate one block to multi-MB. *)
 
@@ -222,15 +232,10 @@ val sanitize_checkpoint_message :
     contract block-by-block. *)
 
 val checkpoint_text_cap_marker : string
-(** Sentinel suffix appended to a Text or tool_result block when the
+(** Marker suffix appended to a Text or tool_result block when the
     sanitizer truncates it (newline followed by the [capped] marker).
     Tests assert against this literal so the marker is part of the
     public contract. *)
-
-(** Pick the keeper's preferred model for checkpointing —
-    canonical cascade name first, then a fallback list of
-    provider-default labels. *)
-val checkpoint_model_of_meta : Keeper_types.keeper_meta -> string
 
 (** Project an OAS checkpoint to a working_context. Optionally
     repair orphan tool results and cap the message tail. *)

@@ -50,7 +50,7 @@ val sdk_aliases_for_operation :
 val core_remote_operation_names : string list
 (** Deduplicated union of [canonical_operation] values from
     {!sdk_bindings} plus the hand-written core operation list
-    (masc_join / masc_operator_action / etc.). Used by the dashboard
+    (masc_operator_action / etc.). Used by the dashboard
     capability inventory and the discovery wiring. *)
 
 val sdk_tool_schemas : Masc_domain.tool_schema list

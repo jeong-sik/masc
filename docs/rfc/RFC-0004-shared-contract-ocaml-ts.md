@@ -10,8 +10,8 @@ implementation_prs: []
 
 **Status**: Active (frontmatter SSOT; Phase A0.1 completed 2026-05-17)
 **Date**: 2026-04-17
-**Scope**: masc-mcp OCaml server ↔ dashboard TypeScript contract boundary; SSE event stream, gRPC surface
-**One sentence**: masc-mcp 의 두 contract 표면(SSE, gRPC) 중 SSE 에는 atd 기반 OCaml→JSON Schema→Zod AST 파이프라인으로 SSOT 를 도입하고, gRPC 는 dashboard 소비 경로(Connect-RPC 또는 gRPC-web)를 여는 thin slice 로 시작한다.
+**Scope**: masc OCaml server ↔ dashboard TypeScript contract boundary; SSE event stream, gRPC surface
+**One sentence**: masc 의 두 contract 표면(SSE, gRPC) 중 SSE 에는 atd 기반 OCaml→JSON Schema→Zod AST 파이프라인으로 SSOT 를 도입하고, gRPC 는 dashboard 소비 경로(Connect-RPC 또는 gRPC-web)를 여는 thin slice 로 시작한다.
 
 ## Related Documents
 
@@ -43,7 +43,7 @@ Track A 의 Phase A0.1 sprint (atd-based typed SSE envelope) 완료. 5 sub-PR + 
 | Sub-PR | PR # | 결과 |
 |---|---|---|
 | PR-1 | #15807 | atd schema + leaf lib + agent_started constructor + byte-equal PoC |
-| PR-2 | #15811 | AgentStarted cascade arm typed-routed |
+| PR-2 | #15811 | AgentStarted runtime arm typed-routed |
 | PR-3 | #15824 | 5 simple-record arms (tool/turn) |
 | PR-4 | #15830 | 8 simple-record arms (handoff/context/replacement/slot) |
 | PR-3b | #15835 | agent_completed/agent_failed — variable-shape addendum 패턴 |
@@ -66,7 +66,7 @@ Track A 의 Phase A0.1 sprint (atd-based typed SSE envelope) 완료. 5 sub-PR + 
 
 ## Context
 
-masc-mcp contract 표면은 두 갈래:
+masc contract 표면은 두 갈래:
 
 1. **gRPC 표면 (proto SSOT)** — `proto/masc.proto` (249 lines) 정의, `ocaml-protoc-plugin` 으로 OCaml AST 변환. `lib/grpc/masc_grpc_server.ml` 이 port **8936 h2c** (HTTP/2 cleartext, `grpc-direct` Eio-native) 로 listen 중. gRPC Reflection v1/v1alpha 지원. `scripts/gen-grpc-descriptors.sh` 가 drift 검증. **서버는 실제로 돌고 있다**. 하지만 dashboard 는 이 표면을 **아직 소비하지 않는다** — 브라우저는 h2c 를 쓸 수 없고 (TLS + HTTP/2 native 필수, 안정 API 없음), Connect-RPC / gRPC-web 어느 쪽도 서버에 추가되지 않았기 때문.
 2. **SSE/Dashboard 표면 (hand-rolled)** — OCaml emitter 가 `Yojson` ad-hoc 생성, dashboard `dashboard/src/types/sse.ts` 가 60+ `SSEEventType` 리터럴 union 수동 유지. PR #7955 로 Zod runtime parse 게이트 확보했지만 정의의 SSOT 부재.
@@ -82,7 +82,7 @@ masc-mcp contract 표면은 두 갈래:
 현재 `lib/sse.ml` 은 `Yojson.Safe.t` 를 ad-hoc 조립한다. 정형 타입이 없으므로 codegen 을 붙일 수 없다.
 
 **범위 실측 (2026-04-17 작성 시점)** — dashboard 가 소비하는 60+ `SSEEventType` 리터럴 중:
-- masc-mcp 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `room_*`, `transport_*`, `execution_*` 등)
+- masc 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `workspace_*`, `transport_*`, `execution_*` 등)
 - **OAS bridge relay**: **21개** (`oas:*` 접두어) — `agent_sdk` 라이브러리의 `Event_bus.payload` variant 를 `lib/oas_event_bridge.ml` 이 릴레이
 
 **Resume 시점 재실측 (2026-05-17, HEAD `ccf0d9d3f0`)**:
@@ -102,7 +102,7 @@ masc-mcp contract 표면은 두 갈래:
 `Sse_event` variant 에 `| Oas of { envelope : oas_envelope; data : Yojson.Safe.t }` 하나로 입목. JSON Schema 에서 data 는 `{"type":"object"}` 로 열어둠.
 
 이점:
-- cross-repo 협업 없이 masc-mcp 단독 진행 가능
+- cross-repo 협업 없이 masc 단독 진행 가능
 - agent_sdk 쪽에 ppx 추가는 장기 옵션 (별도 upstream PR)
 - OAS 이벤트 타입 자체는 dashboard 에서 여전히 검증 (envelope 포함)
 
@@ -116,14 +116,14 @@ type oas_envelope = {
 }
 
 type sse_event = [
-  | Agent_joined of agent_joined_payload
+  | Agent_bound of agent_bound_payload
   | Keeper_heartbeat of keeper_heartbeat_payload
   | Oas of oas_event_wrapper  (* ~ opaque *)
   | ...
 ] <json adapter.ocaml="Sse_event_adapter">
 ```
 
-`<json adapter>` 가 variant tag 를 `{"type":"agent_joined", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
+`<json adapter>` 가 variant tag 를 `{"type":"agent_bound", ...fields}` 형태로 flatten. `masc/board_post`, `oas:turn_completed` 등 특수 문자는 adapter 내부에서 OCaml constructor (`Masc_board_post`) ↔ wire string (`"masc/board_post"`) 매핑.
 
 **emit 경로 교체 전략**:
 - Phase A0 은 도메인별 sub-PR (agent_*, keeper_*, oas_*, board_*) 분할 가능 — 각 sub-PR 은 **byte-equal golden test** 로 기존 emit 동일성 보장

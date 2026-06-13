@@ -3,22 +3,12 @@
 
     Top-level router builder for [/api/v1/broadcast],
     [/api/v1/dashboard/*], and the broader operator-facing JSON
-    surface. Cascade-profile gate accessors let focused tests lock the
-    runtime catalog contract independently of the route pipeline. *)
+    surface. *)
 
 val add_routes :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
-
-val available_cascade_profiles : unit -> string list
-(** Snapshot of qualified cascade profiles currently considered valid by the
-    runtime gate, such as ["tier.primary"] or ["tier-group.primary"].
-    Recomputed on each call. *)
-
-val invalid_cascade_profiles : unit -> (string * string list) list
-(** Snapshot of [(profile_name, violations)] pairs for cascade
-    profiles rejected by the runtime gate. *)
 
 val dashboard_dev_token_path : string -> string
 (** [<base_path>/.masc/auth/dashboard.token] — the canonical

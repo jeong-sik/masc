@@ -5,9 +5,9 @@ export type ViewMode = 'model' | 'keeper'
 export type CostFocus = 'agent' | 'matrix' | 'latency'
 export type AuditFocus = 'actor' | 'summary'
 
-export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
+export type CostView = 'cost' | 'audit' | 'decisions'
 
-export const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
+export const COST_VIEWS: CostView[] = ['cost', 'audit', 'decisions']
 export const COST_FOCUSES: CostFocus[] = ['agent', 'matrix', 'latency']
 export const AUDIT_FOCUSES: AuditFocus[] = ['actor', 'summary']
 

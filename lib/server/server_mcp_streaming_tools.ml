@@ -20,13 +20,12 @@
     (the default per RFC-0100 PR-2) is unaffected. *)
 
 let streaming_capable_tools =
-  [ (* Coordination surface — long-poll messaging and status, currently the
+  [ (* Workspace surface — long-poll messaging and status, currently the
        only consumers of inline POST→SSE framing exercised by the e2e suite
        (test/test_mcp_post_sse_e2e.ml). Promoting these to the registry
        holds the public contract while non-listed tools default to chunked
        JSON under RFC-0100 PR-3. *)
     "masc_status"
-  ; "masc_join"
   ]
 
 let set =

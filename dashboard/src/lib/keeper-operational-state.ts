@@ -27,11 +27,14 @@
 //   paused   ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
 //   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed/Zombie  OR
 //              status ∈ offline/inactive/unbooted
-//   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale)
+//   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale
+//                 AND class is execution-blocking)
 //              OR composite reports fiber_alive === false
 //   running  ⇐ otherwise. When the blocker_class is set but the receipt
 //              is explicitly stale, the blocker is recorded as
 //              `staleBlocker` for display but does NOT drive the headline.
+//              Diagnostic-only classes such as `synthetic_stall` remain
+//              running unless runtime_attention.blocked attests a live block.
 //
 // catch-all `default:` is forbidden — see RFC-0135 §9 (PR-9 CI guard).
 
@@ -46,7 +49,10 @@ import type {
   KeeperCompositeSnapshot,
 } from '../api/schemas/keeper-composite'
 import { deriveBlockerReason } from './keeper-blocker-reason'
-import { keeperDisplayStatus } from './keeper-runtime-display'
+import {
+  isKeeperAutoRecoverPause,
+  keeperDisplayStatus,
+} from './keeper-runtime-display'
 import {
   isKeeperOffline,
   isKeeperPaused,
@@ -117,6 +123,16 @@ function canonicalRuntimeBlockerClass(
   return blockerClass
 }
 
+function runtimeBlockerDrivesStuck(
+  blockerClass: KeeperRuntimeBlockerClass,
+  attention: KeeperCompositeSnapshot['runtime_attention'] | null,
+): boolean {
+  if (blockerClass === 'synthetic_stall') {
+    return attention?.blocked === true
+  }
+  return true
+}
+
 export function deriveKeeperOperationalState(
   { keeper, composite }: DeriveInputs,
 ): KeeperOperationalState {
@@ -140,7 +156,11 @@ export function deriveKeeperOperationalState(
     attention?.execution_current === false
     || attention?.stale_execution_receipt === true
 
-  if (blockerClass !== null && !explicitlyStale) {
+  if (
+    blockerClass !== null
+    && !explicitlyStale
+    && runtimeBlockerDrivesStuck(blockerClass, attention)
+  ) {
     return { kind: 'stuck', ...axes, reason: blockerClass }
   }
 
@@ -177,6 +197,7 @@ function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
 
 function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
   if (k.runtime_blocker_class === 'supervisor_paused') return 'supervisor'
+  if (isKeeperAutoRecoverPause(k)) return 'auto_recover'
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
   if (k.pause_state === 'paused') return 'operator'
   if (k.phase === 'Paused') return 'operator'
@@ -247,64 +268,32 @@ function computeKeeperAttention(
 // invariant-analysis (N-of-M anti-pattern; software-development.md
 // §AI 코드 생성 안티패턴 #2).
 //
-// `KeeperKsmPhase` is the closed sum of states emitted by the backend
-// KeeperStateMachine TLA spec (KSM_STATES in keeper-fsm-specs.ts).
-// `compositePhaseTone` is total and exhaustive — adding a new variant
-// here requires touching every consumer at compile time.
-
-export type KeeperKsmPhase =
-  | 'offline'
-  | 'running'
-  | 'failing'
-  | 'overflowed'
-  | 'compacting'
-  | 'handing_off'
-  | 'draining'
-  | 'paused'
-  | 'stopped'
-  | 'crashed'
-  | 'restarting'
-  | 'dead'
-  | 'zombie'
-
-const KSM_PHASE_VALUES: ReadonlySet<string> = new Set<KeeperKsmPhase>([
-  'offline', 'running', 'failing', 'overflowed', 'compacting',
-  'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-  'restarting', 'dead', 'zombie',
-])
-
-/** Narrow `string` to `KeeperKsmPhase` if it is a known value, else
- *  return `null`. Use at the schema/wire boundary; downstream code
- *  should consume the typed sum directly. */
-export function toKsmPhase(raw: string | null | undefined): KeeperKsmPhase | null {
-  if (raw == null) return null
-  return KSM_PHASE_VALUES.has(raw) ? (raw as KeeperKsmPhase) : null
-}
-
 /** Three-valued tone classification used by FSM-graph node rendering
  *  and invariant cards: terminal/error phases → 'err', long-running
  *  rare-state phases → 'warn', live forward-progress phases → 'active'.
  *
- *  Exhaustive over `KeeperKsmPhase`. If TypeScript reports a missing
+ *  Exhaustive over `KeeperPhase` (the SSOT PascalCase sum from
+ *  `types/core.ts`). Callers with a lowercase wire-format string should
+ *  narrow via `toKeeperPhase` first. If TypeScript reports a missing
  *  case after adding a new variant, route it to the appropriate tone —
  *  do not add a `default:` (RFC-0135 §9-4 forbids catch-all). */
-export function compositePhaseTone(phase: KeeperKsmPhase): 'active' | 'warn' | 'err' {
+export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err' {
   switch (phase) {
-    case 'offline':
-    case 'running':
+    case 'Offline':
+    case 'Running':
       return 'active'
-    case 'overflowed':
-    case 'compacting':
-    case 'handing_off':
-    case 'draining':
-    case 'paused':
-    case 'restarting':
+    case 'Overflowed':
+    case 'Compacting':
+    case 'HandingOff':
+    case 'Draining':
+    case 'Paused':
+    case 'Restarting':
       return 'warn'
-    case 'failing':
-    case 'stopped':
-    case 'crashed':
-    case 'dead':
-    case 'zombie':
+    case 'Failing':
+    case 'Stopped':
+    case 'Crashed':
+    case 'Dead':
+    case 'Zombie':
       return 'err'
   }
 }
@@ -322,18 +311,18 @@ export function compositeIsTurnIdle(snapshot: { turn_phase: string }): boolean {
   return snapshot.turn_phase === 'idle'
 }
 
-/** Composite snapshot has entered the post-cascade-exhaustion failure
- *  mode: KSM has folded to `failing` AND the cascade lane reports
- *  `exhausted` (no provider path left). Two sites in
+/** Composite snapshot has entered the post-runtime-exhaustion failure
+ *  mode: KSM has folded to `failing` AND the runtime lane reports
+ *  `exhausted` (no runtime lane left). Two sites in
  *  `fsm-hub-invariant-analysis` (`nextExpectedStep` /
  *  `deriveOperationalInsight`) need this exact conjunction; an SSOT
  *  prevents the predicate from drifting when either enum evolves.
  *  Phase wire format stays lowercase per the open-string composite
  *  schema. */
-export function isFailingAfterCascadeExhausted(
-  snapshot: { phase: string; cascade: { state: string } },
+export function isFailingAfterRuntimeExhausted(
+  snapshot: { phase: string; runtime: { state: string } },
 ): boolean {
-  return snapshot.phase === 'failing' && snapshot.cascade.state === 'exhausted'
+  return snapshot.phase === 'failing' && snapshot.runtime.state === 'exhausted'
 }
 
 /** Composite compaction is owning the current turn — either the KSM

@@ -1,0 +1,147 @@
+open Alcotest
+
+module Policy = Runtime_transport
+module Auth = Masc.Auth
+
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "")
+    f
+;;
+
+let with_workspace f =
+  let unique =
+    Printf.sprintf
+      "masc-runtime-mcp-policy-auth-%d-%d"
+      (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1000.))
+  in
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) unique in
+  Unix.mkdir dir 0o755;
+  let masc_dir = Filename.concat dir Common.masc_dirname in
+  Unix.mkdir masc_dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm_rf path =
+        if Sys.file_exists path
+        then
+          if Sys.is_directory path
+          then (
+            Array.iter
+              (fun child -> rm_rf (Filename.concat path child))
+              (Sys.readdir path);
+            Unix.rmdir path)
+          else Sys.remove path
+      in
+      rm_rf dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" (Some dir) (fun () ->
+         with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+           with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1:8935") (fun () ->
+             f dir))))
+;;
+
+let masc_headers policy =
+  policy.Llm_provider.Llm_transport.servers
+  |> List.find_map (function
+    | Llm_provider.Llm_transport.Http_server { name = "masc"; headers; _ } ->
+      Some headers
+    | _ -> None)
+  |> Option.value ~default:[]
+;;
+
+let find_header key headers =
+  let key_lc = String.lowercase_ascii key in
+  List.find_map
+    (fun (actual, value) ->
+       if String.equal (String.lowercase_ascii actual) key_lc
+       then Some value
+       else None)
+    headers
+;;
+
+let save_auth_config dir ~enabled ~require_token =
+  Auth.save_auth_config dir { Masc_domain.default_auth_config with enabled; require_token }
+;;
+
+let test_public_policy_absent_without_required_bearer () =
+  with_workspace (fun dir ->
+    save_auth_config dir ~enabled:true ~require_token:true;
+    with_env "MASC_TOKEN" None (fun () ->
+      with_env "MASC_INTERNAL_MCP_TOKEN" (Some "internal-token") (fun () ->
+        check
+          bool
+          "required bearer missing returns no public runtime-MCP policy"
+          true
+          (Option.is_none
+             (Policy.public_mcp_runtime_policy_of_tool_names [ "masc_tasks" ])))))
+;;
+
+let test_public_policy_allowed_when_bearer_not_required () =
+  with_workspace (fun dir ->
+    save_auth_config dir ~enabled:true ~require_token:false;
+    with_env "MASC_TOKEN" None (fun () ->
+      match Policy.public_mcp_runtime_policy_of_tool_names [ "masc_tasks" ] with
+      | None -> fail "auth-optional workspace should allow headerless runtime-MCP policy"
+      | Some policy ->
+        check (list (pair string string)) "no auth headers" [] (masc_headers policy)))
+;;
+
+let test_keeper_policy_uses_internal_token_without_public_bearer () =
+  with_workspace (fun dir ->
+    save_auth_config dir ~enabled:true ~require_token:true;
+    let internal_token = "deterministic-internal-token" in
+    Auth.save_internal_keeper_token_hash dir ~raw_token:internal_token;
+    with_env "MASC_TOKEN" None (fun () ->
+      with_env "MASC_INTERNAL_MCP_TOKEN" (Some internal_token) (fun () ->
+        match
+          Policy.runtime_mcp_policy_of_tool_names
+            ~agent_name:"keeper-rondo-agent"
+            [ "masc_tasks" ]
+        with
+        | None -> fail "keeper runtime-MCP policy should use internal token"
+        | Some policy ->
+          let headers = masc_headers policy in
+          check
+            (option string)
+            "internal token header"
+            (Some internal_token)
+            (find_header "x-masc-internal-token" headers);
+          check
+            (option string)
+            "keeper identity header"
+            (Some "rondo")
+            (find_header "x-masc-keeper-name" headers);
+          check
+            (option string)
+            "agent identity header"
+            (Some "keeper-rondo-agent")
+            (find_header "x-masc-agent-name" headers))))
+;;
+
+let () =
+  run
+    "runtime_mcp_policy_auth"
+    [ ( "auth"
+      , [ test_case
+            "public policy absent when required bearer is missing"
+            `Quick
+            test_public_policy_absent_without_required_bearer
+        ; test_case
+            "public policy allowed when bearer is optional"
+            `Quick
+            test_public_policy_allowed_when_bearer_not_required
+        ; test_case
+            "keeper policy uses internal token without public bearer"
+            `Quick
+            test_keeper_policy_uses_internal_token_without_public_bearer
+        ] )
+    ]
+;;

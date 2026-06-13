@@ -1,14 +1,18 @@
 open Repo_manager_types
 
-val clone :
-  repository:repository -> credential:credential -> (unit, string) result
-(** [clone ~repository ~credential] clones [repository.url] into
-    [repository.local_path] using the given credential. *)
+val clone : repository:repository -> (unit, string) result
+(** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
-val fetch :
-  repository:repository -> credential:credential -> (string list, string) result
-(** [fetch ~repository ~credential] fetches all remotes and returns the list of
-    remote branch names. *)
+val fetch : repository:repository -> (string list, string) result
+(** [fetch ~repository] fetches all remotes and returns the list of remote
+    branch names. *)
+
+val fast_forward :
+  repository:repository -> target_ref:string -> (unit, string) result
+(** [fast_forward ~repository ~target_ref] advances the current branch to
+    [target_ref] with [git merge --ff-only]. Returns [Error] (without mutating
+    history) when the move is not a pure fast-forward, so a divergent working
+    tree is never overwritten. The target ref must already be fetched. *)
 
 val get_branches :
   repository:repository -> (string list, string) result

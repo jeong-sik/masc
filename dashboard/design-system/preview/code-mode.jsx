@@ -17,7 +17,7 @@ const TREE_DATA = [
   { t: 'dir', name: 'keeper', lvl: 1, open: true },
   { t: 'f', name: 'keeper.ts', lvl: 2, k: 'nick', active: true, plus: 18, minus: 4 },
   { t: 'f', name: 'heartbeat.ts', lvl: 2, k: 'multi', count: 2, plus: 6 },
-  { t: 'f', name: 'cascade.ts', lvl: 2, k: 'sangsu', minus: 2 },
+  { t: 'f', name: 'runtime.ts', lvl: 2, k: 'sangsu', minus: 2 },
   { t: 'dir', name: 'fleet', lvl: 1, open: false },
   { t: 'dir', name: 'cockpit', lvl: 1, open: true },
   { t: 'f', name: 'Topbar.tsx', lvl: 2, k: 'masc', plus: 2 },
@@ -68,14 +68,14 @@ const EDITOR_LINES = [
   { n: 5, blame: { k: 'masc', text: 'masc · 4h' }, anchor: true, code: <><span className="tok-key">export class</span> <span className="tok-type">Keeper</span> {'{'}</> },
   { n: 6, blame: { k: 'nick', text: 'nick · 2m' }, cursor: { k: 'nick' }, anchor: true, diff: 'add', code: <>&nbsp;&nbsp;<span className="tok-prop">id</span>: <span className="tok-type">string</span>;</> },
   { n: 7, blame: { k: 'nick', text: 'nick · 2m' }, anchor: true, diff: 'add', code: <>&nbsp;&nbsp;<span className="tok-prop">goal</span>: <span className="tok-type">GoalRef</span>;</> },
-  { n: 8, blame: { k: 'nick', text: 'nick · 2m' }, anchor: true, diff: 'add', code: <>&nbsp;&nbsp;<span className="tok-prop">cascade</span>?: <span className="tok-type">CascadeHandle</span>;</> },
+  { n: 8, blame: { k: 'nick', text: 'nick · 2m' }, anchor: true, diff: 'add', code: <>&nbsp;&nbsp;<span className="tok-prop">runtime</span>?: <span className="tok-type">RuntimeHandle</span>;</> },
   { n: 9, blame: { k: 'masc', text: 'masc · 4h' }, anchor: true, code: <>&nbsp;&nbsp;</> },
   { n: 10, blame: { k: 'masc', text: 'masc · 4h' }, flag: true, code: <>&nbsp;&nbsp;<span className="tok-key">async</span> <span className="tok-fn">tick</span>() {'{'}</> },
   { n: 11, blame: { k: 'masc', text: 'masc · 4h' }, diff: 'del', code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">if</span> (<span className="tok-key">this</span>.<span className="tok-prop">paused</span>) <span className="tok-key">return</span>;</> },
   { n: 12, blame: { k: 'sangsu', text: 'sangsu · 1h' }, cursor: { k: 'sangsu' }, diff: 'add', code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">if</span> (<span className="tok-key">this</span>.<span className="tok-prop">state</span> !== <span className="tok-str">'running'</span>) <span className="tok-key">return</span>;</> },
   { n: 13, blame: { k: 'sangsu', text: 'sangsu · 1h' }, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-fn">emit</span>(<span className="tok-str">'heartbeat'</span>, {'{'} <span className="tok-prop">id</span>: <span className="tok-key">this</span>.<span className="tok-prop">id</span>, <span className="tok-prop">ts</span>: <span className="tok-type">Date</span>.<span className="tok-fn">now</span>() {'}'});</> },
   { n: 14, blame: { k: 'sangsu', text: 'sangsu · 1h' }, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">pullTasks</span>();</> },
-  { n: 15, blame: { k: 'masc', text: 'masc · 4h' }, note: true, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">runCascade</span>(<span className="tok-str">'provider-b'</span>);</> },
+  { n: 15, blame: { k: 'masc', text: 'masc · 4h' }, note: true, code: <>&nbsp;&nbsp;&nbsp;&nbsp;<span className="tok-key">await</span> <span className="tok-key">this</span>.<span className="tok-fn">runRuntime</span>(<span className="tok-str">'runtime-slot-b'</span>);</> },
   { n: 16, blame: { k: 'masc', text: 'masc · 4h' }, code: <>&nbsp;&nbsp;{'}'}</> },
   { n: 17, code: <>{'}'}</> },
 ];
@@ -86,7 +86,7 @@ function Editor({ height = 520 }) {
       <div className="editor-tabs">
         <div className="editor-tab is-active"><span>keeper.ts</span><span className="t-dirty" /><span className="t-close">×</span></div>
         <div className="editor-tab"><span>heartbeat.ts</span><span className="t-close">×</span></div>
-        <div className="editor-tab"><span>cascade.ts</span><span className="t-close">×</span></div>
+        <div className="editor-tab"><span>runtime.ts</span><span className="t-close">×</span></div>
       </div>
       <div className="editor-breadcrumbs">
         <span className="bc-seg">src</span><span className="bc-sep">/</span>
@@ -133,7 +133,7 @@ function Editor({ height = 520 }) {
 const THREADS = [
   { kind: 'flag', anchor: 'keeper.ts:10', author: 'qa-king', ts: '2m', body: '`tick()` has no error handler — if `pullTasks` throws we silently swallow it and the heartbeat loop continues forever.', replies: 3 },
   { kind: 'question', anchor: 'keeper.ts:12', author: 'sangsu', ts: '1h', body: 'Should this also bail when `state === \'draining\'`? We have a draining state now from goal-merge-blockers.', replies: 1 },
-  { kind: 'suggest', anchor: 'keeper.ts:15', author: 'nick0cave', ts: '14m', body: 'Consider gating `runCascade(\'provider-b\')` behind the goal priority. P1 goals only? We cascade too eagerly.', replies: 2 },
+  { kind: 'suggest', anchor: 'keeper.ts:15', author: 'nick0cave', ts: '14m', body: 'Consider gating `runRuntime(\'runtime-slot-b\')` behind the goal priority. P1 goals only? We runtime too eagerly.', replies: 2 },
   { kind: 'note', anchor: 'keeper.ts:5–9', author: 'masc-improver', ts: '4h', body: 'Interface change — GoalRef replaces the old string goal id. Downstream: composer, deck, and drawer.', replies: 0 },
   { kind: 'approve', anchor: 'heartbeat.ts:44', author: 'nick0cave', ts: '22m', body: 'LGTM. Matches the spec from goal-cockpit-polish.', replies: 0, resolved: true, drift: true },
 ];
@@ -184,7 +184,7 @@ const ACTS = [
   { ts: '2m', kind: 'flag', who: 'qa-king', what: 'flagged', where: 'line 10', detail: 'no error handler' },
   { ts: '4m', kind: 'edit', who: 'sangsu', what: 'refactored', where: 'tick()', detail: 'extracted pullTasks' },
   { ts: '8m', kind: 'comment', who: 'sangsu', what: 'asked', where: 'line 12', detail: 'about draining state' },
-  { ts: '14m', kind: 'comment', who: 'nick0cave', what: 'suggested', where: 'line 15', detail: 'gate cascade on priority' },
+  { ts: '14m', kind: 'comment', who: 'nick0cave', what: 'suggested', where: 'line 15', detail: 'gate runtime on priority' },
   { ts: '22m', kind: 'approve', who: 'nick0cave', what: 'approved', where: 'heartbeat.ts', detail: 'matches spec' },
   { ts: '44m', kind: 'commit', who: 'masc-improver', what: 'commit', where: '7f2a9c', detail: '+18 −4 · keeper.ts' },
   { ts: '1h', kind: 'refactor', who: 'sangsu', what: 'renamed', where: 'id→keeperId', detail: '18 refs' },
@@ -225,7 +225,7 @@ function Toolbar() {
       <div className="wc-chips">
         <span className="wc-chip is-active"><span className="dot" style={{ background: 'var(--color-accent-fg)', width: 5, height: 5, borderRadius: '50%' }} />keeper.ts<span className="wc-close">×</span></span>
         <span className="wc-chip">heartbeat.ts<span className="wc-close">×</span></span>
-        <span className="wc-chip">cascade.ts<span className="wc-close">×</span></span>
+        <span className="wc-chip">runtime.ts<span className="wc-close">×</span></span>
       </div>
       <input className="code-search" placeholder="filter · symbol · regex" />
       <div className="code-view-tabs">
@@ -298,7 +298,7 @@ function SplitMode({ w = 1400, h = 680 }) {
           { l: 'running', v: '3' },
           { l: 'heartbeat', v: '1.4s', s: 'ok' },
           { l: 'tok/s', v: '2.8k', s: 'brass' },
-          { l: 'cascade', v: '@2 · 1.24s' },
+          { l: 'runtime', v: '@2 · 1.24s' },
           { l: 'flags', v: '3', s: 'err' },
         ].map((k, i) => (
           <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--color-accent-glow)/.06)' : 'var(--color-bg-surface)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--color-accent-fg)' : 'none' }}>
@@ -353,7 +353,7 @@ function SplitMode({ w = 1400, h = 680 }) {
         <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
         <span>keeper.ts · 47 LOC · +18 −4</span>
         <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
-        <span>cascade: <span style={{ color: 'var(--color-accent-fg)' }}>provider-b@2 · 1.24s</span></span>
+        <span>runtime: <span style={{ color: 'var(--color-accent-fg)' }}>runtime-slot-b@2 · 1.24s</span></span>
         <span style={{ marginLeft: 'auto' }}>⌘K palette · ⇥ focus · esc drawer</span>
       </div>
     </div>
@@ -378,11 +378,11 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         <div><span style={{ color: '#c195e8' }}>export class</span> <span style={{ color: '#88b5d8' }}>Keeper</span> {'{'}</div>
         <div style={{ paddingLeft: 18 }}>id: <span style={{ color: '#88b5d8' }}>string</span>;</div>
         <div style={{ paddingLeft: 18 }}>goal: <span style={{ color: '#88b5d8' }}>GoalRef</span>;</div>
-        <div style={{ paddingLeft: 18 }}>cascade?: <span style={{ color: '#88b5d8' }}>CascadeHandle</span>;</div>
+        <div style={{ paddingLeft: 18 }}>runtime?: <span style={{ color: '#88b5d8' }}>RuntimeHandle</span>;</div>
         <div style={{ paddingLeft: 18 }}><span style={{ color: '#c195e8' }}>async</span> <span style={{ color: '#e8c976' }}>tick</span>() {'{'}</div>
         <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>if</span> (this.state !== <span style={{ color: '#a8c97a' }}>'running'</span>) return;</div>
         <div style={{ paddingLeft: 36 }}><span style={{ color: '#e8c976' }}>emit</span>(<span style={{ color: '#a8c97a' }}>'heartbeat'</span>);</div>
-        <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>await</span> this.<span style={{ color: '#e8c976' }}>runCascade</span>(<span style={{ color: '#a8c97a' }}>'provider-b'</span>);</div>
+        <div style={{ paddingLeft: 36 }}><span style={{ color: '#c195e8' }}>await</span> this.<span style={{ color: '#e8c976' }}>runRuntime</span>(<span style={{ color: '#a8c97a' }}>'runtime-slot-b'</span>);</div>
         <div style={{ paddingLeft: 18 }}>{'}'}</div>
         <div>{'}'}</div>
       </div>

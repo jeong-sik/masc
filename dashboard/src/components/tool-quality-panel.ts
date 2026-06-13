@@ -61,7 +61,7 @@ type ToolQualityData = Omit<
   sampling_mode: string
   sample_limit: number
   window_hours: number | null
-  by_cascade: KeeperStat[]
+  by_runtime: KeeperStat[]
   by_tool: ToolStat[]
 }
 
@@ -72,7 +72,7 @@ function normalizeToolQualityData(json: ToolQualityResponse): ToolQualityData {
     sampling_mode: json.sampling_mode ?? 'recent_n',
     sample_limit: json.sample_limit ?? json.total,
     window_hours: json.window_hours ?? null,
-    by_cascade: json.by_cascade ?? [],
+    by_runtime: json.by_runtime ?? [],
     by_tool: json.by_tool.map(t => ({
       ...t,
       output_truncated_count: t.output_truncated_count ?? 0,
@@ -449,10 +449,10 @@ export function ToolQualityPanel() {
         <${TrendSparkline} points=${d.hourly_trend} />
       ` : null}
 
-      ${d.by_cascade.length > 0 ? html`
+      ${d.by_runtime.length > 0 ? html`
         <div>
-          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase tracking-wider mb-1">캐스케이드별</div>
-          <${KeeperRateBars} keepers=${d.by_cascade} />
+          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase tracking-wider mb-1">런타임별</div>
+          <${KeeperRateBars} keepers=${d.by_runtime} />
         </div>
       ` : null}
 

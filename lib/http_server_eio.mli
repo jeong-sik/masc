@@ -4,12 +4,12 @@
     Sister module to {!Http_server_h2} (cycle 164, the H2
     wrapper).  Conflict-free with [httpun-ws-eio] (no cohttp 6.x
     dependency).  Includes built-in routes for [/health],
-    [/ready], [/metrics], plus the streamable MCP endpoint.
+    [/ready], plus the streamable MCP endpoint.
 
     Internal: ~25+ helpers stay private — exception
     \[Shutdown] (graceful-shutdown signaling), the 5 built-in
     handlers ([health_handler], [ready_handler],
-    [metrics_handler], [mcp_post_handler], [mcp_get_handler]),
+    [mcp_post_handler], [mcp_get_handler]),
     \[default_routes] (the route table assembled from those
     handlers), \[with_streamable_mcp_request_handler],
     \[make_request_handler] (router → request_handler
@@ -209,7 +209,7 @@ module Request : sig
   val default_max_body_bytes : int
 
   (** Effective max body size, resolved at module-load time
-      from [MASC_MCP_MAX_BODY_BYTES] (preferred) or
+      from [MASC_MAX_BODY_BYTES] (preferred) or
       [MCP_MAX_BODY_BYTES] (legacy), falling back to
       {!default_max_body_bytes}.  Restart required for env
       changes. *)

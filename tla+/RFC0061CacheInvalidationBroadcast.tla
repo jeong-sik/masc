@@ -1,7 +1,7 @@
 ---- MODULE RFC0061CacheInvalidationBroadcast ----
 \* Boundary spec for RFC-0061: Cache-invalidation broadcast envelope.
 \*
-\* Runtime truth being modelled (lib/coord/coord_broadcast.ml:79-130):
+\* Runtime truth being modelled (lib/workspace/workspace_broadcast.ml:79-130):
 \*   - When a broadcasting agent's current_task is terminal,
 \*     the original broadcast content is rewritten to a
 \*     "[cache_invalidated] ... stale broadcast suppressed" notice.
@@ -179,7 +179,7 @@ Safety ==
 
 \* Bug action: rewrite happens *before* mention extraction.
 \* This models the current buggy code where cache_invalidated
-\* rewrite at coord_broadcast.ml:95-101 runs before
+\* rewrite at workspace_broadcast.ml:95-101 runs before
 \* pre_extract_mention at line 130.  The rewritten content
 \* ("cache_notice") has no mention, so extraction yields empty.
 BroadcastRewriteSwallowsMention ==

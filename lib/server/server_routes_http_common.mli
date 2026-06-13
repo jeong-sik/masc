@@ -1,11 +1,11 @@
 (** Server_routes_http_common — HTTP routing prelude
     consumed by every routes module via
     [open Server_routes_http_common] +
-    cascade-include through {!Server_routes_http}.
+    runtime-include through {!Server_routes_http}.
 
     External surface: 36 module aliases + 32 helpers.
 
-    Cascade chain (cycle 224 indirect cascade pattern):
+    Runtime chain (cycle 224 indirect runtime pattern):
     Server_routes_http_common
       ↓ include Server_routes_http_common (in
         Server_routes_http)
@@ -25,7 +25,7 @@
     Pinned because the routes prelude pattern threads
     these aliases unqualified to every consumer through
     the [open Server_routes_http_common] +
-    [open Server_routes_http] cascade.  Without these
+    [open Server_routes_http] runtime.  Without these
     aliases the consumers would have to import each
     underlying module explicitly. *)
 
@@ -34,9 +34,9 @@ module Http_h2 = Http_server_h2
 module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
-module Coord = Coord
-module Coord_utils = Coord_utils
-module Tool_keeper = Tool_keeper
+module Workspace = Workspace
+module Workspace_utils = Workspace_utils
+module Keeper_tool_surface = Keeper_tool_surface
 module Keeper_types = Keeper_types
 module Keeper_alerting = Keeper_alerting
 module Keeper_memory = Keeper_memory
@@ -46,20 +46,20 @@ module Ag_ui = Ag_ui
 module Tool_operator = Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
-module Dashboard_mission = Dashboard_mission
-module Dashboard_mission_briefing = Dashboard_mission_briefing
+module Dashboard_briefing = Dashboard_briefing
+module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Build_identity
 module Graphql_api = Graphql_api
 module Tempo = Tempo
 module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
-module Task_dispatch = Task_dispatch
+module Task_dispatch = Task.Dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
-module Tool_board = Tool_board
+module Board_tool = Board_tool
 module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
 
@@ -69,9 +69,24 @@ val mcp_protocol_versions : string list
 val mcp_protocol_version_default : string
 val default_base_path : unit -> string
 val is_valid_protocol_version : string -> bool
-val remember_protocol_version : string -> string -> unit
+val remember_protocol_version :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  string ->
+  unit
+
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+
 val remember_mcp_profile :
-  string -> Server_mcp_transport_http.tool_profile -> unit
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  Server_mcp_transport_http.tool_profile ->
+  unit
 val forget_mcp_session : string -> unit
 val validate_mcp_session_profile :
   profile:Server_mcp_transport_http.tool_profile ->
@@ -176,3 +191,18 @@ val host_header_has_forbidden_authority_chars :
   string -> bool
 val parse_host_port :
   string option -> string -> int -> string * int
+
+(** [respond_cached_read ~request ~reqd ~cache_key ~ttl compute] wraps a
+    dashboard read [compute] in the SWR cache and the shared Executor_pool,
+    then writes the JSON response. Collapses parallel read bursts to one
+    compute per [ttl] and runs heavy compute (subprocess / store query /
+    large JSON) off the main HTTP domain so it does not head-of-line-block
+    other requests. [compress] defaults to [true]. *)
+val respond_cached_read :
+  ?compress:bool ->
+  request:Httpun.Request.t ->
+  reqd:Httpun.Reqd.t ->
+  cache_key:string ->
+  ttl:float ->
+  (unit -> Yojson.Safe.t) ->
+  unit

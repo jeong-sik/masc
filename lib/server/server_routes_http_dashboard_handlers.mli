@@ -12,6 +12,6 @@ val handle_dashboard_task_history :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Handle dashboard task-history requests. *)
 
-val handle_dashboard_rooms :
+val handle_dashboard_workspace :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Handle dashboard rooms requests. *)
+(** Handle dashboard workspace requests. *)

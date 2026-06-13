@@ -1,0 +1,15 @@
+; Runtime_provider_labels — runtime-boundary canonical provider label helper.
+;
+; Tiny leaf extracted from lib/runtime/ so model-metrics parsing can depend on
+; the provider label boundary without pulling in the flat masc library.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare `Runtime_provider_labels` identifier.
+
+(include_subdirs no)
+
+(library
+ (name masc_runtime_provider_labels)
+ (public_name masc.runtime_provider_labels)
+ (wrapped false)
+ (libraries agent_sdk.llm_provider))

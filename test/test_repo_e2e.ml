@@ -105,25 +105,12 @@ let sample_repo ~id ~url local_path =
     local_path;
     aliases = [];
     default_branch = "main";
-    credential_id = "default";
     keepers = [];
     status = Active;
     auto_sync = false;
     sync_interval = 0;
     created_at = Int64.zero;
     updated_at = Int64.zero;
-  }
-
-let sample_credential () =
-  {
-    id = "default";
-    cred_type = Local;
-    username = "test";
-    gh_config_dir = None;
-    ssh_key_path = None;
-    gpg_key_id = None;
-    state = Unmaterialized;
-    token_sha256_prefix = None;
   }
 
 let test_register_and_clone () =
@@ -137,8 +124,7 @@ let test_register_and_clone () =
           | Error e -> Alcotest.fail ("add failed: " ^ e)
           | Ok added ->
               Alcotest.(check string) "id preserved" "e2e-repo" added.id;
-              let cred = sample_credential () in
-              match Repo_git.clone ~repository:added ~credential:cred with
+              match Repo_git.clone ~repository:added with
               | Ok () ->
                   Alcotest.(check bool) "cloned dest exists" true (Sys.file_exists dest);
                   Alcotest.(check bool) "cloned .git exists" true
@@ -155,8 +141,7 @@ let test_register_clone_and_list_branches () =
           match Repo_store.add ~base_path repo with
           | Error e -> Alcotest.fail ("add failed: " ^ e)
           | Ok added ->
-              let cred = sample_credential () in
-              (match Repo_git.clone ~repository:added ~credential:cred with
+              (match Repo_git.clone ~repository:added with
                | Error e -> Alcotest.fail ("clone failed: " ^ e)
                | Ok () ->
                    match Repo_store.list_branches ~base_path added.id with
@@ -186,8 +171,7 @@ let test_e2e_full_lifecycle () =
            | Ok found ->
                Alcotest.(check string) "found url" source found.url);
           (* 3. Clone *)
-          let cred = sample_credential () in
-          (match Repo_git.clone ~repository:added ~credential:cred with
+          (match Repo_git.clone ~repository:added with
            | Error e -> Alcotest.fail ("clone failed: " ^ e)
            | Ok () -> ());
           (* 4. List branches *)

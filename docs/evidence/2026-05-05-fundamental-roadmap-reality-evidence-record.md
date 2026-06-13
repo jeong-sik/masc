@@ -14,16 +14,16 @@
 |---|---|---|---|---|
 | `env_config_keeper.ml` 949 lines (claim 2,278) | `wc -l lib/config/env_config_keeper.ml` @ HEAD `5806519c0b` | 2026-05-05T17:55:00+09:00 | High | 직접 측정 |
 | `keeper_unified_turn.ml` records FSM transitions, not silent skip | `lib/keeper/keeper_unified_turn.ml:60,159,188,203,324,344,419,468,2279` | 2026-05-05T17:56:00+09:00 | High | 8 사이트 모두 telemetry 동반 |
-| `lib/cascade/capabilities.ml` does not exist | `find . -name 'capabilities*.ml'` returned empty | 2026-05-05T17:57:00+09:00 | High | 파일 자체 부재; 로드맵 §3-1 검증 불가 |
+| `lib/runtime/capabilities.ml` does not exist | `find . -name 'capabilities*.ml'` returned empty | 2026-05-05T17:57:00+09:00 | High | 파일 자체 부재; 로드맵 §3-1 검증 불가 |
 | 6/7 cited PRs already merged | `gh pr view <N> --json state,mergedAt` for #12955,12959,12971,12986,12988,12990,12992 | 2026-05-05T17:00:00+09:00 (Explore agent) | High | #12988만 OPEN |
 | oas backend 5종 분리 이미 존재 | `wc -l ~/me/workspace/yousleepwhen/oas/lib/llm_provider/backend_*.ml` | 2026-05-05T17:58:00+09:00 | High | Provider-D 1550 + Provider-A 210 + Provider-F 363 + Ollama 641 + Provider-K 452 |
 | `backend.mli` signature 부재 | `lsd ~/me/workspace/yousleepwhen/oas/lib/llm_provider/backend.mli` → ENOENT | 2026-05-05T17:58:00+09:00 | High | Sprint 2 신규 |
 | `cancellation.ml:135` `Atomic.set t.cancelled true;` only | `rg -n 'Atomic\.set\|Eio\.Cancel\.cancel' lib/cancellation.ml` | 2026-05-05T17:56:00+09:00 | High | `Eio.Cancel.cancel` 0건 |
 | Recovery Strategy GADT 정의됨, 실행 1곳 | `rg -n 'type _ strategy' lib/resilience/recovery.ml` (line 26) + `strategy_to_tla_symbol` (line 60) | 2026-05-05T17:56:00+09:00 | High | 호출 사이트 수동 검증 필요 (Sprint 1) |
-| Mutex/Atomic 비율 54:31 (lib/keeper + lib/cascade) | `rg -c 'Mutex\.\|Eio\.Mutex' lib/keeper lib/cascade \| wc -l` = 54; `rg -c 'Atomic\.' ... \| wc -l` = 31 | 2026-05-05T17:56:00+09:00 | Medium | 파일 단위 카운트, 인스턴스 카운트 아님 |
+| Mutex/Atomic 비율 54:31 (lib/keeper + lib/runtime) | `rg -c 'Mutex\.\|Eio\.Mutex' lib/keeper lib/runtime \| wc -l` = 54; `rg -c 'Atomic\.' ... \| wc -l` = 31 | 2026-05-05T17:56:00+09:00 | Medium | 파일 단위 카운트, 인스턴스 카운트 아님 |
 | `.github/workflows/fundamental-check.yml` 부재 | `ls .github/workflows/` 출력 | 2026-05-05T17:58:00+09:00 | High | 11 workflow 중 해당 없음 |
 | RFC 0008/0019/0020/0022/0024/0026 존재 | `ls docs/rfc/` | 2026-05-05T17:58:00+09:00 | High | 22 RFC 활성 |
-| TLA+ specs 9개 존재 (CascadeKeeperRecovery 포함) | `find . -name '*.tla'` | 2026-05-05T17:58:00+09:00 | High | 신규 spec 작성 시 기존 자산 확장 우선 |
+| TLA+ specs 9개 존재 (RuntimeKeeperRecovery 포함) | `find . -name '*.tla'` | 2026-05-05T17:58:00+09:00 | High | 신규 spec 작성 시 기존 자산 확장 우선 |
 
 ## 검증 (Verification)
 
@@ -34,7 +34,7 @@
 
 ## 불확실성 (Uncertainty)
 
-- `lib/cascade/capabilities.ml` 부재의 시점: git log에서 reflog 안 잡힘. 이전부터 없었을 가능성과 다른 이름(예: `cascade_capability*.ml`)으로 존재할 가능성 — Sprint 1 시작 시 재확인 필요
+- `lib/runtime/capabilities.ml` 부재의 시점: git log에서 reflog 안 잡힘. 이전부터 없었을 가능성과 다른 이름(예: `runtime_capability*.ml`)으로 존재할 가능성 — Sprint 1 시작 시 재확인 필요
 - Mutex/Atomic 카운트는 **파일 수** 기준. 한 파일 내 다중 사용 인스턴스는 미측정. Sprint 3에서 인스턴스 단위 측정 스크립트 도입(`scripts/audit/concurrency-balance.sh`)
 - Recovery Strategy 호출 사이트 정확히 몇 곳인지 — Sprint 1-2 시작 시 `rg -l "Recovery\\.execute"` 전수 검증
 
@@ -50,5 +50,5 @@
 ## 다음 액션
 
 - Sprint 0 PR(이 worktree, branch `chore/sprint-0-roadmap-reset`)에 audit + CI workflow + 본 record 함께 머지
-- masc-mcp `.gitignore:144`가 `memory/`를 ignore하므로 본 record는 `docs/evidence/`에 보관. 사본 동기화는 사용자 요청 시 `~/me/memory/procedural-memory/`로
+- masc `.gitignore:144`가 `memory/`를 ignore하므로 본 record는 `docs/evidence/`에 보관. 사본 동기화는 사용자 요청 시 `~/me/memory/procedural-memory/`로
 - Sprint 0 dogfood에서 발견된 gap #6(`provider_adapter.ml` 모델 리스트)는 audit §1·§8에 추가 기록됨

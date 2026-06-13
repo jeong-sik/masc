@@ -30,7 +30,7 @@ let execution_smoke_fixture_json () =
       ( "status",
         `Assoc
           [
-            ("coordination_root", `String "/tmp/masc-execution-fixture");
+            ("workspace_root", `String "/tmp/masc-execution-fixture");
             ("cluster", `String "fixture");
             ("project", `String "execution-smoke");
             ("tempo_interval_s", `Float 300.0);
@@ -157,7 +157,7 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `Null);
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-alpha");
+                ("koreanName", `String "local-alpha");
                 ("model", `String "runtime");
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
                 ("recent_event", `String "manager handoff");
@@ -179,8 +179,8 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-beta");
-                ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-a"));
+                ("koreanName", `String "local-beta");
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
                 ("recent_event", `String "secondary runtime probe");
               ];
@@ -201,8 +201,8 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-002");
                 ("related_operation_id", `String "op-runtime-003");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-gamma");
-                ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-b"));
+                ("koreanName", `String "local-gamma");
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "idle");
               ];
@@ -261,14 +261,12 @@ let execution_smoke_fixture_json () =
                 ("continuity", `String "Gen 2 · Turns 84 · Goals 2");
                 ("lifecycle", `String "handoff-imminent");
                 ("related_session_id", `Null);
-                ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-a"));
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-a"));
                 ("emoji", `String "🤖");
-                ("korean_name", `String "dm-keeper");
+                ("koreanName", `String "dm-keeper");
                 ("recent_input_preview", `String "Player asked to continue the next scene without breaking continuity");
                 ("recent_output_preview", `String "Prepared the next scene transition and handoff summary");
                 ("recent_tool_names", `List [ `String "masc_keeper_status"; `String "masc_board_post" ]);
-                ("allowed_tool_count", `Int 3);
-                ("allowed_tool_preview", `List [ `String "masc_board_get"; `String "masc_board_post"; `String "masc_keeper_status" ]);
                 ("latest_tool_names", `List [ `String "masc_board_post" ]);
                 ("latest_tool_call_count", `Int 1);
                 ("tool_audit_source", `String "heartbeat_result");
@@ -298,8 +296,8 @@ let execution_smoke_fixture_json () =
                 ("related_session_id", `String "ts-execution-fixture-001");
                 ("related_operation_id", `String "op-runtime-001");
                 ("emoji", `String "🤖");
-                ("korean_name", `String "local-delta");
-                ("model", `String (Cascade_runtime_candidate.local_runtime_label "fixture-model-b"));
+                ("koreanName", `String "local-delta");
+                ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
                 ("recent_event", `String "missing heartbeat");
               ];
@@ -313,7 +311,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "busy");
                 ("current_task", `String "Validate local64 swarm role coverage");
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "manager"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -325,7 +323,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "active");
                 ("current_task", `String "Inspect secondary runtime health");
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String "2026-03-11T09:15:00Z");
                 ("capabilities", `List [ `String "metacog"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -337,7 +335,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "idle");
                 ("current_task", `Null);
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String generated_at);
                 ("capabilities", `List [ `String "executor"; `String "local64" ]);
                 ("emoji", `String "🤖");
@@ -349,7 +347,7 @@ let execution_smoke_fixture_json () =
                 ("agent_type", `String "llama");
                 ("status", `String "inactive");
                 ("current_task", `Null);
-                ("joined_at", `String generated_at);
+                ("session_bound_at", `String generated_at);
                 ("last_seen", `String "2026-03-11T08:55:00Z");
                 ("capabilities", `List [ `String "observer"; `String "local64" ]);
                 ("emoji", `String "🤖");

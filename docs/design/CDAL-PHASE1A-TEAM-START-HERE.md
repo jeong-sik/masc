@@ -59,8 +59,8 @@ Before writing code, confirm the producer side:
 - `oas/docs/schemas/cdal-proof-bundle-v1.json` — proof bundle JSON Schema
 - `oas/lib/mode_enforcer.ml` — runtime enforcement logic (producer side)
 - `oas/lib/proof_capture.ml` — proof artifact writer (producer side)
-- `oas/lib/proof_store.mli` — proof store read interface
-- `masc-mcp/lib/cdal_eval_v1.ml` — current evaluator (anti-pattern reference, not implementation guide). The previous `cdal_eval.ml` was renamed to `cdal_eval_v1.ml` to mark it as the legacy path; `cdal_loader.ml`, `cdal_judge.ml`, `cdal_friction_projection.ml` (the Phase-1A deliverables listed in §1) now exist under `lib/` and are the canonical successors.
+- `oas/lib/runtime_store.mli` / `oas/lib/runtime_replay.mli` — runtime replay/run-window read interfaces (current); historical `proof_store.mli` was removed
+- `masc/lib/cdal_eval_v1.ml` — current evaluator (anti-pattern reference, not implementation guide). The previous `cdal_eval.ml` was renamed to `cdal_eval_v1.ml` to mark it as the legacy path; `cdal_loader.ml`, `cdal_judge.ml`, `cdal_friction_projection.ml` (the Phase-1A deliverables listed in §1) now exist under `lib/` and are the canonical successors.
 
 These files tell you what exists today.
 The docs tell you what you are allowed to claim from those fields.

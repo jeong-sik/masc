@@ -6,7 +6,6 @@
     legacy catch-all flattened it into [None], and these tests
     confirm the new module preserves the diagnostic. *)
 
-open Masc_mcp
 module J = Json_field
 
 let assoc fields : Yojson.Safe.t = `Assoc fields

@@ -1,4 +1,4 @@
-# Periodic Docker resource prune for masc-mcp hosts that build images
+# Periodic Docker resource prune for masc hosts that build images
 # locally (CI runners, dev workstations, smoke-test hosts). Wraps
 # scripts/docker-prune.sh which was added in this PR but had no
 # scheduling layer. Named volumes are intentionally not touched; see the
@@ -17,7 +17,7 @@
 
 [Unit]
 Description=MASC MCP weekly Docker resource prune
-Documentation=https://github.com/jeong-sik/masc-mcp
+Documentation=https://github.com/jeong-sik/masc
 After=docker.service
 Requires=docker.service
 
@@ -27,13 +27,13 @@ Type=oneshot
 # Hosts that run rootless docker should drop the User= line.
 User=masc
 Group=docker
-WorkingDirectory=/opt/masc-mcp
+WorkingDirectory=/opt/masc
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 Environment=AGE_HOURS=168
 
-ExecStart=/opt/masc-mcp/scripts/docker-prune.sh --apply
+ExecStart=/opt/masc/scripts/docker-prune.sh --apply
 # Also reap orphaned keeper sandbox containers that lost their parent.
-ExecStart=/opt/masc-mcp/scripts/cleanup-orphaned-keeper-containers.sh --apply
+ExecStart=/opt/masc/scripts/cleanup-orphaned-keeper-containers.sh --apply
 
 TimeoutStartSec=15min
 
@@ -43,7 +43,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/opt/masc-mcp
+ReadWritePaths=/opt/masc
 
 StandardOutput=journal
 StandardError=journal

@@ -6,7 +6,7 @@
     [operator_digest] surface into [Proactive_refresh.start] with the
     dashboard runtime's offloaded-readonly compute path. Each cycle
     invokes [Operator_control.digest_json ~actor:"dashboard"
-    ~target_type:"root"] under a fresh [Operator_control.context],
+    ~target_type:"workspace"] under a fresh [Operator_control.context],
     decorates the result with [with_projection_diagnostics] /
     [with_operator_digest_metadata], and republishes via
     [!operator_digest_broadcast_ref].
@@ -38,7 +38,7 @@ module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let compute () =
@@ -64,7 +64,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
              }
            in
            match
-             Operator_control.digest_json ~actor:"dashboard" ~target_type:"root" ctx
+             Operator_control.digest_json ~actor:"dashboard" ~target_type:"workspace" ctx
            with
            | Ok json ->
              Core_cache.with_projection_diagnostics

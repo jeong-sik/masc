@@ -32,7 +32,7 @@ runs:
         path: |
           ~/.opam
           ~/.local/share/opam
-        key: opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project') }}-v2
+        key: opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project', 'scripts/oas-agent-sdk-pin.sh', 'scripts/opam-pin-external-deps.sh') }}-v2
         restore-keys: |
           opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 

@@ -1,4 +1,12 @@
-(** Turn context helpers for keeper tool-call logging. *)
+(** Turn context helpers for keeper tool-call logging.
+
+    The context is carried in a per-run {!cell} created at turn setup and
+    threaded to every reader of the same run. RFC-0225 §3.3: the previous
+    carrier was a global table keyed by keeper name, so two concurrent runs
+    of the same keeper overwrote each other and tool-call rows were logged
+    with the wrong run identity (trace_id / keeper_turn_id
+    cross-attribution, 2026-06-10 voice incident). A cell per run makes
+    attribution correct independently of turn admission. *)
 
 type turn_context =
   { agent_name : string option
@@ -19,16 +27,17 @@ type turn_context =
   ; allowed_paths : string list option
   ; network_mode : string option
   ; approval_mode : string option
-  ; tool_surface_class : string option
-  ; visible_tool_count : int option
-  ; required_tools : string list option
-  ; required_tool_candidates : string list option
-  ; missing_required_tools : string list option
-  ; cascade_profile : string option
+  ; runtime_profile : string option
   }
 
+type cell
+(** Per-run carrier. Reads before the first {!set_turn_context} observe
+    the empty context (all fields [None]). *)
+
+val create_cell : unit -> cell
+
 val set_turn_context :
-  keeper_name:string ->
+  cell:cell ->
   ?agent_name:string ->
   ?lane:string ->
   ?tool_choice:string ->
@@ -47,22 +56,17 @@ val set_turn_context :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   unit ->
   unit
 
 val get_turn_context_record :
-  keeper_name:string ->
+  cell:cell ->
   unit ->
   turn_context
 
 val get_turn_context :
-  keeper_name:string ->
+  cell:cell ->
   unit ->
   string option
   * string option
@@ -79,13 +83,14 @@ val get_turn_context :
   * string option
   * string option
 
-val runtime_contract_json_for_call :
+val runtime_observability_contract_json_for_call :
   keeper_name:string ->
+  cell:cell ->
   unit ->
   Yojson.Safe.t
 
 val action_radius_json_for_call :
-  keeper_name:string ->
+  cell:cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   success:bool ->
@@ -93,5 +98,3 @@ val action_radius_json_for_call :
   ?error:string ->
   unit ->
   Yojson.Safe.t
-
-val reset_for_testing : unit -> unit

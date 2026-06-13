@@ -213,6 +213,35 @@ let wait_pid_exit ~pid ~timeout_s =
   in
   loop ()
 
+let dashboard_dev_token ~port =
+  let result =
+    run_curl ~max_time:2.0 ~port ~path:"/api/v1/dashboard/dev-token" ()
+  in
+  match result.status with
+  | Some 200 ->
+      begin
+        match Yojson.Safe.from_string result.body with
+        | `Assoc fields ->
+            begin
+              match List.assoc_opt "token" fields with
+              | Some (`String token) when String.trim token <> "" -> token
+              | _ -> fail ("dashboard dev-token response missing token: " ^ result.body)
+            end
+        | _ -> fail ("dashboard dev-token response is not an object: " ^ result.body)
+        | exception Yojson.Json_error msg ->
+            fail ("dashboard dev-token response is invalid JSON: " ^ msg)
+      end
+  | Some code ->
+      fail
+        (Printf.sprintf
+           "dashboard dev-token returned HTTP %d (curl_exit=%d stderr=%s body=%s)"
+           code result.curl_exit result.stderr result.body)
+  | None ->
+      fail
+        (Printf.sprintf
+           "dashboard dev-token missing HTTP status (curl_exit=%d stderr=%s body=%s)"
+           result.curl_exit result.stderr result.body)
+
 let merge_env_overrides overrides =
   let override_keys =
     List.map fst overrides
@@ -234,6 +263,80 @@ let merge_env_overrides overrides =
   in
   Array.of_list (base @ injected)
 
+let ensure_dir path =
+  if Sys.file_exists path then
+    if not (Sys.is_directory path) then
+      fail (Printf.sprintf "expected directory path: %s" path)
+    else ()
+  else
+    Unix.mkdir path 0o755
+
+let copy_file ~src ~dst =
+  let ic = open_in_bin src in
+  let oc = open_out_bin dst in
+  Fun.protect
+    ~finally:(fun () ->
+      close_in_noerr ic;
+      close_out_noerr oc)
+    (fun () ->
+      let buffer = Bytes.create 8192 in
+      let rec loop () =
+        match input ic buffer 0 (Bytes.length buffer) with
+        | 0 -> ()
+        | n ->
+            output oc buffer 0 n;
+            loop ()
+      in
+      loop ())
+
+let find_repo_file relative =
+  let roots = [ "."; ".."; "../.."; "../../.."; "../../../.." ] in
+  roots
+  |> List.map (fun root -> Filename.concat root relative)
+  |> List.find_opt Sys.file_exists
+
+let runtime_seed =
+  {|
+[runtime]
+default = "sse_storm.smoke"
+
+[providers.sse_storm]
+display-name = "SSE Storm Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.smoke]
+api-name = "smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[sse_storm.smoke]
+is-default = true
+max-concurrent = 1
+|}
+
+let seed_server_config ~base_path =
+  let masc_dir = Filename.concat base_path ".masc" in
+  let config_dir = Filename.concat masc_dir "config" in
+  ensure_dir masc_dir;
+  ensure_dir config_dir;
+  List.iter
+    (fun name -> ensure_dir (Filename.concat config_dir name))
+    [ "keepers"; "personas"; "prompts" ];
+  let tool_policy_dst = Filename.concat config_dir "tool_policy.toml" in
+  if not (Sys.file_exists tool_policy_dst) then begin
+    match find_repo_file "config/tool_policy.toml" with
+    | Some src -> copy_file ~src ~dst:tool_policy_dst
+    | None -> fail "config/tool_policy.toml fixture not found"
+  end;
+  let runtime_dst = Filename.concat config_dir "runtime.toml" in
+  if not (Sys.file_exists runtime_dst) then
+    let oc = open_out runtime_dst in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc runtime_seed)
+
 let with_server f =
   let exe = find_main_eio_exe () in
   let port =
@@ -245,12 +348,15 @@ let with_server f =
   let base_path = Filename.temp_file "sse-storm-base-" "" in
   (try Sys.remove base_path with _ -> ());
   Unix.mkdir base_path 0o755;
+  seed_server_config ~base_path;
   let log_fd =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
   in
   let env =
     merge_env_overrides
       [
+        ("MASC_BASE_PATH", base_path);
+        ("MASC_BASE_PATH_INPUT", base_path);
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
@@ -280,7 +386,9 @@ let with_server f =
     let logs = read_file log_file in
     fail (Printf.sprintf "server failed to become ready on port %d\n%s" port logs)
   end;
-  Fun.protect ~finally:cleanup (fun () -> f ~port)
+  Fun.protect ~finally:cleanup (fun () ->
+    let auth_token = dashboard_dev_token ~port in
+    f ~port ~auth_token)
 
 let check_status label expected result =
   match result.status with
@@ -294,9 +402,15 @@ let check_status label expected result =
            result.stderr)
 
 let test_mcp_reconnect_stays_accepted () =
-  with_server @@ fun ~port ->
+  with_server @@ fun ~port ~auth_token ->
   let sid = Printf.sprintf "storm-mcp-%06d" (Random.int 1_000_000) in
-  let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
+  let headers =
+    [
+      ("Accept", "text/event-stream");
+      ("Authorization", "Bearer " ^ auth_token);
+      ("Mcp-Session-Id", sid);
+    ]
+  in
 
   let first = run_curl ~headers ~max_time:2.0 ~port ~path:"/mcp" () in
   check_status "first /mcp connect accepted" 200 first;
@@ -305,19 +419,19 @@ let test_mcp_reconnect_stays_accepted () =
   check_status "follow-up /mcp reconnect accepted" 200 second
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
-  with_server @@ fun ~port ->
+  with_server @@ fun ~port ~auth_token:_ ->
   let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
   let headers = [("Accept", "text/event-stream"); ("Mcp-Session-Id", sid)] in
 
   (* Stay well inside the 1s reconnect guard so the next request is truly immediate. *)
-  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?room=default" () in
+  let first = run_curl ~headers ~max_time:0.2 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "first /ag-ui/events connect accepted" 200 first;
 
-  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?room=default" () in
+  let second = run_curl ~headers ~max_time:0.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "immediate /ag-ui/events reconnect rejected" 429 second;
 
   Unix.sleepf 2.0;
-  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?room=default" () in
+  let third = run_curl ~headers ~max_time:1.5 ~port ~path:"/ag-ui/events?workspace=default" () in
   check_status "cooldown /ag-ui/events reconnect recovers" 200 third
 
 let () =

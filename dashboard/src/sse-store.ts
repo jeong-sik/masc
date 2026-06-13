@@ -12,6 +12,7 @@ import {
   lastDisconnectedAt,
   pauseQueuedOasRuntimeIngress,
   resumeQueuedOasRuntimeIngress,
+  normalizeSSEDispatchType,
 } from './sse'
 import type {
   BoardPost,
@@ -21,6 +22,7 @@ import type {
   DashboardShellResponse,
   SSEEvent,
 } from './types'
+import type * as TransportHealth from './components/transport-health'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
@@ -49,7 +51,7 @@ import {
 } from './namespace-truth-store'
 import { mergeServerStatus } from './store-normalizers'
 import { normalizeOperatorSnapshot, normalizeOperatorDigest } from './operator-normalizers'
-import { operatorSnapshot, operatorRoomDigest } from './operator-signals'
+import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { hydrateGoalTreeSnapshot } from './goal-tree-state'
@@ -132,18 +134,22 @@ interface SimpleRoute {
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle — emitted by lib/tool_inline_dispatch_room.ml
-  'masc/agent_joined':  { target: 'execution' },
-  'masc/agent_left':    { target: 'execution' },
-  // Broadcasts — emitted by lib/tool_inline_dispatch_comm.ml
-  'masc/broadcast':     { target: 'execution' },
+  // Agent lifecycle — emitted by lib/mcp_tool_runtime_workspace.ml
+  agent_bound:         { target: 'execution' },
+  agent_unbound:       { target: 'execution' },
+  // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
+  broadcast:           { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
   keeper_handoff:       { target: 'execution' },
   keeper_compaction:    { target: 'execution' },
+  keeper_guardrail:     { target: 'execution' },
   keeper_phase_changed: { target: 'execution' },
-  // Board content — emitted by lib/tool_inline_dispatch_extra.ml
+  // Board content — emitted by lib/mcp_tool_runtime_board.ml
+  board_post:          { target: 'board' },
   'masc/board_post':    { target: 'board' },
   board_comment:        { target: 'board' },
+  'masc/board_comment': { target: 'board' },
+  board_delete:         { target: 'board' },
   'masc/board_delete':  { target: 'board' },
   // Board notifications — emitted by lib/server/server_bootstrap_loops.ml
   // via JSON-RPC method="notifications/board" (unwrapped to params.type)
@@ -152,12 +158,14 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   post_voted:           { target: 'board' },
   comment_voted:        { target: 'board' },
   reaction_changed:     { target: 'board' },
-  // Activity graph
+  // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
 }
 
 const BOARD_HEARTH_REFRESH_EVENTS = new Set([
+  'board_post',
   'masc/board_post',
+  'board_delete',
   'masc/board_delete',
   'post_created',
 ])
@@ -198,7 +206,8 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_phase_changed',
+  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_guardrail',
+  'keeper_phase_changed',
 ])
 
 function normalizeMascEventType(type: string): string {
@@ -241,7 +250,7 @@ function handleOperatorSnapshot(payload: unknown): void {
 
 function handleOperatorDigest(payload: unknown): void {
   try {
-    operatorRoomDigest.value = normalizeOperatorDigest(payload)
+    operatorWorkspaceDigest.value = normalizeOperatorDigest(payload)
   } catch (err) {
     console.warn('[SSE] operator digest hydration failed', err instanceof Error ? err.message : '')
   }
@@ -254,7 +263,7 @@ function handleOperatorDigest(payload: unknown): void {
 //      per session, not on every SSE tick.
 //   2. Promote the failure log to console.warn so operators see it
 //      when investigating "transport health widget is missing/stale."
-let transportHealthModule: Promise<typeof import('./components/transport-health')> | null = null
+let transportHealthModule: Promise<typeof TransportHealth> | null = null
 let transportHealthImportFailed = false
 
 function handleTransportHealth(payload: unknown): void {
@@ -437,26 +446,27 @@ export function routeServerPushEvent(event: SSEEvent): void {
     return
   }
 
-  const simpleRoute = SIMPLE_ROUTES[event.type]
+  const routedType = normalizeSSEDispatchType(event.type)
+  const simpleRoute = SIMPLE_ROUTES[routedType]
   if (simpleRoute) {
     scheduleTargetRefresh(
       simpleRoute.target,
       REFRESH_FNS[simpleRoute.target],
       simpleRoute.debounceMs,
     )
-    if (BOARD_HEARTH_REFRESH_EVENTS.has(event.type)) {
+    if (BOARD_HEARTH_REFRESH_EVENTS.has(routedType)) {
       scheduleBoardHearthsRefresh(simpleRoute.debounceMs)
     }
   }
 
   for (const { prefix, target } of PREFIX_ROUTES) {
-    if (event.type.startsWith(prefix)) {
+    if (routedType.startsWith(prefix)) {
       scheduleTargetRefresh(target, REFRESH_FNS[target])
       break
     }
   }
 
-  if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(event.type))) {
+  if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(routedType))) {
     handleKeeperLifecycle(event)
   }
 
@@ -534,6 +544,21 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     return true
   }
 
+  if (event.type === 'keeper_chat_appended') {
+    const payload = event as unknown as { name?: string }
+    const name = typeof payload.name === 'string' ? payload.name : ''
+    if (name) {
+      // Dynamic import keeps sse-store decoupled from the keeper action
+      // layer (same pattern as the agent-failed notification above).
+      void import('./keeper-runtime')
+        .then(mod => { mod.noteKeeperChatAppended(name) })
+        .catch(err => {
+          console.debug('[SSE] keeper chat refresh unavailable', err instanceof Error ? err.message : '')
+        })
+    }
+    return true
+  }
+
   if (event.type === 'post_created' && handleBoardPostCreated(event)) {
     return true
   }
@@ -566,7 +591,7 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
 
   switch (slice) {
     case 'shell':
-      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true })
+      hydrateShellSnapshot(payload as DashboardShellResponse, { light: true, preserveAuth: true })
       return
     case 'namespace':
       hydrateServerPushEvent({ type: 'project_snapshot', payload } as SSEEvent)

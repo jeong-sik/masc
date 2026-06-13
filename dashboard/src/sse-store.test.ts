@@ -30,7 +30,7 @@ const refreshExecution = vi.fn<() => Promise<void>>(async () => {})
 const refreshBoard = vi.fn<() => void>(() => {})
 const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
-const hydrateShellSnapshot = vi.fn<(payload: unknown) => void>(() => {})
+const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
@@ -41,6 +41,7 @@ const showToast = vi.fn<(message: string, kind?: string, durationMs?: number) =>
 const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
+const noteKeeperChatAppended = vi.fn<(name: string) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -90,6 +91,9 @@ async function loadSseStore() {
   }))
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
+  }))
+  vi.doMock('./keeper-runtime', () => ({
+    noteKeeperChatAppended,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -236,6 +240,38 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
+  it('normalizes MASC lifecycle aliases before route-scoped execution refresh', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.lastEvent.value = {
+      type: 'masc/keeper_guardrail',
+      name: 'qa-king',
+      reason: 'tool boundary',
+    }
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+    cleanup()
+  })
+
+  it('normalizes MASC broadcast aliases before route-scoped execution refresh', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'masc/broadcast',
+      from: 'operator',
+      content: 'heads up',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(refreshExecution).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps operator lifecycle refreshes scoped to the command route', async () => {
     const { sseStore, sse } = await loadSseStore()
     const refreshOperator = vi.fn()
@@ -257,6 +293,22 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
+  it('routes all board SSE wire variants through the board refresh budget', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+
+    for (const type of ['board_post', 'masc/board_comment', 'board_delete'] as const) {
+      refreshBoard.mockClear()
+      sseStore.routeServerPushEvent({
+        type,
+        post_id: 'post-1',
+      })
+      vi.advanceTimersByTime(1_000)
+      await flushAsyncWork()
+      expect(refreshBoard).toHaveBeenCalledTimes(1)
+    }
+  })
+
   it('routes websocket raw push events through the same route-scoped refresh budget', async () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
@@ -270,6 +322,19 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('routes keeper_chat_appended pushes to the live chat refresh hook', async () => {
+    const { sseStore } = await loadSseStore()
+
+    sseStore.routeServerPushEvent({
+      type: 'keeper_chat_appended',
+      name: 'echo',
+      connector: 'discord',
+    })
+    await flushAsyncWork()
+
+    expect(noteKeeperChatAppended).toHaveBeenCalledWith('echo')
   })
 
   it('routes board reaction changes through the board refresh budget', async () => {
@@ -376,7 +441,7 @@ describe('setupSSEReaction reconnect hydration', () => {
       title: 'Malformed kind note',
       content: 'body',
       author: 'agent-a',
-      post_kind: 1 as unknown as string,
+      post_kind: 1 as unknown as BoardPost['post_kind'],
       hearth: 'ops',
     })
     vi.advanceTimersByTime(1_000)
@@ -421,7 +486,23 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(refreshBoard).not.toHaveBeenCalled()
   })
 
-  it('does not trigger observatory graph refresh from the workspace board route', async () => {
+  it('refreshes observatory telemetry from activity push events on the observatory route', async () => {
+    const { sseStore } = await loadSseStore()
+    const refreshActivity = vi.fn()
+    sseStore.registerActivityRefresh(refreshActivity)
+    route.value = { tab: 'monitoring', params: { section: 'observatory' }, postId: null }
+
+    sseStore.routeServerPushEvent({
+      type: 'activity_graph_changed',
+      payload: { kind: 'activity_graph_changed' },
+    } as unknown as Parameters<typeof sseStore.routeServerPushEvent>[0])
+    vi.advanceTimersByTime(2_000)
+    await flushAsyncWork()
+
+    expect(refreshActivity).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not trigger observatory telemetry refresh from the workspace board route', async () => {
     const { sseStore } = await loadSseStore()
     const refreshActivity = vi.fn()
     sseStore.registerActivityRefresh(refreshActivity)
@@ -500,7 +581,7 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(hydrateShellSnapshot).toHaveBeenCalledWith(
       payloads.shell,
-      { light: true },
+      { light: true, preserveAuth: true },
     )
     expect(hydrateExecutionSnapshot).toHaveBeenCalledWith(payloads.execution)
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith(payloads.board)

@@ -11,28 +11,6 @@ module Runtime = Server_routes_http_runtime
 module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api = Server_dashboard_http_keeper_api
 
-(* Cascade profile gate extracted to
-   [Server_dashboard_cascade_profile_gate] (godfile decomp PR #18027).
-   PR #18027 deleted this surface but left 3 unqualified call sites in
-   the parent dashboard route file (lines 1173, 1208, 1209). Restored
-   via module alias + local function aliases that map the old
-   unqualified names to the new [_profile_gate] surface. *)
-module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
-
-let cascade_profile_gate = Cascade_profile_gate.compute
-let available_cascade_profiles = Cascade_profile_gate.available_profiles
-let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
-let invalid_cascade_assignment_profiles =
-  Cascade_profile_gate.invalid_assignment_profiles
-
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)
 let dashboard_logs_store_path = Server_dashboard_logs_json.store_path
@@ -59,118 +37,58 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-(* sync_keeper_cascade_meta extracted to
-   [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
-let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta
 (* Dashboard dev-token cluster extracted to
    [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 
 let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
 let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 
-let executable_file_exists path =
-  (* RFC-0145 — narrow from a wildcard catch-all to the only exceptions
-     [Sys.is_directory] and [Unix.access] raise when the path is
-     missing, not a directory, or not executable.  Other runtime
-     exceptions propagate so we do not silently report a healthy
-     filesystem as non-executable. *)
-  try
-    Sys.file_exists path
-    && not (Sys.is_directory path)
-    &&
-    (Unix.access path [ Unix.X_OK ];
-     true)
-  with
-  | Sys_error _ | Unix.Unix_error _ -> false
-
-let append_unique candidate acc =
-  match candidate with
-  | None | Some "" -> acc
-  | Some path when List.mem path acc -> acc
-  | Some path -> acc @ [ path ]
-
-let dashboard_doctor_self_bin () =
-  let argv0 =
-    if Array.length Sys.argv = 0 then None else Some Sys.argv.(0)
-  in
-  let argv0_absolute =
-    match argv0 with
-    | Some path when not (Filename.is_relative path) -> Some path
-    | Some path -> Some (Filename.concat (Sys.getcwd ()) path)
-    | None -> None
-  in
-  let build = Build_identity.current () in
-  let build_root_bin =
-    build.repo_root
-    |> Option.map (fun root ->
-      Filename.concat root "_build/default/bin/main_eio.exe")
-  in
-  []
-  |> append_unique (Sys.getenv_opt "MASC_MAIN_EIO_EXE")
-  |> append_unique argv0
-  |> append_unique argv0_absolute
-  |> append_unique (Some build.executable_path)
-  |> append_unique build_root_bin
-  |> List.find_opt executable_file_exists
-  |> Option.value ~default:(Option.value argv0 ~default:build.executable_path)
-
-let dashboard_doctor_degraded_json ~self_bin ~exn =
-  let message = Printexc.to_string exn in
-  Yojson.Safe.to_string
-    (`Assoc
-      [ "title", `String "MASC Doctor (dashboard degraded)"
-      ; ( "doctors"
-        , `List
-            [ `Assoc
-                [ "name", `String "dashboard-route"
-                ; "kind", `String "config"
-                ; "exit_code", `Int 2
-                ; ( "payload"
-                  , Tool_args.error_assoc
-                      [ "title", `String "Dashboard Doctor Route"
-                      ; ( "checks"
-                        , `List
-                            [ Tool_args.error_assoc
-                                [ "name", `String "self-binary"
-                                ; "message", `String message
-                                ; "path", `String self_bin
-                                ] ] )
-                      ; ( "summary"
-                        , `Assoc
-                            [ "total", `Int 1
-                            ; "ok", `Int 0
-                            ; "warn", `Int 0
-                            ; "error", `Int 1
-                            ] )
-                      ] )
-                ] ] )
-      ; ( "summary"
-        , `Assoc
-            [ "total", `Int 1
-            ; "ok", `Int 0
-            ; "warn", `Int 0
-            ; "error", `Int 1
-            ] )
-      ; "exit_code", `Int 2
-      ])
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
-    relay via Coord.broadcast.  Error responses are encoded through Yojson so
+    relay via Workspace.broadcast.  Error responses are encoded through Yojson so
     exception messages cannot break JSON framing via embedded quotes. *)
 (* Dashboard request handlers extracted to
    [Server_routes_http_dashboard_handlers] (godfile decomp). *)
 let handle_broadcast = Server_routes_http_dashboard_handlers.handle_broadcast
 let handle_dashboard_link_previews = Server_routes_http_dashboard_handlers.handle_dashboard_link_previews
 let handle_dashboard_task_history = Server_routes_http_dashboard_handlers.handle_dashboard_task_history
-let handle_dashboard_rooms = Server_routes_http_dashboard_handlers.handle_dashboard_rooms
+let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_dashboard_workspace
+
+(* Default page sizes for /api/v1/dashboard/telemetry when the client
+   omits [n]. A windowed request (since_ms/until_ms) previously defaulted
+   to n=0 (unbounded): a single Observatory poll
+   ([observatory.ts] fetchTelemetry with since_ms/until_ms and no n) then
+   Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
+   source across all sources — enough to peg the single Eio domain on a
+   non-yielding parse and freeze the keeper fleet. Bound the DEFAULT here;
+   an explicit n=0 still honours the all-in-window contract from #20659. *)
+let default_telemetry_limit = 100
+let default_windowed_telemetry_limit = 2000
+
+(* Resolve the effective entry limit for /api/v1/dashboard/telemetry.
+   Absent or unparseable [n_param] falls back to a bounded default
+   (windowed: [default_windowed_telemetry_limit], else
+   [default_telemetry_limit]) so no request defaults to an unbounded read.
+   An explicit n=0 parses to [Some 0] and is preserved (all-in-window,
+   clamped downstream by #20659). Pure + exposed so the freeze guard
+   (no permissive 0 default) is unit-testable. *)
+let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
+  let default_n =
+    if has_time_window
+    then default_windowed_telemetry_limit
+    else default_telemetry_limit
+  in
+  match n_param with
+  | Some raw -> Option.value ~default:default_n (int_of_string_opt raw) |> max 0
+  | None -> default_n
 
 (* Telemetry unified view handler — extracted from add_routes pipeline
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
   with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.workspace_config in
     let base_path = config.base_path in
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     let float_query_param req key =
       match Server_utils.query_param req key with
       | None -> None
@@ -188,12 +106,15 @@ let handle_telemetry request reqd =
     in
     let has_time_window = Option.is_some since_ts || Option.is_some until_ts in
     let n =
-      match Server_utils.query_param req "n" with
+      resolve_telemetry_n ~has_time_window
+        ~n_param:(Server_utils.query_param req "n")
+    in
+    let offset =
+      match Server_utils.query_param req "offset" with
       | Some raw ->
-        Option.value ~default:(if has_time_window then 0 else 100)
-          (int_of_string_opt raw)
-        |> max 0
-      | None -> if has_time_window then 0 else 100
+        Option.value ~default:0 (int_of_string_opt raw)
+        |> max 0 |> min 5000
+      | None -> 0
     in
     let sources =
       match Server_utils.query_param req "source" with
@@ -205,9 +126,7 @@ let handle_telemetry request reqd =
     in
     let query_json =
       let source_query =
-        match Server_utils.query_param req "source" with
-        | Some value -> `String value
-        | None -> `Null
+        Json_util.string_opt_to_json (Server_utils.query_param req "source")
       in
       `Assoc
         [
@@ -219,6 +138,7 @@ let handle_telemetry request reqd =
                    `String (Telemetry_unified.source_to_string source))
                  sources) );
           ("n", `Int n);
+          ("offset", `Int offset);
           ( "keeper",
             Option.fold ~none:`Null
               ~some:(fun value -> `String value)
@@ -256,8 +176,8 @@ let handle_telemetry request reqd =
     let opt_ts = function None -> "" | Some f -> Printf.sprintf "%.3f" f in
     let cache_key =
       Printf.sprintf
-        "telemetry:%s:%s:src=%s:n=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
-        base_path masc_root sources_key n
+        "telemetry:%s:%s:src=%s:n=%d:off=%d:k=%s:s=%s:o=%s:w=%s:since=%s:until=%s"
+        base_path masc_root sources_key n offset
         (opt_str keeper_name) (opt_str session_id)
         (opt_str operation_id) (opt_str worker_run_id)
         (opt_ts since_ts) (opt_ts until_ts)
@@ -268,7 +188,7 @@ let handle_telemetry request reqd =
         Server_timing.measure timing Telemetry_query (fun () ->
           Telemetry_unified.read_unified_result ~base_path ~masc_root
             ~sources ?keeper_name ?session_id ?operation_id
-            ?worker_run_id ?since_ts ?until_ts ~n ())
+            ?worker_run_id ?since_ts ?until_ts ~n ~offset ())
       in
       let generated_at = Masc_domain.now_iso () in
       Server_timing.measure timing Json_serialize (fun () ->
@@ -283,6 +203,8 @@ let handle_telemetry request reqd =
           ("query", query_json);
           ("count", `Int (List.length result.entries));
           ("total_matching_entries", `Int result.total_matching_entries);
+          ("offset", `Int offset);
+          ("has_more", `Bool (offset + List.length result.entries < result.total_matching_entries));
           ("truncated", `Bool result.truncated);
           ("entries", `List result.entries);
         ])

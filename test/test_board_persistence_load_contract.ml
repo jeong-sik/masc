@@ -1,5 +1,5 @@
-(** Contract test for {!Board_votes_json.load_persisted_posts} and
-    {!Board_votes_json.load_persisted_comments}.
+(** Contract test for {!Masc_board_handlers.Masc_board_handlers.Board_votes_json.load_persisted_posts} and
+    {!Masc_board_handlers.Masc_board_handlers.Board_votes_json.load_persisted_comments}.
 
     Prior to this contract change, the loaders had signature
     [store -> unit] and swallowed any [exn] from the JSONL read into an
@@ -12,7 +12,7 @@
     that is exercised on every fresh server start (no persistence file
     yet). *)
 
-open Masc_mcp
+open Masc
 
 let fresh_test_base_path () =
   let dir =
@@ -27,7 +27,7 @@ let fresh_test_base_path () =
 let test_load_persisted_posts_missing_file () =
   let _dir = fresh_test_base_path () in
   let store = Board_core.create_store () in
-  match Board_votes_json.load_persisted_posts store with
+  match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
   | Error (path, e) ->
@@ -40,7 +40,7 @@ let test_load_persisted_posts_missing_file () =
 let test_load_persisted_comments_missing_file () =
   let _dir = fresh_test_base_path () in
   let store = Board_core.create_store () in
-  match Board_votes_json.load_persisted_comments store with
+  match Masc_board_handlers.Board_votes_json.load_persisted_comments store with
   | Ok 0 -> ()
   | Ok n -> Alcotest.failf "expected Ok 0 for missing file, got Ok %d" n
   | Error (path, e) ->

@@ -8,31 +8,46 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+let blocker_reason_of_turn_driver_reason
+    (reason : Keeper_turn_driver.runtime_exhaustion_reason)
+  : Keeper_meta_contract.runtime_exhaustion_reason
+  =
+  match reason with
+  | Keeper_turn_driver.Connection_refused -> Connection_refused
+  | Keeper_turn_driver.Dns_failure -> Dns_failure
+  | Keeper_turn_driver.No_providers_available -> No_providers_available
+  | Keeper_turn_driver.All_providers_failed -> All_providers_failed
+  | Keeper_turn_driver.Candidates_filtered_after_cycles ->
+    Candidates_filtered_after_cycles
+  | Keeper_turn_driver.Max_turns_exceeded -> Max_turns_exceeded
+  | Keeper_turn_driver.Structural_attempt_timeout { detail } ->
+    Structural_attempt_timeout { detail }
+  | Keeper_turn_driver.Capacity_exhausted -> Capacity_exhausted
+  | Keeper_turn_driver.Other_detail detail -> Other_detail detail
+;;
 
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
-  match Keeper_error_classify.recoverable_cascade_failure_reason err with
+  match Keeper_error_classify.recoverable_runtime_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
   | _ ->
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
-  | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
-    Some (Cascade_exhausted reason)
+  | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
+    Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.No_tool_capable_provider _) -> Some No_tool_capable_provider
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
     Some Admission_queue_wait_timeout
   | Some (Keeper_turn_driver.Admission_queue_rejected _) -> None
-  | Some (Keeper_turn_driver.Provider_timeout _) -> Some Turn_timeout
+  | Some (Keeper_turn_driver.Provider_timeout _) -> None
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _) -> None
   | Some (Keeper_turn_driver.Turn_timeout _) -> Some Turn_timeout
   | Some (Keeper_turn_driver.Ambiguous_post_commit { is_timeout; _ }) ->
     Some
       (if is_timeout then Ambiguous_post_commit_timeout else Ambiguous_post_commit_failure)
-  (* RFC-0158: admission denial — budget too low for any provider attempt.
-     Not a cascade-exhaustion or provider-failure blocker; the turn budget
-     was simply insufficient. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _) -> None
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
@@ -46,23 +61,21 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
        when Keeper_error_classify.is_structural_oas_timeout_message message ->
        Some Oas_agent_execution_timeout
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-       Some Completion_contract_violation
-     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
+     | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
        Some Oas_agent_execution_timeout
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
-     | Agent_sdk.Error.Agent (CostBudgetExceeded _) -> Some Sdk_cost_budget_exceeded
+     | Agent_sdk.Error.Agent (CostBudgetExceeded _)
      | Agent_sdk.Error.Agent (CostBudgetUnenforceable _) -> Some Sdk_cost_budget_exceeded
      | Agent_sdk.Error.Agent (UnrecognizedStopReason _) ->
        Some Sdk_unrecognized_stop_reason
      | Agent_sdk.Error.Agent (IdleDetected _) -> Some Sdk_idle_detected
-     | Agent_sdk.Error.Agent (ToolRetryExhausted _) -> Some Sdk_tool_retry_exhausted
      | Agent_sdk.Error.Agent (GuardrailViolation _) -> Some Sdk_guardrail_violation
      | Agent_sdk.Error.Agent (TripwireViolation _) -> Some Sdk_tripwire_violation
      | Agent_sdk.Error.Agent (ExitConditionMet _) -> Some Sdk_exit_condition_met
      | Agent_sdk.Error.Agent (InputRequired _) -> Some Sdk_input_required
-     (* Provider-level [Api] errors are surfaced via OAS retry / cascade
+     (* Provider-level [Api] errors are surfaced via OAS retry / runtime
          layers and do not map to a typed blocker_class by themselves. *)
      | Agent_sdk.Error.Api _
      | Agent_sdk.Error.Provider _
@@ -70,8 +83,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      | Agent_sdk.Error.Config _
      | Agent_sdk.Error.Serialization _
      | Agent_sdk.Error.Io _
-     | Agent_sdk.Error.Orchestration _
-     | Agent_sdk.Error.A2a _ -> None)
+     | Agent_sdk.Error.Orchestration _ -> None)
 ;;
 
 (* ── Runtime blocker surface ───────────────────────────────── *)
@@ -88,25 +100,17 @@ let runtime_blocker_class_label ?(summary = "") cls =
   let _ = summary in
   blocker_class_to_string (runtime_blocker_surface_class cls)
 
-let is_cascade_exhausted_blocker_class blocker_class =
+let is_runtime_exhausted_blocker_class blocker_class =
   String.equal
     blocker_class
-    (blocker_class_to_string (Cascade_exhausted (Other_detail "")))
-;;
-
-let is_no_tool_capable_provider_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string No_tool_capable_provider)
-;;
-
-let is_completion_contract_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Completion_contract_violation)
+    (blocker_class_to_string (Runtime_exhausted (Other_detail "")))
 ;;
 
 let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
-let is_stale_watchdog_blocker_class blocker_class =
+let is_stale_turn_timeout_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
 ;;
 
@@ -126,8 +130,8 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       if summary = ""
       then "Provider or client capacity backpressure blocked this keeper turn."
       else summary
-    | Cascade_exhausted reason ->
-      if summary = "" then cascade_exhaustion_summary reason else summary
+    | Runtime_exhausted reason ->
+      if summary = "" then runtime_exhaustion_summary reason else summary
     | Turn_livelock_blocked ->
       if summary = ""
       then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
@@ -145,23 +149,18 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Oas_agent_execution_timeout ->
       if summary = ""
       then
-        "OAS Agent.run or the enclosing cascade-attempt watchdog hit its execution timeout; this is not a provider HTTP timeout."
-      else summary
-    | No_tool_capable_provider ->
-      if summary = ""
-      then "No configured provider can satisfy the required tool set before dispatch."
+        "OAS Agent.run reported an execution timeout; inspect whether progress accounting excluded active tool execution."
       else summary
     | Completion_contract_violation ->
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)
       if summary = ""
       then
-        "Provider response violated the required completion/tool contract after dispatch."
+        "Provider response violated the completion contract after dispatch."
       else summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
     | Ambiguous_post_commit_timeout
     | Ambiguous_post_commit_failure
-    | Autonomous_slot_wait_timeout
     | Admission_queue_wait_timeout
     | Turn_timeout_after_queue_wait
     | Turn_timeout
@@ -172,7 +171,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_cost_budget_exceeded
     | Sdk_unrecognized_stop_reason
     | Sdk_idle_detected
-    | Sdk_tool_retry_exhausted
     | Sdk_guardrail_violation
     | Sdk_tripwire_violation
     | Sdk_exit_condition_met
@@ -268,22 +266,31 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
-  | Keeper_registry.Provider_runtime_error { code; detail } ->
-    Some
-      { blocker_class = "provider_runtime_error"
-      ; summary =
-          Printf.sprintf
-            "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-            code
-            detail
-      ; continue_gate = false
-      }
-  | Keeper_registry.Tool_required_unsatisfied { code; detail } ->
-    Some
-      { blocker_class = "tool_required_unsatisfied"
-      ; summary = Printf.sprintf "%s: %s" code detail
-      ; continue_gate = false
-      }
+  | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
+    (match
+       Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ~code
+         ~detail
+     with
+     | Keeper_provider_runtime_boundary.Provider_timeout _ ->
+       Some
+         (runtime_blocker_surface_of_typed_class
+            ~summary:
+              (Printf.sprintf
+                 "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
+                 code
+                 detail)
+            Turn_timeout)
+     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
+       Some
+         { blocker_class = "provider_runtime_error"
+         ; summary =
+             Printf.sprintf
+               "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+               code
+               detail
+         ; continue_gate = false
+         })
   | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
     let blocker_class =
       match kind with
@@ -291,7 +298,7 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
       | Keeper_registry.Post_commit_failure -> "ambiguous_post_commit_failure"
     in
     Some { blocker_class; summary = detail; continue_gate = true }
-  | Keeper_registry.Fiber_unresolved ->
+  | Keeper_registry.Fiber_unresolved _ ->
     Some
       (runtime_blocker_surface_of_typed_class
          ~summary:

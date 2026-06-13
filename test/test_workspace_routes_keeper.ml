@@ -12,8 +12,8 @@
      - [`PlaygroundMissing]  — keeper meta exists but dir is missing
      - [`KeeperUnknown]      — no keeper meta for the given name *)
 
-module W = Masc_mcp.Server_routes_http_routes_workspace
-module P = Masc_mcp.Prometheus
+module W = Server_routes_http_routes_workspace
+module P = Masc.Otel_metric_store
 
 let project = "/repo"
 let repository_root = "/repo/.masc/repos/masc"

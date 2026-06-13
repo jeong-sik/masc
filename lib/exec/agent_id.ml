@@ -1,5 +1,5 @@
 type t =
-  [ `Coord_git
+  [ `Workspace_git
   | `System_sandbox
   | `System_notify
   | `Voice_bridge
@@ -11,8 +11,7 @@ type t =
   | `System_worker_container_types
   | `System_worker_runtime_docker
   | `System_spawn
-  | `System_auto_responder
-  | `Coord_identity
+  | `Workspace_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
   | `Tool_execute
@@ -20,7 +19,7 @@ type t =
   ]
 
 let of_string = function
-  | "coord/git" -> `Coord_git
+  | "workspace/git" -> `Workspace_git
   | "system/sandbox" -> `System_sandbox
   | "system/notify" -> `System_notify
   | "voice/bridge" -> `Voice_bridge
@@ -32,15 +31,14 @@ let of_string = function
   | "system/worker_container_types" -> `System_worker_container_types
   | "system/worker_runtime_docker" -> `System_worker_runtime_docker
   | "system/spawn" -> `System_spawn
-  | "system/auto_responder" -> `System_auto_responder
-  | "coord/identity" -> `Coord_identity
+  | "workspace/identity" -> `Workspace_identity
   | "tool/local_runtime" -> `Tool_local_runtime
   | "tool/local_runtime_bench" -> `Tool_local_runtime_bench
   | "tool/execute" -> `Tool_execute
   | _ -> `Other_agent
 
 let to_string = function
-  | `Coord_git -> "coord/git"
+  | `Workspace_git -> "workspace/git"
   | `System_sandbox -> "system/sandbox"
   | `System_notify -> "system/notify"
   | `Voice_bridge -> "voice/bridge"
@@ -52,8 +50,7 @@ let to_string = function
   | `System_worker_container_types -> "system/worker_container_types"
   | `System_worker_runtime_docker -> "system/worker_runtime_docker"
   | `System_spawn -> "system/spawn"
-  | `System_auto_responder -> "system/auto_responder"
-  | `Coord_identity -> "coord/identity"
+  | `Workspace_identity -> "workspace/identity"
   | `Tool_local_runtime -> "tool/local_runtime"
   | `Tool_local_runtime_bench -> "tool/local_runtime_bench"
   | `Tool_execute -> "tool/execute"

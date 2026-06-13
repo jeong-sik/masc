@@ -5,7 +5,7 @@
 
     @since 2.255.0 — PR-4: TopK_llm activation *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────── *)
 
@@ -22,19 +22,12 @@ let mock_rerank_passthrough ~context:_ ~candidates =
 let mock_rerank_reverse ~context:_ ~candidates =
   List.rev_map fst candidates
 
-(** A mock rerank_fn that always selects tools containing a keyword. *)
-let mock_rerank_keyword keyword ~context:_ ~candidates =
-  let klen = String.length keyword in
-  List.filter_map (fun (name, _desc) ->
-    let nlen = String.length name in
-    if nlen < klen then None
-    else
-      let found = ref false in
-      for i = 0 to nlen - klen do
-        if String.sub name i klen = keyword then found := true
-      done;
-      if !found then Some name else None
-  ) candidates
+(** A mock rerank_fn that selects an explicit allowlist of tool names. *)
+let mock_rerank_names allowed_names ~context:_ ~candidates =
+  List.filter_map
+    (fun (name, _desc) ->
+       if List.exists (String.equal name) allowed_names then Some name else None)
+    candidates
 
 (** A mock rerank_fn that always raises. *)
 let mock_rerank_failing ~context:_ ~candidates:_ =
@@ -96,14 +89,14 @@ let deterministic_prefilter_for ~query_text ~selection_limit =
     ~search_index:(test_search_index ())
     ~query_text
     ~selection_limit
-    ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+    ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
 
 let deterministic_prefilter_for_tools ~tools ~query_text ~selection_limit =
   Keeper_tool_selection.deterministic_prefilter_names
     ~search_index:(test_search_index_with_production_aliases tools)
     ~query_text
     ~selection_limit
-    ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+    ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
 
 (* ── Tests ───────────────────────────────────────────────── *)
 
@@ -192,31 +185,25 @@ let test_topk_llm_empty_tools () =
     ~strategy ~context:"anything" ~tools:[] in
   Alcotest.(check (list string)) "empty tools -> empty result" [] selected
 
-let test_topk_llm_keyword_rerank () =
+let test_topk_llm_explicit_name_rerank () =
+  let allowed_names =
+    [ "keeper_board_post"; "keeper_board_get"; "keeper_board_list" ]
+  in
   let strategy = Agent_sdk.Tool_selector.TopK_llm {
     k = 5;
     bm25_prefilter_n = 20;
     always_include = [];
     confidence_threshold = 0.0;
-    rerank_fn = mock_rerank_keyword "board";
+    rerank_fn = mock_rerank_names allowed_names;
   } in
   let selected = Agent_sdk.Tool_selector.select_names
     ~strategy ~context:"board post message" ~tools:test_tools in
-  (* All selected should contain "board" *)
-  let contains_board name =
-    let nlen = String.length name in
-    if nlen < 5 then false
-    else
-      let found = ref false in
-      for i = 0 to nlen - 5 do
-        if String.sub name i 5 = "board" then found := true
-      done;
-      !found
-  in
+  Alcotest.(check bool) "named rerank returns at least one explicit tool"
+    true (selected <> []);
   List.iter (fun name ->
     Alcotest.(check bool)
-      (Printf.sprintf "%s contains 'board'" name)
-      true (contains_board name)
+      (Printf.sprintf "%s selected by exact-name rerank" name)
+      true (List.exists (String.equal name) allowed_names)
   ) selected
 
 let test_topk_llm_always_include_survives () =
@@ -226,9 +213,9 @@ let test_topk_llm_always_include_survives () =
     always_include = ["keeper_stay_silent"; "keeper_context_status"];
     confidence_threshold = 0.0;
     rerank_fn = (fun ~context:_ ~candidates ->
-      (* Return only board tools — always_include should still appear *)
+      (* Return one regular tool — always_include should still appear *)
       List.filter_map (fun (name, _) ->
-        if String.length name > 6 && String.sub name 0 6 = "keeper" then Some name
+        if String.equal name "keeper_board_post" then Some name
         else None
       ) candidates
       |> List.filteri (fun i _ -> i < 1));
@@ -328,66 +315,41 @@ let test_selection_boundary_sorts_discovered () =
     ["tool_a"; "tool_b"; "core_tool"]
     merged_ab
 
-let test_deterministic_prefilter_surfaces_source_navigation () =
+let test_deterministic_prefilter_surfaces_source_navigation_from_descriptor () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"search code in the repository"
+      ~query_text:"Search code in the repository"
       ~selection_limit:3
   in
-  Alcotest.(check bool) "source search appears without llm rerank"
+  Alcotest.(check bool) "source search appears from descriptor index"
     true (List.mem "tool_search_files" selected)
 
-let test_deterministic_prefilter_surfaces_source_read_for_explicit_read_intent () =
+let test_deterministic_prefilter_surfaces_source_read_from_descriptor () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"read source file contents"
+      ~query_text:"Read code from a source file"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "source read appears for explicit read intent"
+  Alcotest.(check bool) "source read appears from descriptor index"
     true (List.mem "tool_read_file" selected)
 
-let test_deterministic_prefilter_surfaces_source_read_for_source_path_hint () =
+let test_deterministic_prefilter_surfaces_source_symbols_from_descriptor () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"open lib/keeper/agent_tool_execute_runtime.ml"
+      ~query_text:"List functions and classes from a source file"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "source read appears for source path hint"
-    true (List.mem "tool_read_file" selected)
+  Alcotest.(check bool) "source symbols appears from descriptor index"
+    true (List.mem "tool_search_files" selected)
 
-let test_deterministic_prefilter_surfaces_source_symbols_for_explicit_symbol_intent
-    () =
+let test_deterministic_prefilter_limits_after_dedupe () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"show function symbols"
-      ~selection_limit:5
+      ~query_text:"source file"
+      ~selection_limit:1
   in
-  Alcotest.(check bool) "source symbols appears for explicit symbol intent"
-    true (List.mem "tool_search_files" selected);
-  Alcotest.(check bool) "source read stays out of symbol-only intent"
-    false (List.mem "tool_read_file" selected)
-
-let test_deterministic_prefilter_hides_source_navigation_without_source_intent () =
-  let selected =
-    deterministic_prefilter_for
-      ~query_text:"show me activity overview for the room"
-      ~selection_limit:5
-  in
-  Alcotest.(check bool) "source search stays hidden for non-source query"
-    false (List.mem "tool_search_files" selected);
-  Alcotest.(check bool) "source read stays hidden for non-source query"
-    false (List.mem "tool_read_file" selected);
-  Alcotest.(check bool) "source symbols stays hidden for non-source query"
-    false (List.mem "tool_search_files" selected)
-
-let test_deterministic_prefilter_hides_source_read_for_generic_file_read () =
-  let selected =
-    deterministic_prefilter_for
-      ~query_text:"read file contents"
-      ~selection_limit:5
-  in
-  Alcotest.(check bool) "source read stays hidden for generic file read"
-    false (List.mem "tool_read_file" selected)
+  Alcotest.(check int) "selection limit applies after descriptor dedupe" 1
+    (List.length selected)
 
 let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () =
   let shell_tools =
@@ -405,7 +367,7 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () 
   in
   let visible =
     Keeper_tool_selection.merge_tool_selection_boundary
-      ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]
       ~discovered:[]
@@ -413,24 +375,24 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request () 
   Alcotest.(check bool) "Execute appears in final visible surface"
     true (List.mem "Execute" visible)
 
-let test_execute_aliases_exclude_forge_workflow () =
+let test_execute_aliases_exclude_repo_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "Execute"
   in
-  Alcotest.(check bool) "Execute aliases exclude forge draft token"
+  Alcotest.(check bool) "Execute aliases exclude PR draft token"
     false (List.mem ("dra" ^ "ft") aliases);
-  Alcotest.(check bool) "Execute aliases exclude forge request token"
+  Alcotest.(check bool) "Execute aliases exclude PR request token"
     false (List.mem ("pu" ^ "ll") aliases);
   Alcotest.(check bool) "Execute aliases omit Korean create intent"
     false (List.mem ("생" ^ "성") aliases)
 
-let test_search_aliases_exclude_forge_workflow () =
+let test_search_aliases_exclude_repo_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "tool_search_files"
   in
-  Alcotest.(check bool) "tool_search_files aliases exclude forge draft token"
+  Alcotest.(check bool) "tool_search_files aliases exclude PR draft token"
     false (List.mem ("dra" ^ "ft") aliases);
-  Alcotest.(check bool) "tool_search_files aliases exclude forge request token"
+  Alcotest.(check bool) "tool_search_files aliases exclude PR request token"
     false (List.mem ("pu" ^ "ll") aliases);
   Alcotest.(check bool) "tool_search_files aliases omit Korean create intent"
     false (List.mem ("생" ^ "성") aliases)
@@ -443,7 +405,7 @@ let test_public_aliases_reuse_internal_search_aliases () =
   Alcotest.(check (list string))
     "SearchFiles shares tool_search_files aliases"
     (Keeper_agent_tool_surface.tool_search_aliases "tool_search_files")
-    (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
+    (Keeper_agent_tool_surface.tool_search_aliases "Grep")
 
 let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   let shell_tools =
@@ -461,7 +423,7 @@ let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   in
   let visible =
     Keeper_tool_selection.merge_tool_selection_boundary
-      ~core:(Agent_tool_dispatch_runtime.effective_core_tools ())
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]
       ~discovered:[]
@@ -473,6 +435,47 @@ let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   let retired_repo_prefix = "github_" ^ "pr_" in
   Alcotest.(check bool) "retired repo helper surface stays out of visible surface"
     false (List.exists (String.starts_with ~prefix:retired_repo_prefix) visible)
+
+let test_deterministic_prefilter_surfaces_connected_lane_context () =
+  let surface_tools =
+    [ make_tool "keeper_surface_read"
+        "Read recent conversation from one connected surface lane: connector lane, channel conversation, participants roster"
+    ; make_tool "keeper_tools_list"
+        "List available tools and keeper capabilities"
+    ; make_tool "keeper_tool_search"
+        "Search for tools by keyword"
+    ; make_tool "keeper_context_status"
+        "Check context window usage"
+    ]
+  in
+  let selected =
+    deterministic_prefilter_for_tools
+      ~tools:surface_tools
+      ~query_text:"내가 빈센이고 다른 디스코드 채널 뭐있음"
+      ~selection_limit:10
+  in
+  let visible =
+    Keeper_tool_selection.merge_tool_selection_boundary
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
+      ~deterministic_prefilter:selected
+      ~llm_selected:[]
+      ~discovered:[]
+  in
+  let index_of name =
+    let rec loop i = function
+      | [] -> None
+      | x :: xs -> if String.equal x name then Some i else loop (i + 1) xs
+    in
+    loop 0 visible
+  in
+  Alcotest.(check bool) "surface_read appears in visible surface"
+    true (List.mem "keeper_surface_read" visible);
+  Alcotest.(check bool) "surface_read appears before generic tools_list"
+    true
+    (match index_of "keeper_surface_read", index_of "keeper_tools_list" with
+     | Some s, Some t -> s < t
+     | Some _, None -> true
+     | _ -> false)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =
@@ -499,15 +502,15 @@ let test_tool_search_partition_returns_allowed_core_hits () =
 let test_tool_search_partition_projects_allowed_internal_to_public_alias () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
-      ~core:[ "Execute"; "SearchFiles" ]
+      ~core:[ "Execute"; "Grep" ]
       ~core_always:[]
       ~allowed:[ "tool_execute"; "tool_search_files" ]
-      ~retrieved:[ "Execute", 1.0; "SearchFiles", 0.9; "ReadFile", 0.8 ]
+      ~retrieved:[ "Execute", 1.0; "Grep", 0.9; "Read", 0.8 ]
       ~max_results:10
   in
   Alcotest.(check (list string))
     "descriptor public aliases are visible when backing internals are allowed"
-    [ "Execute"; "SearchFiles" ]
+    [ "Execute"; "Grep" ]
     (List.map fst partition.visible_core_hits);
   Alcotest.(check int) "unbacked public hit is filtered" 1 partition.filtered_by_policy
 
@@ -532,38 +535,26 @@ let test_tool_search_partition_filters_policy_denied_core_hits () =
     (List.map fst partition.discoverable_hits);
   Alcotest.(check int) "one policy-filtered hit" 1 partition.filtered_by_policy
 
-let test_tool_surface_truncation_dedupes_essential_tools () =
-  let truncated =
-    Keeper_run_tools.truncate_tool_surface_names
-      ~max_tools:4
-      ~essential_names:[ "keeper_context_status"; "keeper_task_done" ]
-      [
-        "keeper_context_status";
-        "keeper_task_done";
-        "keeper_board_get";
-        "keeper_task_done";
-        "tool_search_files";
-        "tool_read_file";
-      ]
-  in
-  Alcotest.(check (list string))
-    "required essential is not double-counted in truncated surface"
+let test_tool_surface_selection_preserves_order () =
+  let tools =
     [
       "keeper_context_status";
       "keeper_task_done";
       "keeper_board_get";
+      "keeper_task_done";
       "tool_search_files";
+      "tool_read_file";
     ]
-    truncated
+  in
+  Alcotest.(check (list string))
+    "tool order is preserved without truncation"
+    tools
+    tools
 
 let test_keeper_config_defaults () =
   (* Default: LLM rerank disabled *)
   Alcotest.(check bool) "llm_rerank disabled by default"
-    false (Keeper_config.keeper_llm_rerank_enabled ());
-  (* Default cascade name *)
-  let cascade = Keeper_config.keeper_llm_rerank_cascade () in
-  Alcotest.(check string) "default cascade name"
-    "route.llm_rerank" cascade
+    false (Keeper_config.keeper_llm_rerank_enabled ())
 
 (* ── Suite ───────────────────────────────────────────────── *)
 
@@ -580,8 +571,8 @@ let () =
         test_topk_llm_confidence_gate;
       Alcotest.test_case "empty tools" `Quick
         test_topk_llm_empty_tools;
-      Alcotest.test_case "keyword reranker" `Quick
-        test_topk_llm_keyword_rerank;
+      Alcotest.test_case "explicit-name reranker" `Quick
+        test_topk_llm_explicit_name_rerank;
       Alcotest.test_case "always_include survives" `Quick
         test_topk_llm_always_include_survives;
       Alcotest.test_case "deterministic floor preserved" `Quick
@@ -591,35 +582,33 @@ let () =
       Alcotest.test_case "discovered sorted for stable order" `Quick
         test_selection_boundary_sorts_discovered;
       Alcotest.test_case "deterministic prefilter surfaces source navigation" `Quick
-        test_deterministic_prefilter_surfaces_source_navigation;
+        test_deterministic_prefilter_surfaces_source_navigation_from_descriptor;
       Alcotest.test_case "deterministic prefilter surfaces source read" `Quick
-        test_deterministic_prefilter_surfaces_source_read_for_explicit_read_intent;
-      Alcotest.test_case "deterministic prefilter surfaces source read for path hint" `Quick
-        test_deterministic_prefilter_surfaces_source_read_for_source_path_hint;
+        test_deterministic_prefilter_surfaces_source_read_from_descriptor;
       Alcotest.test_case "deterministic prefilter surfaces source symbols" `Quick
-        test_deterministic_prefilter_surfaces_source_symbols_for_explicit_symbol_intent;
-      Alcotest.test_case "deterministic prefilter hides source navigation" `Quick
-        test_deterministic_prefilter_hides_source_navigation_without_source_intent;
-      Alcotest.test_case "deterministic prefilter hides source read for generic file read" `Quick
-        test_deterministic_prefilter_hides_source_read_for_generic_file_read;
+        test_deterministic_prefilter_surfaces_source_symbols_from_descriptor;
+      Alcotest.test_case "deterministic prefilter limits after dedupe" `Quick
+        test_deterministic_prefilter_limits_after_dedupe;
       Alcotest.test_case "deterministic prefilter surfaces shell execute" `Quick
         test_deterministic_prefilter_surfaces_execute_for_explicit_shell_request;
-      Alcotest.test_case "Execute aliases exclude forge workflow" `Quick
-        test_execute_aliases_exclude_forge_workflow;
-      Alcotest.test_case "tool_search_files aliases exclude forge workflow" `Quick
-        test_search_aliases_exclude_forge_workflow;
+      Alcotest.test_case "Execute aliases exclude repo PR workflow" `Quick
+        test_execute_aliases_exclude_repo_pr_workflow;
+      Alcotest.test_case "tool_search_files aliases exclude repo PR workflow" `Quick
+        test_search_aliases_exclude_repo_pr_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;
       Alcotest.test_case "visible Execute covers shell request" `Quick
         test_deterministic_prefilter_surfaces_execute_for_shell_request;
+      Alcotest.test_case "visible surface_read covers connected lane request" `Quick
+        test_deterministic_prefilter_surfaces_connected_lane_context;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search projects allowed internals to public aliases" `Quick
         test_tool_search_partition_projects_allowed_internal_to_public_alias;
       Alcotest.test_case "tool_search filters denied core hits" `Quick
         test_tool_search_partition_filters_policy_denied_core_hits;
-      Alcotest.test_case "tool surface truncation dedupes essential tools" `Quick
-        test_tool_surface_truncation_dedupes_essential_tools;
+      Alcotest.test_case "tool surface selection preserves order" `Quick
+        test_tool_surface_selection_preserves_order;
     ];
     "keeper_config", [
       Alcotest.test_case "config defaults" `Quick

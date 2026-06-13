@@ -37,20 +37,12 @@ let visible_consumer_count () =
 ;;
 
 let visibility_gate_decision
-      ~(visible_consumers : int)
-      ~(has_pending_signal : bool)
-      ~(now : float)
-      ~(last_heartbeat_cycle_ts : float)
+      ~visible_consumers:_
+      ~has_pending_signal:_
+      ~now:_
+      ~last_heartbeat_cycle_ts:_
       (decision : Keeper_heartbeat_smart.decision)
   : Keeper_heartbeat_smart.decision
   =
-  match decision with
-  | Keeper_heartbeat_smart.Emit
-    when visible_consumers <= 0
-         && (not has_pending_signal)
-         && last_heartbeat_cycle_ts > 0.0
-         && now -. last_heartbeat_cycle_ts < unobserved_visibility_idle_window_s ->
-    Keeper_heartbeat_smart.Skip_idle
-      (last_heartbeat_cycle_ts +. unobserved_visibility_idle_window_s)
-  | _ -> decision
+  decision
 ;;

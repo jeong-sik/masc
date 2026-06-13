@@ -185,7 +185,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
           phase: snapshot.phase,
           turnPhase: snapshot.turn_phase,
           decisionStage: snapshot.decision.stage,
-          cascadeState: snapshot.cascade.state,
+          runtimeState: snapshot.runtime.state,
           compactionStage: snapshot.compaction.stage,
         })
       : null,
@@ -211,7 +211,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseBadge} accent>composite ${displayState(snapshot.phase)}<//>
         <${PhaseBadge}>KTC ${displayState(snapshot.turn_phase)}<//>
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
-        <${PhaseBadge}>KCL ${displayState(snapshot.cascade.state)}<//>
+        <${PhaseBadge}>KCL ${displayState(snapshot.runtime.state)}<//>
         <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
         <${PhaseBadge}>KCB ${displayState(snapshot.circuit_breaker?.state ?? 'clean')}<//>
         ${transitions.length > 0 ? html`

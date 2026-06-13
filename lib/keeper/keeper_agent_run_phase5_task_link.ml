@@ -2,7 +2,7 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-9). *)
 
-let run ~config ~(meta : Keeper_types.keeper_meta)
+let run ~config ~(meta : Keeper_meta_contract.keeper_meta)
       ~(acc : Keeper_run_tools.hook_accumulator) ()
   =
   match acc.meta.current_task_id with
@@ -24,7 +24,7 @@ let run ~config ~(meta : Keeper_types.keeper_meta)
       let operation_id = Some trace_id_str in
       let result =
         try
-          Coord.link_task_execution_artifacts_r
+          Workspace.link_task_execution_artifacts_r
             config
             ~task_id:task_id_str
             ?session_id
@@ -49,9 +49,8 @@ let run ~config ~(meta : Keeper_types.keeper_meta)
           ~task_id:task_id_str
           ~trace_id:trace_id_str
       | Error err ->
-        Log.Keeper.warn
-          "keeper:%s link_task_execution_artifacts failed for task=%s: %s"
-          meta.name
+        Log.Keeper.warn ~keeper_name:meta.name
+          "link_task_execution_artifacts failed for task=%s: %s"
           task_id_str
           (Masc_domain.masc_error_to_string err))
 ;;

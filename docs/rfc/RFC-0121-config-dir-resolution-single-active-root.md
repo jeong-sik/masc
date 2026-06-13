@@ -39,7 +39,7 @@ implementation_prs:
 
 ### 의도된 architecture (문서)
 
-`docs/CONFIG-DOCTOR.md` (PR #15930 가 수정):
+`docs/CONFIG-DIAGNOSTIC.md` (PR #15930 가 수정):
 
 > "It only resolves operator config from `MASC_CONFIG_DIR` or `<base-path>/.masc/config`."
 
@@ -99,7 +99,7 @@ RFC-0112 (typed JSON parse boundary, iter-4) 의 `lint-json-parse-raw.sh` 패턴
 
 **Layer C — Doc gate**
 
-`docs/CONFIG-DOCTOR.md` + `docs/BOOT-ENV-STATE-INVENTORY.md` + `docs/spec/14-configuration.md` 의 *현재 commit 된 intent* 와 *코드* 일치 보장. CI 가 lint 와 doc 의 *baseline count* 일치 확인 — drift 시 fail.
+`docs/CONFIG-DIAGNOSTIC.md` + `docs/BOOT-ENV-STATE-INVENTORY.md` + `docs/spec/14-configuration.md` 의 *현재 commit 된 intent* 와 *코드* 일치 보장. CI 가 lint 와 doc 의 *baseline count* 일치 확인 — drift 시 fail.
 
 ## §3 Phasing
 
@@ -110,7 +110,7 @@ RFC-0112 (typed JSON parse boundary, iter-4) 의 `lint-json-parse-raw.sh` 패턴
 | P3 | `lint-config-fallback.sh` baseline = inventory of *현재* fallback site (e.g. `config_dir_resolver.ml:105` `home_base`). CI workflow `.github/workflows/config-fallback-lint.yml`. | grandfather list initial count = N (실측, P3 안에서) |
 | P4 | High-traffic site migration (5+ inventoried). 호출자가 `resolve` 의 `Result.Error _` 처리. | grandfather count -= 5 |
 | P5 | Remaining sites 모두 migrate. grandfather = 0. | `rg "home.*config|home_dir|operator.*home" lib/` = 0 (unescaped `|` for regex alternation) |
-| P6 | Doc 정합 lint — `docs/CONFIG-DOCTOR.md` 의 intent 와 `Config_root_source.t` variant set 일치 검증 | CI 가 doc-code drift 차단 |
+| P6 | Doc 정합 lint — `docs/CONFIG-DIAGNOSTIC.md` 의 intent 와 `Config_root_source.t` variant set 일치 검증 | CI 가 doc-code drift 차단 |
 
 P3 가 핵심 — grandfather list 가 더 이상 늘어나지 않음을 enforce. P5 가 *N-of-M closure* — 최종 0 보장.
 

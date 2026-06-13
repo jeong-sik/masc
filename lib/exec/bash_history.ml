@@ -316,11 +316,6 @@ let timeout_ms = 30_000
 
 let timeout_threshold = 2
 
-let take_last n lst =
-  let len = List.length lst in
-  if len <= n then lst else drop (len - n) lst
-;;
-
 (** Check if [prefix] appears to be a test runner command. *)
 let is_test_prefix prefix =
   let l = String.lowercase_ascii prefix in
@@ -339,7 +334,7 @@ let failure_insight ~base_path ~keeper_name =
   then []
   else (
     let entries = load_entries path in
-    let recent = take_last rate_window entries in
+    let recent = List_util.take_last rate_window entries in
     if recent = []
     then []
     else (

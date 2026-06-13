@@ -1,8 +1,8 @@
 (** Metadata gap detection for mission briefing sections.
 
-    Briefing facts can carry "missing" sentinel strings ("unassigned",
-    "unknown", "not_recorded"). This module turns those sentinels into
-    structured gap records and counts/filters them per briefing section
+    Briefing facts carry absent optional scalars as JSON null or empty
+    fields. This module turns those missing values into structured gap
+    records and counts/filters them per briefing section
     (Communication / Alignment / Watch). *)
 
 type section =
@@ -18,7 +18,7 @@ val collect_metadata_gaps :
   keepers:Yojson.Safe.t list ->
   agents:Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** Scan the three briefing fact lists for sentinel-marked gaps and
+(** Scan the three briefing fact lists for metadata gaps and
     return at most 8 gap records (session goal missing, communication
     mode missing, keeper last reply missing, active agent without
     focus). *)

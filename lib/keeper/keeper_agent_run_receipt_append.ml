@@ -14,16 +14,15 @@ let append_with_coverage_gap
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     let err_msg = Printexc.to_string exn in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "receipt_append" ]
       ();
-    Log.Keeper.warn
-      "keeper:%s execution_receipt append failed: %s"
-      keeper_name
+    Log.Keeper.warn ~keeper_name:keeper_name
+      "execution_receipt append failed: %s"
       err_msg;
     (try
-       let masc_root = Coord.masc_root_dir config in
+       let masc_root = Workspace.masc_root_dir config in
        Telemetry_coverage_gap.record
          ~masc_root
          ~source:"execution_receipt"
@@ -41,13 +40,12 @@ let append_with_coverage_gap
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | gap_exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string DispatchEventFailures)
          ~labels:[ "keeper", keeper_name; "site", "coverage_gap_append" ]
          ();
-       Log.Keeper.warn
-         "keeper:%s execution_receipt coverage gap append failed: %s"
-         keeper_name
+       Log.Keeper.warn ~keeper_name:keeper_name
+         "execution_receipt coverage gap append failed: %s"
          (Printexc.to_string gap_exn));
     Error err_msg
 ;;

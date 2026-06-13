@@ -24,7 +24,7 @@ type observation_context = {
   context_ratio : float;
       (** [\[0.0, 1.0\]] — current context window utilization. *)
   active_agent_count : int;
-      (** Agents currently active in the room. *)
+      (** Agents currently active in the workspace. *)
   unclaimed_task_count : int;
       (** Pending tasks in the backlog. *)
   is_single_focused_task : bool;
@@ -34,7 +34,7 @@ type observation_context = {
   is_local_model : bool;
       (** Whether model runs locally. *)
 }
-(** Snapshot of room / model conditions used by {!Dynamic}
+(** Snapshot of workspace / model conditions used by {!Dynamic}
     strategies to choose concrete sub-strategies at runtime.
     Concrete record because callers (notably
     {!Keeper_compact_policy}) construct it field-by-field. *)
@@ -77,7 +77,7 @@ val compact :
 
     Logs the resolved strategy names + observation summary at
     INFO via {!Log.Compact.info} on every call — used to debug
-    "why is keeper context not shrinking" cascades. *)
+    "why is keeper context not shrinking" runtimes. *)
 
 val resolve_strategies :
   obs:observation_context option ->
@@ -131,7 +131,7 @@ val default_dynamic_selector :
     [Dynamic _] callback for keeper compaction policies.
     Branches on observation thresholds:
 
-    - High context utilization + multi-agent room -> aggressive
+    - High context utilization + multi-agent workspace -> aggressive
       pruning ([\[PruneToolOutputs; DropLowImportance;
         MergeContiguous; SummarizeOld\]]).
     - High utilization + single focused task -> moderate

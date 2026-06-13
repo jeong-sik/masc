@@ -1,6 +1,11 @@
 name: Branch Protection Watchdog
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     - cron: "17 * * * *"
@@ -29,5 +34,5 @@ jobs:
           GH_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN }}
           BRANCH_PROTECTION_REPOSITORY: ${{ github.repository }}
           BRANCH_PROTECTION_BRANCH: main
-          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate,Draft Auto-Merge Guard
+          BRANCH_PROTECTION_REQUIRED_CONTEXTS: CI Gate
         run: bash scripts/ci/check-main-branch-protection.sh

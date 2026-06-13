@@ -83,20 +83,20 @@ type guarded_start_outcome =
 let now_unix () = Time_compat.now ()
 
 let record_started_metrics ~keeper outcome =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnStarts)
     ~labels:[ ("keeper", keeper) ] ();
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnScheduled)
-    ~labels:[ ("keeper_name", keeper) ] ();
+    ~labels:[ ("keeper", keeper) ] ();
   (match outcome with
    | Fresh -> ()
    | Reattempt _ ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string TurnReattempts)
        ~labels:[ ("keeper", keeper) ] ()
    | Regression _ ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string TurnRegressions)
        ~labels:[ ("keeper", keeper) ] ());
   outcome
@@ -143,7 +143,7 @@ let record_turn_start ~(keeper : string) ~(turn_id : int) : start_outcome =
     Eio.Mutex.use_rw ~protect:true mu (fun () ->
       classify_and_update_start ~now:(now_unix ()) ~keeper ~turn_id)
   in
-  (* Counter emissions outside the lock — Prometheus calls allocate
+  (* Counter emissions outside the lock — Otel_metric_store calls allocate
      and can recurse; minimise critical-section scope. *)
   record_started_metrics ~keeper outcome
 
@@ -180,7 +180,7 @@ let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
   (match outcome with
    | Started started -> ignore (record_started_metrics ~keeper started)
    | Blocked reason ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string TurnLivelockBlocks)
        ~labels:[ ("keeper", keeper); ("reason", gate_reason_kind reason) ] ());
   outcome

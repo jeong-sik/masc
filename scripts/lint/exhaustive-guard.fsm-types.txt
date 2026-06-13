@@ -10,7 +10,7 @@
 # `Module.type` convention. Comments and blank lines ignored.
 #
 # Phase 1: this file is intentionally EMPTY. Phase 5 (RFC-0071 §4)
-# populates it from FSM owners (keeper, cascade, decision, verification,
+# populates it from FSM owners (keeper, runtime, decision, verification,
 # turn_phase, compaction). Empty manifest = lint treats every site
 # uniformly; populated manifest = lint flags FSM sites with stronger
 # language.
@@ -19,8 +19,8 @@
 # decision has historically caused a runtime Assert_failure or silently
 # absorbed a new state. Examples reserved for Phase 5:
 #   - Keeper_state_machine.phase
-#   - Coord_task_lifecycle.drift
-#   - Cascade_decl_validator.outcome   (TBD — type may move)
+#   - Workspace_task_lifecycle.drift
+#   - Runtime_decl_validator.outcome   (TBD — type may move)
 #   - Masc_domain.task_action
 #   - Masc_domain.task_status
 #   - Execution_mode.t

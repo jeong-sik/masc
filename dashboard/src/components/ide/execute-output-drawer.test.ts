@@ -41,6 +41,41 @@ describe('ExecuteOutputDrawer event mapping', () => {
     expect(lines.map(line => line.stream)).toEqual(['stdout', 'stdout', 'stderr'])
   })
 
+  it('prefers structured snapshot lines over byte chunks', () => {
+    const lines = linesFromExecuteOutputEvent({
+      type: 'snapshot',
+      keeper: 'sangsu',
+      stdout_since: 'duplicate\n',
+      lines: [
+        { ts_ms: 1000, stream: 'stdout', text: 'one', ansi: false },
+        { ts_ms: 1001, stream: 'stderr', text: 'warn', ansi: false },
+        { ts_ms: 1002, stream: 'system', text: 'closed', ansi: false },
+      ],
+      closed: false,
+    })
+
+    expect(lines).toEqual([
+      { text: 'one', stream: 'stdout' },
+      { text: 'warn', stream: 'stderr' },
+      { text: 'closed', stream: 'meta' },
+    ])
+  })
+
+  it('maps live line and task close events', () => {
+    expect(linesFromExecuteOutputEvent({
+      type: 'line',
+      keeper: 'sangsu',
+      line: { ts_ms: 1000, stream: 'stdout', text: 'fresh', ansi: false },
+      closed: false,
+    })).toEqual([{ text: 'fresh', stream: 'stdout' }])
+
+    expect(linesFromExecuteOutputEvent({
+      type: 'task_closed',
+      keeper: 'sangsu',
+      closed: true,
+    })).toEqual([{ text: 'Execute output task closed', stream: 'meta' }])
+  })
+
   it('surfaces dropped byte evidence as a meta line', () => {
     const lines = linesFromExecuteOutputEvent({
       type: 'snapshot',
@@ -84,7 +119,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
           branch: 'feat/runtime',
           path: '/tmp/runtime',
           git_root: '/tmp/runtime',
-          repo_name: 'masc-mcp',
+          repo_name: 'masc',
         },
       }],
       cursor: {
@@ -178,7 +213,7 @@ describe('ExecuteOutputDrawer event mapping', () => {
         branch: 'feat/runtime',
         path: '/tmp/runtime',
         git_root: '/tmp/runtime',
-        repo_name: 'masc-mcp',
+        repo_name: 'masc',
       },
     }]
     cursorOverlaySignal.value = {

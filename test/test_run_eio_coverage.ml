@@ -2,13 +2,12 @@
 
     Tests for run record types and JSON serialization:
     - run_record type
-    - log_entry type
     - JSON roundtrip functions
 *)
 
 open Alcotest
 
-module Run_eio = Masc_mcp.Run_eio
+module Run_eio = Masc.Run_eio
 
 (* ============================================================
    run_record Type Tests
@@ -19,7 +18,6 @@ let test_run_record_basic () =
     task_id = "task-001";
     agent_name = None;
     plan = "# Plan\n- Step 1";
-    deliverable = "";
     created_at = "2024-01-01T10:00:00Z";
     updated_at = "2024-01-01T10:00:00Z";
   } in
@@ -31,43 +29,12 @@ let test_run_record_with_agent () =
     task_id = "task-002";
     agent_name = Some "agent_llm_a";
     plan = "Do the thing";
-    deliverable = "Done";
     created_at = "2024-01-01T09:00:00Z";
     updated_at = "2024-01-01T11:00:00Z";
   } in
   match r.agent_name with
   | Some a -> check string "agent_name" "agent_llm_a" a
   | None -> fail "expected Some"
-
-let test_run_record_deliverable () =
-  let r : Run_eio.run_record = {
-    task_id = "task-003";
-    agent_name = Some "provider_f";
-    plan = "";
-    deliverable = "# Result\nSuccessfully completed.";
-    created_at = "";
-    updated_at = "";
-  } in
-  check bool "has deliverable" true (String.length r.deliverable > 0)
-
-(* ============================================================
-   log_entry Type Tests
-   ============================================================ *)
-
-let test_log_entry_type () =
-  let e : Run_eio.log_entry = {
-    timestamp = "2024-01-01T12:00:00Z";
-    note = "Started task execution";
-  } in
-  check string "timestamp" "2024-01-01T12:00:00Z" e.timestamp;
-  check string "note" "Started task execution" e.note
-
-let test_log_entry_empty_note () =
-  let e : Run_eio.log_entry = {
-    timestamp = "2024-01-01T12:30:00Z";
-    note = "";
-  } in
-  check string "empty note" "" e.note
 
 (* ============================================================
    JSON Serialization Tests
@@ -78,7 +45,6 @@ let test_run_record_json_roundtrip () =
     task_id = "rt-001";
     agent_name = Some "agent_llm_a";
     plan = "# Plan Content";
-    deliverable = "# Deliverable Content";
     created_at = "2024-01-01T10:00:00Z";
     updated_at = "2024-01-01T12:00:00Z";
   } in
@@ -86,8 +52,7 @@ let test_run_record_json_roundtrip () =
   match Run_eio.run_record_of_json json with
   | Some decoded ->
       check string "task_id" original.task_id decoded.task_id;
-      check string "plan" original.plan decoded.plan;
-      check string "deliverable" original.deliverable decoded.deliverable
+      check string "plan" original.plan decoded.plan
   | None -> fail "json decode failed"
 
 let test_run_record_json_none_agent () =
@@ -95,7 +60,6 @@ let test_run_record_json_none_agent () =
     task_id = "rt-002";
     agent_name = None;
     plan = "";
-    deliverable = "";
     created_at = "2024-01-01T10:00:00Z";
     updated_at = "2024-01-01T10:00:00Z";
   } in
@@ -105,23 +69,11 @@ let test_run_record_json_none_agent () =
       check bool "agent_name None" true (decoded.agent_name = None)
   | None -> fail "json decode failed"
 
-let test_log_entry_json_roundtrip () =
-  let original : Run_eio.log_entry = {
-    timestamp = "2024-01-01T15:00:00Z";
-    note = "Completed step 3";
-  } in
-  let json = Run_eio.log_entry_to_json original in
-  match Run_eio.log_entry_of_json json with
-  | Some decoded ->
-      check string "timestamp" original.timestamp decoded.timestamp;
-      check string "note" original.note decoded.note
-  | None -> fail "json decode failed"
-
 (* ============================================================
    Eio Helpers
    ============================================================ *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -143,12 +95,12 @@ let with_initialized_masc f =
   let tmp_dir = make_test_dir () in
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Coord.default_config tmp_dir in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
   Fun.protect
     ~finally:(fun () ->
       try
-        let _ = Coord.reset config in
+        let _ = Workspace.reset config in
         rm_rf tmp_dir
       with _ -> ())
     (fun () -> f config)
@@ -182,7 +134,7 @@ let test_read_nonexistent () =
   | Ok _ -> fail "expected error"
 
 (* ============================================================
-   Eio IO Tests: update_plan / set_deliverable
+   Eio IO Tests: update_plan
    ============================================================ *)
 
 let test_update_plan () =
@@ -192,51 +144,6 @@ let test_update_plan () =
   | Ok run ->
       check bool "plan updated" true (String.length run.plan > 0)
   | Error e -> failf "update_plan failed: %s" e
-
-let test_set_deliverable () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-deliv-001" ~agent_name:(Some "agent_code"));
-  match Run_eio.set_deliverable config ~task_id:"task-deliv-001" ~content:"# Deliverable\nCompleted successfully." with
-  | Ok run ->
-      check bool "deliverable set" true (String.length run.deliverable > 0)
-  | Error e -> failf "set_deliverable failed: %s" e
-
-(* ============================================================
-   Eio IO Tests: append_log / read_logs
-   ============================================================ *)
-
-let test_append_log () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-001" ~agent_name:(Some "agent_llm_a"));
-  match Run_eio.append_log config ~task_id:"task-log-001" ~note:"Started processing" with
-  | Ok entry ->
-      check bool "has timestamp" true (String.length entry.timestamp > 0);
-      check string "note" "Started processing" entry.note
-  | Error e -> failf "append_log failed: %s" e
-
-let test_read_logs_empty () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-002" ~agent_name:(Some "agent_llm_a"));
-  let logs = Run_eio.read_logs config ~task_id:"task-log-002" () in
-  check int "empty logs" 0 (List.length logs)
-
-let test_read_logs_multiple () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-003" ~agent_name:(Some "agent_llm_a"));
-  ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 1");
-  ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 2");
-  ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 3");
-  let logs = Run_eio.read_logs config ~task_id:"task-log-003" () in
-  check int "three logs" 3 (List.length logs)
-
-let test_read_logs_with_limit () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-004" ~agent_name:(Some "agent_llm_a"));
-  ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 1");
-  ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 2");
-  ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 3");
-  let logs = Run_eio.read_logs config ~task_id:"task-log-004" ~limit:2 () in
-  check int "limited to 2" 2 (List.length logs)
 
 (* ============================================================
    Eio IO Tests: get / list
@@ -248,7 +155,7 @@ let test_get_run () =
   match Run_eio.get config ~task_id:"task-get-001" with
   | Ok json ->
       let open Yojson.Safe.Util in
-      (* get returns: { "run": {...}, "plan": ..., "deliverable": ..., "logs": ... } *)
+      (* get returns: { "run": {...}, "plan": ... } *)
       let run = json |> member "run" in
       let task_id = run |> member "task_id" |> to_string in
       check string "task_id" "task-get-001" task_id;
@@ -257,9 +164,15 @@ let test_get_run () =
 
 let test_get_nonexistent () =
   with_initialized_masc @@ fun config ->
-  match Run_eio.get config ~task_id:"nonexistent" with
-  | Error _ -> ()
-  | Ok _ -> fail "expected error"
+  match Run_eio.get ~agent_name:"keeper-auto" config ~task_id:"nonexistent" with
+  | Error e -> failf "get should auto-create missing run: %s" e
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      let run = json |> member "run" in
+      check string "task_id" "nonexistent" (run |> member "task_id" |> to_string);
+      check string "agent_name" "keeper-auto" (run |> member "agent_name" |> to_string);
+      check bool "run.json created" true
+        (Sys.file_exists (Run_eio.run_json_path config "nonexistent"))
 
 let test_list_empty () =
   with_initialized_masc @@ fun config ->
@@ -295,18 +208,6 @@ let test_run_record_of_json_invalid_type () =
   | None -> ()
   | Some _ -> fail "expected None for invalid type"
 
-let test_log_entry_of_json_missing_field () =
-  let json = `Assoc [("timestamp", `String "2024-01-01")] in
-  match Run_eio.log_entry_of_json json with
-  | None -> ()  (* note missing *)
-  | Some _ -> fail "expected None"
-
-let test_log_entry_of_json_invalid () =
-  let json = `Null in
-  match Run_eio.log_entry_of_json json with
-  | None -> ()
-  | Some _ -> fail "expected None"
-
 (* ============================================================
    Error Path Tests
    ============================================================ *)
@@ -317,17 +218,6 @@ let test_update_plan_nonexistent () =
   | Error _ -> ()
   | Ok _ -> fail "expected error"
 
-let test_set_deliverable_nonexistent () =
-  with_initialized_masc @@ fun config ->
-  match Run_eio.set_deliverable config ~task_id:"nonexistent-task" ~content:"deliv" with
-  | Error _ -> ()
-  | Ok _ -> fail "expected error"
-
-let test_read_logs_nonexistent () =
-  with_initialized_masc @@ fun config ->
-  let logs = Run_eio.read_logs config ~task_id:"nonexistent" () in
-  check int "empty for nonexistent" 0 (List.length logs)
-
 (* ============================================================
    Additional JSON Tests
    ============================================================ *)
@@ -337,7 +227,6 @@ let test_run_record_json_all_fields () =
     task_id = "all-fields";
     agent_name = Some "agent";
     plan = "# My Plan\n- Step 1\n- Step 2";
-    deliverable = "# Result\nSuccess!";
     created_at = "2024-01-01T00:00:00Z";
     updated_at = "2024-01-02T00:00:00Z";
   } in
@@ -346,18 +235,6 @@ let test_run_record_json_all_fields () =
   check string "task_id" "all-fields" (json |> member "task_id" |> to_string);
   check string "agent_name" "agent" (json |> member "agent_name" |> to_string);
   check string "created_at" "2024-01-01T00:00:00Z" (json |> member "created_at" |> to_string)
-
-let test_log_entry_json_long_note () =
-  let long_note = String.make 10000 'x' in
-  let entry : Run_eio.log_entry = {
-    timestamp = "2024-01-01T00:00:00Z";
-    note = long_note;
-  } in
-  let json = Run_eio.log_entry_to_json entry in
-  match Run_eio.log_entry_of_json json with
-  | Some decoded ->
-      check int "long note preserved" 10000 (String.length decoded.note)
-  | None -> fail "decode failed"
 
 (* ============================================================
    Edge Cases for IO Functions
@@ -375,20 +252,6 @@ let test_init_run_idempotent () =
        | Some a -> check string "agent" "second" a
        | None -> fail "expected agent")
   | Error e -> failf "init failed: %s" e
-
-let test_get_run_with_logs () =
-  with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-logs-get" ~agent_name:(Some "agent_llm_a"));
-  ignore (Run_eio.append_log config ~task_id:"task-logs-get" ~note:"Log 1");
-  ignore (Run_eio.append_log config ~task_id:"task-logs-get" ~note:"Log 2");
-  match Run_eio.get config ~task_id:"task-logs-get" with
-  | Ok json ->
-      let open Yojson.Safe.Util in
-      let logs = json |> member "logs" |> to_list in
-      check int "has 2 logs" 2 (List.length logs);
-      let log_count = json |> member "log_count" |> to_int in
-      check int "log_count" 2 log_count
-  | Error e -> failf "get failed: %s" e
 
 let test_get_run_with_updated_plan () =
   with_initialized_masc @@ fun config ->
@@ -410,16 +273,10 @@ let () =
     "run_record", [
       test_case "basic" `Quick test_run_record_basic;
       test_case "with agent" `Quick test_run_record_with_agent;
-      test_case "deliverable" `Quick test_run_record_deliverable;
-    ];
-    "log_entry", [
-      test_case "type" `Quick test_log_entry_type;
-      test_case "empty note" `Quick test_log_entry_empty_note;
     ];
     "json_roundtrip", [
       test_case "run_record" `Quick test_run_record_json_roundtrip;
       test_case "run_record none agent" `Quick test_run_record_json_none_agent;
-      test_case "log_entry" `Quick test_log_entry_json_roundtrip;
     ];
     "eio_init_read", [
       test_case "init run" `Quick test_init_run;
@@ -428,13 +285,6 @@ let () =
     ];
     "eio_update", [
       test_case "update plan" `Quick test_update_plan;
-      test_case "set deliverable" `Quick test_set_deliverable;
-    ];
-    "eio_logs", [
-      test_case "append log" `Quick test_append_log;
-      test_case "read logs empty" `Quick test_read_logs_empty;
-      test_case "read logs multiple" `Quick test_read_logs_multiple;
-      test_case "read logs limit" `Quick test_read_logs_with_limit;
     ];
     "eio_get_list", [
       test_case "get run" `Quick test_get_run;
@@ -445,21 +295,15 @@ let () =
     "json_edge_cases", [
       test_case "run_record missing field" `Quick test_run_record_of_json_missing_field;
       test_case "run_record invalid type" `Quick test_run_record_of_json_invalid_type;
-      test_case "log_entry missing field" `Quick test_log_entry_of_json_missing_field;
-      test_case "log_entry invalid" `Quick test_log_entry_of_json_invalid;
     ];
     "error_paths", [
       test_case "update plan nonexistent" `Quick test_update_plan_nonexistent;
-      test_case "set deliverable nonexistent" `Quick test_set_deliverable_nonexistent;
-      test_case "read logs nonexistent" `Quick test_read_logs_nonexistent;
     ];
     "additional_json", [
       test_case "run_record all fields" `Quick test_run_record_json_all_fields;
-      test_case "log_entry long note" `Quick test_log_entry_json_long_note;
     ];
     "io_edge_cases", [
       test_case "init idempotent" `Quick test_init_run_idempotent;
-      test_case "get with logs" `Quick test_get_run_with_logs;
       test_case "get with updated plan" `Quick test_get_run_with_updated_plan;
     ];
   ]

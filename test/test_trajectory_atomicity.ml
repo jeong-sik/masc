@@ -61,6 +61,7 @@ let make_entry ~tid ~seq : Trajectory.tool_call_entry =
     duration_ms = 0;
     error = None;
     cost_usd = 0.0;
+    execution_id = None;
   }
 
 let test_concurrent_threads () =

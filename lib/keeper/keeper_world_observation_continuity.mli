@@ -1,6 +1,6 @@
 (** Continuity summary reader for keeper world observation. *)
 
 val read_continuity_summary
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> string

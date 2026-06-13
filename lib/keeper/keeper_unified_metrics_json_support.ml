@@ -1,17 +1,10 @@
 (** Keeper_unified_metrics_json_support — decision and snapshot JSON helpers for Keeper_unified_metrics. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
-let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
-
-let cdal_raw_evidence_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
-  List.length proof.raw_evidence_refs
-
-let cdal_violation_ref_count (proof : Masc_mcp_cdal_runtime.Cdal_proof.t) : int =
-  proof.raw_evidence_refs
-  |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
-  |> List.length
 
 let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : string =
   let digest =
@@ -33,51 +26,45 @@ let provider_context_json ~(meta : keeper_meta)
     (result : Keeper_agent_run.run_result option) =
   match result with
   | Some r ->
-      let cascade_name =
-        match r.cascade_observation with
+      let runtime_id =
+        match r.runtime_observation with
         | Some observation ->
-            Cascade_name.to_string observation.cascade_name
-        | None -> cascade_name_of_meta meta
+            observation.runtime_id
+        | None -> runtime_id_of_meta meta
       in
       `Assoc
-        [ ("cascade_name", `String cascade_name)
+        [ ("runtime_id", `String runtime_id)
         ; "selected_model", `Null
         ; "candidate_models", `List []
         ]
   | None ->
       `Assoc
-        [ ("cascade_name", `String (cascade_name_of_meta meta))
+        [ ("runtime_id", `String (runtime_id_of_meta meta))
         ; ("selected_model", `Null)
         ; "candidate_models", `List []
         ]
 
-let redacted_cascade_attempt_to_json
-    (attempt : Cascade_observation.cascade_attempt) : Yojson.Safe.t =
+let redacted_runtime_attempt_to_json
+    (attempt : Runtime_observation.runtime_attempt) : Yojson.Safe.t =
   `Assoc
     [ "attempt_index", `Int attempt.attempt_index
-    ; ( "latency_ms"
-      , match attempt.latency_ms with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "error"
-      , match attempt.error with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "latency_ms", Json_util.int_opt_to_json attempt.latency_ms )
+    ; ( "error", Json_util.string_opt_to_json attempt.error )
     ]
 ;;
 
-let redacted_cascade_fallback_event_to_json
-    (event : Cascade_observation.cascade_fallback_event) : Yojson.Safe.t =
+let redacted_runtime_fallback_event_to_json
+    (event : Runtime_observation.runtime_fallback_event) : Yojson.Safe.t =
   `Assoc [ "reason", `String event.reason ]
 ;;
 
-let redacted_cascade_observation_to_json
-    (obs : Cascade_observation.cascade_observation) : Yojson.Safe.t =
-  let cascade_name =
-    Cascade_name.to_string obs.cascade_name
+let redacted_runtime_observation_to_json
+    (obs : Runtime_observation.runtime_observation) : Yojson.Safe.t =
+  let runtime_id =
+    obs.runtime_id
   in
   `Assoc
-    [ "cascade_name", `String cascade_name
+    [ "runtime_id", `String runtime_id
     ; "strategy", Json_util.string_opt_to_json obs.strategy
     ; "configured_labels", `List []
     ; "candidate_models", `List []
@@ -88,34 +75,20 @@ let redacted_cascade_observation_to_json
     ; "fallback_hops", Json_util.int_opt_to_json obs.fallback_hops
     ; "fallback_applied", `Bool obs.fallback_applied
     ; ( "attempts"
-      , `List (List.map redacted_cascade_attempt_to_json obs.attempts) )
+      , `List (List.map redacted_runtime_attempt_to_json obs.attempts) )
     ; ( "fallback_events"
       , `List
-          (List.map redacted_cascade_fallback_event_to_json obs.fallback_events)
+          (List.map redacted_runtime_fallback_event_to_json obs.fallback_events)
       )
     ; "attempt_details_available", `Bool obs.attempt_details_available
     ; "attempt_details_source", `String obs.attempt_details_source
     ]
 ;;
 
-let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
-    (result : Keeper_agent_run.run_result option) =
-  let requirement, required_tool_names, missing_required_tool_names =
-    match result with
-    | Some r ->
-        ( Some r.tool_surface.tool_requirement,
-          r.tool_surface.required_tool_names,
-          r.tool_surface.missing_required_tool_names )
-    | None -> (None, [], [])
-  in
+let tool_surface_json (result : Keeper_agent_run.run_result option) =
   `Assoc
-    [ ("requirement", match requirement with
-      | Some r -> Keeper_agent_tool_surface.tool_requirement_to_yojson r
-      | None -> `String "unknown")
-    ; ( "required_tool_names",
-        `List (List.map (fun value -> `String value) required_tool_names) )
-    ; ( "missing_required_tool_names",
-        `List (List.map (fun value -> `String value) missing_required_tool_names) )
-    ; ("tool_call_count", `Int tool_call_count)
-    ; ("tools_used", `List (List.map (fun value -> `String value) tools_used))
+    [ ( "turn_lane",
+        match result with
+        | Some r -> Keeper_agent_tool_surface.turn_lane_to_yojson r.tool_surface.turn_lane
+        | None -> `Null )
     ]

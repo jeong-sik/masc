@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrpgLifecycleState {
-    Lobby,
+    Idle,
     Loading,
     Running,
     Stopped,
@@ -12,7 +12,7 @@ pub enum TrpgLifecycleState {
 #[cfg(any(target_arch = "wasm32", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrpgUiState {
-    Lobby,
+    Idle,
     ConfigReady,
     SessionStarting,
     SessionRunning,
@@ -40,30 +40,34 @@ impl TrpgLifecycleState {
             | "outcome_narration" | "state_update" | "transition" => Self::Running,
             "paused" | "stopped" | "suspended" | "halted" => Self::Stopped,
             "ended" | "completed" | "done" | "retired" | "closed" | "archived" => Self::Ended,
-            "loading" | "bootstrapping" | "bootstrap" | "syncing" | "starting"
-            | "initializing" | "creating" => Self::Loading,
+            "loading" | "bootstrapping" | "bootstrap" | "syncing" | "starting" | "initializing"
+            | "creating" => Self::Loading,
             "unavailable" | "error" | "failed" => Self::Unavailable,
-            "idle" | "lobby" | "created" | "ready" => Self::Lobby,
+            "idle" | "created" | "ready" => Self::Idle,
             "unknown" => Self::Unknown,
             _ => Self::Unknown,
         }
     }
 
-    pub fn from_room_progress(room_status: &str, progress_status: &str) -> Self {
+    pub fn from_workspace_progress(workspace_status: &str, progress_status: &str) -> Self {
         let progress_raw = progress_status.trim();
-        let room = Self::from_status(room_status);
+        let workspace = Self::from_status(workspace_status);
         if progress_raw.is_empty() {
-            return room;
+            return workspace;
         }
 
         let progress = Self::from_status(progress_raw);
 
-        // Progress status is more granular when valid, but stale "loading/unknown/lobby"
-        // should not mask a stronger room lifecycle from runtime state.
+        // Progress status is more granular when valid, but stale "loading/unknown/idle"
+        // should not mask a stronger workspace lifecycle from runtime state.
         match progress {
-            Self::Loading if !matches!(room, Self::Unknown | Self::Lobby | Self::Loading) => room,
-            Self::Unknown if !matches!(room, Self::Unknown) => room,
-            Self::Lobby if !matches!(room, Self::Unknown | Self::Lobby | Self::Loading) => room,
+            Self::Loading if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
+            Self::Unknown if !matches!(workspace, Self::Unknown) => workspace,
+            Self::Idle if !matches!(workspace, Self::Unknown | Self::Idle | Self::Loading) => {
+                workspace
+            }
             _ => progress,
         }
     }
@@ -75,14 +79,14 @@ impl TrpgLifecycleState {
             Self::Stopped => "stopped",
             Self::Ended => "ended",
             Self::Unavailable => "unavailable",
-            Self::Lobby | Self::Loading | Self::Unknown => "lobby",
+            Self::Idle | Self::Loading | Self::Unknown => "idle",
         }
     }
 
     #[cfg(target_arch = "wasm32")]
     pub fn css_class(self) -> &'static str {
         match self {
-            Self::Lobby => "state-lobby",
+            Self::Idle => "state-idle",
             Self::Loading => "state-loading",
             Self::Running => "state-running",
             Self::Stopped => "state-stopped",
@@ -95,7 +99,7 @@ impl TrpgLifecycleState {
     #[cfg(target_arch = "wasm32")]
     pub fn label(self) -> &'static str {
         match self {
-            Self::Lobby => "LOBBY",
+            Self::Idle => "IDLE",
             Self::Loading => "LOADING",
             Self::Running => "RUNNING",
             Self::Stopped => "STOPPED",
@@ -107,7 +111,7 @@ impl TrpgLifecycleState {
 
     pub fn label_ko(self) -> &'static str {
         match self {
-            Self::Lobby => "로비",
+            Self::Idle => "대기",
             Self::Loading => "로딩",
             Self::Running => "진행 중",
             Self::Stopped => "멈춤",
@@ -120,7 +124,7 @@ impl TrpgLifecycleState {
     #[cfg(any(target_arch = "wasm32", test))]
     pub fn help_text(self) -> &'static str {
         match self {
-            Self::Lobby => "세션 미시작 또는 초기 대기 상태",
+            Self::Idle => "세션 미시작 또는 초기 대기 상태",
             Self::Loading => "상태 동기화/초기화 진행 중",
             Self::Running => "라운드가 순환 중이며 입력/결과가 반영되는 상태",
             Self::Stopped => "의도적으로 멈춘 상태(재개 가능)",
@@ -144,7 +148,7 @@ impl TrpgLifecycleState {
 impl TrpgUiState {
     pub fn code(self) -> &'static str {
         match self {
-            Self::Lobby => "lobby",
+            Self::Idle => "idle",
             Self::ConfigReady => "config_ready",
             Self::SessionStarting => "session_starting",
             Self::SessionRunning => "session_running",
@@ -164,13 +168,13 @@ impl TrpgUiState {
             "paused" => Self::Paused,
             "ended" => Self::Ended,
             "error" => Self::Error,
-            _ => Self::Lobby,
+            _ => Self::Idle,
         }
     }
 
     pub fn label_ko(self) -> &'static str {
         match self {
-            Self::Lobby => "로비",
+            Self::Idle => "대기",
             Self::ConfigReady => "설정 완료",
             Self::SessionStarting => "세션 시작 중",
             Self::SessionRunning => "세션 진행 중",
@@ -183,7 +187,7 @@ impl TrpgUiState {
 
     pub fn help_text(self) -> &'static str {
         match self {
-            Self::Lobby => "새 세션 시작 전 대기 상태",
+            Self::Idle => "새 세션 시작 전 대기 상태",
             Self::ConfigReady => "사전 점검과 keeper 할당이 완료되어 시작 가능한 상태",
             Self::SessionStarting => "세션 생성/부트스트랩이 진행 중인 상태",
             Self::SessionRunning => "세션이 실행 중이며 라운드 실행 가능 상태",
@@ -199,7 +203,7 @@ impl TrpgUiState {
             Self::ConfigReady | Self::SessionRunning => "status-active",
             Self::SessionStarting | Self::RoundRunning => "status-info",
             Self::Paused => "status-warn",
-            Self::Ended | Self::Lobby => "status-idle",
+            Self::Ended | Self::Idle => "status-idle",
             Self::Error => "status-error",
         }
     }
@@ -212,7 +216,7 @@ mod tests {
     #[test]
     fn trpg_ui_state_code_roundtrip() {
         let cases = [
-            TrpgUiState::Lobby,
+            TrpgUiState::Idle,
             TrpgUiState::ConfigReady,
             TrpgUiState::SessionStarting,
             TrpgUiState::SessionRunning,
@@ -225,13 +229,13 @@ mod tests {
         for state in cases {
             assert_eq!(TrpgUiState::from_code(state.code()), state);
         }
-        assert_eq!(TrpgUiState::from_code("unknown-state"), TrpgUiState::Lobby);
+        assert_eq!(TrpgUiState::from_code("unknown-state"), TrpgUiState::Idle);
     }
 
     #[test]
     fn trpg_ui_state_labels_and_classes_are_defined() {
         let cases = [
-            TrpgUiState::Lobby,
+            TrpgUiState::Idle,
             TrpgUiState::ConfigReady,
             TrpgUiState::SessionStarting,
             TrpgUiState::SessionRunning,
@@ -249,17 +253,17 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_prefers_stronger_room_state_over_stale_progress_loading() {
+    fn lifecycle_prefers_stronger_workspace_state_over_stale_progress_loading() {
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "loading"),
+            TrpgLifecycleState::from_workspace_progress("running", "loading"),
             TrpgLifecycleState::Running
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("stopped", "unknown"),
+            TrpgLifecycleState::from_workspace_progress("stopped", "unknown"),
             TrpgLifecycleState::Stopped
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("ended", "idle"),
+            TrpgLifecycleState::from_workspace_progress("ended", "idle"),
             TrpgLifecycleState::Ended
         );
     }
@@ -267,11 +271,11 @@ mod tests {
     #[test]
     fn lifecycle_keeps_progress_when_it_is_specific() {
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "dm_narration"),
+            TrpgLifecycleState::from_workspace_progress("running", "dm_narration"),
             TrpgLifecycleState::Running
         );
         assert_eq!(
-            TrpgLifecycleState::from_room_progress("running", "stopped"),
+            TrpgLifecycleState::from_workspace_progress("running", "stopped"),
             TrpgLifecycleState::Stopped
         );
     }

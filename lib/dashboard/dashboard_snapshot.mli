@@ -24,6 +24,12 @@ type t = private {
   generated_at : float;          (** Unix.gettimeofday at publish.  *)
   generation : int;              (** Monotonic publish counter.    *)
   shell : Yojson.Safe.t;
+  shell_light : Yojson.Safe.t;
+  (** RFC-0204 section 8.3 ("A").  The [~light] projection of [shell],
+      published alongside it so [shell?light=true] is served wait-free
+      from the snapshot instead of recomputing.  Different shape from
+      [shell] (light skips belief/tension and uses the light agent-count /
+      runtime projections), hence stored, not derived. *)
   tools : Yojson.Safe.t;
   namespace_truth : Yojson.Safe.t;
   telemetry_summary : Yojson.Safe.t;
@@ -55,7 +61,7 @@ val current : unit -> t option
 (** [Atomic.get] from the live slot.  Returns [None] until the first
     successful publish.  Wait-free; total. *)
 
-val current_or_bootstrap : config:Coord.config -> t
+val current_or_bootstrap : config:Workspace.config -> t
 (** [current ()] if populated; otherwise a single bootstrap value
     computed synchronously on the calling fiber.  The bootstrap path is
     taken at most once per process lifetime (first request before the
@@ -64,7 +70,7 @@ val current_or_bootstrap : config:Coord.config -> t
 val refresh_loop :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  config:Coord.config ->
+  config:Workspace.config ->
   ?state:Mcp_server.server_state ->
   interval_sec:float ->
   unit ->
@@ -89,6 +95,7 @@ val publish_for_test : t -> unit
 
 val make_for_test :
   shell:Yojson.Safe.t ->
+  ?shell_light:Yojson.Safe.t ->
   tools:Yojson.Safe.t ->
   namespace_truth:Yojson.Safe.t ->
   telemetry_summary:Yojson.Safe.t ->
@@ -102,3 +109,15 @@ val make_for_test :
 
 val reset_for_test : unit -> unit
 (** Test-only.  Clear the live slot back to [None]. *)
+
+val register_dashboard_shell_payload_json :
+  (?light:bool -> Workspace.config -> Yojson.Safe.t) ->
+  unit
+
+val register_dashboard_tools_http_json : (Workspace.config -> Yojson.Safe.t) -> unit
+
+val register_namespace_truth_snapshot :
+  (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
+
+
+

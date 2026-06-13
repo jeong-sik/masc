@@ -19,7 +19,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 
 | Rank | File | Lines | Proposed Action |
 |------|------|-------|-----------------|
-| 1 | lib/prometheus.ml | 3,195 | Extract sub-lib lib/prometheus/; split constants + built-ins |
+| 1 | Retired metrics backend godfile | 3,195 | Extract metric-store sub-lib; split constants + built-ins |
 | 2 | lib/keeper/keeper_unified_turn.ml | 3,037 | Follow RFC-0072 pattern; extract sub-lib |
 | 3 | lib/keeper/keeper_hooks_oas.ml | 2,697 | Partially done in history; complete extraction |
 | 4 | lib/keeper/keeper_registry.ml | 2,659 | Extract sub-lib |
@@ -33,7 +33,7 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 | 12 | lib/keeper/keeper_types_profile.ml | 1,937 | Move into keeper sub-lib |
 | 13 | lib/keeper/keeper_heartbeat_loop.ml | 1,851 | Move into keeper sub-lib |
 | 14 | lib/keeper/keeper_unified_metrics.ml | 1,781 | Move into keeper sub-lib |
-| 15 | lib/cascade/cascade_transport.ml | 1,772 | Extract lib/cascade/ sub-lib |
+| 15 | lib/runtime/runtime_transport.ml | 1,772 | Extract lib/runtime/ sub-lib |
 | 16 | lib/keeper/keeper_run_tools.ml | 1,725 | Move into keeper sub-lib |
 | 17 | lib/operator/operator_control_snapshot.ml | 1,714 | Extract lib/operator/ sub-lib |
 | 18 | lib/tool_keeper.ml | 1,696 | Split into sub-lib |
@@ -44,26 +44,26 @@ Files with >1000 lines of OCaml (.ml + .mli) under lib/.
 
 - **tool_board.ml**: 2162 → 1706 lines (-456)
 - **tool_shard.ml**: 2152 → 2094 lines (-58)
-- **lib/ide/**: extracted as `masc_mcp.ide` sub-library
+- **lib/ide/**: extracted as `masc.ide` sub-library
 - **Total lines removed from god files**: ~530
-- **Build status**: dune build lib/masc_mcp.cma passes
+- **Build status**: dune build lib/masc.cma passes
 
 ## Phase Plan
 
 ### Phase 1: Root-level god files (highest impact)
 - [x] lib/tool_board.ml → tool_board_schemas extracted (469 lines, 2162→1706)
 - [x] lib/tool_shard.ml → tool_shard_schemas extracted (61 lines, 2152→2094)
-- [ ] lib/prometheus.ml → lib/prometheus/ sub-lib
+- [ ] Retired metrics backend godfile → metric-store sub-lib
 - [ ] lib/tool_board.ml → lib/tool_board/ sub-lib
 - [ ] lib/tool_shard.ml → lib/tool_shard/ sub-lib
 - [x] lib/provider_adapter.ml → removed after this audit
 
 ### Phase 2: Directory extraction (directories without dune files)
-- [x] lib/ide/ (7 files) → masc_mcp.ide sub-lib (zero flat-namespace deps)
-- [ ] lib/keeper/ (500 files) → masc_mcp.keeper sub-lib
-- [ ] lib/server/ (142 files) → masc_mcp.server sub-lib
-- [ ] lib/dashboard/ (104 files) → masc_mcp.dashboard sub-lib
-- [ ] lib/cascade/ (83 files) → masc_mcp.cascade sub-lib
+- [x] lib/ide/ (7 files) → masc.ide sub-lib (zero flat-namespace deps)
+- [ ] lib/keeper/ (500 files) → masc.keeper sub-lib
+- [ ] lib/server/ (142 files) → masc.server sub-lib
+- [ ] lib/dashboard/ (104 files) → masc.dashboard sub-lib
+- [ ] lib/runtime/ (83 files) → masc.runtime sub-lib
 
 ### Phase 3: Remaining directories
 - [ ] lib/operator/ (18 files) → sub-lib

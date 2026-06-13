@@ -8,9 +8,9 @@
     [wrap_unit] runs a [unit -> unit] thunk under that contract: any
     exception escaping the thunk (legacy [Assert_failure] from PPX-injected
     asserts, legacy [Invalid_argument] from string-message validators, or
-    the typed [Keeper_registry.Cascade_transition_violation] /
+    the typed [Keeper_registry.Runtime_transition_violation] /
     [Turn_phase_transition_violation] as of RFC-0072 Phase 5) bumps the
-    [Prometheus.metric_fsm_guard_violation] counter labelled with
+    [Otel_metric_store.metric_fsm_guard_violation] counter labelled with
     [action] / [stage], and is re-raised unchanged.  FSM contract
     violations are fail-closed in production and tests;
     [MASC_FSM_GUARD_ASSERT] is no longer a runtime soft-mode escape hatch.

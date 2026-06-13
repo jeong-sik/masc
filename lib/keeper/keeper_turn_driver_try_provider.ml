@@ -13,40 +13,37 @@ open Result.Syntax
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
-    Fields are grouped by role: cascade identity, agent config, transport,
+    Fields are grouped by role: runtime identity, agent config, transport,
     session/checkpoint, Eio primitives, callbacks, and event bus. *)
 type try_provider_ctx =
-  { (* Cascade identity *)
-    cascade_name : string
-  ; error_cascade_name : Cascade_name.t
+  { (* Runtime identity *)
+    runtime_id : string
+  ; error_runtime_id : string
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
     goal : string
-  ; require_tool_choice_support : bool
-  ; require_tool_support : bool
   ; priority : Llm_provider.Request_priority.t option
   ; session_id : string option
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
-  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; execution_idle_timeout_s : float option
+  ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
+  ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
-  ; memory : Agent_sdk.Memory.t option
-  ; tool_retry_policy : Agent_sdk.Tool_retry_policy.t option
-  ; required_tool_satisfaction : Agent_sdk.Completion_contract.required_tool_satisfaction
   ; raw_trace : Agent_sdk.Raw_trace.t option
+  ; trace_link : (string * string) option
   ; (* Transport *)
     transport_resolved : Masc_grpc_transport.t
-  ; cli_transport_overrides : Cascade_runner.cli_transport_overrides option
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
   ; (* Session / checkpoint *)
     allowed_paths : string list
@@ -58,14 +55,13 @@ type try_provider_ctx =
   ; checkpoint_dir : string option
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
-  ; slot_id : int option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
-  ; exit_condition_result : (int -> Cascade_runner.stop_reason * string option) option
+  ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
   ; summarizer : (Agent_sdk.Types.message list -> string) option
   ; oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; contract : Masc_mcp_cdal_runtime.Risk_contract.t option
   ; (* Eio concurrency *)
     sw : Eio.Switch.t
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -74,13 +70,12 @@ type try_provider_ctx =
   ; on_yield : (unit -> unit) option
   ; on_resume : (unit -> unit) option
   ; agent_ref : Agent_sdk.Agent.t option ref option
-  ; proof_ref : Masc_mcp_cdal_runtime.Cdal_proof.t option ref option
+  ; on_runtime_observation :
+      (Runtime_observation.runtime_observation -> unit) option
   ; (* Event bus *)
     event_bus : Agent_sdk.Event_bus.t option
-  ; cascade_engine : Keeper_cascade_engine.t
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
-  ; runtime_manifest_required_tool_names : string list
   ; turn_start : Mtime.t
   ; seq_ref : int ref
   }
@@ -94,17 +89,12 @@ let emit_runtime_manifest
   match ctx.runtime_manifest_context, ctx.runtime_manifest_append with
   | Some manifest_ctx, Some append ->
     let decision =
+      (* RFC-0206: the runtime-engine manifest base fields are gone; the
+         decision payload carries only its own fields now. *)
       match decision with
-      | None -> Some (`Assoc (Keeper_cascade_engine.manifest_fields ctx.cascade_engine))
-      | Some (`Assoc fields) ->
-          Some
-            (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine @ fields))
-      | Some other ->
-          Some
-            (`Assoc
-              (Keeper_cascade_engine.manifest_fields ctx.cascade_engine
-               @ [ ("decision", other) ]))
+      | None -> Some (`Assoc [])
+      | Some (`Assoc _) as d -> d
+      | Some other -> Some (`Assoc [ ("decision", other) ])
     in
     ctx.seq_ref := !(ctx.seq_ref) + 1;
     let elapsed_ms =
@@ -128,7 +118,7 @@ let emit_runtime_manifest
            decision)
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
-      ~cascade_name:ctx.cascade_name ?logical_seq:(Some !(ctx.seq_ref))
+      ~runtime_id:ctx.runtime_id ?logical_seq:(Some !(ctx.seq_ref))
       ?status ?decision ()
     |> append
   | _ -> ()
@@ -174,11 +164,57 @@ let wrap_runtime_mcp_external_tool_hooks
     Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  match per_provider_timeout_s with
-  | Some timeout_s -> Some timeout_s
-  | None -> Some (Keeper_runtime_resolved.oas_call_timeout_sec ())
+  (* Never forward per-provider timeouts to OAS [max_execution_time_s].
+     That field is a cumulative wall-clock kill switch for one Agent.run /
+     run_stream call; it cancels healthy active streams even while chunks are
+     arriving. Provider-attempt liveness is progress-based instead:
+     [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
+     catches no-first-token / inter-chunk gaps, and tool/max-turn limits bound
+     finite work. *)
+  (match per_provider_timeout_s with
+   | Some (_ : float) -> ()
+   | None -> ());
+  None
 
-(** Run a single provider attempt within the cascade.
+let stream_idle_timeout_for_attempt ~configured =
+  Some
+    (Option.value
+       ~default:Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
+       configured)
+
+let body_timeout_for_attempt ?per_provider_timeout_s () =
+  match Keeper_runtime_resolved.body_timeout_override_sec () with
+  | Some _ as s -> s
+  | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
+
+let accept_rejected_error ~runtime_id ~(response : Agent_sdk_response.api_response) =
+  let rejection =
+    Keeper_tool_response.accept_rejection_of_response ~runtime_id response
+  in
+  let reason_kind =
+    match rejection.kind with
+    | Keeper_tool_response.No_usable_progress ->
+      Some Keeper_internal_error.Accept_no_usable_progress
+    | Keeper_tool_response.Predicate_rejected ->
+      Some Keeper_internal_error.Accept_predicate_rejected
+  in
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       {
+         scope = runtime_id;
+         model =
+           Some
+             (Boundary_redaction.to_string
+                Boundary_redaction.runtime_model_label);
+         reason_kind;
+         reason = rejection.reason;
+       })
+
+let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
+  if accept run_result.response then Ok run_result
+  else Error (accept_rejected_error ~runtime_id ~response:run_result.response)
+
+(** Run a single provider attempt within the runtime.
 
     This is the extracted body of the [try_provider] closure that was
     defined inside [Keeper_turn_driver.run_named]. The [ctx] record
@@ -186,10 +222,12 @@ let max_execution_time_for_attempt ?per_provider_timeout_s () =
 
     @param ctx Explicit closure context (captures from [run_named]).
     @param resume_checkpoint Checkpoint from a previous failed provider.
-    @param per_provider_timeout_s Per-provider wall-clock timeout.
+    @param per_provider_timeout_s Legacy per-provider budget used for manifest
+    diagnostics only. It is not applied as a cumulative timeout around
+    [Runtime_agent.run] because that run may include active tool execution.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
-    sample is not recorded here; the caller records it only after the cascade
+    sample is not recorded here; the caller records it only after the runtime
     accept predicate accepts the response. *)
 let run_try_provider
       (ctx : try_provider_ctx)
@@ -199,12 +237,8 @@ let run_try_provider
   =
   let config_result =
     match
-      Cascade_runtime_candidate.resolve_tool_lane_for_oas_tools
-        ?agent_name:(Cascade_oas_runner.keeper_agent_name_opt ctx.keeper_name)
-        ~tool_requirement:
-          (if ctx.require_tool_choice_support || ctx.require_tool_support
-           then `Required
-           else `Optional)
+      Runtime_candidate.resolve_tool_lane_for_oas_tools
+        ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tools:ctx.tools
         candidate
     with
@@ -213,25 +247,11 @@ let run_try_provider
       let runtime_mcp_policy =
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
-          Cascade_runtime_candidate.runtime_mcp_policy_for_agent
+          Runtime_candidate.runtime_mcp_policy_for_agent
             ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
             candidate
             (Some policy)
         | _ -> runtime_mcp_policy
-      in
-      let requested_tool_names =
-        List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) ctx.tools
-      in
-      let materialized_tool_names =
-        Keeper_turn_driver_helpers.materialized_tool_names_after_lane
-          ~effective_tools
-          ~runtime_mcp_policy
-      in
-      let missing_required_tool_names =
-        Keeper_turn_driver_helpers.missing_required_tool_names_after_lane
-          ~required_tool_names:ctx.runtime_manifest_required_tool_names
-          ~effective_tools
-          ~runtime_mcp_policy
       in
       let resolved_lane =
         Keeper_turn_driver_helpers.resolved_tool_lane_label ~effective_tools
@@ -246,86 +266,42 @@ let run_try_provider
           ctx.hooks
       in
       emit_runtime_manifest ctx
-        ~status:(if missing_required_tool_names = [] then "resolved" else "error")
+        ~status:"resolved"
         ~decision:
           (`Assoc
             [
-              ( "requested_tool_names",
-                `List (List.map (fun name -> `String name) requested_tool_names) );
-              ( "required_tool_names",
-                `List
-                  (List.map
-                     (fun name -> `String name)
-                     ctx.runtime_manifest_required_tool_names) );
-              ( "materialized_tool_names",
-                `List
-                  (List.map (fun name -> `String name) materialized_tool_names) );
-              ( "missing_required_tool_names_after_lane",
-                `List
-                  (List.map
-                     (fun name -> `String name)
-                     missing_required_tool_names) );
               ("resolved_lane", `String resolved_lane);
-              ("effective_tool_count", `Int (List.length effective_tools));
-              ("runtime_mcp_policy_present", `Bool (Option.is_some runtime_mcp_policy));
-              ( "tool_requirement",
-                `String
-                  (if ctx.require_tool_choice_support || ctx.require_tool_support
-                   then "required"
-                   else "optional") );
             ])
         Keeper_runtime_manifest.Provider_lane_resolved;
-      if missing_required_tool_names <> [] then
-        Error
-          (Keeper_turn_driver_helpers.required_tool_lane_unavailable_error
-             ~lane:resolved_lane
-             ~missing_required_tools:missing_required_tool_names
-             ~materialized_tools:materialized_tool_names)
-      else
-        Ok
-          { (Cascade_runtime_candidate.default_config
-               ~name:ctx.name
-               ~system_prompt:ctx.system_prompt
-               ~tools:effective_tools
-               candidate)
+      Ok
+        { (Runtime_candidate.default_config
+             ~name:ctx.name
+             ~system_prompt:ctx.system_prompt
+             ~tools:effective_tools
+             candidate)
             with
             priority = ctx.priority
-          ; max_turns = ctx.max_turns
           ; max_tokens = ctx.max_tokens
           ; max_input_tokens = ctx.max_input_tokens
           ; max_cost_usd = ctx.max_cost_usd
           ; stream_idle_timeout_s =
-              (match per_provider_timeout_s with
-               | Some _ as timeout_s -> timeout_s
-               | None ->
-                 Some
-                   (Option.value
-                      ~default:
-                        Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec
-                      ctx.stream_idle_timeout_s))
+              stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
-          ; body_timeout_s =
-              (* SSOT: Keeper_runtime_resolved.body_timeout_override_sec
-                 (driven by MASC_KEEPER_BODY_TIMEOUT_SEC). When unset
-                 (default), fall back to the per-attempt
-                 max_execution_time so this wire matches the PR #16071
-                 baseline. When set, the body-callback wall-clock fires
-                 before the turn cap, surfacing Retry.Timeout so cascade
-                 falls forward at the attempt boundary. *)
-              (match Keeper_runtime_resolved.body_timeout_override_sec () with
-               | Some _ as s -> s
-               | None -> max_execution_time_for_attempt ?per_provider_timeout_s ())
+          ; execution_idle_timeout_s =
+              (* Keeper/provider attempts must not forward Agent.run idle
+                 timeout until active tool execution is excluded from OAS idle
+                 accounting. *)
+              (let _ = ctx.execution_idle_timeout_s in
+               None)
+          ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
           ; hooks
           ; context_reducer = ctx.context_reducer
-          ; memory = ctx.memory
-          ; tool_retry_policy = ctx.tool_retry_policy
-          ; required_tool_satisfaction = ctx.required_tool_satisfaction
           ; description =
-              Some (Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
+              Some (Printf.sprintf "runtime:%s/runtime" ctx.runtime_id)
           ; transport = ctx.transport_resolved
           ; allowed_paths = ctx.allowed_paths
           ; checkpoint_sidecar = ctx.checkpoint_sidecar
@@ -333,12 +309,11 @@ let run_try_provider
           ; cache_system_prompt = ctx.cache_system_prompt
           ; compact_ratio = ctx.compact_ratio
           ; oas_auto_context_overflow_retry = ctx.oas_auto_context_overflow_retry
-          ; contract = ctx.contract
           ; checkpoint_dir = ctx.checkpoint_dir
           ; context_injector = ctx.context_injector
           ; context = ctx.context
-          ; slot_id = ctx.slot_id
           ; enable_thinking = ctx.enable_thinking
+          ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; approval = ctx.approval
           ; exit_condition = ctx.exit_condition
@@ -346,225 +321,99 @@ let run_try_provider
           ; summarizer = ctx.summarizer
           ; initial_messages = ctx.initial_messages
           ; raw_trace = ctx.raw_trace
+          ; trace_link = ctx.trace_link
           ; yield_on_tool = ctx.yield_on_tool
           ; runtime_mcp_policy
-          ; cli_transport_overrides = ctx.cli_transport_overrides
           }
   in
   let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
-    let liveness_mode = Cascade_attempt_liveness_config.current_mode () in
-    (* MASC stores one neutral runtime-lane budget; concrete provider/model
-       identities remain on the OAS side.  Prometheus receives only the public,
-       bounded provider bucket for TTFT/inter-chunk grouping. *)
-    let candidate_key = Cascade_attempt_liveness_config.runtime_candidate_key in
-    let provider_label = Cascade_runtime_candidate.provider_label candidate in
-    let liveness_observer_opt =
-      match liveness_mode with
-      | Cascade_attempt_liveness_config.Off ->
-        (* RFC-0095 Phase 0 diagnostic trace — capture Off-mode turns. Combined with
-           the existing Observe/Enforce-branch log below, this gives full visibility
-           into whether the streaming master switch is the gating factor for
-           openai_compat candidates. Removed at Phase 0 closeout. *)
-        Log.Misc.debug
-          "rfc0095-trace: liveness_mode=Off observer disabled cascade=%s provider=%s \
-           candidate=%s"
-          ctx.cascade_name
-          provider_label
-          candidate_key;
-        None
-      | Cascade_attempt_liveness_config.Observe | Cascade_attempt_liveness_config.Enforce
-        ->
-        let resolved_budget =
-          Cascade_attempt_liveness_config.budget_for_candidate ~candidate_key
+    (* Stream stall detection is handled by OAS's stream_idle_timeout_s.
+       No separate liveness FSM — provider stall is an OAS-level concern.
+       No per-lane capacity gate — provider load is managed by operator
+       adjusting keeper count. *)
+    let run_started_at =
+      Unix.gettimeofday ()
+      (* NDT-OK: provider-attempt latency telemetry only; dispatch/control
+         decisions do not branch on this timestamp. *)
+    in
+    let result =
+      Eio.Switch.run (fun attempt_sw ->
+        let effective_checkpoint =
+          match resume_checkpoint with
+          | Some _ -> resume_checkpoint
+          | None -> ctx.oas_checkpoint
         in
-        Log.Misc.debug
-          "cascade_attempt_liveness: candidate=%s provider=%s budget_source=%s ttft=%.1fs \
-           inter_chunk=%.1fs wall=%.1fs"
-          candidate_key
-          provider_label
-          (Cascade_attempt_liveness_config.budget_source_label
-             resolved_budget.source)
-          resolved_budget.budget.Cascade_attempt_liveness.ttft_max
-          resolved_budget.budget.Cascade_attempt_liveness.inter_chunk_max
-          resolved_budget.budget.Cascade_attempt_liveness.attempt_wall_max;
-        let obs =
-          Cascade_attempt_liveness_observer.create
-            ~mode:liveness_mode
-            ~budget:resolved_budget.budget
-            ~cascade_label:ctx.cascade_name
-            ~provider_label
-            ~external_wait:(fun () ->
-              Keeper_approval_queue.has_pending_for_keeper
-                ~keeper_name:ctx.keeper_name)
-            ~candidate_key
-            ~started_at:(Time_compat.now ())
-            ()
+        let run_fn () =
+          Eio_guard.check_if_ready ();
+          Runtime_agent.run
+            ~sw:attempt_sw
+            ~net:ctx.net
+            ~config
+            ?oas_checkpoint:effective_checkpoint
+            ?on_event:ctx.on_event
+            ?on_yield:ctx.on_yield
+            ?on_resume:ctx.on_resume
+            ~agent_ref:local_agent_ref
+            ctx.goal
         in
-        Some obs
+        (* Do not wrap [Runtime_agent.run] in a MASC wall-clock timeout here.
+           OAS provider stream/body timeouts and tool-local subprocess budgets
+           are the safe liveness boundaries. A cumulative wrapper at this layer
+           cannot distinguish provider silence from active tool execution. *)
+        (match per_provider_timeout_s with
+         | Some (_ : float) -> ()
+         | None -> ());
+        run_fn ())
     in
-    let finalize_liveness () =
-      match liveness_observer_opt with
-      | None -> ()
-      | Some obs -> Cascade_attempt_liveness_observer.finalize obs
-    in
-    let liveness_success_sample () =
-      match liveness_observer_opt with
-      | None -> None
-      | Some obs ->
-        Cascade_attempt_liveness_observer.success_sample_for_candidate obs
-    in
-    let liveness_timeout_error failure =
-      let kind = Cascade_attempt_liveness.failure_kind_label failure in
-      Agent_sdk.Error.Api
-        (Timeout
-           { message =
-               Printf.sprintf
-                 "Cascade attempt liveness guard killed runtime lane %s: %s"
-                 ctx.cascade_name
-                 kind
-           })
-    in
-    let with_liveness_attempt f =
-      let stop_liveness_tick () =
-        match liveness_observer_opt with
-        | None -> ()
-        | Some obs -> Cascade_attempt_liveness_observer.stop_tick_fiber obs
-      in
-      let run_attempt () =
-        try
-          Eio.Switch.run (fun attempt_sw ->
-            (match liveness_observer_opt with
-             | Some obs ->
-               Cascade_attempt_liveness_observer.register_attempt_switch
-                 obs
-                 ~sw:attempt_sw
-             | None -> ());
-            (match liveness_observer_opt, Eio_context.get_clock_opt () with
-             | Some obs, Some clock ->
-               Cascade_attempt_liveness_observer.start_tick_fiber
-                 obs
-                 ~sw:attempt_sw
-                 ~clock
-             | Some _, None -> ()
-             | None, _ -> ());
-            let liveness_on_event =
-              match liveness_observer_opt with
-              | None -> ctx.on_event
-              | Some obs ->
-                Cascade_attempt_liveness_observer.wrap_on_event obs ctx.on_event
-            in
-            match f ~attempt_sw ~liveness_on_event with
-            | result ->
-              stop_liveness_tick ();
-              result
-            | exception exn ->
-              let bt = Printexc.get_raw_backtrace () in
-              stop_liveness_tick ();
-              Printexc.raise_with_backtrace exn bt)
-        with
-        | Cascade_attempt_liveness_observer.Liveness_kill failure ->
-          Error (liveness_timeout_error failure)
-        | Eio.Cancel.Cancelled _ as e -> raise e
-      in
-      match run_attempt () with
-      | result ->
-        finalize_liveness ();
+    let result =
+      (* Restore typed provider-context enrichment (auth-env / not-found hints).
+         [Runtime_candidate] lives below [lib/keeper] and cannot reach this
+         keeper-level helper, so the enrichment is applied here at the consumer
+         with the candidate's provider config. *)
+      Result.map_error
+        (Keeper_runtime_attempt.enrich_sdk_error
+           ~runtime_id:ctx.error_runtime_id
+           ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
-      | exception exn ->
-        let bt = Printexc.get_raw_backtrace () in
-        finalize_liveness ();
-        Printexc.raise_with_backtrace exn bt
     in
-    (match
-       Cascade_config_builder.with_cli_preflight
-         ~scope:(Printf.sprintf "cascade:%s/runtime" ctx.cascade_name)
-         ~config
-         ~goal:ctx.goal
-         (fun () ->
-            let result =
-              with_liveness_attempt (fun ~attempt_sw ~liveness_on_event ->
-                let effective_checkpoint =
-                  match resume_checkpoint with
-                  | Some _ -> resume_checkpoint
-                  | None -> ctx.oas_checkpoint
-                in
-                let run_fn () =
-                  Eio_guard.check_if_ready ();
-                  Cascade_runner.run
-                    ~sw:attempt_sw
-                    ~net:ctx.net
-                    ~config
-                    ?oas_checkpoint:effective_checkpoint
-                    ?on_event:liveness_on_event
-                    ?on_yield:ctx.on_yield
-                    ?on_resume:ctx.on_resume
-                    ~agent_ref:local_agent_ref
-                    ?proof_ref:ctx.proof_ref
-                    ?contract:ctx.contract
-                    ctx.goal
-                in
-                let outer_wall_for_provider =
-                  Cascade_attempt_liveness_config.outer_wall_for_attempt
-                    ~mode:liveness_mode
-                    ~observer_attached:(Option.is_some liveness_observer_opt)
-                    ~per_provider_timeout_s
-                    ~candidate_key
-                in
-                match outer_wall_for_provider with
-                | None -> run_fn ()
-                | Some t ->
-                  let clock_opt =
-                    match Masc_eio_env.get_opt () with
-                    | Some env ->
-                      (match env.clock with
-                       | Some _ as clock_opt -> clock_opt
-                       | None -> Eio_context.get_clock_opt ())
-                    | None -> Eio_context.get_clock_opt ()
-                  in
-                  (match clock_opt with
-                   | Some clock ->
-                     (try Eio.Time.with_timeout_exn clock t run_fn with
-                      | Eio.Time.Timeout ->
-                        Log.Misc.info
-                          "[cascade-fallback] cascade %s: runtime lane per-provider \
-                           timeout after %.1fs, falling back"
-                          ctx.cascade_name
-                          t;
-                        Error
-                          (Agent_sdk.Error.Api
-                             (Timeout
-                                { message =
-                                    Printf.sprintf "Per-provider timeout after %.1fs" t
-                                })))
-                   | None -> run_fn ()))
-            in
-            Ok result)
-     with
-     | Error err ->
-       finalize_liveness ();
-       Error err, None, None
-     | Ok result ->
-       finalize_liveness ();
-       let liveness_success_sample = liveness_success_sample () in
-       let result =
-         Result.map_error
-           (Cascade_runtime_candidate.enrich_sdk_error
-              ~cascade_name:ctx.error_cascade_name
-              candidate)
-           result
+    let result =
+      match result with
+      | Ok run_result ->
+        apply_accept ~runtime_id:ctx.error_runtime_id ~accept:ctx.accept
+          run_result
+      | Error _ as err -> err
+    in
+    (match ctx.on_runtime_observation, result with
+     | Some emit, Ok run_result ->
+       Option.iter emit run_result.Runtime_agent.runtime_observation
+     | Some emit, Error err ->
+       let total_duration_ms =
+         (Unix.gettimeofday ()
+          (* NDT-OK: closes the provider-attempt latency telemetry sample above. *)
+          -. run_started_at)
+         *. 1000.0
        in
-       let checkpoint_after =
-         Keeper_turn_driver_helpers.checkpoint_after_attempt
-           ?agent_ref:ctx.agent_ref
-           !local_agent_ref
-       in
-       result, checkpoint_after, liveness_success_sample)
+       Runtime_agent.runtime_observation_for_terminal_config
+         ~total_duration_ms
+         ~error:(Agent_sdk.Error.to_string err)
+         config
+       |> emit
+     | None, _ -> ());
+    let checkpoint_after =
+      Keeper_turn_driver_helpers.checkpoint_after_attempt
+        ?agent_ref:ctx.agent_ref
+        !local_agent_ref
+    in
+    result, checkpoint_after, None
 ;;
 
 module For_testing = struct
+  let max_execution_time_for_attempt = max_execution_time_for_attempt
+  let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
+  let apply_accept = apply_accept
 end

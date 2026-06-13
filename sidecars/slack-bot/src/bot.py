@@ -14,16 +14,20 @@ Supports:
 from __future__ import annotations
 
 import logging
+import os
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from gate_shared.bindings_store import load_bindings, save_bindings
+from gate_shared.status_store import ConnectorRuntimeStatus, StatusStore
 
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from .config import get_config
-from .formatters import chunk_text, response_blocks, strip_state_blocks
+from .formatters import response_blocks, strip_state_blocks
 from .gate_client import GateClient, GateResponse
 
 logging.basicConfig(
@@ -42,11 +46,14 @@ class SlackGateBot:
         self._bindings: dict[str, str] = {}  # channel_id -> keeper_name
         self._messages_processed = 0
         self._messages_failed = 0
+        self._last_message_at = ""
+        self.status_store = StatusStore(Path(self.cfg.status_path))
+        self._status_stop = threading.Event()
+        self._status_thread: threading.Thread | None = None
 
     def _load_bindings(self) -> None:
         self._bindings = load_bindings(
             self.cfg.binding_store_path,
-            legacy_path=self.cfg.legacy_binding_store_path,
             logger=logger,
         )
 
@@ -55,6 +62,51 @@ class SlackGateBot:
 
     def _resolve_keeper(self, channel_id: str) -> str:
         return self._bindings.get(channel_id, self.cfg.default_keeper)
+
+    def _write_status(self) -> None:
+        self.status_store.write(
+            ConnectorRuntimeStatus(
+                updated_at=datetime.now(tz=timezone.utc).isoformat(),
+                connected=True,
+                gate_base_url=self.cfg.gate_base_url,
+                gate_healthy=None,
+                gate_health_checked_at="",
+                last_message_at=self._last_message_at,
+                messages_processed=self._messages_processed,
+                messages_failed=self._messages_failed,
+                pid=os.getpid(),
+                runtime_bindings_count=len(self._bindings),
+                default_keeper=self.cfg.default_keeper,
+            )
+        )
+
+    def _status_loop(self) -> None:
+        while not self._status_stop.is_set():
+            try:
+                self._write_status()
+            except Exception as exc:
+                logger.warning("Status write error: %s", exc)
+            self._status_stop.wait(10.0)
+
+    def start_status_heartbeat(self) -> None:
+        if self._status_thread is not None and self._status_thread.is_alive():
+            return
+        self._status_stop.clear()
+        self._status_thread = threading.Thread(
+            target=self._status_loop,
+            name="slack-status-heartbeat",
+            daemon=True,
+        )
+        self._status_thread.start()
+
+    def stop_status_heartbeat(self) -> None:
+        self._status_stop.set()
+        if self._status_thread is not None:
+            self._status_thread.join(timeout=2.0)
+        try:
+            self._write_status()
+        except Exception as exc:
+            logger.warning("Final status write error: %s", exc)
 
     def register_handlers(self, app: App) -> None:
         """Register all Slack event and command handlers."""
@@ -194,10 +246,7 @@ class SlackGateBot:
             model = status.get("last_model_used", "?")
             turns = status.get("total_turns", 0)
             mark = ":white_check_mark:" if alive else ":x:"
-            respond(
-                f"{mark} *{keeper}*: {state}\n"
-                f"Model: `{model}` | Turns: {turns}"
-            )
+            respond(f"{mark} *{keeper}*: {state}\nModel: `{model}` | Turns: {turns}")
 
     def _handle_response(
         self,
@@ -230,6 +279,7 @@ class SlackGateBot:
             else:
                 say(text=reply, blocks=blocks)
             self._messages_processed += 1
+            self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
         elif response.error:
             error_text = f":warning: {response.error}"
             if thinking_ts:
@@ -244,6 +294,7 @@ class SlackGateBot:
             else:
                 say(error_text)
             self._messages_failed += 1
+            self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
         else:
             if thinking_ts:
                 try:
@@ -254,6 +305,8 @@ class SlackGateBot:
                     )
                 except Exception:
                     pass
+            self._messages_processed += 1
+            self._last_message_at = datetime.now(tz=timezone.utc).isoformat()
 
 
 def main() -> None:
@@ -261,15 +314,19 @@ def main() -> None:
     cfg = get_config()
     bot = SlackGateBot()
     bot._load_bindings()
+    bot.start_status_heartbeat()
 
-    app = App(token=cfg.slack_bot_token)
-    bot.register_handlers(app)
+    try:
+        app = App(token=cfg.slack_bot_token)
+        bot.register_handlers(app)
 
-    logger.info(
-        "Slack bot starting (gate=%s, default_keeper=%s, socket_mode=true)",
-        cfg.gate_base_url,
-        cfg.default_keeper,
-    )
+        logger.info(
+            "Slack bot starting (gate=%s, default_keeper=%s, socket_mode=true)",
+            cfg.gate_base_url,
+            cfg.default_keeper,
+        )
 
-    handler = SocketModeHandler(app, cfg.slack_app_token)
-    handler.start()
+        handler = SocketModeHandler(app, cfg.slack_app_token)
+        handler.start()
+    finally:
+        bot.stop_status_heartbeat()

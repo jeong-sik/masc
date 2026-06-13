@@ -1,0 +1,219 @@
+---
+rfc: "0143"
+title: "keeper_runtime_profile Typed Catalog Query Result"
+status: Active
+created: 2026-05-20
+updated: 2026-05-21
+author: vincent
+supersedes: []
+superseded_by: null
+related: ["0088", "0141", "0142", "0148", "0154"]
+implementation_prs: [16860, 17814]
+---
+
+## Progress audit (2026-05-22)
+
+Status remains Active.  PR-1 (bridge) and PR-2 (self-migration) have
+shipped; PR-3 / PR-4 are *cancelled* per audit (see below); PR-5
+closeout is in flight.
+
+| Phase | PR | Scope | Merged |
+|-------|-----|------|--------|
+| PR-1 (bridge) | #16860 | `catalog_metadata_query` typed bridge alongside `catalog_metadata_result` (string error → typed `Unavailable` translation via Otoml message inspection) + unit tests | 2026-05-20 |
+| PR-2 (self-migration) | #17814 | `keeper_runtime_profile.ml` — 5 in-file call sites migrated (`is_system_only_runtime`, `keeper_catalog_names`, `system_catalog_names`, `fallback_runtime_for`, `normalize_keeper_runtime_declared_name`) | 2026-05-22 |
+
+### PR-3 / PR-4 cancelled — no external callers exist
+
+The original §4 PR-3 and PR-4 listed 8 + 5 = 13 external files
+expected to call `catalog_metadata_result`.  Audit on 2026-05-22
+(post-PR-2):
+
+```
+$ grep -rn 'catalog_metadata_result\b' lib/ test/ dashboard/src
+lib/keeper/keeper_runtime_profile.ml:373:let catalog_metadata_result …   ← the function itself
+lib/keeper/keeper_runtime_profile.mli:...                            ← doc-comments only
+test/test_keeper_runtime_profile_bridge.ml:5: …                       ← doc-comment only
+```
+
+Zero external callers.  PR-3 / PR-4 were a misread of the call
+graph; `catalog_metadata_result` was always a private function
+(never declared in the `.mli`) used only within
+`keeper_runtime_profile.ml`.  PR-2 therefore drained the last live
+caller, and the legacy function is now dead code.
+
+### PR-5 — in flight as #17820
+
+`#17820` stacks on PR-2 and deletes the legacy
+`catalog_metadata_result` function body together with its
+doc-comment references in the `.ml`, `.mli`, and the bridge test.
+After it merges, the audit script's
+`silent-failure-ratchet` regeneration can run.
+
+### Transitional API note
+
+§4 PR-1 explicitly tolerated string-match translation (Otoml error
+message → typed `Unavailable` variant) as a *time-boxed*
+transitional path.  After #17820 the bridge module is the sole
+catalog accessor; the string-match site continues to live inside it
+and is not flagged by the audit script (#17123) because it sits at
+the bridge boundary, not at any caller boundary.
+
+### Related RFC
+
+- **RFC-0141** (TOML Field Resolution, Active 2026-05-21): sister
+  typed-Otoml RFC. Same audit cohort.
+- **RFC-0142** (runtime_error_classify, Active 2026-05-21): adjacent
+  runtime-side typed JSON RFC.
+- **RFC-0148 / RFC-0154**: closed-sum cohort. Caller migrations in
+  PR-2/3/4 can reuse the typed-variant shapes those RFCs produced.
+
+---
+
+# RFC-0143 — keeper_runtime_profile Typed Catalog Query Result
+
+## 1. Summary
+
+`lib/keeper/keeper_runtime_profile.ml` has six sites where `catalog_metadata_result ()` returns `Error _` and the call silently falls back to `false`, `[]`, or `None`. These are not dead arms — they fire when the catalog file is unreadable, missing, or malformed. The current behavior:
+
+- `Catalog read failure` and `keeper is not assignable` collapse into the same `false`.
+- `Catalog read failure` and `no system catalogs configured` collapse into the same `[]`.
+
+Callers cannot tell whether the absence is intentional config or a runtime fault, so misconfigured fleets degrade silently.
+
+The fix needs a typed catalog query result variant and a caller-side decision protocol. 25+ caller files makes this an N-of-M migration — RFC required to scope the rollout (AGENT-LLM-A.md `<agent_delegation>` `keeper_*` neighborhood; not a hard gate but bundling 25+ files in a single PR violates Surgical Changes).
+
+## 2. Surface today
+
+| Line | Function | `Error _` arm | Behavior |
+|---|---|---|---|
+| `:173-174` | `catalog_names` (path branch) | `Error _ -> []` | "if declarative parse fails, return empty" |
+| `:182-183` | `catalog_names` (fallback branch) | `Error _ -> []` | "if fallback also fails, return empty" |
+| `:200-201` | `catalog_lookup_names` | `Error _ -> []` | same |
+| `:207-208` | `catalog_lookup_names` fallback | `Error _ -> []` | same |
+| `:405` | `is_system_only_runtime` | `Error _ -> false` | "if metadata read fails, treat as non-system" |
+| `:415` | `system_catalog_names` | `Error _ -> []` | "if metadata fails, no system names" |
+| `:489-490` | `normalize_keeper_runtime_declared_name` | `Error _ -> false` | "if metadata fails, not keeper_assignable" |
+
+The two `false` arms (`:405`, `:489-490`) are the most dangerous because they routing-default to "ignore this name" — a misconfigured catalog silently denies keeper assignability for every name, producing no diagnostic.
+
+Caller surface (25 OCaml files):
+
+```
+lib/runtime/runtime_catalog_runtime_resolve.ml
+lib/runtime/runtime_metrics.ml
+lib/runtime/runtime_routes.ml
+lib/dashboard_runtime_config.ml
+lib/keeper/keeper_runtime_profile.ml         (self)
+lib/keeper/keeper_error_classify.ml
+lib/keeper/keeper_runtime_resilience.ml
+lib/keeper/keeper_runtime.ml
+lib/keeper/keeper_status_bridge.ml
+lib/keeper/keeper_turn_runtime_budget_routing.ml
+lib/keeper/keeper_turn_up_args.ml
+lib/keeper/keeper_types_profile.ml
+lib/keeper/keeper_unified_turn.ml
+lib/keeper/keeper_world_observation.ml
+lib/server/server_routes_http_routes_dashboard.ml
+test/test_keeper_runtime_profile_partial.ml
+test/test_keeper_toml_config_validation.ml
+test/test_keeper_unified.ml
+(plus *.mli files for the keeper modules)
+```
+
+## 3. Proposal — `catalog_query_result`
+
+```ocaml
+(** Result of a catalog metadata query. The [Unavailable] variant is
+    distinct from [Ok []] (which means "catalog exists and is empty")
+    and from [Ok meta] (which means "catalog exists and has these
+    entries"). *)
+type 'a catalog_query_result =
+  | Catalog_ok of 'a
+  | Catalog_unavailable of {
+      reason: catalog_unavailable_reason;
+      message: string;     (** for diagnostic logging *)
+    }
+
+and catalog_unavailable_reason =
+  | Catalog_path_not_resolved
+  | Catalog_file_not_found of string
+  | Catalog_parse_error of string
+  | Catalog_runtime_snapshot_unavailable
+```
+
+Call-site decision protocol:
+
+```ocaml
+let is_system_only_runtime raw =
+  match catalog_metadata_query () with
+  | Catalog_ok meta -> List.mem (public_name_of_target raw) meta.system_names
+  | Catalog_unavailable { reason = Catalog_file_not_found _; _ } ->
+      false  (* expected on first-boot empty install — preserve current behavior *)
+  | Catalog_unavailable { reason; message } ->
+      Log.Runtime.warn "[RuntimeProfile] is_system_only_runtime: catalog \
+                        unavailable (%s); defaulting to non-system: %s"
+                       (catalog_unavailable_reason_to_string reason) message;
+      Runtime_metrics.on_catalog_unavailable ~site:"is_system_only_runtime" ();
+      false
+```
+
+Two important details:
+
+- **First-boot `Catalog_file_not_found` keeps `false`** (preserves today's behavior on legitimate empty installs).
+- **Other failure modes log and counter-increment**, then default conservatively. This is *not* a Counter-as-Fix (RFC-0088 §3.1) because the counter is *diagnostic alongside the typed variant* — the root fix *is* the variant. The log + counter exist only so a misconfigured fleet shows up in operator dashboards rather than as silent denial.
+
+## 4. Migration steps
+
+This RFC requires careful phased migration because the variant rename touches ~25 caller files. To keep each PR self-contained:
+
+1. **PR-1 — bridge phase**: introduce `catalog_metadata_query` (new name, typed result) alongside the existing `catalog_metadata_result` (old, `('a, string) result`). The new function calls the old one internally and translates the string error to a typed `Unavailable` variant by inspecting Otoml's error message. Unit-test the translation table.
+
+2. **PR-2 — call-site migration, batch A (6 sites in `keeper_runtime_profile.ml` itself)**: switch the seven sites listed above to the new query. Each `false`/`[]` arm gets an explicit `Catalog_unavailable` branch.
+
+3. **PR-3 — call-site migration, batch B (7 caller files in `lib/keeper/` outside the SSOT)**: `keeper_runtime`, `keeper_runtime_resilience`, `keeper_status_bridge`, `keeper_unified_turn`, `keeper_turn_up_args`, `keeper_turn_runtime_budget_routing`, `keeper_world_observation`.
+
+4. **PR-4 — call-site migration, batch C (5 caller files in `lib/runtime/` + dashboard + server)**.
+
+5. **PR-5 — `catalog_metadata_result` deletion + ratchet regenerate**: only remove the old API after all callers migrated. The `silent-failure-ratchet.sh` baseline drops `error_result_silence` by 6 in this PR (the original keeper_runtime_profile sites). Cross-batch sites in keeper_runtime/keeper_status_bridge may drop additional counts.
+
+Each PR builds clean. PR-2..PR-4 are *batch-mechanical* — same shape applied to disjoint file sets — so they can be reviewed in parallel.
+
+## 5. Compatibility
+
+- The bridge phase (PR-1) is purely additive. `catalog_metadata_result` keeps its current signature.
+- PR-2..PR-4 behavioral change: misconfigured catalogs that today silently produce `false`/`[]` will start emitting `Log.Runtime.warn` lines and `runtime_catalog_unavailable_count{site=…}` metric.
+- PR-5 is the only PR that removes API surface; it must be the last in the stack.
+- No wire/API compat impact — `keeper_runtime_profile` is internal.
+
+## 6. Non-goals
+
+- Changing what counts as "system" vs "keeper-assignable" — RFC scope is purely the `Error _ -> false/[]` boundary, not the routing logic itself.
+- Replacing `catalog_metadata_result` for tests; tests can continue to use the result type (or migrate at the author's discretion).
+- Re-litigating the `system_names` vs `keeper_assignable_names` SSOT (separate concern).
+
+## 7. Test plan
+
+| Phase | Test |
+|---|---|
+| PR-1 | Unit: bridge function translates 4 known Otoml error messages to the 4 typed variants. Round-trip: catalog file missing → `Catalog_file_not_found`; catalog file malformed → `Catalog_parse_error`. |
+| PR-2 | Existing `test_keeper_runtime_profile_partial.ml` + `test_keeper_toml_config_validation.ml` + `test_keeper_unified.ml` must pass without modification. Add a "first-boot empty install" test asserting `is_system_only_runtime` returns `false` without logging. |
+| PR-3..4 | Each batch's test suite must pass. No new tests required at batch level — the behavior change is centralized in the call-site decision template. |
+| PR-5 | `silent-failure-ratchet.sh` baseline regenerate: `error_result_silence` drops by ≥6. `runtime_catalog_unavailable_count` metric is exported. |
+
+## 8. RFC-0088 conformance
+
+- **§3.1 (Counter-as-Fix)**: `Runtime_metrics.on_catalog_unavailable` is diagnostic *alongside* the typed-variant root fix. The variant *is* the fix.
+- **§3.2 (String classifier)**: PR-1's translation from Otoml's string error to typed variant uses string substring matching internally — this is *temporary*, scoped to the bridge phase. PR-5 deletes the bridge once Otoml's typed error API is exposed (tracked as a separate prerequisite issue).
+- **§3.3 (N-of-M)**: This RFC explicitly schedules 4 PRs to cover all 25 sites, with PR-5 as the closeout marker. PR-2 introduces no new partial coverage — all 7 self-sites move in one batch.
+- **§3.4 (Symptom suppression)**: no cap/cooldown/repair.
+
+## 9. Open questions
+
+1. Should the `Catalog_file_not_found` first-boot path emit a one-shot info log so operators can confirm "empty install detected, defaulting"? Tentative answer: yes, behind a `MASC_LOG_FIRST_BOOT_CATALOG` env var, emitted once per process.
+2. Should the metric be a counter (event count) or gauge (current unavailable site count)? Counter — matches existing `runtime_*_count` siblings.
+
+## 10. Related work
+
+- RFC-0088 — workaround rejection bar.
+- RFC-0141 — TOML field typed variant (sister RFC for repo_manager/credential subsystem, same 2026-05-20 audit).
+- MEMORY `project_runtime_misroute_2026_05_17` — same silent-drop family at the runtime.toml boundary.

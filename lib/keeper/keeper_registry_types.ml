@@ -4,6 +4,8 @@
     See keeper_registry_types.mli for rationale and contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module StringMap = Set_util.StringMap
 
 (* Failure reason types and kill-class re-exports extracted to
@@ -17,15 +19,57 @@ include Keeper_registry_types_turn_phase
    [Keeper_registry_types_decision] (500-line decomp). *)
 include Keeper_registry_types_decision
 
-(* Cascade and compaction FSM types, witnesses, transitions, spec violation
-   types, and resolvers extracted to [Keeper_registry_types_cascade]
-   (500-line decomp). *)
-include Keeper_registry_types_cascade
+(* Compaction-stage (KMC) FSM types, witnesses, transitions, and spec
+   violations re-homed to [Keeper_registry_types_compaction] (RFC-0206). The
+   runtime selection FSM that shared the deleted [Keeper_registry_types_runtime]
+   module is removed — single-binding Runtime has no Selecting/Trying loop; turn
+   lifecycle is the surviving [turn_phase] FSM. *)
+include Keeper_registry_types_compaction
+
+(* The root interface still exposes the ppx_tla helpers generated for the
+   re-exported [compaction_stage] type. Keep those aliases explicit so the
+   keeper aggregate remains compatible while the implementation delegates the
+   FSM body to [Keeper_registry_types_compaction]. *)
+let to_tla_symbol (stage : compaction_stage) =
+  match stage with
+  | Compaction_accumulating -> "compaction_accumulating"
+  | Compaction_compacting -> "compaction_compacting"
+  | Compaction_done -> "compaction_done"
+;;
+
+let all_states : compaction_stage list =
+  [ Compaction_accumulating; Compaction_compacting; Compaction_done ]
+;;
+
+let all_symbols = List.map to_tla_symbol all_states
+let terminal_symbols = [ to_tla_symbol Compaction_done ]
+let active_symbols = [ to_tla_symbol Compaction_compacting ]
+let idle_symbols = [ to_tla_symbol Compaction_accumulating ]
+
+let is_terminal (stage : compaction_stage) =
+  match stage with
+  | Compaction_done -> true
+  | Compaction_accumulating | Compaction_compacting -> false
+;;
+
+let is_active (stage : compaction_stage) =
+  match stage with
+  | Compaction_compacting -> true
+  | Compaction_accumulating | Compaction_done -> false
+;;
+
+let is_idle (stage : compaction_stage) =
+  match stage with
+  | Compaction_accumulating -> true
+  | Compaction_compacting | Compaction_done -> false
+;;
 
 type turn_measurement =
   { tm_captured_at : float
   ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
   }
+
+type done_resolution = [ `Stopped | `Crashed of string ]
 
 type registry_entry =
   { base_path : string
@@ -40,8 +84,8 @@ type registry_entry =
   ; event_queue : Keeper_event_queue.t Atomic.t
   ; started_at : float
   ; grpc_close : (unit -> unit) option Atomic.t
-  ; done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t
-  ; done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u
+  ; done_p : done_resolution Eio.Promise.t
+  ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
   ; last_restart_ts : float
   ; dead_since_ts : float option
@@ -75,7 +119,6 @@ and turn_observation =
   ; last_progress_kind : string option
   ; turn_phase : packed_turn_phase
   ; decision_stage : packed_decision_stage
-  ; cascade_state : packed_cascade_state
   ; measurement : turn_measurement option
   ; measurement_bind_count : int
   ; selected_model : string option
@@ -86,19 +129,31 @@ and completed_turn_observation =
   ; ct_started_at : float
   ; ct_ended_at : float
   ; ct_decision_stage : packed_decision_stage
-  ; ct_cascade_state : packed_cascade_state
   ; ct_selected_model : string option
   }
 
-let try_resolve_done entry value =
+type done_resolve_result =
+  | Done_resolved of { source : string }
+  | Done_already_resolved of
+      { source : string
+      ; previous : done_resolution
+      }
+
+let resolve_done entry ~source (value : done_resolution) =
   match Eio.Promise.peek entry.done_p with
-  | Some _ -> false
+  | Some previous -> Done_already_resolved { source; previous }
   | None ->
     (try
        Eio.Promise.resolve entry.done_r value;
-       true
+       Done_resolved { source }
      with
-     | Invalid_argument _ -> false)
+     | Invalid_argument _ ->
+       let previous =
+         match Eio.Promise.peek entry.done_p with
+         | Some previous -> previous
+         | None -> value
+       in
+       Done_already_resolved { source; previous })
 ;;
 
 let registry_key ~base_path name =
@@ -107,32 +162,26 @@ let registry_key ~base_path name =
   base_path ^ "\x1f" ^ name
 ;;
 
-let turn_phase_of_cascade_state (s : packed_cascade_state) : packed_turn_phase =
-  match s with
-  | Packed Cascade_idle -> Packed Turn_prompting
-  | Packed Cascade_selecting -> Packed Turn_routing
-  | Packed Cascade_trying -> Packed Turn_executing
-  | Packed Cascade_done -> Packed Turn_finalizing
-  | Packed Cascade_exhausted -> Packed Turn_exhausted
-;;
-
 let completed_turn_outcome_of_observation (obs : turn_observation)
   : Keeper_transition_audit.completed_turn_outcome
   =
-  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
-     meant that adding a new variant to either ADT (decision_stage or
-     cascade_state) would silently fall through to Turn_failed without
-     a compile error.  Spelling out every variant lets the OCaml
-     exhaustiveness checker catch missing cases at build time. *)
+  (* RFC-0206: the runtime selection FSM was removed; turn substantiveness is
+     now read off the surviving [turn_phase] projection. Terminal
+     [Turn_finalizing] (the phase the deleted [turn_phase_of_runtime_state]
+     mapped [Runtime_done] onto) = substantive; every other phase = failed.
+     Exhaustive match (no wildcard) so a new turn_phase or decision_stage
+     variant fails the build rather than silently degrading to Turn_failed. *)
   match obs.decision_stage with
   | Packed Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
   | Packed (Decision_undecided | Decision_guard_ok | Decision_tool_policy_selected) ->
-    (match obs.cascade_state with
-     | Packed Cascade_done -> Keeper_transition_audit.Turn_substantive
-     | Packed Cascade_idle
-     | Packed Cascade_selecting
-     | Packed Cascade_trying
-     | Packed Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
+    (match obs.turn_phase with
+     | Packed Turn_finalizing -> Keeper_transition_audit.Turn_substantive
+     | Packed Turn_idle
+     | Packed Turn_prompting
+     | Packed Turn_routing
+     | Packed Turn_executing
+     | Packed Turn_compacting
+     | Packed Turn_exhausted -> Keeper_transition_audit.Turn_failed)
 ;;
 
 (* RFC-0002 Event Dispatch — lifecycle_event_origin type + pure helpers. *)

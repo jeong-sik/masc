@@ -7,6 +7,8 @@
     @since v2.200.0 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 
 (** {1 Included: Keeper_skill_routing types} *)
@@ -165,17 +167,17 @@ val skill_route_context_text :
 
 (** {1 Included: Keeper_alerting_path} *)
 
-val project_root_of_config : Coord.config -> string
+val project_root_of_config : Workspace.config -> string
 val normalize_path_for_check : string -> string
 val normalize_allowed_path_for_check :
   root:string -> string -> string option
 val is_within_root_norm : root_norm:string -> string -> bool
 val absolute_allowed_paths :
-  config:Coord.config -> allowed_paths:string list -> string list
+  config:Workspace.config -> allowed_paths:string list -> string list
 val absolute_allowed_paths_result :
-  config:Coord.config -> allowed_paths:string list -> (string list, string) result
+  config:Workspace.config -> allowed_paths:string list -> (string list, string) result
 val resolve_keeper_target_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   allowed_paths:string list ->
   raw_path:string ->
   (string, Keeper_alerting_path.keeper_path_rejection) result
@@ -186,7 +188,7 @@ val playground_repos_path : string -> string
 val effective_allowed_paths : meta:keeper_meta -> string list
 val effective_write_allowed_paths : meta:keeper_meta -> string list
 val resolve_keeper_read_path :
-  config:Coord.config ->
+  config:Workspace.config ->
   allowed_paths:string list ->
   raw_path:string ->
   (string, Keeper_alerting_path.keeper_path_rejection) result

@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MASC Cockpit — A11y drift coverage (W14)</title>
-  <!-- Cascade chain (read-only mirror, do NOT edit production CSS):
+  <!-- Runtime chain (read-only mirror, do NOT edit production CSS):
          dashboard/src/main.ts -> imports global.css
          dashboard/src/styles/global.css:37 -> @import "./a11y.css"
-         dashboard/src/styles/a11y.css -> 99 LOC, last touched in masc-mcp PR #11224
+         dashboard/src/styles/a11y.css -> 99 LOC, last touched in masc PR #11224
        This preview reflects production a11y.css verbatim. Tokens come from
        dashboard/design-system/source_styles/tokens.generated.css via _preview.css. -->
   <link rel="stylesheet" href="_preview.css" />
@@ -50,7 +50,7 @@
       font: var(--type-body);
     }
 
-    /* Cascade banner */
+    /* Runtime banner */
     .a11y-banner {
       border: 1px solid var(--color-border-strong);
       border-radius: var(--r-1);
@@ -360,20 +360,20 @@
       <p class="pv-sub">
         Visual mirror of <code style="font-family:var(--font-mono);font-size:var(--fs-12);color:var(--color-fg-primary)">dashboard/src/styles/a11y.css</code>.
         Read-only; production CSS is the SSOT. Phase 1 / W14 of the design-system drift
-        workstream (Plan: <code style="font-family:var(--font-mono);font-size:var(--fs-12);color:var(--color-fg-primary)">20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md</code>).
+        workstream (Plan: <code style="font-family:var(--font-mono);font-size:var(--fs-12);color:var(--color-fg-primary)">20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md</code>).
       </p>
     </header>
 
     <!-- ============================================================
-         CASCADE CHAIN BANNER — proves a11y.css is LIVE in production.
+         RUNTIME CHAIN BANNER — proves a11y.css is LIVE in production.
          ============================================================ -->
     <section class="pv-sect">
-      <header class="pv-sect-h"><h2>Cascade chain</h2><span class="sub">how this file reaches runtime</span></header>
+      <header class="pv-sect-h"><h2>Runtime chain</h2><span class="sub">how this file reaches runtime</span></header>
       <div class="a11y-banner">
         <div class="lbl">Import path</div>
         <code>dashboard/src/main.ts &nbsp;→&nbsp; dashboard/src/styles/global.css:37 &nbsp;→&nbsp; dashboard/src/styles/a11y.css</code>
         <div class="lbl" style="margin-top:8px">Verified by</div>
-        <code>PR <a href="https://github.com/jeong-sik/masc-mcp/pull/11317" style="color:var(--color-accent-fg)">orphan-triage</a> · classification = LIVE · masc-mcp</code>
+        <code>PR <a href="https://github.com/jeong-sik/masc/pull/11317" style="color:var(--color-accent-fg)">orphan-triage</a> · classification = LIVE · masc</code>
         <div class="lbl" style="margin-top:8px">Phase 0 reference</div>
         <code>PR Phase 0 production-css audit (orphan triage cleared the false negative)</code>
       </div>
@@ -562,8 +562,8 @@
 
     <footer class="pv-sect">
       <div class="a11y-foot">
-        Source: dashboard/src/styles/a11y.css (99 LOC) · last touched in masc-mcp PR for #3915 ·
-        cascade verified by orphan-triage · Plan: 20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md
+        Source: dashboard/src/styles/a11y.css (99 LOC) · last touched in masc PR for #3915 ·
+        runtime verified by orphan-triage · Plan: 20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md
       </div>
     </footer>
   </div>

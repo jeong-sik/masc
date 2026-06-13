@@ -7,7 +7,7 @@
     this file pins the pure formatting surface so a variant rename or
     addition cannot silently break operator-facing trace messages. *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────── *)
 

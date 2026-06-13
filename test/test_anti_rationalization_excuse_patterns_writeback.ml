@@ -18,7 +18,7 @@
 
 open Alcotest
 
-module A = Masc_mcp.Anti_rationalization
+module A = Masc.Task.Anti_rationalization
 
 let legacy_english_only_json =
   {|[

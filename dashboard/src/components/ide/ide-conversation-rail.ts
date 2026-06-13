@@ -1,10 +1,10 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue } from './use-signal-value'
 import { fetchBoard } from '../../api/board'
 import type { BoardPost } from '../../types/core'
 import { bridgePostsToTrace } from './anchored-thread-trace-bridge'
 import { unixishToMs } from '../../lib/format-time'
-import { bridgeCascadeEventsToTrace } from './cascade-hop-trace-bridge'
 import { bridgeDecisionsToTrace } from './decision-log-trace-bridge'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import { KeeperBadge } from '../keeper-badge'
@@ -12,10 +12,6 @@ import {
   fetchKeeperDecisions,
   type KeeperDecision,
 } from '../../api/dashboard'
-import {
-  fetchCascadeStrategyTrace,
-  type CascadeStrategyTraceEvent,
-} from '../../api/dashboard-cascade'
 import {
   createAnchoredThreadRailStore,
   type AnchoredThread,
@@ -66,7 +62,6 @@ const CONVERSATION_CONTEXT_BADGE_STYLE = {
 
 const EMPTY_POSTS: ReadonlyArray<BoardPost> = []
 const EMPTY_DECISIONS: ReadonlyArray<KeeperDecision> = []
-const EMPTY_CASCADE: ReadonlyArray<CascadeStrategyTraceEvent> = []
 
 interface ConversationContextSummary {
   readonly label: string
@@ -76,7 +71,6 @@ interface ConversationContextSummary {
 type ReplayRailItem =
   | { readonly source: 'thread'; readonly timestamp_ms: number; readonly post: BoardPost }
   | { readonly source: 'decision'; readonly id: string; readonly timestamp_ms: number; readonly decision: KeeperDecision }
-  | { readonly source: 'cascade'; readonly id: string; readonly timestamp_ms: number; readonly cascade: CascadeStrategyTraceEvent }
 
 async function fetchBoardPosts(): Promise<ReadonlyArray<BoardPost>> {
   try {
@@ -95,35 +89,26 @@ async function fetchKeeperDecisionEvents(): Promise<ReadonlyArray<KeeperDecision
   }
 }
 
-async function fetchCascadeReplayEvents(): Promise<ReadonlyArray<CascadeStrategyTraceEvent>> {
-  try {
-    return (await fetchCascadeStrategyTrace({ limit: 200 })).events
-  } catch {
-    return EMPTY_CASCADE
-  }
-}
-
 function parseIsoToMs(iso: string): number {
   return new Date(iso).getTime()
 }
 
-function boardKindFromPost(post: BoardPost): ThreadKind {
-  if (post.hearth) {
-    switch (post.hearth.toLowerCase()) {
-      case 'approve': return 'approve'
-      case 'flag': return 'flag'
-      case 'question': return 'question'
-      case 'suggest': return 'suggest'
-      case 'note': return 'note'
-    }
+function parseThreadKind(hearth: string): ThreadKind | null {
+  switch (hearth.toLowerCase()) {
+    case 'approve': return 'approve'
+    case 'flag': return 'flag'
+    case 'question': return 'question'
+    case 'suggest': return 'suggest'
+    case 'note': return 'note'
+    default: return null
   }
-  const body = (post.body ?? '').toLowerCase()
-  const title = (post.title ?? '').toLowerCase()
-  const text = `${title} ${body}`
-  if (text.includes('approve') || text.includes('ship it') || text.includes('looks good')) return 'approve'
-  if (text.includes('flag') || text.includes('blocker') || text.includes('race condition')) return 'flag'
-  if (text.includes('suggest') || text.includes('could you') || text.includes('recommend')) return 'suggest'
-  if (text.includes('?') || text.includes('question') || text.includes('should')) return 'question'
+}
+
+export function boardKindFromPost(post: BoardPost): ThreadKind {
+  if (post.hearth) {
+    const kind = parseThreadKind(post.hearth)
+    if (kind !== null) return kind
+  }
   return 'note'
 }
 
@@ -131,21 +116,13 @@ export function IdeConversationRail() {
   const threadStore = useMemo(() => createAnchoredThreadRailStore(activeIdeFile.value), [])
   const [posts, setPosts] = useState<ReadonlyArray<BoardPost>>(EMPTY_POSTS)
   const [decisions, setDecisions] = useState<ReadonlyArray<KeeperDecision>>(EMPTY_DECISIONS)
-  const [cascadeEvents, setCascadeEvents] = useState<ReadonlyArray<CascadeStrategyTraceEvent>>(EMPTY_CASCADE)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [replayUntilMs, setReplayUntilMs] = useState<number | null>(ideReplayUntilMs.value)
   const [activeFile, setActiveFile] = useState(activeIdeFile.value)
   const [keeperName, setKeeperName] = useState(activeKeeperName.value)
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
+  const [, bumpThreads] = useState(0)
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
   useEffect(() => {
     const unsub = ideReplayUntilMs.subscribe(value => setReplayUntilMs(value))
     return () => unsub()
@@ -156,12 +133,10 @@ export function IdeConversationRail() {
     void Promise.all([
       fetchBoardPosts(),
       fetchKeeperDecisionEvents(),
-      fetchCascadeReplayEvents(),
-    ]).then(([nextPosts, nextDecisions, nextCascadeEvents]) => {
+    ]).then(([nextPosts, nextDecisions]) => {
       if (cancelled) return
       setPosts(nextPosts)
       setDecisions(nextDecisions)
-      setCascadeEvents(nextCascadeEvents)
     })
     return () => { cancelled = true }
   }, [])
@@ -176,7 +151,7 @@ export function IdeConversationRail() {
   useEffect(() => {
     const publish = () => {
       publishIdeConversationThreads(threadStore.filePath(), threadStore.visibleThreads())
-      forceRender((t: number) => t + 1)
+      bumpThreads((t: number) => t + 1)
     }
     const unsub = threadStore.subscribe(publish)
     publish()
@@ -201,15 +176,6 @@ export function IdeConversationRail() {
     knownPostIds.current = bridgePostsToTrace(posts.map(postToTraceInput), knownPostIds.current)
   }, [posts])
 
-  // RFC-0028 PR-δ-2 cascade-hop producer: each cascade strategy_trace
-  // event becomes a keeper-trace event the first time it is observed.
-  // Dedup key is `cascade:${cascade_name}:${cycle}:${ts}` so a server
-  // restart that resets cycle counters cannot collide with prior runs.
-  const knownCascadeKeys = useRef<ReadonlySet<string>>(new Set())
-  useEffect(() => {
-    knownCascadeKeys.current = bridgeCascadeEventsToTrace(cascadeEvents, knownCascadeKeys.current)
-  }, [cascadeEvents])
-
   // RFC-0028 PR-δ-3 decision-log producer: each KeeperDecision becomes a
   // keeper-trace event the first time it is observed. Dedup key is
   // `decision:${keeper_name}:${ts_unix}:${event_type}` since the
@@ -218,7 +184,7 @@ export function IdeConversationRail() {
   useEffect(() => {
     knownDecisionKeys.current = bridgeDecisionsToTrace(decisions, knownDecisionKeys.current)
   }, [decisions])
-  const replayItems = replayRailItems(posts, decisions, cascadeEvents)
+  const replayItems = replayRailItems(posts, decisions)
   const replayEvents = replayEventsForItems(replayItems)
   const visibleItemIds = new Set(filterReplayEvents(replayEvents, replayUntilMs).map(event => event.id))
   const visibleItems = replayUntilMs === null || replayEvents.length === 0
@@ -245,8 +211,7 @@ export function IdeConversationRail() {
         <span>REACTION THREAD</span>
         <span>
           ${visibleCounts.thread}/${posts.length} threads ·
-          ${visibleCounts.decision}/${decisions.length} decisions ·
-          ${visibleCounts.cascade}/${cascadeEvents.length} cascade
+          ${visibleCounts.decision}/${decisions.length} decisions
         </span>
       </div>
       <div class="ide-rail-scope" aria-label="Keeper workspace scope">
@@ -290,7 +255,6 @@ export function postsToAnchoredThreads(
 export function replayRailItems(
   posts: ReadonlyArray<BoardPost>,
   decisions: ReadonlyArray<KeeperDecision>,
-  cascadeEvents: ReadonlyArray<CascadeStrategyTraceEvent>,
 ): ReplayRailItem[] {
   return [
     ...posts.map(post => ({
@@ -303,12 +267,6 @@ export function replayRailItems(
       id: `decision-${index}`,
       timestamp_ms: unixishToMs(decision.ts_unix),
       decision,
-    })),
-    ...cascadeEvents.map((cascade, index) => ({
-      source: 'cascade' as const,
-      id: `cascade-${index}`,
-      timestamp_ms: unixishToMs(cascade.ts),
-      cascade,
     })),
   ]
     .filter(event => Number.isFinite(event.timestamp_ms))
@@ -383,7 +341,7 @@ function symbolHintFromText(text: string): string | undefined {
 function sourceCounts(items: ReadonlyArray<ReplayRailItem>) {
   return items.reduce(
     (acc, item) => ({ ...acc, [item.source]: acc[item.source] + 1 }),
-    { thread: 0, decision: 0, cascade: 0 },
+    { thread: 0, decision: 0 },
   )
 }
 
@@ -403,10 +361,7 @@ function ReplayRailCard(
       overlay,
     )
   }
-  if (item.source === 'decision') {
-    return DecisionCard(item, entries, overlay)
-  }
-  return CascadeCard(item)
+  return DecisionCard(item, entries, overlay)
 }
 
 function PostCard(
@@ -707,67 +662,6 @@ function decisionTelemetryQuery(decision: KeeperDecision, timestampMs: number): 
     decision.outcome ? `outcome:${decision.outcome}` : null,
     decision.tool ? `tool:${decision.tool}` : null,
     decision.model_used ? `model:${decision.model_used}` : null,
-    Number.isFinite(timestampMs) ? `ts:${Math.floor(timestampMs / 1000)}` : null,
-  ])
-}
-
-function CascadeCard(item: Extract<ReplayRailItem, { source: 'cascade' }>) {
-  const event = item.cascade
-  const routeLinks = cascadeRouteLinks(item)
-  const contextSummary = conversationContextSummary(routeLinks)
-  return html`
-    <li style=${{ display: 'block' }}>
-      <div
-        data-replay-source="cascade"
-        style=${{
-          display: 'grid',
-          gap: 'var(--sp-1)',
-          padding: 'var(--sp-2)',
-          background: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border-default)',
-          borderLeft: '2px solid var(--color-accent-fg)',
-          borderRadius: 'var(--r-2)',
-        }}
-      >
-        <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-accent-fg)', letterSpacing: '0.05em' }}>CASCADE</span>
-          <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--color-fg-secondary)' }}>${event.cascade_name}</span>
-          ${contextSummary ? ConversationContextBadge(contextSummary) : null}
-          <span style=${{ marginLeft: 'auto', fontSize: 'var(--fs-11)', color: 'var(--color-fg-muted)' }}>${formatThreadTime(item.timestamp_ms)}</span>
-        </div>
-        <p style=${{ margin: 0, color: 'var(--color-fg-secondary)', fontSize: 'var(--fs-12)' }}>
-          ${event.strategy} · ${event.kind} · ${event.candidates_in}->${event.candidates_out}
-        </p>
-        ${routeLinks.length > 0 ? html`
-          <div class="ide-conversation-route-links" aria-label="Cascade operational links">
-            ${routeLinks.map(link => ConversationRouteLink(link))}
-          </div>
-        ` : null}
-      </div>
-    </li>
-  `
-}
-
-function cascadeRouteLinks(
-  item: Extract<ReplayRailItem, { source: 'cascade' }>,
-): ReadonlyArray<IdeContextRouteLink> {
-  const event = item.cascade
-  return routeLinksForContext({
-    surface: 'Cascade',
-    label: `${event.cascade_name} ${event.kind}`,
-    sourceId: `cascade-${event.cascade_name}-${event.cycle}-${item.timestamp_ms}`,
-    telemetry: true,
-    telemetryQuery: cascadeTelemetryQuery(event, item.timestamp_ms),
-  })
-}
-
-function cascadeTelemetryQuery(event: CascadeStrategyTraceEvent, timestampMs: number): string {
-  return compactRouteQuery([
-    'cascade',
-    event.cascade_name,
-    `strategy:${event.strategy}`,
-    `cycle:${event.cycle}`,
-    `kind:${event.kind}`,
     Number.isFinite(timestampMs) ? `ts:${Math.floor(timestampMs / 1000)}` : null,
   ])
 }

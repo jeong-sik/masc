@@ -2,7 +2,7 @@
 status: reference
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_registry.ml
   - lib/keeper/keeper_supervisor.ml
 ---
@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-04-05
-**Scope**: `masc-mcp` keeper lifecycle state machine redesign
+**Scope**: `masc` keeper lifecycle state machine redesign
 **One sentence**: Keeper의 5-state 상태 머신을 11-state로 확장하고, 비결정론적 측정과 결정론적 전이 사이에 관찰 가능한 buffer state와 snapshot-at-decision 경계를 도입한다.
 
 ## Related Documents

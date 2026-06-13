@@ -2,14 +2,14 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/agent_tool_remote_mcp_runtime.ml
-  - lib/cascade/
+  - lib/keeper/keeper_tool_registered_runtime.ml
+  - lib/runtime/
   - lib/mcp_server.ml
 ---
 
 # OAS Boundary Health Check - 2026-03-31
 
-Scope: `masc-mcp` to OAS boundary health snapshot on commit `aade21ba7402baede95e565c503d3e38a923558b`
+Scope: `masc` to OAS boundary health snapshot on commit `aade21ba7402baede95e565c503d3e38a923558b`
 
 ## Verdict
 
@@ -51,12 +51,12 @@ Initial boundary health is `healthy with known structural gaps`.
 
 - `_build/default/test/test_oas_worker.exe`
   - Result: pass, 34 tests
-  - Focus: cascade config, SSE bridge, OAS checkpoint continuity, keeper handoff rollover
+  - Focus: runtime config, SSE bridge, OAS checkpoint continuity, keeper handoff rollover
   - [evidence] source: local test binary; checked: 2026-03-31; confidence: High
 
 - `_build/default/test/test_team_session_oas_bridge.exe`
   - Result: pass, 32 tests
-  - Focus: role projection, cascade resolution, supported-tool filtering, `resource_check` presence, telemetry `trace_ref`
+  - Focus: role projection, runtime resolution, supported-tool filtering, `resource_check` presence, telemetry `trace_ref`
   - [evidence] source: local test binary; checked: 2026-03-31; confidence: High
 
 - `_build/default/test/test_tool_local_runtime_verify.exe`

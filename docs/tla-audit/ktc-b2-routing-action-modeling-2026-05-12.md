@@ -47,14 +47,14 @@ guard).  Cross-axis guards keep TLC bounded:
 
 | Action | OCaml transition(s) | Cross-axis guards | New variables touched |
 |---|---|---|---|
-| **RoutingStart** | Prompting_to_routing | `turn_phase = "prompting" /\ decision_stage = "tool_policy_selected" /\ cascade_state = "selecting"` | `turn_phase' = "routing" /\ cascade_state' = "trying"` (or selecting?) |
-| **RoutingRetry** | Routing_to_routing | `turn_phase = "routing" /\ cascade_state = "trying"` | UNCHANGED most; advances internal tier (not modeled) |
-| **RoutingToPrompting** | Routing_to_prompting | `turn_phase = "routing"` (overflow retry?) | `turn_phase' = "prompting" /\ cascade_state' = "idle"` |
-| **RoutingToExecuting** | Routing_to_executing | `turn_phase = "routing" /\ cascade_state = "trying"` | `turn_phase' = "executing"` |
-| **RoutingExhausted** | Routing_to_exhausted, Prompting_to_exhausted | `turn_phase \in {"routing", "prompting"} /\ cascade_state \in {"trying", "selecting"}` | `turn_phase' = "exhausted" /\ cascade_state' = "exhausted"` |
-| **ExecutingToRouting** | Executing_to_routing | `turn_phase = "executing" /\ cascade_state = "trying"` (retry vector) | `turn_phase' = "routing" /\ cascade_state' = "trying"` |
+| **RoutingStart** | Prompting_to_routing | `turn_phase = "prompting" /\ decision_stage = "tool_policy_selected" /\ runtime_state = "selecting"` | `turn_phase' = "routing" /\ runtime_state' = "trying"` (or selecting?) |
+| **RoutingRetry** | Routing_to_routing | `turn_phase = "routing" /\ runtime_state = "trying"` | UNCHANGED most; advances internal tier (not modeled) |
+| **RoutingToPrompting** | Routing_to_prompting | `turn_phase = "routing"` (overflow retry?) | `turn_phase' = "prompting" /\ runtime_state' = "idle"` |
+| **RoutingToExecuting** | Routing_to_executing | `turn_phase = "routing" /\ runtime_state = "trying"` | `turn_phase' = "executing"` |
+| **RoutingExhausted** | Routing_to_exhausted, Prompting_to_exhausted | `turn_phase \in {"routing", "prompting"} /\ runtime_state \in {"trying", "selecting"}` | `turn_phase' = "exhausted" /\ runtime_state' = "exhausted"` |
+| **ExecutingToRouting** | Executing_to_routing | `turn_phase = "executing" /\ runtime_state = "trying"` (retry vector) | `turn_phase' = "routing" /\ runtime_state' = "trying"` |
 
-Note: `Routing_to_routing` (self-loop) is *attempt-level* not phase-level — the cascade attempt FSM (KCAF, #14798) handles per-attempt tier advance.  In KTC's phase axis, `RoutingRetry` is effectively a no-op except for a side-effect counter that KTC doesn't track.  This may not need a spec action.
+Note: `Routing_to_routing` (self-loop) is *attempt-level* not phase-level — the runtime attempt FSM (KCAF, #14798) handles per-attempt tier advance.  In KTC's phase axis, `RoutingRetry` is effectively a no-op except for a side-effect counter that KTC doesn't track.  This may not need a spec action.
 
 ## Cross-axis invariant impact (7 existing invariants)
 
@@ -63,17 +63,17 @@ Note: `Routing_to_routing` (self-loop) is *attempt-level* not phase-level — th
 | `NoLiveTurnClearsState` | Add `~turn_live => turn_phase /= "routing" /\ turn_phase /= "exhausted"` cleanups; FinishTurn already covers via `TurnPhaseSet \ {"idle"}` |
 | `IdleRequiresNotLive` | No change |
 | `GateRejectedRequiresFinalizing` | Need to add: GateRejected only fires in executing today — does it fire in routing too?  Probably not (gate is per-tool-call); confirm with OCaml `keeper_guards.ml`. |
-| `SelectingRequiresToolPolicy` | `cascade_state = "selecting"` only in prompting or routing; routing entry preserves invariant. |
-| `ExecutingRequiresTrying` | Add routing arm: `turn_phase \in {"executing", "routing"} /\ cascade_state \in {"trying", ...}` — but routing's cascade_state semantics may differ; needs OCaml inspection. |
+| `SelectingRequiresToolPolicy` | `runtime_state = "selecting"` only in prompting or routing; routing entry preserves invariant. |
+| `ExecutingRequiresTrying` | Add routing arm: `turn_phase \in {"executing", "routing"} /\ runtime_state \in {"trying", ...}` — but routing's runtime_state semantics may differ; needs OCaml inspection. |
 | `CompactingRequiresTrying` | No routing impact (compacting is post-execution overflow). |
-| `TerminalCascadeRequiresFinalizing` | Add exhausted arm: `cascade_state = "exhausted" => turn_phase \in {"finalizing", "exhausted"}`. |
+| `TerminalRuntimeRequiresFinalizing` | Add exhausted arm: `runtime_state = "exhausted" => turn_phase \in {"finalizing", "exhausted"}`. |
 
 ## TLC state-space estimate
 
 Current (iter 28 + main): 10 distinct states, depth 6.
 
 Estimate post-B-2:
-- 6 new actions × 4-5 distinct (turn_phase, cascade_state) combinations per action = ~25 new transitions.
+- 6 new actions × 4-5 distinct (turn_phase, runtime_state) combinations per action = ~25 new transitions.
 - Reachable state space: ~40-80 distinct states.
 - Depth: ~8-10.
 
@@ -86,7 +86,7 @@ PR is mandatory.
 
 | ID | Direction | Risk |
 |---|---|---|
-| **R-B-2.a** | Spec — add 5-6 actions (RoutingStart / RoutingToPrompting / RoutingToExecuting / RoutingExhausted / ExecutingToRouting; defer RoutingRetry as attempt-level).  Update 2-3 cross-axis invariants (ExecutingRequiresTrying, TerminalCascadeRequiresFinalizing).  TLC re-verify both clean + buggy. | MID — single-spec change but state-space growth + invariant edits |
+| **R-B-2.a** | Spec — add 5-6 actions (RoutingStart / RoutingToPrompting / RoutingToExecuting / RoutingExhausted / ExecutingToRouting; defer RoutingRetry as attempt-level).  Update 2-3 cross-axis invariants (ExecutingRequiresTrying, TerminalRuntimeRequiresFinalizing).  TLC re-verify both clean + buggy. | MID — single-spec change but state-space growth + invariant edits |
 | R-B-2.b | Spec — partial modeling: only add **RoutingExhausted** (the terminal absorber) to capture the `Prompting_to_exhausted` early-out + `Routing_to_exhausted` late-out.  Defers cycle modeling.  Easier TLC verification. | LOW-MID — single action add |
 | R-B-2.c | Document-only: extend KTC header `Adding new constructors` comment (line 85) to note "routing/exhausted are spec-typed but not action-modeled; per-attempt tier advance lives in KCAF.tla".  Acknowledge the architectural choice without modeling.  Defers full coverage. | LOW (doc only) |
 
@@ -95,7 +95,7 @@ R-B-2.b is the cheapest implementable path — closes the "exhausted is reachabl
 ## Why production stays correct (today)
 
 - OCaml GADT compile-time exhaustiveness blocks malformed routing transitions at the type level — drift here requires modifying `keeper_registry.ml:234-244` itself.
-- Cascade attempt-level state lives in KCAF (KeeperCascadeAttemptFSM.tla #14798 entry) which already models the 6-phase attempt FSM with 3 BugActions.  KTC's routing phase is the *projection* of KCAF onto the keeper-facing turn axis.
+- Runtime attempt-level state lives in KCAF (KeeperRuntimeAttemptFSM.tla #14798 entry) which already models the 6-phase attempt FSM with 3 BugActions.  KTC's routing phase is the *projection* of KCAF onto the keeper-facing turn axis.
 - Cross-axis invariants in the current spec all condition on `turn_phase` values they don't reach — they're true vacuously for routing/exhausted.
 
 So this is a **coverage-breadth** gap, not a runtime bug.  The spec is *narrower* than OCaml on the keeper-projection axis.

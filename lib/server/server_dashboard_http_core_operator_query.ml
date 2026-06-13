@@ -7,23 +7,22 @@
 open Masc_domain
 
 (* Sibling dependencies — already extracted in earlier godfile decomp PRs. *)
-let json_string_opt = Server_dashboard_http_core_json.json_string_opt
-let json_bool_opt = Server_dashboard_http_core_json.json_bool_opt
 let operator_generated_at_iso = Server_dashboard_http_core_json.operator_generated_at_iso
 let operator_cache_json = Server_dashboard_http_core_json.operator_cache_json
 
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
 let dashboard_request_timeout_s = Server_dashboard_http_core_cache.dashboard_request_timeout_s
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
-let operator_retention_json ~(config : Coord.config) ~scope ~producer =
+let operator_retention_json ~(config : Workspace.config) ~scope ~producer =
   `Assoc
     [ "scope", `String scope
-    ; "coordination_root", `String config.base_path
+    ; "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "producer", `String producer
     ; "store_kind", `String "process_cache"
     ; "cache_surface", `String "Server_dashboard_http_core.cached_surface"
-    ; "http_swr_ttl_s", `Float 5.0
+    ; "http_swr_ttl_s", `Float standard_cache_ttl_s
     ; "background_refresh_interval_s", `Float operator_refresh_interval_s
     ; "request_timeout_s", `Float dashboard_request_timeout_s
     ; ( "cache_policy"
@@ -41,8 +40,8 @@ let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
     | None -> if default_summary_request then "summary" else "full"
   in
   `Assoc
-    [ "actor", json_string_opt actor
-    ; "view", json_string_opt view
+    [ "actor", Json_util.string_opt_to_json actor
+    ; "view", Json_util.string_opt_to_json view
     ; "effective_actor", `String (Option.value ~default:"dashboard" actor)
     ; "effective_view", `String effective_view
     ; "include_messages", `Bool include_messages
@@ -55,11 +54,11 @@ let operator_snapshot_query_json ~actor ~view ~include_messages ~include_keepers
 let operator_digest_query_json ~actor ~target_type ~target_id ~include_workers
     ~effective_target_type ~default_namespace_request =
   `Assoc
-    [ "actor", json_string_opt actor
-    ; "target_type", json_string_opt target_type
-    ; "target_id", json_string_opt target_id
+    [ "actor", Json_util.string_opt_to_json actor
+    ; "target_type", Json_util.string_opt_to_json target_type
+    ; "target_id", Json_util.string_opt_to_json target_id
     ; "effective_target_type", `String effective_target_type
-    ; "include_workers", json_bool_opt include_workers
+    ; "include_workers", Json_util.bool_opt_to_json include_workers
     ; "default_namespace_request", `Bool default_namespace_request
     ]
 ;;
@@ -141,6 +140,6 @@ let operator_digest_default_query () =
     ~target_type:None
     ~target_id:None
     ~include_workers:None
-    ~effective_target_type:"root"
+    ~effective_target_type:"workspace"
     ~default_namespace_request:true
 ;;

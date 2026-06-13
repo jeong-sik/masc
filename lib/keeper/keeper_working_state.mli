@@ -78,6 +78,20 @@ val active_open_loop_count : t -> int
     tail, never active responsibility. *)
 val compact : ?max_digest:int -> t -> t
 
+(** Implement the TLA [ResumeFromDigest] action: merge a persisted ledger
+    ([persisted]) into the ledger freshly projected from the current [STATE]
+    snapshot ([current]) on resume/compaction.
+
+    A persisted active loop survives even when [current] omits it, so an open
+    loop is not silently lost when an importance heuristic drops the reminder
+    and the model fails to re-emit it. A loop the [current] snapshot has since
+    resolved/archived does not resurrect, and resolved/archived history is
+    carried forward without duplicating ids.
+
+    Callers gate this to resume/compaction turns only; on a normal turn the
+    current snapshot is authoritative so a dropped loop still clears. *)
+val merge_resume : persisted:t -> current:t -> t
+
 val capture_loop : ?max_digest:int -> t -> loop -> (t, string) result
 
 val resolve_loop :

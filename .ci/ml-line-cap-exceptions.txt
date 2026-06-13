@@ -1,6 +1,6 @@
 # Manual line-cap exceptions for generated code.
 lib/masc_pb.ml
-# Cross-cascade fallback logic (provider selection, health-aware routing).
+# Cross-runtime fallback logic (provider selection, health-aware routing).
 # Targeted extraction to a dedicated module is tracked in TODO_TECH_DEBT.md.
 lib/oas_worker_named.ml
 # Legacy process/sidecar godfiles touched by the shell-free sidecar start fix.
@@ -13,5 +13,5 @@ test/test_sidecar_lifecycle_routes.ml
 # lines but below 1000-line godfile threshold. Further decomposition in later steps.
 lib/keeper/keeper_run_tools_hooks.ml
 lib/keeper/keeper_run_tools_setup.ml
-lib/keeper/keeper_turn_driver_try_cascade.ml
+lib/keeper/keeper_turn_driver_try_runtime.ml
 lib/keeper/keeper_unified_turn_execution.ml

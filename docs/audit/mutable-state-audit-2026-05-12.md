@@ -31,7 +31,7 @@ while read f; do c=$(rg -c "\.${f} *<-|\b${f} *<-" lib/ bin/ test/ --type ml | a
 | `Hashtbl.create` 총 | 415 |
 | 모듈 전역 `Hashtbl.create` (`^let`) | 110 |
 
-mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `server`(26), `cascade`(18), `exec`(14), `cdal_runtime`(13), `activity_graph`(11), `pulse`(10).
+mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `server`(26), `runtime`(18), `exec`(14), `cdal_runtime`(13), `activity_graph`(11), `pulse`(10).
 대부분은 메트릭 누산기·캐시처럼 mutation 이 설계 의도인 경우이고, 단일 도메인 모듈 안에서 (또는 Mutex 보호 하에) 쓰인다.
 
 **모범 사례 (그대로 둘 것 — 다른 곳의 템플릿):**
@@ -55,9 +55,8 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 
 | 위치 | 문제 |
 |------|------|
-| `lib/cascade/cascade_client_capacity_history.ml:53-57` | 링버퍼가 `cap_ref`/`buf`/`head`/`count` 4개의 모듈 전역 `ref` 로 분산. invariant 는 주석(43-51)으로만 유지. `with_lock`(Stdlib.Mutex, 순수 non-yielding 구간이라 OK) 보호됨. → 4개가 함께 움직여야 한다는 사실이 구조에 없음. `agent_registry_eio.ml` 패턴으로 단일 record 화 시 invariant 가 구성상 원자적이 됨. |
+| `lib/runtime/runtime_client_capacity_history.ml:53-57` | 링버퍼가 `cap_ref`/`buf`/`head`/`count` 4개의 모듈 전역 `ref` 로 분산. invariant 는 주석(43-51)으로만 유지. `with_lock`(Stdlib.Mutex, 순수 non-yielding 구간이라 OK) 보호됨. → 4개가 함께 움직여야 한다는 사실이 구조에 없음. `agent_registry_eio.ml` 패턴으로 단일 record 화 시 invariant 가 구성상 원자적이 됨. |
 | `lib/board_types/board_types.ml:287-299` | `last_sweep`/`karma_cache`/`sorted_posts_cache`/`dirty_posts`/`dirty_comments`/`last_flush` 6개 mutable 필드가 캐시·dirty-flag 협조 상태. `board_core.ml`/`board_votes.ml` 양쪽에서 변경. lock 규율은 (버킷 A 수정 후) 일관됨. dirty-flag + dirty-id-Hashtbl 쌍이 함께 움직여야 하는 점은 잠재 흠. |
-| `lib/heuristic_metrics.ml:165-167` | `flush_interval_sec_ref`(설정값) + `last_flush_ref`(런타임 상태) + `uninitialized_record_warned_ref`(WARN dedup) 이 한 곳에 섞임. 설정과 상태 미분리. |
 
 ### 버킷 C — Mutable 레코드 bag (다수 mutable 필드, 부분 업데이트로 일관성 깨질 위험) — **백로그 / 일부 RFC 후보**
 
@@ -65,7 +64,7 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 |------|------|
 | `lib/thompson_sampling.ml:18-39` `agent_stats` | 13 mutable 필드 + 모듈 전역 `stats_table`/`pending_votes` Hashtbl(`:60,63`). **`ts_mu` Eio.Mutex 로 보호됨 — 동작 버그 없음.** 흠: 13개 필드 직접 mutation 시 `updated_at` 등 누락하면 일관성 깨짐 (단일 `update` 헬퍼 강제 또는 immutable+functional update 로 전환 가능 — 큰 변경, 별도 RFC). 이번 작업 손대지 않음 (감사 기록만). |
 | `lib/gate/channel_gate_metrics.ml` | mutable 필드 34개 (lib 내 최다). 메트릭 누산기 — mutation 자체는 설계 의도일 가능성 높음. 파일별 triage 필요. |
-| `lib/dashboard/dashboard_governance_judge.ml` (18), `lib/dashboard/dashboard_http_keeper_metrics.ml` (17), `lib/keeper/keeper_run_tools.ml` (14), `lib/cascade/cascade_health_tracker.ml` (13) | 동일 — 대부분 메트릭/판정 누산기. 단 `keeper_run_tools.ml` 의 4개 필드는 버킷 D (write-once) 로 분류됨. |
+| `lib/dashboard/dashboard_governance_judge.ml` (18), `lib/dashboard/dashboard_http_keeper_metrics.ml` (17), `lib/keeper/keeper_run_tools.ml` (14), `lib/runtime/runtime_health_tracker.ml` (13) | 동일 — 대부분 메트릭/판정 누산기. 단 `keeper_run_tools.ml` 의 4개 필드는 버킷 D (write-once) 로 분류됨. |
 
 ### 버킷 D — Write-once / dead `mutable` (생성 후 `<- ` 재대입 0건 → `mutable` 불필요)
 
@@ -102,17 +101,17 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 | 위치 | 사유 |
 |------|------|
 | `lib/core/safe_ops.ml:69-92` | UTF-8 repair 카운터/dedup mutable (`utf8_repaired_reads`/`utf8_repaired_bytes`/`utf8_repair_path_samples` ref + `utf8_repair_log_seen` Hashtbl). telemetry-as-fix 워크어라운드 패턴 — AGENT-LLM-A.md §워크어라운드 거부 기준. 별도 RFC 로 흡수. |
-| `lib/prometheus.ml` 중앙 `metrics : (string, metric) Hashtbl.t` (`:77` 부근) | godfile — `docs/audit/godfile-inventory-2026-05-12.md` + 별도 RFC. metric 소유권 분산이 근본 해결. |
-| `lib/keeper/credential_*`, `lib/repo_manager/`, `lib/operator/operator_control*` | AGENT-LLM-A.md `<agent_delegation>` RFC-gate 대상. 이번 작업 대상 파일 (`board_*`, `cascade_*`, `thompson_sampling`, `heuristic_metrics`, `keeper_run_tools`, `exec_cache`, `fs_compat`, `streamable_http`, `cdal_runtime/*`, `server_dashboard_http_core`) 은 gate 목록 밖. push 전 `bash ~/me/scripts/pr-rfc-check.sh` 재확인. |
+| Retired metrics backend 중앙 `metrics : (string, metric) Hashtbl.t` (`:77` 부근) | godfile — `docs/audit/godfile-inventory-2026-05-12.md` + 별도 RFC. metric 소유권 분산이 근본 해결. |
+| `lib/keeper/credential_*`, `lib/repo_manager/`, `lib/operator/operator_control*` | AGENT-LLM-A.md `<agent_delegation>` RFC-gate 대상. 이번 작업 대상 파일 (`board_*`, `runtime_*`, `thompson_sampling`, `keeper_run_tools`, `exec_cache`, `fs_compat`, `streamable_http`, `cdal_runtime/*`, `server_dashboard_http_core`) 은 gate 목록 밖. push 전 `bash ~/me/scripts/pr-rfc-check.sh` 재확인. |
 
 ## 3. 모듈 전역 `ref` (96개) — 분류
 
 대다수는 다음 중 하나:
 - **init guard** (`let initialized = ref false` — `lib/multimodal/workspace_id.ml:22`, `lib/shared_types/artifact_id.ml:3`, `lib/shared_audit/envelope.ml`, `lib/server_base_path_diagnostics.ml:153` 등): 정당. idempotent 초기화 1회 가드.
-- **lazy-init store handle** (`let store_ref : Dated_jsonl.t option ref = ref None` — `lib/tool_metrics_persist.ml:74`, `lib/eval_calibration.ml:100`, `lib/tool_usage_log.ml:42`, `lib/discovery_history.ml:11`, `lib/agent_stress.ml:253` 등): 서버 init 시 1회 set, 이후 읽기. 대부분 전용 Mutex 또는 `Stdlib.Mutex.protect` 로 보호됨 (예: `lib/tool_shard.ml:1837` `agent_shards_mutex`, `lib/agent_sdk_metrics_bridge.ml:37` `registry_mutex`). 해당 모듈은 "no Eio context" 주석으로 Stdlib.Mutex 선택 근거 명시 — 정당.
-- **dedup / "logged once" 상태** (`lib/config_dir_resolver.ml:537,554` `last_logged_*_signature`, `lib/prometheus.ml:334` `backend_mutex_observers_installed`): 로그 노이즈 억제 — 동작에 영향 없으나 mutable 전역.
+- **lazy-init store handle** (`let store_ref : Dated_jsonl.t option ref = ref None` — `lib/tool_metrics_persist.ml:74`, `lib/eval_calibration.ml:100`, `lib/tool_usage_log.ml:42`, `lib/discovery_history.ml:11`): 서버 init 시 1회 set, 이후 읽기. 대부분 전용 Mutex 또는 `Stdlib.Mutex.protect` 로 보호됨 (예: `lib/tool_shard.ml:1837` `agent_shards_mutex`, `lib/agent_sdk_metrics_bridge.ml:37` `registry_mutex`). 해당 모듈은 "no Eio context" 주석으로 Stdlib.Mutex 선택 근거 명시 — 정당.
+- **dedup / "logged once" 상태** (`lib/config_dir_resolver.ml:537,554` `last_logged_*_signature`, retired metrics backend `backend_mutex_observers_installed`): 로그 노이즈 억제 — 동작에 영향 없으나 mutable 전역.
 
-이미 식별된 위험/흠 (버킷 A/B 와 중복): `lib/heuristic_metrics.ml:165-167` (설정·상태 혼재), `lib/cascade/cascade_client_capacity_history.ml:53-56` (4-ref 링버퍼). `lib/core/safe_ops.ml:69-71` 는 버킷 E.
+이미 식별된 위험/흠 (버킷 A/B 와 중복): `lib/runtime/runtime_client_capacity_history.ml:53-56` (4-ref 링버퍼). `lib/core/safe_ops.ml:69-71` 는 버킷 E.
 
 전체 목록은 위 §0 의 `rg -n '^let \w...= ref '` 명령으로 재생성. 개별 96개를 여기 나열하지 않음 — 추가 위험은 발견되지 않았다.
 
@@ -133,6 +132,6 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 |-------|------|------|
 | 1 | `board_votes.ml get_all_karma` DCL 수정 + 회귀 테스트 (완료) | ~15-25 LOC + 53 LOC 테스트 |
 | 2 | 버킷 D1 의 write-once `mutable` 3개 제거 (`.mli` 동기, 컴파일 검증 완료) | ~6 LOC, 동작 변경 없음 |
-| 3 (선택, sign-off 후) | `adversarial_eval.ml` Stdlib.Mutex 린트 보정 **또는** 버킷 B 중 1건 (예: `cascade_client_capacity_history.ml` 4-ref→1 record) | 1건만 |
+| 3 (선택, sign-off 후) | `adversarial_eval.ml` Stdlib.Mutex 린트 보정 **또는** 버킷 B 중 1건 (예: `runtime_client_capacity_history.ml` 4-ref→1 record) | 1건만 |
 
 백로그로 남기는 것 (이 작업에서 안 함): 버킷 B 의 나머지, 버킷 C 전체 (thompson_sampling 포함), 버킷 E (별도 RFC).

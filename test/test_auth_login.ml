@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -41,7 +41,7 @@ let test_login_with_expiry_uses_caller_env_var () =
   match
     Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
       ~agent_name:"test-agent" ~role:Masc_domain.Worker
-      ~token_env_var:"MASC_MCP_TOKEN"
+      ~token_env_var:"MASC_TOKEN"
       ~token_lifetime:Auth_login.With_expiry ()
   with
   | Error err ->
@@ -53,7 +53,7 @@ let test_login_with_expiry_uses_caller_env_var () =
       check string "agent" "test-agent" report.agent_name;
       check string "role" "worker"
         (Masc_domain.agent_role_to_string report.role);
-      check string "client env passthrough" "MASC_MCP_TOKEN"
+      check string "client env passthrough" "MASC_TOKEN"
         report.mcp_token_env_var;
       check bool "raw token file exists" true
         (Sys.file_exists report.raw_token_file);
@@ -68,7 +68,7 @@ let test_login_with_expiry_uses_caller_env_var () =
              (Masc_domain.masc_error_to_string err));
       let shell = Auth_login.render_shell report in
       check bool "shell exports caller-named env var" true
-        (contains_substring ~needle:"export MASC_MCP_TOKEN="
+        (contains_substring ~needle:"export MASC_TOKEN="
            shell);
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"

@@ -16,19 +16,19 @@ withdrawn_reason: "Sender-side dedup approach abandoned. Receive-side dedup (RFC
 
 - **Status**: Draft (loop-iter-8, 2026-05-07) — *replaces* iter-6/7 sketch
 - **Author**: Vincent + Agent-LLM-A (auto-mode loop)
-- **Resolves Board Issues**: "24+ mention spam to nick0cave" (taskmaster), "Tripartite Coordination Breakdown — same task re-mention" (sangsu/imseonghan)
+- **Resolves Board Issues**: "24+ mention spam to nick0cave" (taskmaster), "Tripartite Workspace Breakdown — same task re-mention" (sangsu/imseonghan)
 - **Sister**: RFC-0035 (memory write — orthogonal complement that lets keepers act on mentions)
 
 ---
 
-## 1. iter-6/7 sketch correction (Narrative cascade)
+## 1. iter-6/7 sketch correction (Narrative runtime)
 
 Earlier iter-6 sketch + iter-7 *correction* both assumed:
 > "Mention dispatch happens at broadcast time; resolve_targets filters recipient set."
 
 **Verified (iter-8 grep, iter-9 cross-check 정정)**: `Mention.resolve_targets` has **0 callers in `lib/` production code** (test/docs는 별도). 정확히는:
-- `lib/coord/mention.ml:110` 정의 + `lib/coord/mention.mli:32` export
-- `docs/spec/03-room-coordination.md:437`에서 *공식 API 명시* — design 의도 존재
+- `lib/workspace/mention.ml:110` 정의 + `lib/workspace/mention.mli:32` export
+- `docs/spec/03-workspace-state collaboration.md:437`에서 *공식 API 명시* — design 의도 존재
 - `test/test_mention.ml`, `test/test_mention_coverage.ml`에 6+ test
 - **lib/ 의 production caller는 0** — 의도된 API이나 미사용 (intended-but-unused infra)
 
@@ -36,8 +36,8 @@ Mention model is actually:
 
 | Step | Where | Action |
 |---|---|---|
-| Sender writes content | `Coord_broadcast.broadcast` | Persist to disk, emit hook |
-| Sender extracts mention | `coord_broadcast.ml:122 Mention.extract content` | parse `@target` token, *informational only* |
+| Sender writes content | `Workspace_broadcast.broadcast` | Persist to disk, emit hook |
+| Sender extracts mention | `workspace_broadcast.ml:122 Mention.extract content` | parse `@target` token, *informational only* |
 | Recipient pulls | `keeper_prompt.ml:16 Mention.any_mentioned ~targets:[my_name] content` | Each keeper checks own name in board on its turn |
 | Recipient handles | `keeper_context_runtime.ml:418`, `keeper_memory_policy.ml:83` | direct_mention boolean → prompt injection / memory tagging |
 
@@ -73,10 +73,10 @@ Mention model is actually:
 
 ### 4.1 발신자 측 dedup (sender-side)
 
-`lib/coord/coord_broadcast.ml:122` `Mention.extract content` 직후, mention이 `Some target`이면 *최근 N분 내 같은 (from_agent, target, topic_hash) 발신 여부* 검사.
+`lib/workspace/workspace_broadcast.ml:122` `Mention.extract content` 직후, mention이 `Some target`이면 *최근 N분 내 같은 (from_agent, target, topic_hash) 발신 여부* 검사.
 
 ```ocaml
-(* lib/coord/coord_broadcast.ml — 변경 후 *)
+(* lib/workspace/workspace_broadcast.ml — 변경 후 *)
 let mention = Mention.extract content in
 let dedup_skip =
   match mention with
@@ -91,14 +91,14 @@ if dedup_skip then begin
   Log.Misc.info
     "[mention-dedup] skipped duplicate mention from %s to %s within window"
     from_agent (Option.value ~default:"<none>" mention);
-  Coord_hooks.coord_broadcast_observed_fn ~msg_type:"dedup_skipped" ~elapsed_s:0.0;
+  Workspace_hooks.workspace_broadcast_observed_fn ~msg_type:"dedup_skipped" ~elapsed_s:0.0;
   Result.Ok "dedup_skipped"
 end else
   (* 기존 흐름 그대로 *)
   ...
 ```
 
-### 4.2 신규 모듈 `lib/coord/mention_dedup.{ml,mli}`
+### 4.2 신규 모듈 `lib/workspace/mention_dedup.{ml,mli}`
 
 ```ocaml
 type t (* abstract; module-level singleton via Atomic / Mutex *)
@@ -116,7 +116,7 @@ val should_skip :
 (** Test-only reset hook. *)
 val reset_for_test : unit -> unit
 
-(** Emit Prometheus metric on every check. *)
+(** Emit legacy metrics backend metric on every check. *)
 (* internal: metric_mention_dedup_decisions_total{outcome} *)
 ```
 
@@ -128,7 +128,7 @@ val reset_for_test : unit -> unit
 
 ### 4.3 `content_topic_hash`
 
-같은 topic의 동일 변종 문구도 dedup하기 위해 hash key는 *문장 단위가 아닌 topic*. 단순화 — 처음에는 *content 그대로 SHA1*로 시작 (variant detection 미적용). 발견 시 `Coord_topic.normalize_for_dedup`(별도 RFC) 추가.
+같은 topic의 동일 변종 문구도 dedup하기 위해 hash key는 *문장 단위가 아닌 topic*. 단순화 — 처음에는 *content 그대로 SHA1*로 시작 (variant detection 미적용). 발견 시 `Workspace_topic.normalize_for_dedup`(별도 RFC) 추가.
 
 ```ocaml
 let content_topic_hash content =
@@ -156,12 +156,12 @@ default `false`. Keeper code는 default. system-level alert은 `~bypass_dedup:tr
 
 8개 production broadcast 사이트 전부 자동으로 dedup 가드 통과:
 - `lib/orchestrator.ml:120` system broadcast
-- `lib/coord/coord_lifecycle.ml:108, 178, 247` (agent join/state/system)
-- `lib/coord/coord_task_create.ml:236` task create alert
-- `lib/coord/coord_eio.ml:588` (eio variant — 별도 함수, dedup 적용 여부 확인 필요)
+- `lib/workspace/workspace_lifecycle.ml:108, 178, 247` (agent join/state/system)
+- `lib/workspace/workspace_task_create.ml:236` task create alert
+- `lib/workspace/workspace_eio.ml:588` (eio variant — 별도 함수, dedup 적용 여부 확인 필요)
 - `lib/grpc/masc_grpc_client.ml:77` grpc broadcast (별도 path)
 
-eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:64 broadcast*만 거치는 caller에만 적용. eio/grpc 계열 caller는 별도 fix.
+eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *workspace_broadcast.ml:64 broadcast*만 거치는 caller에만 적용. eio/grpc 계열 caller는 별도 fix.
 
 ### 5.2 회귀 테스트
 
@@ -184,10 +184,10 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:6
 
 | 단계 | 산출물 | LOC |
 |---|---|---|
-| S1 | `lib/coord/mention_dedup.{ml,mli}` 신설 | ~80 |
-| S2 | `coord_broadcast.ml:122` 직후 dedup 호출 | ~10 |
+| S1 | `lib/workspace/mention_dedup.{ml,mli}` 신설 | ~80 |
+| S2 | `workspace_broadcast.ml:122` 직후 dedup 호출 | ~10 |
 | S3 | `~bypass_dedup` 옵션 추가 + 시그니처 변경 | ~15 |
-| S4 | Prometheus counter `metric_mention_dedup_decisions_total{outcome}` | ~10 |
+| S4 | legacy metrics backend counter `metric_mention_dedup_decisions_total{outcome}` | ~10 |
 | S5 | 회귀 테스트 6건 | ~120 |
 | S6 | env `MASC_MENTION_DEDUP_TTL_S` 통합 | ~5 |
 | S7 | dune build + test green | — |
@@ -208,7 +208,7 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:6
 
 ## 9. Open Questions
 
-1. eio variant `lib/coord/coord_eio.ml:588 broadcast`가 main `coord_broadcast.broadcast`를 호출하는지, 별도 path인지 확인 미수행. iter-9 grep.
+1. eio variant `lib/workspace/workspace_eio.ml:588 broadcast`가 main `workspace_broadcast.broadcast`를 호출하는지, 별도 path인지 확인 미수행. iter-9 grep.
 2. grpc broadcast (`lib/grpc/masc_grpc_client.ml:77`)는 본 dedup 미적용 — *분리 RFC 또는 grpc client 측 dedup* 필요.
 3. dedup state file로 persist 옵션 추후 추가 가능성 (현재 RAM only).
 
@@ -224,7 +224,7 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:6
 - iter-2 §2.P5 (initial framing)
 - iter-5 §2 (P4↔P5 통합)
 - iter-6 §3 (sketch — *틀린 design 방향*)
-- iter-7 §3 (sketch 보강 — *부분 정정만 한 narrative cascade*)
+- iter-7 §3 (sketch 보강 — *부분 정정만 한 narrative runtime*)
 - iter-8 §1 (본 RFC — pull model 발견 후 정정)
-- 코드: `lib/coord/coord_broadcast.ml:64,122`, `lib/coord/mention.ml:121` (`resolve_targets`, 0 callers), `lib/keeper/keeper_prompt.ml:16`, `lib/keeper/keeper_context_runtime.ml:418`, `lib/keeper/keeper_memory_policy.ml:83`
-- Memory: `feedback_keeper_hallucinated_audit_cascade`, `feedback_rfc_section_1_4_caller_context_unverified`
+- 코드: `lib/workspace/workspace_broadcast.ml:64,122`, `lib/workspace/mention.ml:121` (`resolve_targets`, 0 callers), `lib/keeper/keeper_prompt.ml:16`, `lib/keeper/keeper_context_runtime.ml:418`, `lib/keeper/keeper_memory_policy.ml:83`
+- Memory: `feedback_keeper_hallucinated_audit_runtime`, `feedback_rfc_section_1_4_caller_context_unverified`

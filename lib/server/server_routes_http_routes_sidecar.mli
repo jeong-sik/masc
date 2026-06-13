@@ -39,7 +39,7 @@ val dir_exists : string -> bool
 (** [Sys.file_exists]+[is_directory] guarded against EACCES. *)
 
 val project_root_from_executable : unit -> string option
-(** Resolve the masc-mcp project root from [Sys.executable_name];
+(** Resolve the masc project root from [Sys.executable_name];
     [None] for installed binaries that live outside a checkout. *)
 
 val sidecar_root : unit -> string option
@@ -193,12 +193,6 @@ val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
 val read_desired_record : base_path:string -> string -> desired_record option
 val read_attempt_record : base_path:string -> string -> attempt_record option
-
-val isoish_now : unit -> string
-(** ISO-8601-ish timestamp used for [updated_at]. *)
-
-val isoish_at : float -> string
-(** ISO-8601-ish timestamp from a Unix epoch float. *)
 
 val ensure_parent_dir : string -> unit
 (** Create the parent directory of [path] if missing. *)

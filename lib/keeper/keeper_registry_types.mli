@@ -7,6 +7,8 @@
     unchanged. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringMap : Map.S with type key = string
 
@@ -63,6 +65,14 @@ val stale_kill_class_to_string : stale_kill_class -> string
     [Stale_turn_timeout] arm and exposed for dashboards / metrics that
     want to attribute kills by class. *)
 
+(** Issue #18901: cause carried inside [Fiber_unresolved]. Splits the
+    24h fleet ratio of 26 graceful-shutdown artifacts to 9 real
+    missed-resolutions inside the same supervisor crash log. *)
+type fiber_drop_cause =
+  | Graceful_shutdown
+  | Cancelled_by_parent
+  | Unexpected
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
@@ -72,7 +82,7 @@ type failure_reason =
           window count >= [escalation_threshold]. The supervisor's
           [`Crashed] branch checks this variant and skips [to_restart],
           persisting [meta.paused = true] instead so an operator must
-          investigate the underlying cascade/provider/fd issue before
+          investigate the underlying runtime/provider/fd issue before
           resuming the keeper. *)
   | Stale_fleet_batch of { distinct_count : int }
       (** Legacy wire value for stale watchdog fleet-batch state. Current
@@ -88,17 +98,15 @@ type failure_reason =
       ; detail : string
       ; provider_id : string option
       ; http_status : int option
-      ; cascade_name : string option
+      ; runtime_id : string option
+      ; reason : Keeper_meta_contract.runtime_exhaustion_reason option
       }
       (** Latched from the keeper turn terminal reason when the provider,
-          adapter, or cascade fails before useful keeper progress. A later
+          adapter, or runtime fails before useful keeper progress. A later
           idle watchdog should preserve this root cause instead of recasting
           the keeper as generically stale. *)
-  | Tool_required_unsatisfied of { code : string; detail : string }
-      (** Latched when an actionable required-tool turn returned no useful
-          keeper tool progress. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
-  | Fiber_unresolved
+  | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_pause
       (** Keeper paused after context-overflow compact-retry exhaustion.
@@ -119,12 +127,12 @@ val failure_reason_to_string : failure_reason -> string
     recurring P0 pattern (#10490, #10574). *)
 val failure_reason_cohort_key : failure_reason option -> string
 
-val stale_watchdog_failure_reason :
+val stale_kill_failure_reason :
   prior:failure_reason option -> kill_class:stale_kill_class -> failure_reason option
-(** Preserve authoritative terminal failure reasons when the stale watchdog
-    fires after a failed turn, but do not carry stale-watchdog cohort labels
-    across fresh watchdog kills. Storm labels are relatched only by the current
-    per-keeper threshold; fleet-batch detection is observation-only. *)
+(** Preserve authoritative terminal failure reasons when a stale kill follows
+    a failed turn, but do not carry stale-kill cohort labels across fresh
+    stale kills. Storm labels are relatched only by the current per-keeper
+    threshold; fleet-batch detection is observation-only. *)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -172,7 +180,7 @@ val turn_phase_to_witness : turn_phase -> packed_turn_phase
 val packed_turn_phase_label : packed_turn_phase -> string
 
 (** RFC-0072 Phase 4: GADT-encoded turn_phase transitions, aligned with
-    [Cascade_transition].  Enumerates the 23 valid cross-state transitions
+    [Runtime_transition].  Enumerates the 23 valid cross-state transitions
     of the 7-variant [turn_phase] FSM.  The 19 forbidden pairs have no
     constructor and are therefore type-unrepresentable.  Idempotent
     self-loops are not represented (mutator-boundary no-ops). *)
@@ -248,7 +256,7 @@ exception
     }
 
 (** RFC-0072 Phase 4: resolve a (from, target) packed pair to one of three
-    outcomes.  Mirrors [resolve_cascade_transition]. *)
+    outcomes.  Mirrors [resolve_runtime_transition]. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent
@@ -309,7 +317,7 @@ val decision_stage_active_to_packed
   -> packed_decision_stage
 
 (** Diagnostic label using the constructor name (e.g.
-    ["Decision_guard_ok"]).  Used by [validate_cascade_transition] /
+    ["Decision_guard_ok"]).  Used by [validate_runtime_transition] /
     [validate_turn_phase_transition] for [Invalid_argument] messages. *)
 val packed_decision_stage_label : packed_decision_stage -> string
 
@@ -339,123 +347,6 @@ module Decision_transition : sig
   val to_tag : ('from, 'to_) t -> string
 end
 
-type cascade_state =
-  | Cascade_idle [@tla.idle]
-  | Cascade_selecting [@tla.active]
-  | Cascade_trying [@tla.active]
-  | Cascade_done [@tla.terminal]
-  | Cascade_exhausted [@tla.terminal]
-[@@deriving tla]
-
-(** {1 Cascade state GADT infrastructure (Cycle 21 / Tier B5)} *)
-
-type cascade_idle
-type cascade_selecting
-type cascade_trying
-type cascade_done
-type cascade_exhausted
-
-type 'a cascade_state_witness =
-  | Cascade_idle : cascade_idle cascade_state_witness
-  | Cascade_selecting : cascade_selecting cascade_state_witness
-  | Cascade_trying : cascade_trying cascade_state_witness
-  | Cascade_done : cascade_done cascade_state_witness
-  | Cascade_exhausted : cascade_exhausted cascade_state_witness
-
-type packed_cascade_state =
-  | Packed : 'a cascade_state_witness -> packed_cascade_state
-
-val cascade_state_to_witness : cascade_state -> packed_cascade_state
-val witness_to_cascade_state : packed_cascade_state -> cascade_state
-
-(** Diagnostic label using the constructor name (e.g.
-    ["Cascade_exhausted"]).  Used by the [Cascade_transition_violation]
-    [Printexc] printer to render the rejected pair. *)
-val packed_cascade_state_label : packed_cascade_state -> string
-
-(** RFC-0072 Phase 1: GADT-encoded cascade transitions.
-
-    Enumerates the 13 valid cross-state transitions of the 5-variant
-    [cascade_state] FSM.  The 7 forbidden pairs ([Idle -> Trying/Done/
-    Exhausted], [Selecting -> Done/Exhausted], [Done <-> Exhausted]) have
-    no constructor and are therefore type-unrepresentable.  Idempotent
-    self-loops are not represented (they are mutator-boundary no-ops). *)
-module Cascade_transition : sig
-  type ('from, 'to_) t =
-    | Idle_to_selecting : (cascade_idle, cascade_selecting) t
-    | Selecting_to_idle : (cascade_selecting, cascade_idle) t
-    | Selecting_to_trying : (cascade_selecting, cascade_trying) t
-    | Trying_to_idle : (cascade_trying, cascade_idle) t
-    | Trying_to_selecting : (cascade_trying, cascade_selecting) t
-    | Trying_to_done : (cascade_trying, cascade_done) t
-    | Trying_to_exhausted : (cascade_trying, cascade_exhausted) t
-    | Done_to_idle : (cascade_done, cascade_idle) t
-    | Done_to_selecting : (cascade_done, cascade_selecting) t
-    | Done_to_trying : (cascade_done, cascade_trying) t
-    | Exhausted_to_idle : (cascade_exhausted, cascade_idle) t
-    | Exhausted_to_selecting : (cascade_exhausted, cascade_selecting) t
-    | Exhausted_to_trying : (cascade_exhausted, cascade_trying) t
-
-  type packed = Packed_transition : ('a, 'b) t -> packed
-
-  val to_tag : ('a, 'b) t -> string
-end
-
-(** RFC-0072 Phase 1: typed error for cascade transition spec violations.
-    Each forbidden pair has its own constructor; replaces the prior
-    string-formatted [Invalid_argument] payload at the validator. *)
-type cascade_transition_spec_violation =
-  | Idle_to_trying
-  | Idle_to_done
-  | Idle_to_exhausted
-  | Selecting_to_done
-  | Selecting_to_exhausted
-  | Done_to_exhausted
-  | Exhausted_to_done
-
-val cascade_transition_spec_violation_to_tag
-  :  cascade_transition_spec_violation
-  -> string
-
-(** RFC-0072 Phase 5: raised by [validate_cascade_transition] and
-    [set_turn_cascade_state] on a forbidden cascade transition, carrying
-    the typed [cascade_transition_spec_violation] payload (replaces the
-    prior string-formatted [Invalid_argument]).  [where] is a diagnostic
-    label naming the raising function.  A [Printexc] printer is registered
-    so [Printexc.to_string] reproduces the original message text. *)
-exception
-  Cascade_transition_violation of
-    { where : string
-    ; from : packed_cascade_state
-    ; to_ : packed_cascade_state
-    ; violation : cascade_transition_spec_violation
-    }
-
-(** RFC-0072 Phase 1: resolve a (from, target) packed pair to one of
-    three outcomes: a typed transition value, an idempotent no-op, or a
-    typed spec violation.  Phase 2 will route [set_turn_cascade_state]
-    through this resolver. *)
-type cascade_resolve_outcome =
-  | Resolved_transition of Cascade_transition.packed
-  | Resolved_idempotent
-  | Resolved_violation of cascade_transition_spec_violation
-
-val resolve_cascade_transition
-  :  from:packed_cascade_state
-  -> target:packed_cascade_state
-  -> cascade_resolve_outcome
-
-(** Raises [Cascade_transition_violation] with the typed payload.
-    Previously a private helper inside Keeper_registry; exposed via the
-    intra-library split because [validate_cascade_transition] in
-    Keeper_registry calls it after moving the exception here. *)
-val raise_cascade_transition_violation
-  :  where:string
-  -> from:packed_cascade_state
-  -> to_:packed_cascade_state
-  -> violation:cascade_transition_spec_violation
-  -> 'a
-
 type compaction_stage =
   | Compaction_accumulating [@tla.idle]
   | Compaction_compacting [@tla.active]
@@ -483,12 +374,11 @@ val witness_to_compaction_stage : packed_compaction_stage -> compaction_stage
     Used by the [Compaction_transition_violation] [Printexc] printer. *)
 val packed_compaction_stage_label : packed_compaction_stage -> string
 
-(** RFC-0072 Phase 6: typed error for the 3 forbidden compaction-stage
-    transitions (3 idempotent + 3 valid + 3 forbidden = 9 = 3×3). *)
+(** RFC-0072 Phase 6: typed error for forbidden compaction-stage
+    transitions. *)
 type compaction_transition_spec_violation =
   | Accumulating_to_done
   | Done_to_accumulating
-  | Done_to_compacting
 
 val compaction_transition_spec_violation_to_tag
   :  compaction_transition_spec_violation
@@ -509,7 +399,7 @@ exception
     }
 
 (** Raises [Compaction_transition_violation] with the typed payload.
-    Same rationale as the turn_phase / cascade raise helpers above. *)
+    Same rationale as the turn_phase / runtime raise helpers above. *)
 val raise_compaction_transition_violation
   :  where:string
   -> from:packed_compaction_stage
@@ -521,6 +411,8 @@ type turn_measurement = {
   tm_captured_at : float;
   tm_auto_rules : Keeper_state_machine.auto_rule_summary;
 }
+
+type done_resolution = [ `Stopped | `Crashed of string ]
 
 type registry_entry = {
   base_path : string;
@@ -541,10 +433,11 @@ type registry_entry = {
           and the [TurnDequeue] action. *)
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
-  done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
-  done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-      (** Exposed so keeper lifecycle coordinators can resolve stop/crash exactly once.
-          Callers must preserve a single terminal outcome per keeper run. *)
+  done_p : done_resolution Eio.Promise.t;
+  done_r : done_resolution Eio.Promise.u;
+      (** Completion resolver owned by {!resolve_done}. Runtime callers must
+          not resolve this field directly; use {!resolve_done} so
+          double-resolve races return the prior terminal outcome. *)
   restart_count : int;
   last_restart_ts : float;
   dead_since_ts : float option;
@@ -596,17 +489,13 @@ type registry_entry = {
           the most recent outcome in [last_outcome]. *)
   last_skip_observation : (float * string list) option;
       (** Most recent [keeper_cycle_decision] skip outcome captured by
-          the keepalive loop (#10940 follow-up).  The [Prometheus]
-          [proactive_skip_reason_metric] aggregates skip reasons over
-          time, but at stale-watchdog kill the operator wants to see
-          *which* reasons were active *just before* the 300s idle
-          timeout fired.  [Some (ts, reasons)] = wall clock + verdict
+          the keepalive loop (#10940 follow-up).  The [Otel_metric_store]
+          proactive skip counter aggregates skip reasons over time, but
+          operators need recent skip verdict context when diagnosing
+          idle/quiet keepers. [Some (ts, reasons)] = wall clock + verdict
           reason strings ([cooldown_pending], [no_signal],
           [scheduled_autonomous_disabled], etc.) from the last skip;
-          [None] until the first skip is observed.  Read by
-          [Keeper_stale_watchdog] to enrich the kill warn line so an
-          [idle_stale=true] termination is no longer indistinguishable
-          from a *stuck* fiber. *)
+          [None] until the first skip is observed. *)
   compaction_stage : packed_compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
@@ -628,7 +517,6 @@ and turn_observation = {
           refreshed [last_progress_at]. *)
   turn_phase : packed_turn_phase;
   decision_stage : packed_decision_stage;
-  cascade_state : packed_cascade_state;
   measurement : turn_measurement option;
   measurement_bind_count : int;
       (** Number of [Context_measured] snapshots bound to this live turn.
@@ -642,27 +530,31 @@ and completed_turn_observation = {
   ct_started_at : float;
   ct_ended_at : float;
   ct_decision_stage : packed_decision_stage;
-  ct_cascade_state : packed_cascade_state;
   ct_selected_model : string option;
 }
 
+type done_resolve_result =
+  | Done_resolved of { source : string }
+  | Done_already_resolved of {
+      source : string;
+      previous : done_resolution;
+    }
+
 (** Resolve a keeper run completion promise at most once.
-    Returns [false] if another fiber won the resolve race. *)
-val try_resolve_done :
-  registry_entry -> [ `Stopped | `Crashed of string ] -> bool
+
+    [source] identifies the lifecycle branch attempting the resolve. The
+    function never raises on a double-resolve race; instead it returns the
+    already-resolved outcome. *)
+val resolve_done :
+  registry_entry -> source:string -> done_resolution -> done_resolve_result
 
 (** Internal: keeper registry key composition (base_path ^ \\x1f ^ name).
     Exposed via mli so keeper_registry.ml's state functions can use it
     after the intra-library split; not intended for external callers. *)
 val registry_key : base_path:string -> string -> string
 
-(** Pure mapping from cascade_state witness to its parent turn_phase
-    witness. Used by composite observer derivations. *)
-val turn_phase_of_cascade_state :
-  packed_cascade_state -> packed_turn_phase
-
 (** Classify a live turn_observation into a completed_turn_outcome
-    using exhaustive pattern matching on (decision_stage, cascade_state).
+    using exhaustive pattern matching on (decision_stage, turn_phase).
     Pure function, no state access. *)
 val completed_turn_outcome_of_observation :
   turn_observation -> Keeper_transition_audit.completed_turn_outcome

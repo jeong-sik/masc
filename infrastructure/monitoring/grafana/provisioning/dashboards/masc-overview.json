@@ -1,0 +1,1696 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Keeper Heartbeats / min",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper heartbeat success rate.",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_keeper_heartbeat_successes_total[5m])) * 60",
+          "legendFormat": "hb/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Dashboard Snapshot Latency p99",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "99th percentile dashboard snapshot latency.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(masc_dashboard_snapshot_latency_seconds_bucket_total[5m])) by (le)) * 1000",
+          "legendFormat": "p99",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "purple"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Keeper Receipt Failure Rate %",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper execution receipt failure rate.",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_keeper_execution_receipt_failures_total[5m])) / (sum(rate(masc_keeper_execution_receipt_failures_total[5m])) + sum(rate(masc_keeper_heartbeat_successes_total[5m]))) * 100",
+          "legendFormat": "failure %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Keeper Lifecycle Transitions",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper lifecycle transition rate by destination state.",
+      "targets": [
+        {
+          "expr": "sum by (to) (rate(masc_keeper_lifecycle_transitions_total[5m]))",
+          "legendFormat": "{{to}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "done"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "green"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "failed:.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "cancelled:.*"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Chat Transport Failures / min",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "User-visible keeper chat request failures persisted as transport_failure rows. This is the signal for dropped-looking conversations that stay pending for retry.",
+      "targets": [
+        {
+          "expr": "sum by (source) (rate(masc_keeper_chat_transport_failures_total[5m])) * 60",
+          "legendFormat": "{{source}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.1
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "LLM Calls / min",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "GenAI client calls per minute.",
+      "targets": [
+        {
+          "expr": "sum(rate(gen_ai_client_operation_duration_count_total[5m])) * 60",
+          "legendFormat": "calls/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Token Usage / min",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Token usage rate by type (input / output).",
+      "targets": [
+        {
+          "expr": "sum by (token_type) (rate(gen_ai_client_token_usage[5m])) * 60",
+          "legendFormat": "{{token_type}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Goal Attainment %",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Average goal attainment percentage.",
+      "targets": [
+        {
+          "expr": "last_over_time(avg(masc_goal_attainment_pct)[1h])",
+          "legendFormat": "attainment",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Active Keepers",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Number of distinct keepers emitting heartbeats.",
+      "targets": [
+        {
+          "expr": "count(count by (keeper) (masc_keeper_heartbeat_successes_total))",
+          "legendFormat": "keepers",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Keeper Compactions / min",
+      "gridPos": {
+        "x": 8,
+        "y": 48,
+        "w": 16,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper context compaction rate.",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_keeper_compactions_total[5m])) * 60",
+          "legendFormat": "compactions/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Goal Attainment Measured",
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Average measured goal attainment count.",
+      "targets": [
+        {
+          "expr": "last_over_time(avg(masc_goal_attainment_measured)[1h])",
+          "legendFormat": "measured",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Keeper Input Tokens / min",
+      "gridPos": {
+        "x": 8,
+        "y": 64,
+        "w": 16,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper input token consumption rate.",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_keeper_input_tokens_total[5m])) * 60",
+          "legendFormat": "tokens/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Board Signal Wakeups / min",
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 24,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Keeper board signal wakeup rate (capped).",
+      "targets": [
+        {
+          "expr": "sum(rate(masc_keeper_board_signal_wakeup_capped_total[5m])) * 60",
+          "legendFormat": "wakeups/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cpm",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "OCaml Heap Memory",
+      "gridPos": {
+        "x": 0,
+        "y": 80,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "OCaml heap size in megabytes.",
+      "targets": [
+        {
+          "expr": "masc_gc_heap_words * 8 / 1024 / 1024",
+          "legendFormat": "heap MB",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mbytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "GC Major Allocation Rate",
+      "gridPos": {
+        "x": 12,
+        "y": 88,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "OCaml major heap allocation rate.",
+      "targets": [
+        {
+          "expr": "rate(masc_gc_major_words[5m]) * 8 / 1024 / 1024",
+          "legendFormat": "MB/s",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "mbytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "traces",
+      "title": "Recent Traces",
+      "gridPos": {
+        "x": 0,
+        "y": 96,
+        "w": 24,
+        "h": 16
+      },
+      "datasource": {
+        "type": "jaeger",
+        "uid": "PC9A941E8F2E49454"
+      },
+      "description": "Recent distributed traces from the masc service.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "jaeger",
+            "uid": "PC9A941E8F2E49454"
+          },
+          "queryType": "search",
+          "service": "masc",
+          "operation": "",
+          "tags": "",
+          "minDuration": "",
+          "maxDuration": "",
+          "limit": 20
+        }
+      ],
+      "options": {
+        "sort": {
+          "sortBy": "startTime",
+          "sortOrder": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "title": "Keeper Instruction Monitoring",
+      "gridPos": {
+        "x": 0,
+        "y": 112,
+        "w": 24,
+        "h": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Prompt Segment Bytes",
+      "gridPos": {
+        "x": 0,
+        "y": 113,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Byte length of system_prompt and user_message segments per keeper after sanitization.",
+      "targets": [
+        {
+          "expr": "masc_keeper_prompt_segment_bytes{segment=\"system_prompt\"}",
+          "legendFormat": "{{keeper}} / system_prompt",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_keeper_prompt_segment_bytes{segment=\"user_message\"}",
+          "legendFormat": "{{keeper}} / user_message",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "pointSize": 0,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Template Render Outcome",
+      "gridPos": {
+        "x": 12,
+        "y": 113,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Turn-intent template render outcomes: ok, fallback, empty.",
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_keeper_prompt_template_render_outcome_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "graphMode": "area",
+        "colorMode": "value"
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Tool Call Param Completeness",
+      "gridPos": {
+        "x": 18,
+        "y": 113,
+        "w": 6,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Tool calls by parameter completeness status per tool.",
+      "targets": [
+        {
+          "expr": "sum by (tool, status) (rate(masc_keeper_tool_call_param_completeness_total[5m]))",
+          "legendFormat": "{{tool}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right",
+          "showLegend": true
+        },
+        "showValue": "always"
+      }
+    },
+    {
+      "type": "state-timeline",
+      "title": "Turn Instruction Hash",
+      "gridPos": {
+        "x": 0,
+        "y": 121,
+        "w": 24,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "description": "Hash of system+user prompt per keeper for change detection. Value changes indicate prompt reconfiguration.",
+      "targets": [
+        {
+          "expr": "masc_keeper_turn_instruction_hash",
+          "legendFormat": "{{keeper}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Fleet Health \u2014 Freeze Forensics",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 127,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Eio Loop Lag",
+      "gridPos": {
+        "x": 0,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1.0
+              },
+              {
+                "color": "red",
+                "value": 5.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "max_over_time(masc_eio_loop_lag_seconds[1m])",
+          "legendFormat": "lag",
+          "refId": "A"
+        }
+      ],
+      "description": "1s sleep-overshoot of the main Eio domain. Sustained values = the single domain is blocked (June 2026 freeze root-cause class: #20677/#20684). First tick after a block carries the full stall duration."
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Console Sink (writer health)",
+      "gridPos": {
+        "x": 8,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1024.0
+              },
+              {
+                "color": "red",
+                "value": 8192.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_console_sink_queue_depth",
+          "legendFormat": "queue depth",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(masc_console_sink_dropped_total[5m]) * 60",
+          "legendFormat": "drops/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Rising depth = console fd blocked (pty scrollback/copy-mode, #20684). Drops only lose the convenience mirror \u2014 file sink + ring stay lossless."
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Store Size (masc-root)",
+      "gridPos": {
+        "x": 16,
+        "y": 128,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_store_bytes",
+          "legendFormat": "{{store}}",
+          "refId": "A"
+        }
+      ],
+      "description": "On-disk telemetry stores. tool_calls/oas-events growth starved the readers on 2026-06-09; trajectories hit 483MB (#20682)."
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Event Bus Backpressure",
+      "gridPos": {
+        "x": 0,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (bus) (rate(masc_event_bus_subscriber_dropped_total[5m])) * 60",
+          "legendFormat": "{{bus}} drops/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (bus) (masc_event_bus_subscriber_depth)",
+          "legendFormat": "{{bus}} depth",
+          "refId": "B"
+        }
+      ],
+      "description": "Drop_oldest sheds on the oas_runtime bus (#20676); Block accumulates publish wait on masc_domain."
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Snapshot Loop Duty Cycle",
+      "gridPos": {
+        "x": 8,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.3
+              },
+              {
+                "color": "red",
+                "value": 0.7
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(masc_dashboard_snapshot_latency_seconds[5m])",
+          "legendFormat": "duty (s/s)",
+          "refId": "A"
+        }
+      ],
+      "description": "Fraction of wall-clock the 2s dashboard snapshot loop spends computing. ~1.0 = the loop re-parses continuously (pre-#20677 behaviour)."
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Telemetry Read Cost",
+      "gridPos": {
+        "x": 16,
+        "y": 136,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (store) (rate(masc_telemetry_snapshot_scanned_bytes_total[5m]))",
+          "legendFormat": "{{store}} B/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_telemetry_summary_cache_rescans_total[5m])) * 60",
+          "legendFormat": "rescans/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Bytes folded by the incremental readers (#20677). Rescans = boundary invalidation -> full re-parse."
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "FD Open vs Limit",
+      "gridPos": {
+        "x": 0,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_fd_open",
+          "legendFormat": "open",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_fd_limit",
+          "legendFormat": "limit",
+          "refId": "B"
+        }
+      ],
+      "description": "Process fd usage vs RLIMIT_NOFILE soft cap (Fd_accountant.fd_snapshot)."
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Transition Audit Queue",
+      "gridPos": {
+        "x": 8,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_keeper_transition_audit_queue_depth",
+          "legendFormat": "depth",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_fd_pressure_active * 100",
+          "legendFormat": "fd pressure x100",
+          "refId": "B"
+        }
+      ],
+      "description": "FSM forensics async drain queue (#20677). Rising depth = drain fiber starved or store append parked."
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Watchdog Fires (24h)",
+      "gridPos": {
+        "x": 16,
+        "y": 144,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(masc_keeper_attempt_watchdog_fired_total[24h]))",
+          "legendFormat": "fires",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "description": "1800s safety-cap fires: definitively stuck provider attempts."
+    },
+    {
+      "id": 11,
+      "type": "row",
+      "title": "Provider Stalls",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 152,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Time To First Chunk (avg)",
+      "gridPos": {
+        "x": 0,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 10.0
+              },
+              {
+                "color": "red",
+                "value": 55.0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "rate(gen_ai_client_operation_time_to_first_chunk[5m]) / rate(gen_ai_client_operation_time_to_first_chunk_count_total[5m])",
+          "legendFormat": "avg TTFC",
+          "refId": "A"
+        }
+      ],
+      "description": "Average streaming first-chunk latency. The OAS stream-idle gate kills silent streams at 60s."
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "OAS Bridge Timeouts / Cancels",
+      "gridPos": {
+        "x": 8,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(masc_oas_bridge_timeout_total[5m])) * 60",
+          "legendFormat": "timeouts/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_oas_bridge_cancel_total[5m])) * 60",
+          "legendFormat": "cancels/min",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Provider Errors by Reason",
+      "gridPos": {
+        "x": 16,
+        "y": 153,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(masc_llm_provider_errors_by_reason_total[5m])) * 60",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Zero-filled counters: a flat 0 means wired-and-healthy; no series means not deployed."
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "HTTP Pool Occupancy",
+      "gridPos": {
+        "x": 0,
+        "y": 161,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "masc_pool_inflight_total",
+          "legendFormat": "inflight",
+          "refId": "A"
+        },
+        {
+          "expr": "masc_pool_idle_total",
+          "legendFormat": "idle",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(masc_pool_create_total[5m])) * 60",
+          "legendFormat": "creates/min",
+          "refId": "C"
+        }
+      ],
+      "description": "Connection pool from Pool_metrics.current_snapshot (export wiring restored)."
+    },
+    {
+      "id": 16,
+      "type": "row",
+      "title": "Discord Connector",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 169,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Discord Gateway Events / min",
+      "gridPos": {
+        "x": 0,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (event, route) (rate(masc_discord_gateway_events_total[5m])) * 60",
+          "legendFormat": "{{event}} / {{route}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(masc_discord_gateway_ack_timeouts_total[5m])) * 60",
+          "legendFormat": "heartbeat_ack_timeout/min",
+          "refId": "B"
+        }
+      ],
+      "description": "Gateway event flow plus explicit heartbeat ACK timeout source signal."
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Discord Inbound Dispatch / min",
+      "gridPos": {
+        "x": 8,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_inbound_dispatch_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Triggered Discord messages by delivery outcome. dispatch_unavailable means the bound keeper was reached but unavailable; reply status is tracked separately."
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Discord Ambient Capture / min",
+      "gridPos": {
+        "x": 16,
+        "y": 170,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_ambient_record_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Ambient lane write outcomes. This intentionally excludes Discord channel/user/message identifiers."
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Discord Reconnects, Closes, ACK Timeouts",
+      "gridPos": {
+        "x": 0,
+        "y": 178,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(masc_discord_gateway_reconnect_scheduled_total[5m])) * 60",
+          "legendFormat": "reconnects/min",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (code) (rate(masc_discord_gateway_closes_total[5m])) * 60",
+          "legendFormat": "close {{code}}/min",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(masc_discord_gateway_ack_timeouts_total[5m])) * 60",
+          "legendFormat": "heartbeat_ack_timeout/min",
+          "refId": "C"
+        }
+      ],
+      "description": "Connector stability signal: ACK timeout root cause, reconnect scheduling, and gateway close codes."
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Discord Outbound Replies / min",
+      "gridPos": {
+        "x": 12,
+        "y": 178,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P4169E866C3094E38"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(masc_discord_outbound_replies_total[5m])) * 60",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "description": "Discord REST send outcomes. Pair with inbound dispatch_unavailable to distinguish unavailable notices from real keeper replies."
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "masc",
+    "overview"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "MASC Overview",
+  "uid": "masc-overview",
+  "version": 4
+}

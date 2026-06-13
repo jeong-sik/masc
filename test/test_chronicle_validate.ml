@@ -4,8 +4,8 @@
 
 open Alcotest
 
-module CV = Masc_mcp.Chronicle_validate
-module CT = Masc_mcp.Chronicle_types
+module CV = Masc.Chronicle_validate
+module CT = Chronicle_types
 
 (* --- Helpers --- *)
 

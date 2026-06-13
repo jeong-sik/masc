@@ -67,6 +67,18 @@ val health_fields :
     The empty-string [stale_reason] for healthy sources renders
     as [`Null] (Null-vs-missing pattern preserved per cycle 69). *)
 
+val coverage_gap_recovered : latest_ts:float option -> Yojson.Safe.t -> bool
+(** [coverage_gap_recovered ~latest_ts gap] is [true] when the
+    source has a durable row whose timestamp is equal to or newer
+    than the coverage-gap timestamp. Recovered historical gaps stay
+    visible in [coverage_gaps] but no longer force source health to
+    ["coverage_gap"]. *)
+
+val active_coverage_gaps :
+  latest_ts:float option -> Yojson.Safe.t list -> Yojson.Safe.t list
+(** Filter coverage gaps down to the entries still active for the
+    current source timestamp. *)
+
 val coverage_gaps_for_store :
   source_name:string ->
   durable_store:string ->
@@ -90,8 +102,8 @@ val metadata_fields :
     9 identity / count fields ([source] / [producer] /
     [durable_store] / [dashboard_surface] / [freshness_slo_s] /
     [entry_count] / [exists] / [coverage_gaps] /
-    [coverage_gap_count]), then the {!freshness_fields} triplet,
-    then the {!health_fields} pair.
+    [coverage_gap_count] / [active_coverage_gap_count]), then the
+    {!freshness_fields} triplet, then the {!health_fields} pair.
 
     [now] is captured once at the start of the call so the
     freshness and health computations use the same reference
@@ -102,7 +114,7 @@ val keeper_tool_call_io_fields :
   dashboard_surface:string ->
   unit ->
   (string * Yojson.Safe.t) list
-(** Preset wrapper around {!metadata_fields} for the keeper
+(** Convenience wrapper around {!metadata_fields} for the keeper
     tool-call I/O source:
     - [source_name = "tool_call_io"]
     - [source_producer = "keeper_hooks_oas|mcp_server_eio_call_tool"]

@@ -195,15 +195,17 @@ let parse_ddg_html payload =
   |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
 
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
-  let open Yojson.Safe.Util in
   let str_of item key =
     Safe_ops.protect ~default:None (fun () ->
-      Option.bind (member key item |> to_string_option) String_util.trim_nonempty)
+      Option.bind (Json_util.get_string item key) String_util.trim_nonempty)
   in
   Safe_ops.protect ~default:[] (fun () ->
     let root = Yojson.Safe.from_string payload in
     let items =
-      Safe_ops.protect ~default:[] (fun () -> results_path root |> to_list)
+      Safe_ops.protect ~default:[] (fun () ->
+        match results_path root with
+        | `List xs -> xs
+        | _ -> [])
     in
     items
     |> List.filter_map (fun item ->
@@ -215,27 +217,31 @@ let parse_json_search_results ~results_path ~title_field ~snippet_field payload 
 
 let parse_searxng_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_brave_json payload =
   parse_json_search_results
-    ~results_path:(fun j -> Yojson.Safe.Util.(member "web" j |> member "results"))
+    ~results_path:(fun j ->
+      let web = Json_util.assoc_member_opt "web" j |> Option.value ~default:`Null in
+      Json_util.assoc_member_opt "results" web |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"description" payload
 
 let parse_tavily_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
 let parse_exa_json payload =
   parse_json_search_results
-    ~results_path:Yojson.Safe.Util.(member "results")
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"text" payload
 
 let parse_bing_search_json payload =
   parse_json_search_results
-    ~results_path:(fun j -> Yojson.Safe.Util.(member "webPages" j |> member "value"))
+    ~results_path:(fun j ->
+      let web = Json_util.assoc_member_opt "webPages" j |> Option.value ~default:`Null in
+      Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
 let looks_like_rss_payload payload =
@@ -776,6 +782,52 @@ let search_impl ~query ~limit =
   in
   loop [] (provider_order ())
 
+let search_impl_mutex = Mutex.create ()
+let search_impl_ref = ref search_impl
+
+let current_search_impl () =
+  Mutex.protect search_impl_mutex (fun () -> !search_impl_ref)
+
+let with_search_impl_for_test impl f =
+  let previous =
+    Mutex.protect search_impl_mutex (fun () ->
+        let previous = !search_impl_ref in
+        search_impl_ref := impl;
+        previous)
+  in
+  Stdlib.Fun.protect
+    ~finally:(fun () ->
+      Mutex.protect search_impl_mutex (fun () -> search_impl_ref := previous))
+    f
+
+let simulated_search_impl ~outcomes ~query ~limit =
+  let normalize source tuples =
+    tuples |> take_results limit |> normalize_hits ~source
+  in
+  let rec loop errors = function
+    | [] ->
+        Error
+          (if Stdlib.List.length errors = 0 then "all web search providers failed"
+           else String.concat "; " (List.rev errors))
+    | (provider_name, outcome) :: rest -> (
+        match outcome with
+        | `Hits hits when Stdlib.List.length hits > 0 ->
+            Ok
+              {
+                engine = provider_name;
+                search_url = "test://" ^ provider_name;
+                hits = normalize provider_name hits;
+              }
+        | `Hits _ | `Empty ->
+            loop ((provider_name ^ ": no results") :: errors) rest
+        | `Error message ->
+            loop ((provider_name ^ ": " ^ message) :: errors) rest)
+  in
+  loop [] outcomes
+
+let with_simulated_search_for_test ~outcomes f =
+  with_search_impl_for_test (simulated_search_impl ~outcomes) f
+
 (* RFC-0189 PR-1b.9 — typed result. Failure-class mapping at the
    handle boundary (source-typed at each construction site; no
    substring matching):
@@ -844,7 +896,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
           match enforce_rate_limit now with
           | Error message -> transient_err ~tool_name ~start_time message
           | Ok () -> (
-              match search_impl ~query ~limit with
+              match (current_search_impl ()) ~query ~limit with
               | Ok response ->
                   let json =
                     result_json ~query ~search_url:response.search_url
@@ -855,25 +907,12 @@ let handle ~tool_name ~start_time args : Tool_result.result =
               | Error message -> runtime_err ~tool_name ~start_time message))
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
-  let normalize source tuples =
-    tuples |> take_results limit |> normalize_hits ~source
-  in
-  let rec loop errors = function
-    | [] ->
-        runtime_err ~tool_name:"masc_web_search" ~start_time:0.0
-          (if Stdlib.List.length errors = 0 then "all web search providers failed"
-           else String.concat "; " (List.rev errors))
-    | (provider_name, outcome) :: rest -> (
-        match outcome with
-        | `Hits hits when Stdlib.List.length hits > 0 ->
-            text_ok ~tool_name:"masc_web_search" ~start_time:0.0
-              (result_json ~query
-                 ~search_url:("test://" ^ provider_name)
-                 ~engine:provider_name
-                 (normalize provider_name hits))
-        | `Hits _ | `Empty ->
-            loop ((provider_name ^ ": no results") :: errors) rest
-        | `Error message ->
-            loop ((provider_name ^ ": " ^ message) :: errors) rest)
-  in
-  loop [] outcomes
+  match simulated_search_impl ~outcomes ~query ~limit with
+  | Ok response ->
+      text_ok ~tool_name:"masc_web_search" ~start_time:0.0
+        (result_json ~query
+           ~search_url:response.search_url
+           ~engine:response.engine
+           response.hits)
+  | Error message ->
+      runtime_err ~tool_name:"masc_web_search" ~start_time:0.0 message

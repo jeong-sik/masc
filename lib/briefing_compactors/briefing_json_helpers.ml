@@ -7,15 +7,13 @@ let compact_text ?(max_len = 96) raw =
   if normalized = "" then ""
   else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
 
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
-  | _ -> `Null
+let member_assoc = Dashboard_utils.member_assoc
+let string_field = Dashboard_utils.string_field
 
-let string_field ?(default = "") key json =
-  match member_assoc key json with
-  | `String value -> value
-  | _ -> default
+let is_missing_or_unknown value =
+  match String.lowercase_ascii (String.trim value) with
+  | "" | "unknown" -> true
+  | _ -> false
 
 let string_json ?(default = "unknown") ?(max_len = 96) json =
   match json with
@@ -23,6 +21,14 @@ let string_json ?(default = "unknown") ?(max_len = 96) json =
       let compact = compact_text ~max_len value in
       if compact = "" then `String default else `String compact
   | _ -> `String default
+
+let string_json_opt ?(max_len = 96) json =
+  match json with
+  | `String value ->
+      compact_text ~max_len value
+      |> String_util.trim_to_option
+      |> Json_util.string_opt_to_json
+  | _ -> `Null
 
 let string_list_json json =
   match json with
@@ -56,23 +62,4 @@ let float_json ?(default = 0.0) json =
       | None -> `Float default)
   | _ -> `Float default
 
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int value -> value
-  | `Intlit raw -> (
-      Option.value ~default:default (int_of_string_opt raw))
-  | `Float value -> int_of_float value
-  | _ -> default
-
-let rec take n = function
-  | [] -> []
-  | _ when n <= 0 -> []
-  | x :: xs -> x :: take (n - 1) xs
-
-let option_string_json = function
-  | Some value ->
-      let trimmed = String.trim value in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
-
-
+let take = List.take

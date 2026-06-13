@@ -25,13 +25,13 @@ include Dashboard_http_keeper_types
 
 let execution_receipt_dir config keeper_name =
   Filename.concat
-    (Filename.concat (Filename.concat (Coord.masc_root_dir config) "keepers")
+    (Filename.concat (Workspace.keepers_runtime_dir config)
        keeper_name)
     "execution-receipts"
 
 let execution_receipt_store_pattern config =
   Filename.concat
-    (Filename.concat (Coord.masc_root_dir config) "keepers")
+    (Workspace.keepers_runtime_dir config)
     "*/execution-receipts"
 
 let count_execution_receipt_entries config keeper_names =
@@ -56,7 +56,7 @@ let count_execution_receipt_entries config keeper_names =
 
 let execution_receipt_coverage_gaps config =
   Telemetry_coverage_gap.read_recent
-    ~masc_root:(Coord.masc_root_dir config)
+    ~masc_root:(Workspace.masc_root_dir config)
     ~n:50
   |> List.filter (fun gap ->
        String.equal execution_trust_source

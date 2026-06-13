@@ -1,81 +1,6 @@
 (** Keeper_alerting path safety and tool output helpers. *)
 
-(** Phase 1 typed path-rejection variant.
-    Replaces the prior string-only error path so that telemetry
-    (Prometheus labels) and user-facing messages are derived from
-    a single SSOT constructor instead of scattered [Printf.sprintf]
-    sites. See CLAUDE.md §workaround-rejection-bar #2. *)
-type keeper_path_rejection =
-  | Path_required
-  | Absolute_path_rejected of { raw : string }
-  | Outside_project_root of { raw : string }
-  | Allowed_paths_normalized_empty of { count : int }
-  | Outside_sandbox of { raw : string }
-  | Not_found_relative of { raw : string }
-  | Ambiguous_relative_read_path of { raw : string; candidate_count : int }
-
-(** LLM-facing opaque message. *)
-let rejection_to_user_message = function
-  | Path_required -> "path_required"
-  | Absolute_path_rejected { raw } ->
-    Printf.sprintf
-      "path_outside_project_root: %s (absolute paths are not allowed; use \
-       sandbox-relative paths like 'repos/X/lib/foo.ml')"
-      raw
-  | Outside_project_root { raw } ->
-    Printf.sprintf "path_outside_project_root: %s" raw
-  | Allowed_paths_normalized_empty { count } ->
-    Printf.sprintf
-      "allowed_paths_normalized_empty: %d entries provided, none resolved to a \
-       valid path"
-      count
-  | Outside_sandbox { raw } ->
-    Printf.sprintf "path_outside_sandbox: %s" raw
-  | Not_found_relative { raw } ->
-    Printf.sprintf
-      "path_not_found_under_allowed_roots: %s (this path is outside your \
-       allowed playground; check your_playground for available files)"
-      raw
-  | Ambiguous_relative_read_path { raw; candidate_count } ->
-    Printf.sprintf
-      "ambiguous_relative_read_path: %s (%d candidate matches; disambiguate the \
-       relative segment)"
-      raw
-      candidate_count
-;;
-
-let rejection_message_prefix = function
-  | Path_required -> "path_required"
-  | Absolute_path_rejected _ -> "path_outside_project_root:"
-  | Outside_project_root _ -> "path_outside_project_root:"
-  | Allowed_paths_normalized_empty _ -> "allowed_paths_normalized_empty:"
-  | Outside_sandbox _ -> "path_outside_sandbox:"
-  | Not_found_relative _ -> "path_not_found_under_allowed_roots:"
-  | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path:"
-;;
-
-let starts_with_ci ~prefix s =
-  let pl = String.length prefix in
-  String.length s >= pl
-  && String.lowercase_ascii (String.sub s 0 pl) = prefix
-;;
-
-let parse_rejection_prefix msg =
-  let trimmed = String.trim msg in
-  if String.lowercase_ascii trimmed = "path_required"
-  then Some Path_required
-  else if starts_with_ci ~prefix:"path_outside_project_root:" trimmed
-  then Some (Outside_project_root { raw = "" })
-  else if starts_with_ci ~prefix:"allowed_paths_normalized_empty:" trimmed
-  then Some (Allowed_paths_normalized_empty { count = 0 })
-  else if starts_with_ci ~prefix:"path_outside_sandbox:" trimmed
-  then Some (Outside_sandbox { raw = "" })
-  else if starts_with_ci ~prefix:"path_not_found_under_allowed_roots:" trimmed
-  then Some (Not_found_relative { raw = "" })
-  else if starts_with_ci ~prefix:"ambiguous_relative_read_path:" trimmed
-  then Some (Ambiguous_relative_read_path { raw = ""; candidate_count = 0 })
-  else None
-;;
+include Keeper_path_rejection
 
 (** Operator-facing telemetry — single call site for all path-rejection
     counters.  The [kind] label is derived from the constructor name,
@@ -90,14 +15,15 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     | Outside_sandbox _ -> "out_of_roots"
     | Not_found_relative _ -> "not_found_relative"
     | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
+    | Task_state_file_path_blocked _ -> "task_state_file_path_blocked"
   in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PathRejection)
     ~labels:[ "kind", kind ]
     ()
 ;;
 
-let project_root_of_config (config : Coord.config) : string =
+let project_root_of_config (config : Workspace.config) : string =
   let base = config.base_path in
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base
 ;;
@@ -262,14 +188,14 @@ let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list
     allowed_norms
 ;;
 
-let absolute_allowed_paths ~(config : Coord.config) ~(allowed_paths : string list)
+let absolute_allowed_paths ~(config : Workspace.config) ~(allowed_paths : string list)
   : string list
   =
   let root = project_root_of_config config in
   allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
 ;;
 
-let absolute_allowed_paths_result ~(config : Coord.config) ~(allowed_paths : string list)
+let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths : string list)
   : (string list, string) result
   =
   let normalized = absolute_allowed_paths ~config ~allowed_paths in
@@ -321,8 +247,24 @@ let raw_looks_like_playground_subdir (raw : string) : bool =
   || raw = "mind"
 ;;
 
+(** Detect paths that reference .masc/ internal state files.
+    These are workspace-level directories that should not be accessed
+    directly from a keeper's cwd (which is inside repos/<name>/).
+    Keepers should use keeper_tasks_list / keeper_context_status instead. *)
+let is_masc_internal_state_path (raw : string) : bool =
+  (* Match ".masc/", "./.masc/", ".masc" at end, "*/backlog.json" *)
+  (String.starts_with ~prefix:".masc/" raw)
+  || (String.starts_with ~prefix:"./.masc/" raw)
+  || (String.equal raw ".masc")
+  || (String.equal raw "./.masc")
+  || (let len = String.length raw in
+      len >= 12
+      && String.sub raw (len - 12) 12 = "backlog.json"
+      && (len = 12 || raw.[len - 13] = '/'))
+;;
+
 let resolve_keeper_target_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(allowed_paths : string list)
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
@@ -330,6 +272,11 @@ let resolve_keeper_target_path
   let raw = String.trim raw_path in
   if raw = ""
   then Error Path_required
+  else if is_masc_internal_state_path raw
+  then (
+    let rej = Task_state_file_path_blocked { raw } in
+    rejection_to_telemetry rej;
+    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
@@ -375,23 +322,23 @@ let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
 
-let sandbox_path_of_meta ~(meta : Keeper_types.keeper_meta) =
+let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
 ;;
 
-let sandbox_bundle_paths_of_meta ~(meta : Keeper_types.keeper_meta) =
+let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
   [ root ^ "/"; root ^ "/mind/"; root ^ "/repos/" ]
 ;;
 
-let ensure_playground_bundle ~(config : Coord.config) ~(name : string) : string list =
+let ensure_playground_bundle ~(config : Workspace.config) ~(name : string) : string list =
   let root = project_root_of_config config in
   playground_bundle_paths name
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 ;;
 
-let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta)
+let ensure_sandbox_bundle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
   : string list
   =
   let root = project_root_of_config config in
@@ -401,9 +348,9 @@ let ensure_sandbox_bundle ~(config : Coord.config) ~(meta : Keeper_types.keeper_
 ;;
 
 let ensure_sandbox_bundle_for_profile
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(name : string)
-      ~(sandbox_profile : Keeper_types.sandbox_profile)
+      ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
   : string list
   =
   let root = project_root_of_config config in
@@ -419,7 +366,7 @@ let ensure_sandbox_bundle_for_profile
     Returns the single sandbox root plus any explicit [allowed_paths]
     entries. Every additional path must be listed explicitly in
     [allowed_paths]. *)
-let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   sandbox_paths @ meta.allowed_paths
 ;;
@@ -428,7 +375,7 @@ let effective_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
     Returns the single sandbox root plus any explicit [allowed_paths]
     entries. Every additional path must be listed explicitly in
     [allowed_paths]. *)
-let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string list =
+let effective_write_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
   sandbox_paths @ meta.allowed_paths
 ;;
@@ -437,7 +384,7 @@ let effective_write_allowed_paths ~(meta : Keeper_types.keeper_meta) : string li
     allowlist. The allowlist is usually the keeper sandbox root
     plus any explicit custom paths. *)
 let resolve_keeper_read_path
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(allowed_paths : string list)
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
@@ -452,6 +399,14 @@ let resolve_keeper_read_path
        Reject at the gate; the keeper should use sandbox-relative
        paths such as 'repos/X/lib/foo.ml'. *)
     let rej = Absolute_path_rejected { raw } in
+    rejection_to_telemetry rej;
+    Error rej)
+  else if is_masc_internal_state_path raw
+  then (
+    (* Block direct access to .masc/ internal state files.
+       Keepers should use keeper_tasks_list / keeper_context_status
+       instead of probing .masc/backlog.json, .masc/tasks/, etc. *)
+    let rej = Task_state_file_path_blocked { raw } in
     rejection_to_telemetry rej;
     Error rej)
   else (
@@ -513,7 +468,7 @@ let resolve_keeper_read_path
           | Ok (Some resolved) -> Ok resolved
           | Ok None ->
             (* #10349: keep the rejection signal in the
-                Prometheus counter; do NOT echo the resolved
+                Otel_metric_store counter; do NOT echo the resolved
                 roots back to the LLM.  When keeper identity
                 drifts (turn 433 evidence), the roots can
                 belong to a sibling sandbox, leaking its

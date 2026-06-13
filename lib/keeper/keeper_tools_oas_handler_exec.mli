@@ -9,14 +9,18 @@
     [make_keeper_tool_handler] closure are passed explicitly. *)
 val execute_with_observers
   :  name:string
-  -> config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?turn_sandbox_factory_git:Keeper_sandbox_factory.t
   -> exec_cache:Masc_exec.Exec_cache.t option
   -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> ?on_tool_called:(string -> unit)
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?mcp_session_id:string
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> key:string
   -> input:Yojson.Safe.t

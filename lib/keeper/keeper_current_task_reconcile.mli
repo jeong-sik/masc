@@ -8,25 +8,25 @@
     [current_task_id], otherwise it chooses a stable task by status, priority,
     creation time, and task id. *)
 val owned_active_task_id_for_meta :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_id.Task_id.t option
 
-(** Field-level merge for [Keeper_types.write_meta_with_merge]. *)
+(** Field-level merge for [Keeper_meta_store.write_meta_with_merge]. *)
 val merge_current_task_id :
-  latest:Keeper_types.keeper_meta ->
-  caller:Keeper_types.keeper_meta ->
-  Keeper_types.keeper_meta
+  latest:Keeper_meta_contract.keeper_meta ->
+  caller:Keeper_meta_contract.keeper_meta ->
+  Keeper_meta_contract.keeper_meta
 
 (** Persist [meta.current_task_id] after comparing it with backlog ownership. *)
 val sync_current_task_id_from_backlog :
-  config:Coord.config ->
-  Keeper_types.keeper_meta ->
-  Keeper_types.keeper_meta
+  config:Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  Keeper_meta_contract.keeper_meta
 
 (** Best-effort reconciliation for callers that only know an agent name.
     No-ops for non-keeper agents. *)
 val sync_current_task_id_for_agent_name :
-  config:Coord.config ->
+  config:Workspace.config ->
   agent_name:string ->
   unit

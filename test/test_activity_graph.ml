@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -24,7 +24,7 @@ let with_config f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Lib.Coord.default_config dir in
+      let config = Lib.Workspace.default_config dir in
       f config)
 
 let test_emit_and_list_events () =
@@ -63,7 +63,7 @@ let test_events_json_derives_ide_context () =
            ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
            ~tags:[
-             "file:lib/keeper/agent_tool_ide_runtime.ml:27";
+             "file:lib/keeper/keeper_tool_ide_runtime.ml:27";
              "task:task-42";
              "board:post-1";
              "comment:comment-7";
@@ -87,7 +87,7 @@ let test_events_json_derives_ide_context () =
           fail (Printf.sprintf "expected one event, got %d" (List.length events))
       in
       let context = event |> member "context" in
-      check string "context file path" "lib/keeper/agent_tool_ide_runtime.ml"
+      check string "context file path" "lib/keeper/keeper_tool_ide_runtime.ml"
         (context |> member "file_path" |> to_string);
       check int "context line" 27 (context |> member "line" |> to_int);
       check string "context goal" "goal-ide"
@@ -247,7 +247,7 @@ let test_events_json_exposes_provenance_and_non_stale_latest_seq () =
       in
       let seq_counter =
         Filename.concat
-          (Filename.concat (Coord_utils.masc_dir config) "activity-events")
+          (Filename.concat (Workspace_utils.masc_dir config) "activity-events")
           "_seq"
       in
       Fs_compat.save_file seq_counter (string_of_int first.seq);
@@ -310,14 +310,14 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
 let test_read_self_heals_historic_invalid_utf8_event_file () =
   with_config (fun config ->
       Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
-      let root = Filename.concat (Coord_utils.masc_dir config) "activity-events" in
+      let root = Filename.concat (Workspace_utils.masc_dir config) "activity-events" in
       let month_dir = Filename.concat root "2000-01" in
       Unix.mkdir root 0o755;
       Unix.mkdir month_dir 0o755;
       let event_path = Filename.concat month_dir "01.jsonl" in
       let raw_line =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
-         \"room_id\":\"default\",\"kind\":\"message.broadcast\",\
+         \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
          \"payload\":{\"content\":\"bad\xffpayload\"},\"tags\":[]}\n"
       in
       Fs_compat.save_file event_path raw_line;
@@ -556,9 +556,9 @@ let test_agent_spans_json_honors_since_ms () =
 
 let test_parse_since_ms_supports_minutes () =
   check (option int) "5m parses" (Some (5 * 60 * 1000))
-    (Lib.Server_activity_http.parse_since_ms "5m");
+    (Server_activity_http.parse_since_ms "5m");
   check (option int) "1h still parses" (Some (3600 * 1000))
-    (Lib.Server_activity_http.parse_since_ms "1h")
+    (Server_activity_http.parse_since_ms "1h")
 
 let test_span_status_of_string_opt_returns_none_for_unknown () =
   (* #8605 family: strict variant exposes unknown wires explicitly so

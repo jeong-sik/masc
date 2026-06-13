@@ -16,8 +16,7 @@ withdrawn_reason: "Self-declared deferred in original draft (PR-0.2.E). Parent p
   `knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-PLAN.md` PR-0.2
 - Related code:
   `lib/core/masc_runtime_events.ml`,
-  `lib/core/masc_runtime_events.mli`,
-  `scripts/perf-baseline.sh`
+  `lib/core/masc_runtime_events.mli`
 - Related OCaml docs:
   `https://ocaml.org/manual/5.4/api/Runtime_events.html`,
   `https://ocaml.org/p/eio/latest`
@@ -37,7 +36,7 @@ gauges. The PR-0.2 baseline therefore cannot answer "is the process
 starved on syscalls?" — only "is wall time worse?".
 
 This RFC scopes a sampler module that would expose
-`masc_io_wait_ratio` as a Prometheus gauge derived from OCaml 5
+`masc_io_wait_ratio` as a legacy metrics backend gauge derived from OCaml 5
 `Runtime_events` `Io` entries.
 
 ## Why this is a separate, deferred sub-PR
@@ -48,7 +47,7 @@ The parent IMPLEMENTATION-PLAN.md PR-0.2 entry already lists
 Two questions must be answered before code lands:
 
 1. **Eio scheduler interaction**: `Runtime_events.read_poll` reads
-   the per-domain ring buffer. The masc-mcp server runs under a
+   the per-domain ring buffer. The masc server runs under a
    single `Eio_main.run` with cooperatively scheduled fibers; a
    sampler fiber that polls every 30s must not block long enough
    to starve other fibers, and the read path must be safe to call
@@ -90,15 +89,15 @@ session does not re-derive the trade-off.
    `Io` span coverage > 95 % under simulated keeper load
    (`benchmarks/quick-bench.sh` lanes).
 3. **Cancellation**: confirm sampler fiber respects switch
-   cancellation in the standard masc-mcp shutdown path.
+   cancellation in the standard masc shutdown path.
 
 ## Non-goals
 
-- No new Prometheus dependency.
+- No new legacy metrics backend dependency.
 - No change to existing `Runtime_events` registrations
   (`lib/core/masc_runtime_events.ml`).
-- No change to `scripts/perf-baseline.sh` until path A or B is
-  approved as a follow-up.
+- No runtime baseline harness changes until path A or B is approved as a
+  follow-up.
 
 ## Open questions
 

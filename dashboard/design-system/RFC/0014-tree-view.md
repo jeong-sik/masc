@@ -8,7 +8,7 @@
   - RFC 0003 (Roving Tabindex — `vertical` orientation, typeahead)
 - **Consumes**: `--sidebar-*`, `--tree-*` tokens (IDE Chrome, #11948).
 - **Blocks**: file explorer (Stage 5 IdePlane), GoalTree visualization,
-  Cascade Inspector hierarchy.
+  Runtime Inspector hierarchy.
 
 ---
 
@@ -18,7 +18,7 @@ The dashboard has three places where a hierarchy is rendered today:
 
 1. **Goal verifier rail** — flat list, but goals have parent/child
    structure that's collapsed into indentation only.
-2. **Cascade Inspector** — expands a single layer at a time, no
+2. **Runtime Inspector** — expands a single layer at a time, no
    keyboard navigation, no SR announcements.
 3. **Composer mention popover** — flat. Would benefit from grouping
    by team/role.
@@ -40,7 +40,7 @@ and async children are first-class concerns; rendering is consumer's.
   array (or async loader) — primitive does not call APIs.
 - Drag-to-reorder. The MASC tree surfaces are read-mostly; reorder
   is a follow-up RFC if a write-tree surface emerges.
-- Multi-tree coordination (drag between trees). Out of scope.
+- Multi-tree workspace collaboration (drag between trees). Out of scope.
 
 ## 3. Public API
 
@@ -262,7 +262,7 @@ Consumer migrations (separate PRs):
 1. **File explorer** (Stage 5 IdePlane) — first consumer when editor
    lands.
 2. **Goal verifier rail** — flat → tree with parent/child surfaced.
-3. **Cascade Inspector** — replaces single-layer expand with full
+3. **Runtime Inspector** — replaces single-layer expand with full
    tree.
 4. **Composer mention popover** — group-by-team/role.
 

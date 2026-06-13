@@ -30,7 +30,7 @@ The budget constants live in `Keeper_social_model_types`:
 - `default_option_field_max_chars   = 200`
 
 Both are labeled-optional arguments on `cap_social_state`, so a
-cascade-level policy module can override them per speech model
+runtime-level policy module can override them per speech model
 without touching any emission call site.
 
 ## Why the bound exists

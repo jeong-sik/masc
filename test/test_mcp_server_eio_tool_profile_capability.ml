@@ -1,9 +1,21 @@
 open Alcotest
 
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop index =
+    if nlen = 0 then true
+    else if index + nlen > hlen then false
+    else if String.sub haystack index nlen = needle then true
+    else loop (index + 1)
+  in
+  loop 0
+;;
+
 let annotation_fields tool_name =
   match
-    Masc_mcp.Mcp_server_eio_tool_profile.tool_annotations_for_profile
-      Masc_mcp.Mcp_server_eio_tool_profile.Full
+    Masc.Mcp_server_eio_tool_profile.tool_annotations_for_profile
+      Masc.Mcp_server_eio_tool_profile.Full
       tool_name
   with
   | Some (`Assoc fields) -> fields
@@ -24,8 +36,8 @@ let bool_annotation name tool_name =
 ;;
 
 let tool_json name =
-  Masc_mcp.Mcp_server_eio_tool_profile.tool_json_for_profile
-    Masc_mcp.Mcp_server_eio_tool_profile.Full
+  Masc.Mcp_server_eio_tool_profile.tool_json_for_profile
+    Masc.Mcp_server_eio_tool_profile.Full
     { Masc_domain.name
     ; description = "test schema"
     ; input_schema = `Assoc [ "type", `String "object" ]
@@ -76,27 +88,32 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     bool
     "ReadFile readOnlyHint from descriptor"
     true
-    (bool_annotation "readOnlyHint" "ReadFile");
+    (bool_annotation "readOnlyHint" "Read");
   check
     bool
     "ReadFile openWorldHint closed"
     false
-    (bool_annotation "openWorldHint" "ReadFile");
+    (bool_annotation "openWorldHint" "Read");
   check
     bool
     "SearchFiles readOnlyHint from descriptor"
     true
-    (bool_annotation "readOnlyHint" "SearchFiles");
+    (bool_annotation "readOnlyHint" "Grep");
+  check
+    bool
+    "Search secondary alias readOnlyHint from descriptor"
+    true
+    (bool_annotation "readOnlyHint" "Search");
   check
     bool
     "WriteFile readOnlyHint false from descriptor"
     false
-    (bool_annotation "readOnlyHint" "WriteFile");
+    (bool_annotation "readOnlyHint" "Write");
   check
     bool
     "WriteFile destructiveHint from canonical internal capability"
     true
-    (bool_annotation "destructiveHint" "WriteFile");
+    (bool_annotation "destructiveHint" "Write");
   check
     bool
     "Execute destructiveHint from canonical internal capability"
@@ -105,7 +122,7 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
 ;;
 
 let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
-  let read_file = tool_json "ReadFile" in
+  let read_file = tool_json "Read" in
   check
     string
     "ReadFile descriptor id"
@@ -121,7 +138,7 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "ReadFile effect domain"
     "read_only"
     (json_string_field "effectDomain" read_file);
-  let write_file = tool_json "WriteFile" in
+  let write_file = tool_json "Write" in
   check
     string
     "WriteFile effect domain"
@@ -133,48 +150,80 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "filesystem"
     (json_string_field "descriptorExecutor" write_file)
   ;
-  let search_files = tool_json "SearchFiles" in
+  let search_files = tool_json "Grep" in
   check
     string
     "SearchFiles canonical descriptor name"
     "tool_search_files"
-    (json_string_field "descriptorCanonicalName" search_files)
+    (json_string_field "descriptorCanonicalName" search_files);
+  let search_alias = tool_json "Search" in
+  check
+    string
+    "Search alias canonical descriptor name"
+    "tool_search_files"
+    (json_string_field "descriptorCanonicalName" search_alias)
 ;;
 
 let test_descriptor_resolution_capabilities_for_public_aliases () =
   let capability_has =
-    Masc_mcp.Agent_tool_descriptor_resolution.capability_has
+    Masc.Keeper_tool_descriptor_resolution.capability_has
   in
   check
     bool
     "ReadFile read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "ReadFile");
+    (capability_has Tool_capability.Read_only "Read");
   check
     bool
     "SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "SearchFiles");
+    (capability_has Tool_capability.Read_only "Grep");
+  check
+    bool
+    "Search secondary alias read-only via descriptor resolution"
+    true
+    (capability_has Tool_capability.Read_only "Search");
   check
     bool
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Read_only "mcp__masc__SearchFiles");
+    (capability_has Tool_capability.Read_only "mcp__masc__Grep");
   check
     bool
     "WriteFile destructive via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Destructive "WriteFile");
+    (capability_has Tool_capability.Destructive "Write");
   check
     bool
     "Execute destructive via descriptor resolution"
     true
-    (capability_has Masc_mcp.Tool_capability.Destructive "Execute");
+    (capability_has Tool_capability.Destructive "Execute");
   check
     bool
     "ReadFile not destructive via descriptor resolution"
     false
-    (capability_has Masc_mcp.Tool_capability.Destructive "ReadFile")
+    (capability_has Tool_capability.Destructive "Read")
+;;
+
+let test_default_instructions_pin_start_transition_workflow () =
+  let instructions = Masc.Mcp_server_eio_tool_profile.default_instructions () in
+  check
+    bool
+    "write summary names start"
+    true
+    (contains_substring instructions "claim/start/done");
+  check
+    bool
+    "workflow includes start transition"
+    true
+    (contains_substring instructions "masc_transition(start)");
+  check
+    bool
+    "workflow does not skip start"
+    false
+    (contains_substring
+       instructions
+       "masc_transition(claim) -> work in a repo-local worktree")
 ;;
 
 let () =
@@ -201,6 +250,10 @@ let () =
             "descriptor-resolution-capabilities-for-public-aliases"
             `Quick
             test_descriptor_resolution_capabilities_for_public_aliases
+        ; test_case
+            "default-instructions-pin-start-transition-workflow"
+            `Quick
+            test_default_instructions_pin_start_transition_workflow
         ] )
     ]
 ;;

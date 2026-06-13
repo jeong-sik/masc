@@ -9,6 +9,9 @@ const HEARTBEAT_ALIVE_THRESHOLD_S = 120
 export type KeeperActivitySource =
   | 'autonomous_action'
   | 'heartbeat'
+  | 'keeper_meta'
+  | 'tool_call'
+  | 'approval_pending'
   | 'last_activity'
   | 'last_turn'
   | 'agent_seen'
@@ -48,6 +51,8 @@ type KeeperModelDisplaySource = {
 type KeeperActivityDisplaySource = {
   last_autonomous_action_at?: string | null
   last_heartbeat?: string | null
+  last_activity_at?: string | null
+  last_activity_source?: Keeper['last_activity_source'] | null
   last_activity_ago_s?: number | null
   last_turn_ago_s?: number | null
   created_at?: string | null
@@ -102,11 +107,44 @@ function ageCandidate(
   }
 }
 
+function activitySourceLabel(source: Keeper['last_activity_source'] | null | undefined): string {
+  switch (source) {
+    case 'approval_pending':
+      return '승인 대기'
+    case 'tool_call':
+      return '도구 활동'
+    case 'keeper_meta':
+      return '최근 활동'
+    case null:
+    case undefined:
+      return '최근 활동'
+  }
+}
+
+function activityDisplaySource(source: Keeper['last_activity_source'] | null | undefined): KeeperActivitySource {
+  switch (source) {
+    case 'approval_pending':
+      return 'approval_pending'
+    case 'tool_call':
+      return 'tool_call'
+    case 'keeper_meta':
+      return 'keeper_meta'
+    case null:
+    case undefined:
+      return 'last_activity'
+  }
+}
+
 export function keeperActivityDisplay(
   keeper: KeeperActivityDisplaySource | null | undefined,
   fallbackAgentLastSeen?: string | null,
 ): KeeperActivityDisplay {
   const candidates = [
+    timestampCandidate(
+      activityDisplaySource(keeper?.last_activity_source),
+      activitySourceLabel(keeper?.last_activity_source),
+      keeper?.last_activity_at,
+    ),
     timestampCandidate('autonomous_action', '마지막 행동', keeper?.last_autonomous_action_at),
     timestampCandidate('heartbeat', '하트비트', keeper?.last_heartbeat),
     ageCandidate('last_activity', '최근 활동', keeper?.last_activity_ago_s),
@@ -133,6 +171,8 @@ export function keeperActivityDisplay(
 
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
   if (keeper && isKeeperPaused(keeper)) return 'paused'
+  const lifecycleStatus = keeperLifecycleStatus(keeper?.lifecycle_phase)
+  if (lifecycleStatus && lifecycleStatus !== 'running') return lifecycleStatus
   const status = keeper?.status ?? fallbackStatus
   const normalized = (status ?? '').trim().toLowerCase()
 
@@ -142,6 +182,39 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   }
 
   return status && status.trim() !== '' ? status : 'unknown'
+}
+
+function keeperLifecycleStatus(phase: Keeper['lifecycle_phase'] | string | null | undefined): string | null {
+  switch (phase) {
+    case 'Offline':
+      return 'unbooted'
+    case 'Running':
+      return 'running'
+    case 'Failing':
+      return 'failing'
+    case 'Overflowed':
+      return 'overflowed'
+    case 'Compacting':
+      return 'compacting'
+    case 'HandingOff':
+      return 'handoff'
+    case 'Draining':
+      return 'draining'
+    case 'Paused':
+      return 'paused'
+    case 'Stopped':
+      return 'stopped'
+    case 'Crashed':
+      return 'crashed'
+    case 'Restarting':
+      return 'restarting'
+    case 'Dead':
+      return 'dead'
+    case 'Zombie':
+      return 'zombie'
+    default:
+      return null
+  }
 }
 
 function codeLabel(value: string | null | undefined): string | null {
@@ -162,8 +235,45 @@ function diagnosticStateLabel(keeper: Keeper): string | null {
   return health ?? continuity
 }
 
+function transientProviderRuntimeText(value: string | null | undefined): boolean {
+  const text = value?.trim().toLowerCase()
+  if (!text) return false
+  return (
+    text.includes('tls alert')
+    || text.includes('tls_error')
+    || text.includes('handshake failure')
+    || text.includes('network')
+    || text.includes('connection refused')
+    || text.includes('connection reset')
+    || text.includes('dns')
+    || text.includes('timeout')
+    || text.includes('timed out')
+  )
+}
+
+export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
+  if (!keeper || !isKeeperPaused(keeper)) return false
+  const blockerClass = keeper.runtime_blocker_class
+  if (
+    blockerClass === 'turn_timeout'
+    || blockerClass === 'turn_timeout_after_queue_wait'
+    || blockerClass === 'admission_queue_wait_timeout'
+  ) {
+    return true
+  }
+  if (blockerClass === 'provider_runtime_error') {
+    return (
+      transientProviderRuntimeText(keeper.runtime_blocker_summary)
+      || transientProviderRuntimeText(keeper.last_blocker)
+      || transientProviderRuntimeText(keeper.attention_reason)
+    )
+  }
+  return false
+}
+
 export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
   if (!isKeeperPaused(keeper)) return null
+  const autoRecover = isKeeperAutoRecoverPause(keeper)
   const trust = keeper.trust
   const blockerLabel = keeperRuntimeBlockerLabel(keeper.runtime_blocker_class)
   const reason =
@@ -186,8 +296,9 @@ export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
   )
   const diagnostic = diagnosticStateLabel(keeper)
   const detail = [
+    autoRecover ? '상태 자동 재시도 대기' : null,
     `원인 ${reason}`,
-    nextAction ? `다음 ${nextAction}` : null,
+    nextAction ? `다음 ${nextAction}` : autoRecover ? '다음 자동 재시도' : null,
     diagnostic ? `진단 ${diagnostic}` : null,
   ].filter((part): part is string => part !== null).join(' · ')
   const title = [
@@ -228,7 +339,7 @@ function refineOfflineStatus(keeper: Keeper | null | undefined): string {
   // only the 13 PascalCase phases, none of which lowercase to
   // `'inactive'`), so the guard was dead defensive.
   if (keeper.last_heartbeat && isHeartbeatAlive(keeper.last_heartbeat)) {
-    const phase = keeper.phase?.trim().toLowerCase()
+    const phase = (keeper.lifecycle_phase ?? keeper.phase)?.trim().toLowerCase()
     if (phase && phase !== 'offline') return phase
     return 'idle'
   }
@@ -276,16 +387,14 @@ function continueGateHint(keeper: Keeper): string {
 const runtimeBlockerLabels = {
   ambiguous_post_commit_timeout: '커밋 후 응답 없음',
   ambiguous_post_commit_failure: '커밋 후 실패',
-  autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
   admission_queue_wait_timeout: '대기열 진입 만료',
   turn_timeout_after_queue_wait: '대기 후 턴 만료',
   turn_timeout: '턴 응답 만료',
   turn_livelock_blocked: '턴 livelock 차단',
   completion_contract_violation: '완료 계약 위반',
-  cascade_exhausted: '캐스케이드 소진',
-  no_tool_capable_provider: '도구 실행 Provider 없음',
-  provider_runtime_error: 'Provider 런타임 오류',
-  tool_required_unsatisfied: '필수 도구 미충족',
+  runtime_exhausted: '런타임 후보 소진',
+  provider_runtime_error: '런타임 호출 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
   stale_termination_storm: 'Stale 종료 폭주',
@@ -304,7 +413,6 @@ const runtimeBlockerLabels = {
   sdk_cost_budget_exceeded: 'SDK 비용 예산 초과',
   sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
   sdk_idle_detected: 'SDK Idle 감지',
-  sdk_tool_retry_exhausted: 'SDK 도구 재시도 소진',
   sdk_guardrail_violation: 'SDK 가드레일 위반',
   sdk_tripwire_violation: 'SDK Tripwire 위반',
   sdk_exit_condition_met: 'SDK 종료 조건 충족',
@@ -331,9 +439,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'ambiguous_post_commit_failure') {
     return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
   }
-  if (blockerClass === 'autonomous_slot_wait_timeout') {
-    return '자율 턴이 실행 슬롯을 기다리다 타임아웃되었습니다.'
-  }
   if (blockerClass === 'admission_queue_wait_timeout') {
     return 'Keeper admission FIFO 대기 시간이 초과되었습니다.'
   }
@@ -346,17 +451,14 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'completion_contract_violation') {
     return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
   }
-  if (blockerClass === 'cascade_exhausted') {
-    return '캐스케이드 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
+  if (blockerClass === 'runtime_exhausted') {
+    return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
   }
-  if (blockerClass === 'no_tool_capable_provider') {
-    return '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.'
+  if (blockerClass === 'tool_route_recoverable_failure') {
+    return '도구 라우팅이 복구 가능한 실패로 끝나 descriptor, tool surface, runtime lane 확인이 필요합니다.'
   }
   if (blockerClass === 'provider_runtime_error') {
-    return 'Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.'
-  }
-  if (blockerClass === 'tool_required_unsatisfied') {
-    return '액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.'
+    return '런타임 호출 경계가 keeper 진행 전에 실패했습니다.'
   }
   if (blockerClass === 'fiber_unresolved') {
     return 'Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.'
@@ -423,14 +525,24 @@ export function keeperRecentActionLabel(
 
 export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
+  // Use the SSOT predicate so a keeper paused by phase or pipeline_stage —
+  // not just by the `paused` flag — still surfaces the "일시정지" prefix.
+  // The same file already routes the *summary* and *short* axes through
+  // isKeeperPaused (L135, L166); the runtime hint had drifted to raw flag.
+  const paused = isKeeperPaused(keeper)
+  const autoRecover = isKeeperAutoRecoverPause(keeper)
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
-  if (runtimeBlocker) return keeper.paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
+  if (runtimeBlocker) {
+    if (paused && autoRecover) return `자동 재시도 대기 · ${runtimeBlocker}`
+    return paused ? `일시정지 원인 · ${runtimeBlocker}` : runtimeBlocker
+  }
   const socialFallback = socialModelFallbackHint(keeper)
   if (socialFallback) return socialFallback
   const blocker = keeper.last_blocker?.trim()
-  if (keeper.paused && blocker) return `일시정지 · ${blocker}`
-  if (keeper.paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
-  if (keeper.paused) return '일시정지됨'
+  if (paused && autoRecover) return blocker ? `자동 재시도 대기 · ${blocker}` : '자동 재시도 대기'
+  if (paused && blocker) return `일시정지 · ${blocker}`
+  if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'
+  if (paused) return '일시정지됨'
   if (blocker) return `차단 요인 · ${blocker}`
   return null
 }

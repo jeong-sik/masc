@@ -6,6 +6,8 @@
    computed score+reasons pair, not a stateful FSM transition. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 
 let keeper_model_tools = Tool_shard.keeper_model_tools
@@ -120,7 +122,7 @@ let alert_dedup_table : (string, float) Hashtbl.t = Hashtbl.create 32
 
 (** Mutex protecting [alert_dedup_table].  [is_alert_deduplicated] runs
     from every keeper's alert scoring path, and keepers execute
-    concurrently in the same room — so the previous implementation
+    concurrently in the same workspace — so the previous implementation
     interleaved [Hashtbl.length] / [Hashtbl.filter_map_inplace] /
     [Hashtbl.find_opt] / [Hashtbl.replace] from multiple fibers with
     no serialisation.  The [find_opt + replace] pair is a TOCTOU that
@@ -160,9 +162,7 @@ let is_alert_deduplicated ~(keeper_name : string) ~(reasons : string list) : boo
     The score is the sum of matched weights, capped at 1.0.
 
     Signal bonuses are additive modifiers for structural indicators
-    (guardrail stops, context pressure, alignment drops, tool usage).
-
-    TODO(RFC-0001 Phase 3): Register in Runtime_params for runtime tuning. *)
+    (guardrail stops, context pressure, alignment drops, tool usage). *)
 
 let alert_keyword_weights : (string * float) list = [
   ("장애",     0.35);  (* Korean: outage/failure *)
@@ -290,7 +290,7 @@ let post_keeper_alert_board
   let visibility = let v = String.trim Env_config.KeeperAlert.board_visibility in
     if v = "" then "internal" else v in
   let visibility =
-    match Tool_board.visibility_of_string visibility with
+    match Board_tool.visibility_of_string visibility with
     | Some value -> value
     | None -> Board.Internal
   in
@@ -325,7 +325,7 @@ let post_keeper_alert_slack
         ~actor:`System_notify
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper alert slack webhook"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         ~stdin_content:payload
         argv
     in
@@ -375,7 +375,7 @@ let slack_api_post_json
       ~actor:`System_notify
       ~raw_source:(String.concat " " argv)
       ~summary:"keeper alert slack api post"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
       ~stdin_content:body
       argv
   in
@@ -421,10 +421,12 @@ let post_keeper_alert_slack_dm
              | Error e -> Alert_failed (Some ("dm_open_failed: " ^ e))
              | Ok () ->
                  let channel_id =
-                   let open Yojson.Safe.Util in
-                   match open_json |> member "channel" |> member "id" with
-                   | `String s when String.trim s <> "" -> Some s
-                   | _ -> None
+                   match Json_util.assoc_member_opt "channel" open_json with
+                   | Some channel_json -> (
+                       match Json_util.assoc_member_opt "id" channel_json with
+                       | Some (`String s) when String.trim s <> "" -> Some s
+                       | _ -> None)
+                   | None -> None
                  in
                  (match channel_id with
                   | None -> Alert_failed (Some "dm_open_failed: missing_channel_id")
@@ -464,20 +466,20 @@ let post_keeper_alert_github
     in
     let (status, out) =
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`Coord_git
+        ~actor:`Workspace_git
         ~raw_source:(String.concat " " args)
         ~summary:"keeper alert gh issue create"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
         args
     in
     match status with
     | Unix.WEXITED 0 -> Alert_sent (Some (short_preview ~max_len:200 out))
     | Unix.WEXITED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_exit_%d: %s" n (short_preview ~max_len:200 out)))
+        Alert_failed (Some (Printf.sprintf "credential_exit_%d: %s" n (short_preview ~max_len:200 out)))
     | Unix.WSIGNALED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_signaled_%d" n))
+        Alert_failed (Some (Printf.sprintf "credential_signaled_%d" n))
     | Unix.WSTOPPED n ->
-        Alert_failed (Some (Printf.sprintf "repo_cli_stopped_%d" n))
+        Alert_failed (Some (Printf.sprintf "credential_stopped_%d" n))
 
 let maybe_emit_interesting_alert
     (ctx : _ context)
@@ -569,7 +571,7 @@ let maybe_emit_interesting_alert
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
            Log.Keeper.error "alert JSONL write failed: %s" (Printexc.to_string exn);
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string AlertPersistFailures)
              ~labels:[("kind", Keeper_alert_persist_kind.(to_label Alert))]
              ());
@@ -610,9 +612,9 @@ let maybe_emit_interesting_alert
           meta.name score (String.concat "," (if reasons = [] then [ "signal" ] else reasons))
       in
       let gh_body =
-        utf8_safe_prefix_bytes
-          (alert_text ^ "\n\n---\n\nraw alert json:\n" ^ Yojson.Safe.pretty_to_string alert_json)
+        String_util.utf8_prefix
           ~max_bytes:(max 800 Env_config.KeeperAlert.max_body_chars)
+          (alert_text ^ "\n\n---\n\nraw alert json:\n" ^ Yojson.Safe.pretty_to_string alert_json)
       in
       let github_result =
         run_alert_channel_with_retry ctx
@@ -645,7 +647,7 @@ let maybe_emit_interesting_alert
               ])
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Keeper.error "failed-channels JSONL write failed: %s" (Printexc.to_string exn);
-           Prometheus.inc_counter Keeper_metrics.(to_string AlertPersistFailures) ~labels:[("kind", Keeper_alert_persist_kind.(to_label Failed_channels))] ());
+           Otel_metric_store.inc_counter Keeper_metrics.(to_string AlertPersistFailures) ~labels:[("kind", Keeper_alert_persist_kind.(to_label Failed_channels))] ());
       if deadlettered then
         (try
            Keeper_types_support.append_jsonl_line
@@ -660,7 +662,7 @@ let maybe_emit_interesting_alert
               ])
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Keeper.error "deadletter JSONL write failed: %s" (Printexc.to_string exn);
-           Prometheus.inc_counter Keeper_metrics.(to_string AlertPersistFailures) ~labels:[("kind", Keeper_alert_persist_kind.(to_label Deadletter))] ());
+           Otel_metric_store.inc_counter Keeper_metrics.(to_string AlertPersistFailures) ~labels:[("kind", Keeper_alert_persist_kind.(to_label Deadletter))] ());
       {
         enabled = true;
         triggered = true;

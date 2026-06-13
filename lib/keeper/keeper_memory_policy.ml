@@ -34,54 +34,12 @@
     Sibling spec anchors deferred:
       - keeper_memory_bank.ml (open_short / provenanced semantics) *)
 
-open Keeper_types
+open Keeper_meta_contract
 
 (* Static patterns for [STATE] block detection, hoisted from
    [find_state_block].  [Re.compile] runs once at module load. *)
 let state_start_re = Re.str "[STATE]" |> Re.compile
 let state_end_re = Re.str "[/STATE]" |> Re.compile
-
-type keeper_policy_observation = {
-  source_kind: string;
-  room_id: string option;
-  from_agent: string;
-  message: string;
-  direct_mention: bool;
-  has_question: bool;
-  message_chars: int;
-  total_turns: int;
-  active_goal_count: int;
-  joined_room_count: int;
-  last_turn_ago_s: float;
-}
-
-let observation_has_question (message : string) =
-  String.contains message '?'
-
-let keeper_policy_observation_of_room_message
-    ~(meta : keeper_meta)
-    ~(room_id : string)
-    (msg : Masc_domain.message) : keeper_policy_observation =
-  let now_ts = Time_compat.now () in
-  let mention_targets =
-    if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
-  in
-  let last_turn_ago_s =
-    if meta.runtime.usage.last_turn_ts <= 0.0 then 0.0 else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
-  in
-  {
-    source_kind = "room_message";
-    room_id = Some room_id;
-    from_agent = msg.from_agent;
-    message = msg.content;
-    direct_mention = Mention.any_mentioned ~targets:mention_targets msg.content;
-    has_question = observation_has_question msg.content;
-    message_chars = String.length msg.content;
-    total_turns = meta.runtime.usage.total_turns;
-    active_goal_count = List.length meta.active_goal_ids;
-    joined_room_count = List.length meta.joined_room_ids;
-    last_turn_ago_s;
-  }
 
 type alert_channel_result = {
   channel: string;
@@ -151,6 +109,11 @@ let empty_keeper_state_snapshot = {
   constraints = [];
 }
 
+let state_snapshot_source_is_synthetic source =
+  let source = String.trim source in
+  String.equal source "synthesized"
+  || String.starts_with ~prefix:"synthesized_" source
+
 type keeper_memory_line = {
   kind: string;
   text: string;
@@ -169,23 +132,17 @@ type keeper_memory_summary = {
 type compaction_source =
   | Pre_dispatch_hygiene
   | MASC_policy
-  | OAS_proactive
-  | OAS_emergency
   | Memory_bank
 
 let compaction_source_to_string = function
   | Pre_dispatch_hygiene -> "pre_dispatch_hygiene"
   | MASC_policy -> "masc_policy"
-  | OAS_proactive -> "oas_proactive"
-  | OAS_emergency -> "oas_emergency"
   | Memory_bank -> "memory_bank"
 
 let compaction_source_of_string_opt (s : string) : compaction_source option =
   match s with
   | "pre_dispatch_hygiene" -> Some Pre_dispatch_hygiene
   | "masc_policy" -> Some MASC_policy
-  | "oas_proactive" -> Some OAS_proactive
-  | "oas_emergency" -> Some OAS_emergency
   | "memory_bank" -> Some Memory_bank
   | _ -> None
 
@@ -250,7 +207,7 @@ let split_state_items (s : string) : string list =
   |> String.split_on_char ';'
   |> List.map String.trim
   |> List.filter (fun x -> x <> "")
-  |> take 6
+  |> (fun xs -> List.filteri (fun i _ -> i < 6) xs)
 
 let strip_prefix_ci ~(prefix : string) (s : string) : string option =
   let s = String.trim s in
@@ -383,25 +340,25 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
         (fun () ->
            match snapshot.next_items with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Next";
       maybe_line
         (fun () ->
            match snapshot.decisions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Decisions";
       maybe_line
         (fun () ->
            match snapshot.open_questions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "OpenQuestions";
       maybe_line
         (fun () ->
            match snapshot.constraints with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.filteri (fun i _ -> i < 3) (List.map String.trim items))))
         "Constraints";
     ]
     |> List.filter_map (fun x -> x)
@@ -411,8 +368,8 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
 (* Gen7 (2026-04-17): snapshot size cap applied before persistence.
 
    Gen3 (PR #7647) trimmed backward fields at prompt injection and
-   Gen4 (PR #7668) scrubbed [STATE] blocks in OAS compaction, both on
-   the consumption side. Growth of [meta.continuity_summary] itself
+   Gen4 (PR #7668) scrubbed [STATE] blocks during runtime compaction
+   on the consumption side. Growth of [meta.continuity_summary] itself
    was still unbounded: if the LLM produces a longer [STATE] block
    each turn (more decisions, longer goal prose), the parsed snapshot
    and its rendered summary grow monotonically.
@@ -599,7 +556,7 @@ let prompt_memory_sections_of_snapshot
   ]
   |> List.filter (fun text -> String.trim text <> "")
 
-let read_progress_snapshot ~(config : Coord.config) ~(name : string)
+let read_progress_snapshot ~(config : Workspace.config) ~(name : string)
     : keeper_state_snapshot option =
   match
     let path = Keeper_types_support.keeper_progress_path config name in
@@ -614,7 +571,7 @@ let read_progress_snapshot ~(config : Coord.config) ~(name : string)
   | None -> None
   | Some cache -> Some cache.snapshot
 
-let read_progress_snapshot_cache ~(config : Coord.config) ~(name : string)
+let read_progress_snapshot_cache ~(config : Workspace.config) ~(name : string)
     : progress_snapshot_cache option =
   let path = Keeper_types_support.keeper_progress_path config name in
   if not (Fs_compat.file_exists path) then
@@ -676,38 +633,34 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     malformed or represents an empty snapshot (all fields absent/empty).
     RFC-MASC-001 Phase 1: structured working_context in Checkpoint. *)
 let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  try
-    let open Yojson.Safe.Util in
-    let string_opt key = json |> member key |> to_string_option in
-    let string_list key =
-      match json |> member key with
-      | `List items ->
-        List.filter_map (function `String s -> Some s | _ -> None) items
-      | _ -> []
-    in
-    let snapshot =
-      { goal = string_opt "goal"
-      ; progress = string_opt "progress"
-      ; done_summary = string_opt "done_summary"
-      ; next_summary = string_opt "next_summary"
-      ; next_items = string_list "next_items"
-      ; decisions = string_list "decisions"
-      ; open_questions = string_list "open_questions"
-      ; constraints = string_list "constraints"
-      }
-    in
-    if snapshot.goal = None
-       && snapshot.progress = None
-       && snapshot.done_summary = None
-       && snapshot.next_summary = None
-       && snapshot.next_items = []
-       && snapshot.decisions = []
-       && snapshot.open_questions = []
-       && snapshot.constraints = []
-    then None
-    else Some snapshot
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  let string_opt key = Json_util.get_string json key in
+  let string_list key =
+    match Json_util.assoc_member_opt key json with
+    | Some (`List items) ->
+      List.filter_map (function `String s -> Some s | _ -> None) items
+    | _ -> []
+  in
+  let snapshot =
+    { goal = string_opt "goal"
+    ; progress = string_opt "progress"
+    ; done_summary = string_opt "done_summary"
+    ; next_summary = string_opt "next_summary"
+    ; next_items = string_list "next_items"
+    ; decisions = string_list "decisions"
+    ; open_questions = string_list "open_questions"
+    ; constraints = string_list "constraints"
+    }
+  in
+  if snapshot.goal = None
+     && snapshot.progress = None
+     && snapshot.done_summary = None
+     && snapshot.next_summary = None
+     && snapshot.next_items = []
+     && snapshot.decisions = []
+     && snapshot.open_questions = []
+     && snapshot.constraints = []
+  then None
+  else Some snapshot
 
 (** Structured JSON wrapper for Checkpoint.working_context.
     Embeds the snapshot under a "state_snapshot" key alongside a
@@ -729,16 +682,14 @@ let replay_metadata_of_snapshot
 
 let snapshot_of_replay_metadata
     (json : Yojson.Safe.t) : keeper_state_snapshot option =
-  try
-    let open Yojson.Safe.Util in
-    let kind = json |> member "kind" |> to_string_option in
-    let version = json |> member "version" |> to_int_option in
-    match kind, version with
-    | Some kind, Some 1 when String.equal kind replay_metadata_kind ->
-        keeper_state_snapshot_of_json (json |> member "payload")
-    | _ -> None
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
+  let kind = Json_util.get_string json "kind" in
+  let version = Json_util.get_int json "version" in
+  match kind, version with
+  | Some kind, Some 1 when String.equal kind replay_metadata_kind ->
+      (match Json_util.assoc_member_opt "payload" json with
+       | Some payload -> keeper_state_snapshot_of_json payload
+       | None -> None)
+  | _ -> None
 
 let with_snapshot_metadata
     (msg : Agent_sdk.Types.message)
@@ -770,16 +721,106 @@ let snapshot_of_structured_working_context
   match snapshot_of_replay_metadata json with
   | Some _ as snapshot -> snapshot
   | None ->
-      (try
-         let open Yojson.Safe.Util in
-         let version = json |> member "version" |> to_int_option in
-         match version with
-         | Some 1 ->
-             let snapshot_json = json |> member "state_snapshot" in
-             keeper_state_snapshot_of_json snapshot_json
-         | _ -> None
-       with
-       | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None)
+      let version = Json_util.get_int json "version" in
+      (match version with
+       | Some 1 ->
+           (match Json_util.assoc_member_opt "state_snapshot" json with
+            | Some snapshot_json -> keeper_state_snapshot_of_json snapshot_json
+            | None -> None)
+       | _ -> None)
+
+let structured_state_snapshot_of_json
+    (json : Yojson.Safe.t) : keeper_state_snapshot option =
+  match snapshot_of_structured_working_context json with
+  | Some _ as snapshot -> snapshot
+  | None -> keeper_state_snapshot_of_json json
+
+let structured_param ~name ~description ~param_type ~required =
+  { Agent_sdk.Types.name = name; description; param_type; required }
+
+let structured_state_snapshot_schema :
+    keeper_state_snapshot Agent_sdk.Structured.schema =
+  { Agent_sdk.Structured.name = "keeper_state_snapshot";
+    description =
+      "Structured keeper continuity state for the completed turn. Return only \
+       this JSON object when the runtime requests structured state.";
+    params =
+      [ structured_param
+          ~name:"goal"
+          ~description:"Current keeper goal, if still relevant."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"progress"
+          ~description:"Short factual progress summary for this generation."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"done_summary"
+          ~description:"What was completed this generation."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"next_summary"
+          ~description:"What the next generation should do or inspect first."
+          ~param_type:Agent_sdk.Types.String
+          ~required:false
+      ; structured_param
+          ~name:"next_items"
+          ~description:"Concrete next items as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"decisions"
+          ~description:"Model-authored decisions from this generation."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"open_questions"
+          ~description:"Unresolved questions as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ; structured_param
+          ~name:"constraints"
+          ~description:"Active constraints as strings."
+          ~param_type:Agent_sdk.Types.Array
+          ~required:false
+      ];
+    parse =
+      (fun json ->
+        match structured_state_snapshot_of_json json with
+        | Some snapshot -> Ok snapshot
+        | None ->
+            Error
+              "structured keeper state is empty or does not match the snapshot \
+               schema");
+  }
+
+let strip_json_markdown_fences (text : string) : string =
+  let trimmed = String.trim text in
+  if not (String.starts_with ~prefix:"```" trimmed) then trimmed
+  else
+    match String.split_on_char '\n' trimmed with
+    | first :: body when String.starts_with ~prefix:"```" (String.trim first) ->
+        let body =
+          match List.rev body with
+          | last :: rest when String.starts_with ~prefix:"```" (String.trim last) ->
+              List.rev rest
+          | _ -> body
+        in
+        String.concat "\n" body |> String.trim
+    | _ -> trimmed
+
+let parse_structured_state_snapshot_from_reply
+    (reply : string) : keeper_state_snapshot option =
+  let text = strip_json_markdown_fences reply in
+  if String.trim text = "" then None
+  else
+    try
+      Yojson.Safe.from_string text
+      |> structured_state_snapshot_of_json
+    with
+    | Yojson.Json_error _ -> None
 
 let latest_state_snapshot_from_messages (messages : Agent_sdk.Types.message list) :
     keeper_state_snapshot option =
@@ -858,14 +899,16 @@ let cap_for_kind (caps : (string * int) list) (kind : string) : int =
 
 (** Synthesize a [STATE] block from run metadata when the model omits one.
     Produces a deterministic snapshot from tool usage, stop reason, and goal
-    so generation continuity is never broken. Tagged [SYNTHETIC] for
-    downstream consumers to distinguish from model-generated blocks. *)
+    so generation continuity is never broken. Budget exhaustion is a
+    continuation checkpoint, not a model-authored decision or task
+    completion, so it records only progress and next-cycle guidance. *)
 let synthesize_state_from_run_result
     ~(goal : string)
     ~(tools_used : string list)
     ~(stop_reason : string)
     ~(response_text : string)
     : keeper_state_snapshot =
+  let budget_exhausted = String.equal stop_reason "budget_exhausted" in
   let progress =
     match tools_used with
     | [] -> Some "No tools used this generation"
@@ -873,30 +916,37 @@ let synthesize_state_from_run_result
       let unique = List.sort_uniq String.compare ts in
       Some (Printf.sprintf "Used: %s" (String.concat ", " unique))
   in
-  let next_items =
-    if stop_reason = "budget_exhausted" then
-      ["Continue previous work"; "Review results from last generation"]
-    else []
-  in
-  let response_hint =
-    let trimmed = String.trim response_text in
-    if trimmed = "" then None
-    else
-      Some (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
-            |> String_util.to_string)
+  let next_summary =
+    if budget_exhausted
+    then
+      Some
+        "Resume from the OAS checkpoint and inspect the latest assistant/tool \
+         context before choosing the next action."
+    else None
   in
   let decisions =
-    match response_hint with
-    | Some hint -> [Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint)]
-    | None -> [Keeper_synthetic_marker.tag "No visible output this generation"]
+    if budget_exhausted
+    then []
+    else (
+      let response_hint =
+        let trimmed = String.trim response_text in
+        if trimmed = ""
+        then None
+        else
+          Some
+            (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
+             |> String_util.to_string)
+      in
+      match response_hint with
+      | Some hint ->
+        [ Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint) ]
+      | None -> [ Keeper_synthetic_marker.tag "No visible output this generation" ])
   in
   { goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;
-    done_summary = progress;
-    next_summary = (match next_items with
-                    | [] -> None
-                    | items -> Some (String.concat "; " items));
-    next_items;
+    done_summary = (if budget_exhausted then None else progress);
+    next_summary;
+    next_items = [];
     decisions;
     open_questions = [];
     constraints = [];

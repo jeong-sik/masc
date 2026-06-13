@@ -6,7 +6,6 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
   | Stay_silent_recovery
   | Unknown of string
 
@@ -24,7 +23,6 @@ let schema = "keeper.reaction_ledger.v1"
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
   | Stay_silent_recovery -> "stay_silent_recovery"
   | Unknown value -> value
 ;;
@@ -86,7 +84,6 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   match Keeper_event_queue.classify stimulus with
   | Board_signal -> Board_signal
   | Bootstrap -> Bootstrap
-  | Alive_but_stuck_recovery -> Alive_but_stuck_recovery
   | Stay_silent_recovery -> Stay_silent_recovery
   | Unsupported prefix -> Unknown prefix
 ;;
@@ -126,7 +123,7 @@ let store_for_base_path ~base_path ~keeper_name =
 
 let store_for_config config ~keeper_name =
   Dated_jsonl.create
-    ~base_dir:(store_dir ~masc_root:(Coord.masc_root_dir config) ~keeper_name)
+    ~base_dir:(store_dir ~masc_root:(Workspace.masc_root_dir config) ~keeper_name)
     ()
 ;;
 
@@ -146,11 +143,11 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let board_updated_at =
     match kind with
     | Board_signal -> payload_float_field "updated_at_unix" stimulus.payload
-    | Bootstrap | Alive_but_stuck_recovery | Stay_silent_recovery | Unknown _ -> None
+    | Bootstrap | Stay_silent_recovery | Unknown _ -> None
   in
   let parse_error =
     match kind with
-    | Board_signal | Alive_but_stuck_recovery | Stay_silent_recovery ->
+    | Board_signal | Stay_silent_recovery ->
       payload_parse_error stimulus.payload
     | Bootstrap | Unknown _ -> None
   in
@@ -370,16 +367,6 @@ let nested_float_field outer inner json =
   | None -> None
 ;;
 
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
-let option_float_json = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
-
 let summary_schema = "keeper.reaction_ledger.summary.v1"
 let fleet_summary_schema = "keeper.reaction_ledger.fleet_summary.v1"
 
@@ -503,7 +490,6 @@ let summarize_rows ~keeper_name ~limit rows =
   let note_stimulus_kind = function
     | Some "board_signal"
     | Some "bootstrap"
-    | Some "alive_but_stuck_recovery"
     | Some "stay_silent_recovery" -> ()
     | Some _ | None -> incr unsupported_stimulus_count
   in
@@ -605,8 +591,8 @@ let summarize_rows ~keeper_name ~limit rows =
           (List.map
              (fun value -> `String value)
              (cap_list 8 pending_stimulus_ids)) )
-    ; "latest_recorded_at_unix", option_float_json !latest_recorded_at
-    ; "latest_stimulus_id", option_string_json !latest_stimulus_id
+    ; "latest_recorded_at_unix", Json_util.float_opt_to_json !latest_recorded_at
+    ; "latest_stimulus_id", Json_util.string_opt_to_json !latest_stimulus_id
     ; "read_error", `Null
     ]
 ;;

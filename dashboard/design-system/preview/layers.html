@@ -252,7 +252,7 @@
           <div class="l3-row"><span class="l3-glyph">⟳</span><span class="l3-label">tick()</span><span class="l3-freq" style="width: 42%"></span><span class="l3-by">14s · m-imp</span><span class="l3-count">5×</span></div>
           <div class="l3-row"><span class="l3-glyph">∎</span><span class="l3-label">guard()</span><span class="l3-freq" style="width: 25%"></span><span class="l3-by">22s · qa</span><span class="l3-count">3×</span></div>
           <div class="l3-row"><span class="l3-glyph">◐</span><span class="l3-label">pause()</span><span class="l3-freq" style="width: 17%"></span><span class="l3-by">38s · sangsu</span><span class="l3-count">2×</span></div>
-          <div class="l3-row"><span class="l3-glyph" style="color:var(--err)">↯</span><span class="l3-label" style="color:var(--err-fg)">cascade()</span><span class="l3-freq" style="width: 8%; background: linear-gradient(90deg, var(--err), rgb(var(--err-glow)/.15)); box-shadow: 0 0 4px rgb(var(--err-glow)/.5)"></span><span class="l3-by" style="color:var(--err-fg)">52s · sangsu</span><span class="l3-count">1×</span></div>
+          <div class="l3-row"><span class="l3-glyph" style="color:var(--err)">↯</span><span class="l3-label" style="color:var(--err-fg)">runtime()</span><span class="l3-freq" style="width: 8%; background: linear-gradient(90deg, var(--err), rgb(var(--err-glow)/.15)); box-shadow: 0 0 4px rgb(var(--err-glow)/.5)"></span><span class="l3-by" style="color:var(--err-fg)">52s · sangsu</span><span class="l3-count">1×</span></div>
         </div>
       </div>
     </div>
@@ -265,11 +265,11 @@
       <div class="canvas" style="padding: 14px">
         <div class="l4-block">
           <div>export class Keeper {'{'} id: string; goal: GoalRef; {'}'}</div>
-          <div class="l4-by">sangsu · 12m · cascade: provider-b@2</div>
+          <div class="l4-by">sangsu · 12m · runtime: runtime-slot-b@2</div>
           <span class="l4-stamp">LGTM</span>
         </div>
         <div class="l4-block flag">
-          <div>async tick() {'{'} emit('heartbeat'); await runCascade(); {'}'}</div>
+          <div>async tick() {'{'} emit('heartbeat'); await runRuntime(); {'}'}</div>
           <div class="l4-by">qa-king · 45s · "expected guard before emit"</div>
           <span class="l4-stamp">FLAG</span>
         </div>
@@ -291,7 +291,7 @@
           <div class="l5-note" style="position: relative; margin-top: 40px">
             <span class="l5-pin" style="right: 60px"></span>
             <div class="l5-head"><span class="dot"></span>masc-improver · 5m · anchored tick()</div>
-            <div class="l5-body">Refactored to <code style="color:var(--color-accent-fg)">async generator</code>. Breaks existing subscribers — migration path in <code style="color:var(--color-accent-fg)">cascade.md</code>.</div>
+            <div class="l5-body">Refactored to <code style="color:var(--color-accent-fg)">async generator</code>. Breaks existing subscribers — migration path in <code style="color:var(--color-accent-fg)">runtime.md</code>.</div>
           </div>
           <div class="l5-note" style="position: relative; margin-top: 72px">
             <span class="l5-pin"></span>
@@ -322,11 +322,11 @@
           <div class="code-line"><span class="time-bar" style="opacity:.3; height:10px" title="L1 · cold (3h)"></span><span class="num">09</span><span class="src"><span class="k">async</span> <span class="f">tick</span>() {</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.9; box-shadow:0 0 6px rgb(var(--warn-glow)/.8)" title="L1 · 4m"></span><span class="num">10</span><span class="src">  <span class="k">if</span> (this.state !== <span class="s">'running'</span>) <span class="k">return</span>;</span><span class="cursor-chip c-qa" title="L2 · qa-king at col 24">qa-king</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:1; box-shadow:0 0 8px rgb(var(--warn-glow))" title="L1 · 12s · live"></span><span class="num">11</span><span class="src">  <span class="tool-glyph" title="L3 · emit() called 12× in 60s">◈</span> <span class="f hl">emit</span>(<span class="s">'heartbeat'</span>);</span><span class="cursor-chip c-nick" title="L2 · nick0cave editing">nick0cave</span></div>
-          <div class="code-line"><span class="time-bar" style="opacity:.85" title="L1 · 2m"></span><span class="num">12</span><span class="src">  <span class="k">await</span> this.<span class="f">runCascade</span>(<span class="s">'provider-b'</span>);</span><span class="cursor-chip c-ss" title="L2 · sangsu reading">sangsu</span></div>
+          <div class="code-line"><span class="time-bar" style="opacity:.85" title="L1 · 2m"></span><span class="num">12</span><span class="src">  <span class="k">await</span> this.<span class="f">runRuntime</span>(<span class="s">'runtime-slot-b'</span>);</span><span class="cursor-chip c-ss" title="L2 · sangsu reading">sangsu</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.2; height:8px" title="L1 · cold"></span><span class="num">13</span><span class="src">}</span></div>
           <div class="l4-block" style="margin-top: 10px; padding: 8px 12px" title="L4 · approval block">
             <div style="font-family:var(--font-mono); font-size:var(--fs-11); color:var(--color-fg-secondary)">lines 9–13 reviewed</div>
-            <div class="l4-by">sangsu · 2m ago · cascade: provider-b@2 · 1.24s</div>
+            <div class="l4-by">sangsu · 2m ago · runtime: runtime-slot-b@2 · 1.24s</div>
             <span class="l4-stamp" style="font-size: var(--fs-22)">LGTM</span>
           </div>
           <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--color-border-default);">
@@ -404,7 +404,7 @@
         </div>
         <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px 18px 14px; border-top: 1px dashed var(--color-border-default);">
           <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">①</b> Order: base &lt; sticky &lt; dropdown &lt; overlay &lt; drawer &lt; modal &lt; toast. Toast always wins — surfaces the most ephemeral signal.</div>
-          <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">②</b> Gaps (20 → 30, 40 → 60) reserve room for future layers without renumbering. Avoid filling the gaps with raw integers in component CSS.</div>
+          <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">②</b> Gaps (20 → 30, 40 → 60) reserve workspace for future layers without renumbering. Avoid filling the gaps with raw integers in component CSS.</div>
           <div style="font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">③</b> Component overrides (e.g. <code style="color:var(--color-fg-disabled)">--z-overlay-keeper, 3020</code>) shadow the base scale — escape hatch only, audit before adding.</div>
         </div>
       </div>

@@ -21,13 +21,13 @@ let dedupe_thinking_lines = Trace.dedupe_thinking_lines
 let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
 
-let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
-  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  let masc_count = List.length (Agent_tool_dispatch_runtime.keeper_masc_tool_names meta) in
+let keeper_tools_response_json (meta : Keeper_meta_contract.keeper_meta) =
+  let allowed = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let masc_count = List.length (Keeper_tool_dispatch_runtime.keeper_masc_tool_names meta) in
   `Assoc
     [
       ("ok", `Bool true);
-      ("tool_access", Keeper_types.tool_access_to_json meta.tool_access);
+      ("tool_access", Json_util.json_string_list meta.tool_access);
       ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
       ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
       ("active_masc_tool_count", `Int masc_count);
@@ -61,8 +61,8 @@ let handle_keeper_tools_post state req reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name required"
     else
-      let config = state.Mcp_server.room_config in
-      match Keeper_types.read_meta config name with
+      let config = state.Mcp_server.workspace_config in
+      match Keeper_meta_store.read_meta config name with
       | Error msg -> respond_error ~status:`Not_found reqd msg
       | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
       | Ok (Some meta) ->
@@ -76,12 +76,12 @@ let handle_keeper_tools_post state req reqd =
                      Safe_ops.json_string_list "deny" args |> dedupe_tool_names
                    in
                    let tool_access_result =
-                     match Yojson.Safe.Util.member "tool_access" args with
-                     | `Assoc _ as access_json ->
-                         Keeper_types.tool_access_of_meta_json
+                     match Json_util.assoc_member_opt "tool_access" args with
+                     | Some (`List _ as access_json) ->
+                         Keeper_meta_contract.tool_access_of_meta_json
                            (`Assoc [ ("tool_access", access_json) ])
-                     | `Null -> Error "tool_access required"
-                     | _ -> Error "tool_access must be an object"
+                     | Some `Null -> Error "tool_access required"
+                     | None | Some _ -> Error "tool_access must be an array of strings"
                    in
                    Result.map
                      (fun tool_access ->
@@ -89,7 +89,7 @@ let handle_keeper_tools_post state req reqd =
                          meta with
                          tool_access;
                          tool_denylist = deny;
-                         updated_at = Keeper_types.now_iso ();
+                         updated_at = Keeper_meta_contract.now_iso ();
                        })
                      tool_access_result
                | "" -> Error "action required (set_policy)"
@@ -102,7 +102,7 @@ let handle_keeper_tools_post state req reqd =
                  (* force: user-initiated tool config is authoritative.
                     Skips version CAS since user intent overrides
                     concurrent keeper turn updates. *)
-                 (match Keeper_types.write_meta ~force:true config meta' with
+                 (match Keeper_meta_store.write_meta ~force:true config meta' with
                   | Ok () ->
                       Http.Response.json_value ~compress:true ~request:req
                         (keeper_tools_response_json meta') reqd
@@ -129,9 +129,7 @@ let receipt_row_matches = Scan_summary.receipt_row_matches
 let read_receipt_rows = Scan_summary.read_receipt_rows
 let unique_ints = Scan_summary.unique_ints
 let json_int_list = Scan_summary.json_int_list
-let json_int_opt = Scan_summary.json_int_opt
 let event_bus_summary_json = Scan_summary.event_bus_summary_json
-let memory_summary_json = Scan_summary.memory_summary_json
 
 let max_int_list_opt = Scan_summary.max_int_list_opt
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
@@ -148,7 +146,7 @@ let turn_identity_summary_json =
   Server_dashboard_http_keeper_api_summary_aggregates.turn_identity_summary_json
 ;;
 
-let keeper_runtime_trace_json (config : Coord.config) (name : string)
+let keeper_runtime_trace_json (config : Workspace.config) (name : string)
     ?trace_id ?turn_id ?(limit = 200) ()
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   if not (Keeper_config.validate_name name) then
@@ -158,7 +156,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
   else
     let trace_id_query =
       match trace_id with
-      | Some value when String.trim value <> "" -> Some (String.trim value)
+      | Some value -> String_util.trim_to_option value
       | _ -> None
     in
     let missing_trace_id_json =
@@ -186,7 +184,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
       match trace_id_query with
       | Some value -> Ok value
       | None -> (
-          match Keeper_types.read_meta_resolved config name with
+          match Keeper_meta_store.read_meta_resolved config name with
           | Ok (Some (_, meta)) ->
               Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           | Ok None -> Error missing_trace_id_json
@@ -219,7 +217,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
         in
         let receipts =
           read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
-          |> take_last limit
+          |> List_util.take_last limit
         in
         let selected_turn_id = selected_keeper_turn_id ?turn_id manifest_scan in
         let selected_terminal_event_present =
@@ -240,10 +238,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
               ("keeper", `String name);
               ( "trace_id",
                 `String trace_id );
-              ( "turn_id",
-                match turn_id with
-                | Some value -> `Int value
-                | None -> `Null );
+              ( "turn_id", Json_util.int_opt_to_json turn_id );
               ("manifest_path", `String manifest_scan.path);
               ("manifest_path_present", `Bool (Fs_compat.file_exists manifest_scan.path));
               ("manifest_total_rows", `Int manifest_scan.total_rows);
@@ -253,15 +248,11 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
               ("provider_attempts", provider_attempts_summary_json manifest_scan);
               ("event_bus", event_bus_summary_json manifest_scan);
-              ("memory", memory_summary_json manifest_scan);
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );
               ("health", `String health);
-              ( "stale_reason",
-                match stale_reason with
-                | Some value -> `String value
-                | None -> `Null );
+              ( "stale_reason", Json_util.string_opt_to_json stale_reason );
               ( "linked_artifacts",
                 `Assoc
                   [
@@ -292,7 +283,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
   if String.length name = 0 then
     respond_error ~ok:false reqd "keeper name is required"
   else
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.workspace_config in
     try
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
@@ -308,7 +299,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
             respond_error ~ok:false reqd "snapshot_ids is required"
           else
             let trace_id_result =
-              match Keeper_types.read_meta_resolved config name with
+              match Keeper_meta_store.read_meta_resolved config name with
               | Ok (Some (_, meta)) ->
                   Ok (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
               | Ok None ->
@@ -357,8 +348,8 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.room_config in
-    match Keeper_types.read_meta config name with
+    let config = state.Mcp_server.workspace_config in
+    match Keeper_meta_store.read_meta config name with
     | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
         respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
@@ -391,7 +382,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  let args_with_name =
                    `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
                  in
-                 let keeper_ctx : _ Tool_keeper.context =
+                 let keeper_ctx : _ Keeper_tool_surface.context =
                    {
                      config;
                      agent_name;
@@ -403,13 +394,19 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                  in
                  (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
                  | Error result ->
-                     respond_error reqd (Keeper_types.tool_result_body result)
+                     respond_error reqd (Keeper_types_profile.tool_result_body result)
                  | Ok parsed ->
+                     (* Dashboard edits are user-initiated and should
+                        override concurrent heartbeat/version writes.
+                        Also preserve existing prompt fields when the
+                        request omits them, so profile defaults do not
+                        clobber prior dashboard edits. *)
                      let result =
-                       Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
+                       Keeper_turn_up_update.update_keeper ~force:true
+                         ~preserve_prompt_defaults:true keeper_ctx parsed meta0
                      in
-                     if not (Keeper_types.tool_result_success result) then
-                       respond_error reqd (Keeper_types.tool_result_body result)
+                     if not (Keeper_types_profile.tool_result_success result) then
+                       respond_error reqd (Keeper_types_profile.tool_result_body result)
                      else
                        let (_st, json) =
                          Dashboard_http_keeper.keeper_config_json config name
@@ -447,7 +444,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   | Error msg ->
       respond_error ~ok:false reqd msg
     | Ok directive ->
-        let config = state.Mcp_server.room_config in
+        let config = state.Mcp_server.workspace_config in
         let action_str =
           match directive with
           | `Pause -> "pause"
@@ -458,7 +455,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
            (IO/parse failure). For pause/resume the operator expects state to
            change; silent 200 hides the failure. For wakeup we preserve the
            prior best-effort semantics (wakeup does not require meta). *)
-        let read_result = Keeper_types.read_meta config name in
+        let read_result = Keeper_meta_store.read_meta config name in
         let meta_opt =
           match read_result with
           | Ok (Some meta) -> Some meta
@@ -475,10 +472,10 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                 {
                   meta with
                   paused;
-                  updated_at = Keeper_types.now_iso ();
+                  updated_at = Keeper_meta_contract.now_iso ();
                 }
               in
-              (match Keeper_types.write_meta ~force:true config updated_meta with
+              (match Keeper_meta_store.write_meta ~force:true config updated_meta with
                | Ok () -> ()
                | Error err ->
                    Log.Keeper.warn
@@ -528,7 +525,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                action_str
                name
                err;
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string PausedStatePersistErrors)
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "read_meta_error")]
@@ -547,7 +544,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                "directive %s: keeper meta missing for %s — refusing silent no-op"
                action_str
                name;
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string PausedStatePersistErrors)
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "meta_missing")]
@@ -585,15 +582,15 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
     try
       let json = Yojson.Safe.from_string body_str in
       let names_list =
-        match Yojson.Safe.Util.member "names" json with
-        | `List items ->
+        match Json_util.assoc_member_opt "names" json with
+        | Some (`List items) ->
             List.filter_map
               (function
                 | `String s when is_valid_keeper_name s -> Some s
                 | _ -> None)
               items
             |> List.sort_uniq String.compare
-        | _ -> []
+        | None | Some _ -> []
       in
       let action_result =
         match Safe_ops.json_string_opt "action" json with
@@ -620,7 +617,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
   | Ok (names, directive) ->
-      let config = state.Mcp_server.room_config in
+      let config = state.Mcp_server.workspace_config in
       let action_str =
         match directive with
         | `Pause -> "pause"
@@ -631,7 +628,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         match directive with `Pause | `Resume -> true | `Wakeup -> false
       in
       let process_one name =
-        let read_result = Keeper_types.read_meta config name in
+        let read_result = Keeper_meta_store.read_meta config name in
         let meta_opt =
           match read_result with
           | Ok (Some m) -> Some m
@@ -667,11 +664,11 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
                    {
                      meta with
                      paused = target;
-                     updated_at = Keeper_types.now_iso ();
+                     updated_at = Keeper_meta_contract.now_iso ();
                    }
                  in
                  (match
-                    Keeper_types.write_meta ~force:true config updated_meta
+                    Keeper_meta_store.write_meta ~force:true config updated_meta
                   with
                   | Ok () -> ()
                   | Error err ->
@@ -697,8 +694,8 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
       let ok_count =
         List.fold_left
           (fun acc r ->
-            match Yojson.Safe.Util.member "ok" r with
-            | `Bool true -> acc + 1
+            match Json_util.assoc_member_opt "ok" r with
+            | Some (`Bool true) -> acc + 1
             | _ -> acc)
           0 results
       in

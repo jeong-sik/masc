@@ -1,0 +1,11 @@
+(** Tool-neutral workflow rejection payload builder. *)
+
+val payload_json
+  :  ?rule_id:string
+  -> ?tool_suggestion:string
+  -> ?hint:string
+  -> ?scope_policy:string
+  -> ?alternatives:string list
+  -> ?extra_fields:(string * Yojson.Safe.t) list
+  -> string
+  -> string

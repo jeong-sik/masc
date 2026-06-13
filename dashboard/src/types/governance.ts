@@ -52,7 +52,7 @@ export interface GovernanceJudgment {
 }
 
 export interface GovernanceDecisionItem {
-  kind: 'case' | string
+  kind: 'case' | 'petition'
   id: string
   topic: string
   status: string
@@ -94,7 +94,7 @@ interface GovernancePetition {
 interface GovernanceCaseBrief {
   id: string
   author: string
-  stance: 'support' | 'oppose' | 'neutral' | string
+  stance: 'support' | 'oppose' | 'neutral'
   summary: string
   evidence_refs: string[]
   created_at?: string | null
@@ -103,7 +103,7 @@ interface GovernanceCaseBrief {
 interface GovernanceExecutionOrder {
   id: string
   case_id: string
-  status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked' | string
+  status: 'queued_auto' | 'needs_human_gate' | 'auto_executed' | 'done' | 'denied' | 'blocked'
   risk_class?: 'low' | 'high' | string | null
   action_request?: GovernanceResolvedAction | null
   created_at?: string | null
@@ -147,8 +147,8 @@ export interface GovernanceTimelineEvent {
 export interface GovernanceJudgeSummary {
   judge_online?: boolean
   refreshing?: boolean
-  status?: 'online' | 'refreshing' | 'stale_visible' | 'offline' | 'backoff' | string
-  degraded_reason?: 'timeout' | 'error' | 'backoff' | string | null
+  status?: 'online' | 'refreshing' | 'stale_visible' | 'offline' | 'backoff'
+  degraded_reason?: 'timeout' | 'error' | 'backoff' | null
   cached_judgments_visible?: boolean
   generated_at?: string | null
   expires_at?: string | null

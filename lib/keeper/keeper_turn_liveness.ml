@@ -1,95 +1,27 @@
-(* Keeper_turn_liveness — phase-buffer cascade liveness decisions and turn
+(* Keeper_turn_liveness — phase-buffer runtime liveness decisions and turn
    livelock configuration.
 
-   Provider-specific knowledge lives in [Cascade_capacity_probe]; this
+   Provider-specific knowledge lives in [Runtime_capacity_probe]; this
    module routes probeable URLs through that registry without naming
    any single provider.
 
    Extracted from keeper_unified_turn.ml (L328-499) during the god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
-type phase_buffer_liveness_decision =
-  | Keep_effective_cascade of string
-  | Probe_phase_buffer_urls of
-      { effective_cascade : string
-      ; fallback_cascade : string
-      ; probeable_base_urls : string list
-      }
-
-let decide_phase_buffer_liveness
-      ?resolve_runtime_url
-      ~(base_cascade : string)
-      ~(effective_cascade : string)
-      (labels : string list)
-  : phase_buffer_liveness_decision
-  =
-  let resolve_runtime_url =
-    match resolve_runtime_url with
-    | Some resolve_runtime_url -> resolve_runtime_url
-    | None -> Cascade_runtime_candidate.runtime_url_of_label
-  in
-  let normalized_base = Keeper_cascade_profile.normalize_declared_name base_cascade in
-  let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
-  in
-  if
-    (not (String.equal normalized_effective Keeper_config.phase_buffer_cascade_name))
-    || String.equal normalized_base Keeper_config.phase_buffer_cascade_name
-  then Keep_effective_cascade normalized_effective
-  else (
-    let probeable_urls =
-      labels
-      |> List.filter_map resolve_runtime_url
-      |> List.filter (fun url -> Cascade_capacity_probe.can_probe ~url)
-      |> dedupe_keep_order
-    in
-    match probeable_urls with
-    | [] -> Keep_effective_cascade normalized_effective
-    | probeable_base_urls ->
-      Probe_phase_buffer_urls
-        { effective_cascade = normalized_effective
-        ; fallback_cascade = normalized_base
-        ; probeable_base_urls
-        })
-;;
-
-let fail_open_phase_buffer_when_unavailable
-      ?resolve_runtime_url
-      ?probe_base_url
-      ~(base_cascade : string)
-      ~(effective_cascade : string)
-      (labels : string list)
-  : string
-  =
-  match
-    decide_phase_buffer_liveness ?resolve_runtime_url ~base_cascade ~effective_cascade labels
-  with
-  | Keep_effective_cascade cascade -> cascade
-  | Probe_phase_buffer_urls { effective_cascade; fallback_cascade; probeable_base_urls } ->
-    let probe_base_url =
-      match probe_base_url with
-      | Some probe -> Some probe
-      | None ->
-        (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-         | Some sw, Some net ->
-           Some
-             (fun base_url ->
-               Option.is_some (Cascade_capacity_probe.probe ~sw ~net ~url:base_url ()))
-         | _ -> None)
-    in
-    (match probe_base_url with
-     | None -> effective_cascade
-     | Some probe ->
-       if List.exists probe probeable_base_urls
-       then effective_cascade
-       else fallback_cascade)
-;;
+(* runtime→Runtime 숙청: phase-buffer liveness probe 기계 제거.
+   per-phase runtime override 가 사라진 뒤(단일 runtime) effective_runtime 는
+   항상 base_runtime 와 같으므로 decide_phase_buffer_liveness 의 probe 분기
+   (effective == phase_buffer && base != phase_buffer 일 때만 발동)는 죽은
+   코드였다. fail_open_phase_buffer_when_unavailable 도 항상 effective_runtime
+   를 그대로 반환 — 호출자(resolve_runtime)가 직접 base 를 쓴다. *)
 
 (** PR-B: saturation pre-skip support (provider-agnostic).
 
-    When every label in the resolved cascade points at the same
-    [base_url] AND a registered [Cascade_capacity_probe] recognises
+    When every label in the resolved runtime points at the same
+    [base_url] AND a registered [Runtime_capacity_probe] recognises
     that URL, we can pre-check the probe cache before paying an
     [Agent.run] dispatch.  If the probe reports
     [process_available <= 0] the request would queue on a busy slot

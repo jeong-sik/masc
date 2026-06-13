@@ -32,7 +32,7 @@
 
 open Alcotest
 
-module I = Masc_mcp.Institution_eio
+module I = Masc.Institution_eio
 
 (* --- outcome_of_string --------------------------------------------- *)
 

@@ -1,52 +1,17 @@
-(** Keeper_tool_policy — tool access control, presets, and allowed-tool resolution.
+(** Keeper_tool_policy — keeper tool surface and denylist resolution.
 
-    Preset definitions are loaded from [config/tool_policy.toml] at startup
-    via {!Keeper_tool_policy_config}.  Consumes {!Keeper_tool_registry} for
-    candidate aggregation and core tools.
+    Tool access is descriptor/registry driven with denylist filtering only.
+    Policy group classification and config-driven groups have been removed.
 
     @since v2.200.0 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringSet : Set.S with type elt = string
 
-(** {1 Policy Initialization} *)
-
-(** Load tool policy configuration from [config/tool_policy.toml].
-    Must be called once at server startup before any preset resolution. *)
-val init_policy_config :
-  base_path:string -> (unit, string) result
-
-(** Return the loaded policy config, if any.  Used for validation. *)
-val policy_config_for_validation :
-  unit -> Keeper_tool_policy_config.t option
-
-(** Reset the loaded policy config and one-shot unloaded-accessor warning
-    state. Intended for isolated regression tests only. *)
-val reset_policy_config_for_test : unit -> unit
-
-(** {1 Preset Names and Mapping} *)
-
-(** Convert a [tool_preset] variant to its string name. *)
-val preset_name_of_tool_preset : tool_preset -> string
-
-(** Return configured preset names (excluding "full") for schema enum generation. *)
-val configured_preset_names : unit -> string list
-
-(** Check if [agent_preset] subsumes [required_preset] per the config hierarchy. *)
-val preset_can_satisfy :
-  agent_preset:string -> required_preset:string -> bool
-
-(** {1 Workflow and Shell Permissions} *)
-
-val allows_workflow_for_preset : tool_preset -> bool
-val allows_shell_write_for_preset : tool_preset -> bool
-
 (** {1 MASC Schema Injection} *)
-
-(** Inline MCP-runtime tools that are safe for keepers without an MCP session
-    context. Shared by keeper policy and MCP protocol context metadata. *)
-val keeper_safe_inline_tools : string list
 
 val is_keeper_safe_inline_tool : string -> bool
 
@@ -62,12 +27,10 @@ val keeper_supported_masc_schemas :
 val keeper_supported_masc_tool_names_from_schemas :
   Masc_domain.tool_schema list -> string list
 
-(** Filter names to only those present in the injected MASC set. *)
-val select_existing_masc_tool_names : string list -> string list
 
-(** {1 Tool Access Lookup}
+(** {1 Tool Surface Lookup}
 
-    Per-tool access checks using immutable StringSet. *)
+    Per-tool candidate/deny checks using immutable StringSet. *)
 
 type tool_access_lookup = {
   candidate_names : string list;
@@ -82,14 +45,13 @@ val tool_name_set : string list -> StringSet.t
 (** Build a lookup structure from keeper metadata. *)
 val tool_access_lookup_of_meta : keeper_meta -> tool_access_lookup
 
-(** Check if a tool passes candidate + policy + deny filters. *)
-val filter_by_access : lookup:tool_access_lookup -> string -> bool
-
-(** Check candidate membership minus denied, ignoring policy.
-    Used as execution gate for BM25-discovered tools. *)
+(** Candidate reachability: registered candidate and not denied.
+    Per-keeper tool_access/allow does not gate execution — only the denylist
+    bites. Used as the execution gate for BM25-discovered tools. *)
 val filter_by_universe : lookup:tool_access_lookup -> string -> bool
 
-(** Execution gate: core tools bypass policy, others require allowlist.
+(** Execution gate: core tools bypass candidate_set; other tools must be
+    registered candidates and not denied.
     Rejects hallucinated tool names not in candidate_set. *)
 val can_execute : lookup:tool_access_lookup -> string -> bool
 
@@ -98,14 +60,8 @@ val can_execute : lookup:tool_access_lookup -> string -> bool
 (** Policy-filtered MASC tool names for a keeper. *)
 val keeper_masc_tool_names : keeper_meta -> string list
 
-(** Policy-filtered MASC tool schemas for a keeper. *)
-val keeper_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
-
 (** Universe (policy-independent) MASC tool schemas for BM25 indexing. *)
 val keeper_universe_masc_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
-
-(** Default model tools (keeper_model_tools + voice + tool_search). *)
-val keeper_default_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
 (** {1 E6: .masc/ Write Protection} *)
 
@@ -123,19 +79,17 @@ val is_masc_write_allowed : string -> bool
 
     Two layers:
     - Shard floor: [removable=false] shards (currently [base] = local core).
-    - Essential MASC: coordination + web lookup so a Failing keeper can
-      check coordination state, look up information for recovery, and
-      defer to operator approval. Mirrors [masc.essential] in
-      [config/tool_policy.toml]. Sync regression in
-      [test_failing_minimum_essential]. *)
+    - Essential MASC: workspace + web lookup so a Failing keeper can
+      check workspace state, look up information for recovery, and
+      defer to operator approval. Hardcoded in this module.
+      Sync regression in [test_failing_minimum_essential]. *)
 val failing_minimum_tool_names : unit -> string list
 
 (** Essential MASC tool names included in Failing recovery floor.
-    SSOT: [config/tool_policy.toml] [masc.essential]. Exposed for
-    sync regression test. *)
+    Hardcoded. Exposed for sync regression test. *)
 val essential_masc_minimum_names : string list
 
-(** Policy-filtered allowed tool names.
+(** Active descriptor/registry tool names minus denied tools.
     Returns empty list when [write_done] is true.
     When [phase] is [Failing] and decision layer level >= 2,
     returns [failing_minimum_tool_names] instead (recovery floor). *)
@@ -147,23 +101,16 @@ val keeper_allowed_tool_names :
 (** Universe tool names: candidates minus denied, no policy filter. *)
 val keeper_universe_tool_names : keeper_meta -> string list
 
-(** Preset-scoped universe: preset allowlist + core_always - denied. *)
-val keeper_preset_universe_tool_names : keeper_meta -> string list
-
-(** Tools safe to call on the keeper's last turn. *)
-val last_turn_safe_tool_names : unit -> string list
+(** Tool search scope: active candidates + core_always - denied. *)
+val keeper_tool_search_scope : keeper_meta -> string list
 
 (** {1 Tool Schema Assembly} *)
-
-(** Policy-filtered model tool schemas. *)
-val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Masc_domain.tool_schema list
 
 (** Universe model tool schemas for Agent.run(). *)
 val keeper_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
 
-(** Preset-scoped universe model tool schemas for BM25 indexing. *)
-val keeper_preset_universe_model_tools : keeper_meta -> Masc_domain.tool_schema list
+(** Active descriptor/registry model tool schemas for BM25 indexing. *)
+val keeper_model_tool_schemas : keeper_meta -> Masc_domain.tool_schema list
 
 (** Filter schemas by a set of allowed names.  O(1) per schema. *)
 val filter_schemas_by_names :
@@ -178,9 +125,6 @@ val dedupe_tool_schemas :
 (** Lookup tool hint (first sentence + enum/required hints) by name.
     Returns [None] for unknown tools. *)
 val tool_hint_of : string -> string option
-
-(** Check if a tool name is in the keeper denied set. *)
-val is_keeper_denied : string -> bool
 
 (** Check if a tool requires MCP context injection. *)
 val is_keeper_mcp_context_required : string -> bool

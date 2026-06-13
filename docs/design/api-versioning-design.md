@@ -15,7 +15,7 @@ code_refs:
 
 ## 1. Problem Statement
 
-masc-mcp exposes 4 API surfaces (HTTP REST, MCP JSON-RPC, gRPC, WebSocket).
+masc exposes 4 API surfaces (HTTP REST, MCP JSON-RPC, gRPC, WebSocket).
 MCP and gRPC have version negotiation. HTTP REST and Tool Schemas do not.
 
 When a breaking change ships:
@@ -30,7 +30,7 @@ When a breaking change ships:
 | Surface | Endpoints | Version Mechanism | Gap |
 |---------|-----------|-------------------|-----|
 | **MCP JSON-RPC** | `/mcp`, `/sse` | `protocolVersion` in initialize (4 versions: 2024-11-05 .. 2025-11-25) | None (well-versioned) |
-| **gRPC** | 6 RPCs | `masc.coordination.v1` package | None (proto3 compat rules apply) |
+| **gRPC** | 6 RPCs | `masc.workspace collaboration.v1` package | None (proto3 compat rules apply) |
 | **HTTP REST** | 70+ under `/api/v1/` | Hardcoded path prefix | **No v2 path, no negotiation, no deprecation** |
 | **WebSocket** | `/ws` | Shares MCP protocol version | None (inherits MCP) |
 | **Tool Schemas** | 305+ tools | Catalog + ratchet tests | **No soft-removal compatibility lane** |
@@ -97,7 +97,7 @@ type tool_schema = {
 **Wire format** (JSON-RPC `tools/list` response):
 ```json
 {
-  "name": "masc_room_strategy_set",
+  "name": "masc_workspace_strategy_set",
   "description": "...",
   "inputSchema": { ... },
   "annotations": {
@@ -118,7 +118,7 @@ type tool_schema = {
 
 ### 5.3 gRPC: Proto3 Compatibility Rules (Already Sufficient)
 
-gRPC under `masc.coordination.v1` follows standard proto3 rules:
+gRPC under `masc.workspace collaboration.v1` follows standard proto3 rules:
 - Fields can be added (new field number)
 - Fields can be deprecated (reserved keyword)
 - Fields must never be removed or renumbered

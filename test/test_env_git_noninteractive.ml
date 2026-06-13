@@ -7,33 +7,15 @@
    - [Env_keeper_scrub.filter_environment] strips scrubbed keys while
      preserving pass-through entries and entries without ['='] *)
 
-open Masc_mcp
+open Masc
 
 let fail msg = failwith msg
 let assert_true msg b = if not b then fail msg
 let assert_false msg b = if b then fail msg
 
-let assert_list_eq ~msg expected got =
-  if List.length expected <> List.length got
-     || List.exists2 (fun a b -> a <> b) expected got
-  then
-    fail
-      (Printf.sprintf "%s: expected=[%s] got=[%s]" msg
-         (String.concat ";" expected) (String.concat ";" got))
-
 let assert_contains ~msg xs needle =
   if not (List.mem needle xs) then
     fail (Printf.sprintf "%s: %s not in list" msg needle)
-
-let with_env key value f =
-  let prior = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    f
 
 let test_env_has_required_keys () =
   let keys = List.map fst Env_git_noninteractive.env in
@@ -90,43 +72,48 @@ let test_inject_injects_when_missing () =
     out_list "GIT_ASKPASS="
 
 let test_scrub_membership () =
-  assert_true "ANTHROPIC_API_KEY scrubbed"
-    (Env_keeper_scrub.is_scrubbed "ANTHROPIC_API_KEY");
-  assert_true "AWS_SECRET_ACCESS_KEY scrubbed"
-    (Env_keeper_scrub.is_scrubbed "AWS_SECRET_ACCESS_KEY");
-  assert_true "ACTIONS_ID_TOKEN_REQUEST_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "ACTIONS_ID_TOKEN_REQUEST_TOKEN");
-  assert_true "OTEL_EXPORTER_OTLP_HEADERS scrubbed"
-    (Env_keeper_scrub.is_scrubbed "OTEL_EXPORTER_OTLP_HEADERS");
-  assert_true "GH_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GH_TOKEN");
-  assert_true "GITHUB_TOKEN scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GITHUB_TOKEN");
-  assert_true "GH_CONFIG_DIR scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GH_CONFIG_DIR");
-  assert_true "SSH_AUTH_SOCK scrubbed"
-    (Env_keeper_scrub.is_scrubbed "SSH_AUTH_SOCK");
-  assert_true "GIT_CONFIG_GLOBAL scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GIT_CONFIG_GLOBAL");
-  assert_true "GIT_CONFIG_COUNT scrubbed"
-    (Env_keeper_scrub.is_scrubbed "GIT_CONFIG_COUNT");
-  assert_false "PATH NOT scrubbed (neutral)"
-    (Env_keeper_scrub.is_scrubbed "PATH")
+  assert_true "ANTHROPIC_API_KEY denied"
+    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY"));
+  assert_true "AWS_SECRET_ACCESS_KEY denied"
+    (not (Env_keeper_scrub.is_allowed "AWS_SECRET_ACCESS_KEY"));
+  assert_true "ACTIONS_ID_TOKEN_REQUEST_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "ACTIONS_ID_TOKEN_REQUEST_TOKEN"));
+  assert_true "OTEL_EXPORTER_OTLP_HEADERS denied"
+    (not (Env_keeper_scrub.is_allowed "OTEL_EXPORTER_OTLP_HEADERS"));
+  assert_true "GH_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "GH_TOKEN"));
+  assert_true "GITHUB_TOKEN denied"
+    (not (Env_keeper_scrub.is_allowed "GITHUB_TOKEN"));
+  assert_true "GH_CONFIG_DIR denied"
+    (not (Env_keeper_scrub.is_allowed "GH_CONFIG_DIR"));
+  assert_true "SSH_AUTH_SOCK denied"
+    (not (Env_keeper_scrub.is_allowed "SSH_AUTH_SOCK"));
+  assert_true "GIT_CONFIG_GLOBAL denied"
+    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_GLOBAL"));
+  assert_true "GIT_CONFIG_COUNT denied"
+    (not (Env_keeper_scrub.is_allowed "GIT_CONFIG_COUNT"));
+  assert_true "PATH allowed"
+    (Env_keeper_scrub.is_allowed "PATH")
 
 let test_scrub_exact_match_only () =
-  (* Prefix match is explicitly a non-goal. *)
-  assert_false "ANTHROPIC_API_KEY_SUFFIX not scrubbed (exact match)"
-    (Env_keeper_scrub.is_scrubbed "ANTHROPIC_API_KEY_SUFFIX");
-  assert_false "PREFIX_ANTHROPIC_API_KEY not scrubbed (exact match)"
-    (Env_keeper_scrub.is_scrubbed "PREFIX_ANTHROPIC_API_KEY")
+  (* Suffix pattern now blocks anything ending in _API_KEY. *)
+  assert_true "ANTHROPIC_API_KEY_SUFFIX denied (suffix match)"
+    (not (Env_keeper_scrub.is_allowed "ANTHROPIC_API_KEY_SUFFIX"));
+  assert_true "PREFIX_ANTHROPIC_API_KEY denied (suffix match)"
+    (not (Env_keeper_scrub.is_allowed "PREFIX_ANTHROPIC_API_KEY"))
 
 let test_scrub_and_pass_disjoint () =
+  let safe =
+    [ "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
+    ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"
+    ]
+  in
   List.iter
     (fun p ->
-      assert_false
-        (Printf.sprintf "pass-list entry %s must not be on scrub list" p)
-        (Env_keeper_scrub.is_scrubbed p))
-    Env_keeper_scrub.pass
+      assert_true
+        (Printf.sprintf "safe entry %s must be allowed" p)
+        (Env_keeper_scrub.is_allowed p))
+    safe
 
 let test_filter_environment () =
   let env = [|
@@ -145,9 +132,10 @@ let test_filter_environment () =
   let out = Env_keeper_scrub.filter_environment env in
   let out_list = Array.to_list out in
   assert_contains ~msg:"PATH preserved" out_list "PATH=/usr/bin";
-  assert_contains ~msg:"FOO preserved (neutral)" out_list "FOO=bar";
-  assert_contains ~msg:"entries without = are kept"
-    out_list "malformed_entry_no_equals";
+  assert_false "FOO dropped (not on allowlist)"
+    (List.mem "FOO=bar" out_list);
+  assert_false "malformed_entry_no_equals dropped (not on allowlist)"
+    (List.mem "malformed_entry_no_equals" out_list);
   assert_false "ANTHROPIC_API_KEY stripped"
     (List.exists (fun e -> String.starts_with ~prefix:"ANTHROPIC_API_KEY=" e) out_list);
   assert_false "AWS_SECRET_ACCESS_KEY stripped"
@@ -164,53 +152,6 @@ let test_filter_environment () =
     (List.exists (fun e -> String.starts_with ~prefix:"GIT_CONFIG_GLOBAL=" e) out_list);
   assert_false "GIT_CONFIG_COUNT stripped"
     (List.exists (fun e -> String.starts_with ~prefix:"GIT_CONFIG_COUNT=" e) out_list)
-
-let test_compose_base_with_repo_cli_config_rehomes_git_config () =
-  with_env "HOME" "/operator/home" @@ fun () ->
-  with_env "GH_CONFIG_DIR" "/operator/gh" @@ fun () ->
-  with_env "GIT_CONFIG_GLOBAL" "/operator/.gitconfig" @@ fun () ->
-  with_env "GIT_CONFIG_COUNT" "9" @@ fun () ->
-  with_env "GIT_CONFIG_KEY_3" "credential.helper" @@ fun () ->
-  with_env "GIT_CONFIG_VALUE_3" "osxkeychain" @@ fun () ->
-  let dir = "/tmp/masc-root/gh" in
-  let bundle_root = Filename.dirname dir in
-  let out =
-    Repo_cli_credentials.compose_base_with_repo_cli_config ~dir |> Array.to_list
-  in
-  assert_contains ~msg:"HOME rehomed to bundle root"
-    out ("HOME=" ^ bundle_root);
-  assert_contains ~msg:"GH_CONFIG_DIR rehomed to selected bundle"
-    out ("GH_CONFIG_DIR=" ^ dir);
-  assert_contains ~msg:"GIT_CONFIG_GLOBAL rehomed to bundle gitconfig"
-    out ("GIT_CONFIG_GLOBAL=" ^ Filename.concat bundle_root "gitconfig");
-	  assert_contains ~msg:"git config count pinned"
-	    out "GIT_CONFIG_COUNT=4";
-	  assert_contains ~msg:"safe.directory key pinned"
-	    out "GIT_CONFIG_KEY_0=safe.directory";
-	  assert_contains ~msg:"safe.directory value pinned"
-	    out "GIT_CONFIG_VALUE_0=*";
-	  assert_contains ~msg:"ambient credential helper reset"
-	    out "GIT_CONFIG_KEY_1=credential.helper";
-	  assert_contains ~msg:"ambient credential helper reset value"
-	    out "GIT_CONFIG_VALUE_1=";
-	  assert_contains ~msg:"github helper key pinned"
-	    out "GIT_CONFIG_KEY_2=credential.https://github.com.helper";
-	  assert_contains ~msg:"github helper command pinned"
-	    out "GIT_CONFIG_VALUE_2=!gh auth git-credential";
-	  assert_contains ~msg:"useHttpPath key pinned"
-	    out "GIT_CONFIG_KEY_3=credential.useHttpPath";
-	  assert_contains ~msg:"useHttpPath value pinned"
-	    out "GIT_CONFIG_VALUE_3=true";
-  assert_false "operator HOME stripped"
-    (List.mem "HOME=/operator/home" out);
-  assert_false "operator GH_CONFIG_DIR stripped"
-    (List.mem "GH_CONFIG_DIR=/operator/gh" out);
-  assert_false "operator GIT_CONFIG_GLOBAL stripped"
-    (List.mem "GIT_CONFIG_GLOBAL=/operator/.gitconfig" out);
-	  assert_false "operator GIT_CONFIG_KEY_N stripped"
-	    (List.mem "GIT_CONFIG_KEY_3=credential.helper" out);
-	  assert_false "operator GIT_CONFIG_VALUE_N stripped"
-	    (List.mem "GIT_CONFIG_VALUE_3=osxkeychain" out)
 
 let test_no_forgotten_git_askpass_literals () =
   (* Enforcement grep: outside of the SSOT module itself, [lib/] must not
@@ -269,8 +210,5 @@ let () =
   test_scrub_exact_match_only ();
   test_scrub_and_pass_disjoint ();
   test_filter_environment ();
-  test_compose_base_with_repo_cli_config_rehomes_git_config ();
   test_no_forgotten_git_askpass_literals ();
-  (* Silence unused-value warning if a helper is unused in a future edit. *)
-  let _ = assert_list_eq in
   print_endline "test_env_git_noninteractive: OK"

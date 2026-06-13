@@ -39,7 +39,7 @@ type harness_verdict_item =
   ; agent_name : string
   ; gate : string
   ; verdict : string
-  ; evaluator_cascade : string
+  ; evaluator_runtime : string
   ; fallback_reason : string option
   }
 
@@ -50,7 +50,7 @@ type harness_verdict_item =
     access in [keeper_compact_policy] when assembling the
     snapshot JSON.  [trigger] is the closed-sum classification
     of the gate that fired — pair with [Compaction_trigger.to_label]
-    for Prometheus emission and [to_detail_json] for SSE/JSON. *)
+    for Otel_metric_store emission and [to_detail_json] for SSE/JSON. *)
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string
@@ -205,4 +205,4 @@ val set_wake_payload_store_for_testing : base_dir:string -> unit
     eval-calibration stats, recent verdicts, pre-compact
     events, and wake-payload telemetry — clipped to the
     [?since] / [?until] window when provided. *)
-val json : config:Coord.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t
+val json : config:Workspace.config -> ?since:string -> ?until:string -> unit -> Yojson.Safe.t

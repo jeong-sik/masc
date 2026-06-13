@@ -48,14 +48,28 @@ let default_proactive_enabled = true
 let default_proactive_idle_sec = 120
 let default_proactive_cooldown_sec = 300
 let approval_queue_stale_max_wait_sec = 600.0
-let default_room_signal_prompt_enabled = false
-let default_goal_horizon_max_chars = 480
-let default_drift_max_clauses = 6
-let prompt_render_max_bytes = 320
-let legacy_provider_filter_name = "allowed_providers"
 
-let keeper_room_signal_prompt_enabled_override () =
-  bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
+(* Environment-configurable caps. Defaults were raised from 480/320 to 4096
+   because silent truncation in the dashboard made operators think edits were
+   not persisting. Operators can lower them via env vars if a deployment needs
+   tighter prompt budgets. *)
+let default_goal_horizon_max_chars =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_HORIZON_MAX_CHARS" with
+  | Some v ->
+    (match int_of_string_opt (String.trim v) with
+     | Some n when n > 0 -> n
+     | _ -> 4096)
+  | None -> 4096
+
+let default_drift_max_clauses = 6
+
+let prompt_render_max_bytes =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_SELF_MODEL_MAX_BYTES" with
+  | Some v ->
+    (match int_of_string_opt (String.trim v) with
+     | Some n when n > 0 -> n
+     | _ -> 4096)
+  | None -> 4096
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
@@ -64,9 +78,6 @@ let removed_keeper_input_key_names =
     "models";
     "allowed_models";
     "active_model";
-    legacy_provider_filter_name;
-    "presence_keepalive";
-    "presence_keepalive_sec";
     "trigger_mode";
     "policy_action_budget";
     "initiative_scope";
@@ -75,9 +86,14 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
-    "tool_preset";
-    "tool_also_allow";
-    "tool_custom_allowlist";
+    "persona_ref";
+    "runtime_ref";
+  ]
+
+let removed_keeper_sandbox_input_key_names =
+  [
+    "sandbox_profile";
+    "network_mode";
   ]
 
 let non_public_keeper_input_key_names =
@@ -106,13 +122,13 @@ let removed_keeper_msg_input_key_names =
     "new_will";
     "new_needs";
     "new_desires";
-  ]
 
-let removed_keeper_meta_key_names =
-  [
-    "persona_profile_path";
+    (* Tool-task coupling purged (#19806): keeper turns no longer accept
+       per-message tool forcing hints; reject them so older harnesses fail
+       loud rather than have the keys silently ignored. *)
+    "required_tools";
+    "required_tool_names";
   ]
-  @ removed_keeper_input_key_names
 
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with
@@ -131,14 +147,27 @@ let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
          tool_name (String.concat ", " fields)
    | [] -> ());
   let present = present_json_keys removed_keeper_input_key_names args in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-      Error
-        (Printf.sprintf
-           "removed keeper args for %s: %s. Keepers are always-on by definition."
-           tool_name
-           (String.concat ", " fields))
+  if present <> []
+  then
+    Error
+      (Printf.sprintf
+         "removed keeper args for %s: %s. Keepers are always-on by definition."
+         tool_name
+         (String.concat ", " present))
+  else
+      let sandbox_fields =
+        present_json_keys removed_keeper_sandbox_input_key_names args
+      in
+      if sandbox_fields = []
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "removed keeper sandbox args for %s: %s. Configure sandbox posture \
+              in keeper TOML/profile defaults; keeper runtime contracts do not \
+              carry backend details."
+             tool_name
+             (String.concat ", " sandbox_fields))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
   let present = present_json_keys removed_keeper_msg_input_key_names args in
@@ -153,26 +182,6 @@ let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
 
 let utf8_repair_string (s : string) : string =
   let len = String.length s in
@@ -194,8 +203,8 @@ let utf8_repair_string (s : string) : string =
 
 (* ── Self-model / goal-horizon text normalization ───────────── *)
 
-(* #10552: trim BOTH before and after [utf8_safe_prefix_bytes].  The
-   pre-fix sequence was [trim → prefix], but [utf8_safe_prefix_bytes]
+(* #10552: trim BOTH before and after [String_util.utf8_prefix].  The
+   pre-fix sequence was [trim → prefix], but [String_util.utf8_prefix]
    can cut at a position that leaves trailing ASCII whitespace
    (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
    the prefix at max_bytes=320 backs up to byte 318, ending at the
@@ -210,13 +219,13 @@ let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
   else
-    let cut = utf8_safe_prefix_bytes s ~max_bytes in
+    let cut = String_util.utf8_prefix ~max_bytes s in
     String.trim cut
 
 let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
   let s = String.trim raw in
   if s = "" then ""
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len
+  else String_util.utf8_prefix ~max_bytes:max_len s
 
 let normalize_goal_horizon_opt (raw_opt : string option) : string option =
   match raw_opt with
@@ -253,20 +262,7 @@ let split_semicolon_clauses (raw : string) : string list =
   |> List.map String.trim
   |> List.filter (fun s -> s <> "")
 
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec drop k ys =
-        if k <= 0 then ys
-        else
-          match ys with
-          | [] -> []
-          | _ :: tl -> drop (k - 1) tl
-      in
-      drop (len - n) xs
+let take_last = List_util.take_last
 
 let compact_self_model_text
     ?(max_clauses = default_drift_max_clauses)

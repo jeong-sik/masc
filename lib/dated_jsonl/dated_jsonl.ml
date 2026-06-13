@@ -1,7 +1,7 @@
 (** Date-split JSONL storage.
 
     Extracts the [YYYY-MM/DD.jsonl] pattern originally used by
-    {!Coord_utils_ops.log_event} into a reusable module.
+    {!Workspace_utils_ops.log_event} into a reusable module.
 
     Layout:
     {v
@@ -325,9 +325,10 @@ let append t json =
 
 let set_append_guard guard = Atomic.set append_guard guard
 
-let read_recent t n =
+let read_recent ?(offset=0) t n =
   if n <= 0 then []
   else begin
+    let skip = ref offset in
     let collected = ref [] in
     let count = ref 0 in
     let months = list_month_dirs t.base_dir in
@@ -339,17 +340,20 @@ let read_recent t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let remaining = n - !count in
-           let lines = load_tail_lines path ~max_lines:remaining in
+           let need = n - !count + !skip in
+           let lines = load_tail_lines path ~max_lines:need in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
-             if !count < n then begin
-               (try
-                  let json = Yojson.Safe.from_string line in
+             if !count >= n then raise_notrace Done;
+             (try
+                let json = Yojson.Safe.from_string line in
+                if !skip > 0 then
+                  decr skip
+                else begin
                   collected := json :: !collected;
                   incr count
-                with Yojson.Json_error _ -> ())
-             end
+                end
+              with Yojson.Json_error _ -> ())
            ) rev_lines
          ) days
        ) months
@@ -357,9 +361,10 @@ let read_recent t n =
     !collected
   end
 
-let read_recent_lines t n =
+let read_recent_lines ?(offset=0) t n =
   if n <= 0 then []
   else begin
+    let skip = ref offset in
     let collected = ref [] in
     let count = ref 0 in
     let months = list_month_dirs t.base_dir in
@@ -371,11 +376,14 @@ let read_recent_lines t n =
          List.iter (fun d ->
            if !count >= n then raise_notrace Done;
            let path = Filename.concat month_path d in
-           let remaining = n - !count in
-           let lines = load_tail_lines path ~max_lines:remaining in
+           let need = n - !count + !skip in
+           let lines = load_tail_lines path ~max_lines:need in
            let rev_lines = List.rev lines in
            List.iter (fun line ->
-             if !count < n then begin
+             if !count >= n then raise_notrace Done;
+             if !skip > 0 then
+               decr skip
+             else begin
                collected := line :: !collected;
                incr count
              end
@@ -423,7 +431,70 @@ let iter_range t ~since ~until f =
       end)
       months
 
-let count_entries_uncached t =
+(* Per-file non-empty-line count cached as (boundary, count). Day-files are
+   append-only and split by date, so the count of newline-terminated lines
+   before a byte boundary is a pure function of the file prefix: a closed
+   (past-day) file hits the cache forever, and the growing current-day file
+   re-reads only the bytes appended since the last call instead of the whole
+   file. A boundary past the current size (prune/rewrite) falls back to a
+   full rescan, so the cached count never drifts.
+
+   Counting contract: only '\n'-terminated lines are counted. A trailing
+   partially-flushed line is invisible until its newline lands — for the
+   monotonic dashboard counters served by [count_entries] that is the
+   correct staleness direction (undercount by at most the in-flight line).
+   Audit callers that must count an unterminated trailing line use
+   [count_entries_uncached]. *)
+type file_count_entry =
+  { fc_boundary : int
+  ; fc_count : int
+  }
+
+let file_count_cache : (string, file_count_entry) Hashtbl.t = Hashtbl.create 64
+let file_count_cache_mu = Stdlib.Mutex.create ()
+
+let count_non_empty_lines_cached path =
+  let size = try (Unix.stat path).Unix.st_size with Unix.Unix_error _ -> -1 in
+  if size < 0
+  then count_non_empty_lines path
+  else begin
+    let cached =
+      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+        Hashtbl.find_opt file_count_cache path)
+    in
+    match cached with
+    | Some e when e.fc_boundary = size -> e.fc_count
+    | cached ->
+      let store_label = Filename.basename (Filename.dirname path) in
+      let from, base =
+        match cached with
+        | Some e when e.fc_boundary < size -> e.fc_boundary, e.fc_count
+        | Some _ ->
+          (* boundary past the file size: shrink/rotation — full re-parse *)
+          Otel_metric_store_core.inc_counter
+            Otel_builtin_metric_names.metric_telemetry_cache_rescans
+            ~labels:[ ("store", store_label) ]
+            ();
+          0, 0
+        | None -> 0, 0
+      in
+      let delta, boundary =
+        Fs_compat.fold_appended_lines ~path ~from ~init:0
+          ~f:(fun acc _line -> acc + 1)
+      in
+      Otel_metric_store_core.inc_counter
+        Otel_builtin_metric_names.metric_telemetry_scanned_bytes
+        ~labels:[ ("store", store_label) ]
+        ~delta:(Float.of_int (max 0 (boundary - from)))
+        ();
+      let count = base + delta in
+      Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+        Hashtbl.replace file_count_cache path
+          { fc_boundary = boundary; fc_count = count });
+      count
+  end
+
+let fold_day_file_counts t ~counter =
   let months = list_month_dirs t.base_dir in
   List.fold_left (fun total month ->
     let month_path = Filename.concat t.base_dir month in
@@ -431,62 +502,98 @@ let count_entries_uncached t =
     total
     + List.fold_left (fun month_total day ->
         let path = Filename.concat month_path day in
-        month_total + count_non_empty_lines path
+        month_total + counter path
       ) 0 days
   ) 0 months
 
-(* RFC-0162 §3.2: process-local TTL cache around [count_entries].
+(* Truly uncached: every day-file is re-read byte by byte. Audit/test callers
+   that must not observe any caching use this directly. *)
+let count_entries_uncached t = fold_day_file_counts t ~counter:count_non_empty_lines
 
-   The dashboard refreshes Tool Monitor / Fleet Health / Tool Quality
-   surfaces every 30 s. Each surface calls [count_entries] on the
-   same store (`.masc/tool_calls/`, `.masc/oas-events/`, etc.),
-   opening and closing every day-file to count newlines. With 30
-   day-files × 15 MB on a single store this turns into a hot
-   read-side load that competes for the same OS fd budget as the
-   write-side append it is reporting on.
+(* Per-file-cached full count. O(appended bytes) in steady state: closed
+   day-files hit [file_count_cache] outright and the growing current-day
+   file re-reads only its delta. *)
+let count_entries_incremental t =
+  fold_day_file_counts t ~counter:count_non_empty_lines_cached
 
-   The cached count is good for [count_cache_ttl_sec] seconds. A
-   stale count is acceptable for the dashboard surface: appends are
-   monotonic increases, so a slightly stale total under-counts by
-   at most [ttl × append_rate], which is well below the dashboard
-   refresh granularity. Tests and audit callers that need the
-   live count use [count_entries_uncached]. *)
-let count_cache_ttl_sec = 10.0
-
-type count_cache_entry =
-  { entry_count : int
-  ; computed_at : float
-  }
-
-let count_cache : (string, count_cache_entry) Hashtbl.t = Hashtbl.create 8
-let count_cache_mu = Stdlib.Mutex.create ()
-
-let count_entries t =
-  let key = t.base_dir in
-  let now = Unix.gettimeofday () in
-  let cached_opt =
-    Stdlib.Mutex.protect count_cache_mu (fun () ->
-      match Hashtbl.find_opt count_cache key with
-      | Some entry when now -. entry.computed_at < count_cache_ttl_sec ->
-        Some entry.entry_count
-      | _ -> None)
-  in
-  match cached_opt with
-  | Some n -> n
-  | None ->
-    let n = count_entries_uncached t in
-    Stdlib.Mutex.protect count_cache_mu (fun () ->
-      Hashtbl.replace count_cache key { entry_count = n; computed_at = now });
-    n
-;;
+(* The RFC-0162 §3.2 10s-TTL store-level cache that used to sit here is
+   removed: the boundary-keyed per-file cache above makes a [count_entries]
+   call O(appended bytes), so the TTL layer no longer bought anything and
+   only added a staleness window plus a second cache surface to reason
+   about. *)
+let count_entries = count_entries_incremental
 
 let reset_count_cache_for_testing () =
-  Stdlib.Mutex.protect count_cache_mu (fun () -> Hashtbl.reset count_cache)
+  Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
 let read_range t ~since ~until =
   let collected = ref [] in
   iter_range t ~since ~until (fun json -> collected := json :: !collected);
   List.rev !collected
+
+(* Like [read_range] but bounded to the [n] most recent entries within
+   [since, until] (inclusive day range). Reads newest day-file first and
+   only the tail of each file, parsing at most ~[n] entries instead of the
+   whole window. [read_range] parses every entry in the range, which is
+   unbounded over large stores; callers that already pass a result limit
+   should use this so a wide window cannot scan months of multi-MB files.
+   Returns entries oldest-first within the collected set (same convention
+   as [read_recent]). *)
+let read_range_recent ?(offset = 0) t ~since ~until n =
+  if n <= 0
+  then []
+  else (
+    match parse_date since, parse_date until with
+    | None, _ | _, None -> []
+    | Some (since_month, since_day), Some (until_month, until_day) ->
+      let skip = ref offset in
+      let collected = ref [] in
+      let count = ref 0 in
+      let months = list_month_dirs t.base_dir in
+      let exception Done in
+      (try
+         List.iter
+           (fun m ->
+              if String.compare m since_month >= 0
+                 && String.compare m until_month <= 0
+              then begin
+                let month_path = Filename.concat t.base_dir m in
+                let days = list_day_files month_path in
+                List.iter
+                  (fun d ->
+                     if !count >= n then raise_notrace Done;
+                     let day_num = Filename.remove_extension d in
+                     let dominated =
+                       (m = since_month && String.compare day_num since_day < 0)
+                       || (m = until_month && String.compare day_num until_day > 0)
+                     in
+                     if not dominated
+                     then begin
+                       let path = Filename.concat month_path d in
+                       let need = n - !count + !skip in
+                       let lines = load_tail_lines path ~max_lines:need in
+                       let rev_lines = List.rev lines in
+                       List.iter
+                         (fun line ->
+                            if !count >= n then raise_notrace Done;
+                            try
+                              let json = Yojson.Safe.from_string line in
+                              if !skip > 0
+                              then decr skip
+                              else begin
+                                collected := json :: !collected;
+                                incr count
+                              end
+                            with
+                            | Yojson.Json_error _ -> ())
+                         rev_lines
+                     end)
+                  days
+              end)
+           months
+       with
+       | Done -> ());
+      !collected)
 
 let prune t ~days =
   let mutex = Atomic.get t.mutex in

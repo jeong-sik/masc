@@ -45,7 +45,6 @@ let runtime_entries =
     entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
     entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
-    entry ~default:"(none)" "MASC_AUTO_RESPOND" "Auto-respond mode";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
       "Release LLM slot during tool execution (feature flag)";
     entry ~default:"true" Env_config_core.telemetry_enabled_env_key
@@ -105,8 +104,6 @@ let transport_entries =
       "Startup watchdog timeout (seconds)";
     entry ~default:"(none)" "MASC_AGENT_TRANSPORT"
       "Agent transport preference";
-    entry ~default:"false" "MASC_OPENAI_COMPAT"
-      "Enable OpenAI-compatible endpoint";
   ]
 
 let inference_entries =
@@ -228,8 +225,12 @@ let dashboard_entries =
       "Context ratio threshold: handoff-imminent";
     entry ~default:"0.70" "MASC_DASHBOARD_CTX_PREPARING"
       "Context ratio threshold: preparing";
-    entry ~default:"75" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
-      "Execution refresh timeout";
+    entry ~default:"48" "MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S"
+      "Execution refresh timeout (floor 30, ceiling 300)";
+    entry ~default:"120" "MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC"
+      "Execution surface compute timeout (floor 5)";
+    entry ~default:"30" "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC"
+      "Execution-trust surface compute timeout (floor 1)";
     entry ~default:"(none)" "MASC_DASHBOARD_FIXTURE"
       "Dashboard fixture name override";
     entry ~default:"false" "MASC_DASHBOARD_FIXTURES_ENABLED"
@@ -248,6 +249,10 @@ let dashboard_entries =
       "Health penalty for warning context ratio";
     entry ~default:"3600.0" "MASC_DASHBOARD_KEEPER_ACTION_STALE_SEC"
       "Keeper action-age threshold (seconds, 1 hour)";
+    entry ~default:"25" "MASC_DASHBOARD_MISSION_TIMEOUT_SEC"
+      "Mission card compute timeout (floor 1)";
+    entry ~default:"60" "MASC_DASHBOARD_RENDER_TIMEOUT_SEC"
+      "Dashboard render pipeline timeout (floor 5)";
     entry ~default:"0.95" "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
       "Runtime warning context ratio threshold";
     entry ~default:"300.0" "MASC_DASHBOARD_SIGNAL_LIVE_SEC"
@@ -256,6 +261,14 @@ let dashboard_entries =
       "Duration for borderline quiet warning (seconds, 10 min)";
     entry ~default:"1200.0" "MASC_DASHBOARD_SIGNAL_STALE_SEC"
       "Duration after which a signal is stale (seconds, 20 min)";
+    entry ~default:"8" "MASC_DASHBOARD_SHELL_LIGHT_TIMEOUT_SEC"
+      "Shell render timeout — light path (floor 0.5)";
+    entry ~default:"30" "MASC_DASHBOARD_SHELL_PREWARM_TIMEOUT_SEC"
+      "Shell prewarm inner timeout (floor 1)";
+    entry ~default:"35" "MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC"
+      "Shell prewarm outer timeout (floor 5)";
+    entry ~default:"16" "MASC_DASHBOARD_SHELL_TIMEOUT_SEC"
+      "Shell render timeout — full path (floor 1)";
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
     (* RFC-0138 Phase 3 Step 4 — MASC_NAMESPACE_TRUTH_*_TIMEOUT_S env
@@ -451,12 +464,12 @@ let keeper_bootstrap_entries =
       "Keeper stale turn threshold (seconds)";
   ]
 
-let keeper_cascade_entries =
+let keeper_runtime_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST"
-      "Comma-separated provider allowlist for cascade (None=unfiltered)";
-    entry ~default:"enforce" "MASC_CASCADE_ATTEMPT_LIVENESS"
-      "Cascade attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
+    entry ~default:"(none)" "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST"
+      "Comma-separated provider allowlist for runtime (None=unfiltered)";
+    entry ~default:"enforce" "MASC_RUNTIME_ATTEMPT_LIVENESS"
+      "Runtime attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
        Explicit values must be canonical; invalid values raise a config error.";
   ]
 
@@ -470,14 +483,6 @@ let keeper_grpc_entries =
 
 let keeper_keepalive_entries =
   [
-    entry ~default:"180.0" "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"
-      "Max wait in admission queue before abandoning OAS attempt (clamped 5-1200)";
-    entry ~default:"(none)" "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
-      "Max concurrent autonomous keeper turns (clamped 1-8)";
-    entry ~default:"30.0" "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"
-      "Max wait for local keeper turn gate for autonomous cycles (clamped 5-300)";
-    entry ~default:"60.0" "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
-      "Board-reactive wakeup debounce (seconds, clamped 5-300)";
     entry ~default:"30" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       "Heartbeat cycle interval (clamped 5-300 seconds)";
     entry ~default:"0.2" "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"
@@ -504,8 +509,12 @@ let keeper_keepalive_entries =
       "Max seconds a keeper turn id may stay active before livelock guard blocks";
     entry ~default:"600.0" "MASC_KEEPER_TURN_TIMEOUT_SEC"
       "Wall-clock timeout for a single unified turn (clamped 60-900 seconds)";
+    entry ~default:"1800.0" "MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC"
+      "Deprecated compatibility knob; not applied as a MASC timeout around active provider/tool execution";
+    entry ~default:"(none)" "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC"
+      "Parsed compatibility knob; keeper path does not forward until tool execution is excluded";
     entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
-      "Successful room heartbeat after turn counts as presence proof (feature flag)";
+      "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
   ]
 
 let keeper_metrics_entries =
@@ -538,8 +547,8 @@ let keeper_supervisor_entries =
 
 let keeper_tool_entries =
   [
-    entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_CASCADE"
-      "Named cascade profile for LLM reranker";
+    entry ~default:"(none)" "MASC_KEEPER_LLM_RERANK_RUNTIME"
+      "Named runtime profile for LLM reranker";
     entry ~default:"3" "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"
       "Max consecutive failures for same tool+args before blocking (clamped 2-20)";
     entry ~default:"(none)" "MASC_KEEPER_TOOL_AFFINITY_K"
@@ -556,7 +565,7 @@ let local_runtime_entries =
       "Upper bound for local runtime requests (fallback)";
     entry ~default:"0" "MASC_LOCAL_MAX_TOKENS"
       "Upper bound for local runtime requests (primary; falls back to MASC_LLAMA_MAX_TOKENS)";
-    entry ~default:"(none)" "MASC_MCP_URL"
+    entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
   ]
 
@@ -564,26 +573,22 @@ let lock_entries =
   [
     entry ~default:"300.0" "MASC_LOCK_EXPIRY_WARNING_SEC"
       "Lock expiry warning threshold (seconds before expiry)";
-    entry ~default:"1800.0" "MASC_LOCK_TIMEOUT_SEC"
-      "Default lock timeout (seconds, 30 min)";
+    entry ~default:"120.0" "MASC_LOCK_TIMEOUT_SEC"
+      "Default lock timeout (seconds, 2 min)";
   ]
 
-let memory_entries =
-  [
-    entry ~default:"5" "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"
-      "Default importance for OAS-stored memories (clamped 1-10)";
-  ]
+let memory_entries = []
 
 let message_gc_entries =
   [
     entry ~default:"200" "MASC_MESSAGE_MAX_COUNT"
-      "Maximum message files retained per room";
+      "Maximum message files retained per workspace";
   ]
 
 let model_routing_entries =
   [
-    entry ~default:"(none)" "MASC_DEFAULT_CASCADE"
-      "Default cascade label; None when unset";
+    entry ~default:"(none)" "MASC_DEFAULT_RUNTIME"
+      "Default runtime label; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_MODEL"
       "Default model id; None when unset";
     entry ~default:"(none)" "MASC_DEFAULT_PROVIDER"
@@ -592,8 +597,8 @@ let model_routing_entries =
       "Goal dispatch runtime type";
     entry ~default:"(none)" "MASC_GOAL_MODELS"
       "Goal models comma-separated; None when unset";
-    entry ~default:"(none)" "MASC_ROUTING_CASCADE"
-      "Routing cascade for team session routing";
+    entry ~default:"(none)" "MASC_ROUTING_RUNTIME"
+      "Routing runtime for team session routing";
   ]
 
 let oas_sse_entries =
@@ -610,8 +615,8 @@ let operator_entries =
       "Operator judge background loop (feature flag)";
     entry ~default:"60" "MASC_OPERATOR_JUDGE_INTERVAL_SEC"
       "Operator judge interval (clamped >=15 seconds)";
-    entry ~default:"60" "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC"
-      "Coord TTL for operator judge cleanup (clamped >=15 seconds)";
+    entry ~default:"60" "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC"
+      "Workspace TTL for operator judge cleanup (clamped >=15 seconds)";
     entry ~default:"300" "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC"
       "Session TTL for operator judge cleanup (clamped >=30 seconds)";
   ]
@@ -674,6 +679,8 @@ let session_entries =
       "Maximum session age before cleanup (seconds, 1 hour)";
     entry ~default:"60.0" "MASC_SESSION_RATE_LIMIT_WINDOW_SEC"
       "Rate limit window (seconds)";
+    entry ~default:"300.0" "MASC_SESSION_SSE_GRACE_PERIOD_SEC"
+      "Grace period after SSE disconnect before reaping transport session (seconds, 5 min)";
   ]
 
 let shutdown_entries =
@@ -700,8 +707,6 @@ let smart_heartbeat_entries =
 
 let spawn_entries =
   [
-    entry ~default:"7200.0" "MASC_SPAWN_CODING_TIMEOUT_SEC"
-      "Extended timeout for coding mode (seconds, 2 hours)";
     entry ~default:"60.0" "MASC_SPAWN_GRACE_PERIOD_SEC"
       "Grace period before timeout for SIGTERM checkpoint (seconds)";
     entry ~default:"600.0" "MASC_SPAWN_TIMEOUT_SEC"
@@ -852,7 +857,7 @@ let all_categories () =
        @ keeper_sandbox_entries);
     category "keeper_execution"
       (keeper_execution_entries @ compaction_entries @ decision_entries
-       @ keeper_tool_entries @ keeper_cascade_entries
+       @ keeper_tool_entries @ keeper_runtime_entries
        @ keeper_proactive_entries @ keeper_grpc_entries);
     category "keeper_guardrails" keeper_guardrail_entries;
     category "autonomy" (autonomy_entries @ keeper_supervisor_entries);

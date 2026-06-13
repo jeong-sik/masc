@@ -4,18 +4,19 @@
     canonical wire strings byte-for-byte identical to the historical
     untyped output.  PR-3 retired the untyped accessors; this test
     now guards the wire format directly so dashboards /
-    [bin/masc-trace] / Prometheus labels do not drift.
+    [bin/masc-trace] / Otel_metric_store labels do not drift.
 
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
       AuthError / InvalidRequest / NotFound / ContextOverflow /
       NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
-    - all 7 top-level non-Agent / non-Api wrappers (Mcp / Config /
-      Serialization / Io / Orchestration / A2a / Internal) *)
+    - all top-level non-Agent / non-Api wrappers (Mcp / Config /
+      Serialization / Io / Orchestration / Internal) *)
 
-module AE = Masc_mcp.Keeper_agent_error
-module Code = Masc_mcp.Keeper_turn_terminal_code
+module AE = Masc.Keeper_agent_error
+module Code = Masc.Keeper_turn_terminal_code
+module EC = Masc.Keeper_error_classify
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
@@ -43,7 +44,7 @@ let api_cases : (string * SdkE.api_error * string) list =
     , "api_error_network" )
   ; "Timeout", Retry.Timeout { message = "60s" }, "api_error_timeout"
   ; ( "StructuralTimeout"
-    , Retry.Timeout { message = "Turn wall-clock budget exhausted during cascade attempt (budget=554.9s)" }
+    , Retry.Timeout { message = "Turn wall-clock budget exhausted during runtime attempt (budget=554.9s)" }
     , "api_error_oas_agent_execution_timeout" )
   ]
 ;;
@@ -75,7 +76,7 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
     , SdkE.Agent (SdkE.CostBudgetExceeded { spent_usd = 0.42; limit_usd = 0.40 })
     , "agent_error_cost_budget_exceeded:spent_usd=0.42,limit_usd=0.40" )
   ; ( "Agent/CostBudgetUnenforceable"
-    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "provider_k-5.1"; limit_usd = 0.40 })
+    , SdkE.Agent (SdkE.CostBudgetUnenforceable { model_id = "glm-5.1"; limit_usd = 0.40 })
     , "agent_error_cost_budget_unenforceable:runtime=runtime,limit_usd=0.40" )
   ; ( "Agent/IdleDetected"
     , SdkE.Agent (SdkE.IdleDetected { consecutive_idle_turns = 3 })
@@ -90,7 +91,6 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
   ; ( "Orchestration"
     , SdkE.Orchestration (SdkE.UnknownAgent { name = "ghost" })
     , "orchestration_error" )
-  ; "A2a", SdkE.A2a (SdkE.TaskNotFound { task_id = "id" }), "a2a_error"
   ; "Internal", SdkE.Internal "internal issue", "internal_error"
   ]
 ;;
@@ -111,6 +111,44 @@ let test_sdk_typed_wire () =
     sdk_cases
 ;;
 
+let check_parse_split label err ~provider ~model_ ~server =
+  Alcotest.(check bool)
+    (label ^ "/provider")
+    provider
+    (EC.is_provider_rejected_parse_error err);
+  Alcotest.(check bool) (label ^ "/model") model_ (EC.is_model_rejected_parse_error err);
+  Alcotest.(check bool) (label ^ "/server") server (EC.is_server_rejected_parse_error err)
+;;
+
+let test_server_parse_rejection_split () =
+  check_parse_split
+    "provider_parse_error"
+    (SdkE.Provider (Llm_provider.Error.ParseError { detail = "yyjson rejected body" }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "provider_invalid_request_parse_error"
+    (SdkE.Provider
+       (Llm_provider.Error.InvalidRequest
+          { provider = "agent_llm_a"; reason = "unexpected character in JSON at byte 9" }))
+    ~provider:true
+    ~model_:false
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_parse_error"
+    (SdkE.Api (Retry.InvalidRequest { message = "unexpected character in JSON at byte 9" }))
+    ~provider:false
+    ~model_:true
+    ~server:true;
+  check_parse_split
+    "api_invalid_request_generic"
+    (SdkE.Api (Retry.InvalidRequest { message = "missing required field: model" }))
+    ~provider:false
+    ~model_:false
+    ~server:false
+;;
+
 let () =
   Alcotest.run
     "keeper_sdk_error_typed_bridge"
@@ -125,6 +163,12 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ] )
+    ; ( "server parse rejection split"
+      , [ Alcotest.test_case
+            "provider and model parse rejections remain distinguishable"
+            `Quick
+            test_server_parse_rejection_split
         ] )
     ]
 ;;

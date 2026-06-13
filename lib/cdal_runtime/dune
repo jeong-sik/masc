@@ -3,34 +3,36 @@
 ; This sublibrary will host the agent-runtime side of CDAL (Cdal_proof,
 ; Mode_enforcer, Risk_contract, Execution_mode, Proof_capture, Audit, ...)
 ; once MM-2 leaf-first migration begins. It is intentionally separated from
-; masc-mcp's existing CDAL Phase 1A evaluators (lib/cdal_*.ml + lib/cdal/)
+; masc's existing CDAL Phase 1A evaluators (lib/cdal_*.ml + lib/cdal/)
 ; because the two layers have different responsibilities:
 ;
-;   masc_mcp (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
+;   masc (本体, lib/cdal_*.ml + lib/cdal/) — CDAL Phase 1A evaluator:
 ;     consumer-side judge, verdict_gate, labeling, adversarial_eval.
 ;
-;   masc_mcp.cdal_runtime (this) — CDAL runtime/producer:
+;   masc.cdal_runtime (this) — CDAL runtime/producer:
 ;     proof capture middleware, mode enforcement, risk contract typing.
 ;
 ; Dependencies are intentionally minimal: only OAS's *core* (agent_sdk.base
 ; for Tool/Hooks/Types) plus Yojson for serialization. NO dependency on the
-; masc_mcp main library — the producer side must remain reusable independently.
+; masc main library — the producer side must remain reusable independently.
 ;
-; @rfc RFC-OAS-011 (CDAL Migration to masc-mcp)
+; @rfc RFC-OAS-011 (CDAL Migration to masc)
 ; @phase MM-2-leaves — B1 batch (execution_mode, effect_evidence, guardrail_llm)
 
 ; The parent [lib/dune] uses [(include_subdirs unqualified)] which would
-; otherwise absorb every .ml under lib/ into the main [masc_mcp] library
+; otherwise absorb every .ml under lib/ into the main [masc] library
 ; and forbid declaring our own [(library)] stanza.  Marking this directory
 ; with [(include_subdirs no)] opts out of the parent's traversal so this
 ; sub-library compiles as a separate unit, mirroring sibling sub-libs
 ; (lib/activity_graph, lib/embedded_config, lib/mcp_session, ...).
+
 (include_subdirs no)
 
 (library
- (name masc_mcp_cdal_runtime)
- (public_name masc_mcp.cdal_runtime)
+ (name masc_cdal_runtime)
+ (public_name masc.cdal_runtime)
  (libraries
+  masc_core
   agent_sdk.base
   ; agent_sdk (full) is needed for Guardrails_async, referenced from
   ; guardrail_llm.{ml,mli}.  The dune-package places guardrails_async
@@ -71,4 +73,10 @@
  (flags
   (:standard -w +4 -open Agent_sdk_base -open Agent_sdk -open Agent_sdk__))
  (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_deriving.ord ppx_inline_test ppx_let)))
+  (pps
+   ppx_deriving_yojson
+   ppx_deriving.show
+   ppx_deriving.eq
+   ppx_deriving.ord
+   ppx_inline_test
+   ppx_let)))

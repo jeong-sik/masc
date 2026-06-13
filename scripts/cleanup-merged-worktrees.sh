@@ -50,6 +50,7 @@ skipped=0
 dirty=0
 nested=0
 active=0
+locked=0
 
 while read -r branch; do
   [ -z "$branch" ] && continue
@@ -76,6 +77,14 @@ while read -r branch; do
     continue
   fi
 
+  if worktree_cleanup_is_locked "$wt_path"; then
+    local owner
+    owner="$(cat "$wt_path/.masc-lock" 2>/dev/null || true)"
+    echo "LOCKED $wt_path (branch $branch) — skipped (held by $owner)"
+    locked=$((locked+1))
+    continue
+  fi
+
   if [ "$APPLY" -eq 1 ]; then
     if git worktree remove "$wt_path" 2>/dev/null; then
       echo "REMOVED $wt_path (branch $branch)"
@@ -94,8 +103,8 @@ done <<< "$MERGED_BRANCHES"
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty nested=$nested active=$active"
+  echo "Summary: removed=$removed skipped=$skipped dirty=$dirty nested=$nested active=$active locked=$locked"
 else
   echo ""
-  echo "Summary: $removed candidates (dry run — pass --apply to remove; dirty=$dirty nested=$nested active=$active)"
+  echo "Summary: $removed candidates (dry run — pass --apply to remove; dirty=$dirty nested=$nested active=$active locked=$locked)"
 fi

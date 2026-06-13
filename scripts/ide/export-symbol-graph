@@ -273,7 +273,7 @@ def live_lsp_prereq_report(data: dict[str, Any], *, artifact: pathlib.Path) -> d
         "commands": commands,
         "ready": ready,
         "note": (
-            "This doctor checks local executable prerequisites only. It does not "
+            "This diagnostics command checks local executable prerequisites only. It does not "
             "call /api/v1/ide/lsp, open a WebSocket, spawn LSP servers, or mutate "
             "the checked-in artifact."
         ),
@@ -284,8 +284,8 @@ def validate(data: dict[str, Any], root: pathlib.Path, *, check_current_ranges: 
     errors: list[str] = []
     if data.get("schema_version") != SCHEMA_VERSION:
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
-    if data.get("repo") != "masc-mcp":
-        errors.append("repo must be masc-mcp")
+    if data.get("repo") != "masc":
+        errors.append("repo must be masc")
 
     source = data.get("source", {})
     if not isinstance(source, dict):
@@ -372,7 +372,7 @@ def main() -> int:
     parser.add_argument("--emit", action="store_true", help="validate and print canonical JSON to stdout")
     parser.add_argument("--write", action="store_true", help="validate and rewrite the artifact canonically")
     parser.add_argument(
-        "--doctor-live-lsp",
+        "--diagnostics-live-lsp",
         "--live-lsp-prereq-report",
         action="store_true",
         help="print a non-mutating JSON report for live LSP executable prerequisites",
@@ -401,7 +401,7 @@ def main() -> int:
     if args.generated_at:
         data["generated_at"] = args.generated_at
 
-    if args.doctor_live_lsp:
+    if args.diagnostics_live_lsp:
         sys.stdout.write(dump_canonical(live_lsp_prereq_report(data, artifact=artifact)))
         return 0
 

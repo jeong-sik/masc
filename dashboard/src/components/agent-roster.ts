@@ -17,6 +17,7 @@ import {
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { EmptyState } from './common/feedback-state'
+import { ringFocusClasses } from './common/ring'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import {
@@ -49,6 +50,7 @@ import {
   expectedRuntimeDetailRows,
   formatKeeperCountBreakdown,
   formatRuntimeRosterCount,
+  keeperRowLooksRunning,
   resolveRuntimeCounts,
   runtimeDetailRows,
   runtimeCountSourceLabel,
@@ -76,9 +78,19 @@ type StatusFilter = 'all' | RuntimeBand
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
+function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
+  switch (band) {
+    case 'active': return '감시 중'
+    case 'attention': return '확인 필요'
+    case 'paused': return '재개 대기'
+    case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
+  }
+}
+
+// PipelineStage SSOT: branches aligned to `types/core.ts#PipelineStage`.
+// Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
+// backend never emits them as pipeline_stage.
 function stageBadgeClass(stageKey: string): string {
-  if (stageKey === 'tool_use') return 'border-[var(--info-border)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]'
-  if (stageKey === 'scheduled_autonomous' || stageKey === 'thinking') return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
   if (stageKey === 'handoff' || stageKey === 'compacting') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--stalled-fg)]'
   if (stageKey === 'failing' || stageKey === 'crashed') return 'border-[var(--err-border)] bg-[var(--bad-soft)] text-[var(--color-status-err)]'
   if (stageKey === 'paused') return 'border-[var(--purple-24)] bg-[var(--purple-12)] text-[var(--purple)]'
@@ -116,11 +128,13 @@ function rosterContextMeta(
  * Display rules per typed state:
  *  - stuck             → `현재 차단`  (text: backend summary or typed reason)
  *  - running + staleBlocker → `이전 차단` (informational; not a headline)
+ *  - running + synthetic_stall → `상태 추정` (diagnostic; not a blocker)
  *  - running           → fallback to diagnostic error / monitoring hint
- *  - paused / offline  → null — these states are signaled by the row's
- *                         phase badge and dedicated chips elsewhere; the
- *                         state-note slot stays available for extra
- *                         operational context only.
+ *  - paused           → pause cause when available, because it explains the
+ *                       resume gate.
+ *  - offline          → interrupted work / diagnostics / monitoring hint when
+ *                       available; otherwise the row action axis carries the
+ *                       "start required" state.
  */
 export function rosterStateNote(
   keeper: Keeper | null | undefined,
@@ -128,6 +142,19 @@ export function rosterStateNote(
   monitoringHint?: string | null,
 ): RosterStateNote | null {
   if (!keeper) return null
+
+  const gate = keeper.current_gate
+  if (gate?.kind === 'approval_required') {
+    const tool = gate.tool?.trim()
+    const risk = gate.risk?.trim()
+    const reason = gate.disposition_reason?.trim()
+    const text = [
+      tool ? `도구 ${tool}` : '도구 승인 필요',
+      risk ? `위험도 ${risk}` : null,
+      reason ? `사유 ${reason}` : null,
+    ].filter((part): part is string => part !== null).join(' · ')
+    return { label: '승인 대기', text }
+  }
 
   const state = deriveKeeperOperationalState({ keeper, composite })
 
@@ -168,6 +195,15 @@ export function rosterStateNote(
     }
   }
 
+  if (state.kind === 'running' && keeper.runtime_blocker_class === 'synthetic_stall') {
+    const summary = keeper.runtime_blocker_summary?.trim()
+    return {
+      label: '상태 추정',
+      text: summary || '실제 STATE 없이 합성된 진행 기록만 남아 최근 턴 산출물 재확인이 필요합니다.',
+      kind: 'synthetic_stall',
+    }
+  }
+
   if (state.kind === 'offline' && keeper.agent?.current_task) {
     return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
   }
@@ -205,6 +241,14 @@ function rosterPresenceDisplay(
 
   if (state.kind === 'offline' && agent.current_task) {
     return { status: 'offline', detail: `중단된 작업 ${agent.current_task}` }
+  }
+
+  if (state.kind === 'running' && composite?.is_live === true) {
+    return { status: 'busy', detail: `${state.turnPhase} live` }
+  }
+
+  if (state.kind === 'running' && composite?.is_live === false) {
+    return { status: 'idle', detail: '대기 중' }
   }
 
   return { status: agent.status ?? keeper.status ?? null, detail: null }
@@ -288,16 +332,14 @@ function findKeeperRuntimeForAgent(
 }
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
+type RosterAgent = Agent & { rosterSource?: 'agent_registry' | 'keeper_runtime' }
 
-function isRuntimeBackedKeeper(keeper: Keeper): boolean {
+function keeperHasRuntimeDetailRow(keeper: Keeper): boolean {
+  // Paused keepers are not live capacity, but execution still sends them as
+  // operator-visible detail rows. Keep them in the roster so "설정 N" does not
+  // degrade into count-only inventory with missing paused rows.
+  if (isKeeperPaused(keeper)) return true
   if (keeper.registered === false && keeper.keepalive_running === false) return false
-  // RFC-0135 PR-13: use canonical paused predicate. SSOT also covers
-  // `phase === 'Paused'` / `status === 'paused'` / `pipeline_stage ===
-  // 'paused'`. Effect: an FSM-paused but-not-flag-paused keeper that
-  // also lost registration + keepalive is now filtered out, matching
-  // the "no real backing runtime" intent the original `paused === true`
-  // check captured only partially.
-  if (isKeeperPaused(keeper) && keeper.registered !== true && keeper.keepalive_running !== true) return false
   return true
 }
 
@@ -329,20 +371,20 @@ function liveAgentIdentityKeys(agentList: readonly Agent[]): Set<string> {
   return keys
 }
 
-function runtimeBackedKeepers(
+function rosterDetailKeepers(
   keeperList: Keeper[],
   agentList: readonly Agent[] = [],
 ): Keeper[] {
   const liveAgentKeys = liveAgentIdentityKeys(agentList)
   return keeperList.filter(keeper =>
-    isRuntimeBackedKeeper(keeper) || keeperHasLiveAgentPresence(keeper, liveAgentKeys))
+    keeperHasRuntimeDetailRow(keeper) || keeperHasLiveAgentPresence(keeper, liveAgentKeys))
 }
 
 function expectedCountForKeeperFilter(
   keeperFilter: KeeperFilterMode,
   counts: ReturnType<typeof resolveRuntimeCounts>,
 ): number {
-  // Roster fallback messages compare against detail rows, not active runtime
+  // Roster fallback messages compare against detail rows, not running runtime
   // fibers. A paused keeper is not live capacity, but it is still a row the
   // operator expects to see in the directory.
   const useDetailRows = runtimeDetailRows(counts) > 0
@@ -354,7 +396,7 @@ function expectedCountForKeeperFilter(
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {
     label: '전체 상세',
-    description: 'execution 상세 행 전체를 보여줍니다. 활성 runtime 총계와는 별도 기준입니다.',
+    description: 'execution 상세 행 전체를 보여줍니다. 런타임 가동 총계와는 별도 기준입니다.',
   },
   active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
@@ -427,7 +469,7 @@ function keeperRuntimeName(source: Pick<Keeper, 'name' | 'agent_name'>): string 
   return runtimeName && runtimeName.length > 0 ? runtimeName : source.name
 }
 
-function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
+function keeperRuntimeAgentProjection(source: Keeper): RosterAgent | null {
   const displayName = keeperPrimaryName(source.name, source.agent_name) ?? keeperRuntimeName(source)
   if (!displayName) return null
 
@@ -456,15 +498,17 @@ function synthesizeAgentFromKeeper(source: Keeper): Agent | null {
     traits: source.traits,
     activityLevel: source.activityLevel,
     primaryValue: source.primaryValue,
-    synthetic: true,
+    rosterSource: 'keeper_runtime',
   }
 }
 
-function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
+function mergeRosterAgent(existing: RosterAgent | undefined, next: RosterAgent): RosterAgent {
   if (!existing) return next
+  const nextIsKeeperProjection = next.rosterSource === 'keeper_runtime'
+  const existingIsKeeperProjection = existing.rosterSource === 'keeper_runtime'
   return {
     ...existing,
-    name: next.synthetic && !existing.synthetic ? next.name : existing.name,
+    name: nextIsKeeperProjection && !existingIsKeeperProjection ? next.name : existing.name,
     keeper_name: existing.keeper_name ?? next.keeper_name ?? null,
     keeper_id: existing.keeper_id ?? next.keeper_id ?? null,
     agent_type: existing.agent_type ?? next.agent_type,
@@ -486,9 +530,9 @@ function mergeRosterAgent(existing: Agent | undefined, next: Agent): Agent {
 function buildAgentRoster(
   agentList: Agent[],
   keeperList: Keeper[],
-): Agent[] {
+): RosterAgent[] {
   const keeperLookup = buildKeeperRuntimeLookup(keeperList)
-  const roster = new Map<string, Agent>()
+  const roster = new Map<string, RosterAgent>()
 
   for (const agent of agentList) {
     const keeper = findKeeperRuntimeForAgent(agent, keeperLookup)
@@ -499,22 +543,23 @@ function buildAgentRoster(
         keeper?.agent_name ?? agent.name,
       )
       ?? agent.name
-    const normalizedAgent =
+    const normalizedAgent: RosterAgent =
       keeper != null
         ? {
             ...agent,
             keeper_name: agent.keeper_name ?? keeper.name,
             keeper_id: agent.keeper_id ?? keeper.keeper_id ?? null,
+            rosterSource: 'agent_registry',
           }
-        : agent
+        : { ...agent, rosterSource: 'agent_registry' }
     roster.set(key, mergeRosterAgent(roster.get(key), normalizedAgent))
   }
 
   for (const source of keeperList) {
-    const synthetic = synthesizeAgentFromKeeper(source)
-    if (!synthetic) continue
-    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? synthetic.name
-    roster.set(key, mergeRosterAgent(roster.get(key), synthetic))
+    const keeperRuntimeAgent = keeperRuntimeAgentProjection(source)
+    if (!keeperRuntimeAgent) continue
+    const key = keeperPrincipalKey(source.keeper_id ?? null, source.name, source.agent_name) ?? keeperRuntimeAgent.name
+    roster.set(key, mergeRosterAgent(roster.get(key), keeperRuntimeAgent))
   }
 
   return Array.from(roster.values())
@@ -555,8 +600,15 @@ function countAgentsByStatus(
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
-): { agents: number; keepers: number; pausedKeepers: number; totalRuntimes: number } {
-  const runtimeKeepers = runtimeBackedKeepers(keeperList, agentList)
+): {
+  agents: number
+  keepers: number
+  pausedKeepers: number
+  offlineKeepers: number
+  keeperRows: number
+  totalRuntimes: number
+} {
+  const runtimeKeepers = rosterDetailKeepers(keeperList, agentList)
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
   const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
@@ -564,17 +616,25 @@ export function countRuntimeKinds(
   // Agent rows only carry `keeper_id`/`keeper_name`, not the full Keeper, so
   // `a.keeper` was undefined here and `isKeeperPaused(undefined)` silently
   // returned false, leaving the paused count stuck at 0.
-  const pausedKeepers = allKeepers.filter(a => {
-    const keeper = findKeeperRuntimeForAgent(a, keeperLookup)
-    return keeper ? isKeeperPaused(keeper) : false
-  }).length
-  const runningKeepers = allKeepers.length - pausedKeepers
+  let pausedKeepers = 0
+  let runningKeepers = 0
+  for (const row of allKeepers) {
+    const keeper = findKeeperRuntimeForAgent(row, keeperLookup)
+    if (keeper && isKeeperPaused(keeper)) {
+      pausedKeepers += 1
+    } else if (keeperRowLooksRunning(keeper)) {
+      runningKeepers += 1
+    }
+  }
   const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'agent-only', keeperLookup).length
+  const keeperRows = allKeepers.length
 
   return {
     agents: agentCount,
     keepers: runningKeepers,
     pausedKeepers,
+    offlineKeepers: Math.max(0, keeperRows - runningKeepers - pausedKeepers),
+    keeperRows,
     totalRuntimes: rosterAgents.length,
   }
 }
@@ -587,7 +647,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const agentList = agents.value
   const keeperList = keepers.value
   const runtimeKeeperList = useMemo(
-    () => runtimeBackedKeepers(keeperList, agentList),
+    () => rosterDetailKeepers(keeperList, agentList),
     [keeperList, agentList],
   )
 
@@ -628,13 +688,26 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
     // See countRuntimeKinds(): Agent rows expose only keeper identifiers, so
     // `a.keeper` is undefined and isKeeperPaused needs the hydrated Keeper.
-    const pausedCount = allKeepers.filter(a => {
-      const keeper = findKeeperRuntimeForAgent(a, keeperRuntimeLookup)
-      return keeper ? isKeeperPaused(keeper) : false
-    }).length
-    const runningCount = allKeepers.length - pausedCount
+    let pausedCount = 0
+    let runningCount = 0
+    for (const row of allKeepers) {
+      const keeper = findKeeperRuntimeForAgent(row, keeperRuntimeLookup)
+      if (keeper && isKeeperPaused(keeper)) {
+        pausedCount += 1
+      } else if (keeperRowLooksRunning(keeper)) {
+        runningCount += 1
+      }
+    }
     const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'agent-only', keeperRuntimeLookup).length
-    return { agents: agentCount, keepers: runningCount, pausedKeepers: pausedCount, totalRuntimes: rosterAgents.length }
+    const keeperRows = allKeepers.length
+    return {
+      agents: agentCount,
+      keepers: runningCount,
+      pausedKeepers: pausedCount,
+      offlineKeepers: Math.max(0, keeperRows - runningCount - pausedCount),
+      keeperRows,
+      totalRuntimes: rosterAgents.length,
+    }
   }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup])
 
   const runtimeCounts = resolveRuntimeCounts({
@@ -642,6 +715,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
+    offlineKeepersCount: liveRuntimeCounts.offlineKeepers,
+    keeperRowsCount: liveRuntimeCounts.keeperRows,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     shellCounts: shellCounts.value,
@@ -753,21 +828,39 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   }))
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
+  const liveOfflineKeepers = runtimeCounts.live.offlineKeepers
   const configuredKeepers = runtimeCounts.configured.keepers
-  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
+  const configuredKeeperDelta = Math.max(0, configuredKeepers - runtimeCounts.live.keeperRows)
+  const rawPausedKeepers = keeperList.filter(isKeeperPaused).length
+  const pausedOutsideDetail = Math.max(0, rawPausedKeepers - livePausedKeepers)
+  const notStartedKeepers = Math.max(0, configuredKeeperDelta - pausedOutsideDetail)
   const scopeLabel = keeperFilter === 'keeper-only'
     ? formatKeeperCountBreakdown({
         liveKeepers,
         pausedKeepers: livePausedKeepers,
+        offlineKeepers: liveOfflineKeepers,
         configuredKeepers,
       })
     : keeperFilter === 'agent-only'
-      ? `일반 에이전트 활성 ${runtimeCounts.live.agents}`
+      ? `일반 에이전트 런타임 가동 ${runtimeCounts.live.agents}`
       : formatRuntimeRosterCount(runtimeCounts)
+  const keeperStateHints = (
+    keeperFilter === 'keeper-only'
+      ? [
+          pausedOutsideDetail > 0 ? `목록 밖 일시정지 ${pausedOutsideDetail}개` : null,
+          notStartedKeepers > 0 ? `미기동 ${notStartedKeepers}개` : null,
+        ]
+      : [
+          livePausedKeepers > 0 ? `일시정지 ${livePausedKeepers}개` : null,
+          liveOfflineKeepers > 0 ? `오프라인 ${liveOfflineKeepers}개` : null,
+          pausedOutsideDetail > 0 ? `목록 밖 일시정지 ${pausedOutsideDetail}개` : null,
+          notStartedKeepers > 0 ? `미기동 ${notStartedKeepers}개` : null,
+        ]
+  ).filter((item): item is string => item != null)
   const configuredIdleHint =
-    keeperFilter === 'agent-only' || configuredKeeperDelta === 0
+    keeperFilter === 'agent-only' || keeperStateHints.length === 0
       ? null
-      : `일시정지/미기동 ${configuredKeeperDelta}개`
+      : `키퍼 ${keeperStateHints.join(' · ')}`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -869,6 +962,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       keeperRuntime,
       band,
       isKeeper,
+      bandActionHint: rosterBandActionHint(band.key, isKeeper),
       displayName,
       currentWork,
       summaryText,
@@ -947,6 +1041,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
               `
             : null}
+
         </div>
       </section>
 
@@ -1009,7 +1104,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   aria-pressed=${selected}
                   onClick=${() => setSelectedKey(row.key)}
                   onKeyDown=${handleRowKey}
-                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
+                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] ${ringFocusClasses({ tone: 'accent-fg', width: 2 })} lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
                 >
                   <span class="flex min-w-0 items-center gap-3">
                     <span class="shrink-0">
@@ -1026,13 +1121,16 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                       <span class="block truncate text-sm font-semibold text-[var(--color-fg-secondary)]">${row.displayName}</span>
                       <span class="mt-0.5 flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
                         <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
-                        ${row.agent.synthetic ? html`<span class="rounded-[var(--r-0)] border border-dashed border-[var(--color-border-default)] px-1.5 py-0.5 italic">파생</span>` : null}
                       </span>
                     </span>
                   </span>
 
-                  <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs font-medium text-[var(--color-fg-primary)] lg:w-auto">
-                    ${row.band.label}
+                  <span
+                    class="inline-flex w-fit min-w-[4.5rem] flex-col items-start rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-3xs font-medium leading-tight text-[var(--color-fg-primary)] lg:w-auto"
+                    title=${row.band.description}
+                  >
+                    <span>${row.band.label}</span>
+                    <span class="mt-0.5 text-[10px] font-normal text-[var(--color-fg-muted)]">${row.bandActionHint}</span>
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
@@ -1097,6 +1195,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                     ${selectedRow.fsmStageText}
                   </span>
                 ` : null}
+                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]" title=${selectedRow.band.description}>
+                  상태 액션
+                  <span class="ml-1 text-[var(--color-fg-primary)]">${selectedRow.bandActionHint}</span>
+                </span>
                 <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${selectedRow.lastActivityLabel}
                   <span class="ml-1 text-[var(--color-fg-primary)]">

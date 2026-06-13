@@ -17,8 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_misc — Miscellaneous operations (facade).
 
-    Dispatches auth, config, tool inventory, and feature flag handlers to
-    [Tool_misc_admin].
+    Dispatches config introspection and tool inventory helpers to
+    [Tool_misc_introspection].
 
     Retains: dashboard, verify_handoff, gc, cleanup_zombies,
     tool_stats, tool_help.
@@ -30,7 +30,7 @@ open Tool_args
 type tool_result = Tool_result.result
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -51,7 +51,7 @@ type context = {
    - [Workflow_rejection] : invalid dashboard scope; missing
                             tool_name; unknown tool.
    - No [Runtime_failure] / [Transient_error] sites here — the
-     [Coord.gc] / [Coord.cleanup_zombies] / [Dashboard.generate]
+     [Workspace.gc] / [Workspace.cleanup_zombies] / [Dashboard.generate]
      backends assume-success or raise. When a backend later returns
      a typed Error variant, the construction site here gets the
      appropriate class at that time. *)
@@ -71,28 +71,27 @@ let workflow_err ~tool_name ~start_time msg : Tool_result.result =
     ~start_time
     msg
 
-let handle_dashboard ~tool_name ~start_time ctx args : Tool_result.result =
-  let compact = get_bool args "compact" false in
-  let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
-  match Dashboard.scope_of_string_opt scope_arg with
-  | None ->
-      workflow_err ~tool_name ~start_time
-        (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
-           scope_arg
-           (String.concat " | " Dashboard.valid_scope_strings))
-  | Some scope ->
-      let output =
-        if compact then Dashboard.generate_compact ~scope ctx.config
-        else Dashboard.generate ~scope ctx.config
-      in
-      text_ok ~tool_name ~start_time output
+let dashboard_handler =
+  ref (fun ~tool_name ~start_time:_ _ctx _args ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time:0.0
+      "Dashboard handler not registered"
+  )
+
+let register_dashboard_handler f =
+  dashboard_handler := f
+
+let handle_dashboard ~tool_name ~start_time ctx args =
+  !dashboard_handler ~tool_name ~start_time ctx args
 
 let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   let days_raw = get_int args "days" 7 in
   let days = max 1 days_raw in
   if days_raw < 1 then
     Log.Misc.warn "masc_gc days=%d clamped to 1 (minimum guardrail)" days_raw;
-  let gc_result = Coord.gc ctx.config ~days () in
+  let gc_result = Workspace.gc ctx.config ~days () in
   let expired = 0 in
   let decision_note =
     if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
@@ -101,12 +100,12 @@ let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   text_ok ~tool_name ~start_time (gc_result ^ decision_note)
 
 let handle_cleanup_zombies ~tool_name ~start_time ctx _args : Tool_result.result =
-  let result = Coord.cleanup_zombies ctx.config in
+  let result = Workspace.cleanup_zombies ctx.config in
   let msg =
     match result with
-    | Coord.No_agents_dir -> "No agents directory"
-    | Coord.No_zombies -> "No zombie agents found"
-    | Coord.Cleaned { count; names; released_tasks; skipped } ->
+    | Workspace.No_agents_dir -> "No agents directory"
+    | Workspace.No_zombies -> "No zombie agents found"
+    | Workspace.Cleaned { count; names; released_tasks; skipped } ->
         let task_note =
           if released_tasks = 0 then ""
           else Printf.sprintf ", released %d orphan task(s)" released_tasks
@@ -159,7 +158,12 @@ let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
    With dispatch lifting internally now, these wrappers can pass
    the typed result straight through. *)
 let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  Tool_misc_web_search.handle ~tool_name ~start_time args
+  let result = Tool_misc_web_search.handle ~tool_name ~start_time args in
+  Tool_misc_web_enrichment.enrich_result_if_requested
+    ~tool_name
+    ~start_time
+    args
+    result
 
 let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args
@@ -169,10 +173,7 @@ let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
 (* ================================================================ *)
 
 let tool_inventory_json ctx ~include_hidden =
-  let admin_ctx : Tool_misc_admin.context =
-    { config = ctx.config; agent_name = ctx.agent_name }
-  in
-  Tool_misc_admin.tool_inventory_json admin_ctx ~include_hidden
+  Tool_misc_introspection.tool_inventory_json ctx ~include_hidden
 
 (* ================================================================ *)
 (* Dispatch (facade)                                                *)
@@ -180,12 +181,9 @@ let tool_inventory_json ctx ~include_hidden =
 
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let admin_ctx : Tool_misc_admin.context =
-    { config = ctx.config; agent_name = ctx.agent_name }
-  in
   match name with
   | "masc_config" ->
-      Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
+      Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | "masc_dashboard" ->
       Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
@@ -199,27 +197,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_admin_snapshot" ->
-      Some
-        (Tool_misc_admin.handle_tool_admin_snapshot
-           ~tool_name:name
-           ~start_time:start
-           admin_ctx
-           args)
-  | "masc_tool_admin_update" ->
-      Some
-        (Tool_misc_admin.handle_tool_admin_update
-           ~tool_name:name
-           ~start_time:start
-           admin_ctx
-           args)
-  | "masc_deep_review" ->
-      Some
-        (Tool_deep_review.handle_deep_review
-           ~tool_name:name
-           ~start_time:start
-           ctx.config
-           args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
@@ -231,20 +208,8 @@ let schemas = Tool_schemas_misc.schemas
 let tool_spec_read_only =
   [
     "masc_tool_help";
-    "masc_web_search";
-    "masc_web_fetch";
     "masc_dashboard";
   ]
-
-let tool_required_permission = function
-  | "masc_config" | "masc_dashboard"
-  | "masc_tool_stats" | "masc_tool_help" | "masc_web_search" | "masc_web_fetch" ->
-      Some Masc_domain.CanReadState
-  | "masc_tool_admin_snapshot" | "masc_tool_admin_update" ->
-      Some Masc_domain.CanAdmin
-  | "masc_cleanup_zombies" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
 
 let () =
   List.iter
@@ -258,7 +223,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas
 let looks_like_rss_payload = Tool_misc_web_search.looks_like_rss_payload
@@ -273,3 +237,9 @@ let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
 let web_search_simulate_for_test ~query ~limit outcomes =
   Tool_misc_web_search.simulate_for_test ~query ~limit outcomes
+
+let with_web_search_simulation_for_test ~outcomes f =
+  Tool_misc_web_search.with_simulated_search_for_test ~outcomes f
+
+let with_web_fetch_http_get_for_test http_get f =
+  Tool_misc_web_fetch.with_http_get_for_test http_get f

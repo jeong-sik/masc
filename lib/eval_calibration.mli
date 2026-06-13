@@ -23,8 +23,8 @@ type label_verdict =
 val label_verdict_to_string : label_verdict -> string
 val label_verdict_of_string : string -> label_verdict option
 
-val verdict_to_string : Anti_rationalization.verdict -> string
-val verdict_of_string : string -> Anti_rationalization.verdict option
+val verdict_to_string : Task.Anti_rationalization.verdict -> string
+val verdict_of_string : string -> Task.Anti_rationalization.verdict option
 
 type verdict_record = {
   record_type : record_type;
@@ -32,10 +32,10 @@ type verdict_record = {
   task_id : string;
   task_title : string;
   agent_name : string;
-  verdict : Anti_rationalization.verdict;
-  gate : Anti_rationalization.gate;
-  evaluator_cascade : string;
-  generator_cascade : string option;
+  verdict : Task.Anti_rationalization.verdict;
+  gate : Task.Anti_rationalization.gate;
+  evaluator_runtime : string;
+  generator_runtime : string option;
   fallback_reason : string option;
   timestamp : float;
 }
@@ -51,7 +51,7 @@ type label_record = {
 
 type divergence = {
   notes_hash : string;
-  evaluator_verdict : Anti_rationalization.verdict;
+  evaluator_verdict : Task.Anti_rationalization.verdict;
   human_verdict : label_verdict;
   gate : string;
   task_title : string;
@@ -84,8 +84,8 @@ val notes_hash : task_title:string -> notes:string -> string
 
 val record_verdict :
   task_id:string ->
-  req:Anti_rationalization.review_request ->
-  result:Anti_rationalization.review_result ->
+  req:Task.Anti_rationalization.review_request ->
+  result:Task.Anti_rationalization.review_result ->
   ?on_harness_verdict:(Agent_sdk.Harness.verdict -> unit) ->
   unit ->
   unit

@@ -10,7 +10,7 @@
     [action] + [details] payload before delegating to {!log_action}),
     plus reader / pruner / stats helpers.
 
-    Internal helpers ([preview], [string_to_action], [outcome_to_json]
+    Internal helpers ([preview], [outcome_to_json]
     decoders, the [audit_store_cache] and its mutex,
     [get_audit_store], [parse_entries], [max_logged_errors],
     [remove_assoc_keys]) are hidden — callers use the typed log
@@ -22,7 +22,7 @@
 
     @since 0.6.0 — MASC Social v4 Tier 1 *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Event types} *)
 
@@ -42,8 +42,6 @@ type governance_audit_decision =
 [@@deriving tla]
 
 type action =
-  | Join
-  | Leave
   | ClaimTask
   | StartTask
   | DoneTask
@@ -59,13 +57,14 @@ type action =
   | SearchRefinement
   | GovernanceDecision of governance_audit_decision
   | Custom of string
+  | Unknown of string
 [@@deriving tla]
 
 type audit_entry = {
   timestamp : float;
   agent_id : string;
   action : action;
-  room_id : string option;
+  workspace_id : string option;
   details : Yojson.Safe.t;
   outcome : outcome;
   cost_estimate : float option;
@@ -78,7 +77,13 @@ type audit_entry = {
 val action_to_string : action -> string
 (** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GovernanceDecision] /
-    [Custom]) are encoded as ["<tag>:<arg>"]. *)
+    [Custom]) are encoded as ["<tag>:<arg>"]. Unknown wire strings
+    round-trip through [Unknown] without being coerced to [Custom]. *)
+
+val string_to_action : string -> action
+(** Decode a wire-format action string. Unrecognised tags return
+    [Unknown] so callers can distinguish future action variants from
+    explicit [Custom] events. *)
 
 val governance_audit_decision_to_string :
   governance_audit_decision -> string
@@ -131,7 +136,7 @@ val log_action :
   config ->
   agent_id:string ->
   action:action ->
-  ?room_id:string ->
+  ?workspace_id:string ->
   ?details:Yojson.Safe.t ->
   ?cost_estimate:float ->
   ?token_count:int ->
@@ -144,20 +149,6 @@ val log_action :
     delegate to this. *)
 
 (** {1 Logging — per-action helpers} *)
-
-val log_join :
-  config ->
-  agent_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
-
-val log_leave :
-  config ->
-  agent_id:string ->
-  ?cost_estimate:float ->
-  ?token_count:int ->
-  unit -> unit
 
 val log_claim_task :
   config ->
@@ -198,7 +189,7 @@ val log_suspend :
   agent_id:string ->
   target_agent:string ->
   reason:string ->
-  rooms_affected:int ->
+  workspaces_affected:int ->
   ?cost_estimate:float ->
   ?token_count:int ->
   unit -> unit

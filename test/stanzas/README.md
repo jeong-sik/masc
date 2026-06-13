@@ -7,7 +7,7 @@ stanza.  They are included from `test/dune` via sorted `(include …)` directive
 
 `test/dune` used to contain all test stanzas inline. Because every new test
 appended a stanza to the same region of the file, parallel autocoder PRs all
-conflicted with each other on that region (*conflict cascade*).
+conflicted with each other on that region (*conflict runtime*).
 
 By giving each test its own file the only shared edit is one `(include …)` line
 in `test/dune`, inserted at its alphabetical position.  Two PRs whose test names

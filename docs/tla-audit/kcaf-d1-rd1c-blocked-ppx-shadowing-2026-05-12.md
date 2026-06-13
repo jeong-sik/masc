@@ -2,8 +2,8 @@
 
 **Iteration**: 31 (/loop FSM/TLA+/OCaml drift hunt)
 **Date**: 2026-05-12
-**Spec**: `specs/keeper-state-machine/KeeperCascadeAttemptFSM.tla`
-**OCaml**: `lib/cascade/cascade_fsm.ml:15-20` (`decision` type), `ppx_tla/ppx_tla.ml:151, 383`
+**Spec**: `specs/keeper-state-machine/KeeperRuntimeAttemptFSM.tla`
+**OCaml**: `lib/runtime/runtime_fsm.ml:15-20` (`decision` type), `ppx_tla/ppx_tla.ml:151, 383`
 **Risk**: HIGH — corrects iter 30 audit's MISCLASSIFICATION of R-D-1.c risk from LOW to BLOCKED.
 **Type**: Audit correction memo.  **Empirical finding** — attempted the fix and the build error surfaced the constraint.
 
@@ -15,12 +15,12 @@
 
 ## What iter 31 found empirically
 
-Attempted the single-line fix in `lib/cascade/cascade_fsm.ml:20` and `.mli:37` (add `[@@deriving tla]` after the `decision` constructors).
+Attempted the single-line fix in `lib/runtime/runtime_fsm.ml:20` and `.mli:37` (add `[@@deriving tla]` after the `decision` constructors).
 
 Build error:
 
 ```
-File "test/test_keeper_cascade_tla_mirror.ml", line 10, characters 19-28:
+File "test/test_keeper_runtime_tla_mirror.ml", line 10, characters 19-28:
 10 |     (to_tla_symbol Slot_full);
                         ^^^^^^^^^
 Error: This variant expression is expected to have type decision
@@ -41,7 +41,7 @@ When `[@@deriving tla]` is applied to BOTH `provider_outcome` (line 13) and `dec
 1. First derive emits `let to_tla_symbol : provider_outcome -> string = function …`
 2. Second derive emits `let to_tla_symbol : decision -> string = function …`
 3. The second SHADOWS the first by standard OCaml binding semantics.
-4. `test_keeper_cascade_tla_mirror.ml`'s `(to_tla_symbol Slot_full)` now type-resolves against the `decision`-typed function, and `Slot_full` doesn't exist in `decision`.
+4. `test_keeper_runtime_tla_mirror.ml`'s `(to_tla_symbol Slot_full)` now type-resolves against the `decision`-typed function, and `Slot_full` doesn't exist in `decision`.
 
 The same shadowing applies to `all_symbols`, `is_terminal`, `terminal_symbols`, etc.
 
@@ -103,6 +103,6 @@ This is the audit-correction shape that the operator's local "Workaround Rejecti
 
 - iter 30 audit: `docs/tla-audit/kcaf-d1-attempt-fsm-coverage-2026-05-12.md` — original R-D-1.c claim.
 - `ppx_tla/ppx_tla.ml:151, 383` — unprefixed `to_tla_symbol` emission.
-- `test/test_keeper_cascade_tla_mirror.ml:10` — the shadowing-sensitive call site.
-- `lib/cascade/cascade_fsm.ml:13` — existing `[@@deriving tla]` on `provider_outcome`.
+- `test/test_keeper_runtime_tla_mirror.ml:10` — the shadowing-sensitive call site.
+- `lib/runtime/runtime_fsm.ml:13` — existing `[@@deriving tla]` on `provider_outcome`.
 - iter 28 (#14793) — R-B-1.a closure as comparable "spec/OCaml symmetry" effort that *did* succeed (single-spec type widening, no ppx interaction).

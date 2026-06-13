@@ -19,7 +19,7 @@
  *   - Visibility filter beyond `disabled` + `tabindex="-1"`
  *     (CSS display:none / visibility:hidden / aria-hidden=true detection
  *     is the second iteration)
- *   - Focus guard sentinel pair around the container (used when the
+ *   - Focus guard marker pair around the container (used when the
  *     container isn't `position: fixed`); deferred until first consumer
  *     needs it
  */

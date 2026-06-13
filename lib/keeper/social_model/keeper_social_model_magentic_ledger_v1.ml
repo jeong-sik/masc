@@ -6,6 +6,8 @@
     narration. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module Types = Keeper_social_model_types
 module Protocol = Keeper_social_model_protocol
@@ -109,6 +111,7 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     ~(previous_state : Types.social_state option)
     ~(has_text_reply : bool)
     (base_state : Types.social_state) =
+  let tool_names = Keeper_agent_result.tool_names result in
   let previous_snapshot =
     Option.bind previous_state Fsm.snapshot_of_social_state
   in
@@ -117,7 +120,7 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     Fsm.classify_event ~previous:previous_snapshot
       {
         Fsm.has_progress_evidence =
-          result.tools_used <> [] || has_text_reply;
+          tool_names <> [] || has_text_reply;
         has_reactive_signal =
           reactive_signal_count observation > 0 || backlog_count observation > 0;
         has_active_goals = observation.active_goals <> [];
@@ -130,19 +133,19 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     social_model = model_name;
     belief_summary =
       belief_summary_of_snapshot ~snapshot ~event ~observation
-        ~tool_count:(List.length result.tools_used);
+        ~tool_count:(List.length tool_names);
     active_desire = active_desire_of_phase snapshot.phase;
     current_intention =
       current_intention_of_phase ~phase:snapshot.phase
-        ~tools_used:result.tools_used
+        ~tools_used:tool_names
         ~has_text_reply;
     blocker =
       blocker_of_phase ~phase:snapshot.phase ~base_state
-        ~tools_used:result.tools_used
+        ~tools_used:tool_names
         ~has_text_reply;
     need =
       need_of_phase ~phase:snapshot.phase ~base_state
-        ~tools_used:result.tools_used
+        ~tools_used:tool_names
         ~has_text_reply;
   }
 

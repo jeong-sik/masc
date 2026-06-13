@@ -15,5 +15,5 @@ This artifact demonstrates autonomous MASC keeper PR lifecycle:
 ## Metadata
 
 - **Timestamp:** 2026-05-20T09:12:00Z
-- **Worktree:** repos/masc-mcp/.worktrees/keeper-lifecycle-worker-agent-proof-lifecycle-20260520-1
+- **Worktree:** repos/masc/.worktrees/keeper-lifecycle-worker-agent-proof-lifecycle-20260520-1
 - **Generation:** 20260520-1

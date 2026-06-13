@@ -7,6 +7,8 @@
 open Server_utils
 open Server_routes_http_common
 
+module String_set = Set.Make (String)
+
 type paused_keeper_scan = {
   names : string list;
   autoboot_enabled_names : string list;
@@ -19,49 +21,47 @@ let empty_paused_keeper_scan =
 
 let sorted_unique_strings values = List.sort_uniq String.compare values
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
+let effective_autoboot_enabled name (meta : Keeper_meta_contract.keeper_meta) =
   match (Keeper_types_profile.load_keeper_profile_defaults name).autoboot_enabled with
   | Some value -> value
   | None -> meta.autoboot_enabled
 
-let blocker_class_string (info : Keeper_types.blocker_info option) =
-  Option.map (fun (info : Keeper_types.blocker_info) ->
+let blocker_class_string (info : Keeper_meta_contract.blocker_info option) =
+  Option.map (fun (info : Keeper_meta_contract.blocker_info) ->
     Keeper_meta_contract.blocker_class_to_string info.klass) info
 
-let blocker_detail (info : Keeper_types.blocker_info option) =
-  Option.map (fun (info : Keeper_types.blocker_info) -> info.detail) info
+let blocker_detail (info : Keeper_meta_contract.blocker_info option) =
+  Option.map (fun (info : Keeper_meta_contract.blocker_info) -> info.detail) info
 
-let pause_elapsed_sec now (meta : Keeper_types.keeper_meta) =
-  match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+let pause_elapsed_sec now (meta : Keeper_meta_contract.keeper_meta) =
+  match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
   | Some _ | None -> None
 
-let pause_kind (meta : Keeper_types.keeper_meta) =
+let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
   if Keeper_supervisor_types.paused_meta_requires_reconcile_recovery meta then
     "reconcile_gated"
   else
-    match meta.auto_resume_after_sec with
+    match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
     | Some _ -> "auto_recoverable"
     | None -> "operator_paused"
 
-let pause_auto_resume_source (meta : Keeper_types.keeper_meta) =
+let pause_auto_resume_source (meta : Keeper_meta_contract.keeper_meta) =
   match meta.auto_resume_after_sec with
   | Some _ -> Some "explicit"
-  | None -> None
+  | None ->
+    (match Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta with
+     | Some _ -> Some "implicit_turn_timeout"
+     | None -> None)
 
 let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
-    (meta : Keeper_types.keeper_meta) =
+    (meta : Keeper_meta_contract.keeper_meta) =
   let elapsed = pause_elapsed_sec now meta in
+  let effective_auto_resume_after_sec =
+    Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
+  in
   let remaining =
-    match (meta.auto_resume_after_sec, elapsed) with
+    match (effective_auto_resume_after_sec, elapsed) with
     | Some resume_after, Some elapsed -> Some (max 0.0 (resume_after -. elapsed))
     | Some resume_after, None -> Some resume_after
     | None, _ -> None
@@ -71,15 +71,15 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     ("name", `String name);
     ("autoboot_enabled", `Bool autoboot_enabled);
     ("pause_kind", `String (pause_kind meta));
-    ("auto_resume_after_sec", json_float_opt meta.auto_resume_after_sec);
+    ("auto_resume_after_sec", Json_util.float_opt_to_json effective_auto_resume_after_sec);
     ( "persisted_auto_resume_after_sec"
-    , json_float_opt meta.auto_resume_after_sec );
-    ("auto_resume_source", json_string_opt (pause_auto_resume_source meta));
-    ("paused_elapsed_sec", json_float_opt elapsed);
-    ("auto_resume_remaining_sec", json_float_opt remaining);
+    , Json_util.float_opt_to_json meta.auto_resume_after_sec );
+    ("auto_resume_source", Json_util.string_opt_to_json (pause_auto_resume_source meta));
+    ("paused_elapsed_sec", Json_util.float_opt_to_json elapsed);
+    ("auto_resume_remaining_sec", Json_util.float_opt_to_json remaining);
     ( "last_blocker"
     , match last_blocker with
-      | Some info -> Keeper_types.blocker_info_to_json info
+      | Some info -> Keeper_meta_contract.blocker_info_to_json info
       | None -> `Null );
     ( "missing_pause_root_cause",
       `Bool
@@ -87,19 +87,40 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
          && Option.is_none meta.runtime.last_blocker) );
   ]
 
-let running_paused_keeper_names () =
+let registry_paused_keeper_names () =
   Keeper_registry.all ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
 
+let running_paused_keeper_names = registry_paused_keeper_names
+
+let running_keeper_names ?base_path () =
+  Keeper_registry.all ?base_path ()
+  |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
+       match e.phase with
+       | Keeper_state_machine.Running -> Some e.name
+       | Keeper_state_machine.Offline
+       | Keeper_state_machine.Overflowed
+       | Keeper_state_machine.Failing
+       | Keeper_state_machine.Compacting
+       | Keeper_state_machine.HandingOff
+       | Keeper_state_machine.Draining
+       | Keeper_state_machine.Paused
+       | Keeper_state_machine.Stopped
+       | Keeper_state_machine.Crashed
+       | Keeper_state_machine.Restarting
+       | Keeper_state_machine.Dead
+       | Keeper_state_machine.Zombie -> None)
+  |> sorted_unique_strings
+
 let durable_paused_keeper_scan ?(include_details = true) config =
   (* NDT-OK: HTTP health snapshots report wall-clock pause age; state transitions remain ledger-driven. *)
   let now = Unix.gettimeofday () in
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> List.fold_left
        (fun acc name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) when meta.paused ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
              {
@@ -147,8 +168,12 @@ let paused_keepers_health_json_of_scan ~running_names durable_scan =
   `Assoc [
     ("count", `Int (List.length names));
     ("names", `List (List.map (fun name -> `String name) names));
+    ("registry_paused_count", `Int (List.length running_names));
+    ("registry_paused_names", `List (List.map (fun name -> `String name) running_names));
+    ("registry_paused_semantics", `String "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running");
     ("running_count", `Int (List.length running_names));
     ("running_names", `List (List.map (fun name -> `String name) running_names));
+    ("running_count_semantics", `String "legacy alias for registry_paused_count");
     ("durable_count", `Int (List.length durable_scan.names));
     ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
     ( "autoboot_enabled_count",
@@ -169,7 +194,7 @@ let paused_keepers_health_json () =
   let running_names = running_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
-    | Some state -> durable_paused_keeper_scan state.Mcp_server.room_config
+    | Some state -> durable_paused_keeper_scan state.Mcp_server.workspace_config
     | None -> empty_paused_keeper_scan
   in
   paused_keepers_health_json_of_scan ~running_names durable_scan
@@ -206,9 +231,9 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
      paused, autoboot, and bootable scans on the hot path. *)
   (* NDT-OK: request-boundary wall clock only for dashboard pause-age display. *)
   let now = Unix.gettimeofday () in
-  let configured_names = Keeper_types.configured_keeper_names config in
+  let configured_names = Keeper_meta_store.configured_keeper_names config in
   let all_names =
-    sorted_unique_strings (configured_names @ Keeper_types.keeper_names config)
+    sorted_unique_strings (configured_names @ Keeper_meta_store.keeper_names config)
   in
   let is_configured name = List.exists (String.equal name) configured_names in
   let scan =
@@ -229,7 +254,7 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
              if is_configured name then { acc with bootable_names = name :: acc.bootable_names }
              else acc
            in
-           match Keeper_types.read_meta config name with
+           match Keeper_meta_store.read_meta config name with
            | Ok (Some meta) ->
              let autoboot_enabled = effective_autoboot_enabled name meta in
              let acc = if autoboot_enabled then add_autoboot acc meta.name else acc in
@@ -315,10 +340,10 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
   }
 
 let autoboot_enabled_keeper_scan config =
-  sorted_unique_strings (Keeper_types.configured_keeper_names config @ Keeper_types.keeper_names config)
+  sorted_unique_strings (Keeper_meta_store.configured_keeper_names config @ Keeper_meta_store.keeper_names config)
   |> List.fold_left
        (fun acc name ->
-         match Keeper_types.read_meta config name with
+         match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
              if effective_autoboot_enabled name meta then
                { acc with autoboot_names = meta.name :: acc.autoboot_names }
@@ -346,13 +371,23 @@ type keeper_phase_counts =
   ; executable : int
   }
 
-let keeper_phase_counts ?base_path () =
+let empty_keeper_phase_counts =
+  { running = 0; failing = 0; recovering = 0; executable = 0 }
+
+type keeper_phase_snapshot =
+  { counts : keeper_phase_counts
+  ; running_names : string list
+  }
+
+let keeper_phase_snapshot ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
+          let counts = acc.counts in
           let executable =
-            if Keeper_state_machine.can_execute_turn entry.phase then acc.executable + 1
-            else acc.executable
+            if Keeper_state_machine.can_execute_turn entry.phase then
+              counts.executable + 1
+            else counts.executable
           in
           (* Keepers in Failing phase with restart budget remaining are
              expected to recover on the next heartbeat cycle — count them
@@ -362,14 +397,21 @@ let keeper_phase_counts ?base_path () =
             match entry.phase with
             | Keeper_state_machine.Failing
               when entry.conditions.restart_budget_remaining ->
-              acc.recovering + 1
-            | _ -> acc.recovering
+              counts.recovering + 1
+            | _ -> counts.recovering
           in
           match entry.phase with
           | Keeper_state_machine.Running ->
-            { acc with running = acc.running + 1; executable }
+            {
+              counts = { counts with running = counts.running + 1; executable };
+              running_names = entry.name :: acc.running_names;
+            }
           | Keeper_state_machine.Failing ->
-            { acc with failing = acc.failing + 1; recovering; executable }
+            {
+              acc with
+              counts =
+                { counts with failing = counts.failing + 1; recovering; executable };
+            }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting
@@ -380,8 +422,13 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Crashed
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
-          | Keeper_state_machine.Zombie -> { acc with executable })
-       { running = 0; failing = 0; recovering = 0; executable = 0 }
+          | Keeper_state_machine.Zombie ->
+            { acc with counts = { counts with executable } })
+       { counts = empty_keeper_phase_counts; running_names = [] }
+  |> fun snapshot ->
+  { snapshot with running_names = sorted_unique_strings snapshot.running_names }
+
+let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -396,8 +443,8 @@ let keeper_fleet_safety_health_json
       match current_server_state_opt () with
       | Some state ->
         (try
-           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
-           , autoboot_enabled_keeper_scan state.Mcp_server.room_config )
+           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
+           , autoboot_enabled_keeper_scan state.Mcp_server.workspace_config )
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -429,13 +476,6 @@ let keeper_fleet_safety_health_json
   let executable_reaction_capacity_below_target =
     target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
-  let status =
-    if no_executable_keeper_fibers then "blocked"
-    else if no_running_fibers then "degraded"
-    else if low_running_fiber_margin then "degraded"
-    else if reaction_capacity_below_target then "degraded"
-    else "ok"
-  in
   let paused_total_count =
     match paused_keepers_json with
     | `Assoc fields ->
@@ -448,15 +488,21 @@ let keeper_fleet_safety_health_json
     match paused_keepers_json with
     | `Assoc fields ->
         (match List.assoc_opt "autoboot_enabled_count" fields with
-         | Some (`Int count) -> count
-         | _ -> 0)
+       | Some (`Int count) -> count
+       | _ -> 0)
     | _ -> 0
+  in
+  let status =
+    if no_executable_keeper_fibers then "blocked"
+    else if no_running_fibers then "degraded"
+    else if low_running_fiber_margin then "degraded"
+    else if reaction_capacity_below_target then "degraded"
+    else "ok"
   in
   let blocked_count =
     if no_executable_keeper_fibers then executable_reaction_capacity_shortfall_count
     else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then
-      reaction_capacity_shortfall_count
+    then reaction_capacity_shortfall_count
     else 0
   in
   let blocker =
@@ -469,7 +515,7 @@ let keeper_fleet_safety_health_json
   in
   `Assoc
     [ "status", `String status
-    ; ("blocker", json_string_opt blocker)
+    ; ("blocker", Json_util.string_opt_to_json blocker)
     ; "bootable_keeper_count", `Int bootable_count
     ; ( "bootable_keeper_names"
       , `List (List.map (fun name -> `String name) bootable_names) )
@@ -511,8 +557,4 @@ let keeper_fleet_safety_health_json
            || no_running_fibers
            || low_running_fiber_margin
            || reaction_capacity_below_target) )
-    ; "autoboot_throttle_limit"
-    , `Int Keeper_keepalive.effective_turn_throttle_limit
-    ; ( "autoboot_throttle_source"
-      , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]

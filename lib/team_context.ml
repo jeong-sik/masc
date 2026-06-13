@@ -1,4 +1,4 @@
-(** Team_context — shared context for coordinated workers.
+(** Team_context — shared context for coupled workers.
     @since 3.0.0 *)
 
 type task_summary = {
@@ -33,13 +33,13 @@ let max_tasks = 10
 (** Shared findings file within the .masc directory. *)
 let findings_path ~base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "shared_findings.jsonl"
 
 let persistence_surface = "team_context_findings"
 
 let record_persistence_read_drop ~reason () =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)]
     ()
 
@@ -70,10 +70,9 @@ let load_findings ~base_path : string list =
         else
           try
             let json = Yojson.Safe.from_string line in
-            let open Yojson.Safe.Util in
-            let worker = json |> member "worker" |> to_string_option
+            let worker = Json_util.get_string json "worker"
                          |> Option.value ~default:"unknown" in
-            let finding = json |> member "finding" |> to_string_option
+            let finding = Json_util.get_string json "finding"
                           |> Option.value ~default:"" in
             if finding <> "" then
               Some (Printf.sprintf "[%s] %s" worker finding)

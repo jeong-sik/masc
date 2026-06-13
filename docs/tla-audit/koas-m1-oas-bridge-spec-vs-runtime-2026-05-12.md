@@ -12,7 +12,7 @@ KOAS models the OAS Bridge timeout/error boundary with eight state variables, el
 |--------------|------------------------|----------|
 | `sys_stop_requested` / `fiber_state` | Eio.Switch + Eio.Cancel.Cancelled idioms scattered | Indirect; no single owner |
 | `oas_api_state` (Idle/Fetching/Success/Error) | `lib/oas_compat/` (compat shim) + ad-hoc call sites | Partial |
-| `cascade_turn` | cascade modules (lib/cascade/) | Partial |
+| `runtime_turn` | runtime modules (lib/runtime/) | Partial |
 | `keeper_decision` (Unknown/ExecuteSelf/AutonomyFallback/Delegate/NeedsContinueGate) | none | Missing |
 | `context_polluted` | none | Missing |
 | `external_side_effect_committed` | none | Missing |
@@ -25,7 +25,7 @@ Three OCaml modules touch the OAS surface:
 | Module | LOC | Role |
 |--------|-----|------|
 | `lib/oas_compat/oas_compat.ml` | (small) | Compatibility shim over OAS protocol |
-| `lib/keeper/oas_execution_error_phase.ml` | (~30) | Closed sum of 7 phases used as Prometheus label on `metric_keeper_oas_execution_errors` |
+| `lib/keeper/oas_execution_error_phase.ml` | (~30) | Closed sum of 7 phases used as Otel_metric_store label on `metric_keeper_oas_execution_errors` |
 | `lib/keeper/keeper_oas_checkpoint.ml` | (small) | OAS checkpoint snapshot handling |
 
 None of them model the spec's `external_side_effect_committed` / `continue_gate_required` distinction — the spec's most operationally important contribution (it differentiates clean Eio cancellation rollback from cases where an outside-world mutation has already committed and needs an explicit operator decision).
@@ -38,7 +38,7 @@ iter 58 KRL was *design-ground without runtime*.  KOAS is the same gap shape, bu
 |--------|-------------------|--------------------|
 | Spec LOC | 327 | 252 |
 | Runtime LOC matching | 91 (event queue) + 3037 (unified turn), 0 spec-concept hits | ~30 (error_phase enum) + small compat/checkpoint, 0 spec-concept hits |
-| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; operator-local memory note `reference_masc_mcp_integrated_improvement_design_audit.md` (not in-repo) records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
+| Bug-Model fixture | one buggy cfg, no verified counter-example documented | **paired and verified**: `KeeperOASAdvanced-buggy.cfg` with `CancelledNeverAbsorbed` invariant; operator-local memory note `reference_masc_integrated_improvement_design_audit.md` (not in-repo) records "Clean 56 states/no error. Buggy: invariant violated in 3 steps" |
 | Spec discipline | leads-to properties only | bug-model + safety + liveness all paired |
 | Implementation tracking | MASC task-134 (explicit) | none cited |
 

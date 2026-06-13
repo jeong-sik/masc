@@ -22,9 +22,37 @@ module Float = Stdlib.Float
               error_add, error_resolve, plan_set_task, plan_get_task, plan_clear_task
 *)
 
+module Planning_eio = Task.Planning_eio
+
+(** Plan action outcome — closed sum for the [status] field.
+    Previously a separate module; inlined because tool_plan.ml is the
+    sole consumer. *)
+module Plan_action_outcome = struct
+  type t =
+    | Initialized
+    | Updated
+    | Added
+    | Delivered
+    | Set
+    | Cleared
+
+  let to_label = function
+    | Initialized -> "initialized"
+    | Updated -> "updated"
+    | Added -> "added"
+    | Delivered -> "delivered"
+    | Set -> "set"
+    | Cleared -> "cleared"
+  ;;
+
+  let status_field outcome : string * Yojson.Safe.t =
+    ("status", `String (to_label outcome))
+  ;;
+end
+
 (** Tool handler context *)
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
 }
 
 open Tool_args
@@ -37,7 +65,7 @@ open Tool_args
      (Planning_eio is the persistence boundary; the error is opaque
       to the caller and not retryable with different args).
    - "task_id is required" / "content is required" / resolve_task_id
-     parse errors / "not found" lookups / set_current_task validation
+     parse errors / set_current_task validation
      → Workflow_rejection (caller-input violations; same args won't
       succeed on retry). *)
 
@@ -143,7 +171,7 @@ let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
         ~start_time
         e
   | Ok task_id ->
-      let result = Planning_eio.load ctx.config ~task_id in
+      let result = Planning_eio.load_or_init ctx.config ~task_id in
       match result with
       | Ok plan_ctx ->
           let markdown = Planning_eio.get_context_markdown plan_ctx in
@@ -156,9 +184,9 @@ let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
       | Error e ->
           Tool_result.make_err
             ~tool_name
-            ~class_:Tool_result.Workflow_rejection
+            ~class_:Tool_result.Runtime_failure
             ~start_time
-            (Printf.sprintf "Planning context not found: %s" e)
+            (Printf.sprintf "Failed to load planning context: %s" e)
 
 let handle_plan_set_task ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
@@ -227,20 +255,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_plan_get" ]
-let tool_spec_requires_join = [ "masc_plan_set_task"; "masc_plan_clear_task" ]
-
-let tool_required_permission = function
-  | "masc_plan_get" | "masc_plan_get_task" ->
-      Some Masc_domain.CanReadState
-  | "masc_plan_init"
-  | "masc_plan_update"
-  | "masc_plan_set_task"
-  | "masc_plan_clear_task"
-  | "masc_note_add"
-  | "masc_deliver" ->
-      Some Masc_domain.CanBroadcast
-  | _ -> None
+let tool_spec_read_only = [ "masc_plan_get_task" ]
 
 let () =
   let is_plan = function
@@ -266,7 +281,5 @@ let () =
              ~handler_binding:Tag_dispatch
              ~is_read_only:(List.mem s.name tool_spec_read_only)
              ~is_idempotent:(List.mem s.name tool_spec_read_only)
-             ~requires_join:(List.mem s.name tool_spec_requires_join)
-             ?required_permission:(tool_required_permission s.name)
              ()))
     Tool_schemas_misc.schemas

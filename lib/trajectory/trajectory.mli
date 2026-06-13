@@ -1,6 +1,6 @@
-(** Trajectory — Tool call recording and cost/entropy gates for keeper sessions.
+(** Trajectory — Tool call recording, cost telemetry, and entropy gates for keeper sessions.
 
-    Tracks tool calls per turn, accumulated cost, and detects stuck loops
+    Tracks tool calls per turn, accumulated cost telemetry, and detects stuck loops
     via entropy checking. Persists trajectory data as JSONL for post-hoc analysis. *)
 
 (** {1 Types} *)
@@ -21,6 +21,10 @@ type tool_call_entry = {
   duration_ms : int;
   error : string option;
   cost_usd : float;
+  execution_id : string option;
+      (** RFC-0233 canonical join key shared with the tool_calls JSONL row
+          for the same execution. [None] only for rows written by paths
+          that have not adopted the id yet (and historical rows). *)
 }
 
 type gate_decode_summary = {
@@ -92,6 +96,14 @@ val entry_to_json :
   ?action_radius:Yojson.Safe.t ->
   tool_call_entry ->
   Yojson.Safe.t
+
+val tool_call_entry_of_json :
+  Yojson.Safe.t -> (tool_call_entry * bool) option
+(** Decode one persisted JSONL row back into a [tool_call_entry].
+    Returns [None] for non-entry rows (summary/thinking) and malformed
+    JSON. The [bool] is true when the gate field parsed from a
+    persisted value rather than the legacy default. Exposed for
+    RFC-0233 consumers that join rows on [execution_id]. *)
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
@@ -119,6 +131,13 @@ val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   tool_call_entry list
 
+(** Get the next round number for a (keeper_name, trace_id, turn) without
+    reading the entire trajectory file. Lazily hydrates from disk on first
+    access per key, then increments in-memory. *)
+val next_round :
+  masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
+  int
+
 val read_all_lines :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory_line list
@@ -127,6 +146,10 @@ val read_all_lines :
 (** {1 Accumulator}
 
     Mutable session-scoped state for tracking tool calls in progress. *)
+
+type pending_entry = {
+  pe_json : Yojson.Safe.t;
+}
 
 type accumulator = {
   mutable entries : tool_call_entry list;
@@ -139,11 +162,16 @@ type accumulator = {
   started_at : float;
   masc_root : string;
   mutable task_id : string option;
+  pending_queue : pending_entry Queue.t;
+  pending_mu : Mutex.t;
+  mutable last_flush : float;
+  mutable on_flush_error : (exn -> unit) option;
 }
 
 val create_accumulator :
+  ?on_flush_error:(exn -> unit) ->
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  generation:int -> accumulator
+  generation:int -> unit -> accumulator
 
 val set_task_id : accumulator -> string -> unit
 val clear_task_id : accumulator -> unit
@@ -156,6 +184,16 @@ val record_entry :
   tool_call_entry ->
   unit
 val finalize : accumulator -> trajectory_outcome -> trajectory
+
+val flush_pending : accumulator -> unit
+(** [flush_pending acc] drains the pending queue and writes all entries
+    to disk in a single batch. Called automatically by [finalize] and
+    by the background flush fiber. *)
+
+val flush_all_pending : unit -> unit
+(** [flush_all_pending ()] flushes pending entries for all active
+    accumulators. Called by the background flush fiber in
+    server_runtime_bootstrap. *)
 
 val detect_entropy :
   ?threshold:int -> ?args_json:string -> accumulator -> string -> (string * int) option

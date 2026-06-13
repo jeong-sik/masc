@@ -1,0 +1,5 @@
+# MASC domain ownership ratchet baseline.
+# Format: rule|path
+# This file freezes current coupling debt. Entries may SHRINK but must NOT GROW.
+# Regenerate with: bash scripts/lint/masc-domain-boundary-ratchet.sh --regenerate
+#

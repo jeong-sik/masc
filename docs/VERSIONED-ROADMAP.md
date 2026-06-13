@@ -7,14 +7,14 @@ code_refs:
   - CHANGELOG.md
 ---
 
-# masc-mcp Versioned Roadmap — Feature Trains First
+# masc Versioned Roadmap — Feature Trains First
 
 > Last updated: 2026-04-09
 > Baseline: v0.2.0
 
 ## Why This Document Exists
 
-`masc-mcp` has enough internal surface area that "stability work" can easily drift away from a clear release promise.
+`masc` has enough internal surface area that "stability work" can easily drift away from a clear release promise.
 This roadmap keeps release planning anchored to one rule:
 
 **Each minor release must ship a user-visible capability promise.**
@@ -35,7 +35,7 @@ Release lane rules:
 
 - `0.y.0`: feature train release. Each train must have one primary promise.
 - `0.y.z` where `z > 0`: stabilization for the current train only.
-- `1.0.0` is reserved for the point where repo coordination, release truth, and the core operator path are trustworthy without caveats.
+- `1.0.0` is reserved for the point where repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
 - Public MCP surface expansion belongs in `minor` or `major`, not in patch.
 - Migration-heavy cleanup belongs in a named train, not in a stabilization patch.
 - Release automation compares tags inside the active major series only, so frozen legacy `v2.*` tags do not block the `0.x` line.
@@ -103,7 +103,7 @@ Includes:
 
 - restore required `main` CI to green after the merged `v2.87.0` bump
 - replace top-level `CHANGELOG.md` `TBD` placeholders with actual merged release notes
-- reduce `masc-mcp` worktree count to an operational baseline or explicitly track the remainder
+- reduce `masc` worktree count to an operational baseline or explicitly track the remainder
 
 Stays out:
 

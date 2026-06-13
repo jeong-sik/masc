@@ -4,7 +4,7 @@
     lifecycle-mutating tools (masc_pause, masc_resume) are blocked. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -17,7 +17,7 @@ let contains_substring s needle =
   if n_len = 0 then true else loop 0
 
 (* Temp directory setup matching test_keeper_task_dispatch.ml pattern. *)
-let with_room f =
+let with_workspace f =
   Eio_main.run @@ fun _env ->
   let dir = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "test_keeper_tag_dispatch_%d" (Random.int 1_000_000)) in
@@ -36,8 +36,8 @@ let with_room f =
         rm dir
       with _ -> ()))
     (fun () ->
-      let config = Coord.default_config dir in
-      let _msg = Coord.init config ~agent_name:(Some "test-keeper") in
+      let config = Workspace.default_config dir in
+      let _msg = Workspace.init config ~agent_name:(Some "test-keeper") in
       f config)
 
 let dispatch config name =
@@ -54,7 +54,7 @@ let dispatch_inline config name =
 
 (* masc_pause_status is read-only — should be allowed. *)
 let test_pause_status_allowed () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     match dispatch config "masc_pause_status" with
     | Some tr when (Tool_result.is_success tr) -> ()
     | Some tr ->
@@ -65,7 +65,7 @@ let test_pause_status_allowed () =
 
 (* masc_pause mutates lifecycle — should be blocked. *)
 let test_pause_blocked () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     match dispatch config "masc_pause" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions blocked" true
@@ -77,7 +77,7 @@ let test_pause_blocked () =
 
 (* masc_resume mutates lifecycle — should be blocked. *)
 let test_resume_blocked () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     match dispatch config "masc_resume" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions blocked" true
@@ -87,29 +87,16 @@ let test_resume_blocked () =
     | None ->
         fail "masc_resume returned None")
 
-let test_approval_pending_inline_allowed () =
-  with_room (fun config ->
-    match dispatch_inline config "masc_approval_pending" with
-    | Some tr when (Tool_result.is_success tr) ->
-        (match Yojson.Safe.from_string (Tool_result.message tr) with
-         | `List _ -> ()
-         | _ -> fail "masc_approval_pending should return a JSON list")
-    | Some tr ->
-        fail (Printf.sprintf "masc_approval_pending should succeed: %s"
-          (Tool_result.message tr))
-    | None ->
-        fail "masc_approval_pending returned None")
-
 let test_other_inline_blocked () =
-  with_room (fun config ->
-    match dispatch_inline config "masc_who" with
+  with_workspace (fun config ->
+    match dispatch_inline config "masc_agents" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions MCP context" true
           (contains_substring (Tool_result.message tr) "requires MCP session context")
     | Some _tr ->
-        fail "masc_who should remain blocked in keeper context"
+        fail "masc_agents should remain blocked in keeper context"
     | None ->
-        fail "masc_who returned None")
+        fail "masc_agents returned None")
 
 let () =
   Alcotest.run "Keeper_tag_dispatch" [
@@ -119,8 +106,6 @@ let () =
       test_case "masc_resume blocked" `Quick test_resume_blocked;
     ];
     "Mod_inline gate", [
-      test_case "masc_approval_pending allowed" `Quick
-        test_approval_pending_inline_allowed;
-      test_case "other inline tools blocked" `Quick test_other_inline_blocked;
+      test_case "inline tools blocked" `Quick test_other_inline_blocked;
     ];
   ]

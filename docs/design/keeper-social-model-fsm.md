@@ -68,11 +68,11 @@ The exact types do not need to be identical across implementations at the intern
 Every social model must be able to reason over a normalized observation bundle that can include:
 
 - pending mentions
-- board and room activity
+- board and workspace activity
 - task availability / assigned task state
 - blocker signals
-- recent visible tool evidence
-- quiet-room / idle context
+- recent allowed tool evidence
+- quiet-workspace / idle context
 - worktree or file-change hints when relevant
 
 Models may ignore fields they do not use, but the adapter layer should expose a stable superset.

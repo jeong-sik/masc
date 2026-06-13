@@ -16,7 +16,7 @@
     The wire-in body lives directly inside [Keeper_post_turn] (see
     [apply_multimodal_wirein] there) so we mirror the A5/A6 layout.
     These helpers are pure and unit-testable without dragging the
-    full [masc_mcp] library into the test closure.
+    full [masc] library into the test closure.
 
     {1 Convention for raw artifact extraction}
 

@@ -5,7 +5,7 @@
     auditability via {!Board.build_karma_ledger}, and the
     rebuild/replay consistency invariant. *)
 
-open Masc_mcp
+open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Random.self_init ()
@@ -130,16 +130,16 @@ let test_self_post_upvote_no_karma () =
 
 let test_self_post_upvote_no_economy_credit () =
   with_env "MASC_ECONOMY_ENABLED" "true" (fun () ->
-    Agent_economy.reset_cache ();
+    Economy.reset_cache ();
     let base_path = Sys.getenv "MASC_BASE_PATH" in
     let post = create_post_exn ~author:"alice" ~content:"economy self vote" in
     let pid = Board.Post_id.to_string post.id in
     let before =
-      Agent_economy.get_balance ~base_path ~agent_name:"alice"
+      Economy.get_balance ~base_path ~agent_name:"alice"
     in
     vote_exn ~voter:" alice " ~post_id:pid ~direction:Board.Up;
     let after_self_vote =
-      Agent_economy.get_balance ~base_path ~agent_name:"alice"
+      Economy.get_balance ~base_path ~agent_name:"alice"
     in
     Alcotest.(check (float 0.0001)) "self upvote does not earn economy credit"
       before after_self_vote)

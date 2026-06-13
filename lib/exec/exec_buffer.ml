@@ -56,8 +56,8 @@ let add_bytes_inner t buf off len =
   else begin
     (* Append to head until head_cap reached. *)
     let head_len = Buffer.length t.head_buf in
-    let head_room = max 0 (t.head_cap - head_len) in
-    let take_head = min head_room len in
+    let head_workspace = max 0 (t.head_cap - head_len) in
+    let take_head = min head_workspace len in
     if take_head > 0 then
       Buffer.add_subbytes t.head_buf buf off take_head;
     (* All input also flows through the tail ring. When len > tail_cap

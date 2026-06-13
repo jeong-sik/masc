@@ -3,10 +3,10 @@
 \*
 \* Mirrors the runtime [Admission_queue] (lib/admission_queue.ml).
 \* The MASC-layer admission_queue is intentionally *passthrough* for
-\* slot acquisition: provider-level throttling lives in OAS cascade,
+\* slot acquisition: provider-level throttling lives in OAS runtime,
 \* not here. The MASC layer owns one host-resource guard
 \* ([check_host_resources], fd >= 90% of fd_warn_threshold => reject)
-\* plus metric collection (on_acquire / on_release) and cascade_name
+\* plus metric collection (on_acquire / on_release) and runtime_id
 \* canonicalisation at every entry point.
 \*
 \* This spec keeps the model honest: the dynamic state captured here
@@ -28,22 +28,22 @@
 \*   active                  | Admission_queue.global.active
 \*   acquire_count           | Admission_queue_metrics.on_acquire calls
 \*   release_count           | Admission_queue_metrics.on_release calls
-\*   cascade_input           | raw cascade_name argument to with_permit
-\*   cascade_recorded        | Keeper_cascade_profile.canonicalize cascade_input
-\*   fd_count                | Prometheus.approximate_open_fd_count ()
+\*   runtime_input           | raw runtime_id argument to with_permit
+\*   runtime_recorded        | Keeper_runtime_profile.canonicalize runtime_input
+\*   fd_count                | telemetry approximate open FD count
 \*
 \* Out-of-scope (not in main today):
 \*   - priority-sorted waiter list (the [waiter] / [insert_sorted] helpers
 \*     exist as types but no acquire path enqueues into them today),
 \*   - blocking semantics (Eio.Promise.create / await),
-\*   - per-cascade quotas.
+\*   - per-runtime quotas.
 \* Adding any of those should land here as a new action set with a
 \* matching invariant -- not a parallel spec.
 
 EXTENDS TLC, Naturals
 
 CONSTANTS
-    FdThreshold,    \* Prometheus.fd_warn_threshold; small in the model
+    FdThreshold,    \* telemetry FD warning threshold; small in the model
     FdGuardNum,     \* numerator of the guard fraction (OCaml = 9)
     FdGuardDen      \* denominator (OCaml = 10)
 
@@ -53,17 +53,17 @@ VARIABLES
     active,
     acquire_count,
     release_count,
-    cascade_input,
-    cascade_recorded
+    runtime_input,
+    runtime_recorded
 
 vars == << fd_count, admission_state, active, acquire_count,
-            release_count, cascade_input, cascade_recorded >>
+            release_count, runtime_input, runtime_recorded >>
 
 AdmissionStateSet == { "idle", "checking", "rejected_fd", "accepted" }
 
-CascadeNameSet == { "raw_a", "raw_b", "canonical_a", "canonical_b", "" }
+RuntimeNameSet == { "raw_a", "raw_b", "canonical_a", "canonical_b", "" }
 
-\* Mirror of [Keeper_cascade_profile.canonicalize]: the raw aliases
+\* Mirror of [Keeper_runtime_profile.canonicalize]: the raw aliases
 \* normalise to a single canonical form, canonical inputs and the
 \* empty string are fixed points. Idempotent by construction.
 Canonicalize(c) ==
@@ -100,8 +100,8 @@ TypeOK ==
     /\ active \in 0..CounterMax
     /\ acquire_count \in 0..CumulativeMax
     /\ release_count \in 0..CumulativeMax
-    /\ cascade_input \in CascadeNameSet
-    /\ cascade_recorded \in CascadeNameSet
+    /\ runtime_input \in RuntimeNameSet
+    /\ runtime_recorded \in RuntimeNameSet
 
 Init ==
     /\ fd_count = 0
@@ -109,8 +109,8 @@ Init ==
     /\ active = 0
     /\ acquire_count = 0
     /\ release_count = 0
-    /\ cascade_input = ""
-    /\ cascade_recorded = ""
+    /\ runtime_input = ""
+    /\ runtime_recorded = ""
 
 \* The host's fd usage drifts independently of admission state. The
 \* model lets it move only when no decision is in flight, which keeps
@@ -121,10 +121,10 @@ FdCountObserved(n) ==
     /\ n \in 0..FdMax
     /\ fd_count' = n
     /\ UNCHANGED << admission_state, active, acquire_count, release_count,
-                    cascade_input, cascade_recorded >>
+                    runtime_input, runtime_recorded >>
 
-\* Operator submits an admission request with a raw cascade name. The
-\* canonicalisation invariant lives in cascade_recorded' = Canonicalize.
+\* Operator submits an admission request with a raw runtime name. The
+\* canonicalisation invariant lives in runtime_recorded' = Canonicalize.
 \*
 \* Modelling note: [acquire_count < CumulativeMax] is a model-only guard
 \* added 2026-04-28 to avoid a TLC deadlock when both counters saturate
@@ -143,8 +143,8 @@ SubmitRequest(raw) ==
     /\ admission_state = "idle"
     /\ acquire_count < CumulativeMax
     /\ admission_state' = "checking"
-    /\ cascade_input' = raw
-    /\ cascade_recorded' = Canonicalize(raw)
+    /\ runtime_input' = raw
+    /\ runtime_recorded' = Canonicalize(raw)
     /\ UNCHANGED << fd_count, active, acquire_count, release_count >>
 
 \* fd >= 90% of threshold ==> rejection. No counter movement.
@@ -153,7 +153,7 @@ RejectByFdGuard ==
     /\ GuardFires
     /\ admission_state' = "rejected_fd"
     /\ UNCHANGED << fd_count, active, acquire_count, release_count,
-                    cascade_input, cascade_recorded >>
+                    runtime_input, runtime_recorded >>
 
 \* fd OK ==> acquire. Passthrough at MASC: no queue, just metric pair.
 AcceptAndAcquire ==
@@ -164,8 +164,8 @@ AcceptAndAcquire ==
     /\ admission_state' = "accepted"
     /\ active' = active + 1
     /\ acquire_count' = acquire_count + 1
-    /\ UNCHANGED << fd_count, release_count, cascade_input,
-                    cascade_recorded >>
+    /\ UNCHANGED << fd_count, release_count, runtime_input,
+                    runtime_recorded >>
 
 \* Work completes; on_release pairs with prior on_acquire.
 Release ==
@@ -175,8 +175,8 @@ Release ==
     /\ admission_state' = "idle"
     /\ active' = active - 1
     /\ release_count' = release_count + 1
-    /\ UNCHANGED << fd_count, acquire_count, cascade_input,
-                    cascade_recorded >>
+    /\ UNCHANGED << fd_count, acquire_count, runtime_input,
+                    runtime_recorded >>
 
 \* Caller observed the rejection and returns to idle for the next
 \* request without touching counters.
@@ -184,11 +184,11 @@ RejectionDrains ==
     /\ admission_state = "rejected_fd"
     /\ admission_state' = "idle"
     /\ UNCHANGED << fd_count, active, acquire_count, release_count,
-                    cascade_input, cascade_recorded >>
+                    runtime_input, runtime_recorded >>
 
 Next ==
     \/ \E n \in 0..FdMax : FdCountObserved(n)
-    \/ \E raw \in CascadeNameSet : SubmitRequest(raw)
+    \/ \E raw \in RuntimeNameSet : SubmitRequest(raw)
     \/ RejectByFdGuard
     \/ AcceptAndAcquire
     \/ Release
@@ -206,11 +206,11 @@ FdThresholdEnforced ==
     /\ admission_state = "rejected_fd" => GuardFires
     /\ admission_state = "accepted"    => ~ GuardFires
 
-\* I2: CascadeNameCanonical. Every recorded cascade_name equals the
+\* I2: RuntimeNameCanonical. Every recorded runtime_id equals the
 \* canonical form of its input. Mirrors the OCaml SSOT comment at
 \* admission_queue.ml line 140-142.
-CascadeNameCanonical ==
-    cascade_recorded = Canonicalize(cascade_input)
+RuntimeNameCanonical ==
+    runtime_recorded = Canonicalize(runtime_input)
 
 \* I3: ReleaseCountBounded. A release without a prior acquire would
 \* be a spurious metric. release_count <= acquire_count is a strict
@@ -243,8 +243,8 @@ FdGuardSkip ==
     /\ admission_state' = "accepted"
     /\ active' = active + 1
     /\ acquire_count' = acquire_count + 1
-    /\ UNCHANGED << fd_count, release_count, cascade_input,
-                    cascade_recorded >>
+    /\ UNCHANGED << fd_count, release_count, runtime_input,
+                    runtime_recorded >>
 
 \* B2: ReleaseSkipped. The release-on-exception arm in [with_permit]
 \* (lib/admission_queue.ml:158) is the load-bearing failure path for
@@ -255,23 +255,23 @@ ReleaseSkipped ==
     /\ admission_state = "accepted"
     /\ admission_state' = "idle"
     /\ UNCHANGED << fd_count, active, acquire_count, release_count,
-                    cascade_input, cascade_recorded >>
+                    runtime_input, runtime_recorded >>
 
 \* B3: CanonicalizeMissed. SSOT entry-point comment requires every
-\* cascade_name to be canonicalised before record. The bug model lets
+\* runtime_id to be canonicalised before record. The bug model lets
 \* a caller skip the normalisation, recording the raw alias.
 CanonicalizeMissed(raw) ==
     /\ admission_state = "idle"
     /\ admission_state' = "checking"
-    /\ cascade_input' = raw
-    /\ cascade_recorded' = raw            \* missed -- not Canonicalize(raw)
+    /\ runtime_input' = raw
+    /\ runtime_recorded' = raw            \* missed -- not Canonicalize(raw)
     /\ UNCHANGED << fd_count, active, acquire_count, release_count >>
 
 NextBuggy ==
     \/ Next
     \/ FdGuardSkip
     \/ ReleaseSkipped
-    \/ \E raw \in CascadeNameSet : CanonicalizeMissed(raw)
+    \/ \E raw \in RuntimeNameSet : CanonicalizeMissed(raw)
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
 

@@ -18,6 +18,52 @@ module Float = Stdlib.Float
 open Tool_args
 
 let default_timeout_sec = 15
+let default_max_chars = 50_000
+let max_chars_cap = 100_000
+let max_response_bytes = 2_000_000
+let max_redirects = 3
+
+type extract_mode =
+  | Markdown
+  | Text
+
+type extraction_source =
+  | Article
+  | Main
+  | Body
+  | Document
+  | Raw_text
+
+let extraction_source_to_string = function
+  | Article -> "article"
+  | Main -> "main"
+  | Body -> "body"
+  | Document -> "document"
+  | Raw_text -> "raw_text"
+
+type content_kind =
+  | Html
+  | Plain_text
+  | Json_text
+  | Xml_text
+
+let content_kind_to_string = function
+  | Html -> "html"
+  | Plain_text -> "text"
+  | Json_text -> "json"
+  | Xml_text -> "xml"
+
+let extract_mode_to_string = function
+  | Markdown -> "markdown"
+  | Text -> "text"
+
+let extract_mode_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "" | "markdown" | "md" -> Some Markdown
+  | "text" | "plain" | "plain_text" -> Some Text
+  | _ -> None
+
+let default_extract_mode = Markdown
 
 (** Extract <title> from HTML *)
 let title_tag_re =
@@ -85,6 +131,289 @@ let valid_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
+let ends_with ~suffix s =
+  let len_s = String.length s in
+  let len_suffix = String.length suffix in
+  len_suffix <= len_s
+  && String.equal (String.sub s (len_s - len_suffix) len_suffix) suffix
+
+let ipv4_private_reason host =
+  match String.split_on_char '.' host |> List.map Stdlib.int_of_string_opt with
+  | [ Some a; Some b; Some _; Some _ ]
+    when a = 0
+         || a = 10
+         || a = 127
+         || a >= 224
+         || (a = 169 && b = 254)
+         || (a = 172 && b >= 16 && b <= 31)
+         || (a = 192 && b = 168)
+         || (a = 100 && b >= 64 && b <= 127)
+         || (a = 198 && (b = 18 || b = 19)) ->
+      Some "private/internal/special-use IPv4 address"
+  | [ Some 192; Some 0; Some 2; Some _ ]
+  | [ Some 198; Some 51; Some 100; Some _ ]
+  | [ Some 203; Some 0; Some 113; Some _ ] ->
+      Some "documentation-only IPv4 address"
+  | [ Some _; Some _; Some _; Some _ ] -> None
+  | _ -> None
+
+let ipv6_private_reason host =
+  let lower = String.lowercase_ascii host in
+  if String.equal lower "::1"
+     || String.equal lower "0:0:0:0:0:0:0:1"
+     || String.equal lower "::"
+  then Some "private/internal/special-use IPv6 address"
+  else if String.starts_with ~prefix:"fc" lower
+          || String.starts_with ~prefix:"fd" lower
+          || String.starts_with ~prefix:"fe8" lower
+          || String.starts_with ~prefix:"fe9" lower
+          || String.starts_with ~prefix:"fea" lower
+          || String.starts_with ~prefix:"feb" lower
+  then Some "private/internal/special-use IPv6 address"
+  else None
+
+let blocked_host_reason url =
+  let uri = Uri.of_string (String.trim url) in
+  match Uri.host uri with
+  | None -> Some "url must include a host"
+  | Some raw_host ->
+      let host = String.lowercase_ascii (String.trim raw_host) in
+      if String.equal host "" then Some "url must include a host"
+      else if String.equal host "localhost" || ends_with ~suffix:".localhost" host
+      then Some "localhost is not allowed"
+      else if String.equal host "metadata.google.internal"
+              || String.equal host "169.254.169.254"
+      then Some "cloud metadata endpoints are not allowed"
+      else if not (String.contains host '.') && not (String.contains host ':')
+      then Some "single-label internal hostnames are not allowed"
+      else
+        match ipv4_private_reason host with
+        | Some _ as reason -> reason
+        | None -> if String.contains host ':' then ipv6_private_reason host else None
+
+let html_block_re tag =
+  Re.Pcre.re
+    ~flags:[ `CASELESS; `DOTALL ]
+    (Printf.sprintf "<%s\\b[^>]*>[\\s\\S]*?</%s>" tag tag)
+  |> Re.compile
+
+let remove_html_noise_res =
+  List.map html_block_re
+    [ "script"; "style"; "noscript"; "svg"; "canvas"; "template"; "iframe" ]
+
+let remove_boilerplate_res =
+  List.map html_block_re [ "nav"; "footer"; "aside"; "form" ]
+
+let html_comment_re =
+  Re.Pcre.re ~flags:[ `DOTALL ] "<!--[\\s\\S]*?-->" |> Re.compile
+
+let article_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<article\\b[^>]*>([\\s\\S]*?)</article>"
+  |> Re.compile
+
+let main_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<main\\b[^>]*>([\\s\\S]*?)</main>"
+  |> Re.compile
+
+let body_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<body\\b[^>]*>([\\s\\S]*?)</body>"
+  |> Re.compile
+
+let heading_re =
+  Re.Pcre.re ~flags:[ `CASELESS; `DOTALL ] "<h([1-6])\\b[^>]*>([\\s\\S]*?)</h[1-6]>"
+  |> Re.compile
+
+let link_re =
+  Re.Pcre.re
+    ~flags:[ `CASELESS; `DOTALL ]
+    "<a\\b[^>]*href\\s*=\\s*['\"]([^'\"]+)['\"][^>]*>([\\s\\S]*?)</a>"
+  |> Re.compile
+
+let paragraph_open_re = Re.Pcre.re ~flags:[ `CASELESS ] "<p\\b[^>]*>" |> Re.compile
+let paragraph_close_re = Re.Pcre.re ~flags:[ `CASELESS ] "</p>" |> Re.compile
+let br_re = Re.Pcre.re ~flags:[ `CASELESS ] "<br\\s*/?>" |> Re.compile
+let li_open_re = Re.Pcre.re ~flags:[ `CASELESS ] "<li\\b[^>]*>" |> Re.compile
+let li_close_re = Re.Pcre.re ~flags:[ `CASELESS ] "</li>" |> Re.compile
+let block_open_re =
+  Re.Pcre.re ~flags:[ `CASELESS ] "<(div|section|tr|table|ul|ol)\\b[^>]*>"
+  |> Re.compile
+let block_close_re =
+  Re.Pcre.re ~flags:[ `CASELESS ] "</(div|section|tr|table|ul|ol)>"
+  |> Re.compile
+let residual_tag_re = Re.Pcre.re "<[^>]+>" |> Re.compile
+let horizontal_space_re = Re.Pcre.re "[ \t\r]+" |> Re.compile
+let blank_lines_re = Re.Pcre.re "\n{3,}" |> Re.compile
+
+let html_entity_replacements =
+  [
+    ("&amp;", "&");
+    ("&lt;", "<");
+    ("&gt;", ">");
+    ("&quot;", "\"");
+    ("&#39;", "'");
+    ("&#039;", "'");
+    ("&apos;", "'");
+    ("&nbsp;", " ");
+  ]
+  |> List.map (fun (entity, replacement) ->
+         (Re.str entity |> Re.compile, replacement))
+
+let decode_html_entities text =
+  List.fold_left
+    (fun acc (entity_re, replacement) ->
+      Re.replace_string entity_re ~by:replacement acc)
+    text
+    html_entity_replacements
+
+let strip_noise html =
+  remove_html_noise_res
+  |> List.fold_left
+       (fun acc re -> Re.replace_string re ~by:"" acc)
+       (Re.replace_string html_comment_re ~by:"" html)
+
+let longest_nonempty blocks =
+  List.fold_left
+    (fun best block ->
+      let candidate = String.trim block in
+      if String.equal candidate "" then best
+      else
+        match best with
+        | None -> Some candidate
+        | Some current ->
+            if String.length candidate > String.length current then Some candidate
+            else best)
+    None
+    blocks
+
+let first_group pattern html =
+  Re.all pattern html |> List.map (fun groups -> Re.Group.get groups 1)
+
+let select_readable_html html =
+  let html = strip_noise html in
+  let selected, source =
+    match longest_nonempty (first_group article_re html) with
+    | Some article -> (article, Article)
+    | None -> (
+        match longest_nonempty (first_group main_re html) with
+        | Some main -> (main, Main)
+        | None -> (
+            match first_group body_re html with
+            | body :: _ -> (body, Body)
+            | [] -> (html, Document)))
+  in
+  ( List.fold_left
+      (fun acc re -> Re.replace_string re ~by:"" acc)
+      selected
+      remove_boilerplate_res
+  , source )
+
+let clean_inline html =
+  Tool_misc_web_search.clean_search_text html
+
+let render_links html =
+  Re.replace link_re html ~f:(fun groups ->
+      let href = Re.Group.get groups 1 |> String.trim in
+      let label = Re.Group.get groups 2 |> clean_inline in
+      if String.equal label "" then ""
+      else if valid_url href then Printf.sprintf "[%s](%s)" label href
+      else label)
+
+let render_headings html =
+  Re.replace heading_re html ~f:(fun groups ->
+      let level =
+        Re.Group.get groups 1 |> Stdlib.int_of_string_opt |> Option.value ~default:2
+      in
+      let marker = String.make (max 1 (min 6 level)) '#' in
+      let label = Re.Group.get groups 2 |> clean_inline in
+      if String.equal label "" then "\n" else "\n" ^ marker ^ " " ^ label ^ "\n")
+
+let normalize_markdown text =
+  let lines =
+    text
+    |> Re.replace_string horizontal_space_re ~by:" "
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+  in
+  let buf = Buffer.create (String.length text) in
+  let previous_blank = ref true in
+  List.iter
+    (fun line ->
+      if String.equal line "" then (
+        if not !previous_blank then (
+          Buffer.add_char buf '\n';
+          previous_blank := true))
+      else (
+        if Buffer.length buf > 0 && not !previous_blank then Buffer.add_char buf '\n';
+        Buffer.add_string buf line;
+        previous_blank := false))
+    lines;
+  Buffer.contents buf |> Re.replace_string blank_lines_re ~by:"\n\n" |> String.trim
+
+let render_markdown html =
+  html
+  |> render_links
+  |> render_headings
+  |> Re.replace_string br_re ~by:"\n"
+  |> Re.replace_string paragraph_open_re ~by:"\n"
+  |> Re.replace_string paragraph_close_re ~by:"\n"
+  |> Re.replace_string li_open_re ~by:"\n- "
+  |> Re.replace_string li_close_re ~by:"\n"
+  |> Re.replace_string block_open_re ~by:"\n"
+  |> Re.replace_string block_close_re ~by:"\n"
+  |> Re.replace_string residual_tag_re ~by:""
+  |> decode_html_entities
+  |> normalize_markdown
+
+let render_extracted_text ~extract_mode html =
+  let readable, source = select_readable_html html in
+  let text =
+    match extract_mode with
+    | Markdown -> render_markdown readable
+    | Text -> Tool_misc_web_search.clean_search_text readable
+  in
+  text, source
+
+let content_type_base raw =
+  match String.split_on_char ';' raw with
+  | base :: _ -> String.lowercase_ascii (String.trim base)
+  | [] -> String.lowercase_ascii (String.trim raw)
+
+let content_kind_of_content_type = function
+  | None -> Ok Html
+  | Some raw ->
+      let base = content_type_base raw in
+      if String.equal base "" then Ok Html
+      else if String.equal base "text/html"
+              || String.equal base "application/xhtml+xml"
+              || ends_with ~suffix:"+html" base
+      then Ok Html
+      else if String.equal base "text/plain"
+              || String.equal base "text/markdown"
+              || String.equal base "text/csv"
+      then Ok Plain_text
+      else if String.equal base "application/json"
+              || ends_with ~suffix:"+json" base
+      then Ok Json_text
+      else if String.equal base "text/xml"
+              || String.equal base "application/xml"
+              || ends_with ~suffix:"+xml" base
+      then Ok Xml_text
+      else if String.starts_with ~prefix:"text/" base then Ok Plain_text
+      else Error raw
+
+let normalize_raw_text text =
+  text |> Re.replace_string horizontal_space_re ~by:" " |> normalize_markdown
+
+let render_payload ~extract_mode ~content_kind payload =
+  match content_kind with
+  | Html -> render_extracted_text ~extract_mode payload
+  | Plain_text -> (normalize_raw_text payload, Raw_text)
+  | Json_text | Xml_text -> (String.trim payload, Raw_text)
+
+let truncate_text ~max_chars text =
+  if String.length text <= max_chars then text, false
+  else String.sub text 0 max_chars ^ "\n[TRUNCATED]", true
+
 (** Cache + rate limit — same pattern as web_search but separate state *)
 type cache_entry = {
   response : string;
@@ -138,9 +467,6 @@ let enforce_rate_limit now =
         Queue.push now request_times;
         Ok ()))
 
-(** Max content length — prevent context overflow *)
-let max_content_length = 100_000
-
 (** Redact transport error detail before the " for " suffix *)
 let redact_transport_error_detail message =
   match String.index_opt message ' ' with
@@ -157,42 +483,182 @@ type fetch_failure =
   | Transport_error of string   (* raw transport-layer detail, already redacted *)
   | Http_status of int          (* upstream returned a non-2xx HTTP status *)
   | No_http_status              (* protocol level: status line missing *)
+  | Redirect_blocked of string  (* redirect target failed URL/host policy *)
+  | Redirect_limit_exceeded
+  | Unsupported_content_type of string
 
 let fetch_failure_to_string = function
   | Transport_error detail -> Printf.sprintf "fetch failed: %s" detail
   | Http_status status -> Printf.sprintf "HTTP %d" status
   | No_http_status -> "no HTTP status received"
+  | Redirect_blocked reason -> "redirect blocked: " ^ reason
+  | Redirect_limit_exceeded ->
+      Printf.sprintf "redirect limit exceeded (max %d)" max_redirects
+  | Unsupported_content_type content_type ->
+      Printf.sprintf "unsupported content type: %s" content_type
 
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
   | Transport_error _ -> Tool_result.Transient_error
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
+  | Redirect_blocked _ -> Tool_result.Workflow_rejection
+  | Redirect_limit_exceeded -> Tool_result.Runtime_failure
+  | Unsupported_content_type _ -> Tool_result.Runtime_failure
+
+type fetch_response =
+  { http_status : int option
+  ; final_url : string
+  ; redirect_count : int
+  ; content_type : string option
+  ; downloaded_bytes : int option
+  ; body : string
+  }
+
+type http_fetch =
+  timeout_sec:int ->
+  headers:(string * string) list ->
+  max_response_bytes:int ->
+  string ->
+  (fetch_response, fetch_failure) Result.t
+
+let resolve_redirect_url ~base_url target =
+  Uri.resolve "" (Uri.of_string base_url) (Uri.of_string target) |> Uri.to_string
+
+let redirect_status = function
+  | Some status -> status >= 300 && status < 400
+  | None -> false
+
+let fetch_response_of_http_response ~request_url ~redirect_count
+    (response : Tool_local_runtime_http.http_get_response) =
+  { http_status = response.http_status
+  ; final_url =
+      Option.value response.effective_url ~default:request_url
+      |> String.trim
+  ; redirect_count
+  ; content_type = response.content_type
+  ; downloaded_bytes = response.downloaded_bytes
+  ; body = response.body
+  }
+
+let validate_redirect_target target =
+  if not (valid_url target) then
+    Error "redirect target must be a valid http or https URL"
+  else
+    match blocked_host_reason target with
+    | Some reason -> Error ("target host is blocked: " ^ reason)
+    | None -> Ok ()
+
+let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
+  let rec loop ~redirect_count request_url =
+    match
+      Tool_local_runtime_http.http_get_text_response_with_headers
+        ~timeout_sec
+        ~headers
+        ~follow_redirects:false
+        ~compressed:true
+        ~max_response_bytes
+        request_url
+    with
+    | Error detail ->
+        Error (Transport_error (redact_transport_error_detail detail))
+    | Ok response when redirect_status response.http_status -> (
+        match response.redirect_url with
+        | None | Some "" ->
+            Ok (fetch_response_of_http_response ~request_url ~redirect_count response)
+        | Some redirect_url ->
+            if redirect_count >= max_redirects then Error Redirect_limit_exceeded
+            else
+              let next_url =
+                resolve_redirect_url ~base_url:request_url redirect_url
+              in
+              match validate_redirect_target next_url with
+              | Error reason -> Error (Redirect_blocked reason)
+              | Ok () -> loop ~redirect_count:(redirect_count + 1) next_url)
+    | Ok response ->
+        Ok (fetch_response_of_http_response ~request_url ~redirect_count response)
+  in
+  loop ~redirect_count:0 url
+
+let http_fetch_mutex = Mutex.create ()
+let http_fetch_ref = ref default_http_fetch
+
+let current_http_fetch () =
+  Mutex.protect http_fetch_mutex (fun () -> !http_fetch_ref)
+
+let with_http_fetch_for_test http_fetch f =
+  let previous =
+    Mutex.protect http_fetch_mutex (fun () ->
+        let previous = !http_fetch_ref in
+        http_fetch_ref := http_fetch;
+        previous)
+  in
+  Stdlib.Fun.protect
+    ~finally:(fun () ->
+      Mutex.protect http_fetch_mutex (fun () -> http_fetch_ref := previous))
+    f
+
+let with_http_get_for_test http_get f =
+  with_http_fetch_for_test
+    (fun ~timeout_sec ~headers ~max_response_bytes url ->
+      match http_get ~timeout_sec ~headers ~max_response_bytes url with
+      | Ok (http_status, body) ->
+          Ok
+            { http_status
+            ; final_url = url
+            ; redirect_count = 0
+            ; content_type = None
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            }
+      | Error detail ->
+          Error (Transport_error (redact_transport_error_detail detail)))
+    f
 
 (** Main fetch implementation *)
-let fetch_impl ~url ~timeout_sec =
+let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
   let headers =
-    [ ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)") ]
+    [
+      ( "User-Agent",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+         (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 MASC-FetchWeb/1.0" );
+      ("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5");
+      ("Accept-Language", "en-US,en;q=0.8,ko;q=0.7");
+    ]
   in
-  match
-    Tool_local_runtime_http.http_get_text_with_status_with_headers
-      ~timeout_sec ~headers url
-  with
-  | Error detail ->
-      Error (Transport_error (redact_transport_error_detail detail))
-  | Ok (Some status, payload) when status >= 200 && status < 300 ->
-      let title = extract_title payload in
-      let description = extract_description payload in
-      let text =
-        let cleaned = Tool_misc_web_search.clean_search_text payload in
-        if String.length cleaned > max_content_length then
-          String.sub cleaned 0 max_content_length
-          ^ "\n[TRUNCATED at 100KB]"
-        else cleaned
-      in
-      Ok (status, title, description, text)
-  | Ok (Some status, _) -> Error (Http_status status)
-  | Ok (None, _) -> Error No_http_status
+  match (current_http_fetch ()) ~timeout_sec ~headers ~max_response_bytes url with
+  | Error failure -> Error failure
+  | Ok response -> (
+      match response.http_status with
+      | Some status when status >= 200 && status < 300 -> (
+          match content_kind_of_content_type response.content_type with
+          | Error content_type -> Error (Unsupported_content_type content_type)
+          | Ok content_kind ->
+              let title =
+                match content_kind with
+                | Html -> extract_title response.body
+                | Plain_text | Json_text | Xml_text -> None
+              in
+              let description =
+                match content_kind with
+                | Html -> extract_description response.body
+                | Plain_text | Json_text | Xml_text -> None
+              in
+              let rendered, extraction_source =
+                render_payload ~extract_mode ~content_kind response.body
+              in
+              let text, truncated = truncate_text ~max_chars rendered in
+              Ok
+                ( response
+                , status
+                , content_kind
+                , extraction_source
+                , title
+                , description
+                , text
+                , truncated ))
+      | Some status -> Error (Http_status status)
+      | None -> Error No_http_status)
 
 (* RFC-0189 PR-1b.8 — typed result.
    Failure-class assignments live with construction:
@@ -215,66 +681,108 @@ let fetch_impl ~url ~timeout_sec =
 let handle ~tool_name ~start_time args : Tool_result.result =
   let url = get_string args "url" "" in
   let timeout = max 1 (min 60 (get_int args "timeout" default_timeout_sec)) in
-  if not (valid_url url) then
+  let max_chars = max 1 (min max_chars_cap (get_int args "maxChars" default_max_chars)) in
+  let extract_mode_raw =
+    get_string args "extractMode" (extract_mode_to_string default_extract_mode)
+  in
+  let make_workflow_err message =
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Workflow_rejection
       ~start_time
-      "url must be a valid http or https URL"
+      message
+  in
+  if not (valid_url url) then
+    make_workflow_err "url must be a valid http or https URL"
   else
-    (* RFC-0189 follow-up — store the parsed JSON envelope in
-       [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
-       The wrapped form corrupted [result.message] for callers (and
-       tests) that round-tripped through [parse_json result.message],
-       because the wrapper was serialised instead of the envelope. Both
-       the cache and fresh paths produce [Tool_args.ok_response] strings,
-       so both go through
-       [structured_payload_of_message]; plain-text fallback retained
-       only for defence in depth. *)
-    let ok_from_envelope body =
-      let data =
-        match Tool_result.structured_payload_of_message body with
-        | Some json -> json
-        | None -> `String body
-      in
-      Tool_result.make_ok ~tool_name ~start_time ~data ()
-    in
-    let now = Unix.gettimeofday () in
-    let key = url ^ "|" ^ Int.to_string timeout in
-    match cache_lookup key now with
-    | Some cached -> ok_from_envelope cached
-    | None -> (
-        match enforce_rate_limit now with
-        | Error message ->
-            Tool_result.make_err
-              ~tool_name
-              ~class_:Tool_result.Transient_error
-              ~start_time
-              message
-        | Ok () -> (
-            match fetch_impl ~url ~timeout_sec:timeout with
-            | Ok (http_status, title, description, text) ->
-                let fields =
-                  [
-                    ("url", `String url);
-                    ("http_status", `Int http_status);
-                    ("text", `String text);
-                  ]
-                  @
-                  (match title with
-                  | Some t -> [ ("title", `String t) ]
-                  | None -> [])
-                  @
-                  (match description with
-                  | Some d -> [ ("description", `String d) ]
-                  | None -> [])
-                in
-                let json = Tool_args.ok_response fields in
-                cache_store key json now;
-                ok_from_envelope json
-            | Error failure ->
-                Tool_result.make_err
-                  ~tool_name
-                  ~class_:(fetch_failure_class failure)
-                  ~start_time
-                  (fetch_failure_to_string failure)))
+    match extract_mode_of_string extract_mode_raw with
+    | None -> make_workflow_err "extractMode must be one of: markdown, text"
+    | Some extract_mode -> (
+        match blocked_host_reason url with
+        | Some reason -> make_workflow_err ("url host is blocked: " ^ reason)
+        | None ->
+            let extract_mode_label = extract_mode_to_string extract_mode in
+            (* RFC-0189 follow-up — store the parsed JSON envelope in
+               [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
+               The wrapped form corrupted [result.message] for callers (and
+               tests) that round-tripped through [parse_json result.message],
+               because the wrapper was serialised instead of the envelope. Both
+               the cache and fresh paths produce [Tool_args.ok_response] strings,
+               so both go through
+               [structured_payload_of_message]; plain-text fallback retained
+               only for defence in depth. *)
+            let ok_from_envelope body =
+              let data =
+                match Tool_result.structured_payload_of_message body with
+                | Some json -> json
+                | None -> `String body
+              in
+              Tool_result.make_ok ~tool_name ~start_time ~data ()
+            in
+            let now = Unix.gettimeofday () in
+            let key =
+              String.concat
+                "|"
+                [ url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
+            in
+            match cache_lookup key now with
+            | Some cached -> ok_from_envelope cached
+            | None -> (
+                match enforce_rate_limit now with
+                | Error message ->
+                    Tool_result.make_err
+                      ~tool_name
+                      ~class_:Tool_result.Transient_error
+                      ~start_time
+                      message
+                | Ok () -> (
+                    match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
+                    | Ok
+                        ( response
+                        , http_status
+                        , content_kind
+                        , extraction_source
+                        , title
+                        , description
+                        , text
+                        , truncated ) ->
+                        let fields =
+                          [
+                            ("url", `String url);
+                            ("final_url", `String response.final_url);
+                            ("http_status", `Int http_status);
+                            ("redirect_count", `Int response.redirect_count);
+                            ("extract_mode", `String extract_mode_label);
+                            ("content_kind", `String (content_kind_to_string content_kind));
+                            ( "extraction_source",
+                              `String (extraction_source_to_string extraction_source) );
+                            ("text", `String text);
+                            ("content_chars", `Int (String.length text));
+                            ("truncated", `Bool truncated);
+                          ]
+                          @
+                          (match response.content_type with
+                          | Some value -> [ ("content_type", `String value) ]
+                          | None -> [])
+                          @
+                          (match response.downloaded_bytes with
+                          | Some value -> [ ("downloaded_bytes", `Int value) ]
+                          | None -> [])
+                          @
+                          (match title with
+                          | Some t -> [ ("title", `String t) ]
+                          | None -> [])
+                          @
+                          (match description with
+                          | Some d -> [ ("description", `String d) ]
+                          | None -> [])
+                        in
+                        let json = Tool_args.ok_response fields in
+                        cache_store key json now;
+                        ok_from_envelope json
+                    | Error failure ->
+                        Tool_result.make_err
+                          ~tool_name
+                          ~class_:(fetch_failure_class failure)
+                          ~start_time
+                          (fetch_failure_to_string failure))))

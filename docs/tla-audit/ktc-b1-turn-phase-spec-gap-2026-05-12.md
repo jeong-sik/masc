@@ -3,7 +3,7 @@
 **Iteration**: 19 (/loop FSM/TLA+/OCaml drift hunt — first KTC entry)
 **Date**: 2026-05-12
 **Spec**: `specs/keeper-state-machine/KeeperTurnCycle.tla` (373 LOC)
-**OCaml**: `lib/keeper/keeper_registry.ml` (`turn_phase` / `decision_stage` / `cascade_state` types)
+**OCaml**: `lib/keeper/keeper_registry.ml` (`turn_phase` / `decision_stage` / `runtime_state` types)
 **Risk**: MID — 2 active OCaml phases not modeled in spec; 7 invariants currently exclude these phases by silent omission.
 **Type**: Audit-only (no code change in this PR).
 
@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `turn_phase` (`TurnPhaseSet` §110) | 5: idle, prompting, executing, compacting, finalizing | 7: Turn_idle, Turn_prompting, **Turn_routing**, Turn_executing, Turn_compacting, Turn_finalizing, **Turn_exhausted** | ❌ **2 phases missing in spec** |
 | `decision_stage` (`DecisionSet` §111) | 4: undecided, guard_ok, gate_rejected, tool_policy_selected | 4: Decision_undecided, Decision_guard_ok, Decision_gate_rejected, Decision_tool_policy_selected | ✅ Aligned |
-| `cascade_state` (`CascadeSet` §112) | 5: idle, selecting, trying, done, exhausted | 5: Cascade_idle, Cascade_selecting, Cascade_trying, Cascade_done, Cascade_exhausted | ✅ Aligned |
+| `runtime_state` (`RuntimeSet` §112) | 5: idle, selecting, trying, done, exhausted | 5: Runtime_idle, Runtime_selecting, Runtime_trying, Runtime_done, Runtime_exhausted | ✅ Aligned |
 
 ## Drift detail — `turn_phase`
 
@@ -35,7 +35,7 @@ OCaml uses `[@tla.idle]`, `[@tla.active]`, `[@tla.terminal]` PPX attributes on e
 
 ## How 7 invariants currently behave on the unmodeled phases
 
-`KeeperTurnCycle.tla` invariants §316-352 quantify over `turn_phase \in TurnPhaseSet` (= 5-element set).  Since `Turn_routing` / `Turn_exhausted` are not in the set, an OCaml state machine that's currently in those phases is **outside the spec's universe**.  The 7 invariants — `NoLiveTurnClearsState`, `IdleRequiresNotLive`, `GateRejectedRequiresFinalizing`, `SelectingRequiresToolPolicy`, `ExecutingRequiresTrying`, `CompactingRequiresTrying`, `TerminalCascadeRequiresFinalizing` — say nothing about those phases.
+`KeeperTurnCycle.tla` invariants §316-352 quantify over `turn_phase \in TurnPhaseSet` (= 5-element set).  Since `Turn_routing` / `Turn_exhausted` are not in the set, an OCaml state machine that's currently in those phases is **outside the spec's universe**.  The 7 invariants — `NoLiveTurnClearsState`, `IdleRequiresNotLive`, `GateRejectedRequiresFinalizing`, `SelectingRequiresToolPolicy`, `ExecutingRequiresTrying`, `CompactingRequiresTrying`, `TerminalRuntimeRequiresFinalizing` — say nothing about those phases.
 
 This is a coverage gap, not a contradiction.  An OCaml run that enters `Turn_routing` and violates what *would be* a sensible "Routing should imply X" invariant is silently allowed at the spec level.  The Bug Model can't detect routing-related corruption because routing isn't in the universe.
 
@@ -49,17 +49,17 @@ Drawn directly from OCaml's `[@tla.active|terminal]` annotations + production se
        turn_phase = "routing" =>
            /\ turn_live
            /\ decision_stage = "tool_policy_selected"
-           /\ cascade_state \in {"selecting", "trying"}
+           /\ runtime_state \in {"selecting", "trying"}
    ```
    Mirrors `SelectingRequiresToolPolicy` / `ExecutingRequiresTrying` for the routing phase.
 
-2. **`ExhaustedRequiresTerminalCascade`** (spec extension):
+2. **`ExhaustedRequiresTerminalRuntime`** (spec extension):
    ```tla
-   ExhaustedRequiresTerminalCascade ==
+   ExhaustedRequiresTerminalRuntime ==
        turn_phase = "exhausted" =>
-           /\ cascade_state = "exhausted"
+           /\ runtime_state = "exhausted"
    ```
-   Mirrors the OCaml `[@tla.terminal]` annotation.  Exhausted should pair with cascade exhausted.
+   Mirrors the OCaml `[@tla.terminal]` annotation.  Exhausted should pair with runtime exhausted.
 
 3. **`ExhaustedIsForever`** (spec extension):
    ```tla
@@ -90,7 +90,7 @@ R-B-1.a is the prerequisite for R-B-1.b.  R-B-1.c is the structural fix that pre
 - KTC spec line 316-352 (7 safety invariants)
 - OCaml `turn_phase` definition: `lib/keeper/keeper_registry.ml:158-166`
 - OCaml `decision_stage`: `lib/keeper/keeper_registry.ml:295-300`
-- OCaml `cascade_state`: `lib/keeper/keeper_registry.ml:385-391`
+- OCaml `runtime_state`: `lib/keeper/keeper_registry.ml:385-391`
 - Self-admission comment: `lib/keeper/keeper_registry.ml:168-172`
 - PR #14395 (Turn_exhausted transitions, history reference)
 - KSM A-1 audit pattern parallel: `docs/tla-audit/ksm-init-mapping-2026-05-12.md`

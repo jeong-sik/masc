@@ -14,7 +14,6 @@
     Re-included by [Dashboard_goals_types] so the public surface is
     unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 open Dashboard_goals_types_health
 
@@ -68,14 +67,14 @@ let goal_policy_nodes goals =
       })
     goals
 
-let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
+let runtime_blocker_event_from_meta ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   let runtime_blocker_fields =
     Keeper_status_bridge.runtime_blocker_fields_json config meta
   in
   let assoc_string_opt name =
     match List.assoc_opt name runtime_blocker_fields with
-    | Some json -> to_string_option json
-    | None -> None
+    | Some (`String s) -> Some s
+    | _ -> None
   in
   let blocker_class = assoc_string_opt "runtime_blocker_class" in
   let blocker_summary = assoc_string_opt "runtime_blocker_summary" in
@@ -110,14 +109,14 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
             ( "severity",
               `String
                 (match blocker_class with
-                 | Some "cascade_exhausted"
+                 | Some "runtime_exhausted"
                  | Some "completion_contract_violation" ->
                      "bad"
                  | _ -> "warn") );
             ("next_human_action", `String "inspect_runtime_blocker");
           ])
 
-let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_meta)
+let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_meta_contract.keeper_meta)
     receipt =
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
@@ -183,8 +182,11 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_met
       ( "execution_summary",
         `Assoc
           [
-            ( "tool_contract_result",
-              receipt |> member "tool_contract_result" );
+            ( "completion_contract_result",
+              (* Missing receipt field stays JSON null; this projection does
+                 not invent a runtime contract outcome. *)
+              (* sound-partial: allow *)
+              Option.value ~default:`Null (Json_util.assoc_member_opt "completion_contract_result" receipt) );
             ("latest_receipt_at", `String ts);
           ] );
       ("runtime_blockers", `Assoc runtime_blocker_fields);
@@ -197,9 +199,10 @@ type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
-  keeper_metas : Keeper_types.keeper_meta list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  goal_task_index : (string, string list) Hashtbl.t;
 }
 
 let rec build_tree context goals goal =
@@ -213,7 +216,7 @@ let rec build_tree context goals goal =
   let linked_tasks =
     context.all_tasks
     |> List.filter_map (fun task ->
-           task_linkage_source_opt task goal.Goal_store.id
+           task_linkage_source_opt ~goal_task_index:context.goal_task_index task goal.Goal_store.id
            |> Option.map (fun source -> (task, source)))
   in
   let direct_linkage_source =
@@ -233,9 +236,9 @@ let rec build_tree context goals goal =
   in
   let direct_goal_keeper_names =
     context.keeper_metas
-    |> List.filter (fun (meta : Keeper_types.keeper_meta) ->
+    |> List.filter (fun (meta : Keeper_meta_contract.keeper_meta) ->
            List.mem goal.Goal_store.id meta.active_goal_ids)
-    |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
+    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
   in
   let direct_linked_keeper_names =
     dedupe_sort (direct_task_keeper_names @ direct_goal_keeper_names)
@@ -273,7 +276,7 @@ let rec build_tree context goals goal =
   let approval_activity_values =
     direct_pending_approvals
     |> List.filter_map (fun json ->
-           json |> member "requested_at_iso" |> to_string_option)
+           Json_util.get_string json "requested_at_iso")
   in
   let receipt_activity_values =
     direct_receipts |> List.filter_map receipt_ended_at
@@ -314,9 +317,9 @@ let rec build_tree context goals goal =
     List.exists receipt_has_sandbox_risk direct_receipts
     || List.exists (fun (_, trust) -> trust_sandbox_risk trust) direct_runtime_trusts
   in
-  let direct_cascade_risk =
-    List.exists receipt_has_cascade_risk direct_receipts
-    || List.exists (fun (_, trust) -> trust_cascade_risk trust) direct_runtime_trusts
+  let direct_runtime_risk =
+    List.exists receipt_has_runtime_risk direct_receipts
+    || List.exists (fun (_, trust) -> trust_runtime_risk trust) direct_runtime_trusts
   in
   let blocked_by_receipt =
     List.exists receipt_has_error direct_receipts
@@ -403,7 +406,7 @@ let rec build_tree context goals goal =
   in
   let direct_badges =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
-      ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
+      ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~activity_unobserved:(String.equal stagnation_status "unobserved")
   in
@@ -428,7 +431,7 @@ let rec build_tree context goals goal =
       (List.filter
          (fun json ->
            receipt_has_error json || receipt_has_sandbox_risk json
-           || receipt_has_cascade_risk json)
+           || receipt_has_runtime_risk json)
          direct_receipts)
     + List.length
         (List.filter
@@ -482,7 +485,7 @@ let rec build_tree context goals goal =
   let status_reason =
     goal_health_reason ~goal_phase:goal.Goal_store.phase ~blocked_by_receipt
       ~child_blocked ~pending_approvals:pending_approval_count
-      ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
+      ~sandbox_risk:direct_sandbox_risk ~runtime_risk:direct_runtime_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
       ~activity_observation ~stagnation_status

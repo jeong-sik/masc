@@ -1,8 +1,8 @@
 (** Metrics snapshot append helper for unified keeper cycles. *)
 
 val append_metrics_snapshot :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->

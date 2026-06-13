@@ -1,5 +1,5 @@
 /* global React, MASC_DATA, useCockpitState */
-/* Drawer.jsx — VSCode-style bottom drawer with Terminal / Output / Cascade / Audit / Cost
+/* Drawer.jsx — VSCode-style bottom drawer with Terminal / Output / Runtime / Audit / Cost
    - draggable grip on top edge (resize)
    - double-click grip = snap between 30vh and 60vh
    - tab click on closed drawer opens it
@@ -11,7 +11,7 @@ const { useState: dUseState, useEffect: dUseEffect, useRef: dUseRef, useCallback
 const DRAWER_TABS = [
   { id: "terminal", label: "Terminal", glyph: ">_", count: null },
   { id: "output",   label: "Output",   glyph: "⎯",  count: null },
-  { id: "cascade",  label: "Cascade",  glyph: "⇢",  count: 5  },
+  { id: "runtime",  label: "Runtime",  glyph: "⇢",  count: 5  },
   { id: "audit",    label: "Audit",    glyph: "§",  count: 12 },
   { id: "cost",     label: "Cost",     glyph: "¤",  count: null },
 ];
@@ -37,14 +37,14 @@ function TerminalPanel() {
     { t: "01:42:18", k: "ok", txt: "fetching origin (5 refs)" },
     { t: "01:42:19", k: "ok", txt: "From github.com:masc/runtime" },
     { t: "01:42:19", k: "info", txt: "  da11b063..a8c2e91d  main  →  origin/main" },
-    { t: "01:42:20", k: "tx", txt: "$ python -m masc.eval --suite cascade-router --branches feat/keeper-clarity" },
+    { t: "01:42:20", k: "tx", txt: "$ python -m masc.eval --suite runtime-router --branches feat/keeper-clarity" },
     { t: "01:42:21", k: "info", txt: "→ loading 47 cases · seed=42" },
-    { t: "01:42:24", k: "ok", txt: "  ✓ cascade.fanout.basic              (124ms)" },
-    { t: "01:42:25", k: "ok", txt: "  ✓ cascade.fanout.with_fallback      (88ms)" },
-    { t: "01:42:25", k: "err", txt: "  ✗ cascade.fanout.cycle_detection    (timeout)" },
+    { t: "01:42:24", k: "ok", txt: "  ✓ runtime.fanout.basic              (124ms)" },
+    { t: "01:42:25", k: "ok", txt: "  ✓ runtime.fanout.with_fallback      (88ms)" },
+    { t: "01:42:25", k: "err", txt: "  ✗ runtime.fanout.cycle_detection    (timeout)" },
     { t: "01:42:25", k: "err", txt: "        expected len=3, got len=4 (recursive include)" },
-    { t: "01:42:26", k: "ok", txt: "  ✓ cascade.router.priority           (51ms)" },
-    { t: "01:42:27", k: "warn", txt: "  ⚠ cascade.router.weighted          (slow: 412ms)" },
+    { t: "01:42:26", k: "ok", txt: "  ✓ runtime.router.priority           (51ms)" },
+    { t: "01:42:27", k: "warn", txt: "  ⚠ runtime.router.weighted          (slow: 412ms)" },
     { t: "01:42:28", k: "info", txt: "" },
     { t: "01:42:28", k: "info", txt: "─── 44 passed · 1 failed · 2 slow · 18.4s ────────" },
     { t: "01:42:29", k: "tx", txt: "$ █" },
@@ -63,14 +63,14 @@ function TerminalPanel() {
 
 function OutputPanel() {
   // pretend log channels — switchable
-  const channels = ["claim-loop", "cascade-router", "keeper-shell", "tokens-build", "deploy"];
+  const channels = ["claim-loop", "runtime-router", "keeper-shell", "tokens-build", "deploy"];
   const [ch, setCh] = dUseState("claim-loop");
   const lines = {
     "claim-loop": [
       { t: "01:38:00", lv: "info",  txt: "claim-loop tick #4128 · 9 keepers active" },
       { t: "01:38:00", lv: "info",  txt: "  → nick0cave   claim cb-group/i (held 2m12s)" },
       { t: "01:38:00", lv: "info",  txt: "  → sangsu      claim plane-cognition (held 5m04s)" },
-      { t: "01:38:00", lv: "warn",  txt: "  ⚠ kraftwerk   stalled 22m04s on cascade.router.weighted" },
+      { t: "01:38:00", lv: "warn",  txt: "  ⚠ kraftwerk   stalled 22m04s on runtime.router.weighted" },
       { t: "01:38:01", lv: "info",  txt: "  → coltrane    idle (last seen 3m)" },
       { t: "01:38:02", lv: "info",  txt: "tick complete · 8.1ms" },
       { t: "01:38:30", lv: "info",  txt: "claim-loop tick #4129 · 9 keepers active" },
@@ -78,12 +78,12 @@ function OutputPanel() {
       { t: "01:38:31", lv: "ok",    txt: "  ✓ nick0cave   released cb-group/i (changes pushed)" },
       { t: "01:38:32", lv: "info",  txt: "tick complete · 7.4ms" },
     ],
-    "cascade-router": [
-      { t: "01:39:14", lv: "info", txt: "router.dispatch  prompt-id=p_8821a1  primary=provider-a/agent-llm-a-model-a" },
-      { t: "01:39:14", lv: "info", txt: "  step 1  provider-a         200ms · 0.012$" },
-      { t: "01:39:14", lv: "warn", txt: "  step 1  provider-a         RATE_LIMIT (60s)" },
-      { t: "01:39:14", lv: "info", txt: "  step 2  provider-b          318ms · 0.004$" },
-      { t: "01:39:15", lv: "ok",   txt: "  → resolved at step=2 (cascade hit, 5/47 today)" },
+    "runtime-router": [
+      { t: "01:39:14", lv: "info", txt: "router.dispatch  prompt-id=p_8821a1  primary=runtime-slot-a/capability-tier-a" },
+      { t: "01:39:14", lv: "info", txt: "  step 1  runtime-slot-a         200ms · 0.012$" },
+      { t: "01:39:14", lv: "warn", txt: "  step 1  runtime-slot-a         RATE_LIMIT (60s)" },
+      { t: "01:39:14", lv: "info", txt: "  step 2  runtime-slot-b          318ms · 0.004$" },
+      { t: "01:39:15", lv: "ok",   txt: "  → resolved at step=2 (runtime hit, 5/47 today)" },
     ],
     "keeper-shell": [
       { t: "01:40:00", lv: "info", txt: "[nick0cave] shell open · branch=feat/keeper-clarity" },
@@ -123,25 +123,25 @@ function OutputPanel() {
   );
 }
 
-function CascadePanel() {
-  // Cascade run history lives in MASC_P2.cascadeAudit; MASC_DATA.cascade is a
+function RuntimePanel() {
+  // Runtime run history lives in MASC_P2.runtimeAudit; MASC_DATA.runtime is a
   // single-object summary used elsewhere and would always evaluate to "no
-  // cascades yet" here.  Match the schema used by cb-group-{f,k}.jsx.
+  // runtimes yet" here.  Match the schema used by cb-group-{f,k}.jsx.
   const P2 = window.MASC_P2 || {};
-  const cascades = (Array.isArray(P2.cascadeAudit) ? P2.cascadeAudit : []).slice(0, 6);
+  const runtimes = (Array.isArray(P2.runtimeAudit) ? P2.runtimeAudit : []).slice(0, 6);
   return (
-    <div className="dr-cascade">
-      <div className="dr-cascade-bar">
-        <span className="lbl">recent cascades</span>
-        <span className="meta">{cascades.length} shown · 5/47 hit step≥2 today</span>
+    <div className="dr-runtime">
+      <div className="dr-runtime-bar">
+        <span className="lbl">recent runtimes</span>
+        <span className="meta">{runtimes.length} shown · 5/47 hit step≥2 today</span>
       </div>
-      <div className="dr-cascade-body">
-        {cascades.length === 0 && <div className="dr-empty">no cascades yet</div>}
-        {cascades.map((c, i) => (
+      <div className="dr-runtime-body">
+        {runtimes.length === 0 && <div className="dr-empty">no runtimes yet</div>}
+        {runtimes.map((c, i) => (
           <div key={i} className="dr-csc">
             <div className="dr-csc-h">
               <span className="id">{c.id || ("csc-" + i)}</span>
-              <span className="prompt">{c.trigger || c.prompt || c.cascade || "(no prompt)"}</span>
+              <span className="prompt">{c.trigger || c.prompt || c.runtime || "(no prompt)"}</span>
               <span className={"out " + (c.outcome === "ok" ? "ok" : "fail")}>{c.outcome || "—"}</span>
             </div>
             <div className="dr-csc-hops">
@@ -205,9 +205,9 @@ function AuditPanel() {
 function CostPanel() {
   // mock cost breakdown
   const providers = [
-    { name: "provider-a",  used: 0.812, share: 0.42, calls: 1428, lat: 198 },
-    { name: "provider-b",   used: 0.341, share: 0.18, calls: 612,  lat: 312 },
-    { name: "provider-d",     used: 0.602, share: 0.31, calls: 891,  lat: 224 },
+    { name: "runtime-slot-a",  used: 0.812, share: 0.42, calls: 1428, lat: 198 },
+    { name: "runtime-slot-b",   used: 0.341, share: 0.18, calls: 612,  lat: 312 },
+    { name: "runtime-slot-c",     used: 0.602, share: 0.31, calls: 891,  lat: 224 },
     { name: "openrouter", used: 0.171, share: 0.09, calls: 244,  lat: 401 },
   ];
   const total = providers.reduce((a, p) => a + p.used, 0);
@@ -231,7 +231,7 @@ function CostPanel() {
           ))}
         </div>
         <div className="dr-cost-foot">
-          <span className="tip">Tip: provider-a at 42% share — cascade fallback to provider-b saved ~$0.18/h vs primary-only.</span>
+          <span className="tip">Tip: runtime-slot-a at 42% share — runtime fallback to runtime-slot-b saved ~$0.18/h vs primary-only.</span>
         </div>
       </div>
     </div>
@@ -300,7 +300,7 @@ function Drawer() {
   const Panel = dUseMemo(() => {
     if (drawer.tab === "terminal") return TerminalPanel;
     if (drawer.tab === "output")   return OutputPanel;
-    if (drawer.tab === "cascade")  return CascadePanel;
+    if (drawer.tab === "runtime")  return RuntimePanel;
     if (drawer.tab === "audit")    return AuditPanel;
     if (drawer.tab === "cost")     return CostPanel;
     return TerminalPanel;
@@ -414,7 +414,7 @@ window.Drawer = Drawer;
 window.__DrawerPanel = function ({ kind }) {
   if (kind === "terminal") return <TerminalPanel/>;
   if (kind === "output")   return <OutputPanel/>;
-  if (kind === "cascade")  return <CascadePanel/>;
+  if (kind === "runtime")  return <RuntimePanel/>;
   if (kind === "audit")    return <AuditPanel/>;
   if (kind === "cost")     return <CostPanel/>;
   return <div style={{padding:20}}>unknown drawer panel: {kind}</div>;

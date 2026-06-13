@@ -14,20 +14,17 @@ open Dashboard_goals_types_accessor
 let clamp_float lower upper value =
   if value < lower then lower else if value > upper then upper else value
 
+let contains_ci = String_util.contains_substring_ci
+
 let pct_of_float value =
   int_of_float (floor (clamp_float 0.0 100.0 value +. 0.5))
-
-let json_float_opt = Json_util.float_opt_to_json
-
-let json_int_opt = Json_util.int_opt_to_json
 
 let attainment_unit_to_string = function
   | Percent -> "percent"
   | Count -> "count"
   | Unknown -> "unknown"
 
-let contains_ci haystack needle =
-  String_util.contains_substring_ci haystack needle
+
 
 (* Token-split that respects camelCase AND acronym boundaries.
 
@@ -95,7 +92,7 @@ let metric_implies_percent metric =
   match metric with
   | None -> false
   | Some raw ->
-      contains_ci raw "%"
+      String_util.contains_substring_ci raw "%"
       || List.exists metric_word_implies_percent (metric_word_tokens raw)
 
 let metric_count_token = function
@@ -122,9 +119,9 @@ let metric_supports_count_target metric =
       || metric_has_pull_request_phrase tokens
 
 let target_value_implies_percent raw =
-  contains_ci raw "%"
-  || contains_ci raw "percent"
-  || contains_ci raw "pct"
+  String_util.contains_substring_ci raw "%"
+  || String_util.contains_substring_ci raw "percent"
+  || String_util.contains_substring_ci raw "pct"
 
 let strip_number_group_separators token =
   let buffer = Buffer.create (String.length token) in
@@ -188,9 +185,9 @@ let build_attainment_json ~state ~basis ~task_done_count ~task_count
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("target_parse_status", `String target_parse_status);
       ("unit", `String (attainment_unit_to_string unit));
-      ("observed_value", json_float_opt observed_value);
-      ("target_numeric", json_float_opt target_numeric);
-      ("attainment_pct", json_int_opt attainment_pct);
+      ("observed_value", Json_util.float_opt_to_json observed_value);
+      ("target_numeric", Json_util.float_opt_to_json target_numeric);
+      ("attainment_pct", Json_util.int_opt_to_json attainment_pct);
       ("task_done_count", `Int task_done_count);
       ("task_count", `Int task_count);
       ("note", `String note);
@@ -305,20 +302,11 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
               unmeasured "absent"
                 "No target value or linked task evidence is available." ))
 
-let assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+let assoc_member_opt = Json_util.assoc_member_opt
 
-let assoc_string_opt name json =
-  match assoc_member_opt name json with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
+let assoc_string_opt = Json_util.assoc_string_opt
 
-let assoc_int_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Int value) -> Some value
-  | Some (`Intlit raw) -> int_of_string_opt raw
-  | _ -> None
+let assoc_int_opt = Json_util.assoc_int_opt
 
 let goal_completion_to_json ~effective_policy ~open_request
     (goal : Goal_store.goal) (node : tree_node) ~attainment =
@@ -404,7 +392,7 @@ let goal_completion_to_json ~effective_policy ~open_request
   `Assoc
     [
       ("state", `String state);
-      ("pct", json_int_opt pct);
+      ("pct", Json_util.int_opt_to_json pct);
       ("pct_source", `String pct_source);
       ("attainment_state", `String attainment_state);
       ("attainment_basis", `String attainment_basis);

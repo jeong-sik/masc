@@ -1,6 +1,6 @@
 (** Tests for Model_inference_metrics — per-model aggregate inference stats. *)
 
-module M = Masc_mcp.Model_inference_metrics
+module M = Model_inference_metrics
 
 open Alcotest
 
@@ -68,6 +68,12 @@ let write_costs base entries =
   )
 
 let now_unix () = Unix.gettimeofday ()
+
+let recent_hour_bucket_timestamp () =
+  let now = now_unix () in
+  let hour_sec = 3600.0 in
+  let hour_start = floor (now /. hour_sec) *. hour_sec in
+  if now -. hour_start >= 120.0 then now -. 60.0 else hour_start -. 60.0
 
 let runtime_lane_label_for_test model_key =
   "runtime_lane_" ^ String.sub (Digest.to_hex (Digest.string model_key)) 0 12
@@ -161,7 +167,7 @@ let cost_entry ~model ~ts ?(input_tokens=100) ?(output_tokens=50)
     ("request_latency_ms", `Int latency_ms);
   ] @ provider_fields @ tok_fields)
 
-let error_entry ~cascade_name ~ts ?provider () =
+let error_entry ~runtime_id ~ts ?provider () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int 0);
@@ -171,7 +177,7 @@ let error_entry ~cascade_name ~ts ?provider () =
         match provider with
         | Some v -> `String v
         | None -> `Null);
-      ("cascade_name", `String cascade_name);
+      ("runtime_id", `String runtime_id);
       ("candidate_models", `List [`String "model-a"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
@@ -216,7 +222,7 @@ let success_entry_without_usage ~model ~ts ?provider
     ] @ extra_fields @ diag_fields));
   ]
 
-let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
+let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("tool_call_count", `Int tool_count);
@@ -225,7 +231,7 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       `Assoc [
         ("model_used", `Null);
         ("selected_model", `Null);
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("outcome", `String "success");
         ("stop_reason", `String "completed");
         ("usage_reported", `Bool false);
@@ -236,7 +242,7 @@ let success_entry_without_model ~cascade_name ~ts ?(tool_count = 1) () =
       ] );
   ]
 
-let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
+let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
   `Assoc [
     ("ts_unix", `Float ts);
     ("outcome", `String outcome);
@@ -244,7 +250,7 @@ let sparse_provider_context_entry ~outcome ~cascade_name ~ts () =
     ("tools_used", `List []);
     ( "provider_context",
       `Assoc [
-        ("cascade_name", `String cascade_name);
+        ("runtime_id", `String runtime_id);
         ("selected_model", `Null);
         ("candidate_models", `List []);
       ] );
@@ -374,7 +380,7 @@ let test_error_turns_counted () =
     let ts = now_unix () in
     write_decisions path [
       success_entry ~model:"provider_h-35b" ~ts:(ts -. 20.0) ();
-      error_entry ~cascade_name:"local_only" ~ts:(ts -. 10.0) ();
+      error_entry ~runtime_id:"local_only" ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
@@ -573,9 +579,9 @@ let test_coverage_diagnostics_survive_aggregation () =
     let path = make_keeper_dir base "coverage_diag" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"provider_k-coding:provider_k-5"
+      success_entry_without_usage ~model:"glm-coding:glm-5"
         ~ts:(ts -. 5.0)
-        ~provider:"provider_k-coding"
+        ~provider:"glm-coding"
         ~turn_lane:"text_only"
         ~stop_reason:"turn_budget_exhausted(3/3)"
         ();
@@ -636,21 +642,21 @@ let test_coverage_diagnostics_survive_aggregation () =
     check string "recent json stage" "oas"
       (recent_json |> member "coverage_stage" |> to_string))
 
-let test_success_without_model_uses_cascade_attribution () =
+let test_success_without_model_uses_runtime_attribution () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~cascade_name:"tier-group.provider_k-coding-with-spark"
+      success_entry_without_model ~runtime_id:"runtime.glm-coding-with-spark"
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "null-model row retained" 1 agg.total_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check string "cascade attribution"
-      "tier-group.provider_k-coding-with-spark (cascade)"
+    check string "runtime attribution"
+      "runtime.glm-coding-with-spark (runtime)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "tool calls preserved" 1 s.total_tool_calls;
@@ -665,10 +671,10 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     let ts = now_unix () in
     write_decisions path [
       sparse_provider_context_entry ~outcome:"success"
-        ~cascade_name:"tier-group.coding_plan"
+        ~runtime_id:"runtime.coding_plan"
         ~ts:(ts -. 5.0) ();
       sparse_provider_context_entry ~outcome:"error"
-        ~cascade_name:"tier-group.coding_plan"
+        ~runtime_id:"runtime.coding_plan"
         ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -676,8 +682,8 @@ let test_provider_context_attribution_survives_sparse_telemetry () =
     check int "error row counted" 1 agg.total_error_entries;
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check string "provider_context cascade attribution"
-      "tier-group.coding_plan (cascade)"
+    check string "provider_context runtime attribution"
+      "runtime.coding_plan (runtime)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "error count" 1 s.error_count)
@@ -715,7 +721,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list string)
       "private provider keys stay distinct"
-      ["provider_a:shared-model"; "ollama:shared-model"]
+      ["ollama:shared-model"; "provider_a:shared-model"]
       ids;
     let token_totals =
       agg.models
@@ -726,7 +732,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list (pair string int))
       "tokens are not merged across provider lanes"
-      ["provider_a:shared-model", 20; "ollama:shared-model", 10]
+      ["ollama:shared-model", 10; "provider_a:shared-model", 20]
       token_totals)
 
 let test_costs_jsonl_zero_latency_is_missing () =
@@ -1029,7 +1035,7 @@ let test_buckets_empty_dir () =
 let test_buckets_single_bucket () =
   let dir = test_dir () in
   let path = make_keeper_dir dir "single_bucket" in
-  let now = now_unix () in
+  let now = recent_hour_bucket_timestamp () in
   write_decisions path [
     success_entry ~model:"model-a" ~ts:now ();
     success_entry ~model:"model-a" ~ts:(now -. 30.0) ();
@@ -1120,6 +1126,7 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
     total_input_tokens = None;
     total_output_tokens = None;
     total_cache_read_tokens = None;
+    total_cache_creation_tokens = None;
     total_reasoning_tokens = None;
     usage_sample_count = entry_count;
     telemetry_sample_count = entry_count;
@@ -1154,7 +1161,7 @@ let test_provider_rollup_empty_aggregate () =
     (List.length (M.provider_rollup agg))
 
 let test_provider_rollup_skips_unknown_provider () =
-  let m1 = zero_model_stats "provider_k-coding:auto" ~provider:(Some "provider_k-coding")
+  let m1 = zero_model_stats "glm-coding:auto" ~provider:(Some "glm-coding")
              ~entry_count:5 in
   let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
   let agg : M.aggregate =
@@ -1164,7 +1171,7 @@ let test_provider_rollup_skips_unknown_provider () =
   let rollup = M.provider_rollup agg in
   check int "only provider=Some survives" 1 (List.length rollup);
   let stats = List.hd rollup in
-  check string "provider" "provider_k-coding" stats.ps_provider;
+  check string "provider" "glm-coding" stats.ps_provider;
   check int "entry_count" 5 stats.ps_entry_count
 
 let test_provider_rollup_weighted_mean () =
@@ -1321,8 +1328,8 @@ let () =
       test_case "prompt tps and peak memory aggregates" `Quick test_prompt_tps_and_peak_memory_aggregates;
       test_case "missing usage serializes unknowns" `Quick test_missing_usage_serializes_unknowns;
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
-      test_case "success without model uses cascade attribution" `Quick
-        test_success_without_model_uses_cascade_attribution;
+      test_case "success without model uses runtime attribution" `Quick
+        test_success_without_model_uses_runtime_attribution;
       test_case "provider_context attribution survives sparse telemetry" `Quick
         test_provider_context_attribution_survives_sparse_telemetry;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;

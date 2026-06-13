@@ -3,10 +3,10 @@
 open Keeper_hooks_oas_types
 open Keeper_hooks_oas_response_metrics
 
-let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
+let cost_emit_source_metric = Otel_metric_store.metric_cost_emit_zero_source
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:cost_emit_source_metric
     ~help:
       "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
@@ -22,14 +22,20 @@ let () =
 let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd =
   if usage_missing then cost_label_usage_missing
-  else if not usage_trusted then cost_label_usage_untrusted
+  (* token⊥cost: an untrusted *token count* does not gate the provider's
+     authoritative cost_usd. A positive cost_usd is labelled [computed] even when
+     token usage is untrusted; only zero/absent cost on an untrusted turn keeps
+     the [usage_untrusted] source label. Keeps the value and the source label in
+     sync with [cost_status_for_event]. *)
+  else if (not usage_trusted) && not (cost_usd > 0.0) then
+    cost_label_usage_untrusted
   else if runtime_unmetered then cost_source_unmetered_provider
   else if cost_usd > 0.0 then cost_source_computed
   else cost_label_oas_cost_unreported
 
 let record_cost_emit_source source =
   if not (String.equal source cost_source_computed) then
-    Prometheus.inc_counter cost_emit_source_metric
+    Otel_metric_store.inc_counter cost_emit_source_metric
       ~labels:[ (label_source, source) ]
       ()
 
@@ -57,6 +63,7 @@ let assemble_cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
@@ -89,8 +96,12 @@ let assemble_cost_event_payload
   let provider = runtime_lane_label in
   let runtime_unknown = false in
   let runtime_unmetered = false in
-  (* Classify cost_status using raw cost_usd so OAS-reported cost is
-     considered before the safe-value mask below. *)
+  (* Classify cost_status from the raw cost_usd. cost_usd is the provider's
+     authoritative cost field and is accounted independently of token-count
+     trust (token⊥cost): a positive cost_usd yields Cost_reported (and is kept
+     by the safe-value mask below) even when token usage is untrusted. Only the
+     token COUNTS are zeroed for untrusted usage (safe_input/output_tokens
+     above). *)
   let cost_status =
     cost_status_for_event
       ~runtime_unknown
@@ -100,6 +111,14 @@ let assemble_cost_event_payload
       ~input_tokens
       ~output_tokens
       ~cost_usd
+  in
+  (* #18460: when the response model is a runtime selector alias (e.g. "auto"),
+     prefer the canonical model id from telemetry so downstream cost analysis
+     can look up the actual model instead of the unresolved alias. *)
+  let key_model_value =
+    match canonical_model_id_of_telemetry telemetry with
+    | Some canonical_id -> canonical_id
+    | None -> runtime_lane_label
   in
   let default_safe_cost_usd = 0.0 in
   let safe_cost_usd =
@@ -155,7 +174,7 @@ let assemble_cost_event_payload
     (key_agent, `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
     (key_provider, `String runtime_lane_label);
-    (key_model, `String runtime_lane_label);
+    (key_model, `String key_model_value);
     (key_input_tokens, `Int safe_input_tokens);
     (key_output_tokens, `Int safe_output_tokens);
     (key_cost_usd, `Float safe_cost_usd);
@@ -187,6 +206,7 @@ let cost_event_payload
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : Yojson.Safe.t =
   (assemble_cost_event_payload
      ~agent_name
@@ -197,6 +217,7 @@ let cost_event_payload
      ~usage_missing
      ?usage_trust
      ?telemetry
+     ?model
      ()).payload
 
 (** Date-split cost ledger root inside [masc_root].  See
@@ -213,6 +234,7 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    ?(model : string option)
     () : unit =
   (* Tier-A perf change: previously appended to a single unbounded
      [masc_root/costs.jsonl] (14k lines, 7.5MB observed in [<base-path>/.masc]),
@@ -237,10 +259,11 @@ let emit_cost_event
       ~usage_missing
       ?usage_trust
       ?telemetry
+      ?model
       ()
   in
-  Prometheus.inc_counter
-    Prometheus.metric_cost_ledger_status
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_cost_ledger_status
     ~labels:
       [
         (label_provider, assembled.provider);
@@ -253,7 +276,7 @@ let emit_cost_event
   (try Dated_jsonl.append store entry
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string MetricEmitDropped)
           ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
           ();

@@ -1,6 +1,6 @@
-// MASC Dashboard — Keeper messaging (direct, operator-mediated, SSE streaming)
+// MASC Dashboard — Keeper messaging (operator-mediated queue, SSE streaming)
 
-import { isRecord } from '../components/common/normalize'
+import { asString, isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
@@ -8,6 +8,7 @@ import {
 import type { KeeperConversationDetails } from '../types'
 import {
   currentDashboardActor,
+  apiRequestErrorFromResponse,
   jsonHeaders,
   runOperatorAction,
   fetchWithTimeout,
@@ -38,12 +39,14 @@ export type {
   KeeperLastOutcome,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
+  KeeperSecretProjection,
+  KeeperSecretFileMount,
   KeeperPhaseDiagnosis,
   KeeperPhaseDiagnosisRow,
   KeeperCompositePhase,
   KeeperCompositeTurnPhase,
   KeeperCompositeDecisionStage,
-  KeeperCompositeCascadeState,
+  KeeperCompositeRuntimeState,
   KeeperCompositeCompactionStage,
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
@@ -64,9 +67,121 @@ export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Types ---
 
-interface KeeperToolReply {
+export interface KeeperToolReply {
   text: string
   details: KeeperConversationDetails | null
+}
+
+export type QueuedKeeperMessageStatus =
+  | 'queued'
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'lost'
+  | 'cancelled'
+
+export interface QueuedKeeperMessageSubmission {
+  requestId: string
+  keeperName: string
+  status: QueuedKeeperMessageStatus
+  message?: string
+}
+
+export interface QueuedKeeperMessageResult {
+  requestId: string
+  keeperName: string
+  status: QueuedKeeperMessageStatus
+  submittedAt?: number
+  completedAt?: number
+  elapsedSec?: number
+  ok?: boolean
+  result?: unknown
+}
+
+export interface QueuedKeeperMessageCancelResult {
+  requestId: string
+  status: QueuedKeeperMessageStatus
+  message?: string
+}
+
+const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatus>([
+  'done',
+  'error',
+  'lost',
+  'cancelled',
+])
+
+function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
+  switch (asString(value, '').trim()) {
+    case 'queued':
+      return 'queued'
+    case 'running':
+      return 'running'
+    case 'done':
+      return 'done'
+    case 'error':
+      return 'error'
+    case 'lost':
+      return 'lost'
+    case 'cancelled':
+      return 'cancelled'
+    default:
+      return 'error'
+  }
+}
+
+function optionalNumberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parseQueuedKeeperMessageSubmission(data: unknown): QueuedKeeperMessageSubmission {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message queue response missing request_id')
+  }
+  return {
+    requestId,
+    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    message: asString(record?.message),
+  }
+}
+
+function parseQueuedKeeperMessageResult(data: unknown): QueuedKeeperMessageResult {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message result response missing request_id')
+  }
+  return {
+    requestId,
+    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    submittedAt: record ? optionalNumberField(record, 'submitted_at') : undefined,
+    completedAt: record ? optionalNumberField(record, 'completed_at') : undefined,
+    elapsedSec: record ? optionalNumberField(record, 'elapsed_sec') : undefined,
+    ok: typeof record?.ok === 'boolean' ? record.ok : undefined,
+    result: record?.result,
+  }
+}
+
+function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessageCancelResult {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message cancel response missing request_id')
+  }
+  return {
+    requestId,
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    message: asString(record?.message),
+  }
+}
+
+export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
+  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
@@ -83,6 +198,9 @@ export interface KeeperChatStreamEvent {
   name?: string
   value?: unknown
   timestamp?: number
+  // AG-UI tool call fields (TOOL_CALL_START / TOOL_CALL_ARGS / TOOL_CALL_END)
+  toolCallId?: string
+  toolCallName?: string
 }
 
 // --- Direct and operator-mediated messaging ---
@@ -124,6 +242,83 @@ export async function sendKeeperMessageDetailed(
   return callKeeperMessageViaOperator(name, message)
 }
 
+export async function submitQueuedKeeperMessage(
+  name: string,
+  message: string,
+): Promise<QueuedKeeperMessageSubmission> {
+  const response = await runOperatorAction({
+    actor: currentDashboardActor(),
+    action_type: 'keeper_message',
+    target_type: 'keeper',
+    target_id: name,
+    payload: {
+      message,
+      direct_reply: true,
+    },
+  })
+  const operatorResult = isRecord(response.result) ? response.result : null
+  const queuePayload =
+    operatorResult && isRecord(operatorResult.result)
+      ? operatorResult.result
+      : operatorResult
+  return parseQueuedKeeperMessageSubmission(queuePayload)
+}
+
+export async function fetchQueuedKeeperMessageResult(
+  requestId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<QueuedKeeperMessageResult> {
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`
+  const resp = await fetchWithTimeout(
+    path,
+    { headers: jsonHeaders(), signal: opts.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('GET', path, resp)
+  }
+  return parseQueuedKeeperMessageResult(await resp.json())
+}
+
+export async function cancelQueuedKeeperMessage(
+  requestId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<QueuedKeeperMessageCancelResult> {
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
+  const resp = await fetchWithTimeout(
+    path,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: '{}',
+      signal: opts.signal,
+    },
+    DEFAULT_POST_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, resp)
+  }
+  return parseQueuedKeeperMessageCancelResult(await resp.json())
+}
+
+export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
+  const payload = isRecord(result.result) ? result.result : null
+  const message = asString(payload?.message) ?? asString(payload?.reason)
+  const error = asString(payload?.error)
+  return message ?? error ?? `Keeper message request ${result.requestId} ended with ${result.status}`
+}
+
+export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
+  const payload = isRecord(result.result) ? result.result : null
+  const rawReply = asString(payload?.reply, '').trim()
+  const details = normalizeKeeperConversationDetails(payload ?? result.result)
+  const fallback = rawReply || queuedKeeperMessageError(result)
+  return {
+    text: formatKeeperVisibleReply(fallback || '(empty reply)'),
+    details,
+  }
+}
+
 // --- SSE streaming ---
 
 function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
@@ -161,28 +356,58 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
   return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
 }
 
+export interface StreamAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
+/** Outcome of a keeper chat stream read loop.
+ *  `terminal: false` means the connection closed without a
+ *  RUN_FINISHED / RUN_ERROR event — the response was cut mid-stream
+ *  and callers must not present it as a completed reply. */
+export interface KeeperStreamOutcome {
+  terminal: boolean
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
   {
     signal,
     onEvent,
+    attachments,
   }: {
     signal?: AbortSignal
     onEvent: (event: KeeperChatStreamEvent) => void
+    attachments?: StreamAttachment[]
   },
-): Promise<void> {
+): Promise<KeeperStreamOutcome> {
+  const body: Record<string, unknown> = {
+    name,
+    message,
+    direct_reply: true,
+  }
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments.map(att => ({
+      id: att.id,
+      type: att.type,
+      name: att.name,
+      size: att.size,
+      mime_type: att.mimeType,
+      data: att.data,
+    }))
+  }
   const res = await fetch('/api/v1/keepers/chat/stream', {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({
-      name,
-      message,
-      direct_reply: true,
-      }),
+    body: JSON.stringify(body),
     signal,
   })
 
@@ -222,7 +447,7 @@ export async function streamKeeperMessage(
           } catch {
             // Ignore stream cancellation errors after terminal events.
           }
-          return
+          return { terminal: true }
         }
       }
       if (done) break
@@ -230,8 +455,13 @@ export async function streamKeeperMessage(
     const tail = buffer.trim()
     if (tail) {
       const event = parseSseEvent(tail)
-      if (event) onEvent(event)
+      if (event) {
+        onEvent(event)
+        if (isTerminalKeeperStreamEvent(event)) return { terminal: true }
+      }
     }
+    // Connection closed without RUN_FINISHED / RUN_ERROR: mid-stream cut.
+    return { terminal: false }
   } finally {
     reader.releaseLock()
   }
@@ -245,8 +475,9 @@ export async function fetchKeeperChatHistory(
   // P1 silent-failure fix: previously HTTP non-2xx and network/parse
   // errors both mapped to `return []`, leaving the caller unable to
   // distinguish "no chat history yet" from "fetch failed."  Now both
-  // throw, and the caller (keeper-chat-panel.ts) is responsible for
-  // surfacing via chatError.value.  Per-item safeParse drift remains
+  // throw, and the caller (hydrateKeeperChatHistory in
+  // keeper-actions.ts) is responsible for surfacing the failure to
+  // the operator.  Per-item safeParse drift remains
   // tolerant — only network / HTTP / shape errors throw.
   const resp = await fetch(
     `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
@@ -419,7 +650,6 @@ export interface KeeperCheckpointInventory {
   session_dir: string
   current: KeeperCheckpointSummary | null
   history: KeeperCheckpointSummary[]
-  legacy_shadow_count: number
 }
 
 interface KeeperCheckpointDeleteResponse {
@@ -575,14 +805,14 @@ export interface KeeperStateDiagramResponse {
   current_phase: string
   mermaid: string
   decision_pipeline_mermaid?: string
-  cascade_fsm_mermaid?: string
+  runtime_fsm_mermaid?: string
   compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
   thompson_alpha?: number
   thompson_beta?: number
   tool_count?: number
   recovery_floor_count?: number
-  cascade_models?: string[]
+  runtime_models?: string[]
   last_provider_result?: string | null
   memory_kind_usage?: MemoryKindUsageEntry[]
   /** RFC-0149 §3.1 — sibling field carrying the typed memory-bank
@@ -722,7 +952,7 @@ export interface KeeperRuntimeTraceMemorySummary {
 export interface KeeperRuntimeTraceProviderAttempt {
   ts: string
   event: string
-  cascade_name: string | null
+  runtime_id: string | null
   status: string
   error: string | null
   exception_kind: string | null
@@ -755,46 +985,16 @@ export interface KeeperRuntimeLensLifecycleAxis {
   terminal_status: string
 }
 
-export interface KeeperRuntimeLensToolSurfaceAxis {
-  requested_tools: string[]
-  required_tools: string[]
-  materialized_tools: string[]
-  missing_required_tools: string[]
-  turn_lane: string | null
-  tool_surface_class: string | null
-  tool_requirement: string | null
-  visible_tool_count: number | null
-  tool_gate_enabled: boolean | null
-  tool_surface_fallback_used: boolean | null
-  terminal_status: string
-}
-
 export interface KeeperRuntimeLensProviderLaneAxis {
   resolved: boolean
   status: string | null
   resolved_lane: string | null
-  effective_tool_count: number | null
-  runtime_mcp_policy_present: boolean | null
-  required_tools: string[]
-  materialized_tools: string[]
-  missing_required_tools: string[]
 }
 
 export interface KeeperRuntimeLensProviderAttemptAxis {
   started_count: number
   finished_count: number
   terminal_status: string | null
-}
-
-export interface KeeperRuntimeLensToolLineageStage {
-  stage: string
-  tool_names: string[]
-  count: number
-}
-
-export interface KeeperRuntimeLensToolLineageAxis {
-  recorded: boolean
-  decision: Record<string, KeeperRuntimeLensToolLineageStage> | null
 }
 
 export interface KeeperRuntimeLensPayloadRoleAxis {
@@ -826,30 +1026,13 @@ export interface KeeperRuntimeLensConfigDriftAxis {
   status: string
   error: string | null
   has_live_override: boolean
-  cascade_override: boolean
+  runtime_override: boolean
   override_fields: string[]
-  default_cascade_name: string | null
-  live_cascade_name: string | null
+  default_runtime_id: string | null
+  live_runtime_id: string | null
   active_config_root: string | null
   active_config_root_source: string | null
   default_manifest_path: string | null
-}
-
-export interface KeeperRuntimeLensRuntimeProofAxis {
-  source: string
-  status: string
-  matched_tool_call_count: number
-  successful_tool_call_count: number
-  failed_tool_call_count: number
-  tools: string[]
-  successful_tools: string[]
-  failed_tools: string[]
-  sandbox_profiles: string[]
-  network_modes: string[]
-  docker_visible: boolean
-  git_credentials_enabled: boolean
-  repo_cli_identity_materialized: boolean
-  latest_at: string | null
 }
 
 export interface KeeperRuntimeLensContextAxis {
@@ -869,15 +1052,12 @@ export interface KeeperRuntimeLensMemoryAxis extends KeeperRuntimeTraceMemorySum
 
 export interface KeeperRuntimeLensAxes {
   lifecycle: KeeperRuntimeLensLifecycleAxis
-  tool_surface: KeeperRuntimeLensToolSurfaceAxis
   provider_lane: KeeperRuntimeLensProviderLaneAxis
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
-  tool_lineage: KeeperRuntimeLensToolLineageAxis
   payload_role: KeeperRuntimeLensPayloadRoleAxis
   source_clock: KeeperRuntimeLensSourceClockAxis
   claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
-  runtime_proof: KeeperRuntimeLensRuntimeProofAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
 }
@@ -900,7 +1080,7 @@ export interface KeeperRuntimeLensLane {
 
 export interface KeeperRuntimeLensSwimlanes {
   keeper: KeeperRuntimeLensLane
-  masc_policy_cascade: KeeperRuntimeLensLane
+  masc_policy_runtime: KeeperRuntimeLensLane
   oas_agent: KeeperRuntimeLensLane
   provider: KeeperRuntimeLensLane
   tool_runtime: KeeperRuntimeLensLane
@@ -936,7 +1116,6 @@ export interface KeeperRuntimeLensClockEdge {
   tool_batch_id: string | null
   checkpoint_id: string | null
   compaction_id: string | null
-  memory_injection_id: string | null
   event_bus_correlation_id: string | null
   event_bus_run_id: string | null
   event_bus_event_count: number | null
@@ -1122,7 +1301,7 @@ function parseRuntimeTraceProviderAttempt(raw: unknown): KeeperRuntimeTraceProvi
   return {
     ts: stringField(obj, 'ts'),
     event: stringField(obj, 'event'),
-    cascade_name: nullableStringField(obj, 'cascade_name'),
+    runtime_id: nullableStringField(obj, 'runtime_id'),
     status: stringField(obj, 'status'),
     error: nullableStringField(obj, 'error'),
     exception_kind: nullableStringField(obj, 'exception_kind'),
@@ -1168,34 +1347,12 @@ function parseRuntimeLensLifecycleAxis(raw: unknown): KeeperRuntimeLensLifecycle
   }
 }
 
-function parseRuntimeLensToolSurfaceAxis(raw: unknown): KeeperRuntimeLensToolSurfaceAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    requested_tools: stringListField(obj, 'requested_tools'),
-    required_tools: stringListField(obj, 'required_tools'),
-    materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
-    turn_lane: nullableStringField(obj, 'turn_lane'),
-    tool_surface_class: nullableStringField(obj, 'tool_surface_class'),
-    tool_requirement: nullableStringField(obj, 'tool_requirement'),
-    visible_tool_count: nullableNumberField(obj, 'visible_tool_count'),
-    tool_gate_enabled: nullableBooleanField(obj, 'tool_gate_enabled'),
-    tool_surface_fallback_used: nullableBooleanField(obj, 'tool_surface_fallback_used'),
-    terminal_status: stringField(obj, 'terminal_status') || 'unknown',
-  }
-}
-
 function parseRuntimeLensProviderLaneAxis(raw: unknown): KeeperRuntimeLensProviderLaneAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
     resolved: obj.resolved === true,
     status: nullableStringField(obj, 'status'),
     resolved_lane: nullableStringField(obj, 'resolved_lane'),
-    effective_tool_count: nullableNumberField(obj, 'effective_tool_count'),
-    runtime_mcp_policy_present: nullableBooleanField(obj, 'runtime_mcp_policy_present'),
-    required_tools: stringListField(obj, 'required_tools'),
-    materialized_tools: stringListField(obj, 'materialized_tools'),
-    missing_required_tools: stringListField(obj, 'missing_required_tools'),
   }
 }
 
@@ -1205,35 +1362,6 @@ function parseRuntimeLensProviderAttemptAxis(raw: unknown): KeeperRuntimeLensPro
     started_count: numberField(obj, 'started_count'),
     finished_count: numberField(obj, 'finished_count'),
     terminal_status: nullableStringField(obj, 'terminal_status'),
-  }
-}
-
-function parseRuntimeLensToolLineageStage(raw: unknown): KeeperRuntimeLensToolLineageStage {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    stage: stringField(obj, 'stage'),
-    tool_names: stringListField(obj, 'tool_names'),
-    count: numberField(obj, 'count'),
-  }
-}
-
-function parseRuntimeLensToolLineageAxis(raw: unknown): KeeperRuntimeLensToolLineageAxis {
-  const obj = isRecord(raw) ? raw : {}
-  const decisionRaw = obj.decision
-  let decision: Record<string, KeeperRuntimeLensToolLineageStage> | null = null
-  if (isRecord(decisionRaw)) {
-    const parsed: Record<string, KeeperRuntimeLensToolLineageStage> = {}
-    for (const key of Object.keys(decisionRaw)) {
-      const stage = parseRuntimeLensToolLineageStage(decisionRaw[key])
-      if (stage.stage !== '' || stage.count > 0 || stage.tool_names.length > 0) {
-        parsed[key] = stage
-      }
-    }
-    decision = Object.keys(parsed).length > 0 ? parsed : null
-  }
-  return {
-    recorded: obj.recorded === true,
-    decision,
   }
 }
 
@@ -1291,33 +1419,13 @@ function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigD
     status: stringField(obj, 'status') || 'unknown',
     error: nullableStringField(obj, 'error'),
     has_live_override: obj.has_live_override === true,
-    cascade_override: obj.cascade_override === true,
+    runtime_override: obj.runtime_override === true,
     override_fields: stringListField(obj, 'override_fields'),
-    default_cascade_name: nullableStringField(obj, 'default_cascade_name'),
-    live_cascade_name: nullableStringField(obj, 'live_cascade_name'),
+    default_runtime_id: nullableStringField(obj, 'default_runtime_id'),
+    live_runtime_id: nullableStringField(obj, 'live_runtime_id'),
     active_config_root: nullableStringField(obj, 'active_config_root'),
     active_config_root_source: nullableStringField(obj, 'active_config_root_source'),
     default_manifest_path: nullableStringField(obj, 'default_manifest_path'),
-  }
-}
-
-function parseRuntimeLensRuntimeProofAxis(raw: unknown): KeeperRuntimeLensRuntimeProofAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    source: stringField(obj, 'source') || 'keeper_tool_call_log',
-    status: stringField(obj, 'status') || 'missing',
-    matched_tool_call_count: numberField(obj, 'matched_tool_call_count'),
-    successful_tool_call_count: numberField(obj, 'successful_tool_call_count'),
-    failed_tool_call_count: numberField(obj, 'failed_tool_call_count'),
-    tools: stringListField(obj, 'tools'),
-    successful_tools: stringListField(obj, 'successful_tools'),
-    failed_tools: stringListField(obj, 'failed_tools'),
-    sandbox_profiles: stringListField(obj, 'sandbox_profiles'),
-    network_modes: stringListField(obj, 'network_modes'),
-    docker_visible: obj.docker_visible === true,
-    git_credentials_enabled: obj.git_credentials_enabled === true,
-    repo_cli_identity_materialized: obj.repo_cli_identity_materialized === true,
-    latest_at: nullableStringField(obj, 'latest_at'),
   }
 }
 
@@ -1341,15 +1449,12 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
   const obj = isRecord(raw) ? raw : {}
   return {
     lifecycle: parseRuntimeLensLifecycleAxis(obj.lifecycle),
-    tool_surface: parseRuntimeLensToolSurfaceAxis(obj.tool_surface),
     provider_lane: parseRuntimeLensProviderLaneAxis(obj.provider_lane),
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
-    tool_lineage: parseRuntimeLensToolLineageAxis(obj.tool_lineage),
     payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
     source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
     claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
-    runtime_proof: parseRuntimeLensRuntimeProofAxis(obj.runtime_proof),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),
   }
@@ -1384,7 +1489,7 @@ function parseRuntimeLensSwimlanes(raw: unknown): KeeperRuntimeLensSwimlanes {
   const obj = isRecord(raw) ? raw : {}
   return {
     keeper: parseRuntimeLensLane(obj.keeper, 'keeper', 'Keeper'),
-    masc_policy_cascade: parseRuntimeLensLane(obj.masc_policy_cascade, 'masc_policy_cascade', 'MASC Cascade'),
+    masc_policy_runtime: parseRuntimeLensLane(obj.masc_policy_runtime, 'masc_policy_runtime', 'MASC Runtime'),
     oas_agent: parseRuntimeLensLane(obj.oas_agent, 'oas_agent', 'OAS'),
     provider: parseRuntimeLensLane(obj.provider, 'provider', 'Provider'),
     tool_runtime: parseRuntimeLensLane(obj.tool_runtime, 'tool_runtime', 'Tool Runtime'),
@@ -1429,7 +1534,6 @@ function parseRuntimeLensClockEdge(raw: unknown): KeeperRuntimeLensClockEdge {
     tool_batch_id: nullableStringField(obj, 'tool_batch_id'),
     checkpoint_id: nullableStringField(obj, 'checkpoint_id'),
     compaction_id: nullableStringField(obj, 'compaction_id'),
-    memory_injection_id: nullableStringField(obj, 'memory_injection_id'),
     event_bus_correlation_id: nullableStringField(obj, 'event_bus_correlation_id'),
     event_bus_run_id: nullableStringField(obj, 'event_bus_run_id'),
     event_bus_event_count: nullableNumberField(obj, 'event_bus_event_count'),

@@ -1,12 +1,12 @@
 module Schema = Graphql.Schema
 module Arg = Schema.Arg
-module Coord = Coord
-module Coord_utils = Coord_utils
+module Workspace = Workspace
+module Workspace_utils = Workspace_utils
 module Types = Masc_domain
 open Masc_domain
 
 type ctx = {
-  room_config: Coord_utils.config;
+  workspace_config: Workspace_utils.config;
 }
 
 type response_status = [ `OK | `Bad_request ]
@@ -301,10 +301,10 @@ let agent_typ =
         ~typ:Schema.string
         ~args:Arg.[]
         ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.current_task);
-      Schema.field "joinedAt"
+      Schema.field "sessionBoundAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.joined_at);
+        ~resolve:(fun _ (agent : Masc_domain.agent) -> agent.session_bound_at);
       Schema.field "lastSeen"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
@@ -356,45 +356,45 @@ let message_typ =
         ~resolve:(fun _ (message : Masc_domain.message) -> message.relevance);
     ]
 
-let room_state_typ =
-  Schema.obj "RoomState"
+let workspace_state_typ =
+  Schema.obj "WorkspaceState"
     ~fields:[
       Schema.field "protocolVersion"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.protocol_version);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.protocol_version);
       Schema.field "project"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.project);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.project);
       Schema.field "startedAt"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.started_at);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.started_at);
       Schema.field "messageSeq"
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.message_seq);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.message_seq);
       Schema.field "activeAgents"
         ~typ:(Schema.non_null (Schema.list (Schema.non_null Schema.string)))
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.active_agents);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.active_agents);
       Schema.field "paused"
         ~typ:(Schema.non_null Schema.bool)
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused);
       Schema.field "pauseReason"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.pause_reason);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.pause_reason);
       Schema.field "pausedBy"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_by);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused_by);
       Schema.field "pausedAt"
         ~typ:Schema.string
         ~args:Arg.[]
-        ~resolve:(fun _ (state : Masc_domain.room_state) -> state.paused_at);
+        ~resolve:(fun _ (state : Masc_domain.workspace_state) -> state.paused_at);
     ]
 
 let task_edge_typ =
@@ -524,38 +524,38 @@ let variables_of_yojson = function
   | Some _ -> []
 
 let get_agents config : Masc_domain.agent list =
-  let dir = Coord_utils.agents_dir config in
-  Coord_utils.list_dir config dir
+  let dir = Workspace_utils.agents_dir config in
+  Workspace_utils.list_dir config dir
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
-      let json = Coord_utils.read_json config path in
+      let json = Workspace_utils.read_json config path in
       match Masc_domain.agent_of_yojson json with
       | Ok agent -> Some agent
       | Error e ->
-          Log.Coord.debug "get_agents: skipping invalid agent file %s: %s" name e;
+          Log.Workspace.debug "get_agents: skipping invalid agent file %s: %s" name e;
           None)
   |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) -> String.compare a.name b.name)
 
 let get_messages config : Masc_domain.message list =
-  let dir = Coord_utils.messages_dir config in
-  Coord_utils.list_dir config dir
-  |> List.filter Coord.is_valid_filename
+  let dir = Workspace_utils.messages_dir config in
+  Workspace_utils.list_dir config dir
+  |> List.filter Workspace.is_valid_filename
   |> List.filter (fun name -> Filename.check_suffix name ".json")
   |> List.filter_map (fun name ->
       let path = Filename.concat dir name in
-      let json = Coord_utils.read_json config path in
+      let json = Workspace_utils.read_json config path in
       match Masc_domain.message_of_yojson json with
       | Ok msg -> Some msg
       | Error e ->
-          Log.Coord.debug "get_messages: skipping invalid message file %s: %s" name e;
+          Log.Workspace.debug "get_messages: skipping invalid message file %s: %s" name e;
           None)
   |> List.sort (fun (a : Masc_domain.message) (b : Masc_domain.message) -> compare a.seq b.seq)
 
 let tasks_connection config first after =
   let tasks : Masc_domain.task list =
-    if Coord_utils.is_initialized config then
-      Coord.get_tasks_raw config
+    if Workspace_utils.is_initialized config then
+      Workspace.get_tasks_raw config
     else
       []
   in
@@ -575,7 +575,7 @@ let tasks_connection config first after =
 
 let agents_connection config first after =
   let agents : Masc_domain.agent list =
-    if Coord_utils.is_initialized config then
+    if Workspace_utils.is_initialized config then
       get_agents config
     else
       []
@@ -596,7 +596,7 @@ let agents_connection config first after =
 
 let messages_connection config first after =
   let messages : Masc_domain.message list =
-    if Coord_utils.is_initialized config then
+    if Workspace_utils.is_initialized config then
       get_messages config
     else
       []
@@ -628,9 +628,9 @@ let messages_connection config first after =
 let schema =
   Schema.schema [
     Schema.field "status"
-      ~typ:(Schema.non_null room_state_typ)
+      ~typ:(Schema.non_null workspace_state_typ)
       ~args:Arg.[]
-      ~resolve:(fun info () -> Coord.read_state info.ctx.room_config);
+      ~resolve:(fun info () -> Workspace.read_state info.ctx.workspace_config);
     Schema.field "tasks"
       ~typ:(Schema.non_null task_connection_typ)
       ~args:Arg.[
@@ -638,7 +638,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        tasks_connection info.ctx.room_config first after);
+        tasks_connection info.ctx.workspace_config first after);
     Schema.field "agents"
       ~typ:(Schema.non_null agent_connection_typ)
       ~args:Arg.[
@@ -646,7 +646,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        agents_connection info.ctx.room_config first after);
+        agents_connection info.ctx.workspace_config first after);
     Schema.field "messages"
       ~typ:(Schema.non_null message_connection_typ)
       ~args:Arg.[
@@ -654,7 +654,7 @@ let schema =
         Arg.arg "after" ~typ:Arg.string;
       ]
       ~resolve:(fun info () first after ->
-        messages_connection info.ctx.room_config first after);
+        messages_connection info.ctx.workspace_config first after);
   ]
 
 let handle_request ~config body_str =
@@ -663,22 +663,13 @@ let handle_request ~config body_str =
   | Error msg ->
       { status = `Bad_request; body = graphql_error msg }
   | Ok payload ->
-      let open Yojson.Safe.Util in
-      let query =
-        match payload |> member "query" with
-        | `String q -> Some q
-        | _ -> None
-      in
+      let query = Json_util.get_string payload "query" in
       let variables_json =
-        match payload |> member "variables" with
-        | `Null -> None
-        | other -> Some other
+        match Json_util.assoc_member_opt "variables" payload with
+        | Some `Null -> None
+        | opt -> opt
       in
-      let operation_name =
-        match payload |> member "operationName" with
-        | `String s -> Some s
-        | _ -> None
-      in
+      let operation_name = Json_util.get_string payload "operationName" in
       (match query with
        | None ->
            { status = `Bad_request; body = graphql_error "Missing query field" }
@@ -688,7 +679,7 @@ let handle_request ~config body_str =
                { status = `Bad_request; body = graphql_error err }
            | Ok doc ->
                let variables = variables_of_yojson variables_json in
-               let ctx = { room_config = config } in
+               let ctx = { workspace_config = config } in
                let result =
                  if variables = [] then
                    Schema.execute schema ctx ?operation_name doc

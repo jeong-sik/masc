@@ -3,7 +3,7 @@
 # Meta-issue: #9519
 #
 # CONTRACT:
-#   - Upstream OAS must remain coordinator-agnostic. When an OAS
+#   - Upstream OAS must remain agent-stream-agnostic. When an OAS
 #     checkout provides scripts/check-sdk-independence.sh, delegate to it.
 #     The pinned OAS API surface fingerprint (scripts/oas-api-surface.json)
 #     is checked locally for masc_ back-references — no OAS checkout needed.
@@ -49,7 +49,7 @@ resolve_oas_repo() {
   return 1
 }
 
-# 1. Upstream OAS SDK should not learn MASC coordinator vocabulary.
+# 1. Upstream OAS SDK should not learn MASC agent stream vocabulary.
 echo "=== Scan: Upstream OAS SDK independence ==="
 if oas_repo="$(resolve_oas_repo)"; then
   echo "OAS checkout: ${oas_repo}"
@@ -112,7 +112,7 @@ PYEOF
   if [[ -n "$masc_in_surface" ]]; then
     echo "FAIL: OAS API surface fingerprint contains masc_ back-reference(s):"
     echo "$masc_in_surface"
-    echo "  OAS must not learn MASC coordinator vocabulary."
+    echo "  OAS must not learn MASC agent stream vocabulary."
     echo "  repair: remove the masc_-prefixed item from OAS, refresh scripts/oas-api-surface.json"
     exit_code=1
   else
@@ -138,7 +138,7 @@ masc_matches=$(
 )
 if [ -n "$masc_matches" ]; then
   echo "WARN: MASC files contain OAS-reserved concepts (verify they call OAS, not reimplement):"
-  echo "$masc_matches" | head -20
+  head -20 <<< "$masc_matches"
 fi
 
 # 3. MASC using Oas_worker raw/internal interfaces instead of public API.
@@ -154,7 +154,7 @@ internal_matches=$(
 )
 if [ -n "$internal_matches" ]; then
   echo "FAIL: MASC uses Oas_worker raw/internal identifiers (route through Masc_oas_bridge or Oas_worker public API):"
-  echo "$internal_matches" | head -20
+  head -20 <<< "$internal_matches"
   exit_code=1
 else
   echo "PASS: no Oas_worker raw/internal access in MASC keeper/bridge files"

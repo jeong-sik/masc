@@ -36,7 +36,7 @@ type proof_receipt = {
   keeper_id : string;
   tool_name : string;
   turn_id : int;
-  attribution : [`Autonomous | `Operator_triggered | `Cascade_routed];
+  attribution : [`Autonomous | `Operator_triggered | `Runtime_routed];
   outcome : [`Success | `Approval_required | `Policy_denied
             | `Precondition_failed | `Sandbox_path_error
             | `Zero_evidence_placeholder];
@@ -82,7 +82,7 @@ Dashboard panel: same three sections rendered as Solid components on `/dashboard
 
 | Sub-issue | Outcome variant(s) | Closure condition |
 |-----------|-------------------|-------------------|
-| #13567 (policy / approval) | `Approval_required`, `Policy_denied` | All approval-required tools have at least one `Success` after a documented approval; all policy-denied receipts have a follow-up issue explaining why the policy is correct |
+| #13567 (policy / approval) | `Approval_required`, `Policy_denied` | All tools requiring approval have at least one `Success` after a documented approval; all policy-denied receipts have a follow-up issue explaining why the policy is correct |
 | #13568 (sandbox / precondition) | `Precondition_failed`, `Sandbox_path_error` | Per-tool failure rate < 5% over 7-day window AND each remaining failure has a `Keeper_path_check_error` typed cause (no raw-string class) |
 | #13569 (zero-evidence) | `Zero_evidence_placeholder` | Every registered keeper-facing tool has produced at least one `Success` `proof_receipt` from at least one autonomous turn |
 
@@ -97,7 +97,7 @@ This invariant is what turns "I checked yesterday and we had coverage" into a fa
 ## Non-goals
 
 - We do not try to *fix* the policy gates / sandbox precondition failures / zero-evidence tools here. The harness only classifies and counts.
-- We do not extend proof beyond keeper-attributed autonomous tool calls. Operator-triggered receipts and cascade-routed receipts are tracked separately so they cannot mask a real coverage gap.
+- We do not extend proof beyond keeper-attributed autonomous tool calls. Operator-triggered receipts and runtime-routed receipts are tracked separately so they cannot mask a real coverage gap.
 - We do not gate CI on proof coverage. The harness is read-side observability; gating is a separate RFC if it ever becomes necessary.
 
 ## Implementation phases

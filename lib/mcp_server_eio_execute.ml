@@ -2,22 +2,21 @@
 
     Extracted from mcp_server_eio.ml.
     Contains the main tool dispatch function that resolves agent identity,
-    checks authorization, auto-joins, and delegates to tool modules.
+    checks authorization, session-binds, and delegates to tool modules.
 *)
 
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join =
-  if not (room_initialized && join_required)
-  then false
-  else if agent_name = "unknown"
-  then false
-  else check_join agent_name
-;;
-
 let caller_agent_name_from_arguments arguments =
   Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
+;;
+
+let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_join =
+  workspace_initialized
+  && bind_required
+  && not (String.equal agent_name "unknown")
+  && check_join agent_name
 ;;
 
 let cleanup_internal_keeper_runtime_resource ~during_exception ~label cleanup =
@@ -60,37 +59,35 @@ let execute_tool_eio
   =
   (* clock parameter used for Session_eio.wait_for_message *)
   (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
-  let module U = Yojson.Safe.Util in
   (* Defensive: refresh Eio global context for downstream helpers that still
      consult the ambient switch/clock during a request. Tests may leave a
      finished switch in the global slot between runs, so keep it aligned with
      the current request scope. *)
   Eio_context.set_switch sw;
   Eio_context.set_clock clock;
-  (* Prometheus: count every inbound tool call *)
-  Prometheus.record_request ();
-  let config = state.Mcp_server.room_config in
+  (* Otel_metric_store: count every inbound tool call *)
+  Otel_metric_store.record_request ();
+  let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
-  (* Fix 3: Cache room_initialized to avoid repeated stat syscalls.
-     Updated after auto-init succeeds. *)
-  let room_init_cached = ref (Coord.is_initialized config) in
+  (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls. *)
+  let workspace_init_cached = Workspace.is_initialized config in
   (* Fix 4: Check resolved-name cache for fast identity resolution.
      On 2nd+ call in the same MCP session, the cached name preserves the
-     nickname selected by the prior join without relying on sidecar files. *)
+     nickname selected by the prior session binding without relying on sidecar files. *)
   let cached_resolved_agent =
-    Option.bind mcp_session_id Agent_registry_eio.get_resolved_name
+    Option.bind mcp_session_id Client_registry_eio.get_resolved_name
   in
-  let identity = Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments in
-  Log.Mcp.debug "[Identity] %s" (Agent_identity.to_display_string identity);
-  let record_mcp_session_agent agent_name =
+  let identity = Client_registry_eio.get_or_create_identity ?mcp_session_id arguments in
+  Log.Mcp.debug "[Identity] %s" (Client_identity.to_display_string identity);
+  let record_mcp_session_agent ~is_ephemeral agent_name =
     match mcp_session_id with
     | None -> ()
-    | Some sid -> Agent_registry_eio.set_resolved_name sid agent_name
+    | Some sid -> Client_registry_eio.set_resolved_name sid agent_name ~is_ephemeral
   in
   let caller_identity =
     Mcp_server_eio_caller_identity.resolve ~config ~tool_name:name ~arguments
       ~identity ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
-      ~room_initialized:(fun () -> !room_init_cached)
+      ~workspace_initialized:(fun () -> workspace_init_cached)
       ~log_mcp_exn
   in
   let agent_name = caller_identity.agent_name in
@@ -100,10 +97,13 @@ let execute_tool_eio
   in
   let owner_keeper_identity = caller_identity.owner_keeper_identity in
   let mode_gate_error = caller_identity.mode_gate_error in
-  (* Cache resolved agent_name for this session (Fix 4). *)
-  record_mcp_session_agent agent_name;
+  (* Cache resolved agent_name for this session (Fix 4), carrying the
+     ephemerality decided from the typed origin so a later call reads it
+     back without a substring re-probe. *)
+  record_mcp_session_agent ~is_ephemeral:caller_identity.agent_name_is_ephemeral
+    agent_name;
   let is_system_internal_tool =
-    Tool_catalog.is_on_surface Tool_catalog.System_internal name
+    Tool_catalog_surfaces.is_system_internal_hidden name
   in
   let preview ?(max_len = 240) text =
     String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text
@@ -173,183 +173,16 @@ let execute_tool_eio
          ~agent_name
          (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
-       let dedupe_string_list values =
-         values
-         |> List.map String.trim
-         |> List.filter (fun value -> value <> "")
-         |> List.sort_uniq String.compare
-       in
-       let tool_authorized_for_request tool_name =
-         (not auth_enabled)
-         ||
-         match Auth.authorize_tool_v2 config.base_path ~agent_name ~token ~tool_name with
-         | Ok () -> true
-         | Error _ -> false
-       in
-       let profile_tool_names =
-         Mcp_server_eio_tool_profile.tool_schemas_for_profile state profile
-         |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-         |> List.filter (fun tool_name ->
-           Tool_catalog.allow_direct_call tool_name
-           && Mcp_server_eio_tool_profile.tool_allowed_in_profile state profile tool_name
-           && tool_authorized_for_request tool_name)
-       in
-       let keeper_tool_names =
-         let candidates =
-           [ Keeper_identity.canonical_keeper_name agent_name
-           ; Keeper_identity.canonical_keeper_name_from_agent_name agent_name
-           ]
-           |> List.filter_map Fun.id
-           |> List.sort_uniq String.compare
-         in
-         let rec loop = function
-           | [] -> []
-           | keeper_name :: rest ->
-             (match Keeper_types.read_meta_resolved config keeper_name with
-              | Ok (Some (_, meta)) -> Keeper_tool_policy.keeper_allowed_tool_names meta
-              | Ok None | Error _ -> loop rest)
-         in
-         loop candidates
-       in
-       let caller_tool_names =
-         Some (dedupe_string_list (profile_tool_names @ keeper_tool_names))
-       in
-       let extract_nickname_from_join_result ~fallback result =
-         try
-           let prefix = "  Nickname: " in
-           let start_idx =
-             let idx = ref 0 in
-             while
-               !idx < String.length result - String.length prefix
-               && String.sub result !idx (String.length prefix) <> prefix
-             do
-               incr idx
-             done;
-             !idx + String.length prefix
-           in
-           let end_idx =
-             match String.index_from_opt result start_idx '\n' with
-             | Some idx -> idx
-             | None -> String.length result
-           in
-           String.sub result start_idx (end_idx - start_idx)
-         with
-         | Invalid_argument _ -> fallback
-       in
-       (* Auto-init/auto-join for better UX.
-     - Auto-init only when auth is disabled (avoid side effects in secured rooms).
-     - Auto-join when allowed by auth (and safe for token-based auth). *)
-       let join_required =
-         Agent_tool_descriptor_resolution.capability_has
-           Tool_capability.Requires_join
-           name
-       in
-       let init_error =
-         if (not auth_enabled) && join_required && not !room_init_cached
-         then (
-           try
-             let (_init_msg : string) = Coord.init config ~agent_name:None in
-             room_init_cached := true;
-             (* Fix 3: update cache after successful init *)
-             None
-           with
-           | Invalid_argument msg -> Some msg
-           | Sys_error msg -> Some msg
-           | Yojson.Json_error msg -> Some msg
-           | Eio.Cancel.Cancelled _ as exn -> raise exn
-           | exn -> Some (Printexc.to_string exn))
-         else None
-       in
-       (match init_error with
-        | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
-        | None ->
           let is_read_only =
-            Agent_tool_descriptor_resolution.capability_has
+            Keeper_tool_descriptor_resolution.capability_has
               Tool_capability.Read_only
               name
           in
-          let can_auto_join =
-            if (not join_required) || agent_name = "unknown"
-            then false
-            else if Option.is_none mcp_session_id
-            then
-              (* Sessionless requests (no Mcp-Session-Id header) should not auto-join.
-         Without a session, each request gets a new ephemeral agent name,
-         causing orphan agent proliferation in the room. *)
-              false
-            else if not auth_enabled
-            then true
-            else (
-              (* If per-agent tokens are required, only auto-join when agent_name already
-         looks like a stable nickname. Otherwise Coord.join would generate a new
-         nickname, breaking token verification for subsequent calls. *)
-              let auth_cfg = Auth.load_auth_config config.base_path in
-              if auth_cfg.require_token && not (Nickname.is_generated_nickname agent_name)
-              then false
-              else (
-                match
-                  Auth.authorize_tool_v2
-                    config.base_path
-                    ~agent_name
-                    ~token
-                    ~tool_name:"masc_join"
-                with
-                | Ok () -> true
-                | Error _ -> false))
-          in
-          let agent_name =
-            if can_auto_join
-            then (
-              (* Fix 3: use cached room_initialized *)
-              let is_joined =
-                if !room_init_cached
-                then (
-                  (* Auto-join gate hides the failure mode that distinguishes
-                     "agent really isn't joined yet" from "we can't read the
-                     join state". Invalid_argument is kept because
-                     [Coord.is_agent_joined] surface formerly raised it on
-                     malformed agent_name input; dropping it changes scope. *)
-                  try Coord.is_agent_joined config ~agent_name with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | (Sys_error _ | Yojson.Json_error _ | Invalid_argument _) as exn
-                    ->
-                    Log.Mcp.warn
-                      "[is_agent_joined gate] read failed for %s: %s; \
-                       treating as not-joined"
-                      agent_name
-                      (Printexc.to_string exn);
-                    false)
-                else false
-              in
-              if is_joined
-              then agent_name
-              else (
-                let join_result =
-                  Coord.join
-                    config
-                    ~agent_name
-                    ~capabilities:[]
-                    ~keeper_name:(Option.map fst owner_keeper_identity)
-                    ~keeper_id:(Option.bind owner_keeper_identity snd)
-                    ()
-                in
-                let nickname =
-                  extract_nickname_from_join_result ~fallback:agent_name join_result
-                in
-                Log.Mcp.info "Auto-joined for %s: %s -> %s" name agent_name nickname;
-                (* Remember nickname so subsequent calls in this MCP session can use it. *)
-                record_mcp_session_agent nickname;
-                let (_ : Session.session) =
-                  Session.register registry ~agent_name:nickname
-                in
-                nickname))
-            else agent_name
-          in
           (match owner_keeper_identity with
            | Some (keeper_name, keeper_id)
-             when agent_name <> "unknown" && !room_init_cached ->
+             when agent_name <> "unknown" && workspace_init_cached ->
              (try
-                Coord_task.update_local_agent_state config ~agent_name (fun agent ->
+                Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
                   let meta =
                     match agent.meta with
                     | Some existing ->
@@ -395,10 +228,10 @@ let execute_tool_eio
               | Tool_catalog.Real | Tool_catalog.Adapter | Tool_catalog.Placeholder ->
                 false
             in
-            if (not skip_heartbeat) && !room_init_cached
+            if (not skip_heartbeat) && workspace_init_cached
             then (
               try
-                let (_ : string) = Coord.heartbeat config ~agent_name in
+                let (_ : string) = Workspace.heartbeat config ~agent_name in
                 ()
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -408,71 +241,7 @@ let execute_tool_eio
                   agent_name
                   name
                   (Printexc.to_string exn)));
-          (* Check if agent must join first — Fix 3: use cached value *)
-          let room_initialized = !room_init_cached in
-          let is_joined =
-            resolve_join_state
-              ~room_initialized
-              ~join_required
-              ~agent_name
-              ~check_join:(fun candidate ->
-                Coord.is_agent_joined config ~agent_name:candidate)
-          in
-          (* Debug: log join check *)
-          Log.Misc.debug
-            "tool=%s agent_name=%s join_required=%b room_initialized=%b is_joined=%b"
-            name
-            agent_name
-            join_required
-            room_initialized
-            is_joined;
-          if join_required && not room_initialized
-          then (
-            (* #9770: surface guard fires as a fleet-wide metric so
-       operators can see which (tool, agent) pairs repeatedly skip
-       masc_join without log-scraping. *)
-            Prometheus.inc_counter
-              Prometheus.metric_tool_join_required_guard
-              ~labels:
-                [ "tool", name; "agent_name", agent_name; "reason", "room_uninitialized" ]
-              ();
-            with_system_internal_audit
-              ~agent_name
-              (runtime_error_result
-                 (Printf.sprintf
-                    "MASC room not initialized.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step init+join, then \
-                     call %s.\n\
-                     Alternative: masc_init → masc_join → masc_status → %s\n\
-                     📚 See: @~/me/instructions/masc-workflow.md\n\
-                     [DEBUG] agent_name=%s room_initialized=%b"
-                    name
-                    name
-                    agent_name
-                    room_initialized)))
-          else if join_required && not is_joined
-          then (
-            Prometheus.inc_counter
-              Prometheus.metric_tool_join_required_guard
-              ~labels:
-                [ "tool", name; "agent_name", agent_name; "reason", "agent_not_joined" ]
-              ();
-            with_system_internal_audit
-              ~agent_name
-              (runtime_error_result
-                 (Printf.sprintf
-                    "Join required before using %s.\n\n\
-                     Fastest: masc_start(path=\"<project>\") — one-step join with room \
-                     scope.\n\
-                     Alternative: masc_join → masc_status → %s\n\
-                     📚 See: @~/me/instructions/masc-workflow.md\n\
-                     [DEBUG] agent_name=%s is_joined=%b"
-                    name
-                    name
-                    agent_name
-                    is_joined)))
-          else (
-            (* === Fix 1: Tag-based lazy context dispatch ===
+          (* === Fix 1: Tag-based lazy context dispatch ===
      O(1) tag lookup determines which module handles this tool.
      Only the matched module's context is created (1 out of 45+).
      Eliminates per-call 40+ context creation and ~210 Hashtbl.replace. *)
@@ -517,21 +286,23 @@ let execute_tool_eio
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
-                   Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
+                   Tool_run.dispatch
+                     { Tool_run.config; agent_name = Some agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_agent ->
                    Tool_agent.dispatch
                      { Tool_agent.config; agent_name }
                      ~name
                      ~args:coerced_args
                  | Mod_task ->
-                   Tool_task.dispatch
-                     ?agent_tool_names:caller_tool_names
-                     { Tool_task.config; agent_name; sw = Some sw }
+                   Task.Tool.dispatch
+                     { Task.Tool.config; agent_name; sw = Some sw }
                      ~name
                      ~args:coerced_args
-                 | Mod_room ->
-                   Tool_coord.dispatch
-                     { Tool_coord.config; agent_name }
+                 | Mod_state ->
+                   Tool_workspace.dispatch
+                     { Tool_workspace.config; agent_name }
                      ~name
                      ~args:coerced_args
                  | Mod_control ->
@@ -554,7 +325,13 @@ let execute_tool_eio
                      { Tool_library.agent_name }
                      ~name
                      ~args:coerced_args
-                 | Mod_keeper ->
+                 | Mod_external ->
+                   (* Composition root wires the server boundary to the keeper
+                      subsystem: [Mod_external] tools (keeper-management tools)
+                      dispatch through [Keeper_tool_boundary] with the
+                      per-request context built above. The [Tool_dispatch] tag
+                      stays subsystem-agnostic; this is where the concrete
+                      handler is bound. *)
                    Keeper_tool_boundary.dispatch
                      (make_keeper_tool_ctx ())
                      ~name
@@ -568,7 +345,7 @@ let execute_tool_eio
                       then Tool_result.ok ~tool_name:name ~start_time message
                       else Tool_result.error ~tool_name:name ~start_time message)
                  | Mod_inline ->
-                   let inline_ctx : Tool_inline_dispatch.context =
+                   let mcp_runtime_ctx : Mcp_tool_runtime.context =
                      { config
                      ; agent_name
                      ; registry
@@ -577,7 +354,12 @@ let execute_tool_eio
                      ; clock
                      ; arguments = coerced_args
                      ; mcp_session_id
-                     ; record_mcp_session_agent
+                     ; (* The MCP runtime surface caches under the
+                          already-resolved session identity, so carry the
+                          ephemerality decided above. *)
+                       record_mcp_session_agent =
+                         record_mcp_session_agent
+                           ~is_ephemeral:caller_identity.agent_name_is_ephemeral
                      ; wait_for_message =
                          (fun registry ~agent_name ~timeout ->
                            wait_for_message_eio ~clock registry ~agent_name ~timeout)
@@ -587,17 +369,17 @@ let execute_tool_eio
                      ; save_mcp_sessions = Mcp_server_eio_governance.save_mcp_sessions
                      }
                    in
-                   Tool_inline_dispatch.dispatch inline_ctx ~name)
+                   Mcp_tool_runtime.dispatch mcp_runtime_ctx ~name)
             in
             (* #9784: enrich Unknown tool errors with closest-name suggestions so the
      LLM can self-correct on the next turn rather than re-emit the same
      hallucinated name. Suggestions come from a similarity scan of the
-     full tool registry, filtered through Keeper_tool_name_projection to
+     full tool registry, filtered through Keeper_tool_visibility_projection to
      exclude internal handler names (#17023). *)
             let format_unknown_tool_error ~reason =
               let suggestions =
                 Tool_dispatch.find_similar_names ~query:name ()
-                |> Keeper_tool_name_projection.filter_model_visible_suggestions
+                |> Keeper_tool_visibility_projection.filter_schema_visible_suggestions
               in
               match suggestions with
               | [] -> Printf.sprintf "Unknown tool: %s (%s)" name reason
@@ -630,7 +412,7 @@ let execute_tool_eio
                           agent: %s"
                          agent_name)
                   | candidate :: rest ->
-                    (match Keeper_types.read_meta_resolved config candidate with
+                    (match Keeper_meta_store.read_meta_resolved config candidate with
                      | Ok (Some (_resolved_name, meta)) -> Ok meta
                      | Ok None -> loop rest
                      | Error msg -> Error msg)
@@ -649,7 +431,7 @@ let execute_tool_eio
                       address by registering the keeper / fixing the
                       agent invocation context.  Same semantic family
                       as tool_task_handlers' "Agent '%s' is not a
-                      member of this room" — [Workflow_rejection]. *)
+                      member of this workspace" — [Workflow_rejection]. *)
                    Some
                      (Tool_result.error
                         ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -660,39 +442,29 @@ let execute_tool_eio
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in
-                   let turn_sandbox_factory =
-                     Some (Keeper_sandbox_factory.create ~config ~meta ())
-                   in
-                   let turn_sandbox_factory_git =
-                     Some
-                       (Keeper_sandbox_factory.create
-                          ~default_network_override:Keeper_types.Network_inherit
-                          ~config
-                          ~meta
-                          ())
-                   in
-                   let cleanup_one ~during_exception label = function
-                     | None -> ()
+                               let turn_sandbox_factory =
+                                 Some (Keeper_sandbox_factory.create ~config ~meta ())
+                               in
+                               let cleanup_one ~during_exception label = function
+                                 | None -> ()
                      | Some factory ->
                        cleanup_internal_keeper_runtime_resource
                          ~during_exception
                          ~label
                          (fun () -> Keeper_sandbox_factory.cleanup factory)
-                   in
-                   let cleanup ~during_exception () =
-                     cleanup_one ~during_exception "sandbox" turn_sandbox_factory;
-                     cleanup_one ~during_exception "git sandbox" turn_sandbox_factory_git
-                   in
+                               in
+                               let cleanup ~during_exception () =
+                                 cleanup_one ~during_exception "sandbox" turn_sandbox_factory
+                               in
                    let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
                    let result =
                      run_with_cleanup_preserving_primary ~cleanup (fun () ->
-                       Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+                       Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
                          ~config
                          ~meta
-                         ~ctx_work
-                         ?turn_sandbox_factory
-                         ?turn_sandbox_factory_git
-                         ~exec_cache
+                                     ~ctx_work
+                                     ?turn_sandbox_factory
+                                     ~exec_cache
                          (* RFC-0182 Phase 5 PR-A.2: thread Eio
                             resources from execute_tool_eio scope. *)
                          ~sw
@@ -703,7 +475,7 @@ let execute_tool_eio
                          ())
                    in
                    let success =
-                     match result.Agent_tool_dispatch_runtime.outcome with
+                     match result.Keeper_tool_dispatch_runtime.outcome with
                      | `Success -> true
                      | `Failure -> false
                    in
@@ -724,7 +496,7 @@ let execute_tool_eio
                the keeper turn migration in PR-7. *)
             let dispatch_internal_with_telemetry () =
               let result, _outcome =
-                Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
                   let r = dispatch_internal_keeper_runtime_tool () in
                   (* Route through the shared dispatch finalizer so MCP
                      internal-keeper-runtime calls run the same result
@@ -761,7 +533,7 @@ let execute_tool_eio
                     Tool_telemetry.with_span for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
                    let result, _outcome =
-                     Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
+                     Tool_telemetry.with_span ~force_new_trace_id:true ~tool_name:name (fun _trace_id_thunk ->
                        let r = dispatch_by_tag tag in
                        (* Keep external MCP tools/call on the same
                           post-dispatch contract as internal keeper calls. *)
@@ -788,15 +560,15 @@ let execute_tool_eio
                       ~agent_name
                       (runtime_error_result
                          ~tool_name:name
-                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))))
+                         (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
 ;;
 
-(* RFC-0182 §3.1 — register Tool_coord.dispatch with the dependency
-   inversion ref so [Agent_tool_in_process_runtime.handle_masc_coord]
-   (compiled early) can dispatch coord tools without statically
-   importing [Tool_coord] (compiled late). *)
+(* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
+   inversion ref so [Keeper_tool_in_process_runtime.handle_masc_workspace]
+   (compiled early) can dispatch workspace tools without statically
+   importing [Tool_workspace] (compiled late). *)
 let () =
-  Coord_dispatch_ref.dispatch
+  Workspace_dispatch_ref.dispatch
   := fun ~config ~agent_name ~name ~args ->
-    Tool_coord.dispatch { config; agent_name } ~name ~args
+    Tool_workspace.dispatch { config; agent_name } ~name ~args
 ;;

@@ -1,8 +1,8 @@
-(** Dashboard_operator_judge — periodic LLM-driven room judgment loop.
+(** Dashboard_operator_judge — periodic LLM-driven workspace judgment loop.
 
     Runs as an Eio daemon fiber per [base_path]: every
     [Env_config.Operator.judge_interval_sec], it asks an operator-judge
-    keeper to evaluate room health using freshly built facts, then
+    keeper to evaluate workspace health using freshly built facts, then
     caches the verdict (and "is the judge online?" status) for HTTP
     consumption.
 
@@ -35,7 +35,7 @@ val start :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  config:Coord.config ->
+  config:Workspace.config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   build_facts:(unit -> Yojson.Safe.t) ->
@@ -43,5 +43,25 @@ val start :
   unit
 (** Spawn the judge daemon for [config.base_path] iff
     [Env_config.Operator.judge_enabled] and not already running.
-    Backoff doubles up to 5x and caps at 300s when local cascade slots
+    Backoff doubles up to 5x and caps at 300s when local runtime slots
     are saturated. Idempotent: subsequent calls are no-ops. *)
+
+val register_record_operator_judgment :
+  (Workspace.config ->
+   surface:string ->
+   target_type_str:string ->
+   target_id:string option ->
+   summary:string ->
+   confidence:float ->
+   ?model_name:string ->
+   ?recommended_action:Yojson.Safe.t ->
+   evidence_refs:string list ->
+   disagreement_with_truth:bool ->
+   generated_at:string ->
+   generated_at_unix:float ->
+   fresh_until:string ->
+   fresh_until_unix:float ->
+   keeper_name:string ->
+   unit ->
+   unit) ->
+  unit

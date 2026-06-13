@@ -27,9 +27,6 @@ let now_cache_stamp () =
   let ts = Unix.gettimeofday () in
   (ts, Masc_domain.now_iso ())
 
-let json_of_string_option = function
-  | Some value -> `String value
-  | None -> `Null
 
 let mark_cached_surface_attempt surface =
   let ts, iso = now_cache_stamp () in
@@ -95,14 +92,11 @@ let cached_surface_json surface =
   extend_projection_diagnostics surface.json
     [
       ("cache_state", `String cache_state);
-      ("last_success_at", json_of_string_option surface.last_success_at);
-      ("last_attempt_at", json_of_string_option surface.last_attempt_at);
-      ("last_error_at", json_of_string_option surface.last_error_at);
-      ("stale_reason", json_of_string_option stale_reason);
-      ( "stale_age_ms",
-        match stale_age_ms with
-        | Some value -> `Int value
-        | None -> `Null );
+      ("last_success_at", Json_util.string_opt_to_json surface.last_success_at);
+      ("last_attempt_at", Json_util.string_opt_to_json surface.last_attempt_at);
+      ("last_error_at", Json_util.string_opt_to_json surface.last_error_at);
+      ("stale_reason", Json_util.string_opt_to_json stale_reason);
+      ( "stale_age_ms", Json_util.int_opt_to_json stale_age_ms );
     ]
 
 let cached_surface_has_success surface =
@@ -132,30 +126,10 @@ let cached_surface_or_first_success_json surface ~cache_key ~ttl ~clock
     if cached_surface_has_success surface then cached_surface_json surface
     else json
 
-let attach_projection_diagnostics json diagnostics =
-  match json with
-  | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
-  | other -> other
-
-let projection_diagnostics_json ~surface ~started_at ~extra json =
-  let build_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
-  let payload_bytes = String.length (Yojson.Safe.to_string json) in
-  `Assoc
-    ([
-       ("surface", `String surface);
-       ("build_ms", `Int build_ms);
-       ("payload_bytes", `Int payload_bytes);
-       ("generated_at", `String (Masc_domain.now_iso ()));
-     ]
-    @ extra)
-
-let with_projection_diagnostics ~surface ~started_at ~extra json =
-  attach_projection_diagnostics json
-    (projection_diagnostics_json ~surface ~started_at ~extra json)
-
-let initialized_json_opt ?(allow_initializing = false) = function
-  | `Assoc fields as json -> (
-      match List.assoc_opt "status" fields with
-      | Some (`String "initializing") when not allow_initializing -> None
-      | _ -> Some json)
-  | _ -> None
+(* Projection-diagnostics helpers: SSOT is Server_dashboard_http_core_cache.
+   Re-exported here for backward compatibility with modules that include
+   this module. *)
+let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
+let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
+let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
+let initialized_json_opt = Server_dashboard_http_core_cache.initialized_json_opt

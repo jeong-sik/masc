@@ -1,0 +1,24 @@
+(include_subdirs no)
+
+(library
+ (name keeper_metrics)
+ (public_name masc.keeper_metrics)
+ (wrapped false)
+ (modules
+  keeper_measurement
+  keeper_metrics
+  keeper_prompt_names
+  keeper_token_count
+  keeper_timing
+  keeper_memory_policy_summary_filter
+  keeper_continuity_summary_source
+  keeper_memory_llm_summary_outcome
+  keeper_memory_recall_exn_class
+  keeper_user_visible_reply_source
+  keeper_chat_store_operation
+  keeper_compact_audit_retention_outcome
+  keeper_execution_receipt_outcome_kind
+  keeper_oas_execution_error_phase
+  keeper_operator_compact_result
+  keeper_tool_outcome)
+ (libraries masc_core otel_metric_store time_compat unix yojson))

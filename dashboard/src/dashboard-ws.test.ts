@@ -82,31 +82,6 @@ class MockWebSocket {
   }
 }
 
-class MockParseWorker {
-  static holdResponses = false
-
-  onmessage: ((event: MessageEvent) => void) | null = null
-  onerror: ((event: ErrorEvent) => void) | null = null
-  onmessageerror: ((event: MessageEvent) => void) | null = null
-  terminated = false
-
-  constructor(readonly url: URL) {}
-
-  postMessage(message: { id: number; data: string }): void {
-    if (MockParseWorker.holdResponses) return
-    this.onmessage?.({
-      data: {
-        id: message.id,
-        payloads: [JSON.parse(message.data) as unknown],
-      },
-    } as MessageEvent)
-  }
-
-  terminate(): void {
-    this.terminated = true
-  }
-}
-
 function installWebSocketMocks(): void {
   mockSockets.length = 0
   vi.stubGlobal('WebSocket', MockWebSocket)
@@ -184,7 +159,6 @@ beforeEach(() => {
 afterEach(() => {
   disconnectDashboardWS()
   clearDashboardWsDiscoveryCacheForTests()
-  MockParseWorker.holdResponses = false
   dashboardWsConnected.value = false
   dashboardWsLastError.value = null
   dashboardWsLastPingAt.value = 0
@@ -241,9 +215,13 @@ describe('dashboardSlicesForRoute', () => {
     })).toContain('execution')
   })
 
-  it('subscribes route-local dashboard slices for board, goals, and fleet FSM routes', () => {
+  it('keeps board route snapshots HTTP-owned while subscribing goals and fleet FSM slices', () => {
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'board' } }))
-      .toContain('board')
+      .toEqual([
+        'namespace',
+        'shell',
+        'transport',
+      ])
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('goals')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'agents' } }))
@@ -434,7 +412,11 @@ describe('dashboard websocket route subscriptions', () => {
     const subscribe = parseRpc(socket, 1)
     expect(subscribe.method).toBe('dashboard/subscribe')
     expect(subscribe.params.route).toBe('workspace:board::')
-    expect(subscribe.params.slices).toEqual(expect.arrayContaining(['board']))
+    expect(subscribe.params.slices).toEqual([
+      'namespace',
+      'shell',
+      'transport',
+    ])
 
     socket.receive({
       jsonrpc: '2.0',
@@ -590,10 +572,8 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsLastSeq.value).toBe(42)
   })
 
-  it('falls back to main-thread parsing when the parse worker stops responding', async () => {
-    vi.useFakeTimers()
+  it('parses inbound deltas inline on the main thread', async () => {
     installWebSocketMocks()
-    vi.stubGlobal('Worker', MockParseWorker)
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
@@ -611,16 +591,11 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
 
-    MockParseWorker.holdResponses = true
     socket.receive({
       jsonrpc: '2.0',
       method: 'dashboard/delta',
       params: { seq: 43, slice: 'execution', payload: { agents: [] } },
     })
-    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(5_000)
-    flushPendingInbound()
 
     expect(dashboardWsLastSeq.value).toBe(43)
     expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
@@ -783,7 +758,7 @@ describe('dashboard websocket route subscriptions', () => {
     expect(dashboardWsLastSeq.value).toBe(1)
   })
 
-  it('ignores dashboard slice deltas outside the latest route subscription', async () => {
+  it('ignores board slice snapshots and deltas because the board list is HTTP-owned', async () => {
     installWebSocketMocks()
 
     await connectDashboardWS({ tab: 'workspace', params: { section: 'board' } })
@@ -807,11 +782,7 @@ describe('dashboard websocket route subscriptions', () => {
       method: 'dashboard/delta',
       params: { seq: 2, slice: 'board', payload: { posts: [] } },
     })
-    expect(sseStoreMocks.hydrateDashboardSlice).toHaveBeenCalledWith(
-      'board',
-      { posts: [] },
-      undefined,
-    )
+    expect(sseStoreMocks.hydrateDashboardSlice).not.toHaveBeenCalled()
     sseStoreMocks.hydrateDashboardSlice.mockClear()
 
     const switchPromise = subscribeDashboardRoute({

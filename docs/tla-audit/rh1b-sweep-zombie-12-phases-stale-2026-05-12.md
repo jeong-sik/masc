@@ -55,7 +55,7 @@ Specs that carry detailed OCaml↔TLA+ mapping tables but never mention Zombie:
 
 - **KConditionsGovernPhase** — line 61 explicitly says "Adding new OCaml phases does NOT require updating this spec".  Stale "12-phase variant" is misleading but spec is intentionally scope-limited.  Shape A fix only.
 - **KCompactionLifecycle** (KMC) — already iter 43 renamed sets (KMC_*) with documented projection scope.  No "12 phases" reference.  No action needed.
-- **KCAF, KCL, KTC, KCascadeLifecycle, KDP** — already updated in prior iters (28/39/42/43).  Various phase coverages documented per-spec.
+- **KCAF, KCL, KTC, KRuntimeLifecycle, KDP** — already updated in prior iters (28/39/42/43).  Various phase coverages documented per-spec.
 - **KToolSurface, KDwellMonotone, KLaunchPending** — surface-level / dwell-only / launch-only; no full FSM modeling.  Shape A fix only (count comment).
 - **KEventQueue, KOASAdvanced, KWorkPipeline** — different domain (event/OAS/work), not KSM phase modeling.
 
@@ -85,7 +85,7 @@ If iter 50 batch-fixes the count comments and iter 51 fixes the 3 mapping-table 
 ```bash
 # scripts/audit-tla-phase-count.sh (~40-60 LOC)
 # Read OCaml type phase constructor count from keeper_state_machine.ml
-# rg "type phase|^  | [A-Z]" lib/keeper/keeper_state_machine.ml
+# rg "type phase|^  | [A-Z]" lib/keeper_state/keeper_state_machine.ml
 # count = number of constructors
 # Then sweep specs/keeper-state-machine/*.tla for "N phases" / "N-phase" patterns
 # Flag where N != actual_count

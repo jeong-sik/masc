@@ -38,15 +38,14 @@ type diversity_summary = {
 (** Parse keeper tool_usage JSON (the .masc/keepers/tool_usage/{name}.json
     format) into a list of tool_stat. *)
 let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
-  let open Yojson.Safe.Util in
-  match member "tools" json with
-  | `List items ->
+  match Json_util.assoc_member_opt "tools" json with
+  | Some (`List items) ->
     List.filter_map (fun item ->
-      match member "tool" item |> to_string_option with
+      match Json_util.get_string item "tool" with
       | Some name ->
-        let count = member "count" item |> to_int_option |> Option.value ~default:0 in
-        let successes = member "successes" item |> to_int_option |> Option.value ~default:0 in
-        let failures = member "failures" item |> to_int_option |> Option.value ~default:0 in
+        let count = Json_util.get_int item "count" |> Option.value ~default:0 in
+        let successes = Json_util.get_int item "successes" |> Option.value ~default:0 in
+        let failures = Json_util.get_int item "failures" |> Option.value ~default:0 in
         Some { name; count; successes; failures }
       | None -> None
     ) items
@@ -101,7 +100,7 @@ let compute_diversity ~(available_tools : string list)
   let threshold = max 1 (total_calls / 100) in
   let underused = available_tools
     |> List.filter (fun tool ->
-      not (String.equal tool (Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent))
+      not (String.equal tool "keeper_stay_silent")
       && (not (SS.mem tool used_set)
           || List.exists (fun s -> s.name = tool && s.count < threshold) stats))
   in
@@ -114,7 +113,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
   let underused_tools =
     List.sort_uniq String.compare summary.underused_tools
   in
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string ToolUnderusedAllowedCount)
     ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (List.length underused_tools));
@@ -123,7 +122,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
        let value =
          if List.mem tool underused_tools then 1.0 else 0.0
        in
-       Prometheus.set_gauge
+       Otel_metric_store.set_gauge
          Keeper_metrics.(to_string ToolUnderusedAllowed)
          ~labels:[ ("keeper", keeper_name); ("tool", tool) ]
          value)

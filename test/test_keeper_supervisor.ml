@@ -3,17 +3,21 @@
     Keeper_registry (tested in test_keeper_registry.ml). *)
 
 open Alcotest
-module Sup = Masc_mcp.Keeper_supervisor
-module Reg = Masc_mcp.Keeper_registry
-module KT = Masc_mcp.Keeper_types
-module KR = Masc_mcp.Keeper_runtime
-module AQ = Masc_mcp.Keeper_approval_queue
-module KSM = Masc_mcp.Keeper_state_machine
-module KLH = Masc_mcp.Keeper_lifecycle_hooks
-module FD = Masc_mcp.Keeper_fd_pressure
-module KA = Masc_mcp.Keeper_keepalive
-module KFP = Masc_mcp.Keeper_failure_policy
-module KSP = Masc_mcp.Keeper_supervisor_self_preservation
+module Sup = Masc.Keeper_supervisor
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module Keeper_types_profile = Masc.Keeper_types_profile
+module Reg = Masc.Keeper_registry
+module KT = Keeper_types
+module KR = Masc.Keeper_runtime
+module AQ = Masc.Keeper_approval_queue
+module KSM = Keeper_state_machine
+module KLH = Masc.Keeper_lifecycle_hooks
+module FD = Keeper_fd_pressure
+module KA = Masc.Keeper_keepalive
+module KFP = Keeper_failure_policy
+module KSP = Masc.Keeper_supervisor_self_preservation
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -47,6 +51,9 @@ let rec mkdir_p path =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
+let resolve_done_for_test reg value =
+  ignore (Reg.resolve_done reg ~source:"test_fixture" value)
+
 let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
@@ -75,6 +82,7 @@ let write_keeper_toml config_dir ~name =
 [keeper]
 name = "%s"
 goal = "test keeper"
+sandbox_profile = "local"
 |}
        name)
 
@@ -128,7 +136,8 @@ let test_supervisor_policy_pauses_watchdog_provider_timeout_loop () =
   let decision =
     policy_decision_exn (Some (Reg.Provider_timeout_loop { count = 3 }))
   in
-  check string "scope" "turn" (KFP.failure_scope_to_label decision.failure_scope);
+  check string "scope" "keeper_liveness"
+    (KFP.failure_scope_to_label decision.failure_scope);
   check string "lifecycle" "pause_keeper"
     (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
   check string "circuit" "operator_breaker"
@@ -158,6 +167,100 @@ let test_supervisor_policy_restarts_stale_turn () =
   check string "lifecycle" "restart_keeper"
     (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
   check bool "keeper death allowed" true decision.keeper_death_allowed
+
+(* Typed runtime-exhaustion retryability bridge. The consumer now reads the
+   carried [Keeper_meta_contract.runtime_exhaustion_reason] instead of
+   reparsing the stringified [code]; this pins the polarity, including the
+   correction of transient/connectivity reasons from terminal to retryable. *)
+let provider_runtime_error_of_reason reason =
+  Reg.Provider_runtime_error
+    { code = "ignored_by_typed_path"
+    ; detail = "test"
+    ; provider_id = None
+    ; http_status = None
+    ; runtime_id = None
+    ; reason = Some reason
+    }
+
+let test_supervisor_policy_runtime_exhausted_retryable_reasons () =
+  let retryable_reasons =
+    [ Keeper_meta_contract.Candidates_filtered_after_cycles
+    ; Keeper_meta_contract.Max_turns_exceeded
+    ; Keeper_meta_contract.Capacity_exhausted
+    ; Keeper_meta_contract.Connection_refused
+    ; Keeper_meta_contract.Dns_failure
+    ; Keeper_meta_contract.No_providers_available
+    ; Keeper_meta_contract.All_providers_failed
+    ; Keeper_meta_contract.Structural_attempt_timeout { detail = "30" }
+    ]
+  in
+  List.iter
+    (fun reason ->
+       let decision =
+         policy_decision_exn (Some (provider_runtime_error_of_reason reason))
+       in
+       check string
+         ("retryable reason -> soft_fail_turn ("
+          ^ Keeper_meta_contract.runtime_exhaustion_summary reason ^ ")")
+         "soft_fail_turn"
+         (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+       check string "reason label" "runtime_exhausted_retryable" decision.reason)
+    retryable_reasons
+
+let test_supervisor_policy_runtime_exhausted_terminal_reasons () =
+  let terminal_reasons =
+    [ Keeper_meta_contract.Other_detail "opaque free-text" ]
+  in
+  List.iter
+    (fun reason ->
+       let decision =
+         policy_decision_exn (Some (provider_runtime_error_of_reason reason))
+       in
+       check string
+         ("terminal reason -> pause_current_work ("
+          ^ Keeper_meta_contract.runtime_exhaustion_summary reason ^ ")")
+         "pause_current_work"
+         (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+       check string "reason label" "runtime_exhausted_terminal" decision.reason)
+    terminal_reasons
+
+let test_supervisor_policy_runtime_error_no_reason_falls_through () =
+  (* A [Provider_runtime_error] with [reason = None] (non-exhaustion
+     provider/runtime error) must not be classified as runtime-exhausted;
+     it falls through to [None], preserving pre-refactor behavior. *)
+  let r =
+    Reg.Provider_runtime_error
+      { code = "provider_error"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  check bool "reason=None yields no runtime-exhausted decision" true
+    (Sup.failure_reason_policy_decision_for_test (Some r) = None)
+
+let test_supervisor_policy_provider_timeout_catch_all_retries () =
+  let r =
+    Reg.Provider_runtime_error
+      { code = "provider_error_timeout:http_operation"
+      ; detail =
+          "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = None
+      ; reason = None
+      }
+  in
+  let decision = policy_decision_exn (Some r) in
+  check string "scope" "provider"
+    (KFP.failure_scope_to_label decision.failure_scope);
+  check string "lifecycle" "soft_fail_turn"
+    (KFP.lifecycle_effect_to_label decision.lifecycle_effect);
+  check string "operator action" "inspect_provider_stream"
+    (KFP.operator_action_to_label decision.operator_action);
+  check string "reason" "provider_timeout:http_operation" decision.reason
 
 (* ── Pure tests: keep_last_n ────────────────────────────── *)
 
@@ -205,8 +308,9 @@ let test_should_cleanup_dead_true () =
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
+        ("tool_access", `List []);
       ] in
-      match KT.meta_of_json json with
+      match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -225,8 +329,9 @@ let test_should_cleanup_dead_false_when_recent () =
         ("goal", `String "goal");
         ("sandbox_profile", `String "local");
         ("network_mode", `String "inherit");
+        ("tool_access", `List []);
       ] in
-      match KT.meta_of_json json with
+      match Keeper_meta_json_parse.meta_of_json json with
       | Ok meta -> meta
       | Error err -> fail err)
   in
@@ -269,6 +374,39 @@ let test_keep_last_n_never_exceeds () =
   done;
   check bool "length <= n" true (List.length !result <= n)
 
+let test_done_signal_publishes_only_for_fresh_resolution () =
+  check
+    bool
+    "fresh resolve publishes lifecycle"
+    true
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_resolved_now);
+  check
+    bool
+    "already resolved does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_resolved);
+  check
+    bool
+    "already seen does not publish lifecycle"
+    false
+    (Sup.should_publish_lifecycle_for_done_signal Sup.Done_signal_already_seen)
+
+let test_done_signal_maps_registry_result () =
+  check
+    bool
+    "registry fresh resolve publishes"
+    true
+    (Reg.Done_resolved { source = "test" }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal);
+  check
+    bool
+    "registry already-resolved suppresses publish"
+    false
+    (Reg.Done_already_resolved { source = "test"; previous = `Stopped }
+     |> Sup.done_signal_of_registry_result
+     |> Sup.should_publish_lifecycle_for_done_signal)
+
 (* ── Property: self-preservation subset ────────────────── *)
 
 let bp = "/tmp/test-sp-prop"
@@ -280,10 +418,59 @@ let make_meta name =
     ("goal", `String "test");
     ("sandbox_profile", `String "local");
     ("network_mode", `String "inherit");
+    ("tool_access", `List []);
   ] in
-  match KT.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
+
+(* Sweep paths that resolve a keeper's runtime id reach
+   [Keeper_meta_contract.runtime_id_of_meta], which falls back to
+   [Runtime.get_default_runtime_id ()] for keepers without an explicit
+   [[runtime.assignments]] entry.  That fallback fail-fasts until
+   [Runtime.init_default] has run (RFC-0206 §2.1, no silent fallback).
+   In a booted server [init_default] runs at startup
+   (server_runtime_bootstrap.ml); a bare [dune exec] test binary must
+   stand the default runtime up itself.  Mirrors the established pattern in
+   test_keeper_lifecycle_registry_dispatch.ml. *)
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      let path = Filename.temp_file "keeper_supervisor_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+          match Runtime.init_default ~config_path:path with
+          | Ok () -> initialized := true
+          | Error msg -> fail msg))
 
 let test_persona_drift_check_uses_toml_persona_name () =
   with_config_dir @@ fun config_dir ->
@@ -465,16 +652,16 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   Eio.Switch.on_release sw (fun () ->
     FD.reset_for_tests ();
     Reg.clear ();
-    Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+    Masc.Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
-  let config = Masc_mcp.Coord.default_config base_dir in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
   let name = "spawn-denied-no-fork" in
   let meta = make_meta name in
-  (match KT.write_meta config meta with
+  (match Keeper_meta_store.write_meta config meta with
    | Ok () -> ()
    | Error err -> fail err);
-  let ctx : _ KT.context =
+  let ctx : _ Keeper_types_profile.context =
     {
       config;
       agent_name = "supervisor";
@@ -484,9 +671,9 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       net = Some (Eio.Stdenv.net env);
     }
   in
-  let denial_metric = Masc_mcp.Keeper_metrics.(to_string SpawnSlotDenied) in
+  let denial_metric = Keeper_metrics.(to_string SpawnSlotDenied) in
   let denial_count surface =
-    Masc_mcp.Prometheus.metric_value_or_zero
+    Masc.Otel_metric_store.metric_value_or_zero
       denial_metric
       ~labels:
         [
@@ -497,8 +684,8 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       ()
   in
   let fork_total () =
-    Masc_mcp.Prometheus.metric_total
-      Masc_mcp.Keeper_metrics.(to_string DomainPoolFork)
+    Masc.Otel_metric_store.metric_total
+      Keeper_metrics.(to_string DomainPoolFork)
   in
   FD.note ~site:"test_spawn_admission_no_fork"
     ~detail:"Too many open files in system"
@@ -538,7 +725,7 @@ let test_self_preservation_subset () =
   let entries = List.map (fun name ->
     let _reg = Reg.register ~base_path:bp name (make_meta name) in
     ignore (Reg.dispatch_event ~base_path:bp name
-      (Masc_mcp.Keeper_state_machine.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
+      (Keeper_state_machine.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
     Reg.set_failure_reason ~base_path:bp name
       (Some (Reg.Heartbeat_consecutive_failures 3));
     match Reg.get ~base_path:bp name with
@@ -653,7 +840,7 @@ let test_fiber_health_respects_max_restarts_override () =
   let meta = make_meta name in
   let reg = Reg.register ~base_path:bp name meta in
   (* Simulate crash: resolve done_p as Crashed *)
-  Eio.Promise.resolve reg.done_r (`Crashed "test crash");
+  resolve_done_for_test reg (`Crashed "test crash");
   (* Set restart_count to 3 *)
   Reg.restore_supervisor_state ~base_path:bp name
     ~restart_count:3 ~last_restart_ts:0.0 ~crash_log:[];
@@ -663,16 +850,16 @@ let test_fiber_health_respects_max_restarts_override () =
   check bool "zombie at 3/5 restarts (restartable)"
     true (health_before = KT.Fiber_zombie);
   (* Override max_restarts to 2 — now restart_count 3 >= 2 = dead *)
-  (match Masc_mcp.Runtime_params.set
-    Masc_mcp.Governance_registry.keeper_supervisor_max_restarts 2 with
+  (match Masc.Runtime_params.set
+    Masc.Governance_registry.keeper_supervisor_max_restarts 2 with
   | Ok () -> ()
   | Error msg -> fail msg);
   let health_after = Reg.fiber_health_of ~base_path:bp name in
   check bool "dead at 3/2 restarts (overridden)"
     true (health_after = KT.Fiber_dead);
   (* Restore default *)
-  Masc_mcp.Runtime_params.clear
-    Masc_mcp.Governance_registry.keeper_supervisor_max_restarts;
+  Masc.Runtime_params.clear
+    Masc.Governance_registry.keeper_supervisor_max_restarts;
   Reg.clear ()
 
 let test_sweep_restores_reconcile_gate_for_paused_keeper () =
@@ -682,13 +869,13 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive ~base_path:base_dir "paused-reconcile";
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir "paused-reconcile";
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      let _room = Masc_mcp.Coord.init config ~agent_name:(Some "supervisor") in
+      let config = Masc.Workspace.default_config base_dir in
+      let _workspace = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
       let base = make_meta "paused-reconcile" in
       let meta =
         {
@@ -700,16 +887,16 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
               base.runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
-                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
-                     KT.Ambiguous_post_commit_timeout);
+                  (Keeper_meta_contract.blocker_info_of_class
+                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [completion_contract] violated"
+                     Keeper_meta_contract.Ambiguous_post_commit_timeout);
             };
         }
       in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -745,7 +932,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
        | Ok () -> ()
        | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       let resumed_meta =
-        match KT.read_meta config meta.name with
+        match Keeper_meta_store.read_meta config meta.name with
         | Ok (Some value) -> value
         | Ok None -> fail "expected resumed keeper meta"
         | Error err -> fail err
@@ -761,38 +948,40 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
   let base_dir = temp_dir () in
   let name = "restart-metric-keeper" in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_keepalive.stop_keepalive ~base_path:base_dir name;
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir name;
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
+      write_keeper_toml config_dir ~name;
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string RestartAttempts)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -805,13 +994,13 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.(to_string RestartAttempts)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
       | None -> fail "expected restarted keeper in registry"
@@ -827,14 +1016,14 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       let attempt_labels = [ ("keeper", name) ] in
@@ -842,16 +1031,16 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
         [ ("keeper", name); ("outcome", "meta_unavailable") ]
       in
       let attempts_before =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string RestartAttempts)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -864,13 +1053,13 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.(to_string RestartAttempts)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.(to_string RestartOutcomes)
+        (Masc.Otel_metric_store.metric_value_or_zero
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
@@ -878,7 +1067,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 
 (* Reproduces the 2026-04-25 incident pattern: 8 keepers crashed silently
-   after the supervisor exhausted max_restarts. The ERROR log + Prometheus
+   after the supervisor exhausted max_restarts. The ERROR log + Otel_metric_store
    counter + structured OAS event emitted from sweep_and_recover give
    operators the signal that was missing. *)
 let test_max_restarts_exhaustion_emits_dead_alert () =
@@ -889,34 +1078,34 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "dead-alert-keeper" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
       (* Drive the entry to Crashed with restart_count already at the
          default budget (5) so sweep takes the Dead branch on the first
          pass, not the restart branch. *)
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic exhaustion");
+      resolve_done_for_test reg (`Crashed "synthetic exhaustion");
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 9));
       let max_restarts =
-        Masc_mcp.Runtime_params.get
-          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
       in
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -928,18 +1117,18 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       in
       Sup.sweep_and_recover ctx;
       let after =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
         (baseline +. 1.0) after;
       (* Phase advanced to Dead. *)
       let phase =
         Reg.get_phase ~base_path:config.base_path name
-        |> Option.value ~default:Masc_mcp.Keeper_state_machine.Running
+        |> Option.value ~default:Keeper_state_machine.Running
       in
       check bool "keeper phase advanced to Dead"
-        true (phase = Masc_mcp.Keeper_state_machine.Dead))
+        true (phase = Keeper_state_machine.Dead))
 
 let with_reap_ready_dead_keeper name f =
   Eio_main.run @@ fun env ->
@@ -950,18 +1139,18 @@ let with_reap_ready_dead_keeper name f =
     ~finally:(fun () ->
       KLH.reset_for_testing ();
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       ignore (Reg.register ~base_path:config.base_path name meta);
       Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1013,7 +1202,7 @@ let test_sweep_and_recover_swallows_failing_tombstone_hook () =
 (* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
 
 (* Reproduces the Mode A failure pattern from 2026-04-27 fleet observation:
-   keeper proactive turn fails (cascade dead / provider_timeout) → stale
+   keeper proactive turn fails (runtime dead / provider_timeout) → stale
    watchdog kills fiber → supervisor restarts → 30 min later same stale →
    restart loop with no operator-actionable signal beyond log ERROR.
 
@@ -1032,18 +1221,18 @@ let test_stale_storm_pause_skips_restart () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "stale-storm-keeper" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic stale storm");
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
       (* [restore_supervisor_state] resets [last_failure_reason] to [None],
          so it MUST run before [set_failure_reason] (otherwise the storm
          latch is wiped and the supervisor sweeps the entry through the
@@ -1053,13 +1242,13 @@ let test_stale_storm_pause_skips_restart () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
       let baseline_pause =
-        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let baseline_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1071,11 +1260,11 @@ let test_stale_storm_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let after_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
@@ -1083,7 +1272,7 @@ let test_stale_storm_pause_skips_restart () =
         baseline_dead after_dead;
       (* meta.paused must be true on disk so reconcile + future sweeps
          honor the pause across server restarts. *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after storm pause"
              true m.paused;
@@ -1106,31 +1295,31 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "legacy-stale-fleet-batch-keeper" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "legacy stale fleet batch");
+      resolve_done_for_test reg (`Crashed "legacy stale fleet batch");
       let max_restarts =
-        Masc_mcp.Runtime_params.get
-          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
       in
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
       let baseline_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1142,12 +1331,12 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       in
       Sup.sweep_and_recover ctx;
       let after_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "legacy fleet batch follows restart/dead budget"
         (baseline_dead +. 1.0) after_dead;
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays false for legacy fleet batch"
              false m.paused
@@ -1163,31 +1352,31 @@ let test_provider_timeout_loop_pause_skips_restart () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "synthetic provider timeout loop");
+      resolve_done_for_test reg (`Crashed "synthetic provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
       let baseline_pause =
-        Masc_mcp.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let baseline_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1199,18 +1388,18 @@ let test_provider_timeout_loop_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc_mcp.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let after_dead =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string DeadTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "provider_timeout_loop counter incremented by 1"
         (baseline_pause +. 1.0) after_pause;
       check (float 0.001) "dead counter NOT incremented (budget loop is pause)"
         baseline_dead after_dead;
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after provider timeout loop pause"
              true m.paused
@@ -1227,14 +1416,14 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "unresolved-watchdog-stopped" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
@@ -1243,7 +1432,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1254,14 +1443,14 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true after unresolved watchdog stop"
              true m.paused;
            check bool "provider timeout blocker class preserved"
              true
              (match m.runtime.last_blocker with
-              | Some b -> b.klass = KT.Turn_timeout
+              | Some b -> b.klass = Keeper_meta_contract.Turn_timeout
               | None -> false)
        | Ok None -> fail "meta missing after unresolved watchdog stop"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1279,21 +1468,21 @@ let test_non_storm_crashed_restarts_normally () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "non-storm-keeper" in
       let meta = make_meta name in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      resolve_done_for_test reg (`Crashed "ordinary crash");
       let max_restarts =
-        Masc_mcp.Runtime_params.get
-          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
       in
       (* Set restart_count to max_restarts so the default crash branch routes
          to [to_mark_dead] (not [to_restart]).  The point of this regression
@@ -1304,9 +1493,9 @@ let test_non_storm_crashed_restarts_normally () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 3));
       let baseline_pause =
-        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1318,12 +1507,12 @@ let test_non_storm_crashed_restarts_normally () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
         baseline_pause after_pause;
       (* meta.paused stays false. *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays false after non-storm crash"
              false m.paused
@@ -1341,26 +1530,26 @@ let test_storm_pause_requires_manual_resume () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
       check bool "initial auto_resume_after_sec = None"
         true (meta.auto_resume_after_sec = None);
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1372,8 +1561,8 @@ let test_storm_pause_requires_manual_resume () =
       in
       Sup.sweep_and_recover ctx;
       (* Stale storms are operator-owned pauses: no timer should re-enter
-         the same failed cascade/tool loop automatically. *)
-      (match KT.read_meta config name with
+         the same failed runtime/tool loop automatically. *)
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
            check bool "auto_resume_after_sec remains None"
@@ -1381,7 +1570,7 @@ let test_storm_pause_requires_manual_resume () =
            (* updated_at must be refreshed by the pause write so Phase 3.5
               timer (now - updated_at) is anchored to the pause time, not to
               some earlier heartbeat write. *)
-           (match Coord_resilience.Time.parse_iso8601_opt m.updated_at with
+           (match Workspace_resilience.Time.parse_iso8601_opt m.updated_at with
             | None ->
                 fail (Printf.sprintf "updated_at not parseable as ISO-8601: %s"
                         m.updated_at)
@@ -1400,11 +1589,11 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "backoff-doubles" in
       (* Simulate a keeper that was already auto-paused with 1h delay. *)
       let initial_meta =
@@ -1412,16 +1601,16 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
           auto_resume_after_sec = Some 3600.0;
         }
       in
-      (match KT.write_meta config initial_meta with
+      (match Keeper_meta_store.write_meta config initial_meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name initial_meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "provider timeout loop");
+      resolve_done_for_test reg (`Crashed "provider timeout loop");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1433,7 +1622,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       in
       Sup.sweep_and_recover ctx;
       (* Back-off must double: 3600 -> 7200. *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = true" true m.paused;
            (match m.auto_resume_after_sec with
@@ -1447,6 +1636,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
 (* Test: Phase 3.5 sweep auto-resumes a keeper whose timer has elapsed. *)
 let test_sweep_auto_resumes_after_backoff () =
   with_restart_launch_noop @@ fun () ->
+  ensure_test_runtime ();
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1455,11 +1645,11 @@ let test_sweep_auto_resumes_after_backoff () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-resume-keeper" in
       write_keeper_toml config_dir ~name;
       (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
@@ -1477,16 +1667,16 @@ let test_sweep_auto_resumes_after_backoff () =
           updated_at = two_hours_ago;
         }
       in
-      (match KT.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: paused keeper is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1498,7 +1688,7 @@ let test_sweep_auto_resumes_after_backoff () =
       in
       Sup.sweep_and_recover ctx;
       (* meta.paused must be cleared after the back-off timer elapsed. *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = false after auto-resume"
              false m.paused;
@@ -1514,13 +1704,14 @@ let test_sweep_auto_resumes_after_backoff () =
       check bool "auto-resumed keeper is reconciled into registry" true
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
 
 let test_sweep_auto_resumes_registered_paused_entry () =
+  ensure_test_runtime ();
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1529,11 +1720,11 @@ let test_sweep_auto_resumes_registered_paused_entry () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-resume-registered" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1549,7 +1740,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
           updated_at = two_hours_ago;
         }
       in
-      (match KT.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       let entry = Reg.register ~base_path:config.base_path name paused_meta in
@@ -1564,7 +1755,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
            check string "precondition: registry phase paused" "paused"
              (KSM.phase_to_string phase)
        | None -> fail "precondition: registry entry missing");
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1575,7 +1766,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused = false after auto-resume" false m.paused
        | Ok None -> fail "meta missing after auto-resume"
@@ -1599,11 +1790,11 @@ let test_operator_pause_not_auto_resumed () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "operator-paused-keeper" in
       write_keeper_toml config_dir ~name;
       (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
@@ -1620,16 +1811,16 @@ let test_operator_pause_not_auto_resumed () =
           updated_at = two_hours_ago;
         }
       in
-      (match KT.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: operator pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1641,7 +1832,7 @@ let test_operator_pause_not_auto_resumed () =
       in
       Sup.sweep_and_recover ctx;
       (* meta.paused must remain true: operator pauses need human action. *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true for operator pause"
              true m.paused
@@ -1652,96 +1843,44 @@ let test_operator_pause_not_auto_resumed () =
       check bool "operator pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
 
-let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-      let name = "timeout-paused-without-resume-policy" in
-      write_keeper_toml config_dir ~name;
-      let two_hours_ago =
-        let t = Unix.gmtime (Unix.time () -. 7200.0) in
-        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-          t.tm_hour t.tm_min t.tm_sec
-      in
-      let timeout_blocker =
-        KT.blocker_info_of_class ~detail:"turn_timeout" KT.Turn_timeout
-      in
-      let paused_meta =
-        { (make_meta name) with
-          paused = true;
-          auto_resume_after_sec = None;
-          updated_at = two_hours_ago;
-          runtime =
-            { (make_meta name).runtime with
-              last_blocker = Some timeout_blocker;
-            };
+let test_turn_timeout_blocker_without_resume_policy_auto_recoverable () =
+  let now = Unix.time () in
+  let two_hours_ago =
+    let t = Unix.gmtime (now -. 7200.0) in
+    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+      (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+      t.tm_hour t.tm_min t.tm_sec
+  in
+  let timeout_blocker =
+    Keeper_meta_contract.blocker_info_of_class
+      ~detail:"turn_timeout"
+      Keeper_meta_contract.Turn_timeout
+  in
+  let paused_meta =
+    { (make_meta "timeout-paused-without-resume-policy") with
+      paused = true
+    ; auto_resume_after_sec = None
+    ; updated_at = two_hours_ago
+    ; runtime =
+        { (make_meta "timeout-paused-without-resume-policy").runtime with
+          last_blocker = Some timeout_blocker
         }
-      in
-      check bool "timeout blocker without resume policy is not due"
-        false
-        (Masc_mcp.Keeper_supervisor_types.paused_meta_auto_resume_due
-           ~now:(Unix.time ())
-           paused_meta);
-      (match KT.write_meta config paused_meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      check bool "precondition: timeout pause is not bootable" false
-        (List.mem name (KR.bootable_keeper_names config));
-      let baseline_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      let ctx : _ KT.context =
-        {
-          config;
-          agent_name = "supervisor";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-        }
-      in
-      Sup.sweep_and_recover ctx;
-      (match KT.read_meta config name with
-       | Ok (Some m) ->
-           check bool "meta.paused stays true without explicit resume policy"
-             true m.paused;
-           check bool "auto_resume_after_sec remains absent"
-             true (Option.is_none m.auto_resume_after_sec);
-           check bool "timeout blocker stays recorded for operator inspection"
-             true
-             (match m.runtime.last_blocker with
-              | Some info -> info.klass = KT.Turn_timeout
-              | None -> false)
-       | Ok None -> fail "meta missing"
-       | Error err -> fail ("read_meta failed: " ^ err));
-      check bool "timeout pause remains out of bootable set" false
-        (List.mem name (KR.bootable_keeper_names config));
-      check bool "timeout pause is not reconciled into registry" false
-        (Reg.is_registered ~base_path:config.base_path name);
-      let after_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
-      in
-      check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
-        baseline_auto_resume after_auto_resume)
+    }
+  in
+  check bool "timeout blocker without resume policy is due"
+    true
+    (Masc.Keeper_supervisor_types.paused_meta_auto_resume_due ~now paused_meta);
+  check bool "implicit timeout auto-resume delay is present"
+    true
+    (Option.is_some
+       (Masc.Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec
+          paused_meta))
 
 (* Regression guard for #17063/#17067: [auto_resume_after_sec = None] is the
    manual/operator pause contract.  A [Capacity_backpressure] blocker from old
@@ -1755,11 +1894,11 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "capacity-paused-without-resume-policy" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -1777,27 +1916,27 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
             { (make_meta name).runtime with
               last_blocker =
                 Some
-                  (KT.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"capacity exhausted before explicit resume policy"
-                     KT.Capacity_backpressure);
+                     Keeper_meta_contract.Capacity_backpressure);
             };
         }
       in
       check bool "capacity blocker without resume policy is not due"
         false
-        (Masc_mcp.Keeper_supervisor_types.paused_meta_auto_resume_due
+        (Masc.Keeper_supervisor_types.paused_meta_auto_resume_due
            ~now:(Unix.time ())
            paused_meta);
-      (match KT.write_meta config paused_meta with
+      (match Keeper_meta_store.write_meta config paused_meta with
        | Ok () -> ()
        | Error err -> fail err);
       check bool "precondition: capacity pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         {
           config;
           agent_name = "supervisor";
@@ -1808,14 +1947,14 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
         }
       in
       Sup.sweep_and_recover ctx;
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            check bool "meta.paused stays true without explicit resume policy"
              true m.paused;
            check bool "capacity blocker stays recorded for operator inspection"
              true
              (match m.runtime.last_blocker with
-              | Some info -> info.klass = KT.Capacity_backpressure
+              | Some info -> info.klass = Keeper_meta_contract.Capacity_backpressure
               | None -> false)
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1824,8 +1963,8 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       check bool "capacity pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc_mcp.Prometheus.metric_total
-          Masc_mcp.Keeper_metrics.(to_string AutoResumedTotal)
+        Masc.Otel_metric_store.metric_total
+          Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
         baseline_auto_resume after_auto_resume)
@@ -1841,21 +1980,21 @@ let test_initial_auto_resume_capped_at_max () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "initial-cap-regression" in
       (* meta has no prior auto_resume_after_sec (first auto-pause). *)
       let meta = make_meta name in
       check bool "precondition: auto_resume_after_sec = None"
         true (meta.auto_resume_after_sec = None);
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
@@ -1894,11 +2033,11 @@ let test_persisted_blocker_survives_unregister () =
   Fun.protect
     ~finally:(fun () ->
       Reg.clear ();
-      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      Masc.Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "supervisor"));
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
       let meta =
@@ -1907,31 +2046,31 @@ let test_persisted_blocker_survives_unregister () =
           runtime =
             {
               meta.runtime with
-              last_blocker = Some (KT.blocker_info_of_class ~detail:"test-blocker" KT.Turn_timeout);
+              last_blocker = Some (Keeper_meta_contract.blocker_info_of_class ~detail:"test-blocker" Keeper_meta_contract.Turn_timeout);
             };
         }
       in
-      (match KT.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
-      Eio.Promise.resolve reg.done_r (`Crashed "storm");
+      resolve_done_for_test reg (`Crashed "storm");
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
-      let ctx : _ KT.context =
+      let ctx : _ Keeper_types_profile.context =
         { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
       in
       Sup.sweep_and_recover ctx;
       
       (* Check if blocker is persisted *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass" true (b.klass = KT.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass" true (b.klass = Keeper_meta_contract.Turn_timeout)
             | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1940,12 +2079,12 @@ let test_persisted_blocker_survives_unregister () =
       Reg.unregister ~base_path:config.base_path name;
       
       (* Read again and verify *)
-      (match KT.read_meta config name with
+      (match Keeper_meta_store.read_meta config name with
        | Ok (Some m) ->
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = KT.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = Keeper_meta_contract.Turn_timeout)
             | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))
@@ -1994,9 +2133,23 @@ let () =
         test_supervisor_policy_pauses_stale_storm;
       test_case "stale turn restarts via policy" `Quick
         test_supervisor_policy_restarts_stale_turn;
+      test_case "runtime-exhausted transient/bounded reasons are retryable" `Quick
+        test_supervisor_policy_runtime_exhausted_retryable_reasons;
+      test_case "runtime-exhausted capability/unknown reasons are terminal" `Quick
+        test_supervisor_policy_runtime_exhausted_terminal_reasons;
+      test_case "provider timeout catch-all is retryable" `Quick
+        test_supervisor_policy_provider_timeout_catch_all_retries;
+      test_case "provider error with reason=None falls through to no decision" `Quick
+        test_supervisor_policy_runtime_error_no_reason_falls_through;
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
+    ];
+    "done_signal", [
+      test_case "publish only for fresh resolution" `Quick
+        test_done_signal_publishes_only_for_fresh_resolution;
+      test_case "registry result mapping preserves lifecycle ownership" `Quick
+        test_done_signal_maps_registry_result;
     ];
     "supervision_cohorts", [
       test_case "64 keepers form 8 cohorts of 8" `Quick
@@ -2073,8 +2226,8 @@ let () =
         test_sweep_auto_resumes_registered_paused_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
-      test_case "turn timeout blocker without resume policy is NOT auto-resumed"
-        `Quick test_turn_timeout_blocker_without_resume_policy_not_auto_resumed;
+      test_case "turn timeout blocker without resume policy is auto-recoverable"
+        `Quick test_turn_timeout_blocker_without_resume_policy_auto_recoverable;
       test_case "capacity blocker without resume policy is NOT auto-resumed"
         `Quick test_capacity_blocker_without_resume_policy_not_auto_resumed;
       test_case "initial delay capped at max_sec when initial > max (regression)" `Quick
@@ -2082,543 +2235,4 @@ let () =
       test_case "persisted blocker survives unregister" `Quick
         test_persisted_blocker_survives_unregister;
     ];
-    "liveness_recovery", [
-      test_case "backoff_base * 2^attempt, capped at max" `Quick (fun () ->
-        let base = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_base_sec in
-        let max_s = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_max_sec in
-        let d0 = Sup.liveness_recovery_backoff 0 in
-        let d1 = Sup.liveness_recovery_backoff 1 in
-        check (float 0.1) "attempt 0 = base" base d0;
-        check (float 0.1) "attempt 1 = 2*base" (Float.min max_s (base *. 2.0)) d1);
-      test_case "backoff capped at max" `Quick (fun () ->
-        let max_s = Env_config_keeper.KeeperSupervisor.liveness_recovery_backoff_max_sec in
-        let d_big = Sup.liveness_recovery_backoff 100 in
-        check (float 0.1) "large attempt capped" max_s d_big);
-      test_case "should_attempt: Dead phase + elapsed → true" `Quick (fun () ->
-        Reg.clear ();
-        let name = "lr-should-attempt-1" in
-        let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        Reg.mark_dead ~base_path:bp name ~at:0.0;
-        (match Reg.get ~base_path:bp name with
-         | None -> fail "expected entry"
-         | Some entry ->
-             let result =
-               Sup.should_attempt_liveness_recovery
-                 ~now:99999.0 entry
-             in
-             check bool "Dead + elapsed → true" true result));
-      test_case "should_attempt: Dead phase + too recent → false" `Quick (fun () ->
-        Reg.clear ();
-        let name = "lr-should-attempt-2" in
-        let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        let now = Unix.gettimeofday () in
-        Reg.mark_dead ~base_path:bp name ~at:now;
-        (match Reg.get ~base_path:bp name with
-         | None -> fail "expected entry"
-         | Some entry ->
-             let result = Sup.should_attempt_liveness_recovery ~now entry in
-             check bool "Dead but too recent → false" false result));
-      test_case "should_attempt: non-Dead phase → false" `Quick (fun () ->
-        Reg.clear ();
-        let name = "lr-should-attempt-3" in
-        let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        (match Reg.get ~base_path:bp name with
-         | None -> fail "expected entry"
-         | Some entry ->
-             let result = Sup.should_attempt_liveness_recovery ~now:99999.0 entry in
-             check bool "Offline phase → false" false result));
-      test_case "should_attempt: credential_archived → true after self-heal change" `Quick (fun () ->
-        Reg.clear ();
-        let name = "lr-should-attempt-4" in
-        let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        (* Simulate production: credential_archived itself forces Dead. *)
-        ignore (Reg.dispatch_event ~base_path:bp name
-          KSM.Credential_archived);
-        (match Reg.get ~base_path:bp name with
-         | None -> fail "expected entry"
-         | Some entry ->
-             let min_dead_sec =
-               Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec
-             in
-             let now = Unix.gettimeofday () +. min_dead_sec +. 1.0 in
-             let result = Sup.should_attempt_liveness_recovery ~now entry in
-             check bool "credential_archived → true" true result));
-      test_case "credential recovery mints canonical keeper credential" `Quick
-        (fun () ->
-          let base_dir = temp_dir () in
-          Fun.protect
-            ~finally:(fun () ->
-              Reg.clear ();
-              cleanup_dir base_dir)
-            (fun () ->
-              Reg.clear ();
-              let config = Masc_mcp.Coord.default_config base_dir in
-              ignore
-                (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
-              let name = "keeper-credential-auto-agent" in
-              let _reg = Reg.register ~base_path:base_dir name (make_meta name) in
-              ignore
-                (Reg.dispatch_event ~base_path:base_dir name
-                   KSM.Credential_archived);
-              (match Reg.get ~base_path:base_dir name with
-               | None -> fail "expected entry"
-               | Some entry ->
-                   (match
-                      Sup.credential_recovery_before_restart_for_test
-                        ~base_path:base_dir entry
-                    with
-                    | Sup.Credential_recovery_reissued agent_name ->
-                        check string "reissued canonical agent" name agent_name
-                    | Sup.Credential_recovery_not_needed ->
-                        fail "expected credential recovery"
-                    | Sup.Credential_recovery_failed reason ->
-                        fail ("credential recovery failed: " ^ reason));
-                   match Masc_mcp.Auth.load_credential base_dir name with
-                   | Some cred ->
-                       check string "credential agent_name" name cred.agent_name
-                   | None -> fail "expected recovered keeper credential")));
-    ];
-    (* #12838 — alive-but-stuck detector. Pure function tests; dedup
-       state lives in [Sup.alive_but_stuck_*] and is not exercised here. *)
-    "alive_but_stuck", (
-      let make_test_entry ~name ~paused ~phase ~autonomous_turn_count
-          ~last_proactive_ts ~cooldown_sec ~started_at =
-        Reg.clear ();
-        let _reg = Reg.register ~base_path:bp name (make_meta name) in
-        let entry = match Reg.get ~base_path:bp name with
-          | Some e -> e
-          | None -> fail "register/get sync failure"
-        in
-        let meta = entry.meta in
-        let meta' = {
-          meta with
-          paused;
-          proactive = { meta.proactive with cooldown_sec };
-          runtime = {
-            meta.runtime with
-            autonomous_turn_count;
-            proactive_rt = {
-              meta.runtime.proactive_rt with
-              last_ts = last_proactive_ts;
-            };
-          };
-        } in
-        { entry with meta = meta'; phase; started_at }
-      in
-      let detect entry =
-        Sup.detect_alive_but_stuck
-          ~now:100_000.0
-          ~stall_multiplier:10
-          ~stall_floor_sec:1800.0
-          entry
-      in
-      [
-        test_case "paused keeper → None" `Quick (fun () ->
-          let entry = make_test_entry
-              ~name:"abs-paused"
-              ~paused:true
-              ~phase:KSM.Running
-              ~autonomous_turn_count:50
-              ~last_proactive_ts:0.0
-              ~cooldown_sec:60
-              ~started_at:0.0
-          in
-          check (option (float 0.1)) "paused → None" None (detect entry));
-        test_case "Dead phase → None (handled by liveness_recovery_scan)" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-dead"
-                ~paused:false
-                ~phase:KSM.Dead
-                ~autonomous_turn_count:50
-                ~last_proactive_ts:0.0
-                ~cooldown_sec:60
-                ~started_at:0.0
-            in
-            check (option (float 0.1)) "Dead → None" None (detect entry));
-        test_case "Crashed phase -> None (handled by supervisor crash path)" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-crashed"
-                ~paused:false
-                ~phase:KSM.Crashed
-                ~autonomous_turn_count:50
-                ~last_proactive_ts:0.0
-                ~cooldown_sec:60
-                ~started_at:0.0
-            in
-            check (option (float 0.1)) "Crashed -> None" None (detect entry));
-        test_case "Restarting phase -> None (handled by supervisor restart path)" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-restarting"
-                ~paused:false
-                ~phase:KSM.Restarting
-                ~autonomous_turn_count:50
-                ~last_proactive_ts:0.0
-                ~cooldown_sec:60
-                ~started_at:0.0
-            in
-            check (option (float 0.1)) "Restarting -> None" None (detect entry));
-        test_case "brand-new keeper (autonomous_turn_count=0) → None" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-new"
-                ~paused:false
-                ~phase:KSM.Running
-                ~autonomous_turn_count:0
-                ~last_proactive_ts:0.0
-                ~cooldown_sec:60
-                ~started_at:0.0
-            in
-            check (option (float 0.1)) "new → None" None (detect entry));
-        test_case "recent proactive turn → None" `Quick (fun () ->
-          let entry = make_test_entry
-              ~name:"abs-active"
-              ~paused:false
-              ~phase:KSM.Running
-              ~autonomous_turn_count:50
-              ~last_proactive_ts:99_500.0  (* 500s ago, within threshold *)
-              ~cooldown_sec:60
-              ~started_at:0.0
-          in
-          check (option (float 0.1)) "recent → None" None (detect entry));
-        test_case "stalled proactive_ts + autonomous advanced → Some" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-stalled"
-                ~paused:false
-                ~phase:KSM.Running
-                ~autonomous_turn_count:50
-                ~last_proactive_ts:1_000.0  (* 99000s ago *)
-                ~cooldown_sec:60            (* threshold = max(1800, 600) = 1800 *)
-                ~started_at:0.0
-            in
-            match detect entry with
-            | None -> fail "expected stalled keeper to be detected"
-            | Some elapsed ->
-              check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
-        test_case
-          "fresh fiber start suppresses stale persisted proactive_ts"
-          `Quick
-          (fun () ->
-            (* Regression for live restart on 2026-05-05: keepers booted
-               with a fresh registry [started_at] but old persisted
-               [proactive_rt.last_ts], causing the alive-but-stuck scan to
-               crash them before a recovery turn could run. *)
-            let entry = make_test_entry
-                ~name:"abs-fresh-restart"
-                ~paused:false
-                ~phase:KSM.Running
-                ~autonomous_turn_count:50
-                ~last_proactive_ts:1_000.0
-                ~cooldown_sec:60
-                ~started_at:99_500.0
-            in
-            check (option (float 0.1))
-              "fresh boot grace wins over stale persisted proactive_ts"
-              None (detect entry));
-        test_case "scan queues recovery wakeup for running stalled keeper" `Quick
-          (fun () ->
-            Eio_main.run @@ fun env ->
-            Eio.Switch.run @@ fun sw ->
-            let base_dir = temp_dir () in
-            Fun.protect
-              ~finally:(fun () ->
-                Reg.clear ();
-                Sup.alive_but_stuck_reset_for_test ();
-                cleanup_dir base_dir)
-              (fun () ->
-                Reg.clear ();
-                Sup.alive_but_stuck_reset_for_test ();
-                let name = "abs-scan-recovery" in
-                let config = Masc_mcp.Coord.default_config base_dir in
-                let base = make_meta name in
-                let meta =
-                  {
-                    base with
-                    proactive = { base.proactive with cooldown_sec = 60 };
-                    runtime = {
-                      base.runtime with
-                      autonomous_turn_count = 7;
-                      proactive_rt = {
-                        base.runtime.proactive_rt with
-                        last_ts = 1.0;
-                      };
-                    };
-                  }
-                in
-                ignore (Reg.register ~base_path:config.base_path name meta);
-                ignore (Reg.dispatch_event ~base_path:config.base_path name
-                          KSM.Fiber_started);
-                Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
-                let ctx : _ KT.context =
-                  {
-                    config;
-                    agent_name = "supervisor";
-                    sw;
-                    clock = Eio.Stdenv.clock env;
-                    proc_mgr = Some (Eio.Stdenv.process_mgr env);
-                    net = Some (Eio.Stdenv.net env);
-                  }
-                in
-                Sup.alive_but_stuck_scan ctx;
-                let labels = [("keeper_name", name)] in
-                let stuck_seconds =
-                  Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Keeper_metrics.(to_string AliveButStuckSeconds)
-                    ~labels
-                    ()
-                in
-                let threshold_seconds =
-                  Masc_mcp.Prometheus.metric_value_or_zero
-                    Masc_mcp.Keeper_metrics.(to_string AliveButStuckThresholdSeconds)
-                    ~labels
-                    ()
-                in
-                check bool "alive-but-stuck seconds crosses threshold" true
-                  (stuck_seconds > threshold_seconds);
-                check bool "alive-but-stuck threshold exported" true
-                  (threshold_seconds > 0.0);
-                let queue =
-                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
-                in
-                check int "one recovery stimulus queued" 1
-                  (Keeper_event_queue.length queue);
-                (match Keeper_event_queue.dequeue queue with
-                 | Some (stim, _) ->
-                    check string "post id" ("alive-but-stuck:" ^ name)
-                      stim.post_id;
-                    (match Keeper_event_queue.classify stim with
-                     | Keeper_event_queue.Alive_but_stuck_recovery ->
-                        ()
-                     | _ -> fail "expected recovery stimulus class")
-                 | None -> fail "expected queued recovery stimulus");
-                match Reg.get ~base_path:config.base_path name with
-                | Some entry ->
-                    check bool "fiber wakeup set" true
-                      (Atomic.get entry.fiber_wakeup)
-                | None -> fail "expected registered keeper"));
-        (* PR #13123 review: the safety property of this change is
-           "at most one queued wakeup per dedup window".  Without a
-           repeated-scan test, a future regression could enqueue one
-           recovery stimulus on every 30s sweep without failing the
-           suite.  Run [alive_but_stuck_scan] twice within the dedup
-           window and assert the queue length stays at 1. *)
-        test_case
-          "repeated scan within dedup window queues at most one recovery"
-          `Quick
-          (fun () ->
-            Eio_main.run @@ fun env ->
-            Eio.Switch.run @@ fun sw ->
-            let base_dir = temp_dir () in
-            Fun.protect
-              ~finally:(fun () ->
-                Reg.clear ();
-                Sup.alive_but_stuck_reset_for_test ();
-                cleanup_dir base_dir)
-              (fun () ->
-                Reg.clear ();
-                Sup.alive_but_stuck_reset_for_test ();
-                let name = "abs-scan-recovery-repeat" in
-                let config = Masc_mcp.Coord.default_config base_dir in
-                let base = make_meta name in
-                let meta =
-                  {
-                    base with
-                    proactive = { base.proactive with cooldown_sec = 60 };
-                    runtime = {
-                      base.runtime with
-                      autonomous_turn_count = 7;
-                      proactive_rt = {
-                        base.runtime.proactive_rt with
-                        last_ts = 1.0;
-                      };
-                    };
-                  }
-                in
-                ignore (Reg.register ~base_path:config.base_path name meta);
-                ignore (Reg.dispatch_event ~base_path:config.base_path name
-                          KSM.Fiber_started);
-                Reg.set_started_at_for_test ~base_path:config.base_path name 1.0;
-                let ctx : _ KT.context =
-                  {
-                    config;
-                    agent_name = "supervisor";
-                    sw;
-                    clock = Eio.Stdenv.clock env;
-                    proc_mgr = Some (Eio.Stdenv.process_mgr env);
-                    net = Some (Eio.Stdenv.net env);
-                  }
-                in
-                (* Three back-to-back sweeps simulate the supervisor
-                   loop firing every 30s while the keeper is still
-                   stuck.  Without dedup the queue would have 3
-                   stimuli; with dedup it must stay at 1 (until the
-                   reset_for_test below clears the table). *)
-                Sup.alive_but_stuck_scan ctx;
-                Sup.alive_but_stuck_scan ctx;
-                Sup.alive_but_stuck_scan ctx;
-                let queue =
-                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
-                in
-                check int
-                  "dedup window holds queue length to 1 across 3 sweeps"
-                  1
-                  (Keeper_event_queue.length queue);
-                (* Manual dedup reset → next scan re-queues. *)
-                Sup.alive_but_stuck_reset_for_test ();
-                Sup.alive_but_stuck_scan ctx;
-                let queue2 =
-                  Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:config.base_path name
-                in
-                check int
-                  "after dedup reset, the next scan re-queues (now 2 total)"
-                  2
-                  (Keeper_event_queue.length queue2)));
-        test_case "never_started + autonomous + old started_at → Some" `Quick
-          (fun () ->
-            (* Mirrors production case: an autonomous keeper with
-               proactive.last_outcome=never_started but autonomous_turn_count>0. *)
-            let entry = make_test_entry
-                ~name:"abs-never-started"
-                ~paused:false
-                ~phase:KSM.Running
-                ~autonomous_turn_count:14
-                ~last_proactive_ts:0.0       (* never started *)
-                ~cooldown_sec:60
-                ~started_at:1_000.0          (* started 99000s ago *)
-            in
-            match detect entry with
-            | None -> fail "expected never-started keeper to be detected"
-            | Some elapsed ->
-              check (float 1.0) "elapsed ≈ 99000s" 99_000.0 elapsed);
-        test_case "never_started + autonomous + recent started_at → None" `Quick
-          (fun () ->
-            let entry = make_test_entry
-                ~name:"abs-just-launched"
-                ~paused:false
-                ~phase:KSM.Running
-                ~autonomous_turn_count:1
-                ~last_proactive_ts:0.0
-                ~cooldown_sec:60
-                ~started_at:99_500.0  (* started 500s ago — under floor *)
-            in
-            check (option (float 0.1)) "just-launched → None"
-              None (detect entry));
-        test_case "high cooldown raises threshold above floor" `Quick (fun () ->
-          (* cooldown 600 * multiplier 10 = 6000s > floor 1800s, so a
-             5500s-old proactive ts is NOT stuck under this keeper's policy. *)
-          let entry = make_test_entry
-              ~name:"abs-high-cooldown"
-              ~paused:false
-              ~phase:KSM.Running
-              ~autonomous_turn_count:50
-              ~last_proactive_ts:94_500.0  (* 5500s ago *)
-              ~cooldown_sec:600            (* threshold = max(1800,6000) = 6000 *)
-              ~started_at:0.0
-          in
-          check (option (float 0.1)) "below per-keeper threshold → None"
-            None (detect entry));
-        test_case "recovery request sets stale reason and stop flags" `Quick
-          (fun () ->
-            Reg.clear ();
-            let name = "abs-request-recovery" in
-            let entry = Reg.register ~base_path:bp name (make_meta name) in
-            let before =
-              Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Keeper_metrics.(to_string AliveButStuckRecoveryRequests)
-                ~labels:[("keeper", name)]
-                ()
-            in
-            Sup.request_alive_but_stuck_recovery_for_test
-              ~base_path:bp ~elapsed:99_000.0 entry;
-            check bool "fiber_stop set" true (Atomic.get entry.Reg.fiber_stop);
-            check bool "fiber_wakeup set" true (Atomic.get entry.Reg.fiber_wakeup);
-            (match Reg.get ~base_path:bp name with
-             | None -> fail "expected registry entry"
-             | Some updated ->
-               check string "failure reason cohort"
-                 "stale_turn_timeout"
-                 (Reg.failure_reason_cohort_key updated.Reg.last_failure_reason));
-            let after =
-              Masc_mcp.Prometheus.metric_value_or_zero
-                Masc_mcp.Keeper_metrics.(to_string AliveButStuckRecoveryRequests)
-                ~labels:[("keeper", name)]
-                ()
-            in
-            check (float 0.0001) "recovery request metric +1"
-              (before +. 1.0) after);
-        (* PR #13106 review (copilot): the previous test only covers
-           [last_failure_reason = None].  The riskier branch is the
-           one where a non-watchdog reason already exists — without
-           the fix, the helper's earlier call to
-           [stale_watchdog_failure_reason] preserved
-           [Turn_consecutive_failures] / [Exception] / etc., and
-           [watchdog_stop_pending] only restarts on
-           [Stale_turn_timeout | Stale_termination_storm |
-           Stale_fleet_batch | Provider_timeout_loop].  Recovery would set
-           [fiber_stop=true] but the supervisor would never convert
-           it into a crash/restart.  Pin the post-recovery cohort to
-           [stale_turn_timeout] so this regression is caught. *)
-        test_case
-          "recovery overrides non-watchdog failure_reason \
-           (Turn_consecutive_failures) so supervisor restart fires"
-          `Quick
-          (fun () ->
-            Reg.clear ();
-            let name = "abs-request-recovery-nonwatchdog" in
-            let entry =
-              Reg.register ~base_path:bp name (make_meta name)
-            in
-            (* Pre-existing non-watchdog reason → without fix, helper
-               would preserve this and the supervisor would never
-               restart. *)
-            Reg.set_failure_reason ~base_path:bp name
-              (Some (Reg.Turn_consecutive_failures 5));
-            Sup.request_alive_but_stuck_recovery_for_test
-              ~base_path:bp ~elapsed:42_000.0 entry;
-            check bool "fiber_stop set" true
-              (Atomic.get entry.Reg.fiber_stop);
-            (match Reg.get ~base_path:bp name with
-             | None -> fail "expected registry entry"
-             | Some updated ->
-               check string
-                 "non-watchdog reason overridden to stale_turn_timeout \
-                  cohort (else supervisor would not restart)"
-                 "stale_turn_timeout"
-                 (Reg.failure_reason_cohort_key
-                    updated.Reg.last_failure_reason)));
-        (* Idempotent recovery: pre-existing watchdog cohort is
-           preserved (don't churn [stall_seconds] on every poll). *)
-        test_case
-          "recovery preserves existing Stale_turn_timeout cohort"
-          `Quick
-          (fun () ->
-            Reg.clear ();
-            let name = "abs-request-recovery-idempotent" in
-            let entry =
-              Reg.register ~base_path:bp name (make_meta name)
-            in
-            let original_kill =
-              Reg.Idle_turn { stall_seconds = 7_777.0 }
-            in
-            Reg.set_failure_reason ~base_path:bp name
-              (Some (Reg.Stale_turn_timeout original_kill));
-            Sup.request_alive_but_stuck_recovery_for_test
-              ~base_path:bp ~elapsed:99_999.0 entry;
-            (match Reg.get ~base_path:bp name with
-             | None -> fail "expected registry entry"
-             | Some updated ->
-               (match updated.Reg.last_failure_reason with
-                | Some (Reg.Stale_turn_timeout
-                          (Reg.Idle_turn { stall_seconds })) ->
-                  check (float 0.0001)
-                    "preserved original stall_seconds, did not churn"
-                    7_777.0 stall_seconds
-                | _ ->
-                  fail
-                    "expected Stale_turn_timeout (Idle_turn ...) to be \
-                     preserved unchanged")));
-      ]);
   ]

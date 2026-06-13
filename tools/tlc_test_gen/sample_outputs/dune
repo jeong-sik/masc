@@ -16,15 +16,23 @@
 
 (rule
  (target sample_inv_runner.ml)
- (deps (:fixture ../test/fixtures/sample_inv.tla)
-       (:gen ../bin/main.exe))
- (action (with-stdout-to %{target} (run %{gen} --runner %{fixture}))))
+ (deps
+  (:fixture ../test/fixtures/sample_inv.tla)
+  (:gen ../bin/main.exe))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{gen} --runner %{fixture}))))
 
 (rule
  (target nested_sample_runner.ml)
- (deps (:fixture ../test/fixtures/nested_record.tla)
-       (:gen ../bin/main.exe))
- (action (with-stdout-to %{target} (run %{gen} --runner %{fixture}))))
+ (deps
+  (:fixture ../test/fixtures/nested_record.tla)
+  (:gen ../bin/main.exe))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{gen} --runner %{fixture}))))
 
 (tests
  (names sample_inv_runner nested_sample_runner)

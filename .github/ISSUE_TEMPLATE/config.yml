@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Product operating plan
-    url: https://github.com/jeong-sik/masc-mcp/blob/main/docs/PRODUCT-OPERATING-PLAN.md
+    url: https://github.com/jeong-sik/masc/blob/main/docs/PRODUCT-OPERATING-PLAN.md
     about: Check the product promise, GitHub label model, and active 6-8 week tracks before filing.
   - name: Versioned roadmap
-    url: https://github.com/jeong-sik/masc-mcp/blob/main/docs/VERSIONED-ROADMAP.md
+    url: https://github.com/jeong-sik/masc/blob/main/docs/VERSIONED-ROADMAP.md
     about: Check the historical release-train and versioning rules background.

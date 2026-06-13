@@ -5,7 +5,7 @@
 # Rationale: sw-dev §임시조치 주석 의무. `ignore (...)` discards a
 # return value (and therefore a contract) without saying why. The
 # 2026-05-19 audit
-# (memory/masc-mcp-code-smell-report-2026-05-19.html Hotspot #4)
+# (memory/masc-code-smell-report-2026-05-19.html Hotspot #4)
 # found 94 ignore() calls of which 85 had no comment. PR #16609
 # removed the keeper_registry concentration (10 sites); the
 # remaining ~75 are scattered across the tree.
@@ -71,7 +71,7 @@ rg -nP --with-filename '^\s*ignore \(' "$TARGET" 2>/dev/null > "$tmp_all"
 
 # Drop test files unless asked
 if [[ "$INCLUDE_TESTS" -eq 0 ]]; then
-  grep -v '/test/' "$tmp_all" > "$tmp_all.notest" || true
+  grep -Ev '(^|/)test/' "$tmp_all" > "$tmp_all.notest" || true
   mv "$tmp_all.notest" "$tmp_all"
 fi
 

@@ -1,4 +1,4 @@
-(** MASC Orchestrator - Self-sustaining agent coordination *)
+(** MASC Orchestrator - Self-sustaining agent workspace *)
 
 (** Orchestrator configuration *)
 type config = {
@@ -29,13 +29,13 @@ let load_config () =
 let default_config = load_config ()
 
 (** Check if orchestration is needed *)
-let should_orchestrate ~min_priority room_config =
-  (* Check if room is paused first *)
-  if Coord.is_paused room_config then begin
-    Log.Orchestrator.debug "room is paused, skipping";
+let should_orchestrate ~min_priority workspace_config =
+  (* Check if workspace is paused first *)
+  if Workspace.is_paused workspace_config then begin
+    Log.Orchestrator.debug "workspace is paused, skipping";
     false
   end else begin
-  match Coord.read_backlog_r room_config with
+  match Workspace.read_backlog_r workspace_config with
   | Error msg ->
       Log.Orchestrator.error
         "backlog unavailable, skipping orchestration check: %s" msg;
@@ -47,9 +47,9 @@ let should_orchestrate ~min_priority room_config =
       ) backlog.tasks in
 
       (* Get active (non-zombie) agents *)
-      let agents = Coord.get_agents_raw room_config in
+      let agents = Workspace.get_agents_raw workspace_config in
       let active_agents = List.filter (fun (agent: Masc_domain.agent) ->
-        not (Coord_resilience.Zombie.is_zombie agent.last_seen)
+        not (Workspace_resilience.Zombie.is_zombie agent.last_seen)
       ) agents in
 
       (* Need orchestration if: important tasks exist AND no active agents *)
@@ -77,7 +77,7 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 
 ## Your Tasks:
 
-1. **Check status**: Call `mcp__masc__masc_status` to see the room state
+1. **Check status**: Call `mcp__masc__masc_status` to see the project state
 
 2. **Find unclaimed tasks**: Look for tasks with "📋" (unclaimed) status
 
@@ -97,14 +97,14 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 6. **Broadcast progress**: Call `mcp__masc__masc_broadcast` to notify others
 
 ## Available MCP Tools:
-- mcp__masc__masc_status - Get room status
+- mcp__masc__masc_status - Get project status
 - mcp__masc__masc_tasks - List all tasks
 - mcp__masc__masc_transition - Claim/start/done/cancel/release a task
-- mcp__masc__masc_claim_next - Auto-claim highest priority
+- mcp__masc__keeper_task_claim - Auto-claim highest priority
 - mcp__masc__masc_broadcast - Send message to all
 - mcp__masc__masc_heartbeat - Update your heartbeat
 
-Start by calling mcp__masc__masc_status to see the current room state.|}
+Start by calling mcp__masc__masc_status to see the current project state.|}
   end
 
 (* ── Pulse helpers ─────────────────────────────────────────── *)
@@ -124,15 +124,15 @@ let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
 let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
 
 (** Build the orchestrator check consumer.
-    Checks if orchestration is needed and spawns coordinator if so. *)
-let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
+    Checks if orchestration is needed and spawns a workspace lead if so. *)
+let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspace_config ()
     : (module Pulse.Consumer) =
   (module struct
     let name = "orchestrator-check"
     let should_act _beat = config.enabled
     let on_beat _beat =
       try
-        if should_orchestrate ~min_priority:config.min_priority room_config then
+        if should_orchestrate ~min_priority:config.min_priority workspace_config then
           Log.Orchestrator.info "orchestration needed but vendor-specific spawn removed";
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -142,8 +142,8 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
   end)
 
 (** Build the zero-zombie cleanup consumer.
-    Runs Coord.cleanup_zombies and logs if zombies were found. *)
-let make_zero_zombie_consumer ~sw ~room_config
+    Runs Workspace.cleanup_zombies and logs if zombies were found. *)
+let make_zero_zombie_consumer ~sw ~workspace_config
     : (module Pulse.Consumer) =
   let cleanup_running = Atomic.make false in
   (module struct
@@ -156,16 +156,16 @@ let make_zero_zombie_consumer ~sw ~room_config
       (* Typed outcome for stale-claim release. Carries a structured
          [reason] so the catch-all wildcard and untyped [Printexc.to_string]
          warn cannot hide error classification.  benign := matches
-         {!Coord_resilience.ZeroZombie.is_benign_error} (transient FS race
+         {!Workspace_resilience.ZeroZombie.is_benign_error} (transient FS race
          or MASC-not-initialized at startup), in which case operators
          expect no log noise.
 
          Kept local to the consumer body — release_stale_claims itself
          still raises and is wrapped here, because lifting Result into
          the public signature would force every test-suite caller
-         (test_room.ml:909-964) to be rewritten.  Follow-up RFC =
-         Liveness Recovery Supervisor that consumes typed failures here
-         and escalates to operators (see project_keeper-reaction-chain-break). *)
+         (test_workspace.ml:909-964) to be rewritten.  Follow-up RFC =
+         typed recovery consumer can decide whether to escalate to operators
+         (see project_keeper-reaction-chain-break). *)
       let module Stale_claim_outcome = struct
         type t =
           | Released of (string * string) list
@@ -175,12 +175,12 @@ let make_zero_zombie_consumer ~sw ~room_config
       let release_stale_claims_typed () : Stale_claim_outcome.t =
         let ttl = Env_config_runtime.Claim.ttl_seconds in
         match
-          Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl
+          Workspace_task_schedule.release_stale_claims workspace_config ~ttl_seconds:ttl
         with
         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
         | exception exn ->
           Stale_claim_outcome.Failed
-            { benign = Coord_resilience.ZeroZombie.is_benign_error exn
+            { benign = Workspace_resilience.ZeroZombie.is_benign_error exn
             ; reason = Printexc.to_string exn
             }
         | [] -> Stale_claim_outcome.Empty
@@ -194,27 +194,27 @@ let make_zero_zombie_consumer ~sw ~room_config
             ~finally:(fun () -> Atomic.set cleanup_running false)
             (fun () ->
               try
-                let zombie_result = Coord.cleanup_zombies room_config in
+                let zombie_result = Workspace.cleanup_zombies workspace_config in
                 (* Explicit variant match — no catch-all.  Adding a new
                    [cleanup_zombie_result] constructor must surface as a
                    compile error here, not a silent debug. *)
                 (match zombie_result with
-                 | Coord.Cleaned { count = 0; _ } ->
+                 | Workspace.Cleaned { count = 0; _ } ->
                      Log.Orchestrator.debug "[zombie] no zombies to clean"
-                 | Coord.Cleaned { count; names; _ } ->
+                 | Workspace.Cleaned { count; names; _ } ->
                      let status =
                        Printf.sprintf "Cleaned up %d zombie agent(s): %s"
                          count (String.concat ", " names)
                      in
                      Log.Orchestrator.info "[zombie] %s" status
-                 | Coord.No_zombies ->
+                 | Workspace.No_zombies ->
                      Log.Orchestrator.debug "[zombie] no zombies to clean"
-                 | Coord.No_agents_dir ->
-                     (* Misconfiguration signal: room has no agents/ directory.
+                 | Workspace.No_agents_dir ->
+                     (* Misconfiguration signal: workspace has no agents/ directory.
                         Distinct from No_zombies — operators should know GC
                         ran against a missing target. *)
                      Log.Orchestrator.warn
-                       "[zombie] skipped: agents directory missing for room");
+                       "[zombie] skipped: agents directory missing for workspace");
                 (match release_stale_claims_typed () with
                  | Stale_claim_outcome.Empty ->
                      Log.Orchestrator.debug "[stale-claims] no stale claims to release"
@@ -236,20 +236,20 @@ let make_zero_zombie_consumer ~sw ~room_config
                        "[stale-claims] non-benign failure: %s"
                        reason)
               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                if not (Coord_resilience.ZeroZombie.is_benign_error exn) then
+                if not (Workspace_resilience.ZeroZombie.is_benign_error exn) then
                   Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn)));
       Ok ()
   end)
 
 (** Start the orchestrator background services using Pulse.
     Returns a cancel function to gracefully stop both Pulse engines. *)
-let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
+let start ~sw ~proc_mgr ~clock ?domain_mgr workspace_config =
   let config = load_config () in
 
   (* Zero-Zombie cleanup: always enabled, configurable interval *)
   let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
-  let zombie_consumer = make_zero_zombie_consumer ~sw ~room_config in
+  let zombie_consumer = make_zero_zombie_consumer ~sw ~workspace_config in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
   let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
@@ -268,7 +268,7 @@ let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   else
     Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
 
-  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
+  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~workspace_config () in
   let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Always_on ~consumers:[orch_consumer] in
   with_pulse_rw (fun () -> orchestrator_pulse := Some op);
   Eio.Fiber.fork ~sw (fun () ->

@@ -1,4 +1,4 @@
-(** MASC Web Dashboard - Real-time Agent Coordination Visualization *)
+(** MASC Web Dashboard - Real-time Agent Workspace Visualization *)
 
 (** Resolve the static assets root used by both dashboard serving paths. *)
 val assets_root : unit -> string

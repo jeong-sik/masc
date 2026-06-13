@@ -8,7 +8,7 @@
     is resolved cooperatively.  The flock is acquired non-blocking after
     the Eio.Mutex; if another process holds it, we yield and retry.
 
-    Distributed backend paths (Some key in room_utils_ops.ml) are not
+    Distributed backend paths (Some key in workspace_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
 
 module SMap = Set_util.StringMap
@@ -17,7 +17,7 @@ exception Flock_timeout of { caller : string; path : string; attempts : int }
 
 (** Observability hook fired after each [acquire_flock_retry*] attempt
     sequence completes — once on success, once on timeout.  Wired at
-    startup ([lib/coord.ml]) to a Prometheus counter + histogram so
+    startup ([lib/workspace.ml]) to a Otel_metric_store counter + histogram so
     lock-contention spikes become visible without scraping logs.
 
     [retries] is the number of failed [F_TLOCK] attempts before the
@@ -25,9 +25,9 @@ exception Flock_timeout of { caller : string; path : string; attempts : int }
     is the wall-clock time spent inside [acquire_flock_retry*]
     excluding [openfile].  [outcome] is ["acquired"] or ["timeout"].
 
-    Default no-op; [masc_process] cannot depend on [Prometheus]
+    Default no-op; [masc_process] cannot depend on [Otel_metric_store]
     (sub-library boundary, would be a cycle), so emission is wired
-    from the [masc_mcp] root via this Atomic ref. *)
+    from the [masc] root via this Atomic ref. *)
 let on_lock_attempt_fn :
     (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
       Atomic.t =
@@ -44,8 +44,8 @@ let observe_lock_attempt ~caller ~retries ~started_at ~outcome =
     / [get_entry] for different paths) the retry rate is the precise
     contention signal but was previously invisible.
 
-    Default no-op; [masc_process] cannot depend on [Prometheus]
-    (sub-library boundary), so emission is wired from the [masc_mcp]
+    Default no-op; [masc_process] cannot depend on [Otel_metric_store]
+    (sub-library boundary), so emission is wired from the [masc]
     root via this Atomic ref (mirrors [on_lock_attempt_fn] pattern). *)
 let on_cas_retry_fn : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())

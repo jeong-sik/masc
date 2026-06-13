@@ -28,7 +28,7 @@ interface (`.mli`, 319 LOC) 의 30+ surface 는 모두 *5 sub-module 가 정의*
 ```ocaml
 include Keeper_turn_helpers              (* 452 LOC *)
 include Keeper_turn_liveness             (* 115 LOC *)
-include Keeper_turn_cascade_budget       (*  873 LOC *)
+include Keeper_turn_runtime_budget       (*  873 LOC *)
 include Keeper_unified_turn_types        (* 342 LOC *)
 include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 ```
@@ -37,11 +37,11 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 
 ### 1.2 남은 작업
 
-`run_keeper_cycle` 내부에 single mega let-chain 형태로 남은 약 1813 LOC 가 본 RFC 대상이다. depth-2 nested let 8개 (setup phase L77-129) 이후 phase gate → cascade resolution → retry loop → success/failure dispatch 의 *4 stage* 가 *직렬 let-chain* 으로 펼쳐져 있다.
+`run_keeper_cycle` 내부에 single mega let-chain 형태로 남은 약 1813 LOC 가 본 RFC 대상이다. depth-2 nested let 8개 (setup phase L77-129) 이후 phase gate → runtime resolution → retry loop → success/failure dispatch 의 *4 stage* 가 *직렬 let-chain* 으로 펼쳐져 있다.
 
 ### 1.3 선례: RFC-0051
 
-[RFC-0051](RFC-0051-run-named-closure-decomposition.md) 은 동일 패턴의 `keeper_turn_driver.ml` (1146 LOC) `run_named` 함수 내부 closure 3종 (`try_provider` 248 / `try_cascade` 580 / `cycle_loop` 47) 분해를 다룬다. *Draft only*, 구현 미시작. 본 RFC 는 RFC-0051 과 *parallel work* — 같은 *closure→typed-stage* 패턴을 keeper turn 의 다른 진입점에 적용한다. RFC-0051 의 동일 코드 baseline 측정 패턴 + closure dependency 분석 방법론을 차용한다.
+[RFC-0051](RFC-0051-run-named-closure-decomposition.md) 은 동일 패턴의 `keeper_turn_driver.ml` (1146 LOC) `run_named` 함수 내부 closure 3종 (`try_provider` 248 / `try_runtime` 580 / `cycle_loop` 47) 분해를 다룬다. *Draft only*, 구현 미시작. 본 RFC 는 RFC-0051 과 *parallel work* — 같은 *closure→typed-stage* 패턴을 keeper turn 의 다른 진입점에 적용한다. RFC-0051 의 동일 코드 baseline 측정 패턴 + closure dependency 분석 방법론을 차용한다.
 
 ---
 
@@ -50,9 +50,9 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 ### 2.1 정량 측정
 
 - `lib/keeper/keeper_unified_turn.ml` = 1943 LOC. 5위 godfile (top4 = keeper_registry 2131 / server_dashboard_http_keeper_api 2070 / keeper_agent_run 2044 / agent_tool_execute_runtime 2009).
-- `scripts/lint/godfile-size-regression.sh` cap = 3350 LOC. 현재 위반은 없으나 cap raise history (3000→3300→3350) 가 모두 prometheus.ml *흡수형* — *"다음 raise 는 decomposition plan 필수"* (lint script L22-26).
-- *fundamental_roadmap.md Phase 5* 가 6 godfile 명시 (env_config_keeper, **keeper_unified_turn**, keeper_turn, cascade_catalog_runtime, backend_openai, keeper_prompt). 본 RFC 는 그 중 keeper_unified_turn 을 closure decomp 패턴으로 닫는다.
-- conflict 빈도: `run_keeper_cycle` 가 retry/cascade/error 경로 모두 거치므로 *모든 keeper turn 관련 PR* 의 잠재 충돌 face. stage decomposition 후 *PR 단위 충돌 face* 가 stage 별로 분산.
+- `scripts/lint/godfile-size-regression.sh` cap = 3350 LOC. 현재 위반은 없으나 cap raise history (3000→3300→3350) 가 모두 legacy metrics backend module *흡수형* — *"다음 raise 는 decomposition plan 필수"* (lint script L22-26).
+- *fundamental_roadmap.md Phase 5* 가 6 godfile 명시 (env_config_keeper, **keeper_unified_turn**, keeper_turn, runtime_catalog_runtime, backend_openai, keeper_prompt). 본 RFC 는 그 중 keeper_unified_turn 을 closure decomp 패턴으로 닫는다.
+- conflict 빈도: `run_keeper_cycle` 가 retry/runtime/error 경로 모두 거치므로 *모든 keeper turn 관련 PR* 의 잠재 충돌 face. stage decomposition 후 *PR 단위 충돌 face* 가 stage 별로 분산.
 
 ### 2.2 구조적 결함
 
@@ -62,8 +62,8 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 |-------|------------|-----|---------|
 | Setup | L77-129 | 53 | nested let bindings |
 | **Phase Gate** | L130-242 | 113 | 3 typed outcomes (supervisor_stop / non_executable_phase / registry_missing → Ok meta or Error) |
-| Cascade & tool resolution | L243-? | TBD | sets effective_cascade, tool_requirement, timeout_budget |
-| Retry loop | ?-1900 | TBD | OAS Agent.run + cascade rotation + error classify |
+| Runtime resolution | L243-? | TBD | sets effective_runtime and timeout_budget |
+| Retry loop | ?-1900 | TBD | OAS Agent.run + runtime rotation + error classify |
 | Success/Failure dispatch | L1904-1940 | 37 | already extracted to `Keeper_unified_turn_(success|failure)` |
 
 Phase Gate 의 3 outcome 은 *implicit early-exit* — caller (외부 모듈) 가 *outcome 별 처리* 를 *볼 수 없다*. *Alexis King — Parse, don't validate* 의 정확한 위반: validation 결과가 *타입에 표현되지 않음*.
@@ -80,13 +80,13 @@ mli 의 30+ helper export 는 "*Exposed for targeted tests*" / "*Exposed for reg
 
 - `run_keeper_cycle` 의 1920 LOC body 를 *stage 별 typed boundary* 로 분해.
 - Phase Gate 추출 (PR-1) — *closure-free typed outcome*.
-- Cascade & tool resolution 추출 (PR-2) — 의존성 분석 후 결정.
+- Runtime & tool resolution 추출 (PR-2) — 의존성 분석 후 결정.
 - Retry loop body 추출 (PR-3+) — 잠재적으로 가장 복잡, 추가 RFC sub-doc 가능.
 - 각 stage 의 dedicated `.ml` + `.mli`. caller (= keeper_unified_turn 자체) 가 *3 outcome match* 로 stage 결과 처리.
 
 ### 3.2 Out of scope
 
-- 이미 분리된 5 sub-module (keeper_turn_helpers / liveness / cascade_budget / types / phase_plan) 의 추가 분리.
+- 이미 분리된 5 sub-module (keeper_turn_helpers / liveness / runtime_budget / types / phase_plan) 의 추가 분리.
 - 이미 분리된 success/failure post-processor 변경.
 - mli surface 의 *행위* 변경 — *re-export 위치만* 변경.
 - RFC-0051 (`keeper_turn_driver.ml` `run_named`) 동시 분해 — 본 RFC 는 keeper_unified_turn 만.
@@ -151,7 +151,7 @@ type phase_gate_outcome =
     (** registry phase missing — `Error err` 반환. *)
 
 val decide_and_record
-  :  config:Coord.config
+  :  config:Workspace.config
   -> meta:Keeper_types.keeper_meta
   -> generation:int
   -> keeper_turn_id:int
@@ -208,7 +208,7 @@ with
 
 | PR | Scope | 예상 LOC delta | 우선순위 |
 |----|-------|----------------|----------|
-| PR-2 | Cascade resolution stage | -200 ~ -300 | M |
+| PR-2 | Runtime resolution stage | -200 ~ -300 | M |
 | PR-3 | Retry loop body — *separate RFC sub-doc 검토* | -800 ~ -1200 | L (복잡) |
 | PR-4 | Error classification site | -100 ~ -150 | M |
 | PR-5 | Setup phase cleanup (depth-2 lets → typed record) | -50 | L |
@@ -289,7 +289,7 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 |----|----|-------|---------|
 | RFC body | #16601 | docs | Initial Draft |
 | **PR-1** Phase Gate | #16604 | -130 | Typed outcome (Parse, don't validate) |
-| **PR-2** Cascade Resolution | #16624 | -50 | Sibling sub-module |
+| **PR-2** Runtime Resolution | #16624 | -50 | Sibling sub-module |
 | **PR-3** Pre-dispatch | #16643 | -33 | Sibling sub-module |
 | Phase 4 sub-doc | #16650 | docs | 5-PR plan |
 | **PR-4-a** Retry Setup | #16701 | -55 | Record destructuring (16 deps) |
@@ -301,7 +301,7 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 
 - `lib/keeper/keeper_unified_turn.ml` = 1641 LOC (post-PR-4-c).
 - `run_keeper_cycle` body (L22-L1640) = 1618 LOC — still single mega-function.
-- Sibling sub-modules total: 1858 LOC across 13 files (`keeper_unified_turn_{phase_gate, cascade_resolution, pre_dispatch, retry_setup, terminal_error, attempt_watchdog, livelock_block, phase_plan, event_bus, failure, stay_silent, success, types}`).
+- Sibling sub-modules total: 1858 LOC across 13 files (`keeper_unified_turn_{phase_gate, runtime_resolution, pre_dispatch, retry_setup, terminal_error, attempt_watchdog, livelock_block, phase_plan, event_bus, failure, stay_silent, success, types}`).
 
 ### 8.3 PR-4-d / PR-4-e 보류 결정
 

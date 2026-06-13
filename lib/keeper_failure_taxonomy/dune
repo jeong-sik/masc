@@ -1,0 +1,27 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_failure_taxonomy)
+ (public_name masc.keeper_failure_taxonomy)
+ (wrapped false)
+ (modules
+  keeper_alert_persist_kind
+  keeper_approval_queue_failure_site
+  keeper_bookkeeping_failure_kind
+  keeper_checkpoint_failure_operation
+  keeper_checkpoint_store_failure_site
+  keeper_compact_audit_failure_site
+  keeper_crash_persistence_failure_site
+  keeper_execution_receipt_failure_site
+  keeper_fs_failure_site
+  keeper_generation_lineage_failure_site
+  keeper_metric_emit_dropped_site
+  keeper_metrics_sse_failure_kind
+  keeper_paused_state_persist_phase
+  keeper_post_turn_wirein_failure_site
+  keeper_profile_load_failure_site
+  keeper_supervisor_cleanup_failure_site
+  keeper_turn_cleanup_failure_site
+  keeper_turn_metrics_snapshot_failure_site
+  keeper_turn_up_update_failure_site
+  keeper_write_meta_cycle_failure_site))

@@ -21,7 +21,7 @@ module Float = Stdlib.Float
     - Tool_catalog: visibility, lifecycle, metadata
     - Tool_registry: call statistics (count, success, failure, duration)
     - Tool_dispatch: registration status
-    - Tool_capability: read_only, join_required
+    - Tool_capability: read_only
 *)
 
 type tool_info = {
@@ -30,7 +30,6 @@ type tool_info = {
   lifecycle : Tool_catalog.lifecycle;
   is_registered : bool;
   is_read_only : bool;
-  is_join_required : bool;
   call_stats : Tool_registry.call_stats option;
 }
 
@@ -46,7 +45,6 @@ let tool_info name : tool_info =
     lifecycle = meta.lifecycle;
     is_registered = Tool_dispatch.is_registered name;
     is_read_only = Tool_capability.has Tool_capability.Read_only name;
-    is_join_required = Tool_capability.has Tool_capability.Requires_join name;
     call_stats = stats;
   }
 
@@ -72,22 +70,21 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
     ("lifecycle", `String (Tool_catalog.lifecycle_to_string info.lifecycle));
     ("is_registered", `Bool info.is_registered);
     ("is_read_only", `Bool info.is_read_only);
-    ("is_join_required", `Bool info.is_join_required);
     ("call_stats", stats_json);
   ]
 
 (** Summary report for dashboard. *)
-let summary_report () : Yojson.Safe.t =
+let summary_report ?(runtime_metrics = fun () -> `Null) () : Yojson.Safe.t =
   let total = Tool_registry.total_calls () in
   let distinct = Tool_registry.distinct_tools_called () in
   let top_20 = Tool_registry.get_top_n 20 in
   let all_names = Config.all_tool_names () in
-  let visible_names =
+  let allowed_names =
     List.filter (fun name -> Tool_catalog.is_visible name) all_names
   in
-  let never_called = Tool_registry.get_never_called visible_names in
+  let never_called = Tool_registry.get_never_called allowed_names in
   let total_count = List.length all_names in
-  let visible_count = List.length visible_names in
+  let visible_count = List.length allowed_names in
   let hidden_count = total_count - visible_count in
   let public_count = List.length Tool_catalog.public_mcp_tools in
   let tool_dist =
@@ -123,5 +120,5 @@ let summary_report () : Yojson.Safe.t =
        Hashtbl dispatch path is now the only code path so the field
        carried no signal. *)
     ("registered_count", `Int (Tool_dispatch.registered_count ()));
-    ("cascade_metrics", Cascade_observation.cascade_metrics_json ());
+    ("runtime_metrics", runtime_metrics ());
   ]

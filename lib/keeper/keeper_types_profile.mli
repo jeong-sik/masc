@@ -2,11 +2,13 @@
 
 include module type of Keeper_config
 include module type of Keeper_types_profile_sandbox
+  with type sandbox_profile = Keeper_types_profile_sandbox.sandbox_profile
+   and type network_mode = Keeper_types_profile_sandbox.network_mode
 
 val keeper_debug : bool
 
 type 'a context =
-  { config : Coord.config
+  { config : Workspace.config
   ; agent_name : string
   ; sw : Eio.Switch.t
   ; clock : 'a Eio.Time.clock
@@ -31,15 +33,11 @@ val ensure_dir : string -> string
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
-val normalize_cascade_name_opt : string option -> string option
-val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val valid_tool_preset_raw_strings : string list
-val normalize_tool_preset_raw : string -> string option
-val room_seq_map_to_json : (string * int) list -> Yojson.Safe.t
-val room_seq_map_of_json : Yojson.Safe.t -> (string * int) list
+val workspace_seq_map_to_json : (string * int) list -> Yojson.Safe.t
+val workspace_seq_map_of_json : Yojson.Safe.t -> (string * int) list
 
 include module type of Keeper_types_profile_defaults
 
@@ -120,6 +118,7 @@ val keeper_toml_path_opt : string -> string option
 val load_keeper_profile_defaults_from_persona : string -> keeper_profile_defaults
 val resolved_persona_name : keeper_name:string -> keeper_profile_defaults -> string
 val load_keeper_profile_defaults_result : string -> (keeper_profile_defaults, string) result
+val invalidate_keeper_profile_defaults_cache : string -> unit
 val classify_toml_failure_reason : string -> string
 
 type keeper_toml_config_error =
@@ -162,6 +161,6 @@ val load_persona_extended : ?max_chars:int -> string -> string option
 val load_persona_summary : string -> persona_summary option
 val load_persona_summary_from_path : string -> string -> persona_summary option
 val list_persona_summaries : unit -> persona_summary list
-val keeper_dir : Coord.config -> string
-val keeper_meta_path : Coord.config -> string -> string
-val session_base_dir : Coord.config -> string
+val keeper_dir : Workspace.config -> string
+val keeper_meta_path : Workspace.config -> string -> string
+val session_base_dir : Workspace.config -> string

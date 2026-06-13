@@ -26,7 +26,7 @@ container actually executes the tool call.
 ## Static validation
 
 ```bash
-for k in /path/to/base/.masc/keepers/*.json /path/to/masc-mcp/.masc/keepers/*.json; do
+for k in /path/to/base/.masc/keepers/*.json /path/to/masc/.masc/keepers/*.json; do
   name=$(basename "$k" .json)
   profile=$(jq -r '.sandbox_profile // "<missing>"' "$k" 2>/dev/null)
   network=$(jq -r '.network_mode // "<missing>"' "$k" 2>/dev/null)
@@ -53,7 +53,7 @@ For each `sandbox_profile=docker` keeper:
    ```bash
    sb keeper restart <keeper-name>
    ```
-2. From the masc-mcp client, dispatch `Execute` with the
+2. From the masc client, dispatch `Execute` with the
    container hostname probe:
    ```text
    Execute { "executable": "cat", "argv": ["/etc/hostname"] }

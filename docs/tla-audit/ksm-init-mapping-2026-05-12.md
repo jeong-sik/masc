@@ -1,7 +1,7 @@
 # KSM Init Mapping Audit (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (lines 19-100, VARIABLES + Init)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (lines 56-100, conditions/default_conditions) + `lib/keeper/keeper_registry.ml` (lines 750-775, register*)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 56-100, conditions/default_conditions) + `lib/keeper/keeper_registry.ml` (lines 750-775, register*)
 **Iteration**: 1 (Phase A-1, `/loop` plan `.claude/plans/breezy-napping-sketch.md`)
 
 ## TL;DR
@@ -42,14 +42,14 @@ stateDiagram-v2
   Dead --> [*]
 ```
 
-> TLA+ `Init` only models the `[*] --> Running` arrow. OCaml has 4 startup paths (register, register_offline, register_restarting, plus default_conditions → Dead sentinel).
+> TLA+ `Init` only models the `[*] --> Running` arrow. OCaml has 4 startup paths (register, register_offline, register_restarting, plus default_conditions → Dead marker).
 
 ## Field-by-field comparison
 
 | Variable | TLA+ Init (line 82-100) | OCaml `default_conditions` | OCaml `register` overlay |
 |---|---|---|---|
 | `launch_pending` | FALSE | false | (unchanged) false |
-| `fiber_alive` | TRUE | **false** ← Dead-state sentinel | true |
+| `fiber_alive` | TRUE | **false** ← Dead-state marker | true |
 | `heartbeat_healthy` | TRUE | true | true |
 | `turn_healthy` | TRUE | true | true |
 | `context_within_budget` | TRUE | true | true |
@@ -58,7 +58,7 @@ stateDiagram-v2
 | `handoff_active` | FALSE | false | false |
 | `operator_paused` | FALSE | false | false |
 | `stop_requested` | FALSE | false | false |
-| `restart_budget_remaining` | TRUE | **false** ← Dead-state sentinel | true |
+| `restart_budget_remaining` | TRUE | **false** ← Dead-state marker | true |
 | `backoff_elapsed` | FALSE | false | false |
 | `guardrail_triggered` | FALSE | false | false |
 | `drain_complete` | FALSE | false | false |

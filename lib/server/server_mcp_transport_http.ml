@@ -12,6 +12,8 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
+    ?otel_mcp_protocol_version:string ->
+    ?otel_transport_context:Otel_dispatch_hook.transport_context ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->
@@ -111,6 +113,8 @@ let body_tools_call_name body_str =
 
 let session_cookie_header = Server_mcp_transport_http_headers.session_cookie_header
 
+let session_cookie_headers = Server_mcp_transport_http_headers.session_cookie_headers
+
 let sse_headers = Server_mcp_transport_http_headers.sse_headers
 
 let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
@@ -122,8 +126,8 @@ let stream_post_sse_headers ~deps ~origin ~session_id ~protocol_version =
         ("cache-control", "no-cache");
         ("connection", "close");
         ("x-accel-buffering", "no");
-        session_cookie_header session_id;
       ]
+      @ session_cookie_headers protocol_version session_id
       @ mcp_headers session_id protocol_version
       @ deps.cors_headers origin)
 
@@ -234,9 +238,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       | Ok () -> Ok ()
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -252,9 +254,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       | Ok () -> Ok ()
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -265,7 +265,6 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
           safe_respond_with_string reqd response body;
           Error ()
     in
-    remember_mcp_profile session_id profile;
     let* () =
       match auth_result with
       | Ok () -> Ok ()
@@ -274,6 +273,10 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
             ~protocol_version msg;
           Error ()
     in
+    let otel_transport_context =
+      Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+    in
+    remember_mcp_profile ~otel_transport_context session_id profile;
     Ok (Http.Request.read_body_async reqd (fun body_str ->
       ignore (
       let* post_context =
@@ -285,9 +288,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Ok decision -> Ok decision
         | Error (Server_mcp_request_context.Session_required msg) ->
             let body =
-              Printf.sprintf
-                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                (Yojson.Safe.to_string (`String msg))
+              Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
             in
             let headers =
               Httpun.Headers.of_list
@@ -302,9 +303,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
         | Error (Server_mcp_request_context.Unknown_session msg) ->
             let new_session_id = Mcp_session.generate () in
             let body =
-              Printf.sprintf
-                {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                (Yojson.Safe.to_string (`String msg))
+              Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
             in
             let headers =
               Httpun.Headers.of_list
@@ -325,9 +324,32 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                     ( "error",
                       `Assoc
                         [
-                          ("code", `Int (-32600));
+                          ("code", `Int (Mcp_error_code.to_wire_code Invalid_request));
                           ("message", `String msg);
                         ] );
+                  ])
+            in
+            let headers =
+              Httpun.Headers.of_list
+                (("content-length", string_of_int (String.length body))
+                :: json_headers ~deps session_id protocol_version origin)
+            in
+            let response = Httpun.Response.create ~headers `Bad_request in
+            safe_respond_with_string reqd response body;
+            Error ()
+        | Error (Server_mcp_request_context.Header_mismatch msg) ->
+            let body =
+              Yojson.Safe.to_string
+                (`Assoc
+                  [
+                    ("jsonrpc", `String "2.0");
+                    ( "error",
+                      `Assoc
+                        [
+                          ("code", `Int (-32001));
+                          ("message", `String msg);
+                        ] );
+                    ("id", `Null);
                   ])
             in
             let headers =
@@ -351,11 +373,13 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       let sw = runtime.sw in
       let clock = runtime.clock in
       Ok (Eio.Fiber.fork ~sw (fun () ->
+                            let otel_transport_context =
+                              Otel_dispatch_hook.http_transport_context
+                                ~protocol_version:"1.1"
+                            in
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
-                              | Some v ->
-                                  remember_protocol_version session_id v;
-                                  v
+                              | Some v -> v
                               | None ->
                                   get_protocol_version_for_session ~session_id request
                             in
@@ -385,8 +409,15 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               let response_json =
                                 runtime.handle_request ?auth_token ~profile
                                   ~mcp_session_id:session_id
+                                  ~otel_mcp_protocol_version:protocol_version
+                                  ~otel_transport_context
                                   ~internal_keeper_runtime body_with_agent
                               in
+                              remember_protocol_version_if_initialize_succeeded
+                                ~otel_transport_context
+                                session_id
+                                ~request_body:body_str
+                                ~response_json;
                               let protocol_version =
                                 get_protocol_version_for_session ~session_id request
                               in
@@ -513,7 +544,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                       ("Internal error: "
                                      ^ Printexc.to_string exn))))))))
 
-let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
+let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     request reqd =
   if not (deps.is_ready ()) then
     respond_not_ready ~deps request reqd
@@ -528,7 +559,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
         (match sse_kind with
          | Sse.Observer | Sse.Presence ->
              deps.verify_mcp_observer_stream_auth ~base_path request
-         | Sse.Coordinator ->
+         | Sse.Agent_stream ->
              deps.verify_mcp_auth ~base_path request)
     | Operator_remote ->
         deps.verify_operator_mcp_auth ~base_path request
@@ -547,9 +578,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
       match validate_protocol_version_continuity ~session_id request with
       | Error msg ->
           let body =
-            Printf.sprintf
-              {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-              (Yojson.Safe.to_string (`String msg))
+            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
           in
           let headers =
             Httpun.Headers.of_list
@@ -564,7 +593,10 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Coordinator)
           respond_mcp_error ~code:Mcp_error_code.Auth_error ~deps request reqd ~session_id
             ~protocol_version msg
       | Ok () ->
-      remember_mcp_profile session_id profile;
+      let otel_transport_context =
+        Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
+      in
+      remember_mcp_profile ~otel_transport_context session_id profile;
       (match check_sse_connect_guard session_id with
       | Error (reason, retry_after_s) ->
           respond_sse_rate_limited ~deps ~origin ~session_id ~protocol_version
@@ -724,9 +756,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               match validate_protocol_version_continuity ~session_id request with
               | Error msg ->
                   let body =
-                    Printf.sprintf
-                      {|{"jsonrpc":"2.0","error":{"code":-32600,"message":%s},"id":null}|}
-                      (Yojson.Safe.to_string (`String msg))
+                    Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
                   in
                   let protocol_version =
                     get_protocol_version_for_session ~session_id request
@@ -758,8 +788,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                      "skipped_runtime_unavailable"
                in
                forget_mcp_session session_id;
-               Log.info ~ctx:"mcp_transport"
-                 "Session terminated: %s reason=client_delete profile=%s \
+               Log.Mcp_transport.info "Session terminated: %s reason=client_delete profile=%s \
                   protocol_version=%s sse_active_before_stop=%b \
                   resource_cleanup=%s"
                  session_id (profile_label profile) protocol_version

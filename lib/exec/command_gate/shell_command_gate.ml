@@ -1,6 +1,6 @@
 (* Exec shell gate SSOT — see shell_command_gate.mli for the contract.
 
-   This module accepts pre-parsed Shell IR and applies allowlist, path,
+   This module accepts pre-parsed Shell IR and applies syntax, path,
    and redirect policies, exposing the result as a closed [verdict] sum
    type. New callers should target this module so shell policy decisions
    share the same parsed context instead of re-deriving command shape
@@ -11,14 +11,7 @@ module PD = Masc_exec.Parsed
 module ST = Masc_exec.Sandbox_target
 module BIN = Masc_exec.Exec_program
 
-type caller =
-  | Worker_dev_tools
-  | Filesystem_write
-  | Agent_tool_execute_shell_ir
-
 type reject_reason =
-  | Command_not_in_allowlist of { bin : string }
-  | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
@@ -48,11 +41,9 @@ type verdict =
   | Cannot_parse of { reason : parse_reason }
   | Too_complex of { reason : too_complex_reason }
 
-type allowlist_policy = {
+type syntax_policy = {
   redirect_allowed : bool;
-  allowed_commands : string list;
   allow_pipes : bool;
-  
 }
 
 type path_policy = {
@@ -64,6 +55,39 @@ type sandbox_context = {
 }
 
 let allow_all_paths : path_policy = { classify = None }
+
+(* Path policy that rejects shell probes against .masc/ internal state
+   (backlog.json, goal-loop/, traces/, keepalives/).  The diagnostic
+   string contains "task_state_file_probe_blocked" so the deterministic
+   retry classifier in [keeper_tool_deterministic_error] recognises it.
+
+   The [literal_path_surfaces] function already normalises every
+   argument and redirect target through [raw_path], so we only need
+   a simple substring / prefix check here. *)
+let forbid_masc_internal_state_paths : path_policy =
+  let is_masc_path p =
+    (* Match ".masc/", "./.masc/", ".masc" at end *)
+    (String.starts_with ~prefix:".masc/" p)
+    || (String.starts_with ~prefix:"./.masc/" p)
+    || (String.equal p ".masc")
+    || (String.equal p "./.masc")
+  in
+  let is_backlog_json p =
+    (* Match ".../backlog.json" or bare "backlog.json" *)
+    let len = String.length p in
+    len >= 12
+    && String.sub p (len - 12) 12 = "backlog.json"
+    && (len = 12
+        || p.[len - 13] = '/')
+  in
+  { classify =
+      Some
+        (fun ~raw_path ->
+          if is_masc_path raw_path || is_backlog_json raw_path then
+            `Deny "task_state_file_probe_blocked: use keeper task/context tools"
+          else `Allow)
+  }
+;;
 
 let host_sandbox : sandbox_context = { target = ST.host () }
 
@@ -194,31 +218,31 @@ and env_args_run_dune = function
 
 and opam_exec_args_run_dune = function
   | sub :: rest when String.equal (basename_word sub) "exec" ->
-    let rec after_sentinel = function
+    let rec after_marker = function
       | [] -> false
       | "--" :: rest -> command_words_run_dune rest
-      | _ :: rest -> after_sentinel rest
+      | _ :: rest -> after_marker rest
     in
-    let rec without_sentinel = function
+    let rec without_marker = function
       | [] -> false
       | word :: rest ->
         if is_env_assignment_word word
-        then without_sentinel rest
+        then without_marker rest
         else if word = "--switch" || word = "--color" || word = "--root"
                 || word = "--cli"
         then (
           match rest with
-          | _ :: rest -> without_sentinel rest
+          | _ :: rest -> without_marker rest
           | [] -> false)
         else if String.starts_with ~prefix:"--switch=" word
                 || String.starts_with ~prefix:"--color=" word
                 || String.starts_with ~prefix:"--root=" word
                 || String.starts_with ~prefix:"--cli=" word
                 || String.starts_with ~prefix:"-" word
-        then without_sentinel rest
+        then without_marker rest
         else command_words_run_dune (word :: rest)
     in
-    after_sentinel rest || without_sentinel rest
+    after_marker rest || without_marker rest
   | [] -> false
   | _ :: _ -> false
 
@@ -243,22 +267,6 @@ let make_context ~stages =
     let stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) stages in
     let direct_dune_seen = List.exists stage_runs_dune stages in
     Some { ast; stages; stage_bins; direct_dune_seen }
-;;
-
-let bin_allowed ~(allowed_commands : string list) (bin : string) =
-  List.exists (String.equal bin) allowed_commands
-;;
-
-(* Returns the (1-indexed stage, bin) of the first stage whose binary
-   name is outside the allowlist, [None] if every stage passes. *)
-let first_disallowed_stage ~allowed_commands stage_bins =
-  let rec scan idx = function
-    | [] -> None
-    | bin :: rest ->
-      if bin_allowed ~allowed_commands bin then scan (idx + 1) rest
-      else Some (idx, bin)
-  in
-  scan 1 stage_bins
 ;;
 
 let stage_has_redirect (simple : SI.simple) : bool =
@@ -291,7 +299,7 @@ let literal_path_surfaces (simple : SI.simple) : string list =
 
 (* Returns the first path-policy failure encountered, [None] if every
    stage's literal path-bearing surface is accepted. Stage index is
-   1-based to match the [Pipeline_segment_disallowed] convention. *)
+   1-based so diagnostics line up with the human-visible pipeline stage. *)
 let first_path_failure ~(path_policy : path_policy) stages =
   match path_policy.classify with
   | None -> None
@@ -322,7 +330,7 @@ let first_redirect_stage stages =
   scan 1 stages
 ;;
 
-let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
+let apply_policy ~(syntax_policy : syntax_policy) ~(path_policy : path_policy)
     ~(sandbox : sandbox_context) ~stages : verdict =
   let stages = stages_with_sandbox ~sandbox stages in
   match make_context ~stages with
@@ -334,7 +342,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
     Cannot_parse { reason = Parse_error }
   | Some context ->
     let stage_n = List.length stages in
-    if (not allowlist.allow_pipes) && stage_n > 1 then
+    if (not syntax_policy.allow_pipes) && stage_n > 1 then
       let diagnostic =
         Printf.sprintf "pipeline with %d stages is not allowed" stage_n
       in
@@ -344,26 +352,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
         ; diagnostic
         }
     else
-      (match
-         first_disallowed_stage
-           ~allowed_commands:allowlist.allowed_commands
-           context.stage_bins
-       with
-       | Some (stage_idx, bin) ->
-         let reason, diagnostic =
-           if stage_n = 1 then
-             ( Command_not_in_allowlist { bin }
-             , Printf.sprintf "%s not in shell command allowlist" bin )
-           else
-             ( Pipeline_segment_disallowed { stage = stage_idx; bin }
-             , Printf.sprintf
-                 "pipeline stage %d command %s not in shell command allowlist"
-                 stage_idx
-                 bin )
-         in
-         Reject { context; reason; diagnostic }
-       | None ->
-         (match first_path_failure ~path_policy stages with
+    match first_path_failure ~path_policy stages with
           | Some (stage_idx, raw_path, diagnostic) ->
             Reject
               { context
@@ -373,7 +362,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
               }
           | None ->
             (match first_redirect_stage stages with
-             | Some stage when not allowlist.redirect_allowed ->
+             | Some stage when not syntax_policy.redirect_allowed ->
                Reject
                  { context
                  ; reason = Redirect_disallowed_in_caller { stage }
@@ -381,7 +370,7 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
                      Printf.sprintf "pipeline stage %d carries a redirect" stage
                  }
              | None -> Allow context
-             | Some _ -> Allow context)))
+             | Some _ -> Allow context)
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :
@@ -400,27 +389,26 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+let gate_typed ~ir ~syntax_policy ~path_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips raw-string parsing while preserving
      the same policy and verdict surface as [gate_raw]. *)
   match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
-  | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
+  | Ok stages -> apply_policy ~syntax_policy ~path_policy ~sandbox ~stages
 ;;
 
-let gate_raw ?caller ~text ~allowlist ~path_policy ~sandbox () : verdict =
+let gate_raw ~text ~syntax_policy ~path_policy ~sandbox () : verdict =
   match Masc_exec_bash_parser.Bash.parse_string text with
-  | PD.Parsed ir -> gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
+  | PD.Parsed ir -> gate_typed ~ir ~syntax_policy ~path_policy ~sandbox ()
   | PD.Parse_error _ -> Cannot_parse { reason = Parse_error }
   | PD.Parse_aborted reason -> Cannot_parse { reason = Parse_aborted reason }
   | PD.Too_complex reason ->
     Too_complex { reason = Unsupported_construct reason }
 ;;
 
-let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
-  (* See note on [gate_typed] — [caller] is API-shape-only for now. *)
+let lower_typed_pipeline ~stages ~sandbox () : verdict =
   match stages with
   | [] -> Cannot_parse { reason = Parse_error }
   | _ ->
@@ -428,12 +416,6 @@ let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
     (match make_context ~stages with
      | None -> Cannot_parse { reason = Parse_error }
      | Some context -> Allow context)
-;;
-
-let caller_tag = function
-  | Worker_dev_tools -> "worker_dev_tools"
-  | Filesystem_write -> "filesystem_write"
-  | Agent_tool_execute_shell_ir -> "agent_tool_execute_shell_ir"
 ;;
 
 let verdict_tag = function
@@ -444,8 +426,6 @@ let verdict_tag = function
 ;;
 
 let reject_reason_tag = function
-  | Command_not_in_allowlist _ -> "command_not_in_allowlist"
-  | Pipeline_segment_disallowed _ -> "pipeline_segment_disallowed"
   | Pipes_not_allowed _ -> "pipes_not_allowed"
   | Redirect_disallowed_in_caller _ -> "redirect_disallowed_in_caller"
   | Path_outside_policy _ -> "path_outside_policy"

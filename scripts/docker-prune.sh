@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# docker-prune.sh — periodic Docker resource cleanup for masc-mcp hosts.
+# docker-prune.sh — periodic Docker resource cleanup for masc hosts.
 #
 # Why this exists:
 #   The repo today has cleanup-stale-worktrees.sh and

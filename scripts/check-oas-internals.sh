@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Guard masc-mcp from reaching past the agent_sdk public surface.
+# Guard masc from reaching past the agent_sdk public surface.
 #
 # Symmetric counterpart to OAS's scripts/check-sdk-independence.sh
-# (oas does not depend on masc-mcp; masc-mcp does not reach into
+# (oas does not depend on masc; masc does not reach into
 # oas internals).
 #
 # Tiers:
@@ -13,12 +13,14 @@
 #
 #   warn     (--include-internals):
 #     - `Llm_provider.Provider_kind` qualified module access
-#       outside lib/provider_kind_resolver.{ml,mli}
+#       outside lib/runtime_model/provider_kind_resolver.{ml,mli} and
+#       lib/runtime/runtime_provider_credentials.{ml,mli} and
+#       lib/runtime/runtime_provider_labels.{ml,mli}
 #       (informational; allowed uses include serialization, type
 #       annotations, local-module aliases, and comments).
 #     - `Llm_provider.Constants` qualified access outside
-#       lib/oas_compat/ and lib/provider_kind_resolver.{ml,mli}
-#       (informational; cascade subsystem currently legitimately
+#       lib/oas_compat/ and runtime provider boundary helpers.
+#       (informational; runtime subsystem currently legitimately
 #       reads default inference params).
 #
 #   strict-internals (--strict-internals):
@@ -96,16 +98,18 @@ scan_strict_agent_sdk_internal() {
 }
 
 scan_warn_provider_kind_external() {
-  # Provider_kind qualified access outside provider_kind_resolver.
+  # Provider_kind qualified access outside runtime provider boundary helpers.
   local matches
   matches="$(rg -n 'Llm_provider\.Provider_kind|\bProvider_kind\.' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
-    | grep -v 'lib/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime/runtime_provider_credentials\.' \
+    | grep -v 'lib/runtime/runtime_provider_labels\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Provider_kind raw access outside provider_kind_resolver" >&2
+      echo "FAIL [internals]: Llm_provider.Provider_kind raw access outside runtime provider boundary helpers" >&2
     else
-      echo "WARN [internals]: Llm_provider.Provider_kind raw access outside provider_kind_resolver" >&2
+      echo "WARN [internals]: Llm_provider.Provider_kind raw access outside runtime provider boundary helpers" >&2
     fi
     echo "$matches" >&2
     return 1
@@ -114,17 +118,18 @@ scan_warn_provider_kind_external() {
 }
 
 scan_warn_constants_external() {
-  # Llm_provider.Constants outside oas_compat / provider_kind_resolver.
+  # Llm_provider.Constants outside oas_compat / runtime provider boundary helpers.
   local matches
   matches="$(rg -n 'Llm_provider\.Constants' lib/ "${RG_BASE_FLAGS[@]}" 2>/dev/null \
     | grep -v 'lib/oas_compat/' \
-    | grep -v 'lib/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime_model/provider_kind_resolver\.' \
+    | grep -v 'lib/runtime_model/runtime_provider_defaults\.' \
     | filter_noise || true)"
   if [[ -n "$matches" ]]; then
     if [[ "$strict_internals" -eq 1 ]]; then
-      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / provider_kind_resolver" >&2
+      echo "FAIL [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
     else
-      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / provider_kind_resolver" >&2
+      echo "WARN [internals]: Llm_provider.Constants raw access outside oas_compat / runtime provider boundary helpers" >&2
     fi
     echo "$matches" >&2
     return 1

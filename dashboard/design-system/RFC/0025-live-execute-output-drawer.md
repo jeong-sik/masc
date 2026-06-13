@@ -1,7 +1,7 @@
 # RFC 0025 — Live Execute Output Drawer
 
 - **Status**: Draft
-- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
+- **Author**: Vincent + Agent Runtime A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Depends on**: (없음, 신규 표면)
 - **Parent RFC**: RFC 0022 (IDE Plane Assembly v1)
@@ -62,7 +62,7 @@ ring buffer 크기: 5000 lines (env `MASC_EXECUTE_OUTPUT_RING_BUFFER=5000`).
 ```tsx
 // dashboard/src/components/ide/drawer.tsx
 interface DrawerProps {
-  readonly activeTab: 'terminal' | 'output' | 'cascade' | 'audit' | 'cost'
+  readonly activeTab: 'terminal' | 'output' | 'runtime' | 'audit' | 'cost'
   readonly keeperId: string | null      // for terminal tab
 }
 ```
@@ -105,7 +105,7 @@ terminal tab 본문:
 ```
 [01:42:18] cmd  $ git fetch --all
 [01:42:18] stdout  fetching origin (5 refs)
-[01:42:25] stderr    ✗ cascade.fanout.cycle_detection    (timeout)
+[01:42:25] stderr    ✗ runtime.fanout.cycle_detection    (timeout)
 ```
 
 ANSI sequences → CSS class via `parseAnsi()` (existing helper). 자동 스크롤 (latest line 보임), reduced-motion 시 jump.

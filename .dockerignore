@@ -14,13 +14,13 @@ logs
 !dashboard/.env.development
 !dashboard/.env.production
 *.exe
-masc-mcp-linux-x64
+masc-linux-x64
 a.out
 *.native
 dashboard/dist/
 tmp_my_files/
 .recovered/
-cascade_trust/
+runtime_trust/
 .github/
 docs/
 specs/

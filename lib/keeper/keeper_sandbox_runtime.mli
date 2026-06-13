@@ -1,6 +1,6 @@
 (** Keeper sandbox runtime preflight.
 
-    Shared between [Agent_tool_command_runtime] (bash sandbox) and
+    Shared between [Keeper_tool_command_runtime] (bash sandbox) and
     [Keeper_sandbox_read_backend] (read sandbox). Both surfaces need to verify
     the host docker runtime satisfies the configured hardening
     constraints (seccomp profile present, optional rootless / userns
@@ -16,8 +16,6 @@ type required_command_check =
 
 type docker_preflight =
   { ok : bool
-  ; credential_fallbacks_disabled : bool
-  ; git_egress : string
   ; image : string
   ; docker_runtime_ok : bool
   ; docker_runtime_error : string option
@@ -99,10 +97,9 @@ val docker_label_args
   -> unit
   -> string list
 
-(** {2 Label building blocks (RFC-0070 Phase 3e — used by
-    [Keeper_sandbox_session_plan] to compose the *deterministic* subset
-    of [docker_label_args] byte-identically; re-defining them there
-    would risk drift)} *)
+(** {2 Label building blocks (RFC-0070 Phase 3e — exposed so the
+    *deterministic* subset of [docker_label_args] can be composed
+    byte-identically without re-defining the keys and risking drift)} *)
 
 val sandbox_component_label_key : string
 val sandbox_base_path_hash_label_key : string
@@ -167,7 +164,7 @@ val docker_mount_failure_details :
     container shares the host network namespace (needed for
     `git clone` / `gh push` from keepers running under this profile;
     see #10431).  The MASC label remains ["inherit"]. *)
-val docker_network_args : Keeper_types.network_mode -> string list * string
+val docker_network_args : Keeper_types_profile_sandbox.network_mode -> string list * string
 
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
     sandbox containers. *)
@@ -217,20 +214,20 @@ val docker_config_mount_args
   -> container_root:string
   -> string list
 
-(** Docker [-v ...] specs for the read-only room-state subset that keeper
+(** Docker [-v ...] specs for the read-only workspace-state subset that keeper
     task worktrees may read through their container-side runtime [.masc]
     projection. This intentionally excludes auth, credentials, locks,
     logs, metrics, and keeper private state. Existing paths are mounted
     outside [<container_root>] because that path is itself a bind-mounted
     playground; host-absolute [.masc] targets must never be used as Docker
     mount destinations. *)
-val docker_room_state_mount_specs
+val docker_workspace_state_mount_specs
   :  base_path:string
   -> container_root:string
   -> string list
 
-(** Docker [-v ...] argv fragment for {!docker_room_state_mount_specs}. *)
-val docker_room_state_mount_args
+(** Docker [-v ...] argv fragment for {!docker_workspace_state_mount_specs}. *)
+val docker_workspace_state_mount_args
   :  base_path:string
   -> container_root:string
   -> string list
@@ -317,7 +314,7 @@ val maybe_cleanup_stale_containers
     sweep. Test-only. *)
 val reset_last_cleanup_for_tests : unit -> unit
 
-(** Global keeper sandbox preflight used by [doctor] and diagnostics.
+(** Global keeper sandbox preflight used by sandbox diagnostics.
     Returns [None] when
     [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false]. *)
 val docker_preflight : timeout_sec:float -> unit -> docker_preflight option
@@ -328,10 +325,10 @@ val docker_preflight_failure_message : docker_preflight -> string
 (** Fail-fast keeper-up preflight for [sandbox_profile=docker].
     This stays on the lightweight request path: it checks runtime
     hardening and image presence, while the full required-command
-    inventory remains in [docker_preflight] for doctor/status surfaces. *)
+    inventory remains in [docker_preflight] for diagnostic/status surfaces. *)
 val ensure_keeper_startup_preflight
   :  timeout_sec:float
-  -> sandbox_profile:Keeper_types.sandbox_profile
+  -> sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
   -> (unit, string) result
 
 (** Lightweight image-presence gate for per-command execution paths. The

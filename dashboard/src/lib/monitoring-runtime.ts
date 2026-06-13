@@ -59,7 +59,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
   HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
   Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
-  Paused: { key: 'Paused', label: '일시정지', description: '운영자가 keeper를 일시정지했습니다.' },
+  Paused: { key: 'Paused', label: '일시정지', description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
   Stopped: { key: 'Stopped', label: '정지', description: '정상 정지된 런타임입니다.' },
   Crashed: { key: 'Crashed', label: '비정상종료', description: 'fiber가 비정상적으로 종료되었습니다.' },
   Restarting: { key: 'Restarting', label: '재시작중', description: '복구를 시도하고 있습니다.' },
@@ -69,26 +69,27 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   busy: { key: 'busy', label: '작업중', description: '프로세스는 살아 있고 현재 작업을 수행 중입니다.' },
   listening: { key: 'listening', label: '대기중', description: '프로세스는 살아 있고 입력을 기다리고 있습니다.' },
   idle: { key: 'idle', label: '대기', description: '프로세스는 살아 있지만 현재 턴 작업은 없습니다.' },
-  paused: { key: 'paused', label: '일시정지', description: '운영자가 keeper를 일시정지했습니다.' },
+  paused: { key: 'paused', label: '일시정지', description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
   stopped: { key: 'stopped', label: '정지', description: '이전에 실행되었지만 현재는 정지 상태입니다.' },
   unbooted: { key: 'unbooted', label: '미기동', description: '등록만 되어 있고 아직 부팅되지 않았습니다.' },
   offline: { key: 'offline', label: '오프라인', description: '런타임 연결을 확인하지 못했습니다.' },
   unknown: UNKNOWN_PHASE_META,
 }
 
+// PipelineStage SSOT: `types/core.ts#PipelineStage` (11 values from
+// `Keeper_status_runtime.pipeline_stage_of_phase`).
 const STAGE_LABELS: Record<string, StageMeta> = {
   idle: { key: 'idle', label: '활동 없음', description: '지금 진행 중인 세부 활동 단계가 없습니다.' },
-  thinking: { key: 'thinking', label: '사고', description: '응답이나 다음 액션을 결정하는 중입니다.' },
-  tool_use: { key: 'tool_use', label: '도구', description: '도구를 호출하거나 결과를 소비하는 중입니다.' },
   compacting: { key: 'compacting', label: '압축', description: '컨텍스트 압축 단계를 수행 중입니다.' },
   handoff: { key: 'handoff', label: '승계', description: '같은 keeper를 새 trace와 새 세대로 이어붙이는 중입니다.' },
-  scheduled_autonomous: { key: 'scheduled_autonomous', label: '자율', description: '예약된 자율 턴을 수행 중입니다.' },
+  offline: { key: 'offline', label: '오프라인', description: '활동 정보를 확인하지 못했습니다.' },
   failing: { key: 'failing', label: '오류', description: '세부 파이프라인 단계에서 오류를 감지했습니다.' },
+  overflowed: { key: 'overflowed', label: '초과', description: '파이프라인이 용량을 초과했습니다.' },
   draining: { key: 'draining', label: '종료', description: '활동 종료를 위해 파이프라인을 비우는 중입니다.' },
   paused: { key: 'paused', label: '일시정지', description: '활동 단계도 함께 정지된 상태입니다.' },
   crashed: { key: 'crashed', label: '중단', description: '파이프라인 실행이 비정상 종료되었습니다.' },
   restarting: { key: 'restarting', label: '재시작', description: '파이프라인을 다시 올리는 중입니다.' },
-  offline: OFFLINE_STAGE_META,
+  unknown: { key: 'unknown', label: '미상', description: '파이프라인 단계 정보가 없습니다.' },
 }
 
 const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
@@ -101,6 +102,7 @@ const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
   compacting: 'Compacting',
   handoff: 'HandingOff',
   failing: 'Failing',
+  overflowed: 'Overflowed',
   draining: 'Draining',
   paused: 'Paused',
   crashed: 'Crashed',
@@ -121,12 +123,12 @@ const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
   paused: {
     key: 'paused',
     label: '일시정지',
-    description: '운영자가 의도적으로 멈춰 둔 상태입니다.',
+    description: '실행은 멈춰 있지만 재개 대상으로 남아 있는 상태입니다.',
   },
   offline: {
     key: 'offline',
     label: '오프라인',
-    description: '프로세스가 내려갔거나 아직 부팅되지 않았습니다.',
+    description: '프로세스나 하트비트를 확인하지 못해 기동이 필요한 상태입니다.',
   },
 }
 
@@ -180,7 +182,7 @@ function keeperHint(
 ): string | null {
   const signalHint = projection.signals.find(signal => signal.contributesToAttention && signal.hint !== null)?.hint
   if (signalHint) return signalHint
-  if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
+  if (band === 'paused') return '재개 대기 상태입니다. 원인은 차단/오류 근거를 확인하세요.'
   if (band === 'attention') return stage.description
   if (band === 'offline' && keeper.generation === 0 && (keeper.turn_count ?? 0) === 0) {
     return '아직 부팅된 적 없는 등록 런타임입니다.'

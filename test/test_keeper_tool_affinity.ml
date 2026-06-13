@@ -1,8 +1,8 @@
 (** Tests for Keeper_tool_affinity — trajectory-based tool pre-population. *)
 
-module Affinity = Masc_mcp.Keeper_tool_affinity
+module Affinity = Masc.Keeper_tool_affinity
 module Trajectory = Trajectory
-module Discovered = Masc_mcp.Keeper_discovered_tools
+module Discovered = Keeper_discovered_tools
 
 (* Helper: build a tool_stat record *)
 let stat ?(successes = 5) ?(failures = 0) ?(last = "2026-04-06T12:00:00Z") name =

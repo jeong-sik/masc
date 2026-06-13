@@ -17,7 +17,7 @@ Updated: 2026-03-11
 
 이 harness에서 `PASS`로 간주하려면 아래가 모두 충족되어야 한다.
 
-1. room keepalive / agent presence 신호가 실제로 보인다
+1. workspace keepalive / agent presence 신호가 실제로 보인다
 2. `masc_keeper_msg` 이후 recent turn이 갱신된다
 3. `continuity_summary`와 `last_continuity_update_ts`가 실제 turn 이후 전진한다
 4. compaction evidence가 발생한다
@@ -39,7 +39,7 @@ Updated: 2026-03-11
 ## Why this is neutral
 
 - 기본값은 dedicated temporary server + temporary base path를 사용한다
-- 기존 keeper, 기존 `.masc`, 기존 room과 섞이지 않는다
+- 기존 keeper, 기존 `.masc`, 기존 workspace과 섞이지 않는다
 - dashboard 카드가 아니라 MCP truth를 직접 읽는다
 - raw thinking은 보고하지 않고 최근 input/output preview와 구조화된 상태 필드만 남긴다
 
@@ -48,7 +48,7 @@ Updated: 2026-03-11
 Dry-run plumbing check:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 ```
 
@@ -57,7 +57,7 @@ DRY_RUN=1 scripts/harness_keeper_continuity_validation.sh
 Real isolated validation:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 KEEPER_MODELS="default" \
 scripts/harness_keeper_continuity_validation.sh
 ```
@@ -65,7 +65,7 @@ scripts/harness_keeper_continuity_validation.sh
 Use an existing MCP server instead of starting a temp one:
 
 ```bash
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 START_SERVER=0 \
 MCP_URL="http://127.0.0.1:8935/mcp" \
 KEEPER_MODELS="default" \
@@ -146,7 +146,7 @@ The harness only observed stale metadata or dead keeper state.
 
 Typical causes:
 
-- room keepalive signal never appeared
+- workspace keepalive signal never appeared
 - `agent.exists` stayed false
 - turn never updated after `masc_keeper_msg`
 - restart did not restore live behavior

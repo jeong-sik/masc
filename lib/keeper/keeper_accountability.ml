@@ -33,9 +33,9 @@ let candidate_decision_keeper_names keeper_name =
   |> List.sort_uniq String.compare
 ;;
 
-let keeper_decision_log_path (config : Coord_query.config) name =
+let keeper_decision_log_path (config : Workspace_query.config) name =
   let keepers_dir =
-    Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "keepers"
+    Common.keepers_runtime_dir_of_base ~base_path:config.base_path
   in
   Filename.concat keepers_dir (name ^ ".decisions.jsonl")
 ;;
@@ -99,7 +99,7 @@ let decision_activity_for_keeper config ~keeper_name ~now =
       timestamps
   in
   { decision_signal_count = List.length timestamps
-  ; latest_decision_at = Option.map iso8601_of_unix latest
+  ; latest_decision_at = Option.map Masc_domain.iso8601_of_unix_seconds latest
   ; latest_decision_age_s = Option.map (fun ts -> Float.max 0.0 (now -. ts)) latest
   }
 ;;
@@ -185,11 +185,11 @@ let make_claim_id ~agent_name ~kind ~subject ~task_id ~created_at =
   "acct-" ^ String.sub digest 0 12
 ;;
 
-let append_claim (config : Coord_query.config) (event : claim_event) =
+let append_claim (config : Workspace_query.config) (event : claim_event) =
   Dated_jsonl.append (get_store config) (claim_event_to_json event)
 ;;
 
-let append_resolution (config : Coord_query.config) (event : resolution_event) =
+let append_resolution (config : Workspace_query.config) (event : resolution_event) =
   Dated_jsonl.append (get_store config) (resolution_event_to_json event)
 ;;
 
@@ -213,8 +213,8 @@ let resolution_for_claim
   }
 ;;
 
-let task_title_for_id (config : Coord_query.config) task_id =
-  Coord_query.get_tasks_safe config
+let task_title_for_id (config : Workspace_query.config) task_id =
+  Workspace_query.get_tasks_safe config
   |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
   |> Option.map (fun (task : Masc_domain.task) -> task.title)
 ;;
@@ -353,7 +353,7 @@ let maybe_support_recent_completion_claim config ~agent_name ~task_id ~evidence_
    actions explicitly produce no commitment side effects -- their
    accountability tracking lives in [record_completion_claim]. *)
 let record_task_transition
-      (config : Coord_query.config)
+      (config : Workspace_query.config)
       ~agent_name
       ~task_id
       ~(transition : Masc_domain.task_action)
@@ -400,7 +400,6 @@ let record_task_transition
         ~reason
         ~evidence_refs:[ "task:" ^ task_id ]
         ~max_age_sec:task_commitment_expiry_sec
-    | Masc_domain.Submit_pr_evidence
     | Masc_domain.Submit_for_verification
     | Masc_domain.Approve_verification
     | Masc_domain.Reject_verification -> ())
@@ -412,7 +411,7 @@ let supporting_refs_for_turn ~trace_id ~turn_number strong_evidence_refs =
 ;;
 
 let record_completion_claim
-      (config : Coord_query.config)
+      (config : Workspace_query.config)
       ~keeper_name
       ~agent_name
       ~trace_id
@@ -699,14 +698,8 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
         then `String "recent_decisions_without_accountability_claims"
         else `Null )
     ; "decision_signal_count", `Int decision_activity.decision_signal_count
-    ; ( "latest_decision_at"
-      , match decision_activity.latest_decision_at with
-        | Some value -> `String value
-        | None -> `Null )
-    ; ( "latest_decision_age_s"
-      , match decision_activity.latest_decision_age_s with
-        | Some value -> `Float value
-        | None -> `Null )
+    ; ( "latest_decision_at", Json_util.string_opt_to_json decision_activity.latest_decision_at )
+    ; ( "latest_decision_age_s", Json_util.float_opt_to_json decision_activity.latest_decision_age_s )
     ; "coverage_routing_hint", `String coverage_routing_hint
     ]
   in
@@ -722,7 +715,28 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
   | other -> other
 ;;
 
-let accountability_summary_lookup (config : Coord_query.config) =
+type accountability_snapshot = {
+  snap_now : float;
+  by_agent : (string, claim_snapshot list) Hashtbl.t;
+  by_keeper : (string, claim_snapshot list) Hashtbl.t;
+}
+
+let accountability_snapshot_cache :
+    (string, float * accountability_snapshot) Hashtbl.t =
+  Hashtbl.create 4
+
+(* compute_reputation calls accountability_summary_json once per unique post
+   author in a board render; rebuilding the windowed claim aggregation
+   (read_window_entries + materialize_claims + bucketing) per author was
+   O(authors x window). The aggregation is a pure function of the window files,
+   so memoizing it per base path collapses a render's per-author calls (and
+   back-to-back renders) to a single build, at the cost of <= TTL staleness in
+   the accountability bands. The per-keeper decision activity below stays per
+   call; it is per-keeper and cheap relative to the window scan. *)
+let accountability_snapshot_ttl_s = 3.0
+
+let build_accountability_snapshot (config : Workspace_query.config) :
+    accountability_snapshot =
   let now = Time_compat.now () in
   let cutoff = summary_cutoff now in
   let by_agent : (string, claim_snapshot list) Hashtbl.t = Hashtbl.create 32 in
@@ -735,14 +749,30 @@ let accountability_summary_lookup (config : Coord_query.config) =
     in
     Hashtbl.replace table key (snapshot :: existing)
   in
-  (* Request-local pre-aggregation: the dashboard rebuilds this lookup per
-     render, so the next request naturally refreshes the window contents. *)
   materialize_claims (read_window_entries config)
   |> List.iter (fun snapshot ->
     if created_at_unix snapshot.claim >= cutoff
     then (
       add_snapshot by_agent snapshot.claim.agent_name snapshot;
       add_snapshot by_keeper snapshot.claim.keeper_name snapshot));
+  { snap_now = now; by_agent; by_keeper }
+
+let cached_accountability_snapshot (config : Workspace_query.config) :
+    accountability_snapshot =
+  let key = config.base_path in
+  let now = Time_compat.now () in
+  match Hashtbl.find_opt accountability_snapshot_cache key with
+  | Some (built_at, snap) when now -. built_at < accountability_snapshot_ttl_s ->
+      snap
+  | _ ->
+      let snap = build_accountability_snapshot config in
+      Hashtbl.replace accountability_snapshot_cache key (now, snap);
+      snap
+
+let accountability_summary_lookup (config : Workspace_query.config) =
+  let { snap_now = now; by_agent; by_keeper } =
+    cached_accountability_snapshot config
+  in
   fun ~keeper_name ~agent_name ->
     let keeper_name = normalize_keeper_name keeper_name in
     let source, snapshots =
@@ -764,7 +794,7 @@ let accountability_summary_lookup (config : Coord_query.config) =
     |> with_accountability_coverage ~coverage_gap ~decision_activity
 ;;
 
-let accountability_summary_json (config : Coord_query.config) ~keeper_name ~agent_name =
+let accountability_summary_json (config : Workspace_query.config) ~keeper_name ~agent_name =
   accountability_summary_lookup config ~keeper_name ~agent_name
 ;;
 

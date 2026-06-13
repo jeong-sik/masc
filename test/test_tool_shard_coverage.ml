@@ -6,9 +6,27 @@
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Tool_shard = Masc_mcp.Tool_shard
-module Tool_shard_types_schemas_execute = Masc_mcp.Tool_shard_types_schemas_execute
+module Tool_shard = Masc.Tool_shard
+module Tool_shard_types = Tool_shard_types
 module Types = Masc_domain
+
+let contains text needle =
+  Astring.String.is_infix ~affix:needle text
+;;
+
+let check_contains label needle text =
+  Alcotest.(check bool) label true (contains text needle)
+;;
+
+let check_not_contains label needle text =
+  Alcotest.(check bool) label false (contains text needle)
+;;
+
+let schema_description name schemas =
+  match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
+  | Some schema -> schema.description
+  | None -> Alcotest.failf "missing schema: %s" name
+;;
 
 let get_json_assoc key = function
   | `Assoc fields -> (
@@ -54,6 +72,36 @@ let test_shard_search_files_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1)
   | None -> Alcotest.fail "search_files shard not found"
+
+let test_user_facing_alias_copy_is_canonical () =
+  let execute_description =
+    schema_description "tool_execute" Tool_shard_types.typed_execute_tools
+  in
+  let read_description =
+    schema_description "tool_read_file" Tool_shard_types.filesystem_tools
+  in
+  let search_shard_description =
+    match Tool_shard.get_shard "search_files" with
+    | Some shard -> shard.description
+    | None -> Alcotest.fail "search_files shard not found"
+  in
+  let surface_text =
+    String.concat
+      "\n"
+      [ execute_description
+      ; read_description
+      ; search_shard_description
+      ]
+  in
+  List.iter
+    (fun retired ->
+       check_not_contains ("retired alias absent: " ^ retired) retired surface_text)
+    [ "Search" ^ "Files"; "Edit" ^ "File"; "Read" ^ "File"; "Write" ^ "File" ];
+  List.iter
+    (fun canonical ->
+       check_contains ("canonical alias present: " ^ canonical) canonical surface_text)
+    [ "Grep"; "Edit"; "Execute" ]
+;;
 
 let test_shard_governance_removed () =
   Alcotest.(check bool) "governance shard removed"
@@ -130,12 +178,11 @@ let test_tools_of_shards_unknown_ignored () =
 
 let test_keeper_model_tools_count () =
   let tools = Tool_shard.keeper_model_tools in
-  (* keeper_model_tools = default shards plus unsharded default tools.
-     Standalone keeper schemas (keeper_tool_search) are added downstream
-     in keeper_tool_policy.keeper_default_model_tools, not here. *)
+  (* keeper_model_tools = default shards plus unsharded execute tools.
+     Standalone keeper schemas are assembled by keeper_tool_policy, not here. *)
   let expected =
     Tool_shard.tools_of_shards Tool_shard.default_shard_names
-    @ Tool_shard_types_schemas_execute.typed_execute_tools
+	    @ Tool_shard_types.typed_execute_tools
   in
   Alcotest.(check int) "matches default shards sum" (List.length expected) (List.length tools);
   Alcotest.(check bool) "has tools" true (List.length tools >= 1)
@@ -236,73 +283,29 @@ let test_execute_unknown_tool () =
   let (ok, _json) = Tool_shard.execute "unknown_tool" (`Assoc []) in
   Alcotest.(check bool) "fails" false ok
 
-let test_execute_tool_list () =
-  let (ok, json) = Tool_shard.execute "masc_tool_list" (`Assoc []) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let shards = Yojson.Safe.Util.(member "shards" json |> to_list) in
-  let all = Tool_shard.list_all_shards () in
-  Alcotest.(check int) "matches list_all_shards" (List.length all) (List.length shards)
-
-let test_execute_tool_list_with_agent () =
-  Tool_shard.remove_agent_shards "test-ex";
-  Tool_shard.set_agent_shards "test-ex" ["base"; "board"];
-  let (ok, json) = Tool_shard.execute "masc_tool_list"
-    (`Assoc [("agent_name", `String "test-ex")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let active = Yojson.Safe.Util.(member "active_shards" json |> to_list) in
-  Alcotest.(check int) "2 active" 2 (List.length active);
-  Tool_shard.remove_agent_shards "test-ex"
-
-let test_execute_grant () =
-  Tool_shard.remove_agent_shards "test-grant";
-  Tool_shard.set_agent_shards "test-grant" ["base"];
-  let (ok, json) = Tool_shard.execute "masc_tool_grant"
-    (`Assoc [("agent_name", `String "test-grant"); ("shard_name", `String "board")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "granted" "granted" status;
-  Tool_shard.remove_agent_shards "test-grant"
-
-let test_execute_grant_missing_params () =
-  let (ok, json) = Tool_shard.execute "masc_tool_grant" (`Assoc []) in
-  Alcotest.(check bool) "fails" false ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "error status" "error" status
-
-let test_execute_revoke () =
-  Tool_shard.remove_agent_shards "test-revoke";
-  Tool_shard.set_agent_shards "test-revoke" ["base"; "board"; "search_files"];
-  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
-    (`Assoc [("agent_name", `String "test-revoke"); ("shard_name", `String "board")]) in
-  Alcotest.(check bool) "succeeds" true ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "revoked" "revoked" status;
-  Tool_shard.remove_agent_shards "test-revoke"
-
-let test_execute_revoke_non_removable () =
-  Tool_shard.remove_agent_shards "test-rev-base";
-  Tool_shard.set_agent_shards "test-rev-base" ["base"; "board"];
-  let (ok, json) = Tool_shard.execute "masc_tool_revoke"
-    (`Assoc [("agent_name", `String "test-rev-base"); ("shard_name", `String "base")]) in
-  Alcotest.(check bool) "fails" false ok;
-  let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-  Alcotest.(check string) "error" "error" status;
-  Tool_shard.remove_agent_shards "test-rev-base"
+let test_execute_retired_tool_names_are_unknown () =
+  List.iter
+    (fun name ->
+      let ok, json = Tool_shard.execute name (`Assoc []) in
+      Alcotest.(check bool) (name ^ " fails") false ok;
+      Alcotest.(check string)
+        (name ^ " unknown message")
+        ("Unknown tool: " ^ name)
+        Yojson.Safe.Util.(to_string json))
+    [ "masc_tool_list"; "masc_tool_grant"; "masc_tool_revoke" ]
 
 (* ============================================================
    schemas tests
    ============================================================ *)
 
 let test_schemas_count () =
-  Alcotest.(check int) "3 schemas" 3 (List.length Tool_shard.schemas)
+  Alcotest.(check int) "no schemas" 0 (List.length Tool_shard.schemas)
 
 let test_schemas_names () =
-  let names = List.map (fun (s : Masc_domain.tool_schema) -> s.name)
-    Tool_shard.schemas in
-  List.iter (fun expected ->
-    Alcotest.(check bool) (expected ^ " present") true
-      (List.mem expected names)
-  ) ["masc_tool_grant"; "masc_tool_revoke"; "masc_tool_list"]
+  Alcotest.(check (list string))
+    "no public masc_tool schemas"
+    []
+    (List.map (fun (s : Masc_domain.tool_schema) -> s.name) Tool_shard.schemas)
 
 (* ============================================================
    base_tools / board_tools content tests
@@ -423,7 +426,7 @@ let all_keeper_shard_tool_names () : string list =
     |> List.map (fun (name, _, _) -> name)
   in
   (Tool_shard.tools_of_shards all_shard_names
-   @ Tool_shard_types_schemas_execute.typed_execute_tools)
+	   @ Tool_shard_types.typed_execute_tools)
   |> List.filter (fun (t : Masc_domain.tool_schema) ->
        String.length t.name >= 7
        && String.sub t.name 0 7 = "keeper_")
@@ -461,7 +464,7 @@ let test_keeper_dispatch_coverage () =
    Per-persona shard configuration tests
    ============================================================ *)
 
-module Keeper_types_profile = Masc_mcp.Keeper_types_profile
+module Keeper_types_profile = Masc.Keeper_types_profile
 
 let test_empty_defaults_shards_none () =
   let d = Keeper_types_profile.empty_keeper_profile_defaults in
@@ -508,6 +511,8 @@ let () =
       Alcotest.test_case "board" `Quick test_shard_board_exists;
       Alcotest.test_case "filesystem" `Quick test_shard_filesystem_exists;
       Alcotest.test_case "search_files" `Quick test_shard_search_files_exists;
+      Alcotest.test_case "canonical alias copy" `Quick
+        test_user_facing_alias_copy_is_canonical;
       Alcotest.test_case "governance removed" `Quick test_shard_governance_removed;
       Alcotest.test_case "retired tool-mode shard removed" `Quick
         test_retired_tool_mode_shard_removed;
@@ -543,12 +548,8 @@ let () =
     ]);
     ("execute", [
       Alcotest.test_case "unknown tool" `Quick test_execute_unknown_tool;
-      Alcotest.test_case "list" `Quick test_execute_tool_list;
-      Alcotest.test_case "list with agent" `Quick test_execute_tool_list_with_agent;
-      Alcotest.test_case "grant" `Quick test_execute_grant;
-      Alcotest.test_case "grant missing params" `Quick test_execute_grant_missing_params;
-      Alcotest.test_case "revoke" `Quick test_execute_revoke;
-      Alcotest.test_case "revoke non-removable" `Quick test_execute_revoke_non_removable;
+      Alcotest.test_case "retired masc_tool names" `Quick
+        test_execute_retired_tool_names_are_unknown;
     ]);
     ("schemas", [
       Alcotest.test_case "count" `Quick test_schemas_count;

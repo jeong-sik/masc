@@ -5,9 +5,8 @@
     filters, and the nearest-rank percentile in {!Dashboard_oas_bridge.summary},
     plus provider-error count aggregation for I2 (#11925). *)
 
-module DOB = Masc_mcp.Dashboard_oas_bridge
+module DOB = Dashboard_oas_bridge
 module Json = Yojson.Safe.Util
-module P = Provider_error
 
 let make_sample
       ?(provider = "provider_a")
@@ -304,104 +303,6 @@ let test_summary_json_contains_aggregate () =
     (summary |> Json.member "error_ratio" |> Json.to_float)
 ;;
 
-(* --- provider-error counts --- *)
-
-let provider_error_count ~provider ~cascade ~kind ~capacity_scope counts =
-  match
-    List.find_opt
-      (fun (count : DOB.provider_error_count) ->
-         String.equal count.provider_id provider
-         && String.equal count.cascade_name cascade
-         && String.equal count.kind kind
-         && String.equal count.capacity_scope capacity_scope)
-      counts
-  with
-  | Some count -> count
-  | None ->
-    Alcotest.failf
-      "missing provider_error_count %s/%s/%s/%s"
-      provider
-      cascade
-      kind
-      capacity_scope
-;;
-
-let test_provider_error_counts_group_and_filter () =
-  setup ();
-  let rate_limit = P.RateLimit { retry_after = Some 2.0 } in
-  let capacity = P.CapacityBackpressure { scope = `Model } in
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" capacity;
-  let all = DOB.provider_error_counts () in
-  Alcotest.(check int) "two groups" 2 (List.length all);
-  let rate_limit_count =
-    provider_error_count
-      ~provider:"runtime"
-      ~cascade:"primary"
-      ~kind:"rate_limit"
-      ~capacity_scope:"none"
-      all
-  in
-  Alcotest.(check int) "runtime rate_limit count" 3 rate_limit_count.DOB.count;
-  let capacity_count =
-    provider_error_count
-      ~provider:"runtime"
-      ~cascade:"primary"
-      ~kind:"capacity_backpressure"
-      ~capacity_scope:"model"
-      all
-  in
-  Alcotest.(check int) "runtime capacity count" 1 capacity_count.DOB.count;
-  let filtered = DOB.provider_error_counts ~provider:"provider_a" () in
-  Alcotest.(check int) "filtered groups" 2 (List.length filtered);
-  let filtered_rate_limit =
-    provider_error_count
-      ~provider:"runtime"
-      ~cascade:"primary"
-      ~kind:"rate_limit"
-      ~capacity_scope:"none"
-      filtered
-  in
-  Alcotest.(check int) "filtered count" 3 filtered_rate_limit.DOB.count
-;;
-
-let test_summary_json_contains_provider_error_counts () =
-  setup ();
-  DOB.record_provider_error
-    ~cascade_name:"primary"
-    ~provider_id:"provider_a"
-    P.AuthError;
-  let json = DOB.summary_json ~provider:"provider_a" ~limit:10 () in
-  let summary = json |> Json.member "summary" in
-  Alcotest.(check int)
-    "sample_count can be zero"
-    0
-    (summary |> Json.member "sample_count" |> Json.to_int);
-  match summary |> Json.member "provider_error_counts" |> Json.to_list with
-  | [ count ] ->
-    Alcotest.(check string)
-      "provider redacted"
-      "runtime"
-      (count |> Json.member "provider_id" |> Json.to_string);
-    Alcotest.(check string)
-      "cascade"
-      "primary"
-      (count |> Json.member "cascade_name" |> Json.to_string);
-    Alcotest.(check string)
-      "kind"
-      "auth_error"
-      (count |> Json.member "kind" |> Json.to_string);
-    Alcotest.(check string)
-      "capacity scope"
-      "none"
-      (count |> Json.member "capacity_scope" |> Json.to_string);
-    Alcotest.(check int) "count" 1 (count |> Json.member "count" |> Json.to_int)
-  | counts ->
-    Alcotest.failf "expected one provider_error_count, got %d" (List.length counts)
-;;
-
 (* --- clear --- *)
 
 let test_clear_provider () =
@@ -415,29 +316,6 @@ let test_clear_provider () =
     (List.length (DOB.recent ~provider:"provider_a" ()));
   Alcotest.(check int) "other legacy alias also cleared" 0 (List.length (DOB.recent ~provider:"ollama" ()));
   Alcotest.(check int) "all cleared" 0 (List.length (DOB.recent ()))
-;;
-
-let test_clear_provider_error_counts () =
-  setup ();
-  DOB.record_provider_error
-    ~cascade_name:"primary"
-    ~provider_id:"provider_a"
-    (P.RateLimit { retry_after = None });
-  DOB.record_provider_error
-    ~cascade_name:"primary"
-    ~provider_id:"ollama"
-    (P.ServerError { code = 503; transient = true });
-  DOB.clear ~provider:"provider_a" ();
-  Alcotest.(check int)
-    "legacy provider clears runtime counts"
-    0
-    (List.length (DOB.provider_error_counts ~provider:"provider_a" ()));
-  Alcotest.(check int)
-    "other legacy alias also cleared"
-    0
-    (List.length (DOB.provider_error_counts ~provider:"ollama" ()));
-  DOB.clear ();
-  Alcotest.(check int) "all counts cleared" 0 (List.length (DOB.provider_error_counts ()))
 ;;
 
 (* --- OAS response projection --- *)
@@ -754,23 +632,9 @@ let () =
             "summary aggregate"
             `Quick
             test_summary_json_contains_aggregate
-        ; Alcotest.test_case
-            "summary provider-error counts"
-            `Quick
-            test_summary_json_contains_provider_error_counts
         ] )
     ; ( "clear"
       , [ Alcotest.test_case "clear provider" `Quick test_clear_provider
-        ; Alcotest.test_case
-            "clear provider-error counts"
-            `Quick
-            test_clear_provider_error_counts
-        ] )
-    ; ( "provider_error_counts"
-      , [ Alcotest.test_case
-            "group + filter"
-            `Quick
-            test_provider_error_counts_group_and_filter
         ] )
     ; ( "oas_response"
       , [ Alcotest.test_case

@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let contains_substring text needle =
   let text_len = String.length text in
@@ -217,7 +217,7 @@ let test_unknown_cancel_stays_warn () =
             (entry.Log.Ring.details |> member "log_class" |> to_string))))
 ;;
 
-let test_hitl_headroom_exceeds_default_approval_wait () =
+let test_hitl_headworkspace_exceeds_default_approval_wait () =
   let floor =
     Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0
   in
@@ -287,7 +287,7 @@ let () =
         ; Alcotest.test_case
             "HITL approval headroom"
             `Quick
-            test_hitl_headroom_exceeds_default_approval_wait
+            test_hitl_headworkspace_exceeds_default_approval_wait
         ; Alcotest.test_case
             "timeout inner cancel classification"
             `Quick

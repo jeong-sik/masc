@@ -284,7 +284,7 @@ Bonsai에 동등 화면 없음, Preact 단독:
 | Preact 컴포넌트 | 라인 | SPEC 매핑 | 우선순위 |
 |---|---|---|---|
 | `connector-status.ts` | 1740 | (별도 패턴 필요) | N+1 |
-| `cascade-config-panel.ts` | 1364 | cb-group-d Config | N+2 |
+| `runtime-config-panel.ts` | 1364 | cb-group-d Config | N+2 |
 | `keeper-detail-panels.ts` | 1264 | cb-group-i + cb-group-d | N+3 (Stage 3 Keepers와 통합 가능) |
 | `keeper-config-panel.ts` | 1182 | cb-group-d | N+4 |
 | `keeper-detail.ts` | 1163 | (Stage 3에서 처리) | N+3 |
@@ -334,7 +334,7 @@ SPEC §5 ARIA pattern catalog는 명세, 자동 검증 없음. Stage 1+ PR에서
 
 4. **Stage 1 시각 검증**:
    - 양쪽 prod 빌드 통과
-   - 양쪽 prod 모든 화면 시각 byte-identical (alias = forward 매핑이므로 cascade에서 같은 값 도달)
+   - 양쪽 prod 모든 화면 시각 byte-identical (alias = forward 매핑이므로 runtime에서 같은 값 도달)
    - DOM dump role/aria 변화 없음
 
 PR 크기 추정: ~50 라인 변경 + 빌드/시각 검증.
@@ -350,7 +350,7 @@ PR 크기 추정: ~50 라인 변경 + 빌드/시각 검증.
 
 | 위험 | 완화 |
 |------|------|
-| alias chain (raw → semantic → component)이 cascade에서 늘어남 | 11개 alias만 추가 → 무시할 수준. 브라우저 CSS 변수 lookup은 1-2 hop |
+| alias chain (raw → semantic → component)이 runtime에서 늘어남 | 11개 alias만 추가 → 무시할 수준. 브라우저 CSS 변수 lookup은 1-2 hop |
 | Bonsai 5 테마에서 alias 동작 확인 | Stage 1 PR에서 5 테마 모두 dashboard_bonsai 시각 검증 |
 | Preact 4,000+ raw 참조의 deprecation timing | Stage 2+ 화면별로 점진. Stage 1에서는 deprecation 표기 없음 |
 | SPEC.md token import mechanism 누락 | Stage 1 PR에 SPEC §6 신규 섹션 추가 (옵션 A vs B 명세) |

@@ -1,8 +1,12 @@
 (** Keeper_memory_recall — recall scoring, auto-rules, and memory eval. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_memory_bank
+
+module Log_memory = Log.Memory
 
 (* Static string-match patterns hoisted from evaluate_memory_recall.
    [Re.str] + [Re.compile] is pure, so a single DFA build at module
@@ -87,7 +91,7 @@ let record_memory_recall_read_error ~site path exn_class =
   Log.Keeper.warn
     "%s: dropping history read of %s: <error class=%s>"
     site path exn_label;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryRecallReadErrors)
     ~labels:[ ("exception_class", exn_label) ]
     ()
@@ -100,7 +104,7 @@ let record_memory_recall_read_error ~site path exn_class =
    this variant instead of the legacy
    [read_keeper_memory_summary]/[empty-summary] silent fallback. *)
 let read_keeper_memory_summary_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(max_bytes : int)
     ~(max_lines : int)
@@ -143,7 +147,7 @@ let memory_horizon_counts_from_lines (lines : string list) :
 (* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
    horizon rows recorded") from [Error class] ("bank read failed"). *)
 let read_memory_horizon_counts_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(max_bytes : int)
     ~(max_lines : int) :
@@ -173,7 +177,7 @@ let recent_memory_texts_from_lines
              match memory_horizon_of_kind_opt row.kind with
              | Some horizon -> horizon
              | None ->
-                 Log.Memory.warn
+                 Log_memory.warn
                    "memory_horizon_recall: unknown kind %S -> mid_term (drift; see #8826)"
                    row.kind;
                  mid_term_horizon
@@ -191,7 +195,7 @@ let recent_memory_texts_from_lines
    recent texts for this horizon") from [Error class] ("bank read
    failed"). *)
 let read_recent_memory_texts_result
-    (config : Coord.config)
+    (config : Workspace.config)
     ~(name : string)
     ~(horizon : string)
     ~(max_bytes : int)
@@ -318,7 +322,7 @@ let goal_alignment_score
     ~(user_message : string option)
     ~(assistant_reply : string option) : float =
   let goals = goal_horizon_candidates meta in
-  (* Unmeasurable → sentinel [1.0] so [plan_goal_alignment_threshold <= X]
+  (* Unmeasurable → marker [1.0] so [plan_goal_alignment_threshold <= X]
      and [guardrail_goal_alignment_threshold <= floor] gates do NOT
      fire; [goal_drift = 1.0 - alignment] then reads 0.0 (no drift).
      [0.0] was a permissive default that conflated "no goal data" with
@@ -534,7 +538,7 @@ let evaluate_keeper_auto_rules
         ; handoff_cooldown_sec = meta.handoff_cooldown_sec
         ; auto_handoff_enabled = meta.auto_handoff
         ; reflect_repetition_threshold =
-            keeper_rule_reflect_repetition_threshold ()
+            0.86
         ; plan_goal_alignment_threshold =
             keeper_rule_plan_goal_alignment_threshold ()
         ; plan_response_alignment_threshold =
@@ -679,9 +683,9 @@ let history_user_messages_from_lines
   |> List.filter_map (fun line ->
        try
          let json = Yojson.Safe.from_string line in
-         let role = Yojson.Safe.Util.(json |> member "role" |> to_string_option) in
+         let role = Json_util.get_string json "role" in
          let source =
-           Yojson.Safe.Util.(json |> member "source" |> to_string_option)
+           Json_util.get_string json "source"
            |> Option.value ~default:""
            |> String.trim
          in
@@ -704,7 +708,7 @@ let history_user_messages_from_lines
               Behavior preserved — we still drop this line and return
               [None]; only logging + counter are added.
 
-              Codex P1 follow-up: the [exception_class] label is now a
+              P1 follow-up: the [exception_class] label is now a
               4-value closed sum from [Keeper_memory_recall_exn_class]
               (constructor-level match on the [exn] type, not a
               substring scan on [Printexc.to_string]) so the metric
@@ -717,7 +721,7 @@ let history_user_messages_from_lines
            Log.Keeper.warn
              "load_history_user_messages: skipping line in %s: %s"
              path exn_detail;
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MemoryBankLoadHistorySwallowedExceptions)
              ~labels:[ ("exception_class", exn_label) ]
              ();

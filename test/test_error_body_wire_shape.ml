@@ -5,8 +5,8 @@
     PR-2. *)
 
 open Alcotest
-module R = Masc_mcp.Server_mcp_transport_http_respond
-module C = Masc_mcp.Mcp_error_code
+module R = Server_mcp_transport_http_respond
+module C = Masc.Mcp_error_code
 
 (* JSON equality with stable key order: compare normalised string
    forms. Yojson does not guarantee key order, but Yojson.Safe outputs

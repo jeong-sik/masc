@@ -38,7 +38,7 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
       slot
         ~active:true
         ~source:"keeper_hooks_oas"
-        ~features:[ "passive_loop_nudge"; "utf8_guard" ]
+        ~features:[ "utf8_guard" ]
         "before_turn";
       slot
         ~active:true
@@ -72,9 +72,14 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
             "custom_guard";
             "streak_gate";
             "keeper_deny_list";
-            (if Option.is_some max_cost_usd then "cost_budget" else "cost_budget_off");
             (if destructive_check then "destructive_pattern" else "destructive_pattern_off");
             "governance_approval";
+          ]
+        ~features:
+          [
+            (if Option.is_some max_cost_usd
+             then "cost_telemetry_threshold"
+             else "cost_telemetry_threshold_off");
           ]
         "pre_tool_use";
       slot
@@ -157,9 +162,11 @@ let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
       ("deny_list", denied_json);
       (key_deny_list_count, `Int (List.length denied_tools));
       ("destructive_check_tools", destructive_json);
-      ( "cost_budget",
+      ( "cost_telemetry",
         match max_cost_usd with
-        | Some v -> `Assoc [ (key_max_cost_usd, `Float v); (key_active, `Bool true) ]
-        | None -> `Assoc [ (key_active, `Bool false) ] );
+        | Some v ->
+          `Assoc
+            [ (key_max_cost_usd, `Float v); (key_active, `Bool true); ("enforced", `Bool false) ]
+        | None -> `Assoc [ (key_active, `Bool false); ("enforced", `Bool false) ] );
     ]
 ;;

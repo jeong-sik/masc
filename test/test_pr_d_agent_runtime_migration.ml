@@ -4,7 +4,7 @@ open Alcotest
 
     The old `/tmp/.masc_agent[_mcp]_<sid>` bridge was first moved behind
     [Host_config.agent_runtime_root], then removed once
-    [Agent_registry_eio] owned MCP-session identity continuity.  This
+    [Client_registry_eio] owned MCP-session identity continuity.  This
     ratchet keeps the old sidecar file surface from coming back in the
     dispatcher modules. *)
 
@@ -41,7 +41,7 @@ let count_across_files ~files ~needle =
 
 let consumer_files =
   [ "lib/mcp_server_eio_execute.ml"
-  ; "lib/tool_inline_dispatch_coord.ml"
+  ; "lib/mcp_tool_runtime_workspace.ml"
   ]
 ;;
 

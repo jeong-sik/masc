@@ -24,7 +24,7 @@ let operator_actor_hint request =
    every ~18s worst-case, which is acceptable for dashboard SSE polling. *)
 
 (* Late-bound broadcast refs — set by server_dashboard_http.ml after
-   Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
+   Sse module is in scope.  Same pattern as _broadcast_workspace_truth_ref. *)
 let operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
 ;;
@@ -66,5 +66,5 @@ let operator_refresh_interval_s =
 ;;
 
 let operator_snapshot_extra () =
-  [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+  [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json () ]
 ;;

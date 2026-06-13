@@ -6,7 +6,7 @@
     [Keeper_registry_types] resolvers / state machine helpers — no
     registry state read or written.
 
-    Companion to [Keeper_registry_fsm_validators] (cascade /
+    Companion to [Keeper_registry_fsm_validators] (runtime /
     turn_phase) which carries the GADT-resolver wrappers. *)
 
 open Keeper_registry_types
@@ -31,8 +31,8 @@ let paired_lifecycle_origin origin event =
 ;;
 
 (* RFC-0072 Phase 6: the 3×3 compaction matrix dispatched as an exhaustive
-   match — the 3 valid pairs (incl. idempotent self-loops) return [()], the
-   3 forbidden pairs raise the typed [Compaction_transition_violation]
+   match — valid pairs (incl. idempotent self-loops) return [()], forbidden
+   pairs raise the typed [Compaction_transition_violation]
    (replacing the prior bare [assert], whose [Assert_failure] carried no
    labels).  Still wrapped in [Keeper_fsm_guard_runtime.wrap_unit] so
    [metric_fsm_guard_violation] (action=compaction_transition, stage=guard)
@@ -55,8 +55,10 @@ let compaction_transition ~from ~to_ =
        | Packed Compaction_compacting, Packed Compaction_compacting
        | Packed Compaction_compacting, Packed Compaction_done
        (* via set_compaction_stage *)
-       | Packed Compaction_done, Packed Compaction_done -> ()
-       (* Forbidden transitions (3). *)
+       | Packed Compaction_done, Packed Compaction_done
+       (* fresh compaction cycle after a completed prior cycle *)
+       | Packed Compaction_done, Packed Compaction_compacting -> ()
+       (* Forbidden transitions. *)
        | Packed Compaction_accumulating, Packed Compaction_done ->
          raise_compaction_transition_violation
            ~where:"validate_compaction_transition"
@@ -64,17 +66,9 @@ let compaction_transition ~from ~to_ =
            ~to_
            ~violation:Accumulating_to_done
        | Packed Compaction_done, Packed Compaction_accumulating ->
-         (* terminal; a fresh compaction is a reset, not a transition *)
          raise_compaction_transition_violation
            ~where:"validate_compaction_transition"
            ~from
            ~to_
-           ~violation:Done_to_accumulating
-       | Packed Compaction_done, Packed Compaction_compacting ->
-         (* terminal *)
-         raise_compaction_transition_violation
-           ~where:"validate_compaction_transition"
-           ~from
-           ~to_
-           ~violation:Done_to_compacting)
+           ~violation:Done_to_accumulating)
 ;;

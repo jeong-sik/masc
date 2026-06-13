@@ -27,8 +27,8 @@ describe('repositories API', () => {
       repositories: [
         {
           id: 'masc',
-          name: 'masc-mcp',
-          local_path: '/Users/dancer/me/workspace/yousleepwhen/masc-mcp',
+          name: 'masc',
+          local_path: '/Users/dancer/me/workspace/yousleepwhen/masc',
           status: 'active',
         },
       ],

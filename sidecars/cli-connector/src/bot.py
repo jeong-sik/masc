@@ -121,7 +121,7 @@ async def _interactive_loop(client: CLIGateClient, keeper: str) -> None:
             "channel": "cli",
             "channel_user_id": os.environ.get("USER", "cli-user"),
             "channel_user_name": os.environ.get("USER", "cli-user"),
-            "channel_room_id": "cli-session",
+            "channel_workspace_id": "cli-session",
         }
         response = await client.send_message(
             keeper_name=keeper,

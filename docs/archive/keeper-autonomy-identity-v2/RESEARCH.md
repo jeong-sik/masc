@@ -135,7 +135,7 @@
 
 ## Future Research Directions
 
-1. **Cross-community identity**: Same agent in different keeper rooms develops different facets?
+1. **Cross-community identity**: Same agent in different keeper workspaces develops different facets?
 
 2. **Identity transfer**: Can an agent's signature be transplanted to a new context?
 

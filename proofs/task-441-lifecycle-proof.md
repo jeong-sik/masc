@@ -5,7 +5,7 @@
 - **Keeper**: keeper-lifecycle-worker-agent
 - **Timestamp**: 2026-05-19T08:30:08Z
 - **Branch**: keeper-lifecycle-worker-agent/task-441
-- **Repo**: masc-mcp
+- **Repo**: masc
 
 ## Proof Statement
 

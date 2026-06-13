@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-The dashboard subsystem (`lib/dashboard/`) carries 40 `.ml` + 40 `.mli` files implementing the operator-facing HTTP/SSE/JSON surface. This audit measures **how many modules emit Prometheus metrics** (or any structured observability output beyond log lines).
+The dashboard subsystem (`lib/dashboard/`) carries 40 `.ml` + 40 `.mli` files implementing the operator-facing HTTP/SSE/JSON surface. This audit measures **how many modules emit retired scrape backend metrics** (or any structured observability output beyond log lines).
 
 Companion to:
 - TLA+ specs gap audit (`docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md`) — measures spec-side coverage
@@ -23,8 +23,8 @@ Companion to:
 ls lib/dashboard/*.ml  | wc -l   # 40
 ls lib/dashboard/*.mli | wc -l   # 40
 
-# Metric emission grep (counter increment / register / Prometheus.* calls)
-rg -l "Prometheus\.|metric_" lib/dashboard/
+# Metric emission grep (counter increment / register / retired scrape backend.* calls)
+rg -l "retired scrape backend\.|metric_" lib/dashboard/
 
 # False positives (data field "metric_fn", read-side wrappers)
 rg "metric_fn|read_keeper_metric_records" lib/dashboard/
@@ -36,10 +36,10 @@ rg "metric_fn|read_keeper_metric_records" lib/dashboard/
 
 | File | Class | Notes |
 |---|---|---|
-| `dashboard_cache.ml` | **emitter** | `Prometheus.inc_counter Prometheus.metric_cache_hits_total` / `_misses_total` with `cache:dashboard` label |
-| `dashboard_governance_judge.ml` | **emitter** | `Prometheus.register_counter` + `inc_counter` for governance decisions |
+| `dashboard_cache.ml` | **emitter** | `retired scrape backend.inc_counter retired scrape backend.metric_cache_hits_total` / `_misses_total` with `cache:dashboard` label |
+| `dashboard_governance_judge.ml` | **emitter** | `retired scrape backend.register_counter` + `inc_counter` for governance decisions |
 | `dashboard_harness_health.ml` | reader | `read_keeper_metric_records` — consumes existing metric snapshots, doesn't emit |
-| `dashboard_http_autoresearch.ml` | data field name | references `metric_fn` as a JSON field on autoresearch loops, no Prometheus calls |
+| `dashboard_http_autoresearch.ml` | data field name | references `metric_fn` as a JSON field on autoresearch loops, no retired scrape backend calls |
 
 **True emitters: 2 of 40 (5%)**.
 
@@ -50,7 +50,7 @@ rg "metric_fn|read_keeper_metric_records" lib/dashboard/
 | `briefing_*` | 8 | 0/8 |
 | `dashboard_http_*` | ~10 | 0/10 (autoresearch is a false-positive grep hit) |
 | `dashboard_oas_*` | ~5 | 0/5 |
-| `dashboard_cascade*`, `dashboard_governance_judge`, `dashboard_operator_judge` | ~10 | 1/10 (governance_judge) |
+| `dashboard_runtime*`, `dashboard_governance_judge`, `dashboard_operator_judge` | ~10 | 1/10 (governance_judge) |
 | `dashboard_cache`, `dashboard_harness_health`, `dashboard_attention`, `dashboard_safe_autonomy` | ~7 | 1/7 (cache) |
 
 The HTTP route handlers (`dashboard_http_*`) are the largest unhooked subgroup. Each handler has natural metric candidates: request count, latency histogram, error counter.
@@ -71,15 +71,15 @@ The audit's C1–C5 taxonomy is preliminary. Phase 2 will refine via per-file in
 
 ## 5. Mapping to existing observability infrastructure
 
-The Prometheus module exposes counters / histograms via `Prometheus.metric_*`. dashboard_cache uses `metric_cache_hits_total` / `_misses_total` — a precedent. Adopting metrics elsewhere in dashboard:
+The retired scrape backend module exposes counters / histograms via `retired scrape backend.metric_*`. dashboard_cache uses `metric_cache_hits_total` / `_misses_total` — a precedent. Adopting metrics elsewhere in dashboard:
 
 ```ocaml
 let route_metric_label = [("route", "/keepers"); ("method", "GET")]
-Prometheus.inc_counter Prometheus.metric_dashboard_request_total
+retired scrape backend.inc_counter retired scrape backend.metric_dashboard_request_total
   ~labels:route_metric_label ()
 ```
 
-Requires `Prometheus.metric_dashboard_request_total` to exist — likely **prereq invariant analogue**. Cf. Q-P0-2 Phase 3 prereq pattern: 1/3 of "needs prereq" are real (33% accuracy).
+Requires `retired scrape backend.metric_dashboard_request_total` to exist — likely **prereq invariant analogue**. Cf. Q-P0-2 Phase 3 prereq pattern: 1/3 of "needs prereq" are real (33% accuracy).
 
 ## 6. Why fixes are deferred (per audit pattern)
 
@@ -92,12 +92,12 @@ Defer per-handler instrumentation to Phase 3, modelled on Q-P0-2 Phase 3 (8 RFC 
 ```bash
 # Strict (eventual, after Phase 2 + Phase 3 baseline)
 dashboard_metric_emitter_files: count of lib/dashboard/*.ml with
-  at least one Prometheus.inc_counter / register_counter call
+  at least one retired scrape backend.inc_counter / register_counter call
 # Floor: 2 (current). Goal: monotonic increase.
 
 # Descriptive
 dashboard_http_handlers_without_metrics: count of dashboard_http_*.ml
-  with zero Prometheus.* calls
+  with zero retired scrape backend.* calls
 # Floor: ~10 (current, estimate). Goal: monotonic decrease.
 ```
 
@@ -119,7 +119,7 @@ Mirrors the structure documented in `docs/process/AUDIT-CHAIN-4-PHASE-PATTERN.md
 - `docs/process/AUDIT-CHAIN-4-PHASE-PATTERN.md` (PR #12193) — pattern source
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — Q-P0-3 chain (4/4 MERGED)
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
-- `lib/prometheus.{ml,mli}` — metric registry
+- `lib/retired-scrape-backend.{ml,mli}` — metric registry
 - `lib/dashboard/dashboard_cache.ml`, `lib/dashboard/dashboard_governance_judge.ml` — current 2 emitters
 
 *Audit date: 2026-04-30 / Phase 1 of 4 / docs-only / first audit using codified 4-phase pattern*

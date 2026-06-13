@@ -9,13 +9,13 @@
 
 open Alcotest
 
-module Handover_eio = Masc_mcp.Handover_eio
-module Prometheus = Masc_mcp.Prometheus
+module Handover_eio = Masc.Handover_eio
+module Otel_metric_store = Masc.Otel_metric_store
 
 let persistence_surface = "handover_eio"
 
 let persistence_counter reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 (* ============================================================
@@ -187,7 +187,7 @@ let test_generate_id_unique () =
    Eio Helpers
    ============================================================ *)
 
-module Coord_utils = Coord_utils
+module Workspace_utils = Workspace_utils
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -205,7 +205,7 @@ let make_test_dir () =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
-let make_test_config ~base_path : Coord_utils.config =
+let make_test_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -219,7 +219,7 @@ let make_test_config ~base_path : Coord_utils.config =
     workspace_path = base_path;
     lock_expiry_minutes = 5;
     backend_config;
-    backend = Coord_utils.Memory memory_backend;
+    backend = Workspace_utils.Memory memory_backend;
   }
 
 let with_eio_env f =

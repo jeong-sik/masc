@@ -16,7 +16,7 @@ type harness_verdict_item =
   ; agent_name : string
   ; gate : string
   ; verdict : string
-  ; evaluator_cascade : string
+  ; evaluator_runtime : string
   ; fallback_reason : string option
   }
 
@@ -203,7 +203,7 @@ let verdict_item_json (item : harness_verdict_item) =
     ; "agent_name", `String item.agent_name
     ; "gate", `String item.gate
     ; "verdict", `String item.verdict
-    ; "evaluator_cascade", `String item.evaluator_cascade
+    ; "evaluator_runtime", `String item.evaluator_runtime
     ; "fallback_reason", Json_util.string_opt_to_json item.fallback_reason
     ]
 ;;
@@ -219,7 +219,7 @@ let verdict_item_of_json json =
       ; agent_name = string_field json "agent_name"
       ; gate = string_field json "gate"
       ; verdict = string_field json "verdict"
-      ; evaluator_cascade = string_field json "evaluator_cascade"
+      ; evaluator_runtime = string_field json "evaluator_runtime"
       ; fallback_reason = Safe_ops.json_string_opt "fallback_reason" json
       }
 ;;
@@ -269,7 +269,7 @@ let pre_compact_event_of_json json =
       ; strategies = Safe_ops.json_string_list "strategies" json
       ; context_window =
           Safe_ops.json_int
-            ~default:Cascade_runtime.fallback_context_window
+            ~default:Runtime_constants.fallback_context_window
             "context_window"
             json
       ; is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json
@@ -356,7 +356,7 @@ let wake_payload_event_of_json json =
       ; model_id = public_runtime_model_id
       ; context_window =
           Safe_ops.json_int
-            ~default:Cascade_runtime.fallback_context_window
+            ~default:Runtime_constants.fallback_context_window
             "context_window"
             json
       ; approx_body_bytes = Safe_ops.json_int ~default:0 "approx_body_bytes" json
@@ -478,7 +478,7 @@ let handoff_event_json (event : handoff_event) =
     ]
 ;;
 
-let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name =
+let read_keeper_metric_records ?since ?until (config : Workspace.config) keeper_name =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in
   match since, until with
   | Some _, _ | _, Some _ ->
@@ -489,9 +489,9 @@ let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name
   | None, None -> Dated_jsonl.read_recent store max_signal_scan
 ;;
 
-let read_handoff_events ?since ?until (config : Coord.config) =
+let read_handoff_events ?since ?until (config : Workspace.config) =
   let events =
-    Keeper_types.keeper_names config
+    Keeper_meta_store.keeper_names config
     |> List.concat_map (fun keeper_name ->
       read_keeper_metric_records ?since ?until config keeper_name
       |> List.filter_map handoff_event_of_metrics_json)
@@ -502,8 +502,8 @@ let read_handoff_events ?since ?until (config : Coord.config) =
     events
 ;;
 
-let has_any_handoff_events (config : Coord.config) =
-  Keeper_types.keeper_names config
+let has_any_handoff_events (config : Workspace.config) =
+  Keeper_meta_store.keeper_names config
   |> List.exists (fun keeper_name ->
     read_keeper_metric_records config keeper_name
     |> List.exists (fun json -> Option.is_some (handoff_event_of_metrics_json json)))
@@ -601,11 +601,11 @@ let overview_json
     else float_of_int fallback_count /. float_of_int total_verdicts
   in
   (* Cross-model enforcement ratio: of verdicts that recorded both a
-     generator and an evaluator cascade, what fraction used distinct
-     cascades? This is the *runtime* rate at which the cross-model
+     generator and an evaluator runtime, what fraction used distinct
+     runtimes? This is the *runtime* rate at which the cross-model
      review policy (anti_rationalization.mli, #3067) actually fired. *)
   let verdicts_with_generator =
-    Safe_ops.json_int ~default:0 "verdicts_with_generator_cascade" calibration
+    Safe_ops.json_int ~default:0 "verdicts_with_generator_runtime" calibration
   in
   let cross_model_match =
     Safe_ops.json_int ~default:0 "cross_model_match_count" calibration
@@ -631,7 +631,7 @@ let overview_json
     ; "fallback_ratio", `Float fallback_ratio
     ; "cross_model_rate", `Float cross_model_rate
     ; "cross_model_match_count", `Int cross_model_match
-    ; "verdicts_with_generator_cascade", `Int verdicts_with_generator
+    ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
     ; ( "latest_pre_compact_ratio"
       , Json_util.float_opt_to_json (Option.map pre_compact_ratio latest_pre_compact) )
     ; ( "latest_handoff_generation"
@@ -825,7 +825,7 @@ let recent_handoffs_json
     ]
 ;;
 
-let json ~(config : Coord.config) ?since ?until () =
+let json ~(config : Workspace.config) ?since ?until () =
   let calibration = Eval_calibration.calibration_stats ?since ?until () in
   let recent_verdicts = read_recent_verdicts ?since ?until () in
   let has_window = Option.is_some since || Option.is_some until in
@@ -880,4 +880,28 @@ let json ~(config : Coord.config) ?since ?until () =
           ~events:handoff_events
           () )
     ]
+;;
+
+let () =
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
+    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
+  );
+
+  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->
+    let event = record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger in
+    let mapped_event : Keeper_compact_policy.pre_compact_event =
+      {
+        timestamp = event.timestamp;
+        keeper_name = event.keeper_name;
+        context_ratio = event.context_ratio;
+        message_count = event.message_count;
+        token_count = event.token_count;
+        strategies = event.strategies;
+        context_window = event.context_window;
+        is_local_model = event.is_local_model;
+        trigger = event.trigger;
+      }
+    in
+    Some mapped_event
+  )
 ;;

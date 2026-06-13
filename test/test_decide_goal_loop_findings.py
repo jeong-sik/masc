@@ -122,8 +122,8 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
         )
         by_id = {decision.decision_id: decision for decision in report.decisions}
 
-        self.assertEqual(report.decisions_total, 5)
-        self.assertEqual(report.act_linked_count, 5)
+        self.assertEqual(report.decisions_total, 4)
+        self.assertEqual(report.act_linked_count, 4)
         self.assertEqual(report.act_missing_count, 0)
         self.assertEqual(
             by_id["D-EMERGENCY-1"].act_status,
@@ -137,13 +137,7 @@ class DecideGoalLoopFindingsTest(unittest.TestCase):
                 "PR#13246 keeper slot crash-path force release",
             ],
         )
-        self.assertEqual(
-            by_id["D-P1-1"].act_artifacts,
-            [
-                "PR#13123 alive-stuck recovery",
-                "PR#13190 partial stale-turn recovery",
-            ],
-        )
+        self.assertNotIn("D-P1-1", by_id)
 
 
 if __name__ == "__main__":

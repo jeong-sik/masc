@@ -22,7 +22,7 @@ function obs(overrides: Partial<CompositeObservation> & { ts: number }): Composi
     phase: 'Stable',
     turn: 'idle',
     decision: 'undecided',
-    cascade: 'idle',
+    runtime: 'idle',
     compaction: 'accumulating',
     breaker: 'clean',
     ...overrides,
@@ -340,13 +340,13 @@ describe('deriveStateEntries', () => {
   it('handles all 5 lanes', () => {
     const observations = [
       obs({ ts: 100 }),
-      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', cascade: 'trying', compaction: 'compacting' }),
+      obs({ ts: 200, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'trying', compaction: 'compacting' }),
     ]
     const result = deriveStateEntries(observations)
     expect(result!.phase).toBe(200)
     expect(result!.turn).toBe(200)
     expect(result!.decision).toBe(200)
-    expect(result!.cascade).toBe(200)
+    expect(result!.runtime).toBe(200)
     expect(result!.compaction).toBe(200)
   })
 })

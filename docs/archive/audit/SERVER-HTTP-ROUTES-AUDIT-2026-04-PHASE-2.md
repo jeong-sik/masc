@@ -29,9 +29,9 @@ Implication: the C1 ratchet stays. Recommend Phase 3 implements a single shared 
 
 ### 2.2 C2 — Telemetry (14 silent, 2 emit)
 
-Per-domain-module Prometheus search:
+Per-domain-module retired scrape backend search:
 
-| Module | Prometheus calls | Status |
+| Module | retired scrape backend calls | Status |
 |---|---|---|
 | `channel_gate` | 2 | C5 anchor |
 | `frontend` | 1 | C5 anchor |
@@ -39,14 +39,14 @@ Per-domain-module Prometheus search:
 | `artifacts` | 0 | C2 silent |
 | `attribution` | 0 | C2 silent |
 | `autonomous` | 0 | C2 silent |
-| `cascade` | 0 | C2 silent |
+| `runtime` | 0 | C2 silent |
 | `dashboard` | 0 | C2 silent |
 | `git_graph` | 0 | C2 silent |
 | `legendary_bash` | 0 | C2 silent |
 | `multimodal` | 0 | C2 silent |
 | `provider_runs` | 0 | C2 silent |
 | `resilience` | 0 | C2 silent |
-| `room` | 0 | C2 silent |
+| `workspace` | 0 | C2 silent |
 | `sidecar` | 0 | C2 silent |
 | `verification` | 0 | C2 silent |
 
@@ -56,13 +56,13 @@ Total silent: **14**. Phase 1 estimated 14–16 — confirmed at the lower bound
 
 ### 2.3 C3 — Error envelope shapes (3 distinct)
 
-Sampled error returns across activity, artifacts, cascade, dashboard, room:
+Sampled error returns across activity, artifacts, runtime, dashboard, workspace:
 
 | Shape | Example | Modules |
 |---|---|---|
-| A | `{"error": "<string>"}` | activity, dashboard, room |
+| A | `{"error": "<string>"}` | activity, dashboard, workspace |
 | B | `{"error": "<string>", "<field>": ...}` extended | artifacts |
-| C | `{"ok": false, "error": "<string>"}` wrapper | cascade |
+| C | `{"ok": false, "error": "<string>"}` wrapper | runtime |
 
 Phase 1 estimated 10–14 inconsistencies. Phase 2 finds **3 shape classes** (a 3-4× narrowing), some of which differ across modules but cluster into a small set. Convergence to one envelope is feasible in Phase 3 with a shared `error_response` helper.
 
@@ -74,7 +74,7 @@ C4 collapses to **0 unprotected routes**. Phase 1 estimated 3–5 candidates —
 
 ### 2.5 C5 — Anchors (2 confirmed)
 
-Only `channel_gate` and `frontend` have telemetry **and** auth. Phase 1 estimate of 4–6 anchors was based on filename-keyword inference. Phase 2 narrows to 2 via Prometheus-call grep. These two modules become Phase 3's reference patterns for the 14 silent modules.
+Only `channel_gate` and `frontend` have telemetry **and** auth. Phase 1 estimate of 4–6 anchors was based on filename-keyword inference. Phase 2 narrows to 2 via retired scrape backend-call grep. These two modules become Phase 3's reference patterns for the 14 silent modules.
 
 ## 3. Refined ratchet floors
 

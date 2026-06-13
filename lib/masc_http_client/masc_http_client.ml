@@ -1,8 +1,30 @@
 (** Masc_http_client — typed pool front-end for outbound HTTP.
 
-    All callers go through the per-process [Pool.t] singleton via
-    [post_sync] / [get_sync] / [get_response_sync]; the pool owns the
-    underlying piaf transport, keep-alive, and TLS context cache. *)
+    All callers go through a per-domain [Pool.t] via
+    [post_sync] / [get_sync] / [get_response_sync]; each OCaml Domain
+    (OS thread) gets its own pool instance stored in [Domain.DLS],
+    keyed lazily on first HTTP call.
+
+    Why per-domain: [Eio.Switch] is domain-local.  A global singleton
+    pool created on the main domain would cause
+    [Invalid_argument "Switch accessed from wrong domain!"] when
+    Domain_pool worker fibers try to make HTTP requests through it.
+    Per-domain pools eliminate this class of error entirely because
+    each pool's Piaf connections share the creating domain's switch.
+
+    Why [Domain.DLS]: zero-cost fast path ([Domain.DLS.get] is a
+    domain-local array lookup — no mutex, no blocking).  Pool creation
+    happens at most once per domain lifetime.  This avoids the
+    [Stdlib.Mutex] blocking problem where locking a mutex blocks
+    the entire domain's fiber scheduler.
+
+    Prior art: the original design used a global singleton pool whose
+    Eio.Switch belonged to the main domain.  Fibers running on
+    Domain_pool worker domains would access this switch →
+    [Invalid_argument "Switch accessed from wrong domain!"] →
+    [Eio.Mutex.Poisoned] on the pool mutex → permanent 500 on every
+    outbound HTTP call until restart.  See PR #20476 for the full
+    incident analysis. *)
 
 (** POST with structured error handling.
     DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
@@ -34,10 +56,19 @@ let with_optional_timeout ?clock ?timeout_sec f =
           Error (Printf.sprintf "timeout after %.1fs" timeout_sec))
   | _ -> f ()
 
-(* Per-process Pool singleton, lazily initialised on first use by
-   reading [sw] and [env] from [Eio_context]. *)
-let pool_ref : Pool.t option ref = ref None
-let pool_mu = Eio.Mutex.create ()
+(* ── Per-domain pool via Domain.DLS ───────────────────────────────── *)
+
+(* [Domain.DLS] provides a mutex-free, per-domain key-value store.
+   [Domain.DLS.get] is O(1) — a domain-local array index lookup with
+   no synchronization overhead.  This makes the fast path (pool
+   already exists) essentially free.
+
+   Pool lifecycle: each pool registers [Eio.Switch.on_release] during
+   [Pool.create], so cleanup happens automatically when the domain's
+   switch is released.  No explicit teardown needed. *)
+
+let pool_key : Pool.t option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
 
 let pool_init_error () =
   Error
@@ -46,26 +77,48 @@ let pool_init_error () =
      bootstrap-order bug (Pool.request from before \
      Server_runtime_bootstrap.create_server_state)."
 
+(* Registry of all created pools, for metrics aggregation.
+   Stdlib.Mutex protected because writes (pool creation) and reads
+   (metrics snapshots) happen on different domains.  This mutex is
+   NOT on the request hot path — it's touched only during pool
+   creation (once per domain) and periodic metrics export. *)
+let all_pools : (int * Pool.t) list ref = ref []
+let all_pools_mu = Stdlib.Mutex.create ()
+
+let register_pool did p =
+  Stdlib.Mutex.lock all_pools_mu;
+  (try all_pools := (did, p) :: !all_pools with
+   | exn -> Stdlib.Mutex.unlock all_pools_mu; raise exn);
+  Stdlib.Mutex.unlock all_pools_mu
+
 let with_pool f =
-  match !pool_ref with
+  match Domain.DLS.get pool_key with
   | Some p -> f p
   | None ->
-    Eio.Mutex.use_rw ~protect:false pool_mu (fun () ->
-      match !pool_ref with
-      | Some p -> f p
-      | None ->
-        (match Eio_context.get_switch_opt (), Eio_context.get_env_opt () with
-         | Some sw, Some env ->
-           let p = Pool.create ~sw ~env () in
-           pool_ref := Some p;
-           f p
-         | _ -> pool_init_error ()))
+    (match Eio_context.get_switch_opt (), Eio_context.get_env_opt () with
+     | Some sw, Some env ->
+       let p = Pool.create ~sw ~env () in
+       Domain.DLS.set pool_key (Some p);
+       register_pool (Domain.self () :> int) p;
+       f p
+     | _ -> pool_init_error ())
+
+(* ── Public API ───────────────────────────────────────────────────── *)
 
 let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->
   with_pool @@ fun pool ->
   match Pool.request pool ?clock ?timeout_seconds:timeout_sec
           ~method_:`POST ~url ~headers ~body () with
+  | Ok { Pool.status; body; _ } -> Ok (status, body)
+  | Error e -> Error e
+
+(** PATCH with structured error handling. *)
+let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
+  with_pool @@ fun pool ->
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+          ~method_:`PATCH ~url ~headers ~body () with
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 
@@ -85,9 +138,20 @@ let get_sync ?clock ?timeout_sec ~url ~headers () =
   | Ok response -> Ok (response.status, response.body)
   | Error _ as error -> error
 
-(* Read-only accessor on the per-process pool singleton.  Returns
-   [None] before the first HTTP call so callers like [Pool_metrics]
-   can no-op instead of forcing the pool open just to read zeros. *)
-let pool_singleton_opt () : Pool.t option = !pool_ref
+(* ── Observability ────────────────────────────────────────────────── *)
+
+(** Return the pool for the current domain, if initialized.
+    Backward-compatible accessor for telemetry consumers. *)
+let pool_singleton_opt () : Pool.t option = Domain.DLS.get pool_key
+
+(** Return all domain pools created so far.
+    Used by [Pool_metrics] to aggregate counters across domains.
+    Thread-safe via [Stdlib.Mutex]; only touched during pool creation
+    and periodic metrics export, never on the request hot path. *)
+let all_domain_pools () : (int * Pool.t) list =
+  Stdlib.Mutex.lock all_pools_mu;
+  let pools = !all_pools in
+  Stdlib.Mutex.unlock all_pools_mu;
+  pools
 
 module Pool = Pool

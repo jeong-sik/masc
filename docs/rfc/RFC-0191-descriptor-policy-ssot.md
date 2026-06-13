@@ -29,7 +29,6 @@ type policy =
   ; approval             : approval
   ; retryable            : bool
   ; cwd_scope            : string option
-  ; credential_profile   : string option
   }
 ```
 
@@ -40,20 +39,19 @@ Yet `lib/keeper/keeper_tool_policy.ml` is **670 LoC, 63 definitions**, and the o
 | Writable path prefix list | `keeper_writable_prefixes` (3 entries, hardcoded) | none — should be derived per descriptor (`cwd_scope` + tool-specific) |
 | Path normalization | `normalize_path`, `is_masc_write_allowed` | none |
 | Denied-set | `keeper_denied_set` Hashtbl | `visibility = Keeper_denied` |
-| Tool preset enum | `Minimal/Social/Messaging/Dispatch/Research/Delivery/Full` (7) + `preset_allows_privileged_operations`, `allows_workflow_for_preset`, `allows_shell_write_for_preset` | none — preset is an agent attribute, but the *per-tool* preset gate is missing as a descriptor field |
+| Tool-access tier rules | hand-maintained per-agent access checks | should be expressed as descriptor policy + `tool_access` grants |
 | Per-tool inline safety | `keeper_safe_inline_tools` list (handmade) | descriptor `executor = In_process` already captures it |
 | Maintenance gates | `keeper_maintenance_only_tools` list | none — should be `approval = Human_required` + new `audience` field |
-| Last-turn safety | `last_turn_safe_tool_names` list | none — should be a derived property (`readonly_hint = Some true` + `effect_domain = None`) |
-| Allowlist by preset | `preset_allowlist` | should be a descriptor-driven projection |
+| Allowlist by tool access | tool-access keyed lists | should be a descriptor-driven projection |
 | Universe filter | `tool_access_lookup_of_meta`, `filter_by_universe`, `filter_by_access` | should be a descriptor capability check |
 
-Net result: two SSOTs, the smaller (`policy` record) defines structure, the larger (`keeper_tool_policy.ml`) defines truth. Any preset change requires editing the larger one, and the descriptor never gets consulted.
+Net result: two SSOTs, the smaller (`policy` record) defines structure, the larger (`keeper_tool_policy.ml`) defines truth. Any access-rule change requires editing the larger one, and the descriptor never gets consulted.
 
 ## 1. Why this is dangerous
 
 This is the workaround bar's §2 (string/substring classifier) and §3 (N-of-M) double-trigger:
 
-- §2: `keeper_safe_inline_tools`, `keeper_maintenance_only_tools`, `last_turn_safe_tool_names`, `keeper_denied_set` are all string lists/sets growing per migration. New tools must be added to N lists separately or be silently mis-policied.
+- §2: `keeper_safe_inline_tools`, `keeper_maintenance_only_tools`, `keeper_denied_set` are all string lists/sets growing per migration. New tools must be added to N lists separately or be silently mis-policied.
 - §3: every time a new tool category surfaces (board sub-boards, persona authoring, sandbox lifecycle), at least one of these lists is patched in isolation. There is no compile-time guarantee that a descriptor's `policy.visibility = Keeper_denied` and the `keeper_denied_set` agree.
 
 CLAUDE.md "워크어라운드 거부 §2/§3" mandates RFC-level resolution.
@@ -65,7 +63,7 @@ CLAUDE.md "워크어라운드 거부 §2/§3" mandates RFC-level resolution.
 1. Agent-level state (the *agent's* preset, allowlist resolution at runtime).
 2. Boundary helpers that cannot live on the descriptor (path normalization, preset enum semantics).
 
-Every per-tool policy decision (`is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool`, `last_turn_safe_tool_names`) is computed from `descriptor.policy`.
+Every per-tool policy decision (`is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool`) is computed from `descriptor.policy`.
 
 ## 3. Non-goals
 
@@ -84,16 +82,11 @@ type policy =
   ; approval             : approval
   ; retryable            : bool
   ; cwd_scope            : string option
-  ; credential_profile   : string option
   ; (* NEW *)
     audience             : audience_class
-    (* Minimum agent preset required to be granted this tool. *)
-  ; minimum_preset       : tool_preset
-    (* Whether this tool may execute on the final turn before turn cap.
-       Currently a hand-curated list; will be derived from
-       (readonly_hint = Some true && effect_domain = None). *)
-  ; last_turn_safe       : bool
-    (* Whether the tool is permitted on the inline-dispatch fast path
+    (* Tool-access grant required to expose this tool. *)
+  ; required_tool_access : string option
+    (* Whether the tool is permitted on the MCP-runtime fast path
        (no Eio plumbing). Currently a hand list. *)
   ; inline_safe          : bool
   ; (* Maintenance-only tools require an explicit operator gate. *)
@@ -107,18 +100,23 @@ and audience_class =
   | Audience_admin_only
 ```
 
-`audience_class` and `minimum_preset` are *new* descriptor fields, not derived. The other three (`last_turn_safe`, `inline_safe`, `maintenance_only`) are bridges: introduced as explicit fields in P1, then narrowed in P3 to be *derived* from other fields where possible.
+`audience_class` and `required_tool_access` are *new* descriptor fields, not derived. `inline_safe` and `maintenance_only` are bridges: introduced as explicit fields in P1, then narrowed to descriptor-owned projections where possible.
 
 ## 5. Implementation phases
 
 | Phase | PR scope | Verifiable end-state |
 |---|---|---|
-| **P1** | Extend `policy` record with 4 new fields. Every existing descriptor literal gets explicit values matching current `keeper_tool_policy.ml` decisions. No callers migrate yet. | Build green. `Agent_tool_descriptor.all_descriptors ()` answers every per-tool policy question. Cross-check test: for each descriptor, assert agreement with `keeper_tool_policy.<predicate>`. Cross-check pass is the migration safety gate. |
+| **P1** | Extend `policy` record with new fields. Every existing descriptor literal gets explicit values matching current `keeper_tool_policy.ml` decisions. No callers migrate yet. | Build green. `Agent_tool_descriptor.all_descriptors ()` answers every per-tool policy question. Cross-check test: for each descriptor, assert agreement with `keeper_tool_policy.<predicate>`. Cross-check pass is the migration safety gate. |
 | **P2** | Migrate `is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool` to descriptor-driven projections. Drop the corresponding string lists/Hashtbls. | `keeper_tool_policy.ml` LoC down by ~60. Test from P1 still passes (no semantic change). |
-| **P3** | Migrate `last_turn_safe_tool_names` to a derivation rule (`readonly_hint = Some true && effect_domain = None`). Drop the hand list. Audit any descriptor whose old-vs-new disagrees — the disagreement *is* the latent bug, fix by descriptor edit. | Last hand list of per-tool policy classification removed. |
-| **P4** | Migrate `preset_allowlist` to read `descriptor.policy.minimum_preset`. Drop preset-keyed string list construction. | `tool_access_lookup_of_meta` becomes a descriptor filter. |
-| **P5** | Drop everything in `keeper_tool_policy.ml` that has no agent-level role. Target: < 250 LoC, only `tool_preset` enum + agent-side state + path normalization + descriptor projections. | LoC reduction ~420. |
-| **P6** (follow-up RFC) | Re-evaluate whether `Keeper_tool_policy_config` (TOML loader) can be regenerated from descriptors instead of edited by operators. Likely no — operators tune presets, not per-tool policy. | Out of scope. |
+| **P3** | Migrate tool-access allowlists to descriptor policy data. Drop profile-keyed string list construction. | `tool_access_lookup_of_meta` becomes a descriptor filter. |
+| **P4** | Drop everything in `keeper_tool_policy.ml` that has no agent-level role. Target: < 250 LoC, only agent-side state + path normalization + descriptor projections. | LoC reduction ~420. |
+| **P5** (follow-up RFC) | Re-evaluate whether `Keeper_tool_policy_config` (TOML loader) can be regenerated from descriptors instead of edited by operators. Likely no — operators tune policy bundles, not per-tool policy. | Out of scope. |
+
+Progress note (2026-06-05): P2 projections for inline-safe and
+maintenance-only tools are descriptor-owned, and the no-op denied set was
+removed. The final-turn policy axis was removed with the Keeper-side
+tool/budget gates; OAS owns the turn cap and Keeper no longer rewrites schemas
+based on the final turn.
 
 P1's cross-check test is the central safety device. The test compares every descriptor's projected predicate against the existing `keeper_tool_policy` answer; **the migration is only permitted to advance if all descriptors agree**. Disagreements found in P1 are P1's job to resolve (by descriptor edit, never by changing the predicate to be more permissive).
 
@@ -134,8 +132,7 @@ This RFC does *not* trigger workaround signatures:
 
 1. **`audience_class` enum granularity.** Today the de facto audience is binary (operator-facing on `public_mcp_surface_tools` vs. keeper-facing on `keeper_internal_tools`), but `Tool_catalog_surfaces.keeper_internal_replacement` already encodes a 1:1 mapping for tools with both surfaces. Audience may want a fifth variant `Audience_both_with_distinct_handler` — open for discussion in P1.
 2. **Maintenance gate consolidation.** `maintenance_only` overlaps `approval = Human_required`. The distinction today: maintenance can be operator-bypassed for a single tool call, approval is a per-call queue event. Keep both fields in P1; reconsider in P5.
-3. **Preset bypass for `tool_preset = Full`.** `Full` preset agents currently skip all preset checks. Keep this behavior — encode as `minimum_preset` defaulting to `Minimal` and a single bypass at the preset evaluator, not as descriptor-level fields.
-4. **`Keeper_tool_policy_config` TOML.** Operators edit it. If a descriptor's static `minimum_preset = Dispatch` is overridden by TOML to `Research`, the TOML wins (operator > source). Document precedence in P4.
+3. **Tool-access override precedence.** Operators edit `Keeper_tool_policy_config` TOML. If descriptor policy and TOML disagree, the TOML wins (operator > source). Document precedence in P4.
 
 ## 8. Rejected alternatives
 
@@ -147,7 +144,7 @@ This RFC does *not* trigger workaround signatures:
 
 - RFC merged.
 - P1's cross-check test exists and passes on every descriptor for every migrated predicate.
-- P2–P5 PRs all merged.
+- P2–P4 PRs all merged.
 - `keeper_tool_policy.ml` is < 250 LoC.
-- `is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool`, `last_turn_safe_tool_names`, `preset_allowlist` all read from `Agent_tool_descriptor.{public,internal}_descriptors`.
-- No string list of tool names remains in `keeper_tool_policy.ml` outside of preset enum semantics.
+- `is_keeper_denied`, `is_keeper_safe_inline_tool`, `is_keeper_maintenance_only_tool`, and tool-access projections all read from `Agent_tool_descriptor.{public,internal}_descriptors`.
+- No string list of tool names remains in `keeper_tool_policy.ml` outside descriptor projections.

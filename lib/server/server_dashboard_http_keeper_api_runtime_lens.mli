@@ -1,7 +1,7 @@
 (** Runtime-lens JSON cluster for keeper dashboard API. *)
 
 val runtime_lens_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
   ?turn_id:int ->

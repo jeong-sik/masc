@@ -45,7 +45,7 @@ val should_retry_unix_fallback : exn -> bool
 val process_timeout_observer_fn :
   (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t
 (** Hook fired from every [run_argv*] timeout branch.  Default no-op so
-    [masc_process] carries no [Prometheus] dependency.  [lib/coord.ml]
+    [masc_process] carries no [Otel_metric_store] dependency.  [lib/workspace.ml]
     wires it at module load to emit [masc_process_timeout_total].
     [program] is [Filename.basename argv0] (~10-20 distinct programs fleet-wide);
     [origin] is one of {!Timeout_origin.process_origins}, so the metric’s
@@ -112,11 +112,16 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string * string)
 (** Like [run_argv_with_stdin_and_status], but returns
-    [(status, stdout, stderr)] without combining stderr into stdout. *)
+    [(status, stdout, stderr)] without combining stderr into stdout. When
+    callback arguments are supplied on the Eio path, they are invoked for
+    stdout/stderr chunks while the process is still running. Fallback Unix
+    execution remains completion-captured. *)
 
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
@@ -137,6 +142,19 @@ val run_argv_with_status_split :
 (** Like [run_argv_with_status], but returns
     [(status, stdout, stderr)] without combining stderr into stdout. *)
 
+val run_argv_with_status_split_streaming :
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  on_stdout_chunk:(string -> unit) ->
+  on_stderr_chunk:(string -> unit) ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Like [run_argv_with_status_split], but invokes [on_stdout_chunk] and
+    [on_stderr_chunk] for every chunk read from the child pipes while the
+    process is still running. The returned strings still contain the full
+    captured output. *)
+
 type pipeline_stage = {
   argv : string list;
   env : string array option;
@@ -145,11 +163,18 @@ type pipeline_stage = {
 (** One argv-only process stage in a native pipeline. *)
 
 val run_argv_pipeline_with_status_split :
-  ?timeout_sec:float -> pipeline_stage list -> (Unix.process_status * string * string)
+  ?timeout_sec:float ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  pipeline_stage list ->
+  (Unix.process_status * string * string)
 (** Run host stages as a native pipeline. Adjacent stages are connected with
     process pipes so intermediate stdout is streamed with backpressure rather
     than buffered into OCaml strings. The returned stdout is the final stage's
-    stdout; stderr is captured from every stage in stage order. *)
+    stdout; stderr is captured from every stage in stage order. When callback
+    arguments are supplied on the Eio path, they are invoked for chunks read
+    from the final stdout pipe and per-stage stderr pipes while the pipeline is
+    still running. *)
 
 type detached_handle = {
   pid : int;

@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name worker_execution_backend)
+ (public_name masc.worker_execution_backend)
+ (wrapped false)
+ (modules worker_execution_backend)
+ (libraries yojson masc_core))

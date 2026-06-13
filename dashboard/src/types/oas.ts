@@ -37,7 +37,7 @@ interface OasAgentActionExecutedEvent extends OasAgentEventBase {
 
 // `phase` is the keeper FSM phase at emit time. Backend emits the
 // lowercase wire form via `Keeper_state_machine.phase_to_string`
-// (lib/cascade/cascade_events.ml:170–179); the factory in
+// (lib/runtime/runtime_events.ml:170–179); the factory in
 // `oas-runtime-store.ts` normalizes it to the canonical PascalCase
 // `KeeperPhase` so consumers don't carry around two casing forms.
 // `null` means either the lifecycle event genuinely had no phase
@@ -92,6 +92,7 @@ export interface OasHealthSummary {
   replayLoadedEvents: number
   replayTotalMatchingEvents: number
   replayTruncated: boolean
+  hasMore: boolean
   totalLlmCalls: number
   totalErrors: number
   lastLlmCallTs: number | null

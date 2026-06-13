@@ -40,7 +40,7 @@ You are an agent working inside the MASC Cockpit design system. MASC is a single
 Terminal-flavored. Past-tense receipts. Never second-person.
 
 - Empty: `NO ACTIVE KEEPERS` + one-line action
-- Error: `CASCADE FAIL · provider=openai · t-9f2a` + retry info
+- Error: `RUNTIME FAIL · provider=openai · t-9f2a` + retry info
 - Success: `APPROVED · t-9f2a` + receipt
 
 ## When adding new UI

@@ -22,14 +22,14 @@ impl Plugin for GameStatePlugin {
     fn build(&self, app: &mut App) {
         app
             // Resources (always registered — inert when not in TRPG mode)
-            .init_resource::<RoomState>()
+            .init_resource::<WorkspaceState>()
             .init_resource::<MapState>()
             .init_resource::<ConnectionStatus>()
             .init_resource::<OverlayState>()
             .init_resource::<TurnProgressState>()
             .init_resource::<ChoiceState>()
             .init_resource::<CombatState>()
-            .init_resource::<http::ActiveTrpgRoom>()
+            .init_resource::<http::ActiveTrpgWorkspace>()
             .init_resource::<round_runner::RoundRunner>()
             // Events (type registrations — always available)
             .add_message::<DiceRolled>()
@@ -47,8 +47,8 @@ impl Plugin for GameStatePlugin {
             .add_message::<TurnProgressUpdated>()
             // Phase 1: High-frequency events
             .add_message::<PartySelected>()
-            .add_message::<RoomCreated>()
-            .add_message::<RoomStarted>()
+            .add_message::<WorkspaceCreated>()
+            .add_message::<WorkspaceStarted>()
             .add_message::<SessionStarted>()
             .add_message::<PhaseChanged>()
             .add_message::<TurnStarted>()
@@ -61,7 +61,7 @@ impl Plugin for GameStatePlugin {
             .add_message::<ActorClaimed>()
             .add_message::<ActorReleased>()
             .add_message::<ActorUpdated>()
-            .add_message::<RoomEnded>()
+            .add_message::<WorkspaceEnded>()
             .add_message::<TurnActionResolved>()
             .add_message::<CombatAttack>()
             .add_message::<CombatDefense>()
@@ -80,7 +80,7 @@ impl Plugin for GameStatePlugin {
             .add_systems(
                 Update,
                 (
-                    http::refresh_state_on_room_change,
+                    http::refresh_state_on_workspace_change,
                     http::apply_initial_state,
                     systems::apply_hp_change,
                     systems::apply_area_move,
@@ -104,7 +104,7 @@ impl Plugin for GameStatePlugin {
                     systems::apply_actor_deleted,
                     systems::apply_actor_claimed,
                     systems::apply_actor_released,
-                    systems::apply_room_ended,
+                    systems::apply_workspace_ended,
                     systems::apply_scene_transitioned,
                     crate::dom::endgame::detect_endgame,
                 )
@@ -114,8 +114,8 @@ impl Plugin for GameStatePlugin {
                 Update,
                 (
                     systems::apply_party_selected,
-                    systems::apply_room_created,
-                    systems::apply_room_started,
+                    systems::apply_workspace_created,
+                    systems::apply_workspace_started,
                     systems::apply_session_started,
                     systems::apply_phase_changed,
                     systems::apply_turn_started,

@@ -1,13 +1,14 @@
 (** Gen12: verify [truncate_string] primitive used at checkpoint load.
 
     Gen8 caps social_state at the write side (to_social_state). Gen12
-    reuses the same primitive in Keeper_types.parse_keeper_state so
+    reuses the same primitive in Keeper_meta_json_parse.parse_keeper_state so
     pre-Gen8 checkpoints with unbounded [last_active_desire],
     [last_current_intention], [last_blocker], [last_need] are trimmed
     when loaded back into meta.runtime. This test locks the primitive
     so the load path and write path cannot drift. *)
 
-module T = Masc_mcp.Keeper_social_model_types
+module T = Keeper_social_model_types
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 
 let long n = String.make n 'x'
 

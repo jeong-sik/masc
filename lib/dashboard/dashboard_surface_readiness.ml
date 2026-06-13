@@ -2,7 +2,6 @@ type verification_refs = {
   fixture_harness : string option;
   live_spotcheck : string option;
   logs_ref : string option;
-  metrics_ref : string option;
   proof_ref : string option;
   tool_name : string option;
 }
@@ -46,7 +45,6 @@ let refs_json (refs : verification_refs) =
           value)
       refs.live_spotcheck;
     Option.map (ref_json ~kind:"route" ~label:"logs") refs.logs_ref;
-    Option.map (ref_json ~kind:"route" ~label:"metrics") refs.metrics_ref;
     Option.map (ref_json ~kind:"route" ~label:"proof") refs.proof_ref;
     Option.map (ref_json ~kind:"tool" ~label:"tool_name") refs.tool_name;
   ]
@@ -65,7 +63,6 @@ let verification_ref_bar_for_refs (refs : verification_refs) =
     |> verification_ref_label "fixture" refs.fixture_harness
     |> verification_ref_label "live_spotcheck" refs.live_spotcheck
     |> verification_ref_label "logs" refs.logs_ref
-    |> verification_ref_label "metrics" refs.metrics_ref
     |> verification_ref_label "proof" refs.proof_ref
     |> verification_ref_label "tool" refs.tool_name
     |> List.rev
@@ -92,12 +89,11 @@ let refs
       ?fixture_harness
       ?live_spotcheck
       ?(logs_ref = Some "/api/v1/dashboard/logs")
-      ?(metrics_ref = Some "/metrics")
       ?proof_ref
       ?tool_name
       ()
   =
-  { fixture_harness; live_spotcheck; logs_ref; metrics_ref; proof_ref; tool_name }
+  { fixture_harness; live_spotcheck; logs_ref; proof_ref; tool_name }
 
 let entry
       ~id
@@ -110,7 +106,6 @@ let entry
       ?fixture_harness
       ?live_spotcheck
       ?logs_ref
-      ?metrics_ref
       ?proof_ref
       ?tool_name
       ()
@@ -127,7 +122,6 @@ let entry
         ?fixture_harness
         ?live_spotcheck
         ?logs_ref
-        ?metrics_ref
         ?proof_ref
         ?tool_name
         ()
@@ -153,13 +147,13 @@ let all_entries =
       ~meets_main_gate:true
       ~rationale:"Front-door briefing surface for shell, mission, and project snapshots."
       ~route_hash:"#overview"
-      ~fixture_harness:"./scripts/harness_dashboard_mission_smoke.sh"
+      ~fixture_harness:"./scripts/harness_dashboard_briefing_smoke.sh"
       ~live_spotcheck:"/api/v1/dashboard/shell"
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
       ~id:"monitoring.agents"
-      ~label:"Keeper Operations"
+      ~label:"Keeper Fleet"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -182,18 +176,18 @@ let all_entries =
       ()
   ; entry
       ~id:"monitoring.runtime"
-      ~label:"Cascade & Runtime"
+      ~label:"Runtime"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"Canonical runtime surface for cascade routing and provider health."
+      ~rationale:"Canonical runtime surface for provider health."
       ~route_hash:"#monitoring?section=runtime"
-      ~live_spotcheck:"/api/v1/cascade/health"
+      ~live_spotcheck:"/api/v1/providers"
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
       ~id:"monitoring.observatory"
-      ~label:"Evidence Timeline"
+      ~label:"Observatory"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
@@ -201,28 +195,6 @@ let all_entries =
       ~route_hash:"#monitoring?section=observatory"
       ~fixture_harness:"dune exec ./test/test_activity_graph.exe"
       ~live_spotcheck:"/api/v1/activity/graph"
-      ()
-  ; entry
-      ~id:"monitoring.cascade-config"
-      ~label:"Cascade Config"
-      ~exposure_status:"diagnostic"
-      ~hidden_from_nav:true
-      ~meets_main_gate:false
-      ~rationale:"Dedicated cascade.toml editor and diagnostics surface."
-      ~route_hash:"#monitoring?section=cascade-config"
-      ~live_spotcheck:"/api/v1/cascade/config"
-      ~tool_name:"masc_operator_snapshot"
-      ()
-  ; entry
-      ~id:"monitoring.doctor"
-      ~label:"Doctor"
-      ~exposure_status:"diagnostic"
-      ~hidden_from_nav:true
-      ~meets_main_gate:false
-      ~rationale:"Sidecar and config doctor diagnostics promoted to Monitor."
-      ~route_hash:"#monitoring?section=doctor"
-      ~live_spotcheck:"/api/v1/dashboard/doctor"
-      ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
       ~id:"monitoring.transport-health"
@@ -254,7 +226,7 @@ let all_entries =
       ~meets_main_gate:false
       ~rationale:"Hidden diagnostic execution-flow drill-down."
       ~route_hash:"#monitoring?section=journey"
-      ~fixture_harness:"./scripts/harness_dashboard_mission_smoke.sh"
+      ~fixture_harness:"./scripts/harness_dashboard_briefing_smoke.sh"
       ~live_spotcheck:"/api/v1/dashboard/namespace-truth"
       ~tool_name:"masc_operator_snapshot"
       ()
@@ -416,10 +388,7 @@ let verification_ref_bar_for_entries entries =
     let logs =
       verification_ref_coverage_count (fun refs -> nonempty refs.logs_ref) entries
     in
-    let metrics =
-      verification_ref_coverage_count (fun refs -> nonempty refs.metrics_ref) entries
-    in
-    Printf.sprintf "live:%d/%d logs:%d/%d metrics:%d/%d" live total logs total metrics total
+    Printf.sprintf "live:%d/%d logs:%d/%d" live total logs total
 
 let json ?surface_id () =
   let surfaces =

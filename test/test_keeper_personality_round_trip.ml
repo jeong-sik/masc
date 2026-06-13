@@ -18,8 +18,8 @@
    value; compare uses the capped form.  No drift signal, no rewrite,
    loop terminates. *)
 
-module KR = Masc_mcp.Keeper_runtime
-module KC = Masc_mcp.Keeper_config
+module KR = Masc.Keeper_runtime
+module KC = Masc.Keeper_config
 
 (* nick0cave's actual will field (357 bytes, 119 UTF-8 codepoints)
    from .masc/keepers/nick0cave.json on the day the loop was diagnosed.

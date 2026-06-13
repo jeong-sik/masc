@@ -85,7 +85,7 @@ let fingerprint_of_error ?(max_len = 120) (error_msg : string) : string =
   if !i < len then s ^ "…" else s
 
 (** Mutex protecting [states] and every per-keeper [breaker_state].
-    Every production path goes through [Agent_tool_dispatch_runtime.apply_circuit_breaker]
+    Every production path goes through [Keeper_tool_dispatch_runtime.apply_circuit_breaker]
     which runs on whichever keeper fiber handled the tool call — multiple
     keepers execute tools concurrently, so [Hashtbl.find_opt] + conditional
     [Hashtbl.replace] in [get_or_create] is a textbook TOCTOU, and the
@@ -201,7 +201,7 @@ let rec record_failure ~keeper_name ~(error_msg : string) : string option =
       s.consecutive_count <- 0;
       let tripped = s.total_tripped in
       let recent = s.recent_failures in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CircuitBreakerTrips)
         ~labels:[("keeper", keeper_name); ("failure_type", error_class_to_string cls)]
         ();
@@ -224,10 +224,10 @@ and corrective_hint cls keeper_name =
     | Path_not_found ->
       Printf.sprintf
         "- The file you are looking for does NOT exist. Do NOT guess paths.\n\
-         - Use Execute executable='ls' argv=['.'] on your playground root first to see what actually exists, or use a visible file-listing tool if one is present.\n\
+         - Inspect visible paths with the currently exposed read/listing tools before retrying.\n\
          - Your playground: .masc/playground/%s/\n\
          - Your repos: .masc/playground/%s/repos/ (clone a repo first if empty)\n\
-         - NEVER fabricate file paths like lib/ocaml/... — check with ls first."
+         - NEVER fabricate file paths like lib/ocaml/... — confirm the path exists first."
         keeper_name keeper_name
     | Path_not_allowed ->
       Printf.sprintf
@@ -237,7 +237,7 @@ and corrective_hint cls keeper_name =
          - Run `keeper_context_status` to see your allowed paths."
         keeper_name
     | Cwd_not_directory ->
-      "- The cwd you specified is not a directory. Use Execute executable='ls' argv=['.'] to find valid directories, or use a visible file-listing tool if one is present.\n\
+      "- The cwd you specified is not a directory. Inspect visible paths with the currently exposed read/listing tools before retrying.\n\
        - Leave the cwd parameter empty to use your default playground root."
     | Shell_exit_nonzero ->
       "- Your shell command is failing repeatedly. Check the command syntax.\n\

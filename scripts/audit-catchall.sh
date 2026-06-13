@@ -2,7 +2,7 @@
 # Classify OCaml catch-all arms across the tree.
 #
 # Motivation: the 2026-05-19 code-smell audit
-# (memory/masc-mcp-code-smell-report-2026-05-19.html, Hotspot #5)
+# (memory/masc-code-smell-report-2026-05-19.html, Hotspot #5)
 # counted 3,417 catch-all arms. The raw count mixes legitimate
 # variant catch-alls (e.g. `| _ -> acc` in a fold) with the
 # §AI 안티패턴 §4 (FSM Sparse Match) and §AI 안티패턴 §2
@@ -16,7 +16,7 @@
 #
 # Categories (priority order — first match wins):
 #   error-path           raise / failwith / Error _ / Exit / Invalid_argument
-#   unknown-sentinel     identifier ending in _unknown / HL_unknown / SL_unknown
+#   unknown-marker     identifier ending in _unknown / HL_unknown / SL_unknown
 #                        / `Unknown _` / string "unknown"
 #   permissive-empty     None / [] / () / "" / 0 / 0.0 / false
 #                        — §AI §2 candidates
@@ -104,12 +104,12 @@ classify_body() {
       if (body ~ /^(raise[[:space:]]|failwith[[:space:]]|Error[[:space:]]|Invalid_argument|assert false|exit[[:space:]])/) {
         print "error-path"; next
       }
-      # unknown-sentinel
+      # unknown-marker
       if (body ~ /(^|[^a-zA-Z_])(Unknown[[:space:]]|HL_unknown|SL_unknown|[A-Za-z_]+_unknown\b)/ \
           || tolower(body) ~ /"unknown"/ \
           || tolower(body) ~ /"_other_"/ \
           || tolower(body) ~ /"other"/) {
-        print "unknown-sentinel"; next
+        print "unknown-marker"; next
       }
       # permissive-empty
       if (body == "None"      \

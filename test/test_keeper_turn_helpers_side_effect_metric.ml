@@ -1,7 +1,7 @@
 open Alcotest
 
-module Helpers = Masc_mcp.Keeper_turn_helpers
-module Prometheus = Masc_mcp.Prometheus
+module Helpers = Masc.Keeper_turn_helpers
+module Otel_metric_store = Masc.Otel_metric_store
 
 let test_side_effect_issue_increments_failure_metric () =
   let keeper_name = "side-effect-metric-keeper-0507" in
@@ -9,13 +9,13 @@ let test_side_effect_issue_increments_failure_metric () =
     [ ("keeper", keeper_name); ("site", "trajectory_finalize") ]
   in
   let before =
-    Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+    Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in
   let config =
-    Masc_mcp.Coord.default_config
+    Masc.Workspace.default_config
       (Filename.concat (Filename.get_temp_dir_name ())
          "masc-side-effect-metric-0507")
   in
@@ -25,8 +25,8 @@ let test_side_effect_issue_increments_failure_metric () =
     ~side_effect:"trajectory finalize"
     "test failure";
   let after =
-    Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
+    Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in

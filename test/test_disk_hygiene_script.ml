@@ -330,8 +330,8 @@ let read_makefile_surface () =
 
 let test_makefile_exposes_disk_hygiene_targets () =
   let makefile = read_makefile_surface () in
-  check bool "doctor target exists" true
-    (contains_substring makefile "doctor-disk-hygiene:");
+  check bool "diagnostics target exists" true
+    (contains_substring makefile "diagnostics-disk-hygiene:");
   check bool "safe fix target exists" true
     (contains_substring makefile "fix-disk-hygiene:");
   check bool "hard fix target exists" true

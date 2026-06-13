@@ -2,7 +2,7 @@
 # RFC-0132 PR-3: Boundary_redaction SSOT enforcement.
 #
 # After RFC-0132 PR-2 (#16536) routed 24 "runtime" public-surface labels
-# through Boundary_redaction in cascade/ and keeper/ subsystems, this lint
+# through Boundary_redaction in runtime/ and keeper/ subsystems, this lint
 # blocks regression: any *new* inline "runtime" literal in those files
 # must go through the SSOT module.
 #
@@ -46,19 +46,19 @@ done
 
 # Files routed through Boundary_redaction SSOT by RFC-0132 PR-2 (#16536).
 SCAN_FILES=(
-  "lib/cascade/cascade_attempt_fsm.ml"
-  "lib/cascade/cascade_attempt_liveness_config.ml"
-  "lib/cascade/cascade_attempt_liveness_observer.ml"
-  "lib/cascade/cascade_catalog_runtime_probe.ml"
-  "lib/cascade/cascade_event_bridge.ml"
-  "lib/cascade/cascade_observation.ml"
-  "lib/cascade/cascade_runner.ml"
+  "lib/runtime/runtime_attempt_fsm.ml"
+  "lib/runtime/runtime_attempt_liveness_config.ml"
+  "lib/runtime/runtime_attempt_liveness_observer.ml"
+  "lib/runtime/runtime_catalog_runtime_probe.ml"
+  "lib/runtime/runtime_event_bridge.ml"
+  "lib/runtime/runtime_observation.ml"
+  "lib/runtime/runtime_runner.ml"
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"
   "lib/keeper/keeper_status_runtime.ml"
   "lib/keeper/keeper_generation_lineage.ml"
   "lib/keeper/keeper_hooks_oas.ml"
-  "lib/keeper/keeper_hooks_oas_types.ml"
+  "lib/keeper_hooks_oas_types/keeper_hooks_oas_types.ml"
   "lib/keeper/keeper_oas_checkpoint.ml"
   "lib/keeper/keeper_rollover.ml"
   "lib/keeper/keeper_runtime_contract.ml"
@@ -75,10 +75,10 @@ SCAN_FILES=(
 # Drift (line move) makes the entry stale and must be cleaned in the
 # same PR. The runtime check accepts any of the listed lines.
 PREAPPROVED=(
-  # Debug format string inside Printf.sprintf — internal observability
-  # (real provider identity, not boundary redaction). The model field
-  # above it is already routed via Boundary_redaction.
-  "lib/keeper/keeper_turn_driver_wrappers.ml:95"
+  # Empty: internal-observability "runtime" literals now carry inline
+  # `(* RFC-0132-EXEMPT: ... *)` pragmas instead of file:line entries, which
+  # go stale on every line shift (the RFC-0206 dispatch collapse moved the
+  # former keeper_turn_driver_wrappers.ml:94 site and broke this gate).
 )
 
 violations_tmp="$(mktemp -t rfc0132-pr3.violations.XXXXXX)"
@@ -88,7 +88,8 @@ trap 'rm -f "$violations_tmp" "$stale_tmp"' EXIT
 is_preapproved() {
   local key="$1"
   local entry
-  for entry in "${PREAPPROVED[@]}"; do
+  # `${arr[@]+...}` guard: expands to nothing on an empty array under `set -u`.
+  for entry in "${PREAPPROVED[@]+"${PREAPPROVED[@]}"}"; do
     [[ "$key" == "$entry" ]] && return 0
   done
   return 1
@@ -141,7 +142,7 @@ for f in "${SCAN_FILES[@]}"; do
 done
 
 # Detect stale preapproved entries: line no longer carries `"runtime"`.
-for entry in "${PREAPPROVED[@]}"; do
+for entry in "${PREAPPROVED[@]+"${PREAPPROVED[@]}"}"; do
   path="${entry%%:*}"
   line="${entry#*:}"
   [[ -f "$path" ]] || { echo "$entry (file missing)" >>"$stale_tmp"; continue; }

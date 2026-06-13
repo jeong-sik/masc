@@ -1,5 +1,7 @@
 open Alcotest
-open Masc_mcp
+open Masc
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -20,7 +22,12 @@ let cleanup_dir path =
   in
   rm path
 
-let make_meta ~sandbox : Keeper_types.keeper_meta =
+let string_starts_with ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.sub value 0 prefix_len = prefix
+
+let make_meta ~sandbox : Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [ "name", `String "runner-test"
@@ -29,7 +36,7 @@ let make_meta ~sandbox : Keeper_types.keeper_meta =
       ; "goal", `String "sandbox runner boundary"
       ; "allowed_paths", `List [ `String "*" ]
       ; ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) )
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -42,11 +49,8 @@ module Fake_backend = struct
   let record call =
     calls := call :: !calls
 
-  let egress_policy_path ~config:_ ~meta:_ =
-    "/fake/egress.json"
-
   let effective_sandbox_profile ~meta:_ =
-    Keeper_types.Docker, Keeper_types.Network_none
+    Keeper_types_profile_sandbox.Docker, Keeper_types_profile_sandbox.Network_none
 
   let ensure_runtime ~timeout_sec:_ =
     Ok [ "--fake-seccomp" ]
@@ -62,26 +66,21 @@ module Fake_backend = struct
     { status = Unix.WEXITED status
     ; output
     ; image = "fake-image"
-    ; network_label = Keeper_types.network_mode_to_string network_mode
+    ; network_label = Keeper_types_profile_sandbox.network_mode_to_string network_mode
     ; cwd
     ; semantic_status = None
     ; semantic_ok = status = 0
     }
 
   let run_shell_command_with_status ~config:_ ~meta:_ ~cwd ~timeout_sec:_ ~cmd
-      ~git_creds_enabled ~network_mode =
-    record (Printf.sprintf "shell:%s:%b" cmd git_creds_enabled);
+      ~network_mode =
+    record ("shell:" ^ cmd);
     Ok (result ~status:3 ~output:("shell:" ^ cmd) ~network_mode ~cwd)
 
   let run_trusted_shell_command_with_status ~config:_ ~meta:_ ~cwd
-      ~timeout_sec:_ ~cmd ~git_creds_enabled ~network_mode =
-    record (Printf.sprintf "trusted:%s:%b" cmd git_creds_enabled);
+      ~timeout_sec:_ ~cmd ~network_mode =
+    record ("trusted:" ^ cmd);
     Ok (result ~status:0 ~output:("trusted:" ^ cmd) ~network_mode ~cwd)
-
-  let run_credentialed_bash ~turn_sandbox_runtime:_ ~config:_ ~meta:_ ~cwd:_
-      ~timeout_sec:_ ~cmd () =
-    record ("credentialed:" ^ cmd);
-    "credentialed:" ^ cmd
 
   let run_bash ~turn_sandbox_runtime:_ ~config:_ ~meta:_ ~cwd:_ ~timeout_sec:_
       ~cmd ~network_mode:_ =
@@ -96,8 +95,8 @@ let with_fixture f =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types.Docker in
+       let config = Workspace.default_config base in
+       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
        f ~config ~meta)
 
 let test_functor_delegates_user_shell () =
@@ -105,8 +104,8 @@ let test_functor_delegates_user_shell () =
   with_fixture (fun ~config ~meta ->
       match
         Runner.run_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"git status" ~git_creds_enabled:false
-          ~network_mode:Keeper_types.Network_none
+          ~timeout_sec:5.0 ~cmd:"git status"
+          ~network_mode:Keeper_types_profile_sandbox.Network_none
       with
       | Error e -> Alcotest.fail e
       | Ok result ->
@@ -114,7 +113,7 @@ let test_functor_delegates_user_shell () =
           (match result.status with Unix.WEXITED n -> n | _ -> -1);
         check string "output" "shell:git status" result.output;
         check (list string) "calls"
-          [ "shell:git status:false" ]
+          [ "shell:git status" ]
           (List.rev !Fake_backend.calls))
 
 let test_functor_delegates_trusted_tool () =
@@ -122,8 +121,8 @@ let test_functor_delegates_trusted_tool () =
   with_fixture (fun ~config ~meta ->
       match
         Runner.run_trusted_shell_command_with_status ~config ~meta ~cwd:"/work"
-          ~timeout_sec:5.0 ~cmd:"gh pr view" ~git_creds_enabled:true
-          ~network_mode:Keeper_types.Network_inherit
+          ~timeout_sec:5.0 ~cmd:"gh pr view"
+          ~network_mode:Keeper_types_profile_sandbox.Network_inherit
       with
       | Error e -> Alcotest.fail e
       | Ok result ->
@@ -132,7 +131,7 @@ let test_functor_delegates_trusted_tool () =
         check string "output" "trusted:gh pr view" result.output;
         check string "network label" "inherit" result.network_label;
         check (list string) "calls"
-          [ "trusted:gh pr view:true" ]
+          [ "trusted:gh pr view" ]
           (List.rev !Fake_backend.calls))
 
 let test_uses_backend_respects_profile () =
@@ -140,9 +139,9 @@ let test_uses_backend_respects_profile () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
-       let docker_meta = make_meta ~sandbox:Keeper_types.Docker in
-       let local_meta = make_meta ~sandbox:Keeper_types.Local in
+       let config = Workspace.default_config base in
+       let docker_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Docker in
+       let local_meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
        let docker_cwd =
          Keeper_sandbox.host_root_abs_of_meta ~config docker_meta
        in
@@ -162,13 +161,37 @@ let test_uses_backend_respects_profile () =
          (Keeper_sandbox_runner.route_via
             ~config ~meta:local_meta ~cwd:local_cwd))
 
+let test_playground_root_uses_config_base_path () =
+  let config_base = temp_dir "keeper_sandbox_config_base_" in
+  let env_base = temp_dir "keeper_sandbox_env_base_" in
+  let previous_masc_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous_masc_base with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> unsetenv "MASC_BASE_PATH");
+      cleanup_dir config_base;
+      cleanup_dir env_base)
+    (fun () ->
+       Unix.putenv "MASC_BASE_PATH" env_base;
+       let config = Workspace.default_config config_base in
+       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
+       let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+       check bool "host root under config base_path" true
+         (string_starts_with ~prefix:(config_base ^ "/") host_root);
+       check bool "host root ignores ambient MASC_BASE_PATH" false
+         (string_starts_with ~prefix:(env_base ^ "/") host_root);
+       check string "host root suffix"
+         (Filename.concat config_base ".masc/playground/runner-test")
+         (Keeper_alerting_path.strip_trailing_slashes host_root))
+
 let test_local_route_does_not_force_backend_cwd () =
   let base = temp_dir "keeper_sandbox_runner_lazy_cwd_" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       let config = Coord.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types.Local in
+       let config = Workspace.default_config base in
+       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Local in
        let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        let result =
          Keeper_sandbox_runner.run_command_with_status
@@ -185,8 +208,7 @@ let test_local_route_does_not_force_backend_cwd () =
              { route_cwd = cwd
              ; cwd = (fun () -> failwith "backend cwd evaluated on host route")
              ; command_text = "true"
-             ; git_creds_enabled = false
-             ; network_mode = Keeper_types.Network_none
+             ; network_mode = Keeper_types_profile_sandbox.Network_none
              ; trust = Keeper_sandbox_runner.User_shell
              }
        in
@@ -202,6 +224,10 @@ let () =
         ] )
     ; ( "routing",
         [ test_case "profile selects backend" `Quick test_uses_backend_respects_profile
+        ; test_case
+            "playground root uses config base_path"
+            `Quick
+            test_playground_root_uses_config_base_path
         ; test_case
             "local route does not force backend cwd"
             `Quick

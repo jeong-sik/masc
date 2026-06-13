@@ -40,7 +40,7 @@ BIN_AUDITED = {
     "tar", "rsync", "make", "cmake",
     "npm", "yarn", "pnpm", "pip", "opam", "cargo",
     "gh", "glab", "terminal-notifier", "osascript", "play", "rec",
-    "ffplay", "mpg123", "open", "claude", "gemini", "codex",
+    "ffplay", "mpg123", "open", "cli-agent",
 }
 BIN_SAFE = {
     "ls", "cat", "pwd", "echo", "head", "tail",

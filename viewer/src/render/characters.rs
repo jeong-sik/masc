@@ -292,7 +292,7 @@ pub fn handle_drag_end(
 
     let final_pos = Vec2::new(transform.translation.x, transform.translation.y);
 
-    // Snap to nearest named area using the same coordinate system as area_to_position
+    // Snap to nearest named area using the same orchestrate system as area_to_position
     if let Ok(mut actor) = actors.get_mut(entity) {
         actor.area = position_to_area(final_pos);
         log::info!(

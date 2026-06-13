@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TARGET_DIR="${PWD}"
 HOST="${MASC_HOST:-127.0.0.1}"
-PORT="${MASC_MCP_PORT:-}"
+PORT="${MASC_PORT:-}"
 PORT_EXPLICIT=0
 PRINT_PORT_ONLY=0
 BOOTSTRAP_ONLY=0
@@ -43,7 +43,7 @@ Dir-local local-dev launcher:
   - --bootstrap-only materializes local config/build state but does not start the server
   - checked-in keeper manifests are excluded by default; pass --bootstrap-keepers to seed config/keepers
 
-For shared repo/full-runtime startup, use ./start-masc-mcp.sh instead.
+For shared repo/full-runtime startup, use ./start-masc.sh instead.
 EOF
 }
 

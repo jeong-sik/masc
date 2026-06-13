@@ -8,7 +8,7 @@
 
 ## 1. Why this exists
 
-masc-mcp 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된다. 같은 design intent를 표현하는데 vocabulary가 분기되어 있어, surface 간 이동 시 색·간격·타이포가 미묘하게 달라진다. 이 spec은 두 surface가 공유하는 canonical vocabulary와 design rule을 정의한다.
+masc 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된다. 같은 design intent를 표현하는데 vocabulary가 분기되어 있어, surface 간 이동 시 색·간격·타이포가 미묘하게 달라진다. 이 spec은 두 surface가 공유하는 canonical vocabulary와 design rule을 정의한다.
 
 | Surface | 경로 | 스타일 시스템 | Active 테마 |
 |---------|------|----------------|------|
@@ -150,11 +150,11 @@ Keeper hues sit at C=0.09 (muted ring). Status hues use higher chroma
 keeper hex coincides with any status hex. Components MUST NOT reuse
 `--color-status-*` tokens for attribution, and vice-versa.
 
-#### 3.6.5 Provider cascade (removed by RFC-0168 / RFC-0170)
+#### 3.6.5 Provider runtime (removed by RFC-0168 / RFC-0170)
 
 The closed-roster `--p-<vendor>` palette was removed by RFC-0168
 (13 vendor tokens) and RFC-0170 (the missed `--p-moonshot` triple).
-Cascade chips now render with neutral border-default styling.
+Runtime chips now render with neutral border-default styling.
 
 bonsai는 현재 keeper attribution을 색이 아닌 텍스트(`@nick0cave` 등)로
 표현 — SPEC v0.3에서도 텍스트-only 가 valid attribution 으로 인정된다

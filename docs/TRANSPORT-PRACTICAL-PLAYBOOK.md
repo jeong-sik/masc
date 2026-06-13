@@ -1,6 +1,6 @@
 # Transport Practical Playbook
 
-`masc-mcp`의 transport는 많지만, 다 같은 문제를 풀지 않는다. 이 문서는 실제 운영에서 어떤 경로를 우선 쓰고, 어떤 지표를 보며, 어떤 명령으로 검증하는지에 집중한다.
+`masc`의 transport는 많지만, 다 같은 문제를 풀지 않는다. 이 문서는 실제 운영에서 어떤 경로를 우선 쓰고, 어떤 지표를 보며, 어떤 명령으로 검증하는지에 집중한다.
 
 ## Quick View
 
@@ -20,11 +20,11 @@
 
 이 surface는 다음을 한 번에 보여준다.
 
-- live SSE observer/coordinator 수
+- live SSE observer/agent stream 수
 - gRPC subscriber/heartbeat 상태
 - WebSocket/WebRTC 활성도
 - queue/backpressure hot session
-- 현재 cluster / room / managed unit / active operation
+- 현재 cluster / workspace / managed unit / active operation
 - transport별 practical path 추천
 
 ## Truth Harness
@@ -81,7 +81,7 @@ curl -N http://127.0.0.1:8935/mcp?sse_kind=observer\&session_id=playbook-observe
 ### 3. HTTP/2 h2c path
 
 ```bash
-MASC_USE_H2=1 ./start-masc-mcp.sh --http --port 8935
+MASC_USE_H2=1 ./start-masc.sh --http --port 8935
 
 curl --http2-prior-knowledge -sS http://127.0.0.1:8935/mcp \
   -H 'Content-Type: application/json' \
@@ -104,7 +104,7 @@ grpcurl -plaintext 127.0.0.1:8936 list
 grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 ```
 
-`Subscribe` / `Heartbeat`는 `proto/masc_coordination.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
+`Subscribe` / `Heartbeat`는 `proto/masc_workspace collaboration.proto` 기준으로 client를 붙인다. dashboard `transport-health`에서 `subscribers`, `active_streams`가 즉시 증가해야 한다.
 
 ### 5. WebSocket discovery
 

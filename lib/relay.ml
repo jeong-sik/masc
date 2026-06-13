@@ -3,7 +3,7 @@
 (** Relay configuration *)
 type relay_config = {
   threshold: float;          (* Context usage threshold (0.0-1.0), default 0.8 *)
-  target_agent: string;      (* Agent to relay to; "auto" defers to cascade *)
+  target_agent: string;      (* Agent to relay to; "auto" defers to runtime *)
   compress_ratio: float;     (* Target compression ratio, default 0.1 *)
   include_todos: bool;       (* Include TODO list in handoff *)
   include_pdca: bool;        (* Include PDCA state in handoff *)
@@ -90,12 +90,10 @@ let record_actual_tokens ~estimated ~actual =
     | None -> ()
     | Some (new_factor, prev_factor, n) ->
       if new_factor > 1.5 || new_factor < 0.5 then
-        Log.warn ~ctx:"relay"
-          "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
+        Log.Relay.warn "calibration drift: correction_factor=%.2f (was %.2f, %d samples)"
           new_factor prev_factor n
       else if abs_float (new_factor -. prev_factor) > 0.1 then
-        Log.debug ~ctx:"relay"
-          "calibration updated: correction_factor=%.2f (was %.2f)"
+        Log.Relay.debug "calibration updated: correction_factor=%.2f (was %.2f)"
           new_factor prev_factor
   end
 
@@ -114,9 +112,9 @@ let default_registry = Llm_provider.Provider_registry.default ()
     Resolution order:
     1. Capabilities.for_model_id — per-model override (e.g. <provider>-<model> -> max_context)
     2. Provider_registry.find — provider-level default (e.g. <provider_slug> -> max_context)
-    3. {!Cascade_runtime.fallback_context_window} *)
+    3. {!Runtime_constants.fallback_context_window} *)
 let resolve_max_context model =
-  let fallback = Cascade_runtime.fallback_context_window in
+  let fallback = Runtime_constants.fallback_context_window in
   (* Layer 1: per-model capabilities (e.g. <provider>-<model> -> max_context) *)
   let from_caps =
     match Llm_provider.Capabilities.for_model_id model with
@@ -308,7 +306,7 @@ let build_handoff_prompt ~payload ~generation =
     2. Continue working on the current task\n\
     3. Maintain the same tone and approach\n\
     4. If context is unclear, ask the user for clarification\n\
-    5. Use MASC tools to coordinate if needed\n"
+    5. Use MASC tools to align if needed\n"
   in
 
   header ^ context ^ footer
@@ -346,7 +344,7 @@ let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
     } in
     let cps = cp :: !checkpoints in
     checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
-    Log.info ~ctx:"checkpoint" "Saved at %.1f%% context usage"
+    Log.Checkpoint.info "Saved at %.1f%% context usage"
       (metrics.usage_ratio *. 100.0);
     cp)
 

@@ -1,0 +1,16 @@
+(include_subdirs no)
+
+(library
+ (name otel_dispatch_hook)
+ (public_name masc.otel_dispatch_hook)
+ (wrapped false)
+ (modules otel_dispatch_hook)
+ (libraries
+  eio
+  opentelemetry
+  unix
+  masc.masc_core
+  masc.tool_types
+  masc.masc_tool_dispatch
+  masc.otel_spans
+  masc.otel_genai))

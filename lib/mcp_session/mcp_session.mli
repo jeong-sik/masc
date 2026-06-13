@@ -4,10 +4,10 @@
 
 (** {1 Session action variant}
 
-    Variant SSOT for the [masc_mcp_session] tool action. Adding a constructor
+    Variant SSOT for the [masc_session] tool action. Adding a constructor
     forces recompilation of [action_to_string] and extends
     [valid_action_strings]; the schema in [tool_schemas_inline_infra.ml] and
-    the dispatcher in [tool_inline_dispatch.ml] both consume this type via
+    the dispatcher in [mcp_tool_runtime.ml] both consume this type via
     {!action_of_string_opt}. *)
 
 type action =

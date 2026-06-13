@@ -17,76 +17,41 @@ let cdal_verdict_persist_decision = function
   | _ -> `Skip_missing_task_scope
 ;;
 
-let keeper_tool_names_for_outcome
-      ~(allowed_tool_names : string list)
-      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
+let keeper_tool_names_for_outcome ~(tool_calls : Keeper_agent_result.tool_call_detail list)
       ~(outcome : string)
   : string list
   =
-  let observed_tool_names =
-    tool_calls
-    |> List.rev
-    |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
-      if String.equal detail.outcome outcome then Some detail.tool_name else None)
-  in
-  Keeper_tool_observation.final_keeper_tool_names
-    ~reported_tool_names:[]
-    ~observed_tool_names
-    ~allowed_tool_names
+  tool_calls
+  |> List.rev
+  |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
+    if String.equal detail.outcome outcome
+    then Some (Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+    else None)
 ;;
 
 let progress_keeper_tool_names_for_contract
-      ~(allowed_tool_names : string list)
       ~(actual_keeper_tool_names : string list)
       ~(tool_calls : Keeper_agent_result.tool_call_detail list)
   : string list
   =
   match tool_calls with
   | [] -> actual_keeper_tool_names
-  | _ :: _ -> keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok"
+  | _ :: _ -> keeper_tool_names_for_outcome ~tool_calls ~outcome:"ok"
 ;;
 
-let no_progress_success_tool_names_for_contract
-      ~(allowed_tool_names : string list)
-      ~(tool_calls : Keeper_agent_result.tool_call_detail list)
-  : string list
-  =
-  keeper_tool_names_for_outcome ~allowed_tool_names ~tool_calls ~outcome:"ok_no_progress"
-;;
-
-let completion_contract_violation_error reason =
-  Agent_sdk.Error.Agent
-    (Agent_sdk.Error.CompletionContractViolation
-       { contract = Agent_sdk.Completion_contract_id.Require_tool_use
-       ; reason
-       ; violation_detail = None
-       })
-;;
-
-let observed_tool_contract_status ~required_tool_names ~missing_visible_required
+let observed_completion_contract_status
       ~had_owned_active_task_at_turn_start ~actual_keeper_tool_names
-  : Keeper_execution_receipt.tool_contract_result
+  : Keeper_execution_receipt.completion_contract_result
   =
-  Keeper_agent_run_turn_helpers.tool_contract_result_for_observed_tools
-    ~required_tool_names ~missing_visible_required ~had_owned_active_task_at_turn_start
+  Keeper_agent_run_turn_helpers.completion_contract_result_for_progress_evidence
+    ~had_owned_active_task_at_turn_start
     ~actual_keeper_tool_names
 ;;
 
-let passive_violation_contract_status ~actual_keeper_tool_names
-      ~progress_keeper_tool_names ~fallback
-  : Keeper_execution_receipt.tool_contract_result
-  =
-  if actual_keeper_tool_names = []
-  then Contract_missing_required_tool_use
-  else if progress_keeper_tool_names = []
-  then Contract_needs_execution_progress
-  else fallback ()
-;;
-
 let text_only_violation_contract_status ~actual_keeper_tool_names ~fallback
-  : Keeper_execution_receipt.tool_contract_result
+  : Keeper_execution_receipt.completion_contract_result
   =
   if actual_keeper_tool_names = []
-  then Contract_missing_required_tool_use
+  then Contract_violated
   else fallback ()
 ;;

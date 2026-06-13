@@ -1,28 +1,25 @@
 open Alcotest
 
-module WO = Masc_mcp.Keeper_world_observation
-module UM = Masc_mcp.Keeper_unified_metrics
-module AE = Masc_mcp.Agent_economy
+module WO = Masc.Keeper_world_observation
+module UM = Masc.Keeper_unified_metrics
 
 let base_observation : WO.world_observation =
   {
     pending_mentions = [];
     pending_board_events = [];
     pending_scope_messages = [];
-    message_cursor_updates = [];
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";
     context_ratio = 0.0;
-    economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
     provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
-    active_agent_count = 0;
-    last_turn_budget = None;
+    running_keeper_fiber_count = 0;
+    connected_surfaces = [];
   }
 
 let sample_board_event : WO.pending_board_event =
@@ -32,7 +29,7 @@ let sample_board_event : WO.pending_board_event =
     title = "Need help";
     preview = "Please take a look.";
     hearth = Some "research";
-    post_kind = Masc_mcp.Board.Human_post;
+    post_kind = Masc.Board.Human_post;
     updated_at = 0.0;
     explicit_mention = false;
     matched_targets = [];
@@ -42,7 +39,7 @@ let sample_board_event : WO.pending_board_event =
     latest_external_preview = None;
   }
 
-let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   let json =
     `Assoc
       [
@@ -55,7 +52,7 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
-let minimal_meta : Masc_mcp.Keeper_types.keeper_meta = make_meta "test-keeper"
+let minimal_meta : Masc.Keeper_meta_contract.keeper_meta = make_meta "test-keeper"
 
 let test_task_verify_affordance_for_keeper () =
   let meta = { minimal_meta with mention_targets = [ "analyst" ] } in

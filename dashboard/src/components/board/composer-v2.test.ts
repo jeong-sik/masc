@@ -53,12 +53,12 @@ describe('buildComposerV2Request', () => {
   it('keeps the compose shape required by the C3 contract', () => {
     expect(buildComposerV2Request({
       mode: 'state-block',
-      roomId: '#ops',
+      workspaceId: '#ops',
       body: '[STATE]\nGoal: ship\nNEXT: verify\n[/STATE]',
     })).toEqual({
       compose: {
         mode: 'state-block',
-        target: { room_id: 'ops' },
+        target: { workspace_id: 'ops' },
         body: {
           kind: 'state-block',
           raw: '[STATE]\nGoal: ship\nNEXT: verify\n[/STATE]',
@@ -97,25 +97,25 @@ describe('ComposerV2', () => {
     vi.clearAllMocks()
   })
 
-  it('sends broadcast drafts through the room broadcast transport', async () => {
-    render(h(ComposerV2, { roomId: 'ops' }))
+  it('sends broadcast drafts through the workspace broadcast transport', async () => {
+    render(h(ComposerV2, { workspaceId: 'ops' }))
 
-    expect(screen.getByLabelText('Target room: ops')).toBeInTheDocument()
+    expect(screen.getByLabelText('Target workspace: ops')).toBeInTheDocument()
 
     fireEvent.input(screen.getByLabelText('Composer v2 message'), {
-      target: { value: 'room update' },
+      target: { value: 'workspace update' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => {
-      expect(sendBroadcastMock).toHaveBeenCalledWith('dashboard-test', 'room update')
+      expect(sendBroadcastMock).toHaveBeenCalledWith('dashboard-test', 'workspace update')
     })
     expect(dispatchOperatorActionMock).not.toHaveBeenCalled()
     expect((screen.getByLabelText('Composer v2 message') as HTMLTextAreaElement).value).toBe('')
   })
 
   it('sends keeper DMs through the operator keeper-message action', async () => {
-    render(h(ComposerV2, { roomId: 'ops' }))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
     fireEvent.input(screen.getByLabelText('Composer v2 message'), {
@@ -142,7 +142,7 @@ describe('ComposerV2', () => {
       { name: 'offline-one', status: 'offline', phase: 'offline' },
     ])
 
-    render(h(ComposerV2, { roomId: 'ops' }))
+    render(h(ComposerV2, { workspaceId: 'ops' }))
     fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
 
     const select = screen.getByLabelText('Composer v2 keeper target') as HTMLSelectElement
@@ -152,7 +152,7 @@ describe('ComposerV2', () => {
   })
 
   it('requires a parsed state block before state sends', async () => {
-    render(h(ComposerV2, { roomId: 'merge-blockers' }))
+    render(h(ComposerV2, { workspaceId: 'merge-blockers' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'State mode' }))
 

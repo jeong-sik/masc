@@ -45,7 +45,7 @@ describe('normalizeOperatorActionDescriptor', () => {
   it('extracts optional fields', () => {
     const result = normalizeOperatorActionDescriptor({
       action_type: 'broadcast',
-      target_type: 'room',
+      target_type: 'workspace',
       description: 'Alert all agents',
       confirm_required: true,
     })
@@ -332,7 +332,7 @@ describe('selectPendingConfirmState', () => {
     const result = selectPendingConfirmState({
       available_actions: [
         { action_type: 'pause', target_type: 'keeper', confirm_required: true },
-        { action_type: 'broadcast', target_type: 'room', confirm_required: false },
+        { action_type: 'broadcast', target_type: 'workspace', confirm_required: false },
       ],
     })
     expect(result.confirm_required_actions).toHaveLength(1)

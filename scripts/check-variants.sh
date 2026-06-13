@@ -55,7 +55,7 @@ extract_ocaml_all_list() {
     ref_name=$(echo "$content" | head -1 | rg '\.([a-z_][a-zA-Z_0-9]*)' -o -r '$1' || true)
     if [ -n "$ref_module" ] && [ -n "$ref_name" ]; then
       snake_module=$(echo "$ref_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
-      for d in lib/keeper lib lib/coord lib/server lib/dashboard; do
+      for d in lib/keeper_registry lib/keeper_state lib/keeper lib lib/workspace lib/server lib/dashboard; do
         candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
         if [ -f "$candidate" ]; then
           # Guard against infinite recursion: only follow one level.
@@ -89,7 +89,7 @@ extract_ocaml_type() {
   local include_module snake_module candidate resolved
   while IFS= read -r include_module; do
     snake_module=$(echo "$include_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
-    for d in lib/keeper lib lib/coord lib/server lib/dashboard; do
+    for d in lib/keeper_registry lib/keeper_state lib/keeper lib lib/workspace lib/server lib/dashboard; do
       candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
       if [ -f "$candidate" ]; then
         resolved=$(extract_ocaml_type "$candidate" "$type_name")
@@ -181,7 +181,7 @@ check_pair() {
 
 echo "=== Check 1: KeeperStateMachine.phase (OCaml) vs KeeperPhase (TypeScript) ==="
 
-KSM_ML="lib/keeper/keeper_state_machine_phase.ml"
+KSM_ML="lib/keeper_registry/keeper_state_machine_phase.ml"
 KP_TS="dashboard/src/types/core.ts"
 
 if [ -f "$KSM_ML" ] && [ -f "$KP_TS" ]; then
@@ -203,14 +203,15 @@ fi
 # ── Check 2: turn_phase (OCaml) vs TurnPhaseSet in TLA+ ─────────────────────
 
 echo ""
-echo "=== Check 2: turn_phase (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
+echo "=== Check 2: turn_phase (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
 
 KR_TYPES_ML="lib/keeper/keeper_registry_types.ml"
-KCL_TLA="specs/keeper-state-machine/KeeperCascadeLifecycle.tla"
+KR_TURN_PHASE_ML="lib/keeper_registry/keeper_registry_types_turn_phase.ml"
+KCL_TLA="specs/keeper-state-machine/KeeperRuntimeLifecycle.tla"
 
-if [ -f "$KR_TYPES_ML" ]; then
+if [ -f "$KR_TURN_PHASE_ML" ]; then
   # turn_phase constructors (strip "Turn_" prefix, lowercase for TLA+ comparison)
-  ocaml_turn_constructors=$(extract_ocaml_type "$KR_TYPES_ML" "turn_phase")
+  ocaml_turn_constructors=$(extract_ocaml_type "$KR_TURN_PHASE_ML" "turn_phase")
   assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_idle"
   assert_contains_variant "OCaml(turn_phase)" "$ocaml_turn_constructors" "Turn_prompting"
   ocaml_turn=$(echo "$ocaml_turn_constructors" \
@@ -231,38 +232,38 @@ if [ -f "$KR_TYPES_ML" ]; then
       echo "INFO: ${KCL_TLA} not found — TLA+ turn_phase check skipped"
     fi
   else
-    echo "WARN: could not extract OCaml turn_phase from ${KR_TYPES_ML}"
+    echo "WARN: could not extract OCaml turn_phase from ${KR_TURN_PHASE_ML}"
   fi
 else
-  echo "WARN: ${KR_TYPES_ML} not found — turn_phase check skipped"
+  echo "WARN: ${KR_TURN_PHASE_ML} not found — turn_phase check skipped"
 fi
 
-# ── Check 3: cascade_state (OCaml) vs CascadeSet in TLA+ ────────────────────
+# ── Check 3: runtime_state (OCaml) vs RuntimeSet in TLA+ ────────────────────
 
 echo ""
-echo "=== Check 3: cascade_state (OCaml) vs KeeperCascadeLifecycle.tla domain ==="
+echo "=== Check 3: runtime_state (OCaml) vs KeeperRuntimeLifecycle.tla domain ==="
 
 if [ -f "$KR_TYPES_ML" ]; then
-  ocaml_cascade=$(extract_ocaml_type "$KR_TYPES_ML" "cascade_state" \
-    | sed 's/Cascade_//' | tr '[:upper:]' '[:lower:]' | sort -u)
+  ocaml_runtime=$(extract_ocaml_type "$KR_TYPES_ML" "runtime_state" \
+    | sed 's/Runtime_//' | tr '[:upper:]' '[:lower:]' | sort -u)
 
-  if [ -n "$ocaml_cascade" ]; then
+  if [ -n "$ocaml_runtime" ]; then
     if [ -f "$KCL_TLA" ]; then
-      # Extract from the CascadeSet == {"..."} definition in the TLA+ spec.
+      # Extract from the RuntimeSet == {"..."} definition in the TLA+ spec.
       # Reads the canonical set literal — no hardcoded values needed here.
-      tla_cascade=$(extract_tla_set_literals "$KCL_TLA" "CascadeSet")
-      if [ -n "$tla_cascade" ]; then
-        check_pair "OCaml(cascade_state)" "$ocaml_cascade" "TLA+(CascadeSet)" "$tla_cascade"
+      tla_runtime=$(extract_tla_set_literals "$KCL_TLA" "RuntimeSet")
+      if [ -n "$tla_runtime" ]; then
+        check_pair "OCaml(runtime_state)" "$ocaml_runtime" "TLA+(RuntimeSet)" "$tla_runtime"
       else
-        echo "INFO: CascadeSet definition not found in ${KCL_TLA} — cascade_state check skipped"
-        echo "      (Add 'CascadeSet == {\"idle\", ...}' to the spec for automated sync)"
+        echo "INFO: RuntimeSet definition not found in ${KCL_TLA} — runtime_state check skipped"
+        echo "      (Add 'RuntimeSet == {\"idle\", ...}' to the spec for automated sync)"
       fi
     else
-      echo "INFO: ${KCL_TLA} not found — TLA+ cascade_state check skipped"
+      echo "INFO: ${KCL_TLA} not found — TLA+ runtime_state check skipped"
     fi
   fi
 else
-  echo "WARN: ${KR_TYPES_ML} not found — cascade_state check skipped"
+  echo "WARN: ${KR_TYPES_ML} not found — runtime_state check skipped"
 fi
 
 # ── Check 4: PHASE_STYLES coverage (TypeScript) vs KeeperPhase ───────────────

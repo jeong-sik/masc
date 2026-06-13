@@ -116,7 +116,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
         with_initialized_state (fun state ->
           match
             authorize_read_request
-              ~base_path:state.Mcp_server.room_config.base_path
+              ~base_path:state.Mcp_server.workspace_config.base_path
               httpun_request
           with
           | Ok () ->
@@ -130,7 +130,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       with_server_state h2_reqd (fun state ->
         match
           authorize_token_bound_permission_request
-            ~base_path:state.Mcp_server.room_config.base_path
+            ~base_path:state.Mcp_server.workspace_config.base_path
             ~permission
             httpun_request
         with
@@ -164,7 +164,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
     let _h2_authorize_tool state ~tool_name =
       authorize_tool_request
-        ~base_path:state.Mcp_server.room_config.base_path
+        ~base_path:state.Mcp_server.workspace_config.base_path
         ~tool_name httpun_request
     in
 
@@ -228,7 +228,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             with_server_state h2_reqd (fun state ->
               match
                 authorize_permission_request
-                  ~base_path:state.Mcp_server.room_config.base_path
+                  ~base_path:state.Mcp_server.workspace_config.base_path
                   ~permission:Masc_domain.CanBroadcast
                   httpun_request
               with
@@ -258,7 +258,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             with_server_state h2_reqd (fun state ->
               match
                 authorize_permission_request
-                  ~base_path:state.Mcp_server.room_config.base_path
+                  ~base_path:state.Mcp_server.workspace_config.base_path
                   ~permission:Masc_domain.CanBroadcast
                   httpun_request
               with
@@ -279,14 +279,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                           (`Assoc [ ("error", `String msg) ])
                           ~status:`Bad_request ~extra_headers:cors))
 
-      | `GET, "/metrics" ->
-          let body = Prometheus.to_prometheus_text () in
-          h2_respond_body
-            ~content_type:"text/plain; version=0.0.4; charset=utf-8"
-            h2_reqd
-            body
-            ~extra_headers:cors
-
+      (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
+         now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors
 
@@ -321,7 +315,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match !server_state with
-            | Some s -> s.Mcp_server.room_config.base_path
+            | Some s -> s.Mcp_server.workspace_config.base_path
             | None -> default_base_path ()
           in
           let context =
@@ -345,22 +339,29 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (match validate_mcp_session_profile ~profile session_id with
            | Error msg ->
-               let body = json_rpc_error (-32600) msg in
+               let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                h2_respond_json h2_reqd body ~status:`Conflict ~extra_headers:cors
            | Ok () ->
                (match Server_mcp_transport_http.validate_protocol_version_continuity
                         ~session_id httpun_request with
                 | Error msg ->
-                    let body = json_rpc_error (-32600) msg in
+                    let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                     h2_respond_json h2_reqd body ~status:`Bad_request
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
-                    remember_mcp_profile session_id profile;
                     (match auth_result with
                      | Error msg ->
-                         let body = json_rpc_error (-32001) msg in
+                         let body = json_rpc_error Mcp_error_code.Auth_error msg in
                          h2_respond_json h2_reqd body ~status:`Unauthorized ~extra_headers:(("www-authenticate", "Bearer") :: cors)
                      | Ok _cred_opt ->
+                         let otel_transport_context =
+                           Otel_dispatch_hook.http_transport_context
+                             ~protocol_version:"2"
+                         in
+                         remember_mcp_profile
+                           ~otel_transport_context
+                           session_id
+                           profile;
                          h2_read_body h2_reqd (fun body_str ->
                              match
                                Server_mcp_request_context.decide_post_body
@@ -373,7 +374,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              | Error
                                  (Server_mcp_request_context.Session_required msg)
                                ->
-                                 let body = json_rpc_error (-32600) msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                  h2_respond_json h2_reqd body
                                    ~status:`Bad_request
                                    ~extra_headers:
@@ -384,7 +385,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                  (Server_mcp_request_context.Unknown_session msg)
                                ->
                                   let new_session_id = Mcp_session.generate () in
-                                  let body = json_rpc_error (-32600) msg in
+                                  let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                                   h2_respond_json h2_reqd body
                                     ~status:`Not_found
                                     ~extra_headers:
@@ -394,7 +395,17 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              | Error
                                  (Server_mcp_request_context.Invalid_accept msg)
                                ->
-                                 let body = json_rpc_error (-32600) msg in
+                                 let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                                 h2_respond_json h2_reqd body ~status:`Bad_request
+                                   ~extra_headers:(cors @ mcp_headers session_id protocol_version)
+                             | Error
+                                 (Server_mcp_request_context.Header_mismatch msg)
+                               ->
+                                 let body =
+                                   Printf.sprintf
+                                     {|{"jsonrpc":"2.0","error":{"code":-32001,"message":"%s"},"id":null}|}
+                                     (String.escaped msg)
+                                 in
                                  h2_respond_json h2_reqd body ~status:`Bad_request
                                    ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                              | Ok post_context ->
@@ -412,17 +423,26 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                                        ~base_path httpun_request
                                    in
                                    let response_json =
+                                     let otel_transport_context =
+                                       Otel_dispatch_hook.http_transport_context
+                                         ~protocol_version:"2"
+                                     in
                                      Mcp_eio.handle_request ~clock ~sw ~profile
                                        ~mcp_session_id:session_id ?auth_token
+                                       ~otel_mcp_protocol_version:protocol_version
+                                       ~otel_transport_context
                                        ~internal_keeper_runtime state
                                        body_with_agent
                                    in
-                                   (match
-                                      protocol_version_from_body
-                                        post_context.body_str
-                                    with
-                                   | Some v -> remember_protocol_version session_id v
-                                   | None -> ());
+                                   let otel_transport_context =
+                                     Otel_dispatch_hook.http_transport_context
+                                       ~protocol_version:"2"
+                                   in
+                                   remember_protocol_version_if_initialize_succeeded
+                                     ~otel_transport_context
+                                     session_id
+                                     ~request_body:post_context.body_str
+                                     ~response_json;
                                    let protocol_version =
                                      get_protocol_version_for_session ~session_id
                                        httpun_request
@@ -450,7 +470,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             else Server_mcp_transport_http.Full
           in
           let base_path = match !server_state with
-            | Some s -> s.Mcp_server.room_config.base_path
+            | Some s -> s.Mcp_server.workspace_config.base_path
             | None -> default_base_path ()
           in
           let auth_result =
@@ -463,7 +483,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (match auth_result with
            | Error msg ->
-               let body = json_rpc_error (-32001) msg in
+               let body = json_rpc_error Mcp_error_code.Auth_error msg in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:(("www-authenticate", "Bearer") :: cors)
            | Ok _ ->
@@ -471,14 +491,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 | Some session_id -> (
                     match validate_mcp_session_delete_profile ~profile session_id with
                     | Error msg ->
-                        let body = json_rpc_error (-32600) msg in
+                        let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                         h2_respond_json h2_reqd body ~status:`Conflict
                           ~extra_headers:cors
                     | Ok () ->
                         (match Server_mcp_transport_http.validate_protocol_version_continuity
                                  ~session_id httpun_request with
                          | Error msg ->
-                             let body = json_rpc_error (-32600) msg in
+                             let body = json_rpc_error Mcp_error_code.Invalid_request msg in
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->
@@ -492,8 +512,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              stop_sse_session session_id;
                              Sse.unregister session_id;
                              forget_mcp_session session_id;
-                             Log.info ~ctx:"h2_gateway"
-                               "Session terminated: %s reason=client_delete \
+                             Log.H2_gateway.info "Session terminated: %s reason=client_delete \
                                 profile=%s protocol_version=%s \
                                 sse_active_before_stop=%b"
                                session_id
@@ -530,7 +549,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
             with_server_state h2_reqd (fun state ->
-              let response = Graphql_api.handle_request ~config:state.room_config body_str in
+              let response = Graphql_api.handle_request ~config:state.workspace_config body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
 
@@ -557,14 +576,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json =
               dashboard_shell_http_json ?clock:state.Mcp_server.clock
                 ~request:httpun_request ~light
-                state.Mcp_server.room_config
+                state.Mcp_server.workspace_config
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/branches" ->
           with_server_state h2_reqd (fun state ->
             let json =
-              Dashboard_branches.json ~config:state.Mcp_server.room_config
+              Dashboard_branches.json ~config:state.Mcp_server.workspace_config
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -576,13 +595,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             in
             let json =
               Dashboard_operator_nudges.json
-                ~config:state.Mcp_server.room_config ~limit ()
+                ~config:state.Mcp_server.workspace_config ~limit ()
             in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/rooms"
-      | `GET, "/api/v1/rooms" ->
+      | `GET, "/api/v1/dashboard/workspace" ->
           with_server_state h2_reqd (fun state ->
             let limit =
               Server_utils.int_query_param httpun_request "limit" ~default:50
@@ -594,36 +612,8 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> trimmed_query_param httpun_request "agent"
             in
             let json =
-              Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me
+              Dashboard_workspace.json ~config:state.Mcp_server.workspace_config ?me
                 ~limit ()
-            in
-            h2_respond_json_value h2_reqd json
-              ~extra_headers:cors)
-
-      | `GET, "/api/v1/dashboard/heuristics"
-      | `GET, "/api/v1/heuristics" ->
-          let json =
-            Server_routes_http_routes_provider_runs.dashboard_heuristics_json
-              httpun_request
-          in
-          h2_respond_json_value h2_reqd json
-            ~extra_headers:cors
-
-      | `GET, "/api/v1/dashboard/heuristics/coverage"
-      | `GET, "/api/v1/heuristics/coverage" ->
-          let json =
-            Server_routes_http_routes_provider_runs.dashboard_heuristics_coverage_json
-              httpun_request
-          in
-          h2_respond_json_value h2_reqd json
-            ~extra_headers:cors
-
-      | `GET, "/api/v1/dashboard/stress"
-      | `GET, "/api/v1/agent_stress" ->
-          with_server_state h2_reqd (fun state ->
-            let json =
-              Server_routes_http_routes_provider_runs.dashboard_stress_json
-                ~config:state.Mcp_server.room_config httpun_request
             in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
@@ -635,7 +625,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/config/excuse-patterns" ->
           with_h2_public_read h2_reqd (fun _state ->
-            let patterns = Anti_rationalization.load_excuse_patterns () in
+            let patterns = Task.Anti_rationalization.load_excuse_patterns () in
             let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
             let json = `List json_items in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
@@ -646,7 +636,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               h2_read_body h2_reqd (fun body_str ->
                 try
                   let json = Yojson.Safe.from_string body_str in
-                  match Anti_rationalization.parse_excuse_patterns_json json with
+                  match Task.Anti_rationalization.parse_excuse_patterns_json json with
                   | Error msg ->
                       h2_respond_json_value
                         h2_reqd
@@ -654,7 +644,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                         ~status:`Bad_request
                         ~extra_headers:cors
                   | Ok patterns ->
-                      (match Anti_rationalization.save_excuse_patterns patterns with
+                      (match Task.Anti_rationalization.save_excuse_patterns patterns with
                        | Ok () ->
                            h2_respond_json_value h2_reqd
                              (`Assoc [ ("ok", `Bool true) ])
@@ -715,7 +705,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_governance_http_json httpun_request
-                ~base_path:state.Mcp_server.room_config.base_path
+                ~base_path:state.Mcp_server.workspace_config.base_path
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -723,7 +713,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_proof_http_json
-                ~config:state.Mcp_server.room_config httpun_request
+                ~config:state.Mcp_server.workspace_config httpun_request
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -731,7 +721,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_planning_http_json
-                ~config:state.Mcp_server.room_config
+                ~config:state.Mcp_server.workspace_config
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -749,7 +739,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_goals_tree_http_json
-                ~config:state.Mcp_server.room_config
+                ~config:state.Mcp_server.workspace_config
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -771,7 +761,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             else
               let json =
                 dashboard_goal_detail_http_json
-                  ~config:state.Mcp_server.room_config ~goal_id
+                  ~config:state.Mcp_server.workspace_config ~goal_id
               in
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
@@ -793,15 +783,15 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 |> Server_utils.clamp ~min_v:1 ~max_v:200
               in
               let json =
-                Tool_task.task_history_events_json state.Mcp_server.room_config
+                Task.Tool.task_history_events_json state.Mcp_server.workspace_config
                   ~task_id ~limit
               in
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/mission" ->
+      | `GET, "/api/v1/dashboard/briefing" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_mission_http_json ~state ~sw ~clock httpun_request in
+            let json = dashboard_briefing_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/session" ->
@@ -809,10 +799,10 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json = dashboard_session_http_json ~state ~sw ~clock httpun_request in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
-      | `GET, "/api/v1/dashboard/mission/briefing" ->
+      | `GET, "/api/v1/dashboard/briefing/sections" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
-              dashboard_mission_briefing_http_json ~state ~sw ~clock
+              dashboard_briefing_sections_http_json ~state ~sw ~clock
                 httpun_request
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
@@ -824,7 +814,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/perf" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_perf_http_json state.Mcp_server.room_config in
+            let json = dashboard_perf_http_json state.Mcp_server.workspace_config in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
@@ -848,14 +838,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/status" ->
           with_server_state h2_reqd (fun state ->
-            let config = state.Mcp_server.room_config in
-            let room_state = Coord.read_state config in
+            let config = state.Mcp_server.workspace_config in
+            let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
             let json = `Assoc [
               ("cluster", `String (Env_config_core.cluster_name ()));
-              ("project", `String room_state.project);
+              ("project", `String workspace_state.project);
               ("tempo_interval_s", `Float tempo.current_interval_s);
-              ("paused", `Bool room_state.paused);
+              ("paused", `Bool workspace_state.paused);
             ] in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -873,9 +863,9 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
       | `GET, "/api/v1/namespace/current"
-      | `GET, "/api/v1/room/current"
+      | `GET, "/api/v1/workspace/current"
       | `POST, "/api/v1/namespace/current"
-      | `POST, "/api/v1/room/current" ->
+      | `POST, "/api/v1/workspace/current" ->
           h2_respond_removed_surface h2_reqd ~surface:"namespace" ~extra_headers:cors
 
       | `POST, p when String.starts_with ~prefix:"/api/v1/command-plane" p ->
@@ -889,7 +879,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                ~cors ~path
                ~config:
                  (Option.map
-                    (fun state -> state.Mcp_server.room_config)
+                    (fun state -> state.Mcp_server.workspace_config)
                     !server_state)
                httpun_meth ->
           ()

@@ -23,7 +23,7 @@
 
 open Alcotest
 
-module A = Masc_mcp.Anti_rationalization
+module A = Masc.Task.Anti_rationalization
 
 (* Isolate the loader from the real user's active config root
    [excuse_patterns.json], but still reproduce the

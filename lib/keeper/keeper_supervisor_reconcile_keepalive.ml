@@ -5,6 +5,9 @@
     the [Keeper_supervisor_cleanup_tombstone] sibling. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 let reconcile_keepalive_keepers
       ~publish_lifecycle
@@ -12,7 +15,7 @@ let reconcile_keepalive_keepers
       (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
-  let names = Keeper_types.keepalive_keeper_names ctx.config in
+  let names = Keeper_meta_store.keepalive_keeper_names ctx.config in
   Log.Keeper.debug
     "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);
@@ -20,7 +23,7 @@ let reconcile_keepalive_keepers
   let reconcile_ym = Eio_guard.create_yield_meter () in
   List.iter
     (fun name ->
-       (match read_meta ctx.config name with
+       (match read_effective_meta ctx.config name with
         | Ok (Some meta) when not meta.paused ->
           let dominated_by_sweep =
             match Keeper_registry.get ~base_path meta.name with
@@ -60,13 +63,13 @@ let reconcile_keepalive_keepers
         | Ok (Some _meta) -> () (* paused, skip *)
         | Ok None -> ()
         | Error err ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:
-              [ ("operation", Keeper_observation_query_operation.(to_label Reconcile_read_meta))
+              [ ("operation", Runtime_observation_query_operation.(to_label Reconcile_read_meta))
               ]
             ();
-          Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err);
+          Log.Keeper.warn "reconcile: read_effective_meta failed for %s: %s" name err);
        Eio_guard.yield_step reconcile_ym)
     names;
   Log.Keeper.debug

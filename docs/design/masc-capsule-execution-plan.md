@@ -10,7 +10,7 @@ code_refs:
 # MASC Capsule Execution Plan
 
 Updated: 2026-04-17
-Scope: `masc-mcp` only
+Scope: `masc` only
 
 > **Note (2026-04-17)**: The Immediate Slices catalog below (Slices A–C) targeted the
 > `team_session` subsystem, which has since been retired — see
@@ -21,7 +21,7 @@ Scope: `masc-mcp` only
 > migration context only and no longer reflect active implementation targets.
 
 This document is the execution companion for work that stays inside the
-`masc-mcp` capsule.
+`masc` capsule.
 
 We are the middle layer between:
 
@@ -30,16 +30,16 @@ We are the middle layer between:
 - the human operator who uses those agent clients
 - the current development session maintaining MASC itself
 
-The product only works if these layers can trust the same coordination truth.
+The product only works if these layers can trust the same workspace collaboration truth.
 
 ## Product Thesis
 
-`masc-mcp` is not just “an MCP server with many tools”.
+`masc` is not just “an MCP server with many tools”.
 
-Inside this capsule, MASC should behave like a coordination operating system for
+Inside this capsule, MASC should behave like a workspace collaboration operating system for
 persistent repo-local agent society:
 
-- agents join a shared room
+- agents join a shared workspace
 - agents claim work and leave observable ownership
 - agents can be orchestrated as a team session or swarm
 - operator and dashboard surfaces can inspect what happened
@@ -52,7 +52,7 @@ OAS remains the agent runtime layer underneath that system.
 Keep these rules hard:
 
 1. OAS owns reusable execution primitives.
-2. MASC owns room, task, team-session, proof, operator, and governance semantics.
+2. MASC owns workspace, task, team-session, proof, operator, and governance semantics.
 3. If a bridge is lossy, fix the MASC adapter first.
 4. Only ask OAS for changes when the new shape is generic for non-MASC consumers.
 5. MCP truth, persisted truth, dashboard truth, and proof truth must agree.
@@ -61,10 +61,10 @@ Keep these rules hard:
 
 - team-session planning and worker-role semantics
 - delegate readiness and routing policy
-- room/task lifecycle and social runtime invariants
+- workspace/task lifecycle and social runtime invariants
 - proof/report contracts and evidence references
 - operator workflows, diagnosis bundles, intervention surfaces
-- dashboard read models and coordination-specific telemetry
+- dashboard read models and workspace collaboration-specific telemetry
 
 ## What Can Move Upstream To OAS
 
@@ -77,7 +77,7 @@ Only propose upstream work when it is clearly reusable:
 Do not upstream:
 
 - MASC delivery-contract semantics
-- room/board/governance concepts
+- workspace/board/governance concepts
 - team-session proof/report JSON contracts
 
 ## Execution Order
@@ -135,7 +135,7 @@ The three slices below describe the delegate-readiness / worker-proof /
 runtime-visibility workstreams that were planned against the now-retired
 `team_session` subsystem. The named `lib/team_session/*` and
 `lib/tool_team_session_*` modules no longer exist in the repository. The
-slices are kept so follow-on work on the current coordination surface
+slices are kept so follow-on work on the current workspace collaboration surface
 (`board_posts` + keeper FSM + canonical dashboard projections) can reuse
 the framing: "delegate readiness → proof read model → runtime/model
 visibility".
@@ -195,7 +195,7 @@ Primary modules (historical — all removed with the `team_session` purge):
 
 When a change touches the team-session or swarm contract, the review question is:
 
-“Did this make MASC more trustworthy as the coordination layer, or did it only
+“Did this make MASC more trustworthy as the workspace collaboration layer, or did it only
 make the runtime path work?”
 
 If the answer is only the latter, the change is incomplete.

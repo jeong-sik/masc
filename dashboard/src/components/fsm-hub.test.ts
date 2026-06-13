@@ -31,7 +31,7 @@ function observation(
     phase: 'Running',
     turn: 'idle',
     decision: 'undecided',
-    cascade: 'idle',
+    runtime: 'idle',
     compaction: 'accumulating',
     breaker: 'clean',
     ...overrides,
@@ -48,12 +48,12 @@ function snapshot(
     phase: 'Running',
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -72,9 +72,9 @@ function snapshot(
       ...base.decision,
       ...(overrides.decision ?? {}),
     },
-    cascade: {
-      ...base.cascade,
-      ...(overrides.cascade ?? {}),
+    runtime: {
+      ...base.runtime,
+      ...(overrides.runtime ?? {}),
     },
     compaction: {
       ...base.compaction,
@@ -104,7 +104,7 @@ describe('fsm-hub derived state', () => {
     const observations = [
       observation({ ts: 1 }),
       observation({ ts: 2, phase: 'Compacting', turn: 'executing' }),
-      observation({ ts: 3, phase: 'Compacting', turn: 'executing', cascade: 'trying' }),
+      observation({ ts: 3, phase: 'Compacting', turn: 'executing', runtime: 'trying' }),
     ]
 
     expect(deriveTransitionHistory(observations)).toEqual([
@@ -158,7 +158,7 @@ describe('fsm-hub derived state', () => {
       observation({ ts: 1, phase: 'Running' }),
       observation({ ts: 2, phase: 'Running', turn: 'executing' }),
       observation({ ts: 3, phase: 'Failing' }),
-      observation({ ts: 4, phase: 'Failing', cascade: 'trying' }),
+      observation({ ts: 4, phase: 'Failing', runtime: 'trying' }),
     ]
 
     expect(derivePhaseLog(observations)).toEqual([
@@ -175,7 +175,7 @@ describe('fsm-hub derived state', () => {
         compaction: { stage: 'accumulating' },
         invariants: {
           phase_turn_alignment: false,
-          no_cascade_before_measurement: true,
+          no_runtime_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
@@ -198,7 +198,7 @@ describe('fsm-hub derived state', () => {
           turn_id: 42,
           ended_at: 75,
           decision_stage: 'guard_ok',
-          cascade_state: 'done',
+          runtime_state: 'done',
           selected_model: null,
         },
       }),
@@ -207,7 +207,7 @@ describe('fsm-hub derived state', () => {
     )
 
     expect(result.tone).toBe('ok')
-    expect(result.headline).toContain('Idle 스냅샷 정상')
+    expect(result.headline).toContain('대기 상태 정상')
     expect(result.detail).toContain('25s')
   })
 
@@ -246,9 +246,9 @@ describe('fsm-hub derived state', () => {
 })
 
 describe('inferTransitionReason', () => {
-  it('attributes KTC idle→executing to turn start', () => {
+  it('attributes KTC idle→executing to runtime call start', () => {
     expect(inferTransitionReason('KTC', 'idle', 'executing'))
-      .toBe('턴이 시작되었습니다 — OAS worker 호출 진행')
+      .toBe('턴이 시작되었습니다 — runtime 호출 진행')
   })
 
   it('attributes KDP undecided→gate_rejected to gate block', () => {
@@ -257,9 +257,9 @@ describe('inferTransitionReason', () => {
     expect(reason).toMatch(/게이트 차단/)
   })
 
-  it('attributes KCL idle→trying to provider call', () => {
+  it('attributes KCL idle→trying to runtime call', () => {
     expect(inferTransitionReason('KCL', 'idle', 'trying'))
-      .toMatch(/provider/)
+      .toMatch(/runtime/)
   })
 
   it('returns null for unattributable transitions', () => {
@@ -310,9 +310,9 @@ describe('deriveLaneDwellHistograms', () => {
 
   it('pct sums to 100 for each lane', () => {
     const observations = [
-      observation({ ts: 10, cascade: 'idle' }),
-      observation({ ts: 30, cascade: 'trying' }),
-      observation({ ts: 50, cascade: 'idle' }),
+      observation({ ts: 10, runtime: 'idle' }),
+      observation({ ts: 30, runtime: 'trying' }),
+      observation({ ts: 50, runtime: 'idle' }),
     ]
     const histograms = deriveLaneDwellHistograms(observations, 60)
     const kcl = histograms.find((h) => h.field === 'KCL')
@@ -328,27 +328,27 @@ describe('deriveStateEntries', () => {
 
   it('falls back to first observation ts when no transitions', () => {
     const observations = [
-      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 105, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 110, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 105, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 110, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
     ]
     const entries = deriveStateEntries(observations)
-    expect(entries).toEqual({ phase: 100, turn: 100, decision: 100, cascade: 100, compaction: 100 })
+    expect(entries).toEqual({ phase: 100, turn: 100, decision: 100, runtime: 100, compaction: 100 })
   })
 
   it('returns the ts of the latest transition per lane', () => {
     const observations = [
-      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', cascade: 'idle', compaction: 'accumulating' }),
-      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', cascade: 'selecting', compaction: 'accumulating' }),
-      observation({ ts: 130, phase: 'Compacting', turn: 'executing', decision: 'guard_ok', cascade: 'done', compaction: 'accumulating' }),
+      observation({ ts: 100, phase: 'Running', turn: 'idle', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 110, phase: 'Running', turn: 'prompting', decision: 'undecided', runtime: 'idle', compaction: 'accumulating' }),
+      observation({ ts: 120, phase: 'Running', turn: 'executing', decision: 'guard_ok', runtime: 'selecting', compaction: 'accumulating' }),
+      observation({ ts: 130, phase: 'Compacting', turn: 'executing', decision: 'guard_ok', runtime: 'done', compaction: 'accumulating' }),
     ]
     const entries = deriveStateEntries(observations)
     expect(entries).toEqual({
       phase: 130,
       turn: 120,
       decision: 120,
-      cascade: 130,
+      runtime: 130,
       compaction: 100,
     })
   })
@@ -563,7 +563,7 @@ describe('invariantDescription', () => {
   it('returns domain-specific prose for each known invariant key', () => {
     const keys = [
       'phase_turn_alignment',
-      'no_cascade_before_measurement',
+      'no_runtime_before_measurement',
       'compaction_atomicity',
       'event_priority_monotone',
     ]
@@ -576,7 +576,7 @@ describe('invariantDescription', () => {
 
   it('mentions the specific contract each invariant guards', () => {
     expect(invariantDescription('phase_turn_alignment')).toMatch(/KSM|KTC|drift/i)
-    expect(invariantDescription('no_cascade_before_measurement')).toMatch(/cascade|measurement/i)
+    expect(invariantDescription('no_runtime_before_measurement')).toMatch(/runtime|measurement/i)
     expect(invariantDescription('compaction_atomicity')).toMatch(/atomic|half-compacted/i)
     expect(invariantDescription('event_priority_monotone')).toMatch(/priority|priorit/i)
   })

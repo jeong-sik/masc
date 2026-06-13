@@ -1,8 +1,8 @@
 (** Gc_sampler smoke tests (PR-0.2.D).
 
-    Verifies that {!Masc_mcp.Gc_sampler.sample_once} writes the GC
+    Verifies that {!Masc.Gc_sampler.sample_once} writes the GC
     gauges, including [masc_memory_usage_bytes], so
-    [Prometheus.metric_value_or_zero] returns
+    [Otel_metric_store.metric_value_or_zero] returns
     non-zero values for the cumulative word counters after a single
     sample.  We do not exercise the Eio fiber loop here — that path is
     covered transitively by every server boot.  Coverage of [run]
@@ -11,25 +11,25 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
-module Gc_sampler = Masc_mcp.Gc_sampler
+module Otel_metric_store = Masc.Otel_metric_store
+module Gc_sampler = Masc.Gc_sampler
 
 let metrics_to_check =
   [
-    Prometheus.metric_gc_minor_words;
-    Prometheus.metric_gc_major_words;
-    Prometheus.metric_gc_heap_words;
-    Prometheus.metric_gc_live_words;
-    Prometheus.metric_gc_compactions;
-    Prometheus.metric_gc_promoted_words;
-    Prometheus.metric_memory_usage_bytes;
+    Otel_metric_store.metric_gc_minor_words;
+    Otel_metric_store.metric_gc_major_words;
+    Otel_metric_store.metric_gc_heap_words;
+    Otel_metric_store.metric_gc_live_words;
+    Otel_metric_store.metric_gc_compactions;
+    Otel_metric_store.metric_gc_promoted_words;
+    Otel_metric_store.metric_memory_usage_bytes;
   ]
 
 let test_sample_once_writes_all_gauges () =
   Gc_sampler.sample_once ();
   List.iter
     (fun name ->
-       match Prometheus.get_metric_value name () with
+       match Otel_metric_store.get_metric_value name () with
        | None ->
            failf "expected gauge %s to be registered after sample_once" name
        | Some _ -> ())
@@ -38,7 +38,7 @@ let test_sample_once_writes_all_gauges () =
 let test_minor_words_advances_after_allocation () =
   Gc_sampler.sample_once ();
   let before =
-    Prometheus.metric_value_or_zero Prometheus.metric_gc_minor_words ()
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_gc_minor_words ()
   in
   (* Force an allocation that the minor heap cannot optimise away. *)
   let dummy = ref [] in
@@ -48,17 +48,17 @@ let test_minor_words_advances_after_allocation () =
   ignore (List.length !dummy : int);
   Gc_sampler.sample_once ();
   let after =
-    Prometheus.metric_value_or_zero Prometheus.metric_gc_minor_words ()
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_gc_minor_words ()
   in
   check bool "minor_words gauge advances after allocation" true (after >= before)
 
 let test_memory_usage_derives_from_live_words () =
   Gc_sampler.sample_once ();
   let live_words =
-    Prometheus.metric_value_or_zero Prometheus.metric_gc_live_words ()
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_gc_live_words ()
   in
   let memory_usage =
-    Prometheus.metric_value_or_zero Prometheus.metric_memory_usage_bytes ()
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_memory_usage_bytes ()
   in
   let expected = live_words *. float_of_int (Sys.word_size / 8) in
   check (float 0.001) "memory usage bytes derives from live words" expected

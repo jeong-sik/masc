@@ -25,20 +25,20 @@ Keeper pause emit은 5 site에서 자동 발동되지만, 그 중 **3 site는 au
 |---|---|---|---|
 | **S1** operator manual | `keeper_keepalive.ml:116` | N/A (manual) | — |
 | **S2** operator removal | `keeper_turn_lifecycle.ml:74` | N/A (manual) | — |
-| **S3** overflow + compact_retry_exhausted | `keeper_turn_cascade_budget.ml:546` | **❌** | (없음) |
-| **S4** resilience_retry/fallback_unbound | `keeper_turn_cascade_budget.ml:599` + `keeper_unified_turn_failure.ml:65` + `keeper_unified_turn.ml:1445` | **❌** | (없음) |
+| **S3** overflow + compact_retry_exhausted | `keeper_turn_runtime_budget.ml:546` | **❌** | (없음) |
+| **S4** resilience_retry/fallback_unbound | `keeper_turn_runtime_budget.ml:599` + `keeper_unified_turn_failure.ml:65` + `keeper_unified_turn.ml:1445` | **❌** | (없음) |
 | **S5** turn livelock block | `keeper_unified_turn_livelock_block.ml:88` | **❌** | (없음) |
 | S6 provider_timeout_loop | `keeper_supervisor_pause_policy.handle_provider_timeout_pause` | ✅ | `Auto_resume_with_backoff` |
 | S7 stale storm | `keeper_supervisor_pause_policy.handle_stale_storm_pause` | ❌ | `Manual_resume_required` (의도적) |
 
-S3/S4/S5는 *cascade routing failure* 또는 *resilience executor 부재* 같은 transient 상태에서 발동되는데도 영구 pause로 떨어지는 비대칭이다. S6는 같은 cascade 영역인데도 auto-resume — 일관성 부재.
+S3/S4/S5는 *runtime routing failure* 또는 *resilience executor 부재* 같은 transient 상태에서 발동되는데도 영구 pause로 떨어지는 비대칭이다. S6는 같은 runtime 영역인데도 auto-resume — 일관성 부재.
 
 ## 3. 사고 evidence
 
 2026-05-19 fleet attrition timeline:
 - 12:01Z garnet/imseonghan auto-paused (S3 or S4)
 - 12:55Z rondo/ramarama auto-paused
-- 13:18Z executor/lifecycle-worker/nick0cave/qa-king/sangsu/umberto 동시 auto-paused (cascade_exhausted)
+- 13:18Z executor/lifecycle-worker/nick0cave/qa-king/sangsu/umberto 동시 auto-paused (runtime_exhausted)
 - 20:11Z analyst auto-paused (required-tool contract violation, S4)
 - 21:05Z albini auto-paused (same)
 
@@ -47,7 +47,7 @@ S3/S4/S5는 *cascade routing failure* 또는 *resilience executor 부재* 같은
 ## 4. 결함
 
 ### 4.1 의미적 비대칭
-S6 (provider_timeout_loop)는 transient cascade health 문제로 분류하여 backoff resume. 그러나 같은 *cascade routing 영역*의 S3/S4/S5는 manual 강제 — 사용자가 의도적으로 분리한 *없음*. 근거: `keeper_supervisor_pause_policy.mli`에 정책 enum (`Auto_resume_with_backoff` / `Manual_resume_required`)이 있지만 S3/S4/S5는 이 enum을 거치지 않고 직접 `dispatch_event_unit Operator_pause` + `set_keeper_paused_state ~paused:true` 호출.
+S6 (provider_timeout_loop)는 transient runtime health 문제로 분류하여 backoff resume. 그러나 같은 *runtime routing 영역*의 S3/S4/S5는 manual 강제 — 사용자가 의도적으로 분리한 *없음*. 근거: `keeper_supervisor_pause_policy.mli`에 정책 enum (`Auto_resume_with_backoff` / `Manual_resume_required`)이 있지만 S3/S4/S5는 이 enum을 거치지 않고 직접 `dispatch_event_unit Operator_pause` + `set_keeper_paused_state ~paused:true` 호출.
 
 ### 4.2 메커니즘 부재
 `auto_resume_after_sec`을 set하는 코드 site는 `handle_crash_auto_pause` (`keeper_supervisor_pause_policy.ml:43-48`) 단일. S3/S4/S5는 이 함수를 호출하지 않음. supervisor Phase 3.5 sweep (`keeper_supervisor.ml:1517-1608`)은 `auto_resume_after_sec=Some sec`만 보므로 S3/S4/S5 pauses는 sweep에 *invisible*.
@@ -87,8 +87,8 @@ val handle_pause :
 | Source | 정책 | 근거 |
 |---|---|---|
 | Overflow + compact_retry_exhausted | Auto_resume_with_backoff (300s → 3600s) | compact retry exhaustion은 transient context size 문제. 다음 turn에서 context가 자연 축소될 수 있음. |
-| Resilience retry/fallback unbound | Auto_resume_with_backoff (60s → 600s) | provider unavailability는 보통 transient. backoff로 cascade rotation 시도. |
-| Turn livelock | Auto_resume_with_backoff (180s → 1800s) | cascade routing 실패는 cascade 자체가 회복되면 자동 해결 가능. |
+| Resilience retry/fallback unbound | Auto_resume_with_backoff (60s → 600s) | provider unavailability는 보통 transient. backoff로 runtime rotation 시도. |
+| Turn livelock | Auto_resume_with_backoff (180s → 1800s) | runtime routing 실패는 runtime 자체가 회복되면 자동 해결 가능. |
 | provider_timeout_loop | Auto_resume_with_backoff (현재 정책 유지) | 변경 없음. |
 | Stale storm | Manual_resume_required (현재 정책 유지) | stale storm은 운영자 진단 필요 — 의도적 manual. |
 
@@ -96,9 +96,9 @@ val handle_pause :
 
 `keeper_supervisor.ml:1517-1608` Phase 3.5 self-healing circuit breaker가 이미 `auto_resume_after_sec=Some sec` 인 keeper를 깨움. 본 RFC는 *입력 확장*만 — sweep 로직 변경 없음.
 
-### 5.4 cascade health gate (이미 존재)
+### 5.4 runtime health gate (이미 존재)
 
-sweep은 `cascade health probe ≠ Unhealthy`를 검사. 본 RFC는 이 gate를 그대로 사용. cascade 자체가 unhealthy면 resume 안 함 (재발 방지).
+sweep은 `runtime health probe ≠ Unhealthy`를 검사. 본 RFC는 이 gate를 그대로 사용. runtime 자체가 unhealthy면 resume 안 함 (재발 방지).
 
 ## 6. 트레이드오프
 
@@ -116,7 +116,7 @@ sweep은 `cascade health probe ≠ Unhealthy`를 검사. 본 RFC는 이 gate를 
 
 - S1/S2 (operator manual): 변경 없음. 의도적 pause는 manual unpause 유지.
 - Stale storm S7: 정책 유지 (의도적 manual).
-- albini case의 `completion_contract_violation`: 별개 영역 (cascade contract layer). cascade가 mention-only keeper(albini)에 `require_tool_use`를 강제하는 mismatch — 본 RFC 범위 외, 별도 RFC 필요.
+- albini case의 `completion_contract_violation`: 별개 영역 (runtime contract layer). runtime가 mention-only keeper(albini)에 `require_tool_use`를 강제하는 mismatch — 본 RFC 범위 외, 별도 RFC 필요.
 
 ## 8. Phase
 
@@ -133,7 +133,7 @@ Phase A만 본 RFC. Phase B-D는 follow-up RFC 또는 PR.
 
 1. Overflow의 default backoff (300s → 3600s)이 합리적인가? compaction이 자동 trigger되는 cycle이 5-15분이므로 5분으로 시작? — 실측 필요.
 2. Resilience pause의 `resilience_retry/fallback_unbound`가 단순히 *callback 누락* 의미인지 *모든 retry 소진* 의미인지 의미 확정 필요 — 코드 audit 별도.
-3. cascade health probe가 *Unhealthy* 판정 기준이 본 정책에 적합한가? per-source override 필요한가?
+3. runtime health probe가 *Unhealthy* 판정 기준이 본 정책에 적합한가? per-source override 필요한가?
 
 ## 10. 검증
 

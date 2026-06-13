@@ -4,7 +4,7 @@ last_verified: 2026-04-17
 code_refs:
   - lib/config/
   - lib/config/env_config.mli
-  - start-masc-mcp.sh
+  - start-masc.sh
 ---
 
 # Boot, Path, and Runtime State Inventory
@@ -16,9 +16,8 @@ This document answers four operator questions:
 - Where live state, logs, and audit artifacts land on disk.
 - What the current host is actually using right now.
 
-For day-to-day active-root and init diagnosis, prefer
-[`CONFIG-DOCTOR.md`](./CONFIG-DOCTOR.md). This document is the deeper inventory
-behind that operator flow.
+For day-to-day active-root and init diagnosis, use the launcher/env contract.
+This document is the deeper inventory behind that operator flow.
 
 Scope:
 
@@ -33,8 +32,8 @@ Scope:
 
 | Input | What it controls | Used by |
 | --- | --- | --- |
-| `--base-path` | Startup runtime root selection. `main_eio` exports this to `MASC_BASE_PATH`. | `bin/main_eio.ml`, all `.masc` path helpers |
-| `MASC_BASE_PATH` | Runtime base path once the server is running. `.masc` lives under this directory. | `Env_config_core`, `Room_utils`, keeper/board/control-plane/logging paths |
+| `--base-path` | Startup workspace root selection. `main_eio` exports this to `MASC_BASE_PATH`; runtime state is under `<base-path>/.masc`. | `bin/main_eio.ml`, all `.masc` path helpers |
+| `MASC_BASE_PATH` | Runtime base path once the server is running. This is the workspace root, not the `.masc` directory itself. | `Env_config_core`, `Workspace_utils`, keeper/board/control-plane/logging paths |
 | `MASC_CONFIG_DIR` | Explicit config root override. Highest-precedence config selector. | `Config_dir_resolver`, bootstrap, keeper/persona config resolution |
 | `MASC_PERSONAS_DIR` | Explicit personas root override. | `Config_dir_resolver`, keeper/persona loading |
 | `MASC_STORAGE_TYPE` | Runtime backend selector. Only `filesystem` is active; PostgreSQL backend was removed. | bootstrap and backend setup |
@@ -62,7 +61,7 @@ Important boot behavior:
 
 - If `MASC_CONFIG_DIR` is unset, bootstrap initializes `<MASC_BASE_PATH>/.masc/config`.
 - Bootstrap copies only missing files from the versioned `config/` tree; it does not overwrite an existing file.
-- Supported launchers and `main_eio.exe doctor` should be read with a simpler operator contract:
+- Supported launchers and boot diagnostics should be read with a simpler operator contract:
   active config is `MASC_CONFIG_DIR` when set, otherwise `<MASC_BASE_PATH>/.masc/config`.
 - This means a passive base-path config root can exist on disk even when it is not the active config root.
 - There is no secondary operator config fallback. On shared hosts, use an
@@ -83,21 +82,23 @@ The checked-in versioned seed config tree currently contains:
 
 | Path | Purpose |
 | --- | --- |
-| `config/cascade.toml` | Provider/model cascade and routing defaults. |
-| `config/tool_policy.toml` | Tool preset policy and allow/deny rules. |
+| `config/runtime.toml` | Provider/model runtime and routing defaults. |
+| `config/tool_policy.toml` | Tool group policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
 | `config/excuse_patterns.json` | Auxiliary config used by selected flows. |
 
-`keeper_runtime.toml` is not checked into the repo seed tree. It is an optional
-active-root file at `<active config root>/keeper_runtime.toml`.
+`runtime.toml` is checked into the repo seed tree as a local-first example and
+bootstrap default. Live authoring still happens in the active-root file at
+`<active config root>/runtime.toml`; existing active roots are preserved and
+are not overwritten by the seed.
 
-### 1.3 keeper_runtime.toml — per-base-path startup keeper env seeding
+### 1.3 runtime.toml — per-base-path startup keeper env seeding
 
 All live startup-scoped `MASC_KEEPER_*` keeper runtime variables wired through
 `Env_config_keeper` / `Keeper_config` can be set declaratively in
-`<active config root>/keeper_runtime.toml`. The TOML file is loaded at server
+`<active config root>/runtime.toml`. The TOML file is loaded at server
 startup by `Keeper_runtime_config.load_and_apply` (called from
 `server_runtime_bootstrap.ml`) before any module that reads these env
 vars initializes.
@@ -110,7 +111,7 @@ Operational contract:
 
 **Precedence** (highest first):
 1. Process env var (caller/CI override — never overwritten by TOML)
-2. TOML value from `keeper_runtime.toml`
+2. TOML value from `runtime.toml`
 3. Hardcoded default in `Env_config_keeper` / `Keeper_keepalive`
 
 Missing file is not an error (returns 0 overrides, uses env/defaults).
@@ -120,34 +121,32 @@ Legacy compatibility names are not TOML preemption keys. For example,
 only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
 canonical process env var is already set.
 
-**Sections** (80 knobs total):
+**Sections** (75 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
 | `[bootstrap]` | 5 | `enabled`, `max_active_keepers`, `autoboot_max` |
-| `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
-| `[reactive]` | 3 | `max_turns_per_call`, `concurrency`, `max_idle_turns` |
+| `[autonomous]` | 3 | `max_turns_per_call`, `fairness_cooldown_sec`, `max_idle_turns` |
+| `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 10 | `interval_sec`, `max_silence_sec`, `smart_heartbeat`, `board_generic_wakeup_limit` |
-| `[turn]` | 18 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
-| `[watchdog]` | 4 | `stale_sec`, `grace_sec`, `noop_threshold` |
+| `[turn]` | 19 | `timeout_sec`, `stream_idle_timeout_sec`, `execution_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
+| `[proactive]` | 1 | `min_interval_sec` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
 | `[budget]` | 1 | `daily_usd` |
 | `[metrics]` | 2 | `max_bytes`, `max_rotated` |
-| `[memory]` | 5 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
+| `[memory]` | 6 | `max_notes`, `compact_trigger_bytes`, `consensus_pattern` |
 | `[alert]` | 17 | `slack_enabled`, `slack_dm_user_id`, `github_enabled`, `github_min_score` |
 | `[debug]` | 1 | `enabled` |
 
-**Example** (`<active config root>/keeper_runtime.toml`):
+**Example** (`<active config root>/runtime.toml`):
 
 ```toml
 [autonomous]
 max_turns_per_call = 7           # default: 2
-semaphore_wait_timeout_sec = 150 # default: 60
 
 [reactive]
 max_turns_per_call = 15
-concurrency = 4
 
 [heartbeat]
 board_generic_wakeup_limit = 3 # caps non-explicit board_activity fanout; explicit mentions bypass this cap
@@ -159,8 +158,9 @@ max_active_keepers = 12
 
 [turn]
 stream_idle_timeout_sec = 120
+# Optional Agent.run no-progress guard. Tool timeouts live in the tool layer.
+# execution_idle_timeout_sec = 300
 tool_cost_max_usd = 1.25
-max_tools_per_turn = 64
 llm_rerank = true
 
 [watchdog]
@@ -168,7 +168,8 @@ stale_sec = 600
 grace_sec = 900
 ```
 
-`tool_cost_max_usd = 0` means unlimited and disables the keeper cost gate.
+`tool_cost_max_usd = 0` leaves the advisory cost threshold unset. Cost
+thresholds are telemetry only and never gate keeper tool execution.
 
 **Implementation**: `lib/keeper/keeper_runtime_config.ml` maintains a
 `key_to_env` table mapping TOML dotted keys to env var names. Values
@@ -226,7 +227,7 @@ without mutating the parent environment.
 - `<runtime_root>/tasks/backlog.json`: active backlog state.
 - `<runtime_root>/tasks-archive.json`: archived or cleaned-up tasks.
 - `<runtime_root>/agents/`: agent membership and state snapshots.
-- `<runtime_root>/messages/`: room and broadcast message artifacts.
+- `<runtime_root>/messages/`: workspace and broadcast message artifacts.
 - `<runtime_root>/current_task`: planning pointer for the current claimed task.
 - `<base-path>/planning/<task_id>/`: planning-with-files context:
   - `task_plan.md`
@@ -327,7 +328,6 @@ Allowed path model:
 - `<runtime_root>/runtime_params.json`
 - `<runtime_root>/param_audit.jsonl`
 - `<runtime_root>/metrics/<agent>/YYYY-MM.jsonl`
-- `<runtime_root>/heuristic_metrics.jsonl`
 - `<runtime_root>/drift_guard.jsonl`
 - `<runtime_root>/costs.jsonl`
 - `<runtime_root>/autonomy_stats.jsonl`
@@ -335,7 +335,7 @@ Allowed path model:
 Current host note:
 
 - The inspected host also contains auxiliary event and telemetry lanes such as `activity-events/`, `events/`, `telemetry/`, and `data/tool-metrics/`.
-- Repo-local `masc-mcp/logs/` directories are non-canonical historical or
+- Repo-local `masc/logs/` directories are non-canonical historical or
   harness captures. Live runtime service logs belong under `<runtime_root>/logs/`.
 
 ### 3.9 Auth, Connectors, and Voice
@@ -343,7 +343,7 @@ Current host note:
 - `<runtime_root>/auth/`
   - `config.json`
   - `initial_admin`
-  - `room_secret.hash`
+  - `workspace_secret.hash`
   - `agents/`
 - `<runtime_root>/connectors/discord/status.json`
 - `<runtime_root>/connectors/discord/bindings.json`
@@ -354,10 +354,14 @@ Current host note:
 
 Notes:
 
-- Discord connector runtime files are shared between the gate server and the
-  Discord bot. When the bot uses relative paths, resolve them against the same
-  `MASC_BASE_PATH` as the server. Operational setup and verification steps live
-  in `sidecars/discord-bot/README.md`.
+- Discord connector runtime files (`.gate/runtime/discord/status.json`,
+  `bindings.json`, `binding_audit.jsonl`) are now read and written by the
+  in-process gateway (`lib/server/server_discord_in_process_gateway.{ml,mli}`
+  + `lib/gate/channel_gate_discord_state.{ml,mli}`) after RFC-0203 §Phase 3
+  (#19393) deleted the external `sidecars/discord-bot/`. Path resolution is
+  unchanged; the consumer just moved into the same server process. Operator
+  setup: set `DISCORD_BOT_TOKEN` in the server's env and restart. See
+  `docs/CONNECTOR-CONFIG-SCHEMA.md` §Discord.
 - All voice paths resolve relative to `MASC_BASE_PATH/.masc/`.
   `voice_config.json` is discovered at `<runtime_root>/voice_config.json`
   where `<runtime_root>` = `MASC_BASE_PATH/.masc/`.
@@ -388,7 +392,7 @@ These still exist because some execution and proof surfaces have not been fully 
 Current observed state on the inspected host:
 
 - Live server process:
-  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin/main_eio.exe --host=127.0.0.1 --port=8935 --base-path=/Users/dancer/me`
+  - `/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe --host=127.0.0.1 --port=8935 --base-path=/Users/dancer/me`
 - Effective base path:
   - `/Users/dancer/me`
 - Effective runtime root:
@@ -397,14 +401,14 @@ Current observed state on the inspected host:
   - `/Users/dancer/me/.masc/config`
   - Reason: live `/health` reports `startup.config_resolution.config_root.path` as `/Users/dancer/me/.masc/config`.
 - Checked-in fallback/default config tree:
-  - `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config`
+  - `/Users/dancer/me/workspace/yousleepwhen/masc/config`
 - Both of these trees exist at the same time:
   - `/Users/dancer/me/.masc/*`
   - `/Users/dancer/me/.masc/.masc/*`
 
 Interpretation:
 
-- `/Users/dancer/me/.masc` is the current canonical runtime root.
+- `/Users/dancer/me/.masc` is the current canonical runtime root for base path `/Users/dancer/me`; do not shorten this to `~/.masc`, which means `/Users/dancer/.masc` in a shell.
 - `/Users/dancer/me/.masc/.masc` should be treated as historical drift from earlier runs that used `/Users/dancer/me/.masc` itself as `base_path`.
 - The active config root should be treated as the resolved runtime config root under `/Users/dancer/me/.masc/config` unless `MASC_CONFIG_DIR` explicitly points elsewhere.
 - The checked-in repo `config/` tree is the versioned default/seed source, not the live runtime truth by itself.
@@ -430,13 +434,14 @@ Current log sink observed today:
 
 - `curl -fsS http://127.0.0.1:8935/health`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 - `pgrep -fl main_eio`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
-- `test -f /Users/dancer/me/.masc/config/cascade.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
+- `test -f /Users/dancer/me/.masc/config/runtime.toml`; 확인일시: 2026-05-17 Asia/Seoul; 신뢰도: High
 
 ## 5. Operator Checklist for Root Drift
 
 1. Pick one base-path convention per environment and stick to it.
    - `--base-path /Users/dancer/me` produces `/Users/dancer/me/.masc`
    - `--base-path /Users/dancer/me/.masc` normalizes to `/Users/dancer/me` and warns
+   - Avoid bare `~/.masc` in docs and runbooks; write `<base-path>/.masc` or the fully resolved path.
 2. Pick one active config root.
    - If `MASC_CONFIG_DIR` is set, that wins.
    - If you want the base-path config root to become active, unset `MASC_CONFIG_DIR` and restart.
@@ -448,7 +453,7 @@ Current log sink observed today:
    - `<runtime_root>/keepers/<name>/`
    - `<runtime_root>/traces/`
    - `<active config root>/tool_policy.toml`
-   - `<active config root>/cascade.toml`
+   - `<active config root>/runtime.toml`
 
 ## Appendix A. Centralized Environment Inventory
 
@@ -463,7 +468,6 @@ DUNE_SOURCEROOT
 HOME
 MASC_ADMIN_TOKEN
 MASC_ASSETS_DIR
-MASC_AUTO_RESPOND
 MASC_BASE_PATH
 MASC_BUILD_GIT_COMMIT
 MASC_CLUSTER_NAME
@@ -531,12 +535,10 @@ MASC_LOCAL_WORKER_HEARTBEAT_SEC
 MASC_LOCAL_WORKER_MAX_TOKENS
 MASC_LOCK_EXPIRY_WARNING_SEC
 MASC_LOCK_TIMEOUT_SEC
-MASC_MCP_URL
-MASC_MEMORY_OAS_DEFAULT_IMPORTANCE
+MASC_URL
 MASC_MESSAGE_MAX_COUNT
 MASC_METRICS_FLUSH_SEC
 MASC_OAS_SSE_DRAIN_INTERVAL_SEC
-MASC_OPENAI_COMPAT
 MASC_ORCHESTRATOR_AGENT
 MASC_ORCHESTRATOR_ENABLED
 MASC_ORCHESTRATOR_INTERVAL
@@ -609,7 +611,7 @@ MASC_DASHBOARD_FIXTURE
 MASC_DASHBOARD_FIXTURES_ENABLED
 MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED
 MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC
-MASC_DEFAULT_CASCADE
+MASC_DEFAULT_RUNTIME
 MASC_DEFAULT_MODEL
 MASC_DEFAULT_PROVIDER
 MASC_EVENT_BUFFER_SIZE
@@ -625,11 +627,11 @@ MASC_NEO4J_TIMEOUT_SEC
 MASC_OPERATOR_CACHE_TTL
 MASC_OPERATOR_JUDGE_ENABLED
 MASC_OPERATOR_JUDGE_INTERVAL_SEC
-MASC_OPERATOR_JUDGE_ROOM_TTL_SEC
+MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC
 MASC_OPERATOR_JUDGE_SESSION_TTL_SEC
 MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC
 MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC
-MASC_ROUTING_CASCADE
+MASC_ROUTING_RUNTIME
 MASC_SPAWN_CACHE_POLICY
 MASC_SSE_KEEPALIVE_SEC
 ```

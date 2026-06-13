@@ -1,12 +1,9 @@
 (** Keeper_tool_registry — runtime tool name sources and schema injection.
 
-    Static tool name lists have been moved to config/tool_policy.toml.
-    This module retains only runtime-resolved names (Tool_catalog,
-    Tool_shard, injected MASC tools), core always-visible tools,
-    and dynamic schema injection.
-
-    See [Keeper_tool_policy_config] for the declarative tool groups
-    and presets. *)
+    This module retains runtime-resolved names (Tool_catalog, Tool_shard,
+    injected MASC tools), core always-available tools, and dynamic schema
+    injection. Execution surfaces are resolved from descriptors/registries
+    and then denylist-filtered. *)
 
 (** Trim, drop empty entries, and dedupe a list preserving order. *)
 val dedupe_tool_names : string list -> string list
@@ -57,7 +54,7 @@ val is_read_only_with_input :
 
 (** Input-aware main-worktree boundary check: returns [true] when the tool
     should NOT open the per-turn checkpoint boundary (read-only, MASC
-    coordination, or playground-sandboxed mutations). *)
+    workspace, or playground-sandboxed mutations). *)
 val is_main_worktree_boundary_exempt_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
@@ -81,14 +78,9 @@ val set_masc_schemas : Masc_domain.tool_schema list -> unit
 (** Immutable snapshot of injected MASC tool schemas. *)
 val masc_schemas_snapshot : unit -> Masc_domain.tool_schema list
 
-(** Scoped schema override for tests that need a synthetic MASC surface. *)
-val with_masc_schemas_for_test :
-  Masc_domain.tool_schema list -> (unit -> 'a) -> 'a
-
 (** Names extracted from [masc_schemas_snapshot ()] in declaration order. *)
 val injected_masc_tool_names : unit -> string list
 
 (** SSOT schema for [keeper_tool_search]. Defined here because this
-    module is the canonical owner of keeper-internal tool metadata.
-    Consumed by [Keeper_tool_policy.keeper_default_model_tools]. *)
+    module is the canonical owner of keeper-internal tool metadata. *)
 val keeper_tool_search_schema : Masc_domain.tool_schema

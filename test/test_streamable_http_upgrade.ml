@@ -10,8 +10,8 @@
 
 open Alcotest
 
-module Streaming = Masc_mcp.Server_mcp_streaming_tools
-module Http_transport = Masc_mcp.Server_mcp_transport_http
+module Streaming = Server_mcp_streaming_tools
+module Http_transport = Server_mcp_transport_http
 
 let tools_call_body ~tool_name =
   Printf.sprintf
@@ -21,12 +21,12 @@ let tools_call_body ~tool_name =
 let test_registry_membership_known_tools () =
   (* The hand-curated registry must include the two tools the e2e
      suite exercises with SSE expectations (test_mcp_post_sse_e2e.ml:
-     [masc_status], [masc_join]). Removing them flips the contract,
+     [masc_status], [masc_bind]). Removing them flips the contract,
      so the test pins the membership at the seam. *)
   check bool "masc_status in registry" true
     (Streaming.is_streaming_capable "masc_status");
-  check bool "masc_join in registry" true
-    (Streaming.is_streaming_capable "masc_join")
+  check bool "masc_bind in registry" true
+    (Streaming.is_streaming_capable "masc_bind")
 
 let test_registry_excludes_other_tools () =
   (* Any tool not explicitly listed should not auto-upgrade. The

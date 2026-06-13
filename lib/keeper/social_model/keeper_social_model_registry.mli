@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val apply_to_result :
   meta:keeper_meta ->

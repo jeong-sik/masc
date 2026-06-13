@@ -8,9 +8,9 @@ let mark_dead ~base_path name ~at ~decr_running_count_clamped ~update_entry =
   (* Same metric is also incremented by transition dispatch via
      [phase_to_string tr.new_phase], which emits lowercase wire format
      ([dead], [running], [handing_off], ...). Route this direct-write path
-     through the same SSOT casing so Prometheus consumers do not split the
+     through the same SSOT casing so Otel_metric_store consumers do not split the
      time series. *)
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleTransitions)
     ~labels:
       [ "keeper", name

@@ -56,14 +56,14 @@ Agent_sdk.Event_bus  (bounded Eio.Stream, default depth 256)
    │
    │  Custom("telemetry_event", json) payloads
    ▼
-Agent_sdk_metrics_bridge   ── start_sampler ──▶ Prometheus depth gauge
+Agent_sdk_metrics_bridge   ── start_sampler ──▶ legacy metrics backend depth gauge
    │
    │  bounded subscription per consumer
    ▼
 Keeper_telemetry_consumer  ──▶ Keeper_provider_health  (per-(provider, model) EWMA)
                             │
                             ├─▶ livelock gate     (turn admission veto)
-                            └─▶ supervisor signal (cascade rotation)
+                            └─▶ supervisor signal (runtime rotation)
 ```
 
 Wiring sites on `origin/main` (post-#14503):
@@ -92,7 +92,7 @@ The `let rec loop` drain-fiber pattern that motivated this RFC appears at four s
 
 | Site | Yield | Pattern |
 |------|-------|---------|
-| `cascade/cascade_event_bridge.ml:1170` | `Eio.Time.sleep clock interval_s` | env-tunable interval |
+| `runtime/runtime_event_bridge.ml:1170` | `Eio.Time.sleep clock interval_s` | env-tunable interval |
 | `keeper/keeper_compact_audit.ml:432` | `Eio.Time.sleep clock drain_interval_s` | env-tunable interval |
 | `server/server_bootstrap_loops.ml:391` | `Eio.Time.sleep clock keeper_listener_retry_interval_sec` | env-tunable interval |
 | `keeper/keeper_telemetry_consumer.ml:67` | `Eio.Time.sleep clock drain_interval_s` (#14499) | hardcoded 0.1s |
@@ -103,7 +103,7 @@ The lint script `scripts/ci/check-drain-loop-yields.sh` walks every `.ml` under 
 
 ```
 lib/agent_sdk_metrics_bridge.ml         lib/keeper/keeper_compact_audit.ml
-lib/cascade/cascade_event_bridge.ml     lib/keeper/keeper_telemetry_consumer.ml
+lib/runtime/runtime_event_bridge.ml     lib/keeper/keeper_telemetry_consumer.ml
 lib/keeper/keeper_unified_turn.ml       lib/server/server_bootstrap_loops.ml
 lib/metrics_store_eio.ml                lib/session.ml
 lib/pulse/pulse.ml                      lib/sse.ml

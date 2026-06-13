@@ -28,7 +28,7 @@ type tempo_state = {
 val default_config : tempo_config
 
 (** [tempo_file config] = [<masc_dir(config)>/tempo.json]. *)
-val tempo_file : Coord_utils.config -> string
+val tempo_file : Workspace_utils.config -> string
 
 (** {1 State serialisation} *)
 
@@ -42,10 +42,10 @@ val state_of_json : Yojson.Safe.t -> tempo_state option
 (** Reads [.masc/tempo.json]. On missing file or load/parse failure
     returns a [default_config.default_interval_s] state with reason
     ["default"]. *)
-val load_state : Coord_utils.config -> tempo_state
+val load_state : Workspace_utils.config -> tempo_state
 
 (** Persists [state] to [tempo_file config] (creates parent dir). *)
-val save_state : Coord_utils.config -> tempo_state -> unit
+val save_state : Workspace_utils.config -> tempo_state -> unit
 
 (** {1 Tempo adjustment} *)
 
@@ -53,10 +53,10 @@ val save_state : Coord_utils.config -> tempo_state -> unit
     [[min_interval_s; max_interval_s]], updates [last_adjusted], and
     persists. *)
 val set_tempo :
-  Coord_utils.config -> interval_s:float -> reason:string -> tempo_state
+  Workspace_utils.config -> interval_s:float -> reason:string -> tempo_state
 
 (** Alias for {!load_state}. *)
-val get_tempo : Coord_utils.config -> tempo_state
+val get_tempo : Workspace_utils.config -> tempo_state
 
 val is_pending_task : Masc_domain.task -> bool
 
@@ -67,9 +67,9 @@ val is_pending_task : Masc_domain.task -> bool
     - empty list → [max_interval_s] with ["idle - no pending tasks"]. *)
 val calculate_adaptive_tempo : Masc_domain.task list -> float * string
 
-(** Adjusts tempo from [Coord.get_tasks_raw config] via
+(** Adjusts tempo from [Workspace.get_tasks_raw config] via
     {!calculate_adaptive_tempo} and persists. *)
-val adjust_tempo : Coord_utils.config -> tempo_state
+val adjust_tempo : Workspace_utils.config -> tempo_state
 
 (** {1 Presentation} *)
 
@@ -78,4 +78,4 @@ val adjust_tempo : Coord_utils.config -> tempo_state
 val format_state : tempo_state -> string
 
 (** Writes [default_interval_s] with reason ["reset to default"]. *)
-val reset_tempo : Coord_utils.config -> tempo_state
+val reset_tempo : Workspace_utils.config -> tempo_state

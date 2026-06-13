@@ -2,7 +2,7 @@
 
     Pre-fix [Dated_jsonl.create] minted a fresh [Eio.Mutex.t]
     per call.  When two instances pointed at the same JSONL
-    directory, their mutexes did not coordinate and concurrent
+    directory, their mutexes did not serialize and concurrent
     [append] could interleave.  Real-world trigger:
     [oas_event_bridge.ml] re-creates the store on every relay
     error while another fiber still holds the previous instance,

@@ -66,6 +66,15 @@ let test_string_field_wrong_type () =
   let j = `Assoc [ ("count", `Int 5) ] in
   assert (B.string_field ~default:"fallback" "count" j = "fallback")
 
+(* ─── missing scalar detection ─────────────────────────────── *)
+
+let test_missing_or_unknown () =
+  assert (B.is_missing_or_unknown "");
+  assert (B.is_missing_or_unknown "   ");
+  assert (B.is_missing_or_unknown "unknown");
+  assert (B.is_missing_or_unknown "  UNKNOWN  ");
+  assert (not (B.is_missing_or_unknown "async"))
+
 (* ─── string_json ──────────────────────────────────────────── *)
 
 let test_string_json_passthrough () =
@@ -88,6 +97,15 @@ let test_string_json_default_default () =
   match B.string_json `Null with
   | `String s -> assert (s = "unknown")
   | other -> unexpected_json ~where:"string_json_default_default" other
+
+let test_string_json_opt_passthrough () =
+  match B.string_json_opt (`String "hello") with
+  | `String s -> assert (s = "hello")
+  | other -> unexpected_json ~where:"string_json_opt_passthrough" other
+
+let test_string_json_opt_missing_to_null () =
+  assert (B.string_json_opt (`String "   ") = `Null);
+  assert (B.string_json_opt (`Int 7) = `Null)
 
 (* ─── string_list_json ─────────────────────────────────────── *)
 
@@ -164,28 +182,6 @@ let test_float_json_other_uses_default () =
   assert (B.float_json ~default:8.0 `Null = `Float 8.0);
   assert (B.float_json ~default:0.0 (`String "1.0") = `Float 0.0)
 
-(* ─── int_field ────────────────────────────────────────────── *)
-
-let test_int_field_int () =
-  let j = `Assoc [ ("count", `Int 5) ] in
-  assert (B.int_field "count" j = 5)
-
-let test_int_field_intlit_parses () =
-  let j = `Assoc [ ("count", `Intlit "12345") ] in
-  assert (B.int_field "count" j = 12345)
-
-let test_int_field_intlit_garbage_uses_default () =
-  let j = `Assoc [ ("count", `Intlit "gibberish") ] in
-  assert (B.int_field ~default:99 "count" j = 99)
-
-let test_int_field_float_truncates () =
-  let j = `Assoc [ ("count", `Float 2.9) ] in
-  assert (B.int_field "count" j = 2)
-
-let test_int_field_missing () =
-  let j = `Assoc [] in
-  assert (B.int_field ~default:42 "missing" j = 42)
-
 (* ─── take ─────────────────────────────────────────────────── *)
 
 let test_take_zero () =
@@ -206,21 +202,21 @@ let test_take_empty () =
 (* ─── option_string_json ───────────────────────────────────── *)
 
 let test_option_string_json_some () =
-  match B.option_string_json (Some "hello") with
+  match Json_util.string_opt_to_json_trimmed (Some "hello") with
   | `String "hello" -> ()
   | _ -> assert false
 
 let test_option_string_json_some_blank () =
   (* Behaviour contract: blank/whitespace-only strings are
      trimmed to "" and projected to `Null. *)
-  assert (B.option_string_json (Some "   ") = `Null);
-  assert (B.option_string_json (Some "") = `Null)
+  assert (Json_util.string_opt_to_json_trimmed (Some "   ") = `Null);
+  assert (Json_util.string_opt_to_json_trimmed (Some "") = `Null)
 
 let test_option_string_json_none () =
-  assert (B.option_string_json None = `Null)
+  assert (Json_util.string_opt_to_json_trimmed None = `Null)
 
 let test_option_string_json_trims () =
-  match B.option_string_json (Some "  trimmed  ") with
+  match Json_util.string_opt_to_json_trimmed (Some "  trimmed  ") with
   | `String "trimmed" -> ()
   | _ -> assert false
 
@@ -238,10 +234,13 @@ let () =
   test_string_field_present ();
   test_string_field_default ();
   test_string_field_wrong_type ();
+  test_missing_or_unknown ();
   test_string_json_passthrough ();
   test_string_json_empty_uses_default ();
   test_string_json_non_string_uses_default ();
   test_string_json_default_default ();
+  test_string_json_opt_passthrough ();
+  test_string_json_opt_missing_to_null ();
   test_string_list_filters_blanks ();
   test_string_list_drops_non_strings ();
   test_string_list_non_list_returns_empty ();
@@ -256,11 +255,6 @@ let () =
   test_float_json_intlit_parses ();
   test_float_json_intlit_garbage_uses_default ();
   test_float_json_other_uses_default ();
-  test_int_field_int ();
-  test_int_field_intlit_parses ();
-  test_int_field_intlit_garbage_uses_default ();
-  test_int_field_float_truncates ();
-  test_int_field_missing ();
   test_take_zero ();
   test_take_negative ();
   test_take_more_than_length ();

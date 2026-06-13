@@ -10,7 +10,7 @@
        [default_max_checkpoint_tool_result_chars] threshold instead of
        inlining the full [Yojson.Safe.to_string] output. *)
 
-module C = Masc_mcp.Keeper_context_core
+module C = Masc.Keeper_context_core
 module T = Agent_sdk.Types
 
 (* --- message_to_json: no flat [content] field --- *)

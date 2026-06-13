@@ -238,7 +238,7 @@ let report_json r =
 (* ── Persistence ──────────────────────────────────────────── *)
 
 let baseline_dir base_path =
-  Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path) "governance"
+  Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "governance"
   |> fun d -> Filename.concat d "baselines"
 
 let profile_path base_path agent_id =
@@ -253,7 +253,7 @@ let save_profile ~base_path (profile : behavioral_profile) =
 let persistence_surface = "governance_anomaly_profile"
 
 let record_persistence_read_drop ~reason () =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)]
     ()
 
@@ -402,14 +402,14 @@ let check_agent ~config ~agent_id ~window_days ~threshold =
   if List.length entries < 3 then None
   else
     let profile_opt =
-      match load_profile ~base_path:config.Coord.base_path ~agent_id with
+      match load_profile ~base_path:config.Workspace.base_path ~agent_id with
       | Some p when p.sample_count >= 3 && p.window_days = window_days -> Some p
       | _ -> build_profile ~config ~agent_id ~window_days
     in
     match profile_opt with
     | None -> None
     | Some profile ->
-        save_profile ~base_path:config.Coord.base_path profile;
+        save_profile ~base_path:config.Workspace.base_path profile;
         let cutoff = Unix.gettimeofday () -. Masc_time_constants.hour in
         let recent = List.filter (fun e -> e.Audit_log.timestamp >= cutoff) entries in
         let deviations = detect_deviations ~profile ~entries:recent ~threshold in

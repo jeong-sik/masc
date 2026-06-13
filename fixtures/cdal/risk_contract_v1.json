@@ -9,6 +9,6 @@
     "success_criteria": ["tests pass", "no lint errors"],
     "required_evidence": ["src/main.ml", "test/test_main.ml"],
     "contract_id": "dc-fixture-001",
-    "evaluator_cascade": "cross_verifier"
+    "evaluator_runtime": "cross_verifier"
   }
 }

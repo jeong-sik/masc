@@ -36,7 +36,7 @@
     "cited_paths": [
       "docs/BENCHMARK-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
-      "lib/tool_coord.ml"
+      "lib/tool_workspace.ml"
     ],
     "latency_ms": 690
   }

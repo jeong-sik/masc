@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeModelMetrics: vi.fn(),
   fetchKeeperCostMetrics: vi.fn(),
-  fetchHeuristics: vi.fn(),
-  fetchHeuristicCoverage: vi.fn(),
-  fetchStress: vi.fn(),
   fetchAuditLedger: vi.fn(),
   fetchKeeperDecisions: vi.fn(),
 }))
@@ -73,16 +70,6 @@ describe('CostDashboard route-backed focus behavior', () => {
     vi.resetModules()
     apiMocks.fetchRuntimeModelMetrics.mockReset().mockResolvedValue(modelMetrics())
     apiMocks.fetchKeeperCostMetrics.mockReset().mockResolvedValue(keeperMetrics())
-    apiMocks.fetchHeuristics.mockReset().mockResolvedValue({ events: [], limit: 0, source: 'heuristic_metrics' })
-    apiMocks.fetchHeuristicCoverage.mockReset().mockResolvedValue({
-      total_events: 0,
-      decision_shape_count: 0,
-      mixed_outcome_sites: 0,
-      unique_decision_tuples: 0,
-      sites: [],
-      source: 'heuristic_metrics',
-    })
-    apiMocks.fetchStress.mockReset().mockResolvedValue({ events: [], agent_stress: [], limit: 0, source: 'agent_stress' })
     apiMocks.fetchAuditLedger.mockReset().mockResolvedValue({ entries: [], limit: 0 })
     apiMocks.fetchKeeperDecisions.mockReset().mockResolvedValue({ events: [], limit: 0 })
     window.history.replaceState(null, '', '#overview')
@@ -293,40 +280,4 @@ describe('CostDashboard route-backed focus behavior', () => {
     })
   })
 
-  it('renders runtime feed source metadata on heuristic views', async () => {
-    apiMocks.fetchHeuristics.mockResolvedValueOnce({
-      events: [],
-      limit: 25,
-      source: 'heuristic_metrics',
-      dashboard_surface: '/api/v1/dashboard/heuristics',
-      retention: { durable_store: '.masc/heuristic_metrics.jsonl' },
-    })
-    apiMocks.fetchHeuristicCoverage.mockResolvedValueOnce({
-      total_events: 0,
-      decision_shape_count: 0,
-      mixed_outcome_sites: 0,
-      unique_decision_tuples: 0,
-      sites: [],
-      source: 'heuristic_metrics',
-      dashboard_surface: '/api/v1/dashboard/heuristics/coverage',
-      retention: { durable_store: '.masc/heuristic_metrics.jsonl' },
-    })
-    const { route } = await import('../router')
-    const { CostDashboard } = await import('./cost-dashboard')
-    route.value = {
-      tab: 'monitoring',
-      params: { section: 'runtime', view: 'heuristics' },
-      postId: null,
-    }
-
-    render(h(CostDashboard, { view: 'heuristics' }), container)
-    await waitFor(
-      () => container.textContent?.includes('surface /api/v1/dashboard/heuristics') ?? false,
-      'heuristic source metadata',
-    )
-
-    expect(container.textContent).toContain('source heuristic_metrics')
-    expect(container.textContent).toContain('store .masc/heuristic_metrics.jsonl')
-    expect(container.textContent).toContain('surface /api/v1/dashboard/heuristics/coverage')
-  })
 })

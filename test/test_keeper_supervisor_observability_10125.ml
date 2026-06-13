@@ -1,7 +1,7 @@
 (* test/test_keeper_supervisor_observability_10125.ml
 
    #10125 reports a 4h+ silent fleet death after server
-   restart: 14 keepers exit on cascade exhaustion and the
+   restart: 14 keepers exit on runtime exhaustion and the
    supervisor sweep never restarts (the
    "keeper supervisor sweep started" log line is missing
    for the entire post-restart session).
@@ -26,6 +26,8 @@
    line, gauge sets before AND after each beat.
 *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat
@@ -35,24 +37,24 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module R = Masc_mcp.Keeper_runtime
-module Prom = Masc_mcp.Prometheus
+module R = Masc.Keeper_runtime
+module Metrics = Masc.Otel_metric_store
 
 let starts_for ~base_path =
-  Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts)
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
 
 let last_sweep_for ~base_path =
-  Prom.get_metric_value
-    Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+  Metrics.get_metric_value
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     ()
 ;;
 
-(* Both metrics are declared at init via [Prometheus.add ~labels:[]],
+(* Both metrics are declared at init via [Otel_metric_store.add ~labels:[]],
    so [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
    if the registration block actually ran. Pins that the #10125
    dashboard wiring is present — if either name is missing the whole
@@ -63,11 +65,11 @@ let last_sweep_for ~base_path =
    "not registered" and "registered but no observations yet". *)
 let test_metrics_registered () =
   let starts =
-    Prom.get_metric_value Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts) ()
+    Metrics.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
   let last_sweep =
-    Prom.get_metric_value
-      Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+    Metrics.get_metric_value
+      Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ()
   in
   Alcotest.(check bool) "sweep_starts registered" true (Option.is_some starts);
@@ -97,8 +99,8 @@ let test_age_helper_returns_none_before_first_sweep () =
    liveness. *)
 let test_age_helper_advances_after_gauge_set () =
   let base_path = "/tmp/test-supervisor-obs-advances-10125" in
-  Prom.set_gauge
-    Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+  Metrics.set_gauge
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -117,8 +119,8 @@ let test_age_helper_advances_after_gauge_set () =
 let test_age_helper_reports_stale_when_gauge_old () =
   let base_path = "/tmp/test-supervisor-obs-stale-10125" in
   let stale_ts = Unix.gettimeofday () -. 3600.0 in
-  Prom.set_gauge
-    Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+  Metrics.set_gauge
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     ~labels:[ "base_path", base_path ]
     stale_ts;
   match R.supervisor_sweep_age_seconds ~base_path with
@@ -133,12 +135,12 @@ let test_counter_per_base_path_isolation () =
   let a = "/tmp/test-supervisor-obs-iso-A-10125" in
   let b = "/tmp/test-supervisor-obs-iso-B-10125" in
   let before_b = starts_for ~base_path:b in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     ~labels:[ "base_path", a ]
     ();
   Alcotest.(check (float 0.0001))
@@ -151,40 +153,35 @@ let test_counter_per_base_path_isolation () =
     (starts_for ~base_path:a)
 ;;
 
-(* The textual export uses [base_path] as the label key
-   for both metrics, so PromQL queries can join them on
-   that label. *)
-let test_prometheus_text_export_includes_metrics () =
+(* The registry uses [base_path] as the label key for both metrics, so
+   downstream OTel export keeps the join key intact. *)
+let test_registry_snapshot_includes_metrics () =
   let base_path = "/tmp/test-supervisor-obs-export-10125" in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts)
+  let starts = Keeper_metrics.(to_string SupervisorSweepStarts) in
+  let last_sweep = Keeper_metrics.(to_string SupervisorLastSweepUnixtime) in
+  Metrics.inc_counter
+    starts
     ~labels:[ "base_path", base_path ]
     ();
-  Prom.set_gauge
-    Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+  Metrics.set_gauge
+    last_sweep
     ~labels:[ "base_path", base_path ]
     (Unix.gettimeofday ());
-  let text = Prom.to_prometheus_text () in
-  let contains s sub =
-    let n = String.length s
-    and m = String.length sub in
-    let rec loop i =
-      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
-    in
-    loop 0
+  let has_metric name metric_type =
+    Metrics.snapshot ()
+    |> List.exists (fun (m : Metrics.metric) ->
+      String.equal m.name name
+      && m.metric_type = metric_type
+      && List.mem ("base_path", base_path) m.labels)
   in
   Alcotest.(check bool)
-    "counter name appears in export"
+    "counter name appears in registry"
     true
-    (contains text Masc_mcp.Keeper_metrics.(to_string SupervisorSweepStarts));
+    (has_metric starts Metrics.Counter);
   Alcotest.(check bool)
-    "gauge name appears in export"
+    "gauge name appears in registry"
     true
-    (contains text Masc_mcp.Keeper_metrics.(to_string SupervisorLastSweepUnixtime));
-  Alcotest.(check bool)
-    "base_path label appears for export"
-    true
-    (contains text "base_path=")
+    (has_metric last_sweep Metrics.Gauge)
 ;;
 
 let () =
@@ -216,11 +213,11 @@ let () =
             `Quick
             test_counter_per_base_path_isolation
         ] )
-    ; ( "export"
+    ; ( "registry"
       , [ Alcotest.test_case
-            "metrics appear in /metrics text"
+            "metrics appear in registry"
             `Quick
-            test_prometheus_text_export_includes_metrics
+            test_registry_snapshot_includes_metrics
         ] )
     ]
 ;;

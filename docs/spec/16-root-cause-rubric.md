@@ -14,7 +14,7 @@ code_refs:
 
 ## Purpose
 
-Every open issue in `masc-mcp` and `oas` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
+Every open issue in `masc` and `oas` should be classifiable into one or more of seven categories, each defined by a **structural marker** — a pattern a `rg` grep or an LLM pass can detect without prose interpretation. Prose interpretation has been empirically shown to produce false pairings (see `~/me/memory/handoff-2026-04-19-issue-close-sweep.md` for the 0/17 triage hallucination incident).
 
 The rubric is applied two ways:
 
@@ -41,7 +41,7 @@ The rubric is applied two ways:
 | Color | `#0066cc` |
 | Marker | A request path, state transition, or error branch exists without a corresponding metric / span / `correlation_id` propagation |
 | Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
-| Issue body triggers | "metric", "correlation_id", "Prometheus", "span", "observability gap" |
+| Issue body triggers | "metric", "correlation_id", "OTel", "span", "observability gap" |
 
 ### BND — OAS-MASC Boundary Violation
 
@@ -103,7 +103,7 @@ The Model-Agnostic MASC Epic (`#6715`, 2026-04-12) and the 2026-04-09 tool-failu
 | Inference parameter hardcoding | SSOT + BND |
 | Spawn CLI hardcoding | SSOT |
 | Vendor-specific branching | STR + DET |
-| Cascade-specific fallbacks | SIL + VAR |
+| Runtime-specific fallbacks | SIL + VAR |
 | Guard false positives (`#6166`) | SIL |
 | Read-path mismatch (`#6167`) | DET |
 | Readonly bash crash (`#6168`) | STR |

@@ -247,7 +247,7 @@ describe('Governance surface', () => {
       summary: { cases_open: 0, pending_ruling: 0, ready_auto_execute: 0, needs_human_gate: 0, executed: 0 },
       items: [],
       activity: [],
-      judge: { judge_online: false, last_error: 'cascade failed: no models available', keeper_name: 'governance-judge' },
+      judge: { judge_online: false, last_error: 'runtime failed: no models available', keeper_name: 'governance-judge' },
       judgments: [],
       pending_actions: [],
     }
@@ -267,7 +267,7 @@ describe('Governance surface', () => {
     const judgeStatus = container.querySelector('[data-testid="judge-status"]')
     expect(judgeStatus).toBeTruthy()
     expect(judgeStatus?.textContent).toContain('Error')
-    expect(judgeStatus?.textContent).toContain('cascade failed')
+    expect(judgeStatus?.textContent).toContain('runtime failed')
   }, 20000)
 
   it('renders stale-visible judge status without collapsing to offline error', async () => {

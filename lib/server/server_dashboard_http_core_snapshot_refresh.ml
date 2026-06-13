@@ -28,7 +28,7 @@ module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
 let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let compute () =

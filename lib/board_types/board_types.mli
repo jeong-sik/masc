@@ -30,6 +30,10 @@ type board_error =
 
 (** {1 Safe ID Modules — Parse, Don't Validate} *)
 
+val alphanumeric_id_re : Re.re
+(** Shared regex [^[a-zA-Z0-9_-]+$] for alphanumeric ID validation.
+    Used by [Post_id], [Board_id], [Sub_board_id], and [Board_attachment_meta.Id]. *)
+
 module Post_id : sig
   type t
   val of_string : string -> (t, board_error) result
@@ -70,6 +74,18 @@ type post_kind =
   | Automation_post
   | System_post
 [@@deriving tla]
+
+(** Legacy automation-author classification (RFC-0089 §4-3 G2). Defined
+    here so the board metric hook surface can reference it without a
+    dependency cycle through [Board_core_classify]; [Board_core_classify]
+    re-exports it via [include Board_types]. *)
+type automation_label =
+  | Auto_prefixed       (** Author starts with ["auto-"]. *)
+  | Qa_prefixed         (** Author starts with ["qa-"]. *)
+  | Researcher_named    (** Author contains ["researcher"]. *)
+  | Harness_named       (** Author contains ["harness"]. *)
+  | Smoke_named         (** Author contains ["smoke"]. *)
+  | Probe_named         (** Author contains ["probe"]. *)
 
 (** {1 Records — Mandatory TTL} *)
 

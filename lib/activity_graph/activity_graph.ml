@@ -11,27 +11,27 @@ module StringMap = Set_util.StringMap
 (* File storage paths                                               *)
 (* ================================================================ *)
 
-let root_dir (config : Coord_utils.config) =
-  Filename.concat (Coord_utils.masc_dir config) "activity-events"
+let root_dir (config : Workspace_utils.config) =
+  Filename.concat (Workspace_utils.masc_dir config) "activity-events"
 
-let month_dir (config : Coord_utils.config) =
+let month_dir (config : Workspace_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
   Filename.concat (root_dir config)
     (Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1))
 
-let day_path (config : Coord_utils.config) =
+let day_path (config : Workspace_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
   Filename.concat (month_dir config) (Printf.sprintf "%02d.jsonl" tm.tm_mday)
 
-let seq_path (config : Coord_utils.config) =
+let seq_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_seq"
 
-let lock_path (config : Coord_utils.config) =
+let lock_path (config : Workspace_utils.config) =
   Filename.concat (root_dir config) "_stream"
 
 let ensure_dirs config =
-  Coord_utils.mkdir_p (root_dir config);
-  Coord_utils.mkdir_p (month_dir config)
+  Workspace_utils.mkdir_p (root_dir config);
+  Workspace_utils.mkdir_p (month_dir config)
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
@@ -57,7 +57,7 @@ let sanitize_event (value : event) =
   {
     value with
     ts_iso = Safe_ops.sanitize_text_utf8 value.ts_iso;
-    room_id = Safe_ops.sanitize_text_utf8 value.room_id;
+    workspace_id = Safe_ops.sanitize_text_utf8 value.workspace_id;
     kind = Safe_ops.sanitize_text_utf8 value.kind;
     actor = Option.map sanitize_entity_ref value.actor;
     subject = Option.map sanitize_entity_ref value.subject;
@@ -76,7 +76,7 @@ let sanitize_event (value : event) =
    This surfaces "which kind of event / actor had invalid UTF-8 at the emit
    site" without requiring post-hoc forensics on the read-path repair log.
    Log fires once per (kind × actor) via a new call since the Warn channel
-   has no built-in dedup; operators should correlate with the Prometheus
+   has no built-in dedup; operators should correlate with the Otel_metric_store
    repair counter for frequency. *)
 let sanitize_event_traced (value : event) : event =
   let sanitized = sanitize_event value in
@@ -94,7 +94,7 @@ let sanitize_event_traced (value : event) : event =
      List.map always allocates a new list, so tags are compared element-wise. *)
   let changed =
     not (sanitized.ts_iso == value.ts_iso)
-    || not (sanitized.room_id == value.room_id)
+    || not (sanitized.workspace_id == value.workspace_id)
     || not (sanitized.kind == value.kind)
     || entity_ref_changed sanitized.actor value.actor
     || entity_ref_changed sanitized.subject value.subject
@@ -167,7 +167,7 @@ let repair_event_file_utf8_once config path =
   if String.is_valid_utf_8 content then
     content
   else
-    Coord_utils.with_file_lock config (lock_path config) (fun () ->
+    Workspace_utils.with_file_lock config (lock_path config) (fun () ->
         let latest = Fs_compat.load_file path in
         if String.is_valid_utf_8 latest then
           latest
@@ -338,7 +338,7 @@ let activity_events_store_path config = root_dir config
 
 let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value, json_line =
-    Coord_utils.with_file_lock config (lock_path config) (fun () ->
+    Workspace_utils.with_file_lock config (lock_path config) (fun () ->
         ensure_dirs config;
         let seq = read_current_seq config + 1 in
         write_current_seq config seq;
@@ -347,7 +347,7 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
             seq;
             ts_ms = now_ts_ms ();
             ts_iso = Masc_domain.now_iso ();
-            room_id = "default";  (* retained for JSONL backward compat *)
+            workspace_id = "default";  (* retained for JSONL backward compat *)
             kind;
             actor;
             subject;
@@ -402,7 +402,7 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
         `Assoc
           [
             ("scope", `String "activity_events");
-            ("coordination_root", `String (Coord_utils.masc_dir config));
+            ("workspace_root", `String (Workspace_utils.masc_dir config));
             ("durable_store", `String (activity_events_store_path config));
             ("file_pattern", `String "activity-events/YYYY-MM/DD.jsonl");
             ("seq_counter", `String (seq_path config));
@@ -423,7 +423,7 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
-      ("room_id", `String "default");  (* backward compat *)
+      ("workspace_id", `String "default");  (* backward compat *)
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int latest_store_seq);
       ("latest_matching_seq", `Int latest_matching_seq);
@@ -502,8 +502,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         :: acc)
       nodes []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
   in
   let edges_json =
     Hashtbl.fold
@@ -522,8 +521,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
         :: acc)
       edges []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+           compare ((match Json_util.assoc_member_opt "id" a with Some (`String s) -> s | _ -> "")) ((match Json_util.assoc_member_opt "id" b with Some (`String s) -> s | _ -> "")))
   in
   let timeline =
     let total = List.length events in
@@ -533,8 +531,8 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           match Yojson.Safe.Util.member "kind" node with
-           | `String kind when String.equal kind prefix -> acc + 1
+           match Json_util.assoc_member_opt "kind" node with
+           | Some (`String kind) when String.equal kind prefix -> acc + 1
            | _ -> acc)
          0
   in
@@ -542,9 +540,8 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           let open Yojson.Safe.Util in
-           match (member "kind" node, member "status" node) with
-           | `String "agent", `String status
+           match (Json_util.assoc_member_opt "kind" node, Json_util.assoc_member_opt "status" node) with
+           | Some (`String "agent"), Some (`String status)
              when
                not
                  (List.mem status
@@ -601,7 +598,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
           ~events_shown:(List.length events)
           ~events_store_total
           ~extra:[
-            ("room_id", `String "default");
+            ("workspace_id", `String "default");
             ("kinds", `List (List.map (fun value -> `String value) kinds));
           ] () );
       ( "stats",
@@ -631,7 +628,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
 (* Span start events paired with their matching end events *)
 let span_start_kind = function
   | "task.claimed" | "task.started" -> Some "task"
-  | "agent.joined" -> Some "presence"
+  | "agent.session_bound" -> Some "presence"
   | "operation.started" -> Some "operation"
   | "keeper.autonomy_started" -> Some "autonomy"
   | _ -> None

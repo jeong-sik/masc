@@ -47,6 +47,8 @@
 include Keeper_memory_bank_selection
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type keeper_memory_row_raw = {
   json: Yojson.Safe.t;
@@ -443,7 +445,7 @@ let record_memory_consolidation_metrics ~keeper_name ~outcome rows =
   count_rows_by_consolidation_source rows
   |> List.iter (fun (source, count) ->
        if count > 0 then
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MemoryConsolidations)
            ~labels:
              [
@@ -484,7 +486,7 @@ let evicted_generated_rows ~generated ~retained =
 
 let compact_memory_bank_if_needed
     ?summarizer
-    (config : Coord.config)
+    (config : Workspace.config)
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
   let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
@@ -684,15 +686,22 @@ let compact_memory_bank_if_needed
               }
 
 let append_memory_notes_from_reply
-    (config : Coord.config)
+    (config : Workspace.config)
     (meta : keeper_meta)
     ?snapshot
+    ?state_snapshot_source
     ~(turn : int)
     ~(reply : string)
     () : (int * string list) =
   let (snapshot, source) =
     match snapshot with
-    | Some s -> (s, "message_metadata")
+    | Some s ->
+      let source =
+        match state_snapshot_source with
+        | Some source -> source
+        | None -> "message_metadata"
+      in
+      (s, source)
     | None ->
       (match parse_state_snapshot_from_reply reply with
     | Some s -> (s, "reply_state_block")
@@ -713,7 +722,9 @@ let append_memory_notes_from_reply
           },
           "meta_goal_fallback" ))
   in
-  let selection = memory_candidates_from_snapshot snapshot in
+  let selection =
+    memory_candidates_from_snapshot_source ~state_snapshot_source:source snapshot
+  in
   let notes = selection.selected in
   if selection.dropped_by_total_cap > 0 || selection.dropped_by_kind <> [] then
     Log.Keeper.warn
@@ -793,7 +804,7 @@ let tool_result_memory_text ~kind ~artifact_id ~payload_preview : string =
     kind artifact_id payload_preview
 
 let append_memory_notes_from_tool_results
-    (config : Coord.config)
+    (config : Workspace.config)
     (meta : keeper_meta)
     ~(turn : int)
     ~(results : Yojson.Safe.t list) : int =
@@ -842,6 +853,54 @@ let append_memory_notes_from_tool_results
          | _ -> ())
       results);
   !written
+
+let append_voice_output
+    (config : Workspace.config)
+    (meta : keeper_meta)
+    ?provider
+    ~(execution : string)
+    ~(voice_priority : int)
+    ~(turn : int)
+    ~(message : string)
+    () : (int, string) result =
+  let text = String.trim message in
+  if text = "" || not (is_meaningful_memory_text text)
+  then Ok 0
+  else (
+    let kind = "progress" in
+    let now_ts = Time_compat.now () in
+    let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
+    let optional_provider =
+      match provider |> Option.map String.trim with
+      | Some value when value <> "" -> [ "provider", `String value ]
+      | _ -> []
+    in
+    let fields =
+      [ "ts", `String (now_iso ())
+      ; "ts_unix", `Float now_ts
+      ; "name", `String meta.name
+      ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ; "generation", `Int meta.runtime.generation
+      ; "turn", `Int turn
+      ; "kind", `String kind
+      ; "horizon", `String short_term_horizon
+      ; "source", `String "voice_output"
+      ; "schema_version", `Int keeper_memory_schema_version
+      ; "priority", `Int (tuned_priority_for_candidate ~kind ~text)
+      ; "text", `String text
+      ; "tool", `String "keeper_voice_speak"
+      ; "execution", `String execution
+      ; "voice_priority", `Int (max 1 voice_priority)
+      ]
+      @ optional_provider
+    in
+    try
+      with_memory_bank_lock path (fun () ->
+        Keeper_types_support.append_jsonl_line path (`Assoc fields));
+      Ok 1
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn))
 
 let summarize_memory_bank_lines
     (lines : string list)

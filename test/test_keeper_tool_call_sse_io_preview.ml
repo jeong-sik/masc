@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let member key json = Yojson.Safe.Util.member key json
 

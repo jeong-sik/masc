@@ -9,7 +9,7 @@
     Production source file (read-only mirror):
       - dashboard/src/styles/pipeline.css   (97 lines, LIVE)
 
-    Cascade chain (orphan-triage cleared in PR #11317):
+    Runtime chain (orphan-triage cleared in PR #11317):
       dashboard/src/main.ts:21          -> import './styles/global.css'
       dashboard/src/styles/global.css:32 -> @import "./pipeline.css";
     pipeline.css therefore ships in every dashboard build despite its
@@ -43,8 +43,8 @@
        rgba() literals appear — they are the drift evidence.
        ────────────────────────────────────────────────────────────────── */
 
-    /* ── cascade banner (info-glow tinted) ───────────────────────── */
-    .pv-cascade {
+    /* ── runtime banner (info-glow tinted) ───────────────────────── */
+    .pv-runtime {
       background: var(--color-bg-surface);
       border: 1px solid var(--color-border-strong);
       border-left: 3px solid var(--info);
@@ -52,19 +52,19 @@
       padding: 12px 16px;
       display: flex; flex-direction: column; gap: 4px;
     }
-    .pv-cascade .h {
+    .pv-runtime .h {
       font: 600 var(--type-label);
       letter-spacing: var(--track-caps);
       text-transform: uppercase;
       color: var(--color-fg-primary);
     }
-    .pv-cascade .l {
+    .pv-runtime .l {
       font: var(--type-micro);
       font-family: var(--font-mono);
       color: var(--color-fg-muted);
       letter-spacing: var(--track-wide);
     }
-    .pv-cascade code {
+    .pv-runtime code {
       font-family: var(--font-mono);
       color: var(--color-fg-secondary);
     }
@@ -320,13 +320,13 @@
       <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/pipeline.css</code> (97 lines).
         Each card pairs a production selector with the SSOT-token rendering used in the design
         system. Pipeline stages, status pills, and transient runtime states are all derived from
-        the production cascade so the visual tone is comparable. Used to validate that legacy
+        the production runtime so the visual tone is comparable. Used to validate that legacy
         aliases (<code>--white-90</code>, <code>--ok-20</code>, <code>--purple-12</code>) and the
         ad-hoc <code>rgba()</code> stage-hue table can migrate to <code>tokens.generated.css</code>
         without visual drift.</p>
     </header>
 
-    <section class="pv-cascade" role="note">
+    <section class="pv-runtime" role="note">
       <div class="h">Loaded via main.ts → global.css @import → pipeline.css</div>
       <div class="l">
         <code>dashboard/src/main.ts:21</code> · <code>import './styles/global.css'</code>

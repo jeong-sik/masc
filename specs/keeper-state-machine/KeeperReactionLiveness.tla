@@ -165,7 +165,7 @@ IssueReceipt ==
     /\ UNCHANGED <<verification_state, goal_phase, cursor_advanced>>
 
 \* Turn terminates with a typed terminal reason (tool failure, contract
-\* violation, cascade exhaustion, timeout).  The typed reason is an
+\* violation, runtime exhaustion, timeout).  The typed reason is an
 \* observable outcome — not a silent drop.  Any in-flight task produces
 \* an operator action-item; the cursor is acknowledged.
 \* Mirrors: keeper_turn_fsm terminal-state emission with typed_terminal_reason.

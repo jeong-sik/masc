@@ -14,7 +14,7 @@ implementation_prs: [16701, 16709, 16751]
 
 # RFC-0136 Phase 4 — Retry Loop Body Decomposition
 
-본 sub-doc 은 RFC-0136 main spec §4.2 PR-3 (deferred — *Retry loop body — separate RFC sub-doc 검토*) 의 구체 계획이다. PR-1/2/3 (Phase Gate / Cascade Resolution / Pre-Dispatch) 머지 후 `keeper_unified_turn.ml` 의 1742 LOC 중 가장 큰 잔여 stage 인 `rec retry_loop` (L604, ~1100 LOC) 를 5 sub-PR 로 분할한다.
+본 sub-doc 은 RFC-0136 main spec §4.2 PR-3 (deferred — *Retry loop body — separate RFC sub-doc 검토*) 의 구체 계획이다. PR-1/2/3 (Phase Gate / Runtime Resolution / Pre-Dispatch) 머지 후 `keeper_unified_turn.ml` 의 1742 LOC 중 가장 큰 잔여 stage 인 `rec retry_loop` (L604, ~1100 LOC) 를 5 sub-PR 로 분할한다.
 
 본 sub-doc 은 *PR-4 single PR 불가* 의 정량 근거 + sub-PR boundary + context record signature 를 정의한다.
 
@@ -28,9 +28,9 @@ implementation_prs: [16701, 16709, 16751]
 | `let rec retry_loop` 위치 | L604 |
 | retry_loop body 종료 | L1700 (추정 ±20) |
 | retry_loop 본체 LOC | ~1100 |
-| retry_loop 명시 args | 7 (`run_meta`, `execution`, `run_generation`, `attempt`, `is_retry`, `allow_degraded_wall_clock_retry_budget`, `attempted_cascades`) |
-| outer closure deps | 15+ (config, meta, cycle_completed, keeper_turn_id, append_manifest, runtime_manifest_context, effective_cascade_name, profile_defaults, fail_open_rotation_cascades, initial_tool_requirement, clock, turn_started_at, turn_deadline, do_run, ...) |
-| nested helpers | `do_run` (L478), `mark_terminal_error` (L616, **9 call sites**), `attempt_result` (L680), `max_turns` (L670), `execution_cascade_name` (L613), `attempt_timeout_budget` ref (L669) |
+| retry_loop 명시 args | 7 (`run_meta`, `execution`, `run_generation`, `attempt`, `is_retry`, `allow_degraded_wall_clock_retry_budget`, `attempted_runtimes`) |
+| outer closure deps | 14+ (config, meta, cycle_completed, keeper_turn_id, append_manifest, runtime_manifest_context, effective_runtime_id, profile_defaults, fail_open_rotation_runtimes, clock, turn_started_at, turn_deadline, do_run, ...) |
+| nested helpers | `do_run` (L478), `mark_terminal_error` (L616, **9 call sites**), `attempt_result` (L680), `max_turns` (L670), `execution_runtime_id` (L613), `attempt_timeout_budget` ref (L669) |
 
 ### 1.1 Single-PR 불가 정량 근거
 
@@ -61,7 +61,7 @@ implementation_prs: [16701, 16709, 16751]
 | 항목 | 값 |
 |------|-----|
 | Source | L436-602 (~167 LOC) |
-| Scope | timeout_sec, turn_started_at, turn_deadline, remaining_turn_budget_s, retry_phase_started_at, elapsed_ms, current_turn_phase_elapsed_ms, keeper_profile, max_idle_turns, max_turns, initial_tool_requirement, do_run, fail_open_rotation_cascades |
+| Scope | timeout_sec, turn_started_at, turn_deadline, remaining_turn_budget_s, retry_phase_started_at, elapsed_ms, current_turn_phase_elapsed_ms, keeper_profile, max_idle_turns, max_turns, do_run, fail_open_rotation_runtimes |
 | Target module | `keeper_unified_turn_retry_setup.{ml,mli}` |
 | Closure deps | config, meta, channel, observation, clock, generation |
 | 추정 LOC delta | `keeper_unified_turn.ml` 1742 → ~1575 (-167) |
@@ -81,9 +81,8 @@ type retry_setup =
   ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
   ; max_turns : int
-  ; initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement
   ; do_run : ...  (* TBD — closure spec 후속 측정 *)
-  ; fail_open_rotation_cascades : string list
+  ; fail_open_rotation_runtimes : string list
   }
 ```
 
@@ -96,7 +95,7 @@ closure fields (`remaining_turn_budget_s`, `elapsed_ms`, `do_run`) 는 *factory 
 | Source | L616-668 (~53 LOC, 추정) |
 | Call sites | **9 in retry_loop body** |
 | Target module | `keeper_unified_turn_retry_error_marker.{ml,mli}` |
-| Closure deps | config (base_path), meta, attempt, attempted_cascades |
+| Closure deps | config (base_path), meta, attempt, attempted_runtimes |
 | 추정 LOC delta | -53 |
 | 위험도 | LOW (typed helper, dedup value high) |
 
@@ -104,7 +103,7 @@ closure fields (`remaining_turn_budget_s`, `elapsed_ms`, `do_run`) 는 *factory 
 
 ```ocaml
 type terminal_error_outcome =
-  | Cascade_exhausted of Agent_sdk.Error.sdk_error
+  | Runtime_exhausted of Agent_sdk.Error.sdk_error
   | Phase_set_to_failed of Keeper_state_machine.failure_reason
 ```
 
@@ -128,7 +127,7 @@ caller (retry_loop) 가 *exhausted vs single-error* 구분을 *typed* 로 dispat
 | Source | L680-? (retry decision tree) |
 | Scope | Agent_sdk error classification → degraded_retry_decision → rotation/continuation |
 | Target module | `keeper_unified_turn_retry_decision.{ml,mli}` |
-| Closure deps | execution, attempt, attempted_cascades, fail_open_rotation_cascades, allow_degraded_wall_clock_retry_budget |
+| Closure deps | execution, attempt, attempted_runtimes, fail_open_rotation_runtimes, allow_degraded_wall_clock_retry_budget |
 | 추정 LOC delta | -300 |
 | 위험도 | MEDIUM |
 
@@ -254,7 +253,7 @@ PR-4-b (error marker) ─┘
 
 - RFC-0136 main spec (`docs/rfc/RFC-0136-keeper-unified-turn-decomposition.md`).
 - PR-1 #16604 MERGED — Phase Gate.
-- PR-2 #16624 MERGED — Cascade Resolution.
+- PR-2 #16624 MERGED — Runtime Resolution.
 - PR-3 #16643 MERGED — Pre-Dispatch.
 - `lib/keeper/keeper_unified_turn.ml` post-PR-3 (1742 LOC).
 - `scripts/lint/godfile-size-regression.sh` — new_file_cap 600.

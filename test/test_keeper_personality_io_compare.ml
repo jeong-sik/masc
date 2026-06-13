@@ -3,7 +3,7 @@
     [Keeper_runtime.personality_text_equal / _diff_summary] family. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let make ?(will = "") ?(needs = "") ?(desires = "") ?(instructions = "") () :
     Keeper_personality_io.raw_personality =

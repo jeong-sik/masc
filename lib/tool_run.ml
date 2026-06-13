@@ -18,12 +18,13 @@ module Float = Stdlib.Float
 (** Run Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
-    6 tools: run_init, run_plan, run_log, run_deliverable, run_get, run_list
+    4 tools: run_init, run_plan, run_get, run_list
 *)
 
 (** Tool handler context *)
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
+  agent_name: string option;
 }
 
 open Tool_args
@@ -76,44 +77,12 @@ let handle_run_plan ~tool_name ~start_time ctx args : Tool_result.result =
         ~start_time
         (Printf.sprintf "Failed to update run plan: %s" e)
 
-let handle_run_log ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  if String.equal task_id "" then
-    task_id_required ~tool_name ~start_time
-  else
-    let note = get_string args "note" "" in
-    match Run_eio.append_log ctx.config ~task_id ~note with
-  | Ok entry ->
-      Tool_result.make_ok ~tool_name ~start_time ~data:(Run_eio.log_entry_to_json entry) ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to append run log: %s" e)
-
-let handle_run_deliverable ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  if String.equal task_id "" then
-    task_id_required ~tool_name ~start_time
-  else
-    let deliverable = get_string args "deliverable" "" in
-    match Run_eio.set_deliverable ctx.config ~task_id ~content:deliverable with
-  | Ok run ->
-      Tool_result.make_ok ~tool_name ~start_time ~data:(Run_eio.run_record_to_json run) ()
-  | Error e ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Runtime_failure
-        ~start_time
-        (Printf.sprintf "Failed to set run deliverable: %s" e)
-
 let handle_run_get ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
     task_id_required ~tool_name ~start_time
   else
-    match Run_eio.get ctx.config ~task_id with
+    match Run_eio.get ?agent_name:ctx.agent_name ctx.config ~task_id with
     | Ok json -> Tool_result.make_ok ~tool_name ~start_time ~data:json ()
     | Error e ->
         Tool_result.make_err
@@ -139,8 +108,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   match name with
   | "masc_run_init" -> lift (handle_run_init ~tool_name:name ~start_time:start ctx args)
   | "masc_run_plan" -> lift (handle_run_plan ~tool_name:name ~start_time:start ctx args)
-  | "masc_run_log" -> lift (handle_run_log ~tool_name:name ~start_time:start ctx args)
-  | "masc_run_deliverable" -> lift (handle_run_deliverable ~tool_name:name ~start_time:start ctx args)
   | "masc_run_get" -> lift (handle_run_get ~tool_name:name ~start_time:start ctx args)
   | "masc_run_list" -> lift (handle_run_list ~tool_name:name ~start_time:start ctx args)
   | _ -> None
@@ -149,9 +116,9 @@ let schemas : Masc_domain.tool_schema list = [
   (* masc_run_init *)
   {
     name = "masc_run_init";
-    description = "Create an execution memory directory (.masc/runs/{task_id}/) to track plan, logs, and deliverables. \
+    description = "Create an execution memory directory (.masc/runs/{task_id}/) to track the run plan. \
 Call when starting work on a claimed task to enable structured progress tracking. \
-After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_deliverable to close.";
+After init, use masc_run_plan to set approach and masc_run_get to review.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -171,7 +138,7 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
   (* masc_run_plan *)
   {
     name = "masc_run_plan";
-    description = "Set or update the execution plan (markdown) for a task run; each update creates a new revision. \\nCall after masc_run_init to document your approach before starting implementation. \\nOther agents can view plans via masc_run_get for coordination and handoff context.";
+    description = "Set or update the execution plan (markdown) for a task run; each update creates a new revision. \\nCall after masc_run_init to document your approach before starting implementation. \\nOther agents can view plans via masc_run_get for workspace and handoff context.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -188,52 +155,10 @@ After init, use masc_run_plan to set approach, masc_run_log for notes, masc_run_
     ];
   };
 
-  (* masc_run_log *)
-  {
-    name = "masc_run_log";
-    description = "Append a timestamped note (ISO8601) to a task's execution log for audit and handoff continuity. \\nCall when reaching milestones, finding blockers, or making key decisions during task execution. \\nPair with masc_run_plan for the approach and masc_run_get to review the full log.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID");
-        ]);
-        ("note", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Note to add (will be timestamped)");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "note"]);
-    ];
-  };
-
-  (* masc_run_deliverable *)
-  {
-    name = "masc_run_deliverable";
-    description = "Record the final deliverable (markdown) and mark the task run as completed. \
-Call when task implementation is finished and verified to close out the execution record. \
-After recording, the run shows as completed in masc_run_list and masc_run_get.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("task_id", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Task ID");
-        ]);
-        ("deliverable", `Assoc [
-          ("type", `String "string");
-          ("description", `String "The deliverable (markdown supported)");
-        ]);
-      ]);
-      ("required", `List [`String "task_id"; `String "deliverable"]);
-    ];
-  };
-
   (* masc_run_get *)
   {
     name = "masc_run_get";
-    description = "Retrieve full execution history (plan, timestamped logs, deliverable) for a task as markdown. \\nUse when resuming work on a task, reviewing progress, or preparing a handoff. \\nPair with masc_run_list to find task IDs, masc_run_log to add entries.";
+    description = "Retrieve the run record and execution plan for a task. \\nIf the task has no run record yet, create an empty run scaffold and return it so resume flow can continue. \\nUse when resuming work on a task, reviewing progress, or preparing a handoff. \\nPair with masc_run_plan to set the plan.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -249,7 +174,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
   (* masc_run_list *)
   {
     name = "masc_run_list";
-    description = "List all task runs with their status (active/completed), plan presence, and log count. \\nUse when starting a session to find abandoned work or review completed runs. \\nAfter finding a run, call masc_run_get for full details or masc_run_init to start a new one.";
+    description = "List all task runs with their status (active/completed) and plan presence. \\nUse when starting a session to find abandoned work or review completed runs. \\nAfter finding a run, call masc_run_get for full details or masc_run_init to start a new one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc []);
@@ -262,13 +187,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let read_only_tools = [ "masc_run_get"; "masc_run_list" ]
-
-let tool_required_permission = function
-  | "masc_run_get" | "masc_run_list" -> Some Masc_domain.CanReadState
-  | "masc_run_init" | "masc_run_plan" | "masc_run_log"
-  | "masc_run_deliverable" -> Some Masc_domain.CanBroadcast
-  | _ -> None
+let read_only_tools = [ "masc_run_list" ]
 
 let () =
   List.iter
@@ -283,6 +202,5 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:is_ro
            ~is_idempotent:is_ro
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

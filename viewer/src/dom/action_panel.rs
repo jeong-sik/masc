@@ -29,7 +29,7 @@ use wasm_bindgen::prelude::*;
 use crate::config;
 #[cfg(target_arch = "wasm32")]
 use crate::game::lifecycle::TrpgLifecycleState;
-use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
+use crate::game::state::{ConnectionStatus, WorkspaceState, TurnProgressState};
 #[cfg(target_arch = "wasm32")]
 use crate::http::{self, RpcResult};
 
@@ -394,13 +394,13 @@ fn submit_intervention_from_input() {
 #[cfg(target_arch = "wasm32")]
 async fn submit_intervention(actor_id: &str, suggestion: &str) -> Result<(), String> {
     let url = config::build_masc_url("mcp");
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     let params = json!({
         "name": "masc_trpg_intervention_submit",
         "arguments": {
-            "session_id": room_id,
-            "room_id": room_id,
+            "session_id": workspace_id,
+            "workspace_id": workspace_id,
             "target_actor": actor_id,
             "intervention_type": "human_suggestion",
             "reason": "Viewer user input",
@@ -426,12 +426,12 @@ async fn roll_dice_intervention() -> Result<String, String> {
     };
 
     let url = config::build_masc_url("mcp");
-    let room_id = config::current_room_id();
+    let workspace_id = config::current_workspace_id();
 
     let params = json!({
         "name": "masc_trpg_dice_roll",
         "arguments": {
-            "room_id": room_id,
+            "workspace_id": workspace_id,
             "actor_id": actor_id,
             "action": "manual_check",
             "stat_value": 0,
@@ -1031,17 +1031,17 @@ fn append_to_history(text: &str) {
 
 #[allow(unused_variables)]
 pub fn sync_action_panel_interaction_state(
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
     connection: Res<ConnectionStatus>,
 ) {
-    let _ = &room_state;
+    let _ = &workspace_state;
     let _ = &connection;
     #[cfg(target_arch = "wasm32")]
     {
         let active_actor = &progress.current_actor;
         let lifecycle =
-            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+            TrpgLifecycleState::from_workspace_progress(&workspace_state.status, &progress.workspace_status);
         let connected = connection_ready(&connection);
 
         // P2: Connection-aware disable — all three conditions must be true

@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** test_turn_id_propagation — Step 15 partial.
 
-    Compile-time sentinel for the Step 0a (PR #11154 + #11156 + #11159)
+    Compile-time marker for the Step 0a (PR #11154 + #11156 + #11159)
     decision that wired [?turn_id] through [Log.Make] and every
     pre-defined module logger.  If a future PR strips [?turn_id] from
     the log surface, this file fails to type-check and the regression
@@ -34,10 +34,10 @@ let test_make_functor_signature_stable () =
 
 (** Pre-defined module loggers carry the same surface.  These four
     are the ones the keeper turn flow actually emits through:
-    - Keeper: receipts, phase gate, cascade routing
+    - Keeper: receipts, phase gate, runtime routing
     - Mcp:    runtime token / transport / dispatch
     - Auth:   token resolution events
-    - Coord:  fleet coordination
+    - Workspace:  fleet workspace
     Other module loggers (Cancel, Session, Backend, etc.) share the
     same functor signature, so checking these four is sufficient. *)
 let test_predefined_loggers_signature_stable () =
@@ -49,10 +49,10 @@ let test_predefined_loggers_signature_stable () =
     "[15d-anchor]";
   Log.Auth.info ?turn_id:None ?keeper_name:None "%s"
     "[15d-anchor]";
-  Log.Coord.info ?turn_id:None ?keeper_name:None "%s"
+  Log.Workspace.info ?turn_id:None ?keeper_name:None "%s"
     "[15d-anchor]";
   Alcotest.(check bool)
-    "Log.{Keeper,Mcp,Auth,Coord} carry ?turn_id and ?keeper_name"
+    "Log.{Keeper,Mcp,Auth,Workspace} carry ?turn_id and ?keeper_name"
     true true
 
 (** Accepting an [int turn_id] specifically (not just [None]) catches

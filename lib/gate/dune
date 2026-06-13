@@ -2,25 +2,55 @@
 
 (library
  (name masc_gate)
- (public_name masc_mcp.gate)
+ (public_name masc.gate)
  (wrapped false)
  (modules
-   channel_gate
-   channel_gate_connector
-   channel_gate_discord_names
-   channel_gate_discord_state
-   channel_gate_imessage_state
-   channel_gate_metrics
-   gate_protocol
-   gate_time_util)
+  channel_gate
+  channel_gate_connector
+  channel_gate_discord_names
+  channel_gate_discord_state
+  channel_gate_imessage_state
+  channel_gate_sidecar_state
+  channel_gate_slack_state
+  channel_gate_telegram_state
+  channel_gate_metrics
+  discord_observability
+  discord_gateway_client
+  discord_gateway_state
+  discord_rest_client
+  discord_wss_connection
+  gate_protocol
+  gate_surface
+  gate_time_util)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries
-   yojson
-   unix
-   eio
-   eio.unix
-   masc_config
-   masc_core
-   masc_pulse
-   fs_compat))
+  yojson
+  unix
+  eio
+  eio.unix
+  ; RFC-0203 Phase 1.2b — Discord Gateway WSS client
+  ; (httpun-ws-eio.Client requires fd-backed socket but Tls_eio.t exposes
+  ;  only Eio.Flow.two_way_ty; we adopt the discordml-verified stack:
+  ;  Tls_eio + Cohttp_eio + Websocket functor over Buf_read/Buf_write.)
+  uri
+  ca-certs
+  tls
+  tls-eio
+  domain-name
+  mtime
+  cohttp
+  cohttp-eio
+  websocket
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  base64
+  ; existing
+  masc_config
+  masc_core
+  masc_pulse
+  masc.http_client
+  masc.masc_log
+  otel_metric_store
+  fs_compat))

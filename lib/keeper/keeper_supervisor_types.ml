@@ -4,6 +4,8 @@
     See keeper_supervisor_types.mli for rationale and contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let supervision_cohort_size = 8
 
@@ -106,7 +108,7 @@ let is_stale_paused_meta ~now ~paused_ttl_sec (meta : keeper_meta) =
   if not meta.paused
   then false
   else
-    match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+    match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
     | Some updated_ts -> updated_ts > 0.0 && now -. updated_ts >= paused_ttl_sec
     | None -> false
 ;;
@@ -117,6 +119,47 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   match meta.runtime.last_blocker with
   | Some info -> blocker_class_continue_gate info.klass
   | None -> false
+;;
+
+let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some { klass = Turn_timeout; _ } ->
+    let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
+    let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
+    if initial_sec <= 0.0 then None else Some (Float.min max_sec initial_sec)
+  | Some
+      { klass =
+          ( Runtime_exhausted _
+          | Capacity_backpressure
+          | Ambiguous_post_commit_timeout
+          | Ambiguous_post_commit_failure
+          | Admission_queue_wait_timeout
+          | Turn_timeout_after_queue_wait
+          | Turn_livelock_blocked
+          | Completion_contract_violation
+          | Stay_silent_loop
+          | Fiber_unresolved
+          | Stale_turn_timeout
+          | Stale_fleet_batch
+          | Oas_agent_execution_timeout
+          | Sdk_max_turns_exceeded
+          | Sdk_token_budget_exceeded
+          | Sdk_cost_budget_exceeded
+          | Sdk_unrecognized_stop_reason
+          | Sdk_idle_detected
+          | Sdk_guardrail_violation
+          | Sdk_tripwire_violation
+          | Sdk_exit_condition_met
+          | Sdk_input_required )
+      ; _
+      }
+  | None -> None
+;;
+
+let paused_meta_effective_auto_resume_after_sec (meta : keeper_meta) =
+  match meta.auto_resume_after_sec with
+  | Some _ as explicit -> explicit
+  | None -> paused_meta_legacy_auto_resume_after_sec meta
 ;;
 
 let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
@@ -133,10 +176,10 @@ let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
   if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
   then false
   else
-    match meta.auto_resume_after_sec with
+    match paused_meta_effective_auto_resume_after_sec meta with
     | None -> false
     | Some resume_after_sec ->
-      (match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
+      (match Workspace_resilience.Time.parse_iso8601_opt meta.updated_at with
        | Some paused_ts -> paused_ts > 0.0 && now -. paused_ts >= resume_after_sec
        | None -> false)
 ;;
@@ -155,61 +198,4 @@ let active_supervision_keeper_count entries =
     (fun (e : Keeper_registry.registry_entry) ->
        e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed)
     entries
-;;
-
-let liveness_recovery_backoff attempt =
-  let base = Env_config.KeeperSupervisor.liveness_recovery_backoff_base_sec in
-  let max_delay = Env_config.KeeperSupervisor.liveness_recovery_backoff_max_sec in
-  Float.min max_delay (base *. Float.of_int (1 lsl min attempt 20))
-;;
-
-let should_attempt_liveness_recovery ~now (entry : Keeper_registry.registry_entry) : bool =
-  if entry.phase <> Keeper_state_machine.Dead
-  then false
-  else if entry.conditions.zombie_timeout_reached
-  then false
-  else (
-    let min_dead_sec = Env_config.KeeperSupervisor.liveness_recovery_min_dead_sec in
-    match entry.dead_since_ts with
-    | None -> false
-    | Some dead_since -> now -. dead_since >= min_dead_sec)
-;;
-
-let detect_alive_but_stuck
-      ~now
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  : float option
-  =
-  let meta = entry.meta in
-  if meta.paused
-  then None
-  else if entry.phase <> Keeper_state_machine.Running
-  then None
-  else if meta.runtime.autonomous_turn_count <= 0
-  then None
-  else (
-    let cooldown_sec = float_of_int meta.proactive.cooldown_sec in
-    let stall_threshold =
-      Float.max stall_floor_sec (cooldown_sec *. float_of_int stall_multiplier)
-    in
-    let last_proactive_ts = meta.runtime.proactive_rt.last_ts in
-    let reference_ts =
-      if last_proactive_ts > 0.0
-      then Float.max last_proactive_ts entry.started_at
-      else entry.started_at
-    in
-    let elapsed = now -. reference_ts in
-    if elapsed > stall_threshold then Some elapsed else None)
-;;
-
-let alive_but_stuck_threshold
-      ~stall_multiplier
-      ~stall_floor_sec
-      (entry : Keeper_registry.registry_entry)
-  =
-  Float.max
-    stall_floor_sec
-    (float_of_int entry.meta.proactive.cooldown_sec *. float_of_int stall_multiplier)
 ;;

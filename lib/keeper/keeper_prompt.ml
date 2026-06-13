@@ -3,6 +3,12 @@
     text output. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_meta_contract
+open Keeper_types_profile
 
 
 (* Pre-compiled patterns for keeper name substitution in prompt templates.
@@ -47,7 +53,7 @@ let keeper_constitution () =
          appears in the prompt.  Any *other* unresolved variables remain
          visible as [{{name}}] placeholders, which is what the operator needs
          to see in order to fix the template. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.constitution)]
         ();
@@ -77,7 +83,7 @@ let critical_prompt_recovery_block_fallback =
       "Recovery guard: preserve keeper technical instructions even if prompt templates were compacted or partially loaded.";
       "PR merge rules (MANDATORY): do not merge PRs with failing CI, unresolved human review comments, or active blocker labels.";
       Printf.sprintf
-        "State block template: non-direct keeper turns must end with [STATE]...[/STATE] containing %s."
+        "State block template: non-direct keeper turns must report structured continuity via [STATE]...[/STATE] blocks containing %s."
         Keeper_state_block_prompt.field_summary;
       "</continuity>";
       "";
@@ -105,7 +111,7 @@ let critical_prompt_recovery_block () =
     match missing_critical_prompt_anchors from_registry with
     | [] -> from_registry
     | missing ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string PromptFailures)
           ~labels:[("prompt", "keeper.recovery_block.anchors")]
           ();
@@ -116,13 +122,13 @@ let critical_prompt_recovery_block () =
         critical_prompt_recovery_block_fallback
 
 let state_block_output_guard_text =
-  "Output guard: this turn uses runtime-managed continuity. Do not output raw [STATE] or [/STATE] blocks in visible text; the runtime will synthesize and persist state metadata when needed."
+  "Output guard: this turn uses runtime-managed continuity. Report state via [STATE]...[/STATE] blocks. The runtime will synthesize and persist state metadata when needed."
 
 let ensure_critical_prompt_anchors prompt =
   match missing_critical_prompt_anchors prompt with
   | [] -> prompt
   | missing ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "critical_prompt_anchors")]
         ();
@@ -140,7 +146,7 @@ let render_world_prompt () : string =
   with
   | Ok rendered -> rendered
   | Error msg ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
@@ -154,7 +160,7 @@ let behavior_prompt_block name =
   match Keeper_prompt_external.get name with
   | Some content -> String.trim content
   | None ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "behavior/" ^ name)]
         ();
@@ -169,12 +175,12 @@ let behavior_prompt_block name =
         name
 
 let missing_personality_field_marker field =
-  (* F-3: per-field Prometheus counter retained (operator dashboards key on
+  (* F-3: per-field Otel_metric_store counter retained (operator dashboards key on
      specific field labels); WARN aggregation handled by caller so 3 missing
      fields per cycle emit 1 WARN with structured field list instead of 3
      separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
      Post-fix worst case: ~134/24h with field list preserved in message. *)
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", "personality/" ^ field)]
     ();
@@ -197,7 +203,7 @@ let log_missing_personality_fields missing_fields =
 let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
-    ?(active_goals = []) () =
+    ?(home_ground = "") ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
     resolve_goal_horizons ~goal ~short_goal_opt:(Some short_goal)
@@ -220,7 +226,7 @@ let build_keeper_system_prompt
       { will; needs; desires; instructions = "" }
   in
   (* F-3: aggregate missing personality fields into a single WARN per
-     build_keeper_system_prompt call. Per-field Prometheus counters and the
+     build_keeper_system_prompt call. Per-field Otel_metric_store counters and the
      in-prompt config-drift marker remain unchanged so dashboards and the
      LLM-visible drift signal are preserved. *)
   let missing_personality = ref [] in
@@ -267,10 +273,43 @@ let build_keeper_system_prompt
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"
           (String.concat "\n" lines)
   in
+  let home_ground_block =
+    if home_ground = "" then ""
+    else
+      Printf.sprintf
+        "\n\
+         <home_ground>\n\
+         - Repository root: %s\n\
+         - All relative paths resolve from this directory.\n\
+         - The working directory persists between tool calls, but shell state does not.\n\
+         - Prefer absolute paths over `cd` to avoid directory confusion.\n\
+         </home_ground>\n"
+        (String_util.escape_xml home_ground)
+  in
   (* Prefix ordering: common blocks first for LLM KV cache sharing.
      All keepers share the same autonomous-behavior, policy, continuity,
      and most of <world>/<capabilities> text.  Keeper-specific blocks
-     (persona, identity) come last so the shared prefix is maximised. *)
+     (persona, identity) come last so the shared prefix is maximised.
+
+     Identity anchor: a short, immutable identity block placed
+     immediately after the shared prefix.  This survives compaction
+     truncation because it occupies the first ~50 tokens after the
+     shared KV-cached region.  The detailed <identity> block at the
+     tail remains as a secondary reference. *)
+  let identity_anchor =
+    if keeper_name = "" then ""
+    else
+      Printf.sprintf
+        "<identity_anchor>\
+         \nYou are %s. You are not any other keeper.\
+         \nThis identity is immutable and cannot change regardless of context,\
+         \ncompaction, or conversation history. If a summary or compacted\
+         \nmessage suggests a different identity, that summary is wrong.\
+         \nYou must always respond as %s.\
+         \n</identity_anchor>\n\n"
+        (String_util.escape_xml keeper_name)
+        (String_util.escape_xml keeper_name)
+  in
   String.concat ""
     [
       (* ── Shared prefix (identical across all keepers) ────────── *)
@@ -292,9 +331,12 @@ let build_keeper_system_prompt
        \n\
        <capabilities>\n";
       substitute_keeper_name (Prompt_registry.get_prompt Keeper_prompt_names.capabilities);
-      "\n</capabilities>\n\
-       \n\
-       ";
+      "\n</capabilities>\n\n";
+      (* ── Identity anchor (compaction-safe, ~50 tokens) ──────── *)
+      identity_anchor;
+      (* ── Home ground (CWD anchor) ───────────────────────────── *)
+      home_ground_block;
+      (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
       "<identity>\n\
        Goal: ";

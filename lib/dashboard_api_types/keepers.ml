@@ -12,7 +12,7 @@
       dashboard_bonsai/src/keepers_fetch.ml  — client consumer
 
     SSOT for the JSON wire contract. Phase 1 artifact per
-    planning/agent_llm_a-plans/masc-mcp-eventual-parrot.md. *)
+    planning/agent_llm_a-plans/masc-eventual-parrot.md. *)
 
 type keeper_status =
   | Live
@@ -57,7 +57,7 @@ type keeper = {
 type response = {
   keepers : keeper list;
   cycle : int;                  (* current cycle number *)
-  room : string option;          [@default None]
+  workspace : string option;         [@default None]
   generated_at : string;        (* ISO-8601 UTC *)
 }
 [@@deriving yojson { strict = false }]

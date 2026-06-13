@@ -24,7 +24,8 @@
 open Alcotest
 
 module KB = Env_config_keeper.KeeperBootstrap
-module Boot = Masc_mcp.Server_bootstrap_loops.For_testing
+module Boot = Server_bootstrap_loops.For_testing
+module Chat_queue = Masc.Keeper_chat_queue
 
 let approx = float 0.001
 
@@ -161,6 +162,26 @@ let test_autoboot_warmup_is_order_independent () =
   check bool "stagger produces ≥3 distinct warmups across 10 names" true
     (distinct >= 3)
 
+let test_discord_queue_projection_matches_gateway_context () =
+  let queued : Chat_queue.queued_message =
+    {
+      content = "hello";
+      attachments = [];
+      timestamp = 0.0;
+      source =
+        Chat_queue.Discord
+          { channel_id = "discord-channel-1"; user_id = "discord-user-9" };
+    }
+  in
+  let projection = Boot.queued_chat_projection queued in
+  check string "connector label" "discord" projection.payload_channel;
+  check string "actor id" "discord-user-9" projection.payload_channel_user_id;
+  check string "workspace id uses Discord channel id" "discord-channel-1"
+    projection.payload_channel_workspace_id;
+  check string "agent identity matches gate channel actor"
+    "gate:discord:discord-channel-1:discord-user-9"
+    projection.agent_name
+
 let () =
   run "env_config_keeper_bootstrap_intervals"
     [
@@ -191,5 +212,10 @@ let () =
             test_autoboot_warmup_is_order_independent;
           test_case "Int32 hash pinned cross-platform (#13155 §L)" `Quick
             test_warmup_hash_pinned_cross_platform;
+        ] );
+      ( "queued chat projection",
+        [
+          test_case "Discord queue source keeps connector context" `Quick
+            test_discord_queue_projection_matches_gateway_context;
         ] );
     ]

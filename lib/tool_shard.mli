@@ -9,13 +9,9 @@
     [test_types.ml :: sort_order_schema_ssot] catches drift. *)
 val sort_order_enum_strings : string list
 
-(** Issue #8524: hand-mirrored from
-    [Agent_tool_command_runtime.valid_shell_op_strings]. Sync regression test in
-    [test_types.ml :: tool_search_files_op_ssot] catches drift. *)
-val tool_search_files_op_enum_strings : string list
 
 (** Issue #8484: hand-mirrored from
-    [Agent_tool_memory_runtime.valid_memory_search_source_strings]. Sync
+    [Keeper_tool_memory_runtime.valid_memory_search_source_strings]. Sync
     regression test in [test_types.ml :: memory_search_source_ssot]
     catches drift. *)
 val memory_search_source_enum_strings : string list
@@ -26,7 +22,7 @@ val memory_search_source_enum_strings : string list
 val memory_kind_enum_strings : string list
 
 (** Issue #8490: hand-mirrored from
-    [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]. Sync regression test
+    [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings]. Sync regression test
     in [test_types.ml :: fs_write_mode_ssot] catches drift. *)
 val fs_write_mode_enum_strings : string list
 
@@ -60,7 +56,7 @@ val shard_filesystem : shard
 (** File I/O: read-only inspection. *)
 
 val shard_search_files : shard
-(** SearchFiles structured repo inspection access. *)
+(** Grep structured repo inspection access. *)
 
 (** {1 Lookup} *)
 
@@ -124,11 +120,12 @@ val board_tools : Masc_domain.tool_schema list
 (** {1 MCP Interface} *)
 
 val schemas : Masc_domain.tool_schema list
-(** MCP tool schemas for masc_tool_grant, masc_tool_revoke, masc_tool_list. *)
+(** Empty: [masc_tool_*] callable tools are not exposed. *)
 
 val execute : string -> Yojson.Safe.t -> (bool * Yojson.Safe.t)
-(** Execute tool_shard MCP tools (grant, revoke, list).
-    Agent shard state is tracked in-memory per agent. *)
+(** Legacy compatibility entrypoint. [masc_tool_*] calls are no longer
+    exposed and return unknown. Internal shard state is managed through
+    keeper/persona configuration, not callable tools. *)
 
 val all_keeper_tool_schemas : Masc_domain.tool_schema list
 (** #10101: every keeper-facing tool schema exposed by this

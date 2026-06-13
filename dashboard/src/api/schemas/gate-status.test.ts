@@ -16,7 +16,7 @@ function validChannel(overrides: Record<string, unknown> = {}): Record<string, u
 function validBinding(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     channel: 'slack',
-    room_id: 'C123',
+    workspace_id: 'C123',
     keeper: 'greeter',
     ...overrides,
   }
@@ -26,7 +26,7 @@ function validEvent(overrides: Record<string, unknown> = {}): Record<string, unk
   return {
     timestamp: '2026-04-17T00:00:00Z',
     channel: 'slack',
-    room_id: 'C123',
+    workspace_id: 'C123',
     keeper: 'greeter',
     ...overrides,
   }
@@ -60,12 +60,12 @@ describe('parseGateStatusData', () => {
     expect(out.channels).toHaveLength(1)
   })
 
-  it('drops binding rows missing any of channel/room_id/keeper', () => {
+  it('drops binding rows missing any of channel/workspace_id/keeper', () => {
     const out = parseGateStatusData({
       bindings: [
         validBinding(),
-        { channel: 'slack', room_id: 'C1' }, // missing keeper
-        { channel: 'slack', keeper: 'k1' }, // missing room_id
+        { channel: 'slack', workspace_id: 'C1' }, // missing keeper
+        { channel: 'slack', keeper: 'k1' }, // missing workspace_id
       ],
     })
     expect(out.bindings).toHaveLength(1)
@@ -75,7 +75,7 @@ describe('parseGateStatusData', () => {
     const out = parseGateStatusData({
       recent_events: [
         validEvent(),
-        { channel: 'slack', room_id: 'C1', keeper: 'k1' }, // missing timestamp
+        { channel: 'slack', workspace_id: 'C1', keeper: 'k1' }, // missing timestamp
       ],
     })
     expect(out.recent_events).toHaveLength(1)

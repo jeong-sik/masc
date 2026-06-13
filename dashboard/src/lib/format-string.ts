@@ -1,7 +1,7 @@
 // Unified string formatting utilities.
 
 /**
- * User-visible sentinel string for missing scalar data in panel rows.
+ * User-visible marker string for missing scalar data in panel rows.
  *
  * `'--'` is the dashboard's convention for "value not present" in metadata
  * tables (RuntimeMetaRow, ConfigRow, supervisor cohort summary, fleet
@@ -82,7 +82,7 @@ export function firstNonEmptyString(
  * test, etc.
  *
  * Two file-internal copies (`components/ide/ide-editor.ts` needle
- * highlighting, `styles/cockpit-token-cascade.test.ts` CSS literal
+ * highlighting, `styles/cockpit-token-runtime.test.ts` CSS literal
  * assertions) shipped this exact body before centralising here.
  */
 export function escapeRegExp(value: string): string {
@@ -103,16 +103,15 @@ export function escapeRegExp(value: string): string {
  *
  * ~45 call sites currently inline this exact ternary across
  * `dashboard-ws`, `lib/async-state` (file-internal helper),
- * `api/mcp`, `components/cascade-config-panel`,
- * `components/cascade-inspector`, `components/cascade-waterfall`,
- * `components/excuse-patterns`, `components/git-graph-view`,
+ * `api/mcp`, `components/runtime-config-panel`,
+ * `components/runtime-inspector`, `components/runtime-waterfall`,
+ * `components/excuse-patterns`,
  * `components/goal-loop-panel`, `components/goals/goal-tree`,
- * `components/handoff-timeline`, `components/ide/execute-output-drawer`,
- * `components/ide/ide-branch-context-panel`,
+ * `components/ide/execute-output-drawer`,
  * `components/ide/interject-store`, `components/journey-panel`,
- * `components/keeper-chat-panel`, `components/keeper-reactivity-monitor`,
+ * `components/keeper-shared`, `components/keeper-reactivity-monitor`,
  * `components/keeper-spawn/keeper-spawn-state`,
- * `components/prometheus-metrics`, `components/task-manage/task-manage-state`,
+ * `components/task-manage/task-manage-state`,
  * `components/telemetry-unified`,
  * `components/tool-executor/tool-executor-state`,
  * `components/tool-executor/tool-result-display`,

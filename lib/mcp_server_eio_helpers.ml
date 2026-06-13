@@ -1,17 +1,32 @@
 (** Mcp_server_eio_helpers — Small utility functions extracted from mcp_server_eio.ml
 
-    Provides functions needed by both mcp_server_eio.ml and tool_inline_dispatch.ml
+    Provides functions needed by both mcp_server_eio.ml and mcp_tool_runtime.ml
     without circular dependencies.
 *)
 
-(** Log an MCP server error with [UNEXPECTED] tag for unrecognized exceptions. *)
+(** Severity and grep tag for an exception logged via {!log_mcp_exn}.
+
+    Recognised exceptions ([Sys_error] / [Failure] / [Not_found] /
+    [End_of_file] / [Yojson.Json_error] / [Yojson.Safe.Util.Type_error]) are
+    expected I/O / parse / control-flow outcomes in best-effort side channels
+    (telemetry, identity resolution, activity-graph emit) and stay at [Info].
+    Any other exception is unrecognised: tagged ["[UNEXPECTED] "] and raised to
+    [Warn] so it surfaces above the [Info] noise floor.  It stays at [Warn]
+    rather than [Error] because the caller still recovers (the side channel is
+    swallowed and the SSE loop continues), and [Error] is reserved for
+    unrecoverable faults (docs/spec/18-log-severity-taxonomy.md § 2 / § 3.6). *)
+let mcp_exn_level_and_tag exn : Log.level * string =
+  match exn with
+  | Sys_error _ | Failure _ | Not_found | End_of_file
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> (Log.Info, "")
+  | _ -> (Log.Warn, "[UNEXPECTED] ")
+
+(** Log an MCP server-side exception at a severity derived from the exception
+    class (see {!mcp_exn_level_and_tag}) rather than a hardcoded level.  Emits
+    exactly one line. *)
 let log_mcp_exn ~label exn =
-  let tag = match exn with
-    | Sys_error _ | Failure _ | Not_found | End_of_file
-    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
-    | _ -> "[UNEXPECTED] "
-  in
-  Log.Mcp.info "%s%s: %s" tag label (Printexc.to_string exn)
+  let level, tag = mcp_exn_level_and_tag exn in
+  Log.Mcp.emit level (Printf.sprintf "%s%s: %s" tag label (Printexc.to_string exn))
 
 (** Wait for message using Eio sleep - adapter for Session.registry *)
 let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =

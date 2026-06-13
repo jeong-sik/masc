@@ -3,11 +3,11 @@ open Alcotest
 (** RFC-0084 host-config-cleanup-F — test-mode predicate migration.
 
     PR-F migrates the typed [Host_config.test_mode_kind] surface into
-    the only call-site that lives in the [masc_mcp] main library:
+    the only call-site that lives in the [masc] main library:
     [lib/config_dir_resolver.ml:55] [running_under_test_executable].
 
     The other 4 sites enumerated in PR-12 mli §1.5 live in lower-level
-    sub-libraries ([masc_config], [masc_coord], [fs_compat]) which
+    sub-libraries ([masc_config], [masc_workspace], [fs_compat]) which
     cannot call [Host_config] without inverting the dune
     dependency graph; their migration is deferred to a separate RFC
     (Host_config extraction to a shared lower-level library).  The 6th

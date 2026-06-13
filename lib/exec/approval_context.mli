@@ -12,8 +12,8 @@
 
 type t = {
   actor : Agent_id.t;
-  (** Typed agent identity for who is triggering the exec.  [`Coord_git] for
-      the git coordinator, [`System_sandbox] for the sandbox runner,
+  (** Typed agent identity for who is triggering the exec.  [`Workspace_git] for
+      the git workspace helper, [`System_sandbox] for the sandbox runner,
       etc.  Not a security principal — that stays with the token/session on
       the transport layer. *)
 

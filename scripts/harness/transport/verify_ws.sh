@@ -33,18 +33,14 @@ else
   exit 1
 fi
 
-read_sse_external_subscriber_count() {
-  curl -fsS "${MASC_HTTP_BASE_URL}/metrics" 2>/dev/null \
-    | awk '$1=="masc_sse_external_subscribers_total" { print int($2); found=1; exit } END { if (!found) print -1 }' \
-    2>/dev/null || echo "-1"
-}
-
 ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
 ws_handshake="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws-handshake.XXXXXX")"
-ws_subscribers_before="$(read_sse_external_subscriber_count)"
+ws_auth_token="$(transport_auth_token)"
 MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
-WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" python3 - <<'PY' &
+WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" \
+WS_AUTH_TOKEN="$ws_auth_token" python3 - <<'PY' &
 import base64
+import json
 import os
 import socket
 import sys
@@ -54,6 +50,7 @@ port = int(os.environ["MASC_WS_PORT"])
 output_path = os.environ["WS_OUTPUT"]
 expected = os.environ["WS_EXPECT"]
 handshake_path = os.environ["WS_HANDSHAKE"]
+auth_token = os.environ.get("WS_AUTH_TOKEN", "")
 
 sock = socket.create_connection((host, port), timeout=5)
 key = base64.b64encode(os.urandom(16)).decode()
@@ -83,6 +80,19 @@ with open(handshake_path, "w", encoding="utf-8") as fh:
 buffer = buffer.split(b"\r\n\r\n", 1)[1]
 sock.settimeout(6)
 
+def send_text(text: str) -> None:
+    payload = text.encode("utf-8")
+    mask = os.urandom(4)
+    length = len(payload)
+    if length < 126:
+        header = bytes([0x81, 0x80 | length])
+    elif length <= 0xFFFF:
+        header = bytes([0x81, 0x80 | 126]) + length.to_bytes(2, "big")
+    else:
+        header = bytes([0x81, 0x80 | 127]) + length.to_bytes(8, "big")
+    masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    sock.sendall(header + mask + masked)
+
 def read_exact(n: int) -> bytes:
     global buffer
     data = b""
@@ -97,7 +107,7 @@ def read_exact(n: int) -> bytes:
         data += chunk
     return data
 
-for _ in range(16):
+def read_text_frame() -> tuple[int, str]:
     hdr = read_exact(2)
     opcode = hdr[0] & 0x0F
     masked = (hdr[1] & 0x80) != 0
@@ -111,7 +121,44 @@ for _ in range(16):
     if masked:
       payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     if opcode == 0x1:
-      text = payload.decode("utf-8", errors="replace")
+      return opcode, payload.decode("utf-8", errors="replace")
+    if opcode == 0x8:
+      return opcode, ""
+    return opcode, ""
+
+hello_params = {
+    "protocol": "dashboard-ws.v1",
+    "features": ["snapshot", "delta", "mode_snapshot"],
+}
+if auth_token:
+    hello_params["token"] = auth_token
+send_text(json.dumps({
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "dashboard/hello",
+    "params": hello_params,
+}, separators=(",", ":")))
+
+for _ in range(8):
+    opcode, text = read_text_frame()
+    if opcode == 0x8:
+      raise SystemExit(3)
+    if not text:
+      continue
+    try:
+      payload = json.loads(text)
+    except json.JSONDecodeError:
+      continue
+    if payload.get("id") == 1:
+      if "result" in payload:
+        break
+      raise SystemExit(5)
+else:
+    raise SystemExit(6)
+
+for _ in range(16):
+    opcode, text = read_text_frame()
+    if opcode == 0x1:
       with open(output_path, "a", encoding="utf-8") as fh:
         fh.write(text)
         fh.write("\n")
@@ -145,45 +192,20 @@ else
   exit 1
 fi
 
-# Poll Prometheus for the SSE external-subscriber count instead of a
-# fixed sleep. The Python client above needs time for:
-#   1. socket connect
-#   2. upgrade request/response (101 Switching Protocols)
-#   3. server-side [create_websocket] callback to run and call
-#      [Sse.subscribe_external] registering this session as an
-#      external broadcast recipient
-# Step 3 happens asynchronously inside the httpun-ws [Wsd.t] setup and
-# is NOT guaranteed to complete before [respond_with_upgrade] returns.
-# The previous fixed [sleep 1] raced this registration: on a loaded CI
-# runner, the subscription could be placed AFTER the mcp_broadcast
-# call, so the broadcast event had no subscriber to deliver to and the
-# Python client's 6-second recv timeout elapsed with zero frames.
-#
-# Polling against [masc_sse_external_subscribers_total] provides the
-# deterministic barrier we actually need. The previous
-# [websocket.session_count] guard was still racy because
-# [server_mcp_transport_ws.ml] inserts the session before it calls
-# [Sse.subscribe_external], so /health could report the new WS session
-# even while the SSE fanout registry was still missing the subscriber.
-#
-# Falls back to the old 1-second wait if /metrics is unavailable.
-ws_target_subscribers=1
-if [[ "$ws_subscribers_before" =~ ^[0-9]+$ ]]; then
-  ws_target_subscribers=$(( ws_subscribers_before + 1 ))
-fi
-
-ws_ready_deadline=$(( $(date +%s) + 10 ))
-while [[ "$(date +%s)" -lt "$ws_ready_deadline" ]]; do
-  ws_subscribers="$(read_sse_external_subscriber_count)"
-  if [[ "$ws_subscribers" =~ ^[0-9]+$ ]] && [[ "$ws_subscribers" -ge "$ws_target_subscribers" ]]; then
-    break
-  fi
-  sleep 0.2
-done
-
 session_id="$(mcp_initialize_session)"
 mcp_join_agent "$session_id" "transport-harness" >/dev/null
-mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null
+
+# The server-side WS callback registers the session as an external broadcast
+# recipient asynchronously after the 101 handshake. Use a bounded broadcast
+# retry loop as the readiness barrier.
+ws_broadcast_deadline=$(( $(date +%s) + 10 ))
+while [[ "$(date +%s)" -lt "$ws_broadcast_deadline" ]]; do
+  if ! kill -0 "$ws_client_pid" >/dev/null 2>&1; then
+    break
+  fi
+  mcp_broadcast "$session_id" "transport-harness" "ws-e2e-test-event" >/dev/null || true
+  sleep 0.5
+done
 
 if wait "$ws_client_pid"; then
   if grep -q "ws-e2e-test-event" "$ws_output"; then

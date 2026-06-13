@@ -28,28 +28,28 @@ Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.
 - **Evidence**: `lib/masc_http_client/masc_http_client.ml:1-13` 헤더 인용:
   > *"cohttp-eio 6.1.1 does not reliably close the underlying TCP socket fd when the Eio.Switch exits (observed on macOS). This module intercepts the connection factory via [make_generic] to capture the raw socket and close it explicitly on switch release."*
 - **현재 워크어라운드**: `make_closing_client` 는 cohttp-eio 의 `make_generic` factory 를 가로채 `tracked_flows: Eio.Resource.t list ref` 에 모든 socket flow 를 등록한 뒤, `Switch.on_release` 시점에 명시적으로 close. 정교한 우회 trick 이지만 *Eio 공식 권고 위반* — Eio issue #244 에서 Eio 팀이 "라이브러리의 자동 리소스 정리에 맡기고 명시적 close 하지 말 것" 권고했음에도, 우리는 cohttp-eio 의 부족을 우회하기 위해 어쩔 수 없이 명시적 close 를 추가.
-- **결과**: 매 호출 `connection: close` 강제 → keep-alive 0건 → cascade 마다 N socket burst.
-- **상위 issue**: [`ocaml-cohttp#85`](https://github.com/mirage/ocaml-cohttp/issues/85) "Support HTTP Keep-Alive" — 2014-01 개설, Closed (milestone "1.0 Stable API"), 결과적으로 abandoned/out-of-scope. masc-mcp 의 워크어라운드는 그 gap 의 lower bound.
+- **결과**: 매 호출 `connection: close` 강제 → keep-alive 0건 → runtime 마다 N socket burst.
+- **상위 issue**: [`ocaml-cohttp#85`](https://github.com/mirage/ocaml-cohttp/issues/85) "Support HTTP Keep-Alive" — 2014-01 개설, Closed (milestone "1.0 Stable API"), 결과적으로 abandoned/out-of-scope. masc 의 워크어라운드는 그 gap 의 lower bound.
 
-### 1.2 Connection pool 부재 — masc-mcp + oas 양쪽
+### 1.2 Connection pool 부재 — masc + oas 양쪽
 
-- **masc-mcp**: `lib/masc_http_client/masc_http_client.ml` 가 매 호출 fresh `Eio.Switch.run` → `Client.make` → 1 request → switch release → tracked socket close.
+- **masc**: `lib/masc_http_client/masc_http_client.ml` 가 매 호출 fresh `Eio.Switch.run` → `Client.make` → 1 request → switch release → tracked socket close.
 - **oas**: `oas/lib/llm_provider/http_client.ml:380-410` 의 `get_sync` / `post_sync` 가 동일 패턴.
 - **RFC-0100 (Streamable HTTP)** 가 명시적으로 connection pooling 을 *out-of-scope* 로 명시 (line 20).
-- **Cascade 영향**: 12+ keeper 가 cascade 재시도 안에서 매 호출 새 TCP+TLS 를 염. cascade 1 turn 에 5~12 fd burst (provider probe + cascade attempt + tool call HTTP).
+- **Runtime 영향**: 12+ keeper 가 runtime 재시도 안에서 매 호출 새 TCP+TLS 를 염. runtime 1 turn 에 5~12 fd burst (provider probe + runtime attempt + tool call HTTP).
 
 ### 1.3 Switch hierarchy gap
 
-- **`lib/keeper/keeper_turn_driver_try_provider.ml:406`**: cascade attempt 마다 fresh `Eio.Switch.run (fun attempt_sw -> ...)` 존재 — cascade level 은 OK.
+- **`lib/keeper/keeper_turn_driver_try_provider.ml:406`**: runtime attempt 마다 fresh `Eio.Switch.run (fun attempt_sw -> ...)` 존재 — runtime level 은 OK.
 - **`lib/keeper/keeper_agent_run.ml:196`**: `run_turn` 자체는 ambient switch 사용. **turn-scoped FD boundary 가 없음**.
 - **결과**: turn 내부에서 spawn 된 fiber 가 attempt switch 가 아니라 ambient switch 에 attach 되면, turn 종료 후에도 FD 가 해제되지 않음. `try_provider:406` 의 fresh switch 는 *opt-in* 이라 turn 본체 코드가 그 switch 를 쓰지 않을 수 있음.
 - **Eio.Switch 공식 axiom**: *"Resource cannot outlive its switch"* ([공식 docs](https://ocaml-multicore.github.io/eio/eio/Eio/Switch/index.html)). Ambient switch 를 쓰면 resource lifetime 의 상한이 ambient 만큼 길어지는데, 우리 ambient 는 keeper lifetime 전체 — *FD 가 keeper 종료까지 살아남을 수 있음*.
 
 ### 1.4 Subprocess-heavy Docker
 
-- **모든 Docker 호출** 이 `lib/docker_spawn_throttle.ml` 의 `with_slot` 으로 감싼 subprocess `docker run/exec` (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`, sandbox Execute runner, `lib/keeper/keeper_docker_client_real.ml`).
+- **모든 live Docker 호출** 이 `lib/docker_spawn_throttle.ml` 의 `with_slot` 으로 감싼 subprocess `docker run/exec` (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`). RFC-0070 executor-track removal 이후 sandbox Execute runner 의 mockable executor path 는 더 이상 live caller 가 아니다.
 - **Docker HTTP API (`/var/run/docker.sock`) 사용 0건**. sandbox Execute runner 가 명시적으로 `blocked_mount_paths` 에 등재 (security 의도).
-- **fd 비용**: subprocess 1회 = daemon socket 1 + stdio pipe 3 + cgroup fd. SDK/HTTP API 호출 = 같은 daemon socket 재사용. *cascade-storm 의 가장 큰 spike 원인*.
+- **fd 비용**: subprocess 1회 = daemon socket 1 + stdio pipe 3 + cgroup fd. SDK/HTTP API 호출 = 같은 daemon socket 재사용. *runtime-storm 의 가장 큰 spike 원인*.
 - **RFC-0097 (container reuse)** 는 Draft, spec-only — 머지 후 *spec body 만* 존재하고 구현 PR 없음. 본 RFC 가 §3.4 에서 활성화.
 
 ## 2. Non-goals
@@ -156,7 +156,7 @@ sandbox_exec
 
 ## 4. Implementation phases
 
-본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-oas-vast-moonbeam.md` 와 동기화. 요약:
+본 RFC 의 phase 구성은 plan `~/me/planning/claude-plans/me-workspace-yousleepwhen-masc-oas-vast-moonbeam.md` 와 동기화. 요약:
 
 | Phase | Scope | Critical path? |
 |---|---|---|
@@ -183,12 +183,12 @@ sandbox_exec
 
 Gate 입력은 두 개의 보완적 evidence — *결정론적 in-process witness* + *비결정론적 production 30일 sample*. 한 쪽만으로는 demotion 정당화 불충분.
 
-**Witness 1 — in-process (deterministic).** `test/test_pool_cascade_storm.ml` (Phase D.2e). cohttp-eio loopback echo server + 16 fiber × 5 sequential request 81-call burst. `Pool.stats` 가 keep-alive 계약을 만족해야 통과:
+**Witness 1 — in-process (deterministic).** `test/test_pool_runtime_storm.ml` (Phase D.2e). cohttp-eio loopback echo server + 16 fiber × 5 sequential request 81-call burst. `Pool.stats` 가 keep-alive 계약을 만족해야 통과:
 - `create_count_total ≤ fiber_count` (worst case = 모든 fiber 가 첫 dial 에서 parked queue miss)
 - `reuse_count_total > total − fiber_count − 1` (reuse 가 우세)
 - `reuse + create == total` (accounting)
 
-실측: `create=16, reuse=65, fibers=16`. pre-D `make_closing_client` 시절이라면 `create=81, reuse=0` 이 됐을 cascade-fd-storm 패턴 (§1.1) 이 정확히 사라졌음을 입증.
+실측: `create=16, reuse=65, fibers=16`. pre-D `make_closing_client` 시절이라면 `create=81, reuse=0` 이 됐을 runtime-fd-storm 패턴 (§1.1) 이 정확히 사라졌음을 입증.
 
 **Witness 2 — production (statistical).** Phase D 머지 후 **30일 production sample**:
 - peak `process_open_fds < RLIMIT_NOFILE_soft × 0.5`
@@ -252,7 +252,7 @@ Phase D 머지 시 `lib/masc_http_client/masc_http_client.ml` 의 `make_closing_
 - **A**: `rfc-number-collision-check` CI green, `pr-rfc-check.sh` PASS.
 - **B**: 4-axis bench 결과 `lib/masc_http_client/CHOICE.md` 에 commit, RFC §3.1 표 backfill.
 - **C**: TLA+ clean spec invariant 통과, buggy spec 위반 ≤ 3 steps. e2e 100-turn loop `lsof` peak linear-bounded.
-- **D**: 16 keepers × 5 turn cascade-storm reproducer 통과, ENFILE 0건.
+- **D**: 16 keepers × 5 turn runtime-storm reproducer 통과, ENFILE 0건.
 - **E**: container reuse 100회 exec 후 fd diff = 0. security review pass.
 - **F**: 30일 production sample 의 fd peak / ENFILE 카운트 측정.
 - **G**: 부팅 후 `launchctl limit maxfiles` 반영 확인.

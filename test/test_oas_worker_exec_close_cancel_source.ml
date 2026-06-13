@@ -39,7 +39,7 @@ let assert_order ~label haystack first second =
   | _ ->
       failwith
         (Printf.sprintf
-           "[%s] expected %S to appear before %S in cascade_runner.ml"
+           "[%s] expected %S to appear before %S in runtime_agent.ml"
            label first second)
 
 let () =
@@ -48,9 +48,9 @@ let () =
   let project_root = parent (parent (parent (parent exe))) in
   let candidates =
     [
-      Filename.concat project_root "lib/cascade/cascade_runner.ml";
-      "lib/cascade/cascade_runner.ml";
-      "../lib/cascade/cascade_runner.ml";
+      Filename.concat project_root "lib/runtime/runtime_agent.ml";
+      "lib/runtime/runtime_agent.ml";
+      "../lib/runtime/runtime_agent.ml";
     ]
   in
   let src =
@@ -58,7 +58,7 @@ let () =
     | Some path -> read_file path
     | None ->
         failwith
-          (Printf.sprintf "no cascade_runner.ml source path resolved (cwd=%s, exe=%s)"
+          (Printf.sprintf "no runtime_agent.ml source path resolved (cwd=%s, exe=%s)"
              (Sys.getcwd ()) exe)
   in
   let cancel_guard = "Eio.Cancel.Cancelled _ as e ->" in

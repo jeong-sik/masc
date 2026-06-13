@@ -15,7 +15,7 @@ code_refs:
 
 ## Context
 
-MASC-MCP는 176개 이상의 환경변수 설정을 사용하며, boolean feature flag는 `lib/config/feature_flag_registry.ml`에 중앙 집중식으로 관리된다. 최근 PR #3793에서 `MASC_KEEPER_WORK_AS_HEARTBEAT` 플래그가 registry에 3번 중복 등록되는 문제가 발견되었다 (lines 95, 130, 140).
+MASC는 176개 이상의 환경변수 설정을 사용하며, boolean feature flag는 `lib/config/feature_flag_registry.ml`에 중앙 집중식으로 관리된다. 최근 PR #3793에서 `MASC_KEEPER_WORK_AS_HEARTBEAT` 플래그가 registry에 3번 중복 등록되는 문제가 발견되었다 (lines 95, 130, 140).
 
 ### 문제의 근본 원인
 

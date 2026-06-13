@@ -216,11 +216,11 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
         </svg>
       <//>
 
-      ${'' /* Cascade fallback events */}
+      ${'' /* Runtime fallback events */}
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <${DetailRow}>
-            <>캐스케이드 폰백</>
+            <>런타임 폴백</>
             <span class="text-3xs text-[var(--color-status-err)]">${fallbackCount}회</span>
           </${DetailRow}>
           <div class="flex flex-wrap gap-1.5">

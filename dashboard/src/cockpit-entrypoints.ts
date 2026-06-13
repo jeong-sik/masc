@@ -42,7 +42,7 @@ export const COGNITIVE_MODE_TARGETS: Record<CognitiveMode, CockpitRouteTarget> =
   cockpit: { tab: 'overview' },
   code: { tab: 'code', params: { section: 'ide-shell', view: 'source' } },
   split: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } },
-  explode: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } },
+  explode: { tab: 'workspace', params: { section: 'repositories' } },
 }
 
 export const COGNITIVE_MODE_STATES: Record<CognitiveMode, CognitiveModeState> = {
@@ -127,8 +127,8 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   },
   {
     mode: 'observe',
-    aliases: ['cascade'],
-    target: { tab: 'monitoring', params: { section: 'cascade-config' } },
+    aliases: ['runtime'],
+    target: { tab: 'monitoring', params: { section: 'runtime' } },
     coverage: 'covered',
   },
   {
@@ -177,7 +177,7 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'workspace', params: { section: 'board' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'workspace', params: { section: 'board', focus: 'thread' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'workspace', params: { section: 'board', focus: 'automation' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-rm', 'messages-room'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-room' } }, coverage: 'covered' },
+  { mode: 'comms', aliases: ['ms-rm', 'messages-workspace'], target: { tab: 'workspace', params: { section: 'board', focus: 'messages-workspace' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'workspace', params: { section: 'board', focus: 'mention-inbox' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'workspace', params: { section: 'board', focus: 'state-block' } }, coverage: 'covered' },
   { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'covered' },
@@ -185,9 +185,8 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
 
   // Observe Plane legacy design subtabs.
-  { mode: 'observe', aliases: ['cs-list', 'cascade-list'], target: { tab: 'monitoring', params: { section: 'cascade-config' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['cs-deep', 'cascade-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['cs-cmp', 'cascade-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-deep', 'runtime-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
+  { mode: 'observe', aliases: ['cs-cmp', 'runtime-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-led', 'audit-ledger'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-act', 'audit-by-actor'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'actor' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['au-sum', 'audit-summary'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } }, coverage: 'covered' },
@@ -197,9 +196,6 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'observe', aliases: ['ct-agt', 'cost-per-agent'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['ct-mtx', 'cost-matrix'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'matrix' } }, coverage: 'covered' },
   { mode: 'observe', aliases: ['ct-lat', 'cost-latency'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'latency' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['hr-log', 'heuristic-log'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'log' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['hr-st', 'stress-board'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'stress' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['hr-mod', 'heuristic-by-module'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'heuristics', focus: 'module' } }, coverage: 'covered' },
 
   // Cognition Plane legacy design subtabs.
   { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'cognition', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
@@ -214,7 +210,6 @@ export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
   { mode: 'ide', aliases: ['edit'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['review', 'pr-thread'], target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['merge', 'split', 'split-diff'], target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } }, coverage: 'covered' },
-  { mode: 'ide', aliases: ['graph', 'git-graph'], target: { tab: 'workspace', params: { section: 'repositories', view: 'graph' } }, coverage: 'covered' },
   { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', find: 'open' } }, coverage: 'covered' },
 ]
 
@@ -260,7 +255,7 @@ export function cognitiveModeForRoute(
   if (tab === 'code') {
     return params.view === 'split-diff' ? 'split' : 'code'
   }
-  if (tab === 'workspace' && params.section === 'repositories' && params.view === 'graph') {
+  if (tab === 'workspace' && params.section === 'repositories') {
     return 'explode'
   }
   return 'cockpit'

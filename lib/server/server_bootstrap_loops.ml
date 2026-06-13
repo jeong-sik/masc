@@ -4,7 +4,7 @@
     subsystem-spawning functions into a focused module. *)
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:state.room_config ~governance_level
+  Governance_pipeline.install ~config:state.workspace_config ~governance_level
 ;;
 
 (* Stable djb2-style hash for the autoboot warmup jitter.
@@ -106,9 +106,81 @@ let board_sse_event_params event =
       ]
 ;;
 
+type queued_chat_projection = {
+  payload_channel : string;
+  payload_channel_user_id : string;
+  payload_channel_user_name : string;
+  payload_channel_workspace_id : string;
+  agent_name : string;
+}
+
+let discord_channel_label = "discord"
+
+let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
+  match queued_message.source with
+  | Keeper_chat_queue.Dashboard ->
+    {
+      payload_channel = "";
+      payload_channel_user_id = "";
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = "";
+      agent_name = "dashboard";
+    }
+  | Keeper_chat_queue.Discord { channel_id; user_id } ->
+    {
+      payload_channel = discord_channel_label;
+      payload_channel_user_id = user_id;
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = channel_id;
+      agent_name =
+        Gate_keeper_backend.agent_name_for_channel_actor
+          ~channel:discord_channel_label
+          ~channel_workspace_id:channel_id
+          ~channel_user_id:user_id;
+    }
+  | Keeper_chat_queue.Slack { channel; user_id } ->
+    {
+      payload_channel = channel;
+      payload_channel_user_id = user_id;
+      payload_channel_user_name = "";
+      payload_channel_workspace_id = "";
+      agent_name =
+        Gate_keeper_backend.agent_name_for_channel_actor
+          ~channel
+          ~channel_workspace_id:""
+          ~channel_user_id:user_id;
+    }
+
+let trimmed_env_opt name =
+  match Sys.getenv_opt name with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.equal trimmed "" then None else Some trimmed
+
+let discord_bot_token_opt () = trimmed_env_opt "DISCORD_BOT_TOKEN"
+
 module For_testing = struct
+  type queued_chat_projection = {
+    payload_channel : string;
+    payload_channel_user_id : string;
+    payload_channel_user_name : string;
+    payload_channel_workspace_id : string;
+    agent_name : string;
+  }
+
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
+
+  let queued_chat_projection queued_message : queued_chat_projection =
+    let projection = queued_chat_projection queued_message in
+    {
+      payload_channel = projection.payload_channel;
+      payload_channel_user_id = projection.payload_channel_user_id;
+      payload_channel_user_name = projection.payload_channel_user_name;
+      payload_channel_workspace_id = projection.payload_channel_workspace_id;
+      agent_name = projection.agent_name;
+    }
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -130,11 +202,11 @@ let start_keeper_loops
   =
   Progress.set_sse_callback Sse.broadcast;
   (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Atomic.set Coord_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
+  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
      Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
      buffer-size/policy choice is auditable in source rather than implicit in
-     OAS defaults, and the chosen capacity is published to /metrics. *)
+     OAS defaults, and the chosen capacity is published through OTel. *)
   let event_bus =
     Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
   in
@@ -218,7 +290,7 @@ let start_keeper_loops
                  task
                  boot_guard_sec
                  elapsed;
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  "masc_lazy_task_boot_guard_fired_total"
                  ~labels:[ "task", task ]
                  ();
@@ -270,8 +342,8 @@ let start_keeper_loops
   in
   Masc_event_bus.set masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
-  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:event_bus;
-  Cascade_event_bridge.start ~sw ~clock ~config:state.room_config ~bus:masc_event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:event_bus;
+  Keeper_event_bridge.start ~sw ~clock ~config:state.workspace_config ~bus:masc_event_bus;
   (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
      persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
      with rolling 14-day retention (override via
@@ -298,7 +370,7 @@ let start_keeper_loops
   Eio.Switch.on_release sw (fun () ->
     Agent_sdk_metrics_bridge.unsubscribe masc_event_bus keeper_lifecycle_sub);
   (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when /metrics is not scraped.
+     even when no external telemetry backend is attached.
 
      [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
      a rebuild — fleet-wide keeper load legitimately pushes depth past
@@ -335,11 +407,11 @@ let start_keeper_loops
                        (missing `event` or `keeper_name` field) were
                        silently dropped.  A systematic encoding bug
                        could lose every cache invalidation indefinitely
-                       with no signal.  Bumping a Prometheus counter
+                       with no signal.  Bumping a Otel_metric_store counter
                        lets `rate(...)` alerts catch the regression
                        even though the dashboard cache continues to
                        degrade gracefully (just stale, not broken). *)
-                   Prometheus.inc_counter "masc_keeper_lifecycle_malformed_total" ())
+                   Otel_metric_store.inc_counter "masc_keeper_lifecycle_malformed_total" ())
               | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
            events;
          if events <> []
@@ -362,9 +434,9 @@ let start_keeper_loops
     loop ());
   (* Inject Event_bus into keeper keepalive runtime for telemetry publishing *)
   Keeper_keepalive.set_bus event_bus;
-  Board_dispatch.set_keeper_board_signal_hook (fun signal ->
+  Board_dispatch.set_board_signal_hook (fun signal ->
     Keeper_keepalive.wakeup_relevant_keeper_for_board_signal
-      ~config:state.room_config
+      ~config:state.workspace_config
       signal);
   Board_dispatch.set_board_sse_hook (fun event ->
     let params = board_sse_event_params event in
@@ -455,7 +527,7 @@ let start_keeper_loops
     try
       ignore
         (Activity_graph.emit
-           state.room_config
+           state.workspace_config
            ~actor:activity_actor
            ?subject:activity_subject
            ~kind:activity_kind
@@ -470,26 +542,23 @@ let start_keeper_loops
         activity_kind
         (Printexc.to_string exn));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
-     can react to new tasks, mentions, or room activity immediately.
-     Coord_state.on_broadcast_mention is the active path (Coord.broadcast uses
-     Coord_state.broadcast); Coord_eio.on_broadcast_mention is kept in sync as
-     a safety net for any legacy callers. *)
+     can react to new tasks, mentions, or workspace activity immediately.
+     SSOT: Workspace_broadcast.on_broadcast_mention is the single ref wired here. *)
   let broadcast_mention_handler =
     fun mention ->
     match mention with
     | Some target ->
-      Keeper_keepalive.wakeup_keeper ~base_path:state.room_config.base_path target;
+      Keeper_keepalive.wakeup_keeper ~base_path:state.workspace_config.base_path target;
       Log.Keeper.info "broadcast mention → wakeup keeper %s" target
     | None ->
-      Keeper_keepalive.wakeup_all_keepers ~base_path:state.room_config.base_path ();
+      Keeper_keepalive.wakeup_all_keepers ~base_path:state.workspace_config.base_path ();
       Log.Keeper.info "broadcast → wakeup all keepers (reactive push)"
   in
-  Coord_broadcast.on_broadcast_mention := broadcast_mention_handler;
-  Coord_eio.on_broadcast_mention := broadcast_mention_handler;
+  Workspace_broadcast.on_broadcast_mention := broadcast_mention_handler;
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =
-       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.room_config
+       Orchestrator.start ~sw ~proc_mgr ~clock ~domain_mgr state.workspace_config
      in
      Shutdown_hooks.register_cancel_orchestrator cancel_orchestrator
    with
@@ -504,10 +573,13 @@ let start_keeper_loops
   Keeper_subprocess_registry.register_default_cleanup_hook ();
   (* Build read-only tool surface shared by both judges. *)
   let judge_tool_names =
-    List.map Tool_name.Masc.to_string Tool_name.Masc.[ Status; Tasks; Agents; Board_list ]
+    [ "masc_status"
+    ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
+    ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
+    ]
   in
   let judge_masc_tools =
-    match Agent_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with
+    match Keeper_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with
     | Ok schemas -> schemas
     | Error e ->
       Log.Server.warn "judge tool schema resolution failed: %s" e;
@@ -515,14 +587,14 @@ let start_keeper_loops
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.result =
     let start_time = Time_compat.now () in
-    let config = state.room_config in
+    let config = state.workspace_config in
     let agent_name = actor in
-    let ctx_room : Tool_coord.context = { config; agent_name } in
-    let ctx_task : Tool_task.context = { config; agent_name; sw = Some sw } in
-    let ctx_agent : Tool_agent.context = { config; agent_name } in
+    let ctx_workspace : Tool_workspace.context = { config; agent_name } in
+    let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
+    (* ctx_agent removed with the masc_agents judge dispatch case (2026-06-09). *)
     match name with
     | "masc_status" ->
-      (match Tool_coord.dispatch ctx_room ~name ~args with
+      (match Tool_workspace.dispatch ctx_workspace ~name ~args with
        | Some result -> result
        | None ->
          (* RFC-0189: [Tool_*.dispatch] returning [None] when the
@@ -533,21 +605,14 @@ let start_keeper_loops
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_status: dispatch failed")
     | "masc_tasks" ->
-      (match Tool_task.dispatch ctx_task ~name ~args with
+      (match Task.Tool.dispatch ctx_task ~name ~args with
        | Some result -> result
        | None ->
          Tool_result.error
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_tasks: dispatch failed")
-    | "masc_agents" ->
-      (match Tool_agent.dispatch ctx_agent ~name ~args with
-       | Some result -> result
-       | None ->
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
-      Tool_board.handle_tool name args
+      Board_tool.handle_tool name args
     | _ ->
       (* RFC-0189: judge dispatch caller (governance / operator
          judge runner) requested a tool outside the allow-list.
@@ -558,30 +623,16 @@ let start_keeper_loops
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)
   in
-  let governance_judge_dispatch = make_judge_dispatch ~actor:"governance-judge" in
+  (* governance_judge subsystem removed (2026-06-09): its only factual input
+     was [Workspace.get_agents_status], which read the disk-backed
+     [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
+     had zero call sites. items/activity were already hardcoded []. So the
+     judge ran ~100 empty LLM cycles/day producing 0 judgments for ~12 days.
+     Removing the daemon rather than leaving a permanently-empty input. *)
   let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
-  fork_subsystem "governance_judge" (fun () ->
-    Dashboard_governance_judge.start
-      ~sw
-      ~clock
-      ~net
-      ~base_path:state.room_config.base_path
-      ~masc_tools:judge_masc_tools
-      ~dispatch:governance_judge_dispatch
-      ~build_facts:(fun () ->
-        let base =
-          `Assoc
-            [ "generated_at", `String (Masc_domain.now_iso ())
-            ; "items", `List []
-            ; "activity", `List []
-            ]
-        in
-        let agents = Coord.get_agents_status state.room_config in
-        Operator_control_snapshot.merge_json_objects base (`Assoc [ "agents", agents ]))
-      ());
   fork_subsystem "operator_judge" (fun () ->
     let operator_judge_ctx : _ Operator_control.context =
-      { config = state.room_config
+      { config = state.workspace_config
       ; agent_name = "operator-judge"
       ; sw
       ; clock
@@ -594,7 +645,7 @@ let start_keeper_loops
       ~sw
       ~clock
       ~net
-      ~config:state.room_config
+      ~config:state.workspace_config
       ~masc_tools:judge_masc_tools
       ~dispatch:operator_judge_dispatch
       ~build_facts:(fun () ->
@@ -602,7 +653,7 @@ let start_keeper_loops
           ~actor:"operator-judge"
           ~view:"summary"
           ~include_messages:false
-          ~include_keepers:false
+          ~include_keepers:true
           operator_judge_ctx)
       ());
   fork_subsystem "session_cleanup" (fun () ->
@@ -611,36 +662,10 @@ let start_keeper_loops
     let interval = Env_config_runtime.Verification.timeout_check_interval_seconds in
     let rec loop () =
       Eio.Time.sleep clock interval;
-      Verification_protocol.check_timeouts ~config:state.room_config;
+      Verification_protocol.check_timeouts ~config:state.workspace_config;
       loop ()
     in
     loop ());
-  (* #10405: Goal_janitor.run was previously only invoked by the
-     dashboard DELETE handler, so stagnated [Active] goals never got
-     promoted to [Dropped] and [last_review_at] stayed null indefinitely
-     (4 goals stale for 4 days observed on 2026-04-25).  Spawn a
-     periodic sweep fiber on a 1-hour cadence so the existing
-     [stagnant_days] / [dropped_ttl_days] thresholds actually fire.
-     [enabled ()] is true by default; flipping it to false leaves the
-     dashboard DELETE path as the only caller (pre-fix behaviour). *)
-  fork_subsystem "goal_janitor" (fun () ->
-    if not (Env_config_runtime.Goal_janitor.enabled ())
-    then Log.Server.info "goal_janitor: disabled via MASC_GOAL_JANITOR_ENABLED=false"
-    else (
-      let interval = Env_config_runtime.Goal_janitor.interval_seconds in
-      let rec loop () =
-        Eio.Time.sleep clock interval;
-        (try
-           let config = Goal_janitor.runtime_config () in
-           let _result = Goal_janitor.run ~config state.room_config in
-           ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn "goal_janitor: sweep failed: %s" (Printexc.to_string exn));
-        loop ()
-      in
-      loop ()));
   (* HITL approval queue death-spiral fix.
      [Keeper_approval_queue.expire_stale] has been a complete
      implementation (queue removal, audit event, promise [Reject]
@@ -656,8 +681,7 @@ let start_keeper_loops
      ([last_skip_observation] surface) so operators can see
      [last_skip=[approval_pending]] alongside the kill warn line.
      [max_wait_s] is a code constant (policy, not calibration);
-     [interval_seconds] mirrors [Goal_janitor]'s env exposure so
-     ops can tune cadence without changing policy. *)
+     [interval_seconds] remains an ops knob for cadence tuning. *)
   fork_subsystem "approval_janitor" (fun () ->
     if not (Env_config_runtime.Approval_janitor.enabled ())
     then
@@ -691,10 +715,10 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = state.room_config in
-      let masc_root = Coord.masc_root_dir config in
+      let config = state.workspace_config in
+      let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let all_names = Keeper_types.keeper_names config in
+      let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
       Log.Keeper.info
         "autoboot: base_path=%s masc_root=%s keeper_dir=%s keeper_json_count=%d"
@@ -702,51 +726,9 @@ let start_keeper_loops
         masc_root
         keeper_dir
         all_count;
-      (* 2026-05-05 — auto-repair active_goal_ids=[] keepers before boot.
-         Newer keepers (created via persona autoboot or
-         masc_keeper_create_from_persona) start with active_goal_ids=[] and
-         have no automatic path to populate it, so they enter a "frozen"
-         state where no desire fires (no goal → keeper_stay_silent →
-         completion contract violation, then
-         contract violation was previously class=null per #13055).
-         Keeper_goal_repair was previously only invokable via
-         masc_keeper_persona_audit(repair=true) MCP tool — manual operator
-         action.  Default-on so keepers self-heal on next server restart;
-         opt out with MASC_KEEPER_AUTO_GOAL_REPAIR=false.  Idempotent:
-         skips keepers that already have non-empty active_goal_ids. *)
-      let auto_repair_enabled =
-        match Sys.getenv_opt "MASC_KEEPER_AUTO_GOAL_REPAIR" with
-        | Some ("0" | "false" | "FALSE" | "off" | "OFF") -> false
-        | _ -> true
-      in
-      if auto_repair_enabled
-      then (
-        try
-          let result = Keeper_goal_repair.run config in
-          let action_count = List.length result.actions in
-          let error_count = List.length result.errors in
-          let skipped_count = List.length result.skipped in
-          if action_count > 0 || error_count > 0
-          then
-            Log.Keeper.info
-              "autoboot: goal_repair created=%d errors=%d skipped=%d (set \
-               MASC_KEEPER_AUTO_GOAL_REPAIR=false to disable)"
-              action_count
-              error_count
-              skipped_count
-          else
-            Log.Keeper.info
-              "autoboot: goal_repair scanned, all keepers have active_goal_ids \
-               (skipped=%d)"
-              skipped_count
-        with
-        | exn ->
-          Log.Keeper.warn
-            "autoboot: goal_repair failed (continuing without repair): %s"
-            (Printexc.to_string exn));
       let names = Keeper_runtime.bootable_keeper_names config in
       let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
-      let keeper_boot_ctx : _ Keeper_types.context =
+      let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "keeper-autoboot"
         ; sw
@@ -755,12 +737,7 @@ let start_keeper_loops
         ; net = state.net
         }
       in
-      Log.Keeper.info
-        "autoboot: %d keeper(s) to boot; concurrent keeper turns throttled to %d (source=%s)"
-        (List.length names)
-        Keeper_keepalive.effective_turn_throttle_limit
-        (Keeper_turn_slot.throttle_source_to_string
-           Keeper_keepalive.keeper_turn_throttle_source);
+      Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
       Log.Keeper.info "autoboot: keeper set [%s]" (String.concat ", " names);
       if exclusions <> []
       then (
@@ -777,18 +754,19 @@ let start_keeper_loops
       let base_warmup = Keeper_config.keeper_bootstrap_proactive_warmup_sec () in
       let stagger_window = Keeper_config.keeper_bootstrap_stagger_step_sec () in
       (* Attempt to boot a single keeper. Returns true if started. *)
-      let try_boot_one _idx name =
+      let try_boot_one ?(log_prefix = "autoboot") _idx name =
         try
-          Log.Keeper.info "autoboot: loading meta for %s" name;
+          Log.Keeper.info "%s: loading meta for %s" log_prefix name;
           match Keeper_runtime.load_or_materialize_boot_meta keeper_boot_ctx name with
           | Error e ->
-            Log.Keeper.error "autoboot: failed to load meta for %s: %s" name e;
+            Log.Keeper.error "%s: failed to load meta for %s: %s" log_prefix name e;
             false
           | Ok { meta = m; materialized } ->
             if Keeper_registry.is_running ~base_path:config.base_path m.name
             then (
               Log.Keeper.info
-                "autoboot: %s already running%s"
+                "%s: %s already running%s"
+                log_prefix
                 m.name
                 (if materialized then " (materialized from TOML)" else "");
               true)
@@ -800,10 +778,11 @@ let start_keeper_loops
                   ~keeper_name:name
               in
               Log.Keeper.info
-                "autoboot: calling start_keepalive for %s (warmup=%ds)"
+                "%s: calling start_keepalive for %s (warmup=%ds)"
+                log_prefix
                 name
                 warmup;
-              let ctx : _ Keeper_types.context =
+              let ctx : _ Keeper_types_profile.context =
                 { config
                 ; agent_name = m.agent_name
                 ; sw
@@ -827,16 +806,21 @@ let start_keeper_loops
                 Keeper_registry.is_registered ~base_path:config.base_path m.name
               in
               if registered
-              then Log.Keeper.info "autoboot: started keepalive for %s" m.name
+              then Log.Keeper.info "%s: started keepalive for %s" log_prefix m.name
               else
                 Log.Keeper.warn
-                  "autoboot: start_keepalive returned but %s not registered"
+                  "%s: start_keepalive returned but %s not registered"
+                  log_prefix
                   m.name;
               registered)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Keeper.error "autoboot: exception for %s: %s" name (Printexc.to_string exn);
+          Log.Keeper.error
+            "%s: exception for %s: %s"
+            log_prefix
+            name
+            (Printexc.to_string exn);
           false
       in
       (* Initial boot pass *)
@@ -895,7 +879,7 @@ let start_keeper_loops
       (* #10125: start the supervisor sweep here, after autoboot
          completes.  Without this call the sweep would only fire
          on the first [masc_keeper_msg] tool dispatch (the single
-         caller of [start_existing_keepalives] in [tool_keeper.ml]
+         caller of [start_existing_keepalives] in [keeper_tool_surface.ml]
          — see #10125 timeline 2026-04-24, where 14 keepers ran
          under autoboot but the sweep never came up because no
          operator [masc_keeper_msg] arrived after the restart;
@@ -906,14 +890,121 @@ let start_keeper_loops
          [supervisor_sweep_running] guard makes a second call a
          noop, so this stays correct if [masc_keeper_msg] later
          races into [start_existing_keepalives] anyway. *)
-      try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
-      | Eio.Cancel.Cancelled _ as e -> raise e
+      (try Keeper_runtime.start_supervisor_sweep keeper_boot_ctx with
+       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Log.Keeper.error
           "autoboot: supervisor sweep failed to start: %s"
           (Printexc.to_string exn)));
+      (* Start queue consumer fiber for async queue drain.
+         handle_turn wires process_single_turn for actual turn execution. *)
+      (try
+         Keeper_chat_consumer.start ~sw ~clock
+           ~base_path:state.Mcp_server.workspace_config.base_path
+           ~handle_turn:(fun ~sw ~keeper_name ~queued_message ->
+             let open Server_routes_http_keeper_stream in
+             let now = Time_compat.now () in
+             let run_id =
+               Printf.sprintf "keeper-consumer-run-%d"
+                 (int_of_float (now *. 1000.0))
+             in
+             let message_id =
+               Printf.sprintf "keeper-consumer-msg-%d"
+                 (int_of_float ((now +. 0.001) *. 1000.0))
+             in
+             let projection = queued_chat_projection queued_message in
+             let payload =
+               {
+                 name = keeper_name;
+                 message = queued_message.content;
+                 timeout_sec = None;
+                 channel = projection.payload_channel;
+                 channel_user_id = projection.payload_channel_user_id;
+                 channel_user_name = projection.payload_channel_user_name;
+                 channel_workspace_id = projection.payload_channel_workspace_id;
+                 attachments = queued_message.attachments;
+               }
+             in
+             let agent_name = projection.agent_name in
+             let events = Keeper_chat_events.create () in
+             let closed = ref false in
+             let thread_id = "keeper-consumer:" ^ keeper_name in
+             (match queued_message.source with
+              | Keeper_chat_queue.Dashboard ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: processing dashboard queue \
+                     message for keeper=%s"
+                    keeper_name
+              | Keeper_chat_queue.Discord { channel_id; _ } ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: forking Discord adapter \
+                     for keeper=%s"
+                    keeper_name;
+                  (match discord_bot_token_opt () with
+                   | Some token ->
+                       (* fork_logged_fiber, not bare Eio.Fiber.fork: the
+                          adapter body runs after this synchronous frame
+                          returns, so the enclosing try/with cannot catch an
+                          exception it raises later. A bare fork would fail
+                          the shared [sw] and cancel every sibling fiber under
+                          it. [on_error] contains non-Cancelled exceptions;
+                          [fork_logged_fiber] re-raises Cancelled to preserve
+                          structured teardown. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Discord adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_discord.adapter_loop ~token
+                             ~channel_id ~events)
+                   | None ->
+                       Log.Keeper.warn
+                         "keeper_chat_consumer: \
+                          DISCORD_BOT_TOKEN not set, \
+                          skipping Discord delivery for keeper=%s"
+                         keeper_name)
+              | Keeper_chat_queue.Slack { channel; _ } ->
+                  Log.Keeper.info
+                    "keeper_chat_consumer: forking Slack adapter \
+                     for keeper=%s"
+                    keeper_name;
+                  (match Sys.getenv_opt "MASC_SLACK_BOT_TOKEN" with
+                   | Some token ->
+                       (* Isolate from the shared [sw] like the Discord arm
+                          above; a bare fork would cancel sibling fibers if
+                          the adapter raises a non-Cancelled exception. *)
+                       fork_logged_fiber ~sw
+                         ~on_error:(fun exn ->
+                           Log.Keeper.error
+                             "keeper_chat_consumer: Slack adapter fiber \
+                              crashed for keeper=%s: %s"
+                             keeper_name (Printexc.to_string exn))
+                         (fun () ->
+                           Keeper_chat_slack.adapter_loop ~token
+                             ~channel ~events)
+                   | None ->
+                       Log.Keeper.warn
+                         "keeper_chat_consumer: \
+                          MASC_SLACK_BOT_TOKEN not set, \
+                          skipping Slack delivery for keeper=%s"
+                         keeper_name));
+             process_single_turn ~state ~clock ~sw ~auth_token:None
+               ~thread_id ~closed ~payload ~run_id ~message_id
+               ~agent_name ~events)
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.warn
+             "keeper_chat_consumer: failed to start: %s"
+             (Printexc.to_string exn)));
+  (* Discord presence bridge — syncs keeper liveness to bot status. *)
+  fork_subsystem "discord_presence" (fun () ->
+    Discord_presence_bridge.start
+      ~sw ~clock ~workspace_config:state.workspace_config ());
   (* Phase 5: unified startup subsystem summary *)
-  Log.info ~ctx:"startup" "subsystems: keeper loops started"
+  Log.Startup.info "subsystems: keeper loops started"
 ;;
 
 

@@ -8,7 +8,6 @@
     Facade [Dashboard_goals_types] re-includes this module so existing
     callers keep using [Dashboard_goals.task_is_done], etc. unchanged. *)
 
-open Yojson.Safe.Util
 
 type tree_node = {
   goal : Goal_store.goal;
@@ -35,7 +34,7 @@ type tree_node = {
 }
 
 type goal_detail_keeper = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
   runtime_trust : Yojson.Safe.t;
 }
@@ -45,13 +44,16 @@ type attainment_unit =
   | Count
   | Unknown
 
-let task_is_linked_to_goal (task : Masc_domain.task) goal_id =
-  Convergence.task_matches_goal ~goal_id task
+let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
+  let task_goal_ids =
+    try Hashtbl.find goal_task_index task.id with Not_found -> []
+  in
+  List.mem goal_id task_goal_ids
 
-let task_linkage_source_opt (task : Masc_domain.task) goal_id =
-  match task.goal_id with
-  | Some task_goal_id when String.equal task_goal_id goal_id -> Some "explicit"
-  | Some _ | None -> None
+let task_linkage_source_opt ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
+  if task_is_linked_to_goal ~goal_task_index task goal_id
+  then Some "explicit"
+  else None
 
 let task_assignee (task : Masc_domain.task) : string option =
   Masc_domain.task_assignee_of_status task.task_status
@@ -94,89 +96,96 @@ let link_source_of_values values =
   | [ source ] -> source
   | _ -> "mixed"
 let receipt_error_kind json =
-  match json |> member "error" with
-  | `Assoc _ as error -> error |> member "kind" |> to_string_option
+  match Json_util.assoc_member_opt "error" json with
+  | Some (`Assoc _ as error) -> Json_util.get_string error "kind"
   | _ -> None
 
 let receipt_error_message json =
-  match json |> member "error" with
-  | `Assoc _ as error -> error |> member "message" |> to_string_option
+  match Json_util.assoc_member_opt "error" json with
+  | Some (`Assoc _ as error) -> Json_util.get_string error "message"
   | _ -> None
 
 let receipt_sandbox_kind json =
-  json |> member "sandbox" |> member "kind" |> to_string_option
+  match Json_util.assoc_member_opt "sandbox" json with
+  | Some sandbox -> Json_util.get_string sandbox "kind"
+  | None -> None
 
 let receipt_approval_profile json =
-  json |> member "approval" |> member "profile" |> to_string_option
+  match Json_util.assoc_member_opt "approval" json with
+  | Some approval -> Json_util.get_string approval "profile"
+  | None -> None
 
-let receipt_cascade_name json =
-  json |> member "cascade" |> member "name" |> to_string_option
+let receipt_runtime_id json =
+  match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_string runtime "name"
+  | None -> None
 
-let receipt_cascade_outcome json =
-  json |> member "cascade" |> member "outcome" |> to_string_option
+let receipt_runtime_outcome json =
+  match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_string runtime "outcome"
+  | None -> None
 
-let receipt_cascade_fallback_applied json =
-  json |> member "cascade" |> member "fallback_applied" |> to_bool_option
+let receipt_runtime_fallback_applied json =
+  (match Json_util.assoc_member_opt "runtime" json with
+  | Some runtime -> Json_util.get_bool runtime "fallback_applied"
+  | None -> None)
   |> Option.value ~default:false
 
 let receipt_outcome json =
-  json |> member "outcome" |> to_string_option
+  Json_util.get_string json "outcome"
 
 let receipt_started_at json =
-  json |> member "started_at" |> to_string_option
+  Json_util.get_string json "started_at"
 
 let receipt_ended_at json =
-  json |> member "ended_at" |> to_string_option
+  Json_util.get_string json "ended_at"
 
 let receipt_turn_count json =
-  json |> member "turn_count" |> to_int_option
+  Json_util.get_int json "turn_count"
 
 let trust_disposition json =
-  json |> member "disposition" |> to_string_option
+  Json_util.get_string json "disposition"
 
 let trust_disposition_reason json =
-  json |> member "disposition_reason" |> to_string_option
+  Json_util.get_string json "disposition_reason"
 
 let trust_attention_reason json =
-  json |> member "attention_reason" |> to_string_option
+  Json_util.get_string json "attention_reason"
 
 let trust_needs_attention json =
-  json |> member "needs_attention" |> to_bool_option
+  Json_util.get_bool json "needs_attention"
   |> Option.value ~default:false
 
 let trust_snapshot_unavailable json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
-     |> Option.value ~default:"")
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "runtime_trust_snapshot_unavailable"
 
 let trust_turn_id json =
-  json |> member "turn_id" |> to_int_option
+  Json_util.get_int json "turn_id"
 
 let trust_latest_event json =
-  match json |> member "latest_causal_event" with
-  | `Assoc _ as event -> Some event
+  match Json_util.assoc_member_opt "latest_causal_event" json with
+  | Some (`Assoc _ as event) -> Some event
   | _ -> None
 
 let trust_latest_event_ts json =
   Option.bind (trust_latest_event json) (fun event ->
-      event |> member "ts" |> to_string_option )
+      Json_util.get_string event "ts" )
 
 let trust_latest_event_ts_unix json =
   Option.bind (trust_latest_event json) (fun event ->
-      event |> member "ts_unix" |> to_float_option )
+      Json_util.get_float event "ts_unix" )
 
 let trust_sandbox_risk json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
-     |> Option.value ~default:"")
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
     "sandbox_violation"
 
-let trust_cascade_risk json =
+let trust_runtime_risk json =
   String.equal
-    (json |> member "disposition_reason" |> to_string_option
-     |> Option.value ~default:"")
-    "cascade_exhausted"
+    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
+    "runtime_exhausted"
 
 let receipt_has_error json =
   match receipt_error_kind json with
@@ -192,10 +201,10 @@ let receipt_has_sandbox_risk json =
   | Some "docker" -> false
   | Some _ | None -> false
 
-let receipt_has_cascade_risk json =
-  receipt_cascade_fallback_applied json
+let receipt_has_runtime_risk json =
+  receipt_runtime_fallback_applied json
   ||
-  match receipt_cascade_outcome json with
+  match receipt_runtime_outcome json with
   | Some "passed_to_next_model" -> true
   | _ -> false
 

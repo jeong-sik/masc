@@ -311,7 +311,7 @@ let render entries =
      `MASC_*` env var, declare it in the appropriate `env_config_*.ml`\n\
      module and regenerate this file.\n\
      \n\
-     See [#10733](https://github.com/jeong-sik/masc-mcp/issues/10733) for\n\
+     See [#10733](https://github.com/jeong-sik/masc/issues/10733) for\n\
      the categorization roadmap. Newly-added typed getters in\n\
      `lib/config/env_config_*.ml` must carry nearby `@category` and\n\
      `@ops_class` tags; existing knobs remain in the backfill lane.\n\
@@ -365,7 +365,11 @@ let render entries =
         module_entries;
       Buffer.add_char buf '\n')
     modules;
-  Buffer.contents buf
+  let rendered = Buffer.contents buf in
+  let len = String.length rendered in
+  if len >= 2 && rendered.[len - 1] = '\n' && rendered.[len - 2] = '\n' then
+    String.sub rendered 0 (len - 1)
+  else rendered
 
 let usage () =
   prerr_endline "usage: env_knob_catalog.exe <output-md-path> [--lib-dir DIR]";

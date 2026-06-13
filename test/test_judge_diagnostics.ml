@@ -1,7 +1,7 @@
 (** #9774: regression tests for the judge fallback diagnostic formatter. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_short_input_passes_through () =
   let raw = "{\"items\":[]}" in
@@ -75,14 +75,14 @@ let test_record_lenient_fallback_increments_metrics () =
   let raw = "not-json" in
   let labels = [("judge", "governance")] in
   let unparseable_before =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_governance_judge_unparseable
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_governance_judge_unparseable
       ~labels
       ()
   in
   let fallback_before =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_governance_lenient_json_fallback_hit
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_governance_lenient_json_fallback_hit
       ~labels
       ()
   in
@@ -98,14 +98,14 @@ let test_record_lenient_fallback_increments_metrics () =
      with Not_found -> false);
   check (float 0.0001) "unparseable counter increments"
     (unparseable_before +. 1.0)
-    (Prometheus.metric_value_or_zero
-       Prometheus.metric_governance_judge_unparseable
+    (Otel_metric_store.metric_value_or_zero
+       Otel_metric_store.metric_governance_judge_unparseable
        ~labels
        ());
   check (float 0.0001) "fallback counter increments"
     (fallback_before +. 1.0)
-    (Prometheus.metric_value_or_zero
-       Prometheus.metric_governance_lenient_json_fallback_hit
+    (Otel_metric_store.metric_value_or_zero
+       Otel_metric_store.metric_governance_lenient_json_fallback_hit
        ~labels
        ())
 
@@ -113,14 +113,14 @@ let test_record_unparseable_response_increments_unparseable_only () =
   let raw = "{\"items\":[{\"guardrail_state\":null}]}" in
   let labels = [("judge", "governance")] in
   let unparseable_before =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_governance_judge_unparseable
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_governance_judge_unparseable
       ~labels
       ()
   in
   let fallback_before =
-    Prometheus.metric_value_or_zero
-      Prometheus.metric_governance_lenient_json_fallback_hit
+    Otel_metric_store.metric_value_or_zero
+      Otel_metric_store.metric_governance_lenient_json_fallback_hit
       ~labels
       ()
   in
@@ -137,14 +137,14 @@ let test_record_unparseable_response_increments_unparseable_only () =
      with Not_found -> false);
   check (float 0.0001) "unparseable counter increments"
     (unparseable_before +. 1.0)
-    (Prometheus.metric_value_or_zero
-       Prometheus.metric_governance_judge_unparseable
+    (Otel_metric_store.metric_value_or_zero
+       Otel_metric_store.metric_governance_judge_unparseable
        ~labels
        ());
   check (float 0.0001) "lenient fallback counter unchanged"
     fallback_before
-    (Prometheus.metric_value_or_zero
-       Prometheus.metric_governance_lenient_json_fallback_hit
+    (Otel_metric_store.metric_value_or_zero
+       Otel_metric_store.metric_governance_lenient_json_fallback_hit
        ~labels
        ())
 
@@ -153,15 +153,15 @@ let test_lenient_fallback_metrics_json_reads_counters () =
   let labels = [("judge", "governance")] in
   let before_unparseable =
     int_of_float
-      (Prometheus.metric_value_or_zero
-         Prometheus.metric_governance_judge_unparseable
+      (Otel_metric_store.metric_value_or_zero
+         Otel_metric_store.metric_governance_judge_unparseable
          ~labels
          ())
   in
   let before_fallback =
     int_of_float
-      (Prometheus.metric_value_or_zero
-         Prometheus.metric_governance_lenient_json_fallback_hit
+      (Otel_metric_store.metric_value_or_zero
+         Otel_metric_store.metric_governance_lenient_json_fallback_hit
          ~labels
          ())
   in

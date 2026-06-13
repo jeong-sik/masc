@@ -4,12 +4,12 @@
     [Mcp-Session-Id] header the server has no state for is rejected
     with the equivalent of [404 Not Found], rather than silently
     minted into a phantom session. Also exercises the
-    {!Masc_mcp.Mcp_session.get_or_generate} echo contract that the
+    {!Masc.Mcp_session.get_or_generate} echo contract that the
     transport relies on to bind a session id across multiple POSTs. *)
 
 open Alcotest
 
-module Http_transport = Masc_mcp.Server_mcp_transport_http
+module Http_transport = Server_mcp_transport_http
 module Session = Mcp_session
 
 let request_body ~method_ =

@@ -228,7 +228,7 @@ body[data-density="normal"]       { --density: 1; }
 body[data-density="comfortable"]  { --density: 1.15; }
 
 :root {
-  /* Sentinel — closes the auto-var block so the density override above
+  /* Marker — closes the auto-var block so the density override above
      scopes cleanly. */
   --_density-scope: 1;
 

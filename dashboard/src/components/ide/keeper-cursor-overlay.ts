@@ -307,48 +307,111 @@ export function ActiveFileIndicator({ activeFile, keeperCount }: ActiveFileIndic
 
 // ── SSE Stream Integration ───────────────────────────────────────
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | null {
+  const value = record[key]
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function focusModeField(record: Record<string, unknown>): KeeperCursor['focus_mode'] | null {
+  const value = stringField(record, 'focus_mode')
+  if (value === 'reading' || value === 'editing' || value === 'reviewing' || value === 'planning') {
+    return value
+  }
+  return null
+}
+
+function parseSelectionEnd(raw: unknown): KeeperCursor['selection_end'] | null {
+  if (!isRecord(raw)) return null
+  const line = numberField(raw, 'line')
+  const column = numberField(raw, 'column')
+  if (line === null || line < 1 || column === null || column < 0) return null
+  return { line, column }
+}
+
+function parseCursorEntry(raw: unknown): KeeperCursor | null {
+  if (!isRecord(raw)) return null
+  const keeperId = stringField(raw, 'keeper_id')
+  const filePath = stringField(raw, 'file_path')
+  const line = numberField(raw, 'line')
+  const column = numberField(raw, 'column')
+  const focusMode = focusModeField(raw)
+  const lastUpdate = numberField(raw, 'last_update')
+  if (
+    !keeperId
+    || !filePath
+    || line === null
+    || line < 1
+    || column === null
+    || column < 0
+    || focusMode === null
+    || lastUpdate === null
+  ) return null
+
+  const selectionEnd = parseSelectionEnd(raw.selection_end)
+  const toolName = stringField(raw, 'tool_name')
+  const turn = numberField(raw, 'turn')
+  return {
+    keeper_id: keeperId,
+    file_path: filePath,
+    line,
+    column,
+    ...(selectionEnd ? { selection_end: selectionEnd } : {}),
+    focus_mode: focusMode,
+    last_update: lastUpdate,
+    ...(toolName ? { tool_name: toolName } : {}),
+    ...(turn !== null ? { turn } : {}),
+  }
+}
+
+export function normalizeKeeperCursorSnapshot(snapshot: unknown): KeeperCursorOverlay {
+  const entries =
+    isRecord(snapshot) && Array.isArray(snapshot.cursors)
+      ? snapshot.cursors
+      : isRecord(snapshot) && Array.isArray(snapshot.entries)
+        ? snapshot.entries
+        : []
+  const cursors = new Map<string, KeeperCursor>()
+  let activeFilePath: string | null = null
+
+  for (const raw of entries) {
+    const cursor = parseCursorEntry(raw)
+    if (cursor === null) continue
+    if (!activeFilePath) activeFilePath = cursor.file_path
+    cursors.set(cursor.keeper_id, cursor)
+  }
+
+  return {
+    cursors,
+    heatmap: calculateHeatmap(cursors.values()),
+    collisions: detectCollisions(cursors.values()),
+    active_file: activeFilePath,
+  }
+}
+
 export function connectKeeperCursorStream(
   baseUrl: string,
   onUpdate: (overlay: KeeperCursorOverlay) => void,
 ): () => void {
-  const eventSource = new EventSource(`${baseUrl}/api/v1/ide/presence/stream`)
+  const eventSource = new EventSource(`${baseUrl}/api/v1/ide/cursors/stream`)
   
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      const entries = data.entries || []
-      
-      const cursors = new Map<string, KeeperCursor>()
-      let activeFilePath: string | null = null
-      
-      for (const entry of entries) {
-        // Extract file path from workspace_label or branch info
-        const filePath = entry.file_path || ''
-        if (filePath && !activeFilePath) {
-          activeFilePath = filePath
-        }
-        
-        cursors.set(entry.keeper_id, {
-          keeper_id: entry.keeper_id,
-          file_path: filePath,
-          line: entry.line || 0,
-          column: entry.column || 0,
-          focus_mode: entry.focus_mode || '(unknown focus_mode)',
-          last_update: entry.last_seen_ms,
-          tool_name: entry.tool_name,
-          turn: entry.turn,
-        })
-      }
-      
-      const collisionArray = detectCollisions(cursors.values())
-      const heatmapMap = calculateHeatmap(cursors.values())
-      
-      onUpdate({ 
-        cursors, 
-        heatmap: heatmapMap, 
-        collisions: collisionArray,
-        active_file: activeFilePath,
-      })
+      onUpdate(normalizeKeeperCursorSnapshot(data))
     } catch (err) {
       console.error('Keeper cursor stream parse error:', err)
     }

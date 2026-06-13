@@ -1,0 +1,25 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_tooling)
+ (public_name masc.keeper_tooling)
+ (wrapped false)
+ (modules
+  keeper_tool_command_words
+  keeper_tool_execute_shell_ir
+  keeper_tool_name
+  keeper_tool_response
+  keeper_tool_retry_state
+  keeper_tool_hook_error_state
+  keeper_discovered_tools
+  keeper_skill_routing)
+ (libraries
+  agent_sdk
+  masc.bounded_event_dedupe
+  masc.config
+  masc.exec_policy
+  masc.masc_exec
+  masc.masc_exec_command_gate
+  masc.masc_exec_shell_words
+  masc_core
+  yojson))

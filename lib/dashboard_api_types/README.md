@@ -30,7 +30,7 @@ once it stabilizes).
 ## Why a dedicated library (not `lib/dashboard/`)
 
 - **Client-shareable**: Bonsai compiles via `bonsai-dashboard` opam switch
-  (OxCaml 5.2). Importing `masc_mcp.dashboard` would drag in Eio, Unix,
+  (OxCaml 5.2). Importing `masc.dashboard` would drag in Eio, Unix,
   filesystem helpers the client cannot compile.
 - **Zero side effects**: pure record definitions + ppx-generated JSON
   converters. No Eio, no Unix, no logging. Safe to link anywhere.

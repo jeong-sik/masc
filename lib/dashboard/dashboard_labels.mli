@@ -9,10 +9,9 @@
 
     These break circular dependency between Dashboard subsystems. *)
 
-(** Coord snapshot shared between Dashboard and Dashboard_attention. *)
-type room_snapshot = {
-  room_id : string;
-  is_current : bool;
+(** Workspace snapshot shared between Dashboard and Dashboard_attention. *)
+type workspace_snapshot = {
+  workspace_id : string;
   agents : Masc_domain.agent list;
   tasks : Masc_domain.task list;
   messages : Masc_domain.message list;

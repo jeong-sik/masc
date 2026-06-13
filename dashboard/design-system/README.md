@@ -17,7 +17,7 @@
 
 MASC is a **single-pane-of-glass cockpit** where a human operator (or agent) can watch multiple AI keepers work in parallel across codebases, tasks, goals, and providers. It fuses two modes into one view:
 
-- **Dashboard mode** — fleet ticker, KPI strip, lifeline heartbeat, swimlane timeline, ops rail, and a multi-tab "deck" (Board / Tasks / Goals / Verified / Providers / Sandbox / Cascade).
+- **Dashboard mode** — fleet ticker, KPI strip, lifeline heartbeat, swimlane timeline, ops rail, and a multi-tab "deck" (Board / Tasks / Goals / Verified / Providers / Sandbox / Runtime).
 - **Code mode** — a 4-column IDE layer (tree · editor · review · activity) with stacked **observational overlays** (time · parallel · tools · approve · notes) that can explode into a 3D z-axis view.
 
 The two modes can cohabit in **split mode**, sharing the topbar/ticker/KPI chrome.
@@ -34,7 +34,7 @@ Keeper attribution runs on a **12-slot palette** (infrastructure capability — 
 | **qa-king** | QA | Red `#c46a5a` |
 | **rama** (ramarama) | Researcher | Purple `#8a6aa0` |
 
-There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Provider-A, Provider-B, Provider-D, Provider-E) that appear in the cascade chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
+There are also supporting roles that appear in the runtime chain and provider-neutral execution matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
 
 ### Goals seen in the system (Korean + English mixed)
 
@@ -56,7 +56,7 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
   - `sidebar.css` · `ticker.css` · `kpi.css` · `lifeline.css` · `center.css` · `swimlanes.css` · `deck.css` · `drawer.css` · `rail.css` — zone-specific styles
   - `code.css` · `layers.css` — code mode + stacked overlays
   - The hand-written `tokens.css` was deleted (Wave 2); the generated counterpart now ships in its place.
-- **`.masc/`** (read-only mount) — runtime state/config directory: agent manifests, goals, tasks, activity events, auth, trajectories, trash. Used to derive copy, keeper names, and real goal/task strings. Not source of visuals.
+- **Synthetic seed data only** — repository previews must not embed `.masc/` records, keeper prompts, provider model names, decision logs, auth material, trajectories, or operator transcripts.
 - No Figma provided.
 - No slide template provided — `slides/` is omitted per instructions.
 
@@ -66,13 +66,13 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 **Tone: terse, diagnostic, ops-flavored.** MASC talks like a mission-control console. Every label is doing a job.
 
-- **Labels are ALL-CAPS mono**, small-caps letterspaced (.06–.08em): `FLEET` · `KEEPERS` · `NOW` · `TOOL USE` · `CASCADE` · `GOAL`.
+- **Labels are ALL-CAPS mono**, small-caps letterspaced (.06–.08em): `FLEET` · `KEEPERS` · `NOW` · `TOOL USE` · `RUNTIME` · `GOAL`.
 - **Headings are numeric-first.** KPI values lead with the number; unit follows in a tiny caption: `1.24s TPS`, `87% PASS`.
 - **IDs are always shown.** Tasks show `t-abc12`, goals show `goal-merge-blockers`, PRs show `#9712`. Mono, dim.
 - **Timestamps are relative-first, absolute on hover.** `3m ago` · `2026-04-24 16:31:27Z`.
 - **Bilingual on purpose.** Korean appears in goal titles, feature names, and some log lines; chrome labels stay English. Don't "translate everything."
 - **No emoji. No exclamation marks.** The only affordance for attention is color (brass glow, err pulse) — never punctuation.
-- **Second-person is rare; "you" barely appears.** The voice is third-person factual: "nick0cave claimed t-abc12" · "cascade hit at step 3."
+- **Second-person is rare; "you" barely appears.** The voice is third-person factual: "nick0cave claimed t-abc12" · "runtime hit at step 3."
 - **No marketing words.** Never "delightful," "powerful," "beautiful." Say what happened: `STALLED 12m` · `3 FAIL / 47 PASS` · `TPS 1.24s (+0.1)`.
 - **Status language is terminal-flavored.** `OK · FAIL · NOOP · ACTIVE · BLOCKED · STALLED · PENDING · DONE · RUNNING · IDLE`.
 - **Keeper names are always lowercase mono.** `nick0cave`, never `Nick0Cave`.
@@ -83,7 +83,7 @@ Examples seen in the system:
 ```
 goal-merge-blockers       ACTIVE   3/3    priority 1
 nick0cave  →  t-9f2a  tool.write_file  +18 −4   2m ago
-CASCADE  provider-a > provider-b > provider-d   hit@2   1.24s
+RUNTIME  descriptor-run-42   policy=allow   local-sandbox   1.24s
 FLAG  @sangsu  drift detected at L187    +2 replies
 ```
 

@@ -8,12 +8,12 @@
 
 open Alcotest
 
-module KAR = Masc_mcp.Keeper_agent_run
+module KAR = Masc.Keeper_agent_run
 module KSR = Keeper_skill_routing
-module KP = Masc_mcp.Keeper_prompt
-module KRP = Masc_mcp.Keeper_run_prompt
-module KCB = Masc_mcp.Keeper_failure_circuit_breaker
-module KUP = Masc_mcp.Keeper_unified_prompt
+module KP = Masc.Keeper_prompt
+module KRP = Masc.Keeper_run_prompt
+module KCB = Masc.Keeper_failure_circuit_breaker
+module KUP = Masc.Keeper_unified_prompt
 
 (* CJK-aware token estimator from OAS *)
 let estimate_tokens s =
@@ -42,12 +42,12 @@ let repo_root () =
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 let restore_prompt_registry () =
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Filename.concat (repo_root ()) "config/prompts");
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 (* ── Fixture: realistic keeper prompt components ──────── *)
 
@@ -58,7 +58,7 @@ let base_system_prompt =
 
 let continuity_snapshot_text =
   "Recent continuity snapshot:\n\
-   Goal: Deploy masc-mcp v0.97.0 to production\n\
+   Goal: Deploy masc v0.97.0 to production\n\
    Progress: OAS pinned, keeper hooks updated, CI passing\n\
    Next: Run integration tests, prepare release notes\n\
    Decisions: Use squash merge for PR #3895\n\
@@ -76,7 +76,7 @@ let skill_route_text =
 let worktree_text =
   "--- Worktree changes ---\n\
    M lib/keeper/keeper_hooks_oas.ml\n\
-   M lib/prometheus.ml\n\
+   M lib/otel_metric_store.ml\n\
    A test/test_keeper_prompt_metrics.ml"
 
 let turn_instructions_text =
@@ -175,6 +175,15 @@ let test_hard_constraints_in_system_only () =
   check bool "no output guard in dynamic" true
     (not (has_in tp.dynamic_context "Output guard:"))
 
+let test_direct_reply_prompt_requires_action_evidence () =
+  let tp = build_separated () in
+  check bool "direct reply prompt binds action claims to tool evidence" true
+    (has_in tp.system_prompt "matching tool-call evidence");
+  check bool "board read claims require same-turn board evidence" true
+    (has_in tp.system_prompt "same-turn board-read evidence");
+  check bool "tool failures must be reported as attempts" true
+    (has_in tp.system_prompt "do not phrase the attempt as a completed check")
+
 let test_soft_context_in_dynamic_only () =
   let tp = build_separated () in
   let has_in s needle =
@@ -268,21 +277,23 @@ let test_state_block_guard_is_runtime_managed_not_absolute_never () =
   let guard = KP.state_block_output_guard_text in
   check bool "guard mentions runtime-managed continuity" true
     (has_in guard "runtime-managed continuity");
+  check bool "guard directs bracketed state block output" true
+    (has_in guard "[STATE]...[/STATE]");
   check bool "guard avoids absolute NEVER state wording" false
     (has_in guard ("NEVER output " ^ "[STATE]"));
-  check bool "guard names raw state markers" true
-    (has_in guard "raw [STATE]");
-  check bool "guard mentions runtime persistence" true
-    (has_in guard "persist state metadata")
+  check bool "guard mentions runtime synthesis and persistence" true
+    (has_in guard "synthesize and persist state metadata")
 
 let test_unified_state_instruction_respects_turn_level_guard () =
   let text = KUP.state_block_instruction_text in
+  check bool "instruction names state block template" true
+    (has_in text "State block template");
   check bool "instruction is scoped to non-direct turns" true
-    (has_in text "For non-direct keeper turns");
-  check bool "instruction names turn-level override" true
-    (has_in text "turn-level output guard");
-  check bool "instruction mentions runtime-managed continuity" true
-    (has_in text "runtime-managed");
+    (has_in text "for non-direct keeper turns");
+  check bool "instruction lists canonical fields" true
+    (has_in text "DONE, NEXT, Goal, Decisions, OpenQuestions, and Constraints");
+  check bool "instruction does not depend on keeper_report_state" false
+    (has_in text "keeper_report_state");
   check bool "instruction avoids old unconditional wording" false
     (has_in text
        ("End every response with a "
@@ -296,12 +307,16 @@ let test_state_block_schema_is_canonical_six_field_shape () =
     [
       "DONE: what you accomplished this turn";
       "NEXT: what the next turn should do";
-      "Goal: current active goal";
+      "Goal: active goal id from <available_goals> verbatim";
       "Decisions: key decisions";
       "OpenQuestions: unresolved items";
       "Constraints: active constraints";
     ];
-  check bool "schema excludes old Progress field" false (has_in text "Progress:")
+  check bool "schema excludes old Progress field" false (has_in text "Progress:");
+  (* #20937: prose in the Goal field is cleared by the post-turn sanitizer
+     (active_goal_ids membership), so the instruction must demand the id. *)
+  check bool "goal field demands id, not prose" false
+    (has_in text "Goal: current active goal")
 
 let test_constitution_uses_canonical_state_instruction () =
   let text = KP.keeper_constitution () in
@@ -330,6 +345,26 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   check bool "does not claim no permission is needed" false
     (has_in prompt "You do not need permission to act")
 
+let test_keeper_oas_guardrails_are_visibility_neutral () =
+  let source_guardrails =
+    { Agent_sdk.Guardrails.tool_filter =
+        Agent_sdk.Guardrails.AllowList [ "keeper_report_state" ]
+    ; max_tool_calls_per_turn = Some 7
+    }
+  in
+  let guardrails =
+    KAR.For_testing.keeper_oas_visibility_neutral_guardrails
+      ~guardrails:source_guardrails
+      ()
+  in
+  check bool "OAS base guardrails allow all tools" true
+    (match guardrails.Agent_sdk.Guardrails.tool_filter with
+     | Agent_sdk.Guardrails.AllowAll -> true
+     | Agent_sdk.Guardrails.AllowList _
+     | Agent_sdk.Guardrails.DenyList _
+     | Agent_sdk.Guardrails.Custom _ -> false);
+  check (option int) "max tool call cap is preserved" (Some 7)
+    guardrails.Agent_sdk.Guardrails.max_tool_calls_per_turn
 
 let test_user_message_sanitizer_preserves_normal_text () =
   let text = "Please inspect the current board status." in
@@ -409,6 +444,7 @@ let test_ctx_composition_splits_history_and_residual () =
                 content = "Fetched board post body";
                 is_error = false;
                 json = None;
+                content_blocks = None;
               };
           ];
         name = None;
@@ -493,6 +529,8 @@ let () =
         [
           test_case "hard constraints in system only" `Quick
             test_hard_constraints_in_system_only;
+          test_case "direct reply prompt requires action evidence" `Quick
+            test_direct_reply_prompt_requires_action_evidence;
           test_case "soft context in dynamic only" `Quick
             test_soft_context_in_dynamic_only;
           test_case "direct reply prompt matches server-managed heartbeat policy" `Quick
@@ -512,6 +550,8 @@ let () =
             test_state_block_schema_is_canonical_six_field_shape;
           test_case "constitution uses canonical state instruction" `Quick
             test_constitution_uses_canonical_state_instruction;
+          test_case "keeper OAS base guardrails are visibility-neutral" `Quick
+            test_keeper_oas_guardrails_are_visibility_neutral;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
           test_case "user message sanitizer preserves normal text" `Quick

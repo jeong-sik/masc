@@ -1,18 +1,17 @@
-let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
-  let room_state = Coord.read_state config in
+let dashboard_shell_status_json (config : Workspace.config) : Yojson.Safe.t =
+  let workspace_state = Workspace.read_state config in
   let cluster = Env_config_core.cluster_name () in
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
     [ "cluster", `String cluster
     ; "base_path", `String config.base_path
-    ; "coordination_root", `String config.base_path
+    ; "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
-    ; "cluster", `String (Env_config_core.cluster_name ())
-    ; "project", `String room_state.project
+    ; "project", `String workspace_state.project
     ; "tempo_interval_s", `Float tempo.current_interval_s
-    ; "paused", `Bool room_state.paused
+    ; "paused", `Bool workspace_state.paused
     ; "version", `String build.release_version
     ; "build", Build_identity.to_yojson build
     ]
@@ -62,7 +61,7 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
     ; "current_task", Json_util.string_opt_to_json agent.current_task
-    ; "joined_at", `String agent.joined_at
+    ; "session_bound_at", `String agent.session_bound_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
     ; "emoji", `String profile.emoji
@@ -89,24 +88,16 @@ let dashboard_message_json (message : Masc_domain.message) =
     ]
 ;;
 
-let dashboard_tasks_safe config = Coord.get_tasks_safe config
-let dashboard_agents_safe config = Coord.get_active_agents config
-
-let json_assoc_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
-;;
+let dashboard_tasks_safe config = Workspace.get_tasks_safe config
+let dashboard_agents_safe config = Workspace.get_active_agents config
 
 let active_agent_summary_json json =
-  match json_assoc_string_opt "status" json with
+  match Json_util.assoc_string_opt "status" json with
   | Some status ->
     (match String.lowercase_ascii (String.trim status) with
      | "active" | "busy" | "listening" ->
        let agent_type =
-         json_assoc_string_opt "agent_type" json
+         Json_util.assoc_string_opt "agent_type" json
          |> Option.value ~default:"unknown"
          |> String.trim
          |> String.lowercase_ascii
@@ -118,10 +109,10 @@ let active_agent_summary_json json =
 ;;
 
 let dashboard_general_agent_count_light config =
-  if not (Coord.root_is_initialized config)
+  if not (Workspace.root_is_initialized config)
   then 0
   else
-    Coord.list_dir config (Coord.agents_dir config)
+    Workspace.list_dir config (Workspace.agents_dir config)
     |> List.fold_left
          (fun count name ->
            if name = ""
@@ -129,8 +120,8 @@ let dashboard_general_agent_count_light config =
               || not (Filename.check_suffix name ".json")
            then count
            else (
-             let path = Filename.concat (Coord.agents_dir config) name in
-             match Coord.read_json_result config path with
+             let path = Filename.concat (Workspace.agents_dir config) name in
+             match Workspace.read_json_result config path with
              | Ok json ->
                (match active_agent_summary_json json with
                 | Some agent_type when not (String.equal agent_type "keeper") -> count + 1
@@ -140,7 +131,7 @@ let dashboard_general_agent_count_light config =
 ;;
 
 let dashboard_messages_safe config ~since_seq ~limit =
-  Coord.get_messages_raw config ~since_seq ~limit
+  Workspace.get_messages_raw config ~since_seq ~limit
 ;;
 
 let is_keeper_agent (agent : Masc_domain.agent) =

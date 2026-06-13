@@ -224,6 +224,26 @@ module Ring = struct
     file_current_date := date;
     file_base_dir := dir
 
+  (* Atomic rotate: open the new sink first, swap only on success. The
+     previous [close_sink (); open_sink ()] pair left [file_channel := None]
+     if [open_out_gen] raised (e.g. EMFILE, transient FS race), and never
+     re-attempted; the file-channel stayed [None] for the rest of the
+     process's life and every subsequent emit silently fell through the
+     [None] arm of [write_to_sink]. Observed on 2026-05-25 (rotation-time
+     stop after 18h) and 2026-05-29 (25 min after midnight UTC rotation):
+     [system_log_*.jsonl] ended at [00:25:09Z] while [/private/tmp/masc-server.log]
+     continued for hours from the same process. Atomic swap + a no-throw
+     [protect] guard turns an [open_out_gen] failure into a logged warning
+     plus retained old channel, instead of permanent silent loss. *)
+  let try_open_channel dir =
+    ensure_dir dir;
+    let date = date_string () in
+    let path = log_file_path dir date in
+    protect ~default:None (fun () ->
+      Some
+        ( open_out_gen [Open_append; Open_creat; Open_wronly] 0o644 path
+        , date ))
+
   (* RFC-0079: typed encoder. Exhaustive match on [level] / [source] means
      adding a new variant fails to compile here until the wire format is
      extended deliberately. The wire shape (field set + key order) is the
@@ -269,8 +289,22 @@ module Ring = struct
         | None -> true
       in
       if needs_reopen then begin
-        close_sink ();
-        open_sink !file_base_dir
+        match try_open_channel !file_base_dir with
+        | Some (new_oc, date) ->
+            (match !file_channel with
+             | Some old_oc -> close_out_noerr old_oc
+             | None -> ());
+            file_channel := Some new_oc;
+            file_current_date := date
+        | None ->
+            (* open_out_gen raised. Keep the existing channel (if any)
+               so emits continue landing in the previous day's file
+               until the next rotation attempt succeeds. *)
+            Printf.eprintf
+              "[%s] [WARN] [Log] file-sink rotate failed (target %s); \
+               retaining previous channel\n%!"
+              (timestamp ())
+              (log_file_path !file_base_dir today)
       end
     end
 
@@ -306,10 +340,29 @@ module Ring = struct
     Fun.protect
       ~finally:(fun () -> Stdlib.Mutex.unlock sink_mutex)
       (fun () ->
+        (* Self-heal: if a prior rotate left [file_channel = None]
+           (open failure) but the base dir is still configured, try
+           to reopen now. Bounded: at most one attempt per write, no
+           backoff loop. Failure is silent here because [rotate_if_needed]
+           already emitted the WARN; logging again per emit would spam. *)
+        if !file_channel = None && !file_base_dir <> "" then begin
+          match try_open_channel !file_base_dir with
+          | Some (oc, date) ->
+              file_channel := Some oc;
+              file_current_date := date
+          | None -> ()
+        end;
         match !file_channel with
         | Some oc ->
             let line = Yojson.Safe.to_string entry_json ^ "\n" in
-            output_string oc line;
+            (try output_string oc line
+             with exn ->
+               Printf.eprintf
+                 "[%s] [ERROR] [Log] file-sink write failed: %s; \
+                  dropping channel for next-emit re-open\n%!"
+                 (timestamp ())
+                 (Printexc.to_string exn);
+               close_sink ());
             protect ~default:() (fun () -> flush oc)
         | None -> ())
 
@@ -331,9 +384,8 @@ module Ring = struct
      bad line at the file-fold boundary; the decoder itself never silently
      drops. *)
   let entry_of_json json =
-    let open Yojson.Safe.Util in
     let require_string field =
-      match member field json with
+      match Yojson.Safe.Util.member field json with
       | `String s -> s
       | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
@@ -344,7 +396,7 @@ module Ring = struct
                   (Yojson.Safe.to_string other)))
     in
     let require_int field =
-      match member field json with
+      match Yojson.Safe.Util.member field json with
       | `Int i -> i
       | `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
@@ -370,7 +422,7 @@ module Ring = struct
         let module_name = require_string "module" in
         let message = require_string "message" in
         let keeper_name =
-          match member "keeper_name" json with
+          match Yojson.Safe.Util.member "keeper_name" json with
           | `String s -> Some s
           | `Null -> None
           | other ->
@@ -380,7 +432,7 @@ module Ring = struct
                       (Yojson.Safe.to_string other)))
         in
         let turn_id =
-          match member "turn_id" json with
+          match Yojson.Safe.Util.member "turn_id" json with
           | `Int i -> Some i
           | `Null -> None
           | other ->
@@ -392,7 +444,7 @@ module Ring = struct
         {
           seq; ts; level; source; module_name;
           keeper_name; turn_id; message;
-          details = member "details" json;
+          details = Yojson.Safe.Util.member "details" json;
         }
     | _ ->
         raise
@@ -629,7 +681,7 @@ let log level ?(ctx : string option) fmt =
         | Some c -> Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str c
         | None -> Printf.sprintf "[%s] [%s]" (timestamp ()) level_str
       in
-      Printf.eprintf "%s %s\n%!" prefix msg;
+      Console_sink.write (prefix ^ " " ^ msg);
       Ring.push ~level ~module_name ~message:msg ()
     end
   ) fmt
@@ -643,7 +695,7 @@ let emit level ?(module_name = "") ?(details = `Null) message =
       else
         Printf.sprintf "[%s] [%s] [%s]" (timestamp ()) level_str module_name
     in
-    Printf.eprintf "%s %s\n%!" prefix message;
+    Console_sink.write (prefix ^ " " ^ message);
     Ring.push ~level ~module_name ~message ~details ()
   end
 
@@ -681,7 +733,7 @@ let error ?ctx fmt = log Error ?ctx fmt
    [~level:Log.Error/Warn/Debug] explicitly, so the option was dead code
    masquerading as flexibility. *)
 let emit_legacy_raw ~level ?(module_name = "") ~source message =
-  Printf.eprintf "%s\n%!" message;
+  Console_sink.write message;
   Ring.push ~level ~source ~module_name ~message ()
 
 let legacy_stderr ~level ?module_name message =
@@ -691,7 +743,7 @@ let legacy_traceln ~level ?module_name message =
   emit_legacy_raw ~level ?module_name ~source:Legacy_traceln message
 
 let client_tool_host_error ?(module_name = "ToolHost") ?(details = `Null) message =
-  Printf.eprintf "%s\n%!" message;
+  Console_sink.write message;
   Ring.push ~level:Error ~source:Client_tool_host
     ~module_name ~message ~details ()
 
@@ -755,9 +807,15 @@ module Make (M : sig val name : string end) = struct
   let emit level ?(details = `Null) ?keeper_name ?turn_id message =
     if should_log_module level then begin
       let level_str = level_to_string level in
-      let prefix = Printf.sprintf "[%s] [%s] [%s]"
-        (timestamp ()) level_str M.name in
-      Printf.eprintf "%s %s\n%!" prefix message;
+      let prefix = match keeper_name with
+        | Some kn ->
+            Printf.sprintf "[%s] [%s] [%s/%s]"
+              (timestamp ()) level_str M.name kn
+        | None ->
+            Printf.sprintf "[%s] [%s] [%s]"
+              (timestamp ()) level_str M.name
+      in
+      Console_sink.write (prefix ^ " " ^ message);
       Ring.push ?keeper_name ?turn_id
         ~level ~module_name:M.name ~message ~details ()
     end
@@ -783,7 +841,7 @@ module Make (M : sig val name : string end) = struct
 end
 
 (** Pre-defined module loggers *)
-module Coord = Make(struct let name = "Coord" end)
+module Workspace = Make(struct let name = "Workspace" end)
 module Mcp = Make(struct let name = "MCP" end)
 module Auth = Make(struct let name = "Auth" end)
 module Retry = Make(struct let name = "Retry" end)
@@ -809,11 +867,11 @@ module Transport = Make(struct let name = "Transport" end)
 module Gc = Make(struct let name = "GC" end)
 module Reputation = Make(struct let name = "Reputation" end)
 module Keeper = Make(struct let name = "Keeper" end)
-(* RFC-0058 Phase 8.1.5: dedicated cascade namespace so partial-catalog
-   warnings and other cascade-domain events route through a stable
+(* RFC-0058 Phase 8.1.5: dedicated runtime namespace so partial-catalog
+   warnings and other runtime-domain events route through a stable
    channel that alerting/dashboard filters can target without false
    positives from the Keeper namespace. *)
-module Cascade = Make(struct let name = "Cascade" end)
+module Runtime = Make(struct let name = "Runtime" end)
 module Memory = Make(struct let name = "Memory" end)
 module Mention = Make(struct let name = "Mention" end)
 module Misc = Make(struct let name = "Misc" end)
@@ -833,7 +891,7 @@ module MemoryJsonl = Make(struct let name = "MemoryJsonl" end)
 module AutoResponder = Make(struct let name = "AutoResponder" end)
 module Env = Make(struct let name = "Env" end)
 module Level2 = Make(struct let name = "Level2" end)
-module RoomTask = Make(struct let name = "RoomTask" end)
+module TaskState = Make(struct let name = "TaskState" end)
 module Inline = Make(struct let name = "Inline" end)
 module Protocol = Make(struct let name = "Protocol" end)
 module AlwaysOn = Make(struct let name = "AlwaysOn" end)
@@ -846,3 +904,31 @@ module Planner = Make(struct let name = "Planner" end)
 module Compact = Make(struct let name = "Compact" end)
 module Harness = Make(struct let name = "Harness" end)
 module Discovery = Make(struct let name = "Discovery" end)
+
+(* Logging-consistency migration (refactor/logging-consistency-harness):
+   modules added so that former top-level [Log.info ~ctx:"<name>"] call sites
+   route through a dedicated per-module logger while preserving the exact
+   component string operators see in [ts] [LEVEL] [<name>] output. The [name]
+   string is the original [~ctx] value verbatim; the module identifier is its
+   Capitalized form. See docs/LOGGING.md. *)
+module Otel = Make(struct let name = "otel" end)
+module Agent_health = Make(struct let name = "agent_health" end)
+module Relay = Make(struct let name = "relay" end)
+module Runtime_verify = Make(struct let name = "runtime_verify" end)
+module Checkpoint = Make(struct let name = "checkpoint" end)
+module Jsonl_atomic = Make(struct let name = "jsonl_atomic" end)
+module Mcp_transport = Make(struct let name = "mcp_transport" end)
+module Startup = Make(struct let name = "startup" end)
+module Model_inference_metrics = Make(struct let name = "model_inference_metrics" end)
+module Oas_worker_exec = Make(struct let name = "oas_worker_exec" end)
+module Oas_event = Make(struct let name = "oas:event" end)
+module H2_gateway = Make(struct let name = "h2_gateway" end)
+
+(* Modules added for former raw-stderr / [Logs.*] server-runtime call sites
+   that carried no [~ctx]. Domain-named (no prior component string to
+   preserve); the migration adds a single [ts] [LEVEL] [<name>] prefix where
+   there was previously none. *)
+module Voice = Make(struct let name = "Voice" end)
+module Exec_tap = Make(struct let name = "ExecTap" end)
+module Tool_validation = Make(struct let name = "ToolValidation" end)
+module Discord = Make(struct let name = "Discord" end)

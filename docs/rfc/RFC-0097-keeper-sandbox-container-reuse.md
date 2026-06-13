@@ -77,7 +77,7 @@ Cost per call (measured 2026-05-16):
   veth pair, OCI runtime fork-exec.
 - Wall-clock: 1–5 s startup before `bash -lc` even begins.
 
-When the cascade-failure-storm at 2026-05-16 18:08-18:15 fired,
+When the runtime-failure-storm at 2026-05-16 18:08-18:15 fired,
 12+ keepers retried tier rotations in lockstep, each retry spawning
 a fresh container. Host FD usage crossed `kern.maxfiles` (491_520),
 ENFILE returned for `fstatat`/`execve`/`fork`, and unrelated
@@ -230,7 +230,7 @@ Rejected for this RFC because:
 1. macOS development would require Apple Virtualization Framework
    (newer, less battle-tested than HVF QEMU) or HVF directly — neither
    has the operator familiarity that Docker has accumulated over the
-   masc-mcp history.
+   masc history.
 2. Image tooling — our keeper images are Docker images. Switching to
    microVM image format requires a parallel build pipeline (rootfs
    assembly, kernel pinning, init system selection).
@@ -264,7 +264,7 @@ Rejected for the keeper use case because:
 
 This is the opposite end of the design space from E (microVM).
 Provider-A optimized for startup cost on a per-command CLI shell;
-masc-mcp keepers are the opposite shape (long-lived, stateful), so
+masc keepers are the opposite shape (long-lived, stateful), so
 the trade-off does not invert in our favor.
 
 ## Workaround rejection bar (self-check)

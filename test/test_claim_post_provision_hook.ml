@@ -1,19 +1,21 @@
 module Types = Masc_domain
 
-(** Regression test for [Coord_hooks.claim_post_provision_fn] dispatch.
+(** Regression test for [Workspace_hooks.claim_post_provision_fn] dispatch.
 
-    task-103: a successful [Coord.claim_task_r] must invoke the
+    task-103: a successful [Workspace.claim_task_r] must invoke the
     post-provision hook with the same agent_name + task_id, so the keeper
     layer can auto-create a sandbox worktree for docker keepers. The hook
     is best-effort — claim must succeed even when the hook raises. *)
 
 open Alcotest
-open Masc_mcp
-module CH = Coord_hooks
+open Masc
+module CH = Workspace_hooks
+
+let () = Workspace_metric_hooks.install ()
 
 let failure_metric_value ~site ~agent_name =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_coord_claim_post_provision_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_workspace_claim_post_provision_failures
     ~labels:[ ("site", site); ("agent_name", agent_name) ]
     ()
 
@@ -27,13 +29,13 @@ let with_test_env f =
          (int_of_float (Unix.gettimeofday () *. 1000.)))
   in
   Unix.mkdir tmp_dir 0o755;
-  let config = Coord.default_config tmp_dir in
-  let _ = Coord.init config ~agent_name:(Some "agent_llm_a") in
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:(Some "agent_llm_a") in
   let prev = Atomic.get CH.claim_post_provision_fn in
   Fun.protect
     ~finally:(fun () ->
       Atomic.set CH.claim_post_provision_fn prev;
-      let _ = Coord.reset config in
+      let _ = Workspace.reset config in
       try Unix.rmdir tmp_dir with _ -> ())
     (fun () -> f config)
 
@@ -42,9 +44,9 @@ let test_hook_invoked_on_successful_claim () =
   let calls = ref [] in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name ~task_id ->
       calls := (agent_name, task_id) :: !calls);
-  let _ = Coord.add_task config ~title:"task-103 t1" ~priority:1 ~description:"" in
+  let _ = Workspace.add_task config ~title:"task-103 t1" ~priority:1 ~description:"" in
   (match
-     Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
+     Workspace.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
    with
    | Ok _ -> ()
    | Error e ->
@@ -61,13 +63,13 @@ let test_hook_failure_does_not_block_claim () =
   let before = failure_metric_value ~site:"claim_task" ~agent_name:"agent_llm_a" in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
       raise (Failure "synthetic worktree provisioning failure"));
-  let _ = Coord.add_task config ~title:"task-103 t2" ~priority:1 ~description:"" in
+  let _ = Workspace.add_task config ~title:"task-103 t2" ~priority:1 ~description:"" in
   match
-    Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
+    Workspace.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
   with
-  | Ok msg ->
+  | Ok outcome ->
     check bool "claim succeeded despite hook failure" true
-      (Astring.String.is_infix ~affix:"claimed" msg);
+      (Astring.String.is_infix ~affix:"claimed" outcome.message);
     check (float 0.001) "claim failure metric incremented"
       (before +. 1.0)
       (failure_metric_value ~site:"claim_task" ~agent_name:"agent_llm_a")
@@ -80,27 +82,27 @@ let test_claim_next_hook_failure_is_observed () =
   let before = failure_metric_value ~site:"claim_next" ~agent_name:"agent_llm_a" in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
       raise (Failure "synthetic claim_next provisioning failure"));
-  let _ = Coord.add_task config ~title:"task-103 t-next" ~priority:1 ~description:"" in
-  match Coord.claim_next_r config ~agent_name:"agent_llm_a" () with
-  | Coord.Claim_next_claimed { task_id; _ } ->
+  let _ = Workspace.add_task config ~title:"task-103 t-next" ~priority:1 ~description:"" in
+  match Workspace.claim_next_r config ~agent_name:"agent_llm_a" () with
+  | Workspace.Claim_next_claimed { task_id; _ } ->
     check string "claimed task" "task-001" task_id;
     check (float 0.001) "claim_next failure metric incremented"
       (before +. 1.0)
       (failure_metric_value ~site:"claim_next" ~agent_name:"agent_llm_a")
-  | Coord.Claim_next_no_unclaimed ->
+  | Workspace.Claim_next_no_unclaimed ->
     fail "claim_next unexpectedly found no unclaimed task"
-  | Coord.Claim_next_no_eligible { excluded_count; _ } ->
+  | Workspace.Claim_next_no_eligible { excluded_count; _ } ->
     failf "claim_next unexpectedly found no eligible task; excluded=%d"
       excluded_count
-  | Coord.Claim_next_error msg ->
+  | Workspace.Claim_next_error msg ->
     failf "claim_next unexpectedly failed: %s" msg
 
 let test_claim_next_admission_filter_blocks_claim () =
   with_test_env @@ fun config ->
-  let _ = Coord.add_task config ~title:"admission gated" ~priority:1 ~description:"" in
+  let _ = Workspace.add_task config ~title:"admission gated" ~priority:1 ~description:"" in
   let admission_calls = ref 0 in
   let result =
-    Coord.claim_next_r
+    Workspace.claim_next_r
       config
       ~agent_name:"agent_llm_a"
       ~admission_filter:(fun ~active_tasks:_ task ->
@@ -109,25 +111,25 @@ let test_claim_next_admission_filter_blocks_claim () =
       ()
   in
   (match result with
-   | Coord.Claim_next_no_eligible { scope_excluded_count; claim_pool_candidate_count; _ } ->
+   | Workspace.Claim_next_no_eligible { scope_excluded_count; claim_pool_candidate_count; _ } ->
      check int "scope/admission excluded" 1 scope_excluded_count;
      check int "claim pool count" 1 claim_pool_candidate_count
-   | Coord.Claim_next_claimed { task_id; _ } ->
+   | Workspace.Claim_next_claimed { task_id; _ } ->
      failf "admission filter should block claim, got %s" task_id
-   | Coord.Claim_next_no_unclaimed ->
+   | Workspace.Claim_next_no_unclaimed ->
      fail "expected no_eligible, got no_unclaimed"
-   | Coord.Claim_next_error msg ->
+   | Workspace.Claim_next_error msg ->
      failf "claim_next unexpectedly failed: %s" msg);
   check int "admission filter called once" 1 !admission_calls;
-  match Coord.get_tasks_raw config with
+  match Workspace.get_tasks_raw config with
   | [ { Masc_domain.task_status = Masc_domain.Todo; _ } ] -> ()
   | _ -> fail "admission-filtered task must remain Todo"
 
 let test_hook_not_invoked_on_already_claimed () =
   with_test_env @@ fun config ->
-  let _ = Coord.add_task config ~title:"task-103 t3" ~priority:1 ~description:"" in
+  let _ = Workspace.add_task config ~title:"task-103 t3" ~priority:1 ~description:"" in
   (match
-     Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
+     Workspace.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" ()
    with
    | Ok _ -> ()
    | Error e ->
@@ -135,7 +137,7 @@ let test_hook_not_invoked_on_already_claimed () =
   let calls = ref 0 in
   Atomic.set CH.claim_post_provision_fn (fun _ ~agent_name:_ ~task_id:_ ->
       incr calls);
-  let _ = Coord.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" () in
+  let _ = Workspace.claim_task_r config ~agent_name:"agent_llm_a" ~task_id:"task-001" () in
   check int "hook does not fire for already_mine repeat" 0 !calls
 
 let () =

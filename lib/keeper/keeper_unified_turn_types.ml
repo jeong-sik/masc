@@ -6,7 +6,7 @@
     use [Keeper_unified_turn.<name>] unchanged. *)
 
 let turn_event_bus_manifest_decision
-      (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
+      (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
   let overflow =
     match summary.overflow_imminent with
@@ -45,112 +45,100 @@ let turn_event_bus_manifest_decision
     ]
 ;;
 
-(* Pure predicate (Keeper_context_runtime + Keeper_behavioral_regime). *)
-let should_auto_pause_required_tool_contract_violation
-      ~(paused : bool)
-      ~(consecutive_failures : int)
-      (err : Agent_sdk.Error.sdk_error)
-  : bool
-  =
-  Keeper_error_classify.is_required_tool_contract_violation err
-  && consecutive_failures >= Keeper_behavioral_regime.turn_fail_streak_threshold
-  && not paused
-;;
-
-(* Pure constructor for the SDK retry-timeout error wire shape. *)
-let sdk_error_of_retry_slot_reacquire_timeout
-      ~(keeper_name : string)
-      (timeout : Keeper_turn_slot.semaphore_wait_timeout)
-  =
-  let phase = Keeper_turn_slot.semaphore_wait_phase_to_string timeout.timeout_phase in
-  let holder_summary = Keeper_turn_slot.format_slot_holders timeout.timeout_holders in
-  Agent_sdk.Error.Api
-    (Agent_sdk.Retry.Timeout
-       { message =
-           Printf.sprintf
-             "keeper turn slot reacquire timed out after degraded retry (keeper=%s \
-              phase=%s wait=%.0fs holders=%s)"
-             keeper_name
-             phase
-             timeout.timeout_wait_sec
-             holder_summary
-       })
-;;
-
-let cascade_exhaustion_detail_code detail =
+let runtime_exhaustion_detail_code detail =
   let contains needle = String_util.contains_substring_ci detail needle in
   if contains "no_first_token"
-  then "cascade_exhausted_no_first_token"
-  else if contains "inter_chunk_idle"
-  then "cascade_exhausted_inter_chunk_idle"
+  then "runtime_exhausted_no_first_token"
   else if contains "http 429" || contains "usage limit" || contains "rate limit"
-  then "cascade_exhausted_rate_limited"
+  then "runtime_exhausted_rate_limited"
   else if contains "max_execution_time"
-  then "cascade_exhausted_max_execution_time"
+  then "runtime_exhausted_max_execution_time"
   else if contains "wall-clock timeout"
-  then "cascade_exhausted_wall_clock_timeout"
+  then "runtime_exhausted_wall_clock_timeout"
   else if contains "connection closed by peer"
-  then "cascade_exhausted_connection_closed"
+  then "runtime_exhausted_connection_closed"
   else if contains "connection refused"
-  then "cascade_exhausted_connection_refused"
-  else "cascade_exhausted_provider_failure"
+  then "runtime_exhausted_connection_refused"
+  else "runtime_exhausted_provider_failure"
 ;;
 
-let cascade_exhaustion_reason_code
-      (reason : Keeper_types.cascade_exhaustion_reason)
+let runtime_exhaustion_reason_code
+      (reason : Keeper_internal_error.runtime_exhaustion_reason)
   =
   match reason with
-  | Keeper_types.Connection_refused -> "cascade_exhausted_connection_refused"
-  | Keeper_types.Dns_failure -> "cascade_exhausted_dns_failure"
-  | Keeper_types.No_providers_available -> "cascade_exhausted_no_providers_available"
-  | Keeper_types.All_providers_failed -> "cascade_exhausted_all_providers_failed"
-  | Keeper_types.Candidates_filtered_after_cycles ->
-    "cascade_exhausted_candidates_filtered"
-  | Keeper_types.Max_turns_exceeded -> "cascade_exhausted_max_turns"
-  | Keeper_types.Structural_attempt_timeout _ ->
-    "cascade_exhausted_structural_attempt_timeout"
-  | Keeper_types.Other_detail detail -> cascade_exhaustion_detail_code detail
+  | Keeper_internal_error.Connection_refused -> "runtime_exhausted_connection_refused"
+  | Keeper_internal_error.Dns_failure -> "runtime_exhausted_dns_failure"
+  | Keeper_internal_error.No_providers_available -> "runtime_exhausted_no_providers_available"
+  | Keeper_internal_error.All_providers_failed -> "runtime_exhausted_all_providers_failed"
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
+    "runtime_exhausted_candidates_filtered"
+  | Keeper_internal_error.Max_turns_exceeded -> "runtime_exhausted_max_turns"
+  | Keeper_internal_error.Structural_attempt_timeout _ ->
+    "runtime_exhausted_structural_attempt_timeout"
+  | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
+  | Keeper_internal_error.Other_detail detail -> runtime_exhaustion_detail_code detail
 ;;
 
-let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
-  match Cascade_error_classify.classify_masc_internal_error_of_string raw_error with
-  | Some (Cascade_error_classify.Cascade_exhausted { reason; cascade_name }) ->
+let registry_reason_of_internal_reason
+    (reason : Keeper_internal_error.runtime_exhaustion_reason)
+  : Keeper_meta_contract.runtime_exhaustion_reason
+  =
+  match reason with
+  | Keeper_internal_error.Connection_refused -> Keeper_meta_contract.Connection_refused
+  | Keeper_internal_error.Dns_failure -> Keeper_meta_contract.Dns_failure
+  | Keeper_internal_error.No_providers_available ->
+    Keeper_meta_contract.No_providers_available
+  | Keeper_internal_error.All_providers_failed ->
+    Keeper_meta_contract.All_providers_failed
+  | Keeper_internal_error.Candidates_filtered_after_cycles ->
+    Keeper_meta_contract.Candidates_filtered_after_cycles
+  | Keeper_internal_error.Max_turns_exceeded ->
+    Keeper_meta_contract.Max_turns_exceeded
+  | Keeper_internal_error.Structural_attempt_timeout { detail } ->
+    Keeper_meta_contract.Structural_attempt_timeout { detail }
+  | Keeper_internal_error.Capacity_exhausted ->
+    Keeper_meta_contract.Capacity_exhausted
+  | Keeper_internal_error.Other_detail detail ->
+    Keeper_meta_contract.Other_detail detail
+;;
+
+let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
+  match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = cascade_exhaustion_reason_code reason
+         { code = runtime_exhaustion_reason_code reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = Some (Cascade_name.to_string cascade_name)
+         ; runtime_id = Some (runtime_id)
+         ; reason = Some (registry_reason_of_internal_reason reason)
          })
-  | Some (Cascade_error_classify.Capacity_backpressure { detail = capacity_detail; _ }) ->
+  | Some (Keeper_internal_error.Capacity_backpressure { detail = capacity_detail; _ }) ->
     Some
       (Keeper_registry.Provider_runtime_error
          { code = "capacity_backpressure"
          ; detail = capacity_detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
+         ; reason = None
          })
   | Some
-      ( Cascade_error_classify.Resumable_cli_session _
-      | Cascade_error_classify.No_tool_capable_provider _
-      | Cascade_error_classify.Accept_rejected _
-      | Cascade_error_classify.Admission_queue_timeout _
-      | Cascade_error_classify.Admission_queue_rejected _
-      | Cascade_error_classify.Turn_timeout _
-      | Cascade_error_classify.Provider_timeout _
-      | Cascade_error_classify.Max_tokens_ceiling_violation _
-      | Cascade_error_classify.Ambiguous_post_commit _
-      (* RFC-0158: pre-dispatch admission denial is not a cascade-exhaustion
-         reason; the keeper decided not to attempt a provider call. *)
-      | Cascade_error_classify.Retry_admission_denied _
+      ( Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Admission_queue_timeout _
+      | Keeper_internal_error.Admission_queue_rejected _
+      | Keeper_internal_error.Turn_timeout _
+      | Keeper_internal_error.Provider_timeout _
+      | Keeper_internal_error.Max_tokens_ceiling_violation _
+      | Keeper_internal_error.Ambiguous_post_commit _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
-         cascade-exhaustion reasons; they map to opaque
+         runtime-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
-      | Cascade_error_classify.Internal_unhandled_exception _
-      | Cascade_error_classify.Internal_bridge_exception _
-      | Cascade_error_classify.Internal_contract_rejected _ )
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _ )
   | None -> None
 ;;
 
@@ -168,18 +156,10 @@ let registry_failure_reason_of_terminal_reason
   : Keeper_registry.failure_reason option
   =
   let detail = Keeper_types_profile.short_preview raw_error in
-  match cascade_exhausted_failure_reason_of_raw_error ~detail raw_error with
+  match runtime_exhausted_failure_reason_of_raw_error ~detail raw_error with
   | Some _ as reason -> reason
   | None ->
   match terminal_reason.disposition with
-  | Keeper_turn_disposition.Required_tool_use_no_tool_call ->
-    Some
-      (Keeper_registry.Tool_required_unsatisfied
-         { code = "required_tool_use_no_tool_call"; detail })
-  | Keeper_turn_disposition.Required_tool_use_unsatisfied ->
-    Some
-      (Keeper_registry.Tool_required_unsatisfied
-         { code = "required_tool_use_unsatisfied"; detail })
   | Keeper_turn_disposition.Provider_error c ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -187,16 +167,18 @@ let registry_failure_reason_of_terminal_reason
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
+         ; reason = None
          })
-  | Keeper_turn_disposition.Cascade_attempts_exhausted ->
+  | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
-         { code = "cascade_attempts_exhausted"
+         { code = "runtime_attempts_exhausted"
          ; detail
          ; provider_id = None
          ; http_status = None
-         ; cascade_name = None
+         ; runtime_id = None
+         ; reason = None
          })
   | Keeper_turn_disposition.Success
   | Keeper_turn_disposition.External_cancel
@@ -263,7 +245,7 @@ let record_unmatched_tool_completed
   in
   Log.Keeper.error "%s" message;
   let mutating_tool_committed =
-    tool_committed && Agent_tool_dispatch_runtime.has_mutating_side_effect tool_name
+    tool_committed && Keeper_tool_dispatch_runtime.has_mutating_side_effect tool_name
   in
   if mutating_tool_committed
   then tracker.mutating_tools_committed <- tool_name :: tracker.mutating_tools_committed;
@@ -281,7 +263,7 @@ let record_unmatched_tool_completed
 
 let record_turn_tool_events
       ?(has_mutating_side_effect_with_input =
-        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input)
+        Keeper_tool_dispatch_runtime.has_mutating_side_effect_with_input)
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
       (events : Agent_sdk.Event_bus.event list)
@@ -320,15 +302,17 @@ let record_turn_tool_events
     events
 ;;
 
-(** Record the observation for a streaming turn that was cancelled
-    externally (supervisor stop or external cancel). FSM emits +
-    record_pre_dispatch_terminal_observation are *boundary* side
-    effects intentionally retained from the godfile. *)
+(** Record the observation for a streaming turn that was cancelled.
+    [cancel_reason] distinguishes the source:
+      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
+      - ["supervisor_stop"] — supervisor requested stop
+      - ["external_cancel"] — external fiber cancellation *)
 let record_streaming_cancelled_observation
-      ~(config : Coord.config)
-      ~(run_meta : Keeper_types.keeper_meta)
+      ?(cancel_reason : string = "external_cancel")
+      ~(config : Workspace.config)
+      ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(runtime_id : string)
       ~(keeper_turn_id : int)
       ()
   : unit
@@ -337,6 +321,12 @@ let record_streaming_cancelled_observation
     match Keeper_registry.get ~base_path:config.base_path run_meta.name with
     | Some entry -> Atomic.get entry.fiber_stop
     | None -> false
+  in
+  let terminal_reason_code =
+    (* Priority: explicit cancel_reason > fiber_stop inference *)
+    if cancel_reason <> "external_cancel"
+    then cancel_reason
+    else if fiber_stop_set then "supervisor_stop" else "external_cancel"
   in
   if fiber_stop_set
   then
@@ -347,24 +337,43 @@ let record_streaming_cancelled_observation
       ~turn_id:keeper_turn_id
       ~prev:Keeper_turn_fsm.Streaming
       Keeper_turn_fsm.Streaming;
-  let terminal_reason_code =
-    if fiber_stop_set then "supervisor_stop" else "external_cancel"
-  in
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config
     ~meta:run_meta
     ~generation:run_generation
-    ~cascade_name
+    ~runtime_id
     ~outcome:`Cancelled
     ~terminal_reason_code
     ~activity_kind:"keeper.turn_cancelled"
     ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
     ~keeper_turn_id
     ();
-  (* FSM: HonorStopSignal — cooperative cancel. *)
+  let cancelled_variant =
+    match terminal_reason_code with
+    | "attempt_watchdog_safety_deadline" ->
+      (* Legacy receipts from the removed whole-run attempt watchdog were
+         environmental terminals (provider stalled mid-stream), not same-turn
+         re-dispatch storms.
+         [Keeper_turn_livelock.classify_and_decide] keys [Stuck_age_exceeded]
+         off [first_started_at], i.e. the FIRST dispatch of this turn_id; a
+         retry after the watchdog cancel inherits that ~watchdog-budget-old
+         timestamp and trips the stuck-age gate on the very next dispatch,
+         routing the keeper to operator_pause (human-gated resume). That
+         pause on a transport stall contradicts the invariant that a keeper
+         keeps acting autonomously. Reset the livelock entry so the retry is
+         classified Fresh. Rapid re-dispatch storm detection is unaffected:
+         only legacy watchdog/provider_timeout receipts clear the counter, and
+         only for the affected keeper. Current runtime code must not emit this
+         reason from a MASC-created wall-clock timeout around tool execution. *)
+      Keeper_turn_livelock.reset_keeper_livelock ~keeper:run_meta.name;
+      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
+    | _ ->
+      (* supervisor_stop, external_cancel, or any future reason *)
+      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop
+  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:run_meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
-    (Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop)
+    cancelled_variant
 ;;

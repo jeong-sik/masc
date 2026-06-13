@@ -4,6 +4,13 @@ type risk_class =
   | `Privileged
   ]
 
+let risk_class_max a b =
+  match a, b with
+  | `Privileged, _ | _, `Privileged -> `Privileged
+  | `Audited, _ | _, `Audited -> `Audited
+  | `Safe, `Safe -> `Safe
+;;
+
 type kind =
   [ `Git
   | `Docker
@@ -52,6 +59,13 @@ type known =
   | Uname
   | Ps
   | Tty
+  | Cp
+  | Mv
+  | Ln
+  | Touch
+  | Tee
+  | Awk
+  | Xargs
   (* Audited *)
   | Git
   | Docker
@@ -148,6 +162,13 @@ let known_metadata : known -> known_metadata = function
   | Uname -> { name = "uname"; risk = `Safe; kind = `Safe_program }
   | Ps -> { name = "ps"; risk = `Safe; kind = `Safe_program }
   | Tty -> { name = "tty"; risk = `Safe; kind = `Safe_program }
+  | Cp -> { name = "cp"; risk = `Safe; kind = `Safe_program }
+  | Mv -> { name = "mv"; risk = `Safe; kind = `Safe_program }
+  | Ln -> { name = "ln"; risk = `Safe; kind = `Safe_program }
+  | Touch -> { name = "touch"; risk = `Safe; kind = `Safe_program }
+  | Tee -> { name = "tee"; risk = `Safe; kind = `Safe_program }
+  | Awk -> { name = "awk"; risk = `Safe; kind = `Safe_program }
+  | Xargs -> { name = "xargs"; risk = `Safe; kind = `Safe_program }
   | Git -> { name = "git"; risk = `Audited; kind = `Git }
   | Docker -> { name = "docker"; risk = `Audited; kind = `Docker }
   | Curl -> { name = "curl"; risk = `Audited; kind = `Curl }
@@ -239,6 +260,13 @@ let all_known =
   ; Uname
   ; Ps
   ; Tty
+  ; Cp
+  ; Mv
+  ; Ln
+  ; Touch
+  ; Tee
+  ; Awk
+  ; Xargs
   ; Git
   ; Docker
   ; Curl

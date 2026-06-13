@@ -1,38 +1,14 @@
 (** Keeper_unified_metrics_support — shared observation, trust, and JSON helpers for Keeper_unified_metrics. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 
-(* ── String utilities (private, duplicated from keeper_unified_turn
-      to avoid circular module dependency) ────────── *)
+let string_contains_substring = String_util.string_contains_substring
 
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset = needle_len then true
-    else if haystack.[start_idx + offset] <> needle.[offset] then false
-    else loop (offset + 1)
-  in
-  loop 0
-
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > hay_len then false
-  else
-    let rec loop i =
-      if i + needle_len > hay_len then false
-      else if substring_matches_at ~needle haystack i then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
-  string_contains_substring
-      ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains_substring_ci = String_util.string_contains_substring_ci
 
 
 (* ── Observation / decision helpers ─────────────── *)
@@ -69,7 +45,7 @@ let scheduled_autonomous_outcome_of_result
    codec functions were extracted to [Turn_mode_codec] in lib/ so
    [Tool_agent_timeline] can parse keeper turn payloads without
    importing this module (which would form a Config-mediated dependency
-   cycle with [Agent_tool_in_process_runtime]). The local re-export
+   cycle with [Keeper_tool_in_process_runtime]). The local re-export
    keeps existing callers source-compatible. *)
 type turn_mode = Turn_mode_codec.turn_mode =
   | Tool_use
@@ -82,7 +58,7 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-(* RFC-0132 PR-2: Prometheus metric label = external boundary; redact via SSOT. *)
+(* RFC-0132 PR-2: Otel_metric_store metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
@@ -92,7 +68,7 @@ let classify_usage_trust ~(usage_reported : bool)
   Keeper_usage_trust.classify ~usage_reported ~usage ~context_max
 
 (* #9953: bucket the raw [context_max] integer into a tightly
-   bounded vocabulary so the Prometheus label cardinality stays
+   bounded vocabulary so the Otel_metric_store label cardinality stays
    small AND the dashboards see the same drift the issue
    reported (42% / 17% / 41% three-way split for one model).
 
@@ -100,9 +76,9 @@ let classify_usage_trust ~(usage_reported : bool)
    - [zero]  : context_max = 0 (uninitialised / pre-resolve)
    - [64k]   : (0, 64_000]
    - [128k]  : (64_000, 128_000]
-   - [200k]  : (128_000, 200_000]   — provider_a model-a-sonnet
-   - [256k]  : (200_000, 262_144]   — provider_c / agent_llm_a haiku 4.5
-   - [1m]    : (262_144, 1_048_576] — agent_llm_a opus 4.7 / 1M
+   - [200k]  : (128_000, 200_000]
+   - [256k]  : (200_000, 262_144]
+   - [1m]    : (262_144, 1_048_576]
    - [other] : everything else (sanity check / future caps) *)
 let context_max_bucket (n : int) : string =
   if n <= 0 then "zero"
@@ -116,7 +92,7 @@ let context_max_bucket (n : int) : string =
 let record_context_max_observation
     ~(keeper : string)
     ~(context_max : int) : unit =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ContextMaxObserved)
     ~labels:
       [
@@ -166,7 +142,7 @@ let record_turn_latency_bucket
     ~(keeper : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnLatencyBucket)
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ();
@@ -184,7 +160,7 @@ let label_or_unknown raw =
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
     ~(channel : string)
-    ~(cascade_profile : string)
+    ~(runtime_profile : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
   let model_used = runtime_lane_label in
@@ -192,8 +168,8 @@ let record_turn_latency_by_model_bucket
   let provider_kind =
     Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
   in
-  let cascade_profile = label_or_unknown cascade_profile in
-  Prometheus.inc_counter
+  let runtime_profile = label_or_unknown runtime_profile in
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", label_or_unknown keeper)
@@ -201,7 +177,7 @@ let record_turn_latency_by_model_bucket
       ; ("provider_kind", provider_kind)
       ; ("model_used", model_used)
       ; ("resolved_model_id", resolved_model_id)
-      ; ("cascade_profile", cascade_profile)
+      ; ("runtime_profile", runtime_profile)
       ; ("bucket", bucket)
       ]
     ()
@@ -209,12 +185,15 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
-let estimate_trusted_usage_cost_usd ~usage_trusted usage =
-  if usage_trusted then
-    match usage.Agent_sdk.Types.cost_usd with
-    | Some cost when cost > 0.0 -> cost
-    | Some _ | None -> 0.0
-  else 0.0
+(* cost_usd is the provider's authoritative cost field; it is independent of
+   whether token *counts* are trusted (token⊥cost). This function accounts the
+   reported cost directly and does NOT gate it on token-trust. Token counts may
+   still be zeroed for untrusted usage — that is the separate token-metrics
+   concern handled by callers, not a reason to drop a real reported cost. *)
+let estimate_usage_cost_usd usage =
+  match usage.Agent_sdk.Types.cost_usd with
+  | Some cost when cost > 0.0 -> cost
+  | Some _ | None -> 0.0
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
 
@@ -223,7 +202,7 @@ let usage_trust_reasons = Keeper_usage_trust.reasons
 let usage_trust_json_fields = Keeper_usage_trust.json_fields
 
 (* #9959 defensive observability: surface usage-field trust into
-   Prometheus so operators can alert on rising untrusted/missing
+   Otel_metric_store so operators can alert on rising untrusted/missing
    rates while the upstream OAS fix (jeong-sik/oas#1181 —
    accumulated values leaking into per-response [api_usage]) lands.
 
@@ -247,13 +226,13 @@ let keeper_total_cost_usd_help =
 
 let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   let outcome = usage_trust_to_string trust in
-  Prometheus.inc_counter usage_trust_outcome_metric
+  Otel_metric_store.inc_counter usage_trust_outcome_metric
     ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
   match trust with
   | Usage_untrusted reasons ->
     List.iter
       (fun reason ->
-        Prometheus.inc_counter usage_anomaly_reason_metric
+        Otel_metric_store.inc_counter usage_anomaly_reason_metric
           ~labels:[ ("keeper", keeper_name); ("reason", reason) ] ())
       reasons;
     let warns_operator = Keeper_usage_trust.warns_operator trust in
@@ -270,21 +249,21 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   | Usage_missing | Usage_trusted -> ()
 
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
-  let labels = [ ("keeper_name", keeper_name) ] in
-  Prometheus.register_gauge
+  let labels = [ ("keeper", keeper_name) ] in
+  Otel_metric_store.register_gauge
     ~name:Keeper_metrics.(to_string TotalCostUsd)
     ~help:keeper_total_cost_usd_help
     ~labels
     ();
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string TotalCostUsd)
     ~labels
     total_cost_usd
 
 let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string IdleSeconds)
-    ~labels:[ ("keeper_name", keeper_name) ]
+    ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 
 (* RFC-0182 §3.1 cycle break — codecs live in [Turn_mode_codec]. *)
@@ -378,7 +357,7 @@ let error_category_of_no_result_outcome ~outcome ~error =
   | _ -> None
 
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
-  has_substantive_tool_calls result.tools_used
+  has_substantive_tool_calls (Keeper_agent_result.tool_names result)
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
@@ -397,8 +376,8 @@ let accountability_evidence_refs
     ~(result : Keeper_agent_run.run_result)
     ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
-    let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
-    result.tools_used
+    let stay_silent = "keeper_stay_silent" in
+    Keeper_agent_result.tool_names result
     |> List.filter_map (fun tool_name ->
            let trimmed = String.trim tool_name in
            if trimmed = "" || String.equal trimmed stay_silent then None
@@ -464,7 +443,6 @@ let observed_affordances_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
-  if observation.pending_mentions <> [] then add "reply_in_room";
   if observation.pending_board_events <> [] then add "board_post_or_comment";
   let _ = meta in
   if List.length observation.pending_board_events >= 2 then add "board_curation";

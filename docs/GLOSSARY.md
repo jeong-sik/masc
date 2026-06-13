@@ -8,7 +8,7 @@
 
 ## Introduction
 
-This glossary defines the official terminology for the MASC (Multi-Agent Streaming Coordination) project. Terminology normalization is essential for:
+This glossary defines the official terminology for the MASC (Multi-Agent Shared Context) project. Terminology normalization is essential for:
 
 1. **Consistency**: Unified vocabulary across documentation, code, and communication
 2. **Clarity**: Reducing confusion from multiple terms describing the same concept
@@ -33,7 +33,7 @@ This glossary defines the official terminology for the MASC (Multi-Agent Streami
 | Work unit | **Task** | job, work, quest | A discrete unit of work assigned to an agent |
 | Agent sandbox | **Playground** | workspace | Keeper-owned writable sandbox for cloned repos and scratch files |
 | Git isolation workflow | **Worktree** | agent workspace | Isolated git worktree for parallel agent work |
-| Inter-agent message | **Broadcast** | announce, notify | A message sent to all agents in the room |
+| Inter-agent message | **Broadcast** | announce, notify | A message sent to all agents in the workspace |
 | Direct communication | **Portal** | tunnel, channel | A direct communication link between two specific agents |
 | Resource protection | **Lock** | mutex, guard | Exclusive access to a shared resource |
 | Agent pool | **Stem Pool** | reserve, pool | Pre-warmed agents ready for immediate handoff |
@@ -52,7 +52,7 @@ A keeper-owned writable sandbox under the runtime root:
 .masc/playground/{keeper}/
 
 # Example clone path
-.masc/playground/sangsu/repos/masc-mcp/
+.masc/playground/sangsu/repos/masc/
 ```
 
 Typical contents:

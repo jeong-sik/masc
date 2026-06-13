@@ -1,7 +1,7 @@
 open Alcotest
 
-module KF = Masc_mcp.Keeper_fs
-module KI = Masc_mcp.Keeper_identity
+module KF = Masc.Keeper_fs
+module KI = Masc.Keeper_identity
 
 let read_file path =
   let ic = open_in path in

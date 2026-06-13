@@ -5,36 +5,36 @@
 | Status | Draft |
 | Supersedes-in-part | RFC-0166 §9 (deferred items) |
 | Related | RFC-0165 (auth client-agnostic), RFC-0166 (big-bang sweep rev1+rev2) |
-| Scope | `lib/cascade/cascade_transport_codex_omission_dedup.{ml,mli}`, `lib/cascade/cascade_transport.{ml,mli}` facade + caller, `lib/cascade/cascade_config_provider_filter.ml`, `lib/cascade/cascade_metrics.{ml,mli}`, `test/test_cli-tool-a_omission_dedup_10097.ml` |
-| Repos | masc-mcp |
+| Scope | `lib/runtime/runtime_transport_codex_omission_dedup.{ml,mli}`, `lib/runtime/runtime_transport.{ml,mli}` facade + caller, `lib/runtime/runtime_config_provider_filter.ml`, `lib/runtime/runtime_metrics.{ml,mli}`, `test/test_cli-tool-a_omission_dedup_10097.ml` |
+| Repos | masc |
 
 ## 1. Problem
 
 RFC-0166 (rev1 + rev2) cleared all client/provider name literals from `lib/` and `bin/` source except for two feature paths held back in §9 because removing them in that PR would have cut the feature itself:
 
-1. `cascade_transport_codex_omission_dedup` (#10097): a 5-function module that fingerprints per-keeper cli-tool-a MCP-tool omissions and emits WARN-dedup + per-tool Prometheus counter.
-2. `cascade_config_provider_filter.ml:38` `Some ("llama", model_id)`: model-aware endpoint resolution for Llama labels, with a round-robin fallback to `Llm_provider.Provider_registry.current_llama_endpoint`.
+1. `runtime_transport_codex_omission_dedup` (#10097): a 5-function module that fingerprints per-keeper cli-tool-a MCP-tool omissions and emits WARN-dedup + per-tool legacy metrics backend counter.
+2. `runtime_config_provider_filter.ml:38` `Some ("llama", model_id)`: model-aware endpoint resolution for Llama labels, with a round-robin fallback to `Llm_provider.Provider_registry.current_llama_endpoint`.
 
 The operator deferred §9 explicitly and confirmed in the follow-up turn that both should be removed. This RFC closes them.
 
 ## 2. Decision
 
 ### Agent-Code omission-dedup
-- Delete `lib/cascade/cascade_transport_codex_omission_dedup.{ml,mli}` wholesale.
-- Delete the 5 facade re-exports in `cascade_transport.{ml,mli}` (`cli-tool-a_omission_fingerprint`, `cli-tool-a_omission_fingerprint_seen`, `record_cli-tool-a_omission`, `record_cli-tool-a_omission_for_agent`, `reset_cli-tool-a_omission_dedup_for_tests`).
+- Delete `lib/runtime/runtime_transport_codex_omission_dedup.{ml,mli}` wholesale.
+- Delete the 5 facade re-exports in `runtime_transport.{ml,mli}` (`cli-tool-a_omission_fingerprint`, `cli-tool-a_omission_fingerprint_seen`, `record_cli-tool-a_omission`, `record_cli-tool-a_omission_for_agent`, `reset_cli-tool-a_omission_dedup_for_tests`).
 - Delete `test/test_cli-tool-a_omission_dedup_10097.ml` (paired test, exclusive caller of the facade).
-- Reword the one internal caller in `cascade_transport.ml` to client-agnostic names: `codex_can_auth_keeper_bound_actor_tools` → `provider_can_auth_keeper_bound_actor_tools`, `codex_keeper_bound_actor_tools` → `omitted_keeper_bound_actor_tools`. The `record_cli-tool-a_omission_for_agent` call at line 239 is removed; the structural omission detection that returns `Error (invalid_runtime_config ...)` remains intact.
+- Reword the one internal caller in `runtime_transport.ml` to client-agnostic names: `codex_can_auth_keeper_bound_actor_tools` → `provider_can_auth_keeper_bound_actor_tools`, `codex_keeper_bound_actor_tools` → `omitted_keeper_bound_actor_tools`. The `record_cli-tool-a_omission_for_agent` call at line 239 is removed; the structural omission detection that returns `Error (invalid_runtime_config ...)` remains intact.
 
 ### Llama endpoint discovery
-- Delete the `Some ("llama", model_id) -> ...` arm from `Cascade_config_provider_filter.resolve_label_context`. The function now resolves discovery-based per-slot context only for `"custom:<url>"` labels.
-- Delete `Cascade_metrics.on_llama_model_not_discovered` + the `metric_llama_model_not_discovered` constant + its `.mli` export. The counter had no remaining caller.
+- Delete the `Some ("llama", model_id) -> ...` arm from `Runtime_config_provider_filter.resolve_label_context`. The function now resolves discovery-based per-slot context only for `"custom:<url>"` labels.
+- Delete `Runtime_metrics.on_llama_model_not_discovered` + the `metric_llama_model_not_discovered` constant + its `.mli` export. The counter had no remaining caller.
 
 ## 3. Behavioral consequences (operator-acknowledged)
 
 | Path | Before | After |
 |------|--------|-------|
-| `cascade.toml` with `"llama:<model_id>"` label, no `Discovery.context_for_model` match | Fell back to `current_llama_endpoint` round-robin and ticked `masc_cascade_llama_model_not_discovered_total` | `resolve_label_context` returns `None`. Per-slot context resolution must use `"custom:<url>"` label shape instead. |
-| `cascade.toml` with `"llama:<model_id>"` label, has Discovery match | Returned `Some ctx` | Returns `None`. |
+| `runtime.toml` with `"llama:<model_id>"` label, no `Discovery.context_for_model` match | Fell back to `current_llama_endpoint` round-robin and ticked `masc_runtime_llama_model_not_discovered_total` | `resolve_label_context` returns `None`. Per-slot context resolution must use `"custom:<url>"` label shape instead. |
+| `runtime.toml` with `"llama:<model_id>"` label, has Discovery match | Returned `Some ctx` | Returns `None`. |
 | cli-tool-a runtime adapter omits keeper-bound MCP tools (per-keeper bridging required, no per-keeper bearer) | Logged WARN-once + ticked per-tool counter + (if `required`) returned `Error (invalid_runtime_config ...)` | Same `Error` path retained; WARN + counter removed. |
 | Test `test_cli-tool-a_omission_dedup_10097` | Validated WARN-once + counter semantics | Removed; the validated behavior no longer exists. |
 
@@ -70,13 +70,13 @@ All 7 rejection signatures: NO.
 - `rg 'cli-tool-a_omission|on_llama_model_not_discovered|Some \("llama"' lib/ bin/` returns only RFC-0167 closeout comments.
 - `rg -i 'agent-llm-a|provider-f|agent-code|provider-c|provider-a|provider-k|llama' lib/ bin/` returns only:
   - RFC-0166 / RFC-0167 closeout comments (self-documenting).
-  - `cascade_metrics.ml` describing how `cascade.toml` `"llama:..."` labels behaved before the removal (operator-facing release note context, kept in comment form pending a separate docs sweep).
-  - `coord/nickname.ml` `"llama"` animal name (false positive).
+  - `runtime_metrics.ml` describing how `runtime.toml` `"llama:..."` labels behaved before the removal (operator-facing release note context, kept in comment form pending a separate docs sweep).
+  - `workspace/nickname.ml` `"llama"` animal name (false positive).
 
 ## 7. Migration
 
 Operators must:
 
-- Replace any `cascade.toml` cascade entries of the shape `"llama:<model_id>"` with `"custom:<endpoint_url>"` (the generic discovery-based label).
-- Drop Grafana queries against `masc_cascade_llama_model_not_discovered_total` (series no longer emitted).
-- The structural cli-tool-a WARN/counter is gone; rely on the `tool_support` `Error` path for required-tool omissions on cli-tool-a transports.
+- Replace any `runtime.toml` runtime entries of the shape `"llama:<model_id>"` with `"custom:<endpoint_url>"` (the generic discovery-based label).
+- Drop Grafana queries against `masc_runtime_llama_model_not_discovered_total` (series no longer emitted).
+- The structural cli-tool-a WARN/counter is gone; keeper tool exposure now degrades instead of raising a required-tool omission error.

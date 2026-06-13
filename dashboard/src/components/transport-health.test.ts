@@ -44,7 +44,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     },
     sse: {
       sessions_observer: 1,
-      sessions_coordinator: 0,
+      sessions_agent_stream: 0,
       sessions_presence: 0,
       sessions_total: 1,
       external_subscribers: 0,
@@ -122,7 +122,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     },
     cluster: {
       cluster: 'default',
-      room_id: 'default',
+      workspace_id: 'default',
       topology_available: false,
       topology_source: 'metrics_only',
       total_units: null,
@@ -225,7 +225,7 @@ describe('TransportHealthPanel', () => {
       sampleResponse({
         cluster: {
           cluster: 'prod',
-          room_id: 'default',
+          workspace_id: 'default',
           topology_available: false,
           topology_source: 'metrics_only',
           total_units: null,
@@ -290,7 +290,7 @@ describe('TransportHealthPanel', () => {
         },
         sse: {
           sessions_observer: 1,
-          sessions_coordinator: 0,
+          sessions_agent_stream: 0,
           sessions_presence: 1,
           sessions_total: 2,
           external_subscribers: 0,
@@ -395,8 +395,8 @@ describe('TransportHealthPanel', () => {
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
 
     vi.useFakeTimers()
-    lastEvent.value = { type: 'agent_joined' }
-    lastEvent.value = { type: 'agent_left' }
+    lastEvent.value = { type: 'agent_bound' }
+    lastEvent.value = { type: 'agent_unbound' }
     lastEvent.value = { type: 'task_claimed' }
     await vi.advanceTimersByTimeAsync(1_199)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
@@ -409,7 +409,7 @@ describe('TransportHealthPanel', () => {
 describe('filterHotSessions', () => {
   const sessions: HotSession[] = [
     { session_id: 'aaaa1111-2222-3333-4444-555566667777', kind: 'observer', queue_depth: 5, last_event_id: 101, idle_seconds: 3 },
-    { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'coordinator', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
+    { session_id: 'bbbb9999-8888-7777-6666-555544443333', kind: 'agent_stream', queue_depth: 12, last_event_id: 202, idle_seconds: 9 },
     { session_id: 'cccc0000-1111-2222-3333-444455556666', kind: 'external', queue_depth: 3, last_event_id: 303, idle_seconds: 30 },
   ]
 
@@ -431,9 +431,9 @@ describe('filterHotSessions', () => {
   })
 
   it('matches substring of kind', () => {
-    const result = filterHotSessions(sessions, 'coord')
+    const result = filterHotSessions(sessions, 'agent')
     expect(result).toHaveLength(1)
-    expect(result[0]!.kind).toBe('coordinator')
+    expect(result[0]!.kind).toBe('agent_stream')
   })
 
   it('matches last_event_id by numeric-string substring', () => {
@@ -451,9 +451,9 @@ describe('filterHotSessions', () => {
   })
 
   it('trims the query before matching', () => {
-    const result = filterHotSessions(sessions, '  coordinator  ')
+    const result = filterHotSessions(sessions, '  agent_stream  ')
     expect(result).toHaveLength(1)
-    expect(result[0]!.kind).toBe('coordinator')
+    expect(result[0]!.kind).toBe('agent_stream')
   })
 
   it('returns an empty array when nothing matches', () => {
@@ -523,10 +523,10 @@ describe('shouldRefreshFromEvent', () => {
     [{ type: 'keeper_heartbeat' }, false],
     [{ type: 'broadcast' }, true],
     [{ type: 'masc/broadcast' }, true],
-    [{ type: 'agent_joined' }, true],
-    [{ type: 'masc/agent_joined' }, true],
-    [{ type: 'agent_left' }, true],
-    [{ type: 'masc/agent_left' }, true],
+    [{ type: 'agent_bound' }, true],
+    [{ type: 'masc/agent_bound' }, true],
+    [{ type: 'agent_unbound' }, true],
+    [{ type: 'masc/agent_unbound' }, true],
     [{ type: 'task_claimed' }, true],
     [{ type: 'masc/task_started' }, true],
     [{ type: 'keeper_state_changed' }, true],
@@ -680,7 +680,7 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
     },
     sse: {
       sessions_observer: 1,
-      sessions_coordinator: 0,
+      sessions_agent_stream: 0,
       sessions_presence: 0,
       sessions_total: 1,
       external_subscribers: 0,
@@ -757,7 +757,7 @@ function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData
     },
     cluster: {
       cluster: 'default',
-      room_id: 'default',
+      workspace_id: 'default',
       topology_available: false,
       topology_source: 'metrics_only',
       total_units: null,

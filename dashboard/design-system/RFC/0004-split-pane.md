@@ -34,7 +34,7 @@ resize), so the primitive earns its place even before IdePlane lands.
 
 The primitive's name in spec §3.2.5 / §3.3.1 is `useMove`; this RFC
 names the public API `createSplitPane` for the controller and exposes
-a thin `useMove` core for general drag-coordinate tracking.
+a thin `useMove` core for general drag-position tracking.
 
 ## 2. Non-Goals
 

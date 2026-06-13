@@ -30,7 +30,7 @@ in which case the user picks one (or rejects all) — solved by the
 existing 12-slot keeper color carrying through to the suggestion
 attribution stripe.
 
-This RFC defines `createInlineSuggestionManager` to coordinate
+This RFC defines `createInlineSuggestionManager` to align
 suggestions across the editor surface, plus `createInlineSuggestion`
 for individual proposal tracking.
 
@@ -294,7 +294,7 @@ CodeEditor mount in Iter 21). Until then:
    suggestions render at all? Probably yes but with reduced
    prominence. Consumer detail; primitive is threshold-agnostic.
 3. **Cross-file batched suggestions** — if one agent proposes a
-   coordinated 3-file refactor, are those 3 separate suggestions or
+   aligned 3-file refactor, are those 3 separate suggestions or
    one bundle? Current proposal: 3 separate, each with the same
    `rationale`. Bundle UX is a follow-up.
 

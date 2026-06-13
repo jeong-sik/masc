@@ -55,7 +55,7 @@ vars == <<keeper_phase, turn_number, context_id, context_tokens, message_count,
           resume_ctx_id, fail_count, next_ctx_id>>
 
 \* Issue #8701: explicit OCaml ↔ TLA+ mapping for the context lifecycle
-\* abstraction. SSOT for OCaml side is lib/keeper/keeper_state_machine.ml
+\* abstraction. SSOT for OCaml side is lib/keeper_registry/keeper_state_machine.ml
 \* (13 phases; Zombie added iter 4 #14707).  This spec intentionally
 \* collapses the 12 non-Zombie OCaml phases into
 \* a 7-symbol alphabet because the context-lifecycle invariants do not

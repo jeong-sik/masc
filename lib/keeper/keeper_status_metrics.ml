@@ -56,7 +56,7 @@ let metrics_tool_audit_persistence_surface =
 let report_persistence_read_drop ~surface ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
         ~labels:[("surface", surface); ("reason", reason)]
         ())
     ~surface
@@ -246,7 +246,6 @@ let metrics_summary_to_json (s : metrics_summary) : Yojson.Safe.t =
 
 let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
     metrics_summary =
-  let open Yojson.Safe.Util in
   List.fold_left
     (fun acc line ->
       try
@@ -259,6 +258,7 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
                 ~detail:"keeper metrics row is not a JSON object";
               raise Exit
         in
+        let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
         let trace_id = Safe_ops.json_string ~default:"" "trace_id" j in
         let generation =
@@ -279,14 +279,14 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           Safe_ops.json_int ~default:0 "compaction_after_tokens" j
         in
         let saved_tokens = max 0 (before_tokens - after_tokens) in
-        let handoff = j |> member "handoff" in
+        let handoff = m "handoff" in
         let handoff_performed =
           Safe_ops.json_bool ~default:false "performed" handoff
         in
         let to_model = Safe_ops.json_string_opt "to_model" handoff in
         let prev_trace_id = Safe_ops.json_string_opt "prev_trace_id" handoff in
         let new_trace_id = Safe_ops.json_string_opt "new_trace_id" handoff in
-        let memory = j |> member "memory_check" in
+        let memory = m "memory_check" in
         let memory_performed =
           Safe_ops.json_bool ~default:false "performed" memory
         in
@@ -317,14 +317,14 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
         let memory_compaction_invalid_now =
           Safe_ops.json_int ~default:0 "memory_compaction_invalid_dropped" j
         in
-        let drift = j |> member "drift" in
+        let drift = m "drift" in
         let drift_applied_now =
           Safe_ops.json_bool ~default:false "applied" drift
         in
         let memory_is_weather =
           match memory_expected_topic with Some "weather" -> true | _ -> false
         in
-        let auto_rules = j |> member "auto_rules" in
+        let auto_rules = m "auto_rules" in
         let auto_reflect_now =
           Safe_ops.json_bool
             ~default:(Safe_ops.json_bool ~default:false "reflect" auto_rules)
@@ -489,30 +489,13 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
           acc)
     empty_metrics_summary lines
 
-let json_string_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-      items
-      |> List.filter_map (function
-             | `String value ->
-                 let trimmed = String.trim value in
-                 if trimmed = "" then None else Some trimmed
-             | _ -> None)
-  | _ -> []
-
-let json_int_opt_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `Int value -> Some value
-  | `Intlit raw -> (int_of_string_opt (raw))
-  | `Float value -> Some (int_of_float value)
-  | _ -> None
 
 let action_source_opt_member json =
   match Safe_ops.json_string_opt "action_source" json with
   | Some _ as value -> value
   | None -> (
-      match Yojson.Safe.Util.member "deliberation_execution" json with
-      | `Assoc _ as nested ->
+      match Json_util.assoc_member_opt "deliberation_execution" json with
+      | Some (`Assoc _ as nested) ->
           Safe_ops.json_string_opt "action_source" nested
       | _ -> None)
 
@@ -521,6 +504,30 @@ let has_tool_audit_evidence ~tools ~raw_tool_call_count ~action_source =
   || Option.fold ~none:false ~some:(fun count -> count > 0) raw_tool_call_count
   || Option.is_some action_source
 
+let merge_tool_name_lists primary secondary =
+  let seen = Hashtbl.create 8 in
+  let add acc raw_name =
+    let name = String.trim raw_name in
+    if name = "" || Hashtbl.mem seen name
+    then acc
+    else (
+      Hashtbl.replace seen name ();
+      name :: acc)
+  in
+  List.rev (List.fold_left add [] (List.concat [ primary; secondary ]))
+
+let single_tool_name_members json =
+  [ "tool"; "tool_name"; "last_tool_name" ]
+  |> List.filter_map (fun key ->
+         match Safe_ops.json_string_opt key json with
+         | Some value when String.trim value <> "" -> Some value
+         | _ -> None)
+
+let tool_names_of_audit_json json =
+  merge_tool_name_lists
+    (single_tool_name_members json)
+    (Json_util.json_string_list_member "tools_used" json)
+
 let json_iso_opt json =
   match Safe_ops.json_string_opt "ts" json with
   | Some text ->
@@ -528,10 +535,10 @@ let json_iso_opt json =
       if trimmed <> "" then Some trimmed
       else
         let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-        if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+        if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
   | None ->
       let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" json in
-      if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
+      if ts_unix > 0.0 then Some (Masc_domain.iso8601_of_unix_seconds ts_unix) else None
 
 let read_recent_metrics_lines config keeper_name =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in
@@ -549,35 +556,9 @@ let read_recent_metrics_lines config keeper_name =
           ~site:"keeper_status_metrics" metrics_path exn_class;
         []
 
-let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
+let latest_snapshot_of_lines lines ~parse_snapshot =
   let ordered = List.rev lines in
-  match List.find_map parse_snapshot ordered with
-  | Some _ as snapshot -> snapshot
-  | None ->
-      List.find_map
-        (fun line ->
-          try
-            let json = Yojson.Safe.from_string line in
-            let snapshot =
-              match json with
-              | `Assoc _ -> parse_snapshot line
-              | _ -> None
-            in
-            match snapshot with
-            | Some _ as snapshot -> snapshot
-            | None ->
-                if has_legacy_shape json then
-                  Some
-                    {
-                      latest_tool_names = [];
-                      latest_tool_call_count = Some 0;
-                      latest_action_source = None;
-                      tool_audit_source = None;
-                      tool_audit_at = json_iso_opt json;
-                    }
-                else None
-          with Yojson.Json_error _ -> None)
-        ordered
+  List.find_map parse_snapshot ordered
 
 let latest_tool_audit_snapshot_from_decisions config keeper_name =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
@@ -612,8 +593,8 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
                 ~detail:"decision log row is not a JSON object";
               raise Exit
         in
-        let tools = json_string_list_member "tools_used" json in
-        let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+        let tools = tool_names_of_audit_json json in
+        let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
         let tool_call_count =
           match raw_tool_call_count with
           | Some _ as value -> value
@@ -625,7 +606,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
         else
           Some
             {
-              latest_tool_names = List.sort_uniq String.compare tools;
+              latest_tool_names = tools;
               latest_tool_call_count = tool_call_count;
               latest_action_source = action_source;
               tool_audit_source = Some "keeper_decision_log";
@@ -639,13 +620,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
             ~detail;
           None
     in
-    latest_snapshot_of_lines lines
-      ~parse_snapshot
-      ~has_legacy_shape:(fun json ->
-        Option.is_some (json_iso_opt json)
-        || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
-        || Option.is_some (Safe_ops.json_string_opt "selected_mode" json)
-        || Option.is_some (Safe_ops.json_string_opt "outcome" json))
+    latest_snapshot_of_lines lines ~parse_snapshot
     |> Option.map (fun snapshot ->
            {
              snapshot with
@@ -676,11 +651,8 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
               ~detail:"keeper metrics row is not a JSON object";
             raise Exit
       in
-      let tools =
-        json_string_list_member "tools_used" json
-        |> List.sort_uniq String.compare
-      in
-      let raw_tool_call_count = json_int_opt_member "tool_call_count" json in
+      let tools = tool_names_of_audit_json json in
+      let raw_tool_call_count = Json_util.get_int json "tool_call_count" in
       let tool_call_count =
         match raw_tool_call_count with
         | Some _ as value -> value
@@ -706,13 +678,7 @@ let latest_tool_audit_snapshot_from_metrics config keeper_name =
           ~detail;
         None
   in
-  latest_snapshot_of_lines lines
-    ~parse_snapshot
-    ~has_legacy_shape:(fun json ->
-      Option.is_some (json_iso_opt json)
-      || Option.is_some (Safe_ops.json_string_opt "channel" json)
-      || Option.is_some (Safe_ops.json_string_opt "turn_mode" json)
-      || Option.is_some (Safe_ops.json_string_opt "work_kind" json))
+  latest_snapshot_of_lines lines ~parse_snapshot
   |> Option.map (fun snapshot ->
          {
            snapshot with

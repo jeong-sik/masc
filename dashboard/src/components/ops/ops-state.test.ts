@@ -20,10 +20,6 @@ import {
   selectedKeeperName,
   keeperMessage,
   hydratedWorkflowId,
-  quickTarget,
-  quickMessage,
-  quickComposerMode,
-  composerModeForFocus,
   ensureStateBlockDraft,
   hasStateBlock,
   persistActorName,
@@ -40,9 +36,6 @@ describe('ops-state', () => {
     selectedKeeperName.value = ''
     keeperMessage.value = ''
     hydratedWorkflowId.value = null
-    quickTarget.value = 'namespace'
-    quickMessage.value = ''
-    quickComposerMode.value = 'broadcast'
     mockPersistDashboardActorName.mockClear()
     mockResolveDashboardActorName.mockClear()
   })
@@ -62,9 +55,6 @@ describe('ops-state', () => {
     expect(broadcastMessage.value).toBe('')
     expect(pauseReason.value).toBe('Operator maintenance')
     expect(taskPriority.value).toBe('2')
-    expect(quickTarget.value).toBe('namespace')
-    expect(quickMessage.value).toBe('')
-    expect(quickComposerMode.value).toBe('broadcast')
     expect(hydratedWorkflowId.value).toBeNull()
   })
 
@@ -73,14 +63,6 @@ describe('ops-state', () => {
     persistActorName('new-actor')
     expect(mockPersistDashboardActorName).toHaveBeenCalledWith('new-actor')
     expect(actorName.value).toBe('persisted-actor')
-  })
-
-  it('maps command focus aliases to composer modes', () => {
-    expect(composerModeForFocus('broadcast')).toBe('broadcast')
-    expect(composerModeForFocus('mention')).toBe('dm')
-    expect(composerModeForFocus('dm')).toBe('dm')
-    expect(composerModeForFocus('state')).toBe('state')
-    expect(composerModeForFocus('unknown')).toBeNull()
   })
 
   it('extracts structured state block keys', () => {

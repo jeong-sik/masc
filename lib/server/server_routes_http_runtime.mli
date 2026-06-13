@@ -35,17 +35,18 @@ val cors_preflight_headers : string -> (string * string) list
 
 (** {1 JSON-RPC error envelope} *)
 
-val json_rpc_error : int -> string -> string
+val json_rpc_error : Mcp_error_code.t -> string -> string
 (** [json_rpc_error code message] returns the canonical
     JSON-RPC 2.0 error envelope as a string:
     [{"jsonrpc":"2.0","error":{"code":<code>,"message":"<msg>"},"id":null}].
+    Delegates to {!Mcp_error_code.jsonrpc_error_body}.
     Message is `String.escaped`-quoted; callers must not pre-
     escape. *)
 
 val is_http_error_response : Yojson.Safe.t -> bool
 (** [is_http_error_response json] returns [true] when [json] is
     a JSON-RPC 2.0 response with [id = null] AND [error.code]
-    in [-32700] (Parse error) / [-32600] (Invalid Request).
+    is {!Mcp_error_code.Parse_error} or {!Mcp_error_code.Invalid_request}.
     Mirrors the predicate in
     {!Server_mcp_transport_http_headers}; duplicated here
     because the route layer needs it before the transport
@@ -97,10 +98,6 @@ val agent_card_json : Httpun.Request.t -> Yojson.Safe.t
 
 (** {1 Runtime subsystem helpers} *)
 
-val cdal_health_json : unit -> Yojson.Safe.t
-(** [cdal_health_json ()] returns the CDAL health projection reused by
-    runtime-info routes and the full health response. *)
-
 (** {1 Health endpoints} *)
 
 val health_path_diagnostics :
@@ -108,7 +105,7 @@ val health_path_diagnostics :
 (** [health_path_diagnostics ()] resolves the base-path
     diagnostics for the [/health] response.  When the runtime
     state is initialised, reads from
-    [state.room_config.base_path]; otherwise falls back to the
+    [state.workspace_config.base_path]; otherwise falls back to the
     default base path computed from env. *)
 
 val make_health_json :
@@ -124,8 +121,8 @@ val make_health_json :
 
     [status] / [server] / [version] / [release_version] /
     [build] / [protocol] (default + listener + supported list) /
-    [transport] / [paths] / [uptime] / [sse_clients] /
-    [startup] / [subsystems] / [feature_flags] / [gc] /
+    [transport] / [paths] / [internal_mcp_auth] / [uptime] /
+    [sse_clients] / [startup] / [subsystems] / [feature_flags] / [gc] /
     [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
@@ -139,13 +136,14 @@ val make_health_json :
 
     [paused_keepers.count] and [paused_keepers.names] are the union of
     registry-visible paused keepers and durable [.masc/keepers/*.json]
-    metas with [paused = true].  The nested [running_*] and
+    metas with [paused = true].  The nested [registry_paused_*] and
     [durable_*] fields keep the two sources inspectable so a keeper
     that has been auto-paused and removed from the live keepalive set
-    does not disappear from [/health].  [autoboot_enabled_*] and
-    [details] distinguish auto-recoverable, operator-paused, and
-    reconcile-gated durable pauses without auto-unpausing them.
-    [missing_pause_root_cause] is true when a keeper is auto-recoverable
+    does not disappear from [/health].  [running_*] remains as a legacy
+    alias for [registry_paused_*]; it does not mean FSM phase [Running].
+    [autoboot_enabled_*] and [details] distinguish auto-recoverable,
+    operator-paused, and reconcile-gated durable pauses without auto-unpausing
+    them.  [missing_pause_root_cause] is true when a keeper is auto-recoverable
     but its persisted runtime has no typed [last_blocker].  [read_error_count]
     surfaces corrupt durable meta instead of silently reporting a clean zero.
 
@@ -184,7 +182,7 @@ val make_health_json :
     {2 lazy_task_boot_guard_fires_total contract (P2 silent-
     failure fix)}
 
-    Surfaces {!Prometheus.metric_total} for
+    Surfaces {!Otel_metric_store.metric_total} for
     [masc_lazy_task_boot_guard_fired_total].  Without this
     field, an operator hitting [/health] would see ["status":
     "ok"] while keepers had silently failed to start.  Pinning
@@ -232,11 +230,6 @@ module For_testing : sig
   (** Returns [(interval_sec, timeout_sec, ttl_sec)] for full-health refresh. *)
 end
 
-val cdal_health_json : unit -> Yojson.Safe.t
-(** [cdal_health_json ()] returns the CDAL writer/proof-store/task-scope
-    projection used by [/health?full=1] and dashboard runtime-resolution
-    surfaces. *)
-
 val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) list
 (** [keeper_fleet_runtime_resolution_fields ()] returns the health/fleet
     safety subset projected into [/api/v1/dashboard/shell]'s
@@ -247,7 +240,7 @@ val keeper_fleet_runtime_resolution_fields : unit -> (string * Yojson.Safe.t) li
     [/health] so the dashboard can render pending durable stimuli without a
     second endpoint.  [fd_accountant] is also projected here so the dashboard
     shell can show the same backpressure source as [/health] without scraping
-    Prometheus. *)
+    Otel_metric_store. *)
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
@@ -283,7 +276,7 @@ val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
 val board_post_detail_json :
   include_moderation:bool ->
   blind_votes:bool ->
-  config:Coord.config option ->
+  config:Workspace.config option ->
   voter:string option ->
   response_format:string ->
   post_id:string ->

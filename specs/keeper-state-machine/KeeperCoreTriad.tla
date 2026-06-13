@@ -1,25 +1,25 @@
 ---- MODULE KeeperCoreTriad ----
-\* Keeper Core Triad — State x Decision x Cascade Unified Specification
+\* Keeper Core Triad — State x Decision x Runtime Unified Specification
 \*
 \* Composes three independently-verified subsystems into a single model
 \* to verify cross-cutting safety and liveness properties:
 \*
 \*   State Machine  (KeeperStateMachine.tla)   — keeper phase lifecycle
 \*   Decision       (KeeperDecisionPipeline.tla) — guard/tool policy
-\*   Cascade        (CascadeExhaustion.tla)    — provider fallback
+\*   Runtime        (RuntimeExhaustion.tla)    — provider fallback
 \*
 \* Key properties verified:
-\*   S1 NoTerminalCascade:       terminal phase => no cascade active
-\*   S2 FailingUsesRecovery:     Failing => local_recovery cascade only
+\*   S1 NoTerminalRuntime:       terminal phase => no runtime active
+\*   S2 FailingUsesRecovery:     Failing => local_recovery runtime only
 \*   S3 CapabilityGateHolds:     active attempt => ceiling >= requested
 \*   S4 SideEffectContainment:   committed side effect + error => partial
-\*   S5 PhaseDecisionConsistency: active turn => cascade selected
+\*   S5 PhaseDecisionConsistency: active turn => runtime selected
 \*
-\* Bug model: BugSelectCascade removes phase-aware routing, reproducing
-\* the Groq max_tokens ceiling violation (masc-mcp#6686).
+\* Bug model: BugSelectRuntime removes phase-aware routing, reproducing
+\* the Groq max_tokens ceiling violation (masc#6686).
 \*
-\* Mirrors: lib/keeper/keeper_cascade_routing.ml (SelectCascade action)
-\*          lib/cascade_inference.ml (CapabilityGate action)
+\* Mirrors: lib/keeper/keeper_turn_driver_try_runtime.ml (SelectRuntime action)
+\*          lib/runtime/runtime_inference.ml (CapabilityGate action)
 \*          lib/keeper/keeper_unified_turn.ml (turn lifecycle)
 \*
 \* OCaml mapping:
@@ -34,9 +34,9 @@
 \*                          Comment A for the canonical 13->7 mapping
 \*                          (referred to as "Terminal" shorthand earlier in
 \*                          some prose; the projection symbol is "Stable").)
-\*   effective_cascade  <-> Keeper_cascade_routing.select_cascade result
-\*   provider_ceiling   <-> Oas_model_resolve.resolve_max_cascade_context
-\*   requested_max_tokens <-> Cascade_inference.resolve_max_tokens
+\*   effective_runtime  <-> Keeper_turn_driver_try_runtime.run selected candidate
+\*   provider_ceiling   <-> Oas_model_resolve.resolve_max_runtime_context
+\*   requested_max_tokens <-> Runtime_inference.resolve_max_tokens
 \*
 \* (The canonical 13->7 phase mapping lives next to PhaseSet in this file
 \*  (KeeperCompositeLifecycle Comment A is the SSOT).  Pre-Zombie this
@@ -53,13 +53,13 @@ CONSTANTS
     MaxRetries,          \* Max cross-provider retries (e.g. 2)
     Provider1Ceiling,    \* max_tokens ceiling for provider 1
     Provider2Ceiling,    \* max_tokens ceiling for provider 2
-    BaseCascade,         \* keeper-configured base cascade name
-    BaseCascadeTokens,   \* max_tokens for the base cascade profile
+    BaseRuntime,         \* keeper-configured base runtime name
+    BaseRuntimeTokens,   \* max_tokens for the base runtime profile
     LocalRecoveryTokens, \* max_tokens for local_recovery profile
     LocalOnlyTokens      \* max_tokens for local_only profile
 
 ASSUME /\ MaxRetries >= 0
-       /\ BaseCascade \notin {"local_recovery", "local_only", "none"}
+       /\ BaseRuntime \notin {"local_recovery", "local_only", "none"}
 
 NumProviders == 2
 Providers == 1..NumProviders
@@ -68,15 +68,15 @@ Providers == 1..NumProviders
 ProviderCeiling(p) ==
     IF p = 1 THEN Provider1Ceiling ELSE Provider2Ceiling
 
-\* ── Cascade profile definitions ─────────────────────────
-\* Maps cascade name to its requested max_tokens.
-\* Mirrors config/cascade.json profile -> max_tokens, with BaseCascade
+\* ── Runtime profile definitions ─────────────────────────
+\* Maps runtime name to its requested max_tokens.
+\* Mirrors config/runtime.json profile -> max_tokens, with BaseRuntime
 \* standing in for the keeper's configured profile (typically keeper_unified).
 
-MaxTokensFor(cascade) ==
-    CASE cascade = BaseCascade      -> BaseCascadeTokens
-      [] cascade = "local_recovery" -> LocalRecoveryTokens
-      [] cascade = "local_only"     -> LocalOnlyTokens
+MaxTokensFor(runtime) ==
+    CASE runtime = BaseRuntime      -> BaseRuntimeTokens
+      [] runtime = "local_recovery" -> LocalRecoveryTokens
+      [] runtime = "local_only"     -> LocalOnlyTokens
       [] OTHER                      -> 0
 
 \* ── Variables ────────────────────────────────────────────
@@ -84,22 +84,22 @@ MaxTokensFor(cascade) ==
 VARIABLES
     phase,               \* "Running" | "Failing" | "Overflowed" | "Compacting" | "HandingOff" | "Draining" | "Terminal"
     turn_status,         \* "idle" | "selecting" | "executing" | "retrying" | "done"
-    effective_cascade,   \* BaseCascade | "local_recovery" | "local_only" | "none"
+    effective_runtime,   \* BaseRuntime | "local_recovery" | "local_only" | "none"
     provider_idx,        \* 0..NumProviders (0 = exhausted or not started)
-    requested_max_tokens,\* Nat (what the selected cascade demands)
+    requested_max_tokens,\* Nat (what the selected runtime demands)
     provider_result,     \* "pending" | "ok" | "error" | "capability_exceeded"
     has_side_effect,     \* BOOLEAN
     retry_count,         \* 0..MaxRetries
     turn_outcome         \* "none" | "success" | "error" | "partial_commit"
 
-vars == <<phase, turn_status, effective_cascade, provider_idx,
+vars == <<phase, turn_status, effective_runtime, provider_idx,
           requested_max_tokens, provider_result, has_side_effect,
           retry_count, turn_outcome>>
 
 \* ── Type Invariant ───────────────────────────────────────
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* OCaml side is lib/keeper_registry/keeper_state_machine.ml (13 phases;
 \* Zombie added iter 4 #14707).  This spec collapses the 12 non-Zombie
 \* phases into a 7-symbol "core triad" alphabet
 \* because the triad invariants only depend on running/failure/
@@ -125,14 +125,14 @@ vars == <<phase, turn_status, effective_cascade, provider_idx,
 \*   none (all 13 OCaml phases are represented in the 7-symbol triad)
 Phases == {"Running", "Failing", "Overflowed", "Compacting", "HandingOff", "Draining", "Terminal"}
 TurnStatuses == {"idle", "selecting", "executing", "retrying", "done"}
-Cascades == {BaseCascade, "local_recovery", "local_only", "none"}
+Runtimes == {BaseRuntime, "local_recovery", "local_only", "none"}
 ProviderResults == {"pending", "ok", "error", "capability_exceeded"}
 TurnOutcomes == {"none", "success", "error", "partial_commit"}
 
 TypeOK ==
     /\ phase \in Phases
     /\ turn_status \in TurnStatuses
-    /\ effective_cascade \in Cascades
+    /\ effective_runtime \in Runtimes
     /\ provider_idx \in 0..NumProviders
     /\ requested_max_tokens \in Nat
     /\ provider_result \in ProviderResults
@@ -145,7 +145,7 @@ TypeOK ==
 Init ==
     /\ phase = "Running"
     /\ turn_status = "idle"
-    /\ effective_cascade = "none"
+    /\ effective_runtime = "none"
     /\ provider_idx = 0
     /\ requested_max_tokens = 0
     /\ provider_result = "pending"
@@ -155,7 +155,7 @@ Init ==
 
 \* ── Phase Transitions ────────────────────────────────────
 \* Simplified from KeeperStateMachine.tla: only transitions relevant
-\* to cascade routing behavior. Full phase verification is delegated
+\* to runtime routing behavior. Full phase verification is delegated
 \* to the existing KeeperStateMachine spec.
 
 \* Phase transitions only occur between turns (Eio cooperative scheduling:
@@ -170,7 +170,7 @@ BecomeFailing ==
     /\ phase \in {"Running", "Compacting"}
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Failing"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -178,7 +178,7 @@ BecomeCompacting ==
     /\ phase = "Running"
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Compacting"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -186,7 +186,7 @@ BecomeHandingOff ==
     /\ phase = "Running"
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "HandingOff"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -194,7 +194,7 @@ BecomeDraining ==
     /\ phase \in {"Running", "Failing", "Compacting", "HandingOff"}
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Draining"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -202,7 +202,7 @@ BecomeTerminal ==
     /\ phase \in {"Draining", "Failing"}
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Terminal"
-    /\ effective_cascade' = "none"
+    /\ effective_runtime' = "none"
     /\ UNCHANGED <<turn_status, provider_idx, requested_max_tokens,
                    provider_result, has_side_effect, retry_count,
                    turn_outcome>>
@@ -210,12 +210,12 @@ BecomeTerminal ==
 \* Context overflow detection: Running -> Overflowed.
 \* Mirrors Context_overflow_detected event in keeper_state_machine.ml.
 \* Guard: turn must be idle/done; mid-attempt overflow is left to the
-\* in-flight cascade (it will fail naturally via ProviderError path).
+\* in-flight runtime (it will fail naturally via ProviderError path).
 BecomeOverflowed ==
     /\ phase = "Running"
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Overflowed"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -224,25 +224,25 @@ OverflowedBecomeCompacting ==
     /\ phase = "Overflowed"
     /\ turn_status \in {"idle", "done"}
     /\ phase' = "Compacting"
-    /\ UNCHANGED <<turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
-\* ── Turn Lifecycle: Select Cascade ───────────────────────
-\* Mirrors: Keeper_cascade_routing.select_cascade
-\* Pure function: phase -> effective cascade profile.
+\* ── Turn Lifecycle: Select Runtime ───────────────────────
+\* Mirrors: Keeper_turn_driver_try_runtime.run candidate selection
+\* Pure abstraction: phase -> effective runtime role.
 
-SelectCascade ==
+SelectRuntime ==
     /\ turn_status = "idle"
     /\ phase \notin {"Terminal", "Overflowed"}
        \* Terminal blocks all turns; Overflowed waits for auto-compaction
        \* (can_execute_turn=false in keeper_state_machine.ml).
     /\ turn_status' = "selecting"
-    /\ effective_cascade' =
+    /\ effective_runtime' =
         IF phase = "Failing"    THEN "local_recovery"
         ELSE IF phase \in {"Compacting", "HandingOff"} THEN "local_only"
-        ELSE BaseCascade
-    /\ requested_max_tokens' = MaxTokensFor(effective_cascade')
+        ELSE BaseRuntime
+    /\ requested_max_tokens' = MaxTokensFor(effective_runtime')
     /\ provider_idx' = 1
     /\ provider_result' = "pending"
     /\ has_side_effect' = FALSE
@@ -251,7 +251,7 @@ SelectCascade ==
     /\ UNCHANGED phase
 
 \* ── Turn Lifecycle: Capability Gate + Attempt Provider ───
-\* Mirrors: Cascade_inference.clamp_max_tokens_to_ceiling
+\* Mirrors: Runtime_inference.clamp_max_tokens_to_ceiling
 \* If ceiling < requested, the request is clamped (not rejected).
 \* The invariant S3 verifies that after clamping, the gate holds.
 
@@ -267,7 +267,7 @@ AttemptProvider ==
        IN
        /\ requested_max_tokens' = effective_tokens
        /\ turn_status' = "executing"
-    /\ UNCHANGED <<phase, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, effective_runtime, provider_idx,
                    provider_result, has_side_effect, retry_count,
                    turn_outcome>>
 
@@ -278,7 +278,7 @@ ProviderSuccess ==
     /\ provider_result' = "ok"
     /\ turn_outcome' = "success"
     /\ turn_status' = "done"
-    /\ UNCHANGED <<phase, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, effective_runtime, provider_idx,
                    requested_max_tokens, has_side_effect, retry_count>>
 
 ProviderError ==
@@ -301,7 +301,7 @@ ProviderError ==
             ELSE /\ turn_outcome' = "error"
                  /\ turn_status' = "done"
                  /\ UNCHANGED <<provider_idx, retry_count>>
-    /\ UNCHANGED <<phase, effective_cascade, requested_max_tokens,
+    /\ UNCHANGED <<phase, effective_runtime, requested_max_tokens,
                    has_side_effect>>
 
 \* Side effect committed during execution (mutating tool ran)
@@ -309,7 +309,7 @@ SideEffectCommit ==
     /\ turn_status = "executing"
     /\ ~has_side_effect
     /\ has_side_effect' = TRUE
-    /\ UNCHANGED <<phase, turn_status, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, turn_status, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, retry_count,
                    turn_outcome>>
 
@@ -320,15 +320,15 @@ ProviderErrorAfterSideEffect ==
     /\ provider_result' = "error"
     /\ turn_outcome' = "partial_commit"
     /\ turn_status' = "done"
-    /\ UNCHANGED <<phase, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, effective_runtime, provider_idx,
                    requested_max_tokens, has_side_effect, retry_count>>
 
-\* Transient retry: re-enter cascade from provider 1
+\* Transient retry: re-enter runtime from provider 1
 TransientRetry ==
     /\ turn_status = "retrying"
     /\ turn_status' = "selecting"
     /\ provider_result' = "pending"
-    /\ UNCHANGED <<phase, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, effective_runtime, provider_idx,
                    requested_max_tokens, has_side_effect, retry_count,
                    turn_outcome>>
 
@@ -338,7 +338,7 @@ TransientRetry ==
 TurnComplete ==
     /\ turn_status = "done"
     /\ turn_status' = "idle"
-    /\ effective_cascade' = "none"
+    /\ effective_runtime' = "none"
     /\ provider_idx' = 0
     /\ requested_max_tokens' = 0
     /\ provider_result' = "pending"
@@ -365,7 +365,7 @@ Next ==
     \/ BecomeDraining
     \/ BecomeTerminal
     \* Turn lifecycle
-    \/ SelectCascade
+    \/ SelectRuntime
     \/ AttemptProvider
     \/ ProviderSuccess
     \/ ProviderError
@@ -378,64 +378,46 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 \* ── Safety Invariants ────────────────────────────────────
 \*
-\* CASCADE NAME ABSTRACTION (S1/S2/S3-buffer)
+\* RUNTIME NAME ABSTRACTION (S1/S2/S3-buffer)
 \* ----------------------------------------
 \* The string literals "none", "local_recovery", and "local_only" used below
 \* are SPEC-LEVEL CANONICAL ROLE NAMES, not literal OCaml return values.
 \*
-\* On the OCaml side (`lib/keeper/keeper_cascade_routing.ml` +
-\* `lib/cascade/cascade_routes.ml`), cascade names are resolved through a
-\* typed `logical_use` enum (`Phase_recovery`, `Phase_buffer`) and a
-\* prioritised resolution chain in `cascade_name_for_use`:
-\*   (a) operator-supplied `routes.<key>` binding, if its target exists
-\*       in the live catalog;
-\*   (b) first catalog entry name (the boot-time default profile);
-\*   (c) `route_spec.aliases` first element, or the route key — *only*
-\*       when the catalog is empty (a state boot validation rejects).
-\* The literal string produced at runtime depends on operator catalog and
-\* routes (RFC-0058 declarative route mapping); only the *default empty
-\* catalog* boot path produces the literal strings written below.
-\*
-\* The invariants below are written as TLA+ string equalities, but those
-\* literals should be read as canonical *role identifiers* — they stand
-\* in for the typed `logical_use` role that production resolves through
-\* the chain above:
-\*   - "none"           ↔ "no cascade is active for this turn"
-\*   - "local_recovery" ↔ `Phase_recovery` role
-\*   - "local_only"     ↔ `Phase_buffer` role
-\* TLC still compares strings; the *semantic* claim is role identity.
-\* See `docs/tla-audit/kct-c3-terminal-cascade-contract-gap-2026-05-12.md`
-\* and `docs/tla-audit/kct-s2s3-failing-buffer-cascade-alignment-2026-05-12.md`
+\* On the OCaml side, runtime ids are already resolved before
+\* `Keeper_turn_driver_try_runtime.run` walks the candidate list.  The
+\* literal strings below are therefore canonical *role identifiers* for
+\* the spec, not production return values:
+\*   - "none"           ↔ "no runtime is active for this turn"
+\*   - "local_recovery" ↔ recovery runtime role
+\*   - "local_only"     ↔ buffer-operation runtime role
+\* TLC still compares strings; the semantic claim is role identity.
+\* See `docs/tla-audit/kct-c3-terminal-runtime-contract-gap-2026-05-12.md`
+\* and `docs/tla-audit/kct-s2s3-failing-buffer-runtime-alignment-2026-05-12.md`
 \* (the latter lands via PR #14787) for the production indirection
 \* analysis.
 
-\* S1: Terminal phase never has an active cascade.
-\* OCaml note: `select_cascade` returns `base_cascade` for terminal phases
-\* (paper contract gap — caller graph upstream-gates the call so the value
-\* is unreachable in production).  See C-3 audit memo above.
-NoTerminalCascade ==
-    phase = "Terminal" => effective_cascade = "none"
+\* S1: Terminal phase never has an active runtime.
+\* OCaml note: runtime attempts are upstream-gated for terminal phases, so
+\* the spec-level empty role has no literal production counterpart.
+NoTerminalRuntime ==
+    phase = "Terminal" => effective_runtime = "none"
 
-\* S2: Cascade selection in Failing phase must yield the Phase_recovery role.
+\* S2: Runtime selection in Failing phase must yield the Phase_recovery role.
 \* Note: if a keeper transitions to Failing MID-TURN, the already-selected
-\* cascade remains — cascade is chosen at turn start, not re-evaluated.
+\* runtime remains — runtime is chosen at turn start, not re-evaluated.
 \* This invariant checks the selection action, not the runtime state.
-\* OCaml: `Failing -> Keeper_config.local_recovery_cascade_name`, which
-\* resolves through `Phase_recovery` route — string match only in the
-\* default catalog.  See S2/S3 audit memo above.
+\* OCaml: failing-turn recovery uses the resolved recovery runtime id.
 FailingUsesRecovery ==
     (phase = "Failing" /\ turn_status = "selecting"
-     /\ effective_cascade /= "none") =>
-        effective_cascade = "local_recovery"
+     /\ effective_runtime /= "none") =>
+        effective_runtime = "local_recovery"
 
-\* S3 (buffer): Cascade selection in buffer-operation phases must yield
-\* the Phase_buffer role.  OCaml:
-\* `Compacting | HandingOff -> Keeper_config.local_only_cascade_name`,
-\* which resolves through `Phase_buffer` route.  See S2/S3 audit memo.
+\* S3 (buffer): Runtime selection in buffer-operation phases must yield
+\* the buffer-operation role.
 BufferOpsUseLocalOnly ==
     (phase \in {"Compacting", "HandingOff"} /\ turn_status = "selecting"
-     /\ effective_cascade /= "none") =>
-        effective_cascade = "local_only"
+     /\ effective_runtime /= "none") =>
+        effective_runtime = "local_only"
 
 \* S3: Active provider attempt respects ceiling
 \* After clamping, requested_max_tokens <= provider ceiling
@@ -449,29 +431,27 @@ SideEffectContainment ==
     \* i.e., if side_effect is TRUE, outcome is never plain "error"
     \* it must be "partial_commit" instead
 
-\* S5: Active turn has a cascade selected.
+\* S5: Active turn has a runtime selected.
 \*
-\* Cascade-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
-\* SENTINEL — it asserts "no cascade is selected", not a literal string
+\* Runtime-name abstraction: `"none"` here is the SPEC-LEVEL EMPTY-ROLE
+\* MARKER — it asserts "no runtime is selected", not a literal string
 \* match against an OCaml return value.  The OCaml side has no literal
-\* "none" — `select_cascade` always returns a real cascade name (even for
-\* terminal phases — see `docs/tla-audit/kct-c3-terminal-cascade-contract
-\* -gap-2026-05-12.md`); the empty-role assertion is preserved
-\* STRUCTURALLY by the caller graph upstream gating the call for non-
-\* active turn_status values.
+\* "none"; the empty-role assertion is preserved structurally by the
+\* caller graph upstream gating runtime attempts for non-active
+\* turn_status values.
 \*
-\* The invariant therefore captures a structural property: the dispatch
-\* table in `lib/keeper/keeper_cascade_routing.ml` returns a non-empty
-\* cascade name for all phases that can co-occur with
+\* The invariant therefore captures a structural property: candidate
+\* selection in `lib/keeper/keeper_turn_driver_try_runtime.ml` uses a
+\* non-empty runtime id for all phases that can co-occur with
 \* turn_status in {selecting, executing, retrying}, namely
 \* {Running, Failing, Compacting, HandingOff}.
 PhaseDecisionConsistency ==
     turn_status \in {"selecting", "executing", "retrying"} =>
-        effective_cascade /= "none"
+        effective_runtime /= "none"
 
 SafetyInvariant ==
     /\ TypeOK
-    /\ NoTerminalCascade
+    /\ NoTerminalRuntime
     /\ FailingUsesRecovery
     /\ BufferOpsUseLocalOnly
     /\ CapabilityGateHolds
@@ -488,7 +468,7 @@ RunningEventuallyCompletes ==
 
 \* L2: Failing phase eventually resolves — DELEGATED to KeeperStateMachine.tla.
 \* This property may require external operator approval/recovery clearance,
-\* which is outside cascade routing scope. The counterexample: partial_commit
+\* which is outside runtime routing scope. The counterexample: partial_commit
 \* in Failing creates a cycle only breakable by external action + next success.
 \* Retained as definition for documentation; removed from cfg PROPERTIES.
 FailingResolves ==
@@ -499,16 +479,16 @@ CapabilityNeverDeadlocks ==
     turn_status = "executing" ~> turn_status \in {"done", "idle", "selecting", "retrying"}
 
 \* ── Bug Model ────────────────────────────────────────────
-\* Reproduces masc-mcp#6686: phase-unaware cascade selection
+\* Reproduces masc#6686: phase-unaware runtime selection
 \* sends 65536 max_tokens to a provider with 40960 ceiling.
 
-BugSelectCascade ==
+BugSelectRuntime ==
     /\ turn_status = "idle"
     /\ phase \notin {"Terminal", "Overflowed"}
     /\ turn_status' = "selecting"
-    \* BUG: always use the configured base cascade regardless of phase
-    /\ effective_cascade' = BaseCascade
-    /\ requested_max_tokens' = BaseCascadeTokens
+    \* BUG: always use the configured base runtime regardless of phase
+    /\ effective_runtime' = BaseRuntime
+    /\ requested_max_tokens' = BaseRuntimeTokens
     /\ provider_idx' = 1
     /\ provider_result' = "pending"
     /\ has_side_effect' = FALSE
@@ -523,7 +503,7 @@ BugAttemptProvider ==
     /\ provider_result = "pending"
     \* BUG: no clamping, send raw requested_max_tokens
     /\ turn_status' = "executing"
-    /\ UNCHANGED <<phase, effective_cascade, provider_idx,
+    /\ UNCHANGED <<phase, effective_runtime, provider_idx,
                    requested_max_tokens, provider_result, has_side_effect,
                    retry_count, turn_outcome>>
 
@@ -532,7 +512,7 @@ NextBuggy ==
     \/ BecomeCompacting
     \/ BecomeDraining
     \/ BecomeTerminal
-    \/ BugSelectCascade         \* replaces SelectCascade
+    \/ BugSelectRuntime         \* replaces SelectRuntime
     \/ BugAttemptProvider        \* replaces AttemptProvider
     \/ ProviderSuccess
     \/ ProviderError

@@ -12,10 +12,10 @@ Missing production evidence is represented as `BLOCKED`; mapped but unrun
 commands are represented as `SKIPPED`.
 
 Metric gates read snapshot keys from the JSON passed via `--metrics-json`; the
-gate evidence records those snapshot keys separately from any underlying
-`masc_*` Prometheus series used to derive them. The rendered command examples
-therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of naming a
-non-repo `prometheus` CLI.
+gate evidence records those snapshot keys separately from the underlying
+`masc_*` metric series used to derive them. The rendered command examples
+therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of requiring an
+external metrics CLI.
 
 Covered gate groups:
 
@@ -35,12 +35,6 @@ silently satisfied by adjacent TLA assets. The clean and buggy cfg pairs under
 `specs/goal-loop/` are included in the TLA matrix shard so CI verifies both the
 happy path and the corresponding bug model.
 
-## Completion Audit
-
-`scripts/goal_loop_completion_audit.py --verify-pipeline <result.json>` consumes
-the pipeline result. A partial pipeline adds the `verify_pipeline_complete`
-blocker, so a generic Verify `PASS` cannot close the GOAL LOOP while metric,
-TLA, log, or Orient gates are blocked.
-For schema version 1, completion also validates the reported gate counts and the
-full required gate-id set, so a minimal all-PASS fixture cannot stand in for the
-repo-owned Verify contract.
+The pipeline result is the verification artifact. Completion gating should use
+the explicit gate IDs and evidence payloads above, not a separate prompt-corpus
+closeout ledger.

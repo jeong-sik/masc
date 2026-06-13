@@ -1,7 +1,7 @@
 # TLA+ Keeper State FSM Gap Analysis — Bug #1 (manual_reconcile one-way trap)
 
 > Status: historical audit only, not a live keeper contract.
-> Current authoritative keeper FSM set is `KeeperStateMachine`, `KeeperCompositeLifecycle`, `KeeperTurnCycle`, `KeeperDecisionPipeline`, `KeeperCascadeLifecycle`, `KeeperCompactionLifecycle`, and `boundary/KeeperContinueGate`.
+> Current authoritative keeper FSM set is `KeeperStateMachine`, `KeeperCompositeLifecycle`, `KeeperTurnCycle`, `KeeperDecisionPipeline`, `KeeperRuntimeLifecycle`, `KeeperCompactionLifecycle`, and `boundary/KeeperContinueGate`.
 > `KeeperReconcileLiveness.tla` and `boundary/KeeperRecoveryOrchestration.tla` are retained here as forensic models for the old two-store reconcile bug.
 
 > **Update 2026-05-05** — §5 disposition recheck:
@@ -65,9 +65,9 @@ but in the OCaml code `Turn_succeeded` does NOT clear it (line 311-312:
 ### 2.2 KeeperOASAdvanced.tla (specs/keeper-state-machine/)
 
 Models the OAS Bridge timeout/error boundary and Eio structured concurrency.
-Focus: cascade fetch lifecycle, side-effect containment, cancellation absorption.
+Focus: runtime fetch lifecycle, side-effect containment, cancellation absorption.
 
-**Properties**: NoZombieFibers, AtomicCascadeFallback, CommittedSideEffectsRequireReconcile,
+**Properties**: NoZombieFibers, AtomicRuntimeFallback, CommittedSideEffectsRequireReconcile,
 CancelledNeverAbsorbed, StrictStopPreemption, EventualTermination.
 
 **Relevance to Bug #1**: Models `reconcile_required` as a flag set when external
@@ -87,10 +87,10 @@ recovery-to-FSM-dispatch path.
 
 ### 2.4 KeeperCoreTriad.tla (specs/keeper-state-machine/)
 
-Composes State Machine x Decision Pipeline x Cascade into a unified model.
-Verifies cross-cutting cascade routing properties.
+Composes State Machine x Decision Pipeline x Runtime into a unified model.
+Verifies cross-cutting runtime routing properties.
 
-**Properties**: NoTerminalCascade, FailingUsesRecovery, CapabilityGateHolds,
+**Properties**: NoTerminalRuntime, FailingUsesRecovery, CapabilityGateHolds,
 SideEffectContainment, PhaseDecisionConsistency.
 
 **Relevance to Bug #1**: Indirectly relevant. `TurnComplete` action (line 268-284)
@@ -266,7 +266,7 @@ No spec models the keepalive recovery orchestration — the multi-event sequence
 `maybe_recover_from_failing` performs. The specs model:
 
 - FSM layer (KeeperStateMachine.tla): individual events -> conditions -> phases
-- OAS bridge layer (KeeperOASAdvanced.tla): cascade fetch -> side-effect -> reconcile
+- OAS bridge layer (KeeperOASAdvanced.tla): runtime fetch -> side-effect -> reconcile
 - Turn lifecycle (AmbiguousPartialCommit.tla): tool calls -> partial commit -> reconcile
 - Keepalive dispatch (KeepalivePhaseConsistency.tla): phase gating on dispatch
 

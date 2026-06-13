@@ -5,6 +5,8 @@
     fields based on a failure observation. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 
@@ -78,7 +80,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             Option.value
               ~default:reason
               (Keeper_turn_driver.summary_of_masc_internal_error err)
-        | Some (Keeper_turn_driver.No_tool_capable_provider _ as err) -> (
+        | Some (Keeper_turn_driver.Runtime_exhausted _ as err) -> (
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
@@ -97,39 +99,13 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_timeout _
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
-            | Keeper_turn_driver.Capacity_backpressure _
-            (* No_tool_capable_provider excluded: this is a
-               configuration/capability mismatch, not a transient
-               condition.  Counting it toward noop_backoff causes
-               spurious keeper fiber kills (59/day on 2026-05-24)
-               without resolving the underlying filter mismatch.
-               See #18317, #18315. *)
-            | Keeper_turn_driver.Retry_admission_denied _) ->
+            | Keeper_turn_driver.Capacity_backpressure _) ->
             true
         | Some _ | None -> false)
     | None -> false
   in
-  (* #10474: emit Prometheus counters for no_tool_provider and proactive
-     cycle outcomes so Grafana can surface fleet-wide health ratios. *)
-  (match sdk_error with
-   | Some err ->
-       (match Keeper_turn_driver.classify_masc_internal_error err with
-        | Some (Keeper_turn_driver.No_tool_capable_provider
-	                  { cascade_name; _ }) ->
-            let cascade_name =
-              Cascade_name.to_string cascade_name
-            in
-            Prometheus.inc_counter
-              Keeper_metrics.(to_string NoToolProvider)
-              ~labels:
-                [ ("keeper", meta.name)
-                ; ("cascade", cascade_name)
-                ]
-              ()
-        | _ -> ())
-   | None -> ());
   if is_scheduled_autonomous_cycle then
-    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
       ();
   let preview =

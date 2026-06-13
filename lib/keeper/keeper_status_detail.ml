@@ -7,15 +7,18 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_alerting
-open Agent_tool_dispatch_runtime
+open Keeper_tool_dispatch_runtime
 open Keeper_execution
 open Keeper_status_runtime
 open Keeper_status_metrics
 open Keeper_status_bridge
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
   match read_file_tail_lines_result path ~max_bytes ~max_lines with
@@ -80,6 +83,18 @@ let invalidate_status_cache_all () =
 let status_cache_key ~base_path ~name = base_path ^ ":" ^ name
 
 let normalize_status_name = String.trim
+
+let status_name_lookup_candidates raw_name =
+  let trimmed = normalize_status_name raw_name in
+  if String.equal trimmed "" then
+    []
+  else
+    let aliases =
+      match Keeper_identity.canonical_keeper_name trimmed with
+      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
+      | Some _ | None -> []
+    in
+    trimmed :: aliases
 
 let docker_preflight_status_cache_key ~timeout_sec =
   String.concat "|"
@@ -150,29 +165,97 @@ let apply_tail_order order items =
   | Newest_first -> List.rev items
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let resolve_status_target_config ~(config : Coord.config) ~(agent_name : string) args =
+let resolve_status_target_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name = effective_status_name_config ~agent_name args in
-  if not (validate_name requested_name) then
+  let candidates =
+    status_name_lookup_candidates requested_name
+    |> List.filter validate_name
+  in
+  if candidates = [] then
     Error
       (Printf.sprintf
          "invalid keeper name %S (must be non-empty and match \
           [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
          requested_name)
   else
-    match read_meta_resolved config requested_name with
-    | Error e -> Error e
-    | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
-    | Ok None ->
-        Error (Printf.sprintf "keeper not found: %s" requested_name)
+    let rec loop = function
+      | [] -> Error (Printf.sprintf "keeper not found: %s" requested_name)
+      | candidate :: rest -> (
+          match read_effective_meta_resolved config candidate with
+          | Error e -> Error e
+          | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
+          | Ok None -> loop rest)
+    in
+    loop candidates
 
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
 
-(** Hash the status-affecting args so different parameter combos
-    get separate cache entries (e.g. fast=true vs fast=false). *)
-let hash_status_args _config resolved_name args =
+(** Hash the status-affecting args and the profile-overlay fields so different
+    parameter combos (e.g. fast=true vs fast=false) and TOML/persona overlays
+    get separate cache entries. Persisted JSON writes update [updated_at], but
+    external [keepers/<name>.toml] edits do not. *)
+let cache_fingerprint_field (key, value) =
+  Printf.sprintf "%s=%d:%s" key (String.length value) value
+
+let cache_fingerprint_list values = String.concat "\x1f" values
+
+let cache_fingerprint_pairs pairs =
+  pairs
+  |> List.map (fun (key, value) ->
+       key ^ "\x1e" ^ string_of_int (String.length value) ^ "\x1e" ^ value)
+  |> String.concat "\x1f"
+
+let effective_meta_overlay_hash (meta : keeper_meta) =
+  let opt_string = function
+    | Some value -> value
+    | None -> ""
+  in
+  let opt_bool = function
+    | Some true -> "true"
+    | Some false -> "false"
+    | None -> ""
+  in
+  let opt_int = Option.fold ~none:"" ~some:string_of_int in
+  let fields =
+    [
+      ("goal", meta.goal);
+      ("short_goal", meta.short_goal);
+      ("mid_goal", meta.mid_goal);
+      ("long_goal", meta.long_goal);
+      ("will", meta.will);
+      ("needs", meta.needs);
+      ("desires", meta.desires);
+      ("social_model", meta.social_model);
+      ("sandbox_profile", sandbox_profile_to_string meta.sandbox_profile);
+      ("sandbox_image", opt_string meta.sandbox_image);
+      ("network_mode", network_mode_to_string meta.network_mode);
+      ("allowed_paths", cache_fingerprint_list meta.allowed_paths);
+      ("tool_access", cache_fingerprint_list meta.tool_access);
+      ("tool_denylist", cache_fingerprint_list meta.tool_denylist);
+      ("mention_targets", cache_fingerprint_list meta.mention_targets);
+      ("active_goal_ids", cache_fingerprint_list meta.active_goal_ids);
+      ("proactive_enabled", string_of_bool meta.proactive.enabled);
+      ("proactive_idle_sec", string_of_int meta.proactive.idle_sec);
+      ("proactive_cooldown_sec", string_of_int meta.proactive.cooldown_sec);
+      ("autoboot_enabled", string_of_bool meta.autoboot_enabled);
+      ("telemetry_feedback_enabled", opt_bool meta.telemetry_feedback_enabled);
+      ( "telemetry_feedback_window_hours",
+        opt_int meta.telemetry_feedback_window_hours );
+      ("always_approve", opt_bool meta.always_approve);
+      ("oas_env", cache_fingerprint_pairs meta.oas_env);
+    ]
+  in
+  fields
+  |> List.map cache_fingerprint_field
+  |> String.concat "\n"
+  |> Digest.string
+  |> Digest.to_hex
+
+let hash_status_args _config resolved_name (meta : keeper_meta) args =
   let parts = [
     resolved_name;
+    effective_meta_overlay_hash meta;
     (* Keeper_manual_reconcile.cache_key removed with reconcile system. *)
     string_of_bool (get_bool args "fast" false);
     string_of_bool (get_bool args "include_context" false);
@@ -187,20 +270,20 @@ let hash_status_args _config resolved_name args =
   Digest.string (String.concat "|" parts) |> Digest.to_hex
 
 let nonempty_trimmed = Keeper_status_detail_observability.nonempty_trimmed
-let json_string_opt_member = Keeper_status_detail_observability.json_string_opt_member
+let json_string_opt_member = Json_util.get_string_nonempty
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
 (* TEL-OK: status handler — telemetry surfaces via the cache layer
-   ([_cache] mutex-protected reads/writes) and Prometheus counters in
+   ([_cache] mutex-protected reads/writes) and Otel_metric_store counters in
    the downstream [Keeper_status_runtime]/[Keeper_status_bridge] calls. *)
-let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match resolve_status_target_config ~config ~agent_name args with
   | Error err -> tool_result_error err
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
-      let args_hash = hash_status_args config name args in
-      (* Cache hit: same updated_at + same args → return cached response.
+      let args_hash = hash_status_args config name m args in
+      (* Cache hit: same updated_at + same args/effective-meta hash → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
       (match
@@ -227,10 +310,8 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
       let include_compaction_history =
         get_bool args "include_compaction_history" (not fast)
       in
-      let models = Keeper_model_labels.configured_model_labels_of_meta m in
       let max_context_resolution =
-        Keeper_context_runtime.resolve_max_context_resolution
-          ~requested_override:m.max_context_override models
+        Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
       let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir config in
@@ -270,7 +351,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
-           Coord_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+           Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
          in
          let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
          let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
@@ -284,7 +365,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            else now_ts -. m.runtime.proactive_rt.last_visible_ts
          in
          let trace_history_count = List.length m.runtime.trace_history in
-         let runtime_cascade_metrics = `Null in
+         let runtime_runtime_metrics = `Null in
          let last_compaction_saved_tokens =
            max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
          in
@@ -360,7 +441,6 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            if not include_metrics_overview then
              None
            else
-             let open Yojson.Safe.Util in
              let rec find_latest = function
                | [] -> None
                | line :: tl ->
@@ -369,14 +449,14 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                     match Safe_ops.json_string_opt "skill_primary" j with
                     | Some primary when String.trim primary <> "" ->
                       let secondary =
-                        match j |> member "skill_secondary" with
-                        | `List xs ->
+                        match Json_util.assoc_member_opt "skill_secondary" j with
+                        | Some (`List xs) ->
                           xs
                           |> List.filter_map (fun v ->
                                match v with
                                | `String s when String.trim s <> "" -> Some s
                                | _ -> None)
-                        | _ -> []
+                        | None | Some _ -> []
                       in
                       let reason = Safe_ops.json_string_opt "skill_reason" j in
                       Some
@@ -490,7 +570,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                      in
                      let preview =
                        if String.length content > 200 then
-                         utf8_safe_prefix_bytes content ~max_bytes:200 ^ "..."
+                         String_util.utf8_prefix ~max_bytes:200 content ^ "..."
                        else content
                      in
                      let item =
@@ -605,13 +685,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
              let tail = List.filteri (fun i _ -> i >= start) events in
              (`List (apply_tail_order tail_order tail), total)
         in
-        let all_internal_tools =
-          keeper_model_tools |> List.map (fun tool -> tool.Masc_domain.name)
-        in
         let allowed_tools = keeper_allowed_tool_names m in
-        let allowed_tool_preview =
-          allowed_tools |> List.filteri (fun idx _ -> idx < 10)
-        in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
           match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
@@ -643,36 +717,17 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                    else None);
               }
         in
-        let blocked_internal_tools =
-          all_internal_tools
-          |> List.filter (fun name -> not (List.mem name allowed_tools))
-        in
          let sandbox_last_error =
            match Keeper_registry.get ~base_path:config.base_path m.name with
            | Some entry -> entry.last_error
            | None -> None
          in
-         let effective_sandbox_image =
-           if m.sandbox_profile = Docker
-           then
-             Some (
-               match m.sandbox_image with
-               | Some img when String.trim img <> "" -> img
-               | _ -> Env_config_sandbox.Runtime.docker_image ()
-             )
-           else None
-         in
-         let sandbox_preflight =
-           match effective_sandbox_image with
-           | Some _ ->
-               cached_docker_preflight_status_json
-                 ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
-           | None -> None
-         in
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
-             ~config:config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
+             ~config:config ~meta:m
+             ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io ())
+             ~verbose:false ()
          in
          let runtime_blocker_fields =
           runtime_blocker_fields_json config m
@@ -680,18 +735,19 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          let attention_fields =
            attention_fields_json config m
          in
+         let runtime_trust =
+           Keeper_runtime_trust_snapshot.snapshot_json
+             ~config:config ~meta:m
+         in
          let latest_metrics =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
          in
          let model_observability =
            model_observability_json
-             ~current_cascade_name:(cascade_name_of_meta m)
+             ~current_runtime_id:(runtime_id_of_meta m)
              ~runtime_blocker_fields
+             ~runtime_trust
              latest_metrics
-         in
-         let runtime_trust =
-           Keeper_runtime_trust_snapshot.snapshot_json
-             ~config:config ~meta:m
          in
          let attention_fields =
            attention_fields_with_runtime_trust attention_fields runtime_trust
@@ -717,7 +773,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
 
          let json = `Assoc ([
            ("name", `String name);
-           ("meta", meta_to_json m);
+           ("meta", Keeper_meta_json.meta_to_json m);
            ("goal", `String m.goal);
            ("short_goal", `String m.short_goal);
            ("mid_goal", `String m.mid_goal);
@@ -727,13 +783,25 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
              ("mid", `String m.mid_goal);
              ("long", `String m.long_goal);
            ]);
+           ( "persona",
+             match m.persona with
+             | Some persona when String.trim persona <> "" -> `String persona
+             | _ -> `Null );
            ("will", if String.trim m.will = "" then `Null else `String m.will);
            ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
            ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
+           ("instructions",
+            if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("self_model", `Assoc [
+             ( "persona",
+               match m.persona with
+               | Some persona when String.trim persona <> "" -> `String persona
+               | _ -> `Null );
              ("will", if String.trim m.will = "" then `Null else `String m.will);
              ("needs", if String.trim m.needs = "" then `Null else `String m.needs);
              ("desires", if String.trim m.desires = "" then `Null else `String m.desires);
+             ("instructions",
+              if String.trim m.instructions = "" then `Null else `String m.instructions);
            ]);
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
@@ -748,27 +816,20 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("disposition", Json_util.string_opt_to_json disposition);
            ("disposition_reason", Json_util.string_opt_to_json disposition_reason);
            ("next_model_hint", `Null);
-           ("runtime_cascade_metrics", runtime_cascade_metrics);
+           ("runtime_runtime_metrics", runtime_runtime_metrics);
            ("trace_history_count", `Int trace_history_count);
            ("handoff_count_total", `Int trace_history_count);
            ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-           ("allowed_tool_count", `Int (List.length allowed_tools));
            ("sandbox_profile",
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",
              `String (network_mode_to_string m.network_mode));
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
-           ("sandbox_preflight",
-             Json_util.option_to_yojson Fun.id sandbox_preflight);
            ("sandbox_live", sandbox_live);
-           ("effective_sandbox_image",
-             Json_util.string_opt_to_json effective_sandbox_image);
-           ("tool_denylist", string_list_to_json m.tool_denylist);
-           ("allowed_tool_names", string_list_to_json allowed_tools);
-           ("allowed_tool_preview", string_list_to_json allowed_tool_preview);
+           ("tool_denylist", Json_util.json_string_list m.tool_denylist);
            ("latest_tool_names",
-             string_list_to_json tool_audit_snapshot.latest_tool_names);
+             Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
              Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
            ("latest_action_source",
@@ -817,12 +878,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
-             ("effective_sandbox_image",
-               Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
-           ("allowed_tools", string_list_to_json allowed_tools);
-            ("available_internal_tools", string_list_to_json all_internal_tools);
-            ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
            ("auto_execution_session_enabled", `Bool false);
@@ -844,9 +900,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                else `String (String.trim m.social_model));
              ("recognized_model", `Bool (Keeper_social_model.is_known_social_model m.social_model));
              ("fallback_model",
-               match Keeper_social_model.fallback_social_model m.social_model with
-               | Some model -> `String model
-               | None -> `Null);
+               Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model m.social_model));
              ("last_speech_act",
                if String.trim m.runtime.last_speech_act = ""
                then `Null
@@ -864,7 +918,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                else `String m.runtime.last_social_transition_reason);
              ("last_blocker",
                match m.runtime.last_blocker with
-               | Some info -> Keeper_types.blocker_info_to_json info
+               | Some info -> Keeper_meta_contract.blocker_info_to_json info
                | None -> `Null);
              ("last_need",
                if String.trim m.runtime.last_need = ""
@@ -891,7 +945,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("context_budget", `Assoc [
              ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
              ("primary_budget", `Int max_context_resolution.primary_budget);
-             ("cascade_budget", `Int max_context_resolution.cascade_budget);
+             ("runtime_budget", `Int max_context_resolution.runtime_budget);
              ("turn_budget", `Int max_context_resolution.turn_budget);
              ("effective_budget", `Int max_context_resolution.effective_budget);
            ]);
@@ -899,16 +953,14 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
            ("runtime", runtime_surface_json config m);
-           ("coordination", coordination_surface_json m);
+           ("workspace", workspace_surface_json m);
            ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
            ("memory_bank", memory_summary_to_json memory_bank_summary);
            ("memory_bank_error_class",
-             match memory_bank_error_class with
-             | Some label -> `String label
-             | None -> `Null);
+             Json_util.string_opt_to_json memory_bank_error_class);
            ("generation_lineage", generation_lineage);
            ("metrics_tail", metrics_tail);
            ("history_tail", history_tail);
@@ -946,8 +998,8 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                (Filename.concat
                  (Common.masc_dir_from_base_path ~base_path:config.base_path)
                  (Printf.sprintf "evidence/%s/%s"
-                   (Coord_utils.safe_filename m.name)
-                   (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
+                   (Workspace_utils.safe_filename m.name)
+                   (Workspace_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
            (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
            let playground_abs = sandbox.host_root_abs in
@@ -955,7 +1007,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
               not surface host paths.  For Docker keepers the host abs path
               does not exist inside the container, so the LLM previously
               echoed [cd <host_abs>] producing ~890/day [No such file or
-              directory] errors.  default_cwd / private_workspace_root use
+              directory] errors.  default_cwd uses
               [keeper_visible_root_abs] (container path for Docker, host
               path for Local).  Host-only fields (sandbox_host_root,
               playground_path) are intentionally omitted — server-side
@@ -970,17 +1022,12 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
              ("sandbox_mind", `String sandbox.mind_arg);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("default_cwd", `String keeper_visible_abs);
-             ("private_workspace_root", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
              ("sandbox_last_error",
                Json_util.string_opt_to_json sandbox_last_error);
-             ("sandbox_preflight",
-               Json_util.option_to_yojson Fun.id sandbox_preflight);
              ("sandbox_live", sandbox_live);
-             ("effective_sandbox_image",
-               Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("playground_repos",
                Keeper_sandbox_control.playground_repos_json
                  ~config:config ~meta:m);
@@ -991,20 +1038,6 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
                  let entries = Fs_compat.load_jsonl pr_path in
                  (* Last 10 PRs, most recent first *)
                  `List (List.take 10 (List.rev entries))
-               with Sys_error _ -> `List []);
-             ("active_worktrees",
-               let worktrees_dir = Filename.concat config.base_path ".worktrees" in
-               try
-                 let entries = Sys.readdir worktrees_dir |> Array.to_list in
-                 let keeper_prefix = Keeper_alerting_path.sanitize_keeper_name m.name in
-                 let matching = List.filter (fun name ->
-                   String.starts_with ~prefix:(keeper_prefix ^ "-") name
-                   || String.starts_with ~prefix:(keeper_prefix ^ "/") name
-                   || name = keeper_prefix) entries in
-                 `List (List.map (fun name -> `Assoc [
-                   "name", `String name;
-                   "path", `String (Filename.concat ".worktrees" name);
-                 ]) matching)
                with Sys_error _ -> `List []);
            ]);
          ]) in

@@ -22,7 +22,7 @@ import { routeLinkLabels } from './ide-context-route-helpers'
  * Reads `keeperTraceState` (the stitched trace store) and
  * renders a stacked gutter chip per RFC §5: cap=3 visible chips per
  * (keeperName, line) bucket plus a `+N` overflow indicator. Each chip is
- * colored by source (anchored-thread / cascade-hop / bdi-snapshot /
+ * colored by source (anchored-thread / runtime-hop / bdi-snapshot /
  * decision-log / activity-event) and exposes a hover tooltip with the
  * underlying event details.
  *
@@ -36,9 +36,9 @@ import { routeLinkLabels } from './ide-context-route-helpers'
  * keeper rail) decide where to mount the chips.
  *
  * Conflict avoidance (RFC §10): the `keeper-trace` IDE_LAYERS entry
- * declares `conflictsWith: ['cascade']` so activating either layer drops
+ * declares `conflictsWith: ['runtime']` so activating either layer drops
  * the other automatically — see `layered-overlay.ts`. PR-β does not
- * coordinate with cascade-overlay directly; the layer registry handles it.
+ * orchestrate with runtime-overlay directly; the layer registry handles it.
  */
 
 export const TRACE_CHIP_CAP = 3
@@ -47,7 +47,7 @@ const TRACE_ROUTE_LINK_CAP = 10
 /** Source → chip background color (semantic, not literal). */
 const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
   'anchored-thread': 'var(--color-status-info)',
-  'cascade-hop': 'var(--color-accent-fg)',
+  'runtime-hop': 'var(--color-accent-fg)',
   'bdi-snapshot': 'var(--color-status-ok)',
   'decision-log': 'var(--color-status-warn)',
   'activity-event': 'var(--color-status-info)',
@@ -56,7 +56,7 @@ const SOURCE_COLORS: Record<KeeperTraceSource, string> = {
 /** Source → label glyph for tooltip + ARIA. */
 const SOURCE_LABELS: Record<KeeperTraceSource, string> = {
   'anchored-thread': 'thread',
-  'cascade-hop': 'cascade',
+  'runtime-hop': 'runtime',
   'bdi-snapshot': 'BDI',
   'decision-log': 'decision',
   'activity-event': 'activity',
@@ -109,7 +109,7 @@ function lineOf(event: KeeperTraceEvent): number | null {
   if (event.source === 'activity-event') return event.line
   if (event.source === 'bdi-snapshot') return event.line ?? null
   if (event.source === 'decision-log') return event.line ?? null
-  if (event.source === 'cascade-hop') return event.line ?? null
+  if (event.source === 'runtime-hop') return event.line ?? null
   return null
 }
 
@@ -118,7 +118,7 @@ function filePathOf(event: KeeperTraceEvent): string | null {
   if (event.source === 'activity-event') return event.filePath
   if (event.source === 'bdi-snapshot') return event.filePath ?? null
   if (event.source === 'decision-log') return event.filePath ?? null
-  if (event.source === 'cascade-hop') return event.filePath ?? null
+  if (event.source === 'runtime-hop') return event.filePath ?? null
   return null
 }
 
@@ -454,7 +454,7 @@ function traceRouteContext(event: KeeperTraceEvent): IdeContextRouteContext {
   return {
     filePath: event.filePath,
     line: event.line,
-    surface: 'Cascade',
+    surface: 'Runtime',
     label: event.provider,
     sourceId: `trace:${event.id}`,
     goalId: event.goalId,

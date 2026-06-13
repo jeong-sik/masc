@@ -8,11 +8,10 @@
 ; downstream test crates.
 ;
 ; No (public_name) — this is test-only infrastructure and must not
-; leak into the masc_mcp opam install artifact (test_lib was found
-; in _build/install/default/lib/masc_mcp/ast_grep/* by audit).
+; leak into the masc opam install artifact (test_lib was found
+; in _build/install/default/lib/masc/ast_grep/* by audit).
 
 (library
  (name ast_grep)
  (wrapped false)
- (libraries
-  compiler-libs.common))
+ (libraries compiler-libs.common))

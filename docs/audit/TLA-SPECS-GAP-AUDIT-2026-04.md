@@ -66,12 +66,11 @@ Scanning `specs/INDEX.md` for `clean={X} buggy={X}` matches:
 
 | File | Clean and buggy invariant set (verbatim from INDEX) |
 |---|---|
-| `admission-queue/AdmissionQueue.tla` | `{TypeOK, FdThresholdEnforced, CascadeNameCanonical, ReleaseCountBounded, ActiveCounterConsistent}` |
+| `admission-queue/AdmissionQueue.tla` | `{TypeOK, FdThresholdEnforced, RuntimeNameCanonical, ReleaseCountBounded, ActiveCounterConsistent}` |
 | `auth/AuthIdentityFSM.tla` | `{TypeOK, SafetyInvariant}` |
-| `boundary/CascadeKeeperRecovery.tla` | `{SafetyInvariant}` |
-| `boundary/CascadeStrategyStateful.tla` | `{TypeOK, StickyDomainBounded, StickyMembersAreCandidates, RRBounded, NoExpiredEntriesUsable, prop:StickyEventuallyEvicts}` |
+| `boundary/RuntimeKeeperRecovery.tla` | `{SafetyInvariant}` |
+| `boundary/RuntimeStrategyStateful.tla` | `{TypeOK, StickyDomainBounded, StickyMembersAreCandidates, RRBounded, NoExpiredEntriesUsable, prop:StickyEventuallyEvicts}` |
 | `boundary/KeeperContractViolated.tla` | `{Safety}` |
-| `boundary/KeeperEmptyToolUniverse.tla` | `{Safety}` |
 | `boundary/KeeperRecoveryOrchestration.tla` | `{SafetyInvariant}` |
 | `boundary/KeeperStaleKilled.tla` | `{Safety}` |
 | `boundary/KeeperTurnScheduler.tla` | `{SafetyInvariant}` |
@@ -86,9 +85,8 @@ Scanning `specs/INDEX.md` for `clean={X} buggy={X}` matches:
 | `bug-models/KeeperPhaseRace.tla` | `{TypeOK, CrashImpliesThreshold, RecordOnlyOnCrash, CounterBoundedByObservations}` |
 | `bug-models/MemoryCompaction.tla` | `{ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected}` |
 | `bug-models/SSEBroadcastBlock.tla` | `{TypeOK, NoPermanentBlock}` |
-| `bug-models/SessionRegistryGhost.tla` | `{TypeOK, ConsistencyInvariant}` |
 
-**21 specs** have textually identical clean and buggy invariant sets.
+**20 specs** have textually identical clean and buggy invariant sets.
 
 This **may** still be valid: the buggy cfg can override the `Spec`/`Init`/`Next` action (e.g. via a separate `SpecBuggy` definition that includes `BugAction`) while keeping the same invariants — that *is* the AGENT-LLM-A.md pattern. To confirm, the buggy `.cfg` file must reference a different `SPECIFICATION` than the clean `.cfg`.
 
@@ -170,7 +168,7 @@ The ratchet wouldn't gate CI immediately — both metrics need a sweep PR (or se
 1. **Per-spec triage of the 21 tautology candidates** (one-shot pass): `diff` the clean/buggy `.cfg` SPECIFICATION lines, classify into (a) valid `SpecBuggy` override, (b) true tautology — needs buggy invariant strengthening.
 2. **Migrate 3 `bug-models/*Bug.tla` files** to unified-pair style: hygiene-only, not urgent.
 3. **`specs/states/` cleanup**: investigate whether `cleanup-tlc-artifacts.sh` missed this path, or add `.gitignore` entry.
-4. **Add buggy cfg + BugAction for 8 specs** in 5 domains: domain-by-domain, each as its own RFC + spec PR. Highest-value first (autonomous/AutonomousLoop is in the keeper-loop hot path; resilience specs interact with cascade orchestration).
+4. **Add buggy cfg + BugAction for 8 specs** in 5 domains: domain-by-domain, each as its own RFC + spec PR. Highest-value first (autonomous/AutonomousLoop is in the keeper-loop hot path; resilience specs interact with runtime orchestration).
 5. **Add coverage ratchet** to `scripts/`: descriptive metric per §6, eventually promoted to enforced once §1–§4 baseline is solid.
 
 ## 8. References

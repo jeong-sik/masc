@@ -69,7 +69,7 @@ Failure grouping은 free-form string matching으로 하지 않는다. Operator s
 
 | Serialized value | Meaning |
 |---|---|
-| `heartbeat_consecutive_failures` | room/presence sync failure streak이 budget 초과 |
+| `heartbeat_consecutive_failures` | workspace/presence sync failure streak이 budget 초과 |
 | `fiber_unresolved` | supervisor generic fallback path |
 | `exception:<summary>` | structured but non-heartbeat exception |
 
@@ -94,7 +94,7 @@ Canonical naming rule:
 |---|---|
 | `masc_keeper_dead_resurrection_total` | `Dead` keeper가 operator action 없이 다시 실행됨 |
 | `masc_keeper_reconcile_registered_launch_total` | registry entry가 있는 keeper를 reconcile이 잘못 재기동 |
-| `masc_keeper_false_freshness_skip_total` | failed room heartbeat 이후 freshness skip 발생 |
+| `masc_keeper_false_freshness_skip_total` | failed workspace heartbeat 이후 freshness skip 발생 |
 | `masc_keeper_unplanned_self_preservation_total` | operator-injected test가 아닌 suppression 발생 |
 
 이 네 개 중 하나라도 증가하면 rollout은 stop 상태다.
@@ -109,7 +109,7 @@ Canonical naming rule:
 | `masc_keeper_presence_sync_duration_seconds` | stage latency |
 | `masc_keeper_keepalive_cycle_duration_seconds` | 전체 keepalive loop latency |
 | `masc_keeper_freshness_skip_total` | skip hit rate |
-| `masc_keeper_room_heartbeat_after_turn_total{result}` | turn 후 heartbeat success/failure |
+| `masc_keeper_workspace_heartbeat_after_turn_total{result}` | turn 후 heartbeat success/failure |
 | `masc_keeper_state_transition_total{from,to}` | state machine audit |
 | `masc_keeper_restart_total{failure_reason}` | restart pressure 추적 |
 | `masc_keeper_dead_tombstone_total` | exhausted keeper 발생량 |
@@ -120,7 +120,7 @@ Canonical naming rule:
 
 ### 6.1 Global SLO
 
-Global API/SSE requirements are inherited unchanged from [PERFORMANCE-SLO.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/docs/PERFORMANCE-SLO.md).
+Global API/SSE requirements are inherited unchanged from [PERFORMANCE-SLO.md](/Users/dancer/me/workspace/yousleepwhen/masc/docs/PERFORMANCE-SLO.md).
 
 Promotion is blocked if the candidate breaches any published MCP/REST/SSE threshold.
 
@@ -154,7 +154,7 @@ Runbook and dashboards must be able to answer these without log spelunking:
 - Why is a keeper `Crashed`?
 - If `failure_reason=heartbeat_consecutive_failures`, what is the current streak count?
 - Is reconcile skipping a keeper because it is registered, paused, or dead?
-- Was the last freshness lease created by a successful room heartbeat?
+- Was the last freshness lease created by a successful workspace heartbeat?
 - Did self-preservation fire, and for which failure cohort?
 
 If any answer requires reading raw stack traces or filesystem state directly, observability is incomplete.

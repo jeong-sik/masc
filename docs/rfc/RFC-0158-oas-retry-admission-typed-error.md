@@ -17,10 +17,10 @@ implementation_prs: []
 
 현재 `Keeper_turn_driver.Oas_timeout_budget` (`lib/keeper/keeper_turn_driver.mli:67-75`) 한 variant 가 두 가지 *의미상 분리된* 실패를 동일 분류로 emit 한다:
 
-1. **server-side timeout** — provider 가 OAS 호출 도중 wall-clock 한계로 끊김 (`source = "cascade_attempt_watchdog"`)
+1. **server-side timeout** — provider 가 OAS 호출 도중 wall-clock 한계로 끊김 (`source = "runtime_attempt_watchdog"`)
 2. **pre-dispatch admission denial** — keeper 가 retry 를 *시도조차 하지 않음*. budget gate 가 사전에 차단 (`source = "pre_retry_budget_unavailable"`, `"pre_attempt_budget_unavailable"`)
 
-Team OO POC (`decide_retry_admission_for_turn : ... -> (unit, retry_admission_denial) result`, `lib/keeper/keeper_turn_cascade_budget.ml`) 는 case 2 의 *결정 함수* 를 typed 로 추출했다. 본 RFC 는 그 typed result 를 emission 까지 잇는 **closed-sum 확장** 을 정의한다: `masc_internal_error` 에 `Retry_admission_denied of { reason : retry_admission_denial }` 신규 variant 를 추가하고, Team JJ 관측치 (`oas_timeout_budget` 1077/24h, 74% retry-path ≈ 800/day) 의 *didn't-try* 부분을 별도 라벨로 분리한다.
+Team OO POC (`decide_retry_admission_for_turn : ... -> (unit, retry_admission_denial) result`, `lib/keeper/keeper_turn_runtime_budget.ml`) 는 case 2 의 *결정 함수* 를 typed 로 추출했다. 본 RFC 는 그 typed result 를 emission 까지 잇는 **closed-sum 확장** 을 정의한다: `masc_internal_error` 에 `Retry_admission_denied of { reason : retry_admission_denial }` 신규 variant 를 추가하고, Team JJ 관측치 (`oas_timeout_budget` 1077/24h, 74% retry-path ≈ 800/day) 의 *didn't-try* 부분을 별도 라벨로 분리한다.
 
 핵심 제약: 신규 variant 는 closed-sum (OCaml exhaustive match) 확장이며 string classifier 가 아니다. 새 카운터 `masc_oas_error_total{kind="retry_admission_denied"}` 는 *visibility* 보조이며 *fix* 자체는 분리 emission 이다 (cf. RFC-0088, software-development.md §1 텔레메트리-as-fix 거부 기준).
 
@@ -39,19 +39,19 @@ Team OO POC (`decide_retry_admission_for_turn : ... -> (unit, retry_admission_de
 |---|---|---|
 | `oas_timeout_budget` (총합) | 1077 | 100% |
 | retry-path (`source = "pre_retry_budget_unavailable"`) | ~800 | 74% |
-| true server timeout (`source = "cascade_attempt_watchdog"`) | ~277 | 26% |
+| true server timeout (`source = "runtime_attempt_watchdog"`) | ~277 | 26% |
 
-retry-path 분량이 server-timeout 분량의 ~3배다. 그러나 둘은 alert / pause-policy / cascade-rotation 측면에서 *반대 신호*다:
+retry-path 분량이 server-timeout 분량의 ~3배다. 그러나 둘은 alert / pause-policy / runtime-rotation 측면에서 *반대 신호*다:
 
-- **server timeout**: provider 가 *느림* → cascade rotation 합리적, watchdog 자동 회복 가능
-- **retry admission denial**: keeper 가 *시도 안 함* → cascade rotation 불필요 (다음 cascade candidate 도 동일 budget 적용 시 동일하게 denied), pause-policy 와 무관
+- **server timeout**: provider 가 *느림* → runtime rotation 합리적, watchdog 자동 회복 가능
+- **retry admission denial**: keeper 가 *시도 안 함* → runtime rotation 불필요 (다음 runtime candidate 도 동일 budget 적용 시 동일하게 denied), pause-policy 와 무관
 
 `keeper_supervisor_pause_policy.ml:174` 의 `~blocker_class:(Some Oas_timeout_budget)` 와 `keeper_registry_types.ml:80` 의 `Oas_timeout_budget_loop of { count : int }` 는 *둘 다*를 동일 loop 신호로 누적한다. 즉 retry-admission denial 800회 가 server timeout 신호처럼 `Oas_timeout_budget_loop` counter 를 부풀려 supervisor 의 auto-pause 결정을 왜곡한다.
 
 ### 1.2 현재 emission 위치
 
 - `lib/keeper/keeper_unified_turn.ml:599-615` — `resolve_bounded_oas_timeout_budget_with_turn_budget` 가 `None` 반환 시 `Oas_timeout_budget { source = if is_retry then "pre_retry_budget_unavailable" else "pre_attempt_budget_unavailable"; ... }` 를 raise. 이것이 *case 2* (didn't-try).
-- `lib/keeper/keeper_turn_cascade_budget.ml:266` (`reclassify_oas_timeout_for_attempt`) — `Agent_sdk.Error.Api (Timeout { message })` 가 structural OAS timeout 메시지면 `Oas_timeout_budget { source = "cascade_attempt_watchdog"; ... }` 로 reclassify. 이것이 *case 1* (server slow).
+- `lib/keeper/keeper_turn_runtime_budget.ml:266` (`reclassify_oas_timeout_for_attempt`) — `Agent_sdk.Error.Api (Timeout { message })` 가 structural OAS timeout 메시지면 `Oas_timeout_budget { source = "runtime_attempt_watchdog"; ... }` 로 reclassify. 이것이 *case 1* (server slow).
 
 두 site 가 동일 variant 를 emit 하므로 downstream 30+ 사이트 (exhaustive match) 는 분리 처리 불가하다.
 
@@ -85,7 +85,7 @@ type retry_admission_denial = {
 }
 
 type masc_internal_error =
-  | Cascade_exhausted of { ... }
+  | Runtime_exhausted of { ... }
   ...
   | Oas_timeout_budget of { ... }  (* case 1 server-timeout 만 *)
   | Retry_admission_denied of { reason : retry_admission_denial }  (* NEW *)
@@ -93,7 +93,7 @@ type masc_internal_error =
   ...
 ```
 
-`retry_admission_denial` 은 Team OO POC 의 `lib/keeper/keeper_turn_cascade_budget.ml` 에 이미 정의된 record 타입을 재사용한다 (POC 가 export 한 형태 그대로). POC 가 export 하지 않았다면 Phase A 에서 export.
+`retry_admission_denial` 은 Team OO POC 의 `lib/keeper/keeper_turn_runtime_budget.ml` 에 이미 정의된 record 타입을 재사용한다 (POC 가 export 한 형태 그대로). POC 가 export 하지 않았다면 Phase A 에서 export.
 
 ### 3.2 emission 분리
 
@@ -101,17 +101,17 @@ type masc_internal_error =
 |---|---|---|
 | `keeper_unified_turn.ml:599-615` (`is_retry = true`) | `Oas_timeout_budget { source = "pre_retry_budget_unavailable" }` | `Retry_admission_denied { reason }` |
 | `keeper_unified_turn.ml:599-615` (`is_retry = false`) | `Oas_timeout_budget { source = "pre_attempt_budget_unavailable" }` | `Retry_admission_denied { reason }` (Phase C 결정: `is_retry` 필드로 구분, §9 Q1 참조) |
-| `keeper_turn_cascade_budget.ml:266` (`reclassify_oas_timeout_for_attempt`) | `Oas_timeout_budget { source = "cascade_attempt_watchdog" }` | 변경 없음 (case 1 server timeout) |
+| `keeper_turn_runtime_budget.ml:266` (`reclassify_oas_timeout_for_attempt`) | `Oas_timeout_budget { source = "runtime_attempt_watchdog" }` | 변경 없음 (case 1 server timeout) |
 
-분리 후 `Oas_timeout_budget.source` 필드는 `"cascade_attempt_watchdog"` 만 유효 값. 두 dead branch 는 Phase D 에서 제거.
+분리 후 `Oas_timeout_budget.source` 필드는 `"runtime_attempt_watchdog"` 만 유효 값. 두 dead branch 는 Phase D 에서 제거.
 
 ### 3.3 downstream exhaustive match 처리
 
-`grep -nc "Oas_timeout_budget" lib/ test/` 기준 약 30+ 사이트 (분포: lib/keeper/ 12, lib/cascade/ 3, test/ 15+). 신규 variant 추가는 OCaml exhaustive match 위반을 컴파일러가 강제하므로, Phase B 에서 *모든 사이트* 가 `Retry_admission_denied _ -> ...` arm 을 추가해야 한다. 각 사이트의 의미적 분류:
+`grep -nc "Oas_timeout_budget" lib/ test/` 기준 약 30+ 사이트 (분포: lib/keeper/ 12, lib/runtime/ 3, test/ 15+). 신규 variant 추가는 OCaml exhaustive match 위반을 컴파일러가 강제하므로, Phase B 에서 *모든 사이트* 가 `Retry_admission_denied _ -> ...` arm 을 추가해야 한다. 각 사이트의 의미적 분류:
 
 - `keeper_turn_disposition.ml` — disposition code 매핑. `Retry_admission_denied` 는 dispositional 으로 *retry-able 이 아님 (admission denied)* — 신규 disposition code 또는 `Oas_timeout_budget` 와 동일 처리 중 선택 (§9 Q2)
 - `keeper_supervisor*.ml` — pause policy. `Retry_admission_denied` 는 `Oas_timeout_budget_loop` counter 에 *기여하지 않음* (별도 카운터 또는 skip)
-- `cascade_attempt_fsm.ml`, `cascade_error_classify.ml` — cascade rotation 분류. `Retry_admission_denied` 는 cascade rotation 효과 없음 (다음 candidate 도 동일 budget) → `should_skip_cascade_rotation` 신호로 분류
+- `runtime_attempt_fsm.ml`, `runtime_error_classify.ml` — runtime rotation 분류. `Retry_admission_denied` 는 runtime rotation 효과 없음 (다음 candidate 도 동일 budget) → `should_skip_runtime_rotation` 신호로 분류
 - `test/*.ml` — 신규 variant 의 *명시적* assertion 추가, 기존 `Oas_timeout_budget` 테스트 의미 좁힘
 
 ## §4 Observability
@@ -144,7 +144,7 @@ masc_oas_error_total{kind="retry_admission_denied", is_retry="false"}  # case 2.
 
 ### §1 텔레메트리-as-fix — **NOT applicable**
 
-새 카운터 `retry_admission_denied` 는 *fix 자체가 아니다*. fix 는 emission 분리 — variant 가 다르므로 downstream 처리 (pause policy, cascade rotation) 도 분리된다. 카운터는 이 분리가 production 에서 작동하는지 *관측* 만 한다. counter 만 있고 emit 경로 동일이면 §1 위반이지만, 본 RFC 는 **emit 경로 자체가 분기** 한다.
+새 카운터 `retry_admission_denied` 는 *fix 자체가 아니다*. fix 는 emission 분리 — variant 가 다르므로 downstream 처리 (pause policy, runtime rotation) 도 분리된다. 카운터는 이 분리가 production 에서 작동하는지 *관측* 만 한다. counter 만 있고 emit 경로 동일이면 §1 위반이지만, 본 RFC 는 **emit 경로 자체가 분기** 한다.
 
 ### §2 String classifier — **NOT applicable**
 
@@ -175,12 +175,12 @@ masc_oas_error_total{kind="retry_admission_denied", is_retry="false"}  # case 2.
 - Team OO POC commit (`decide_retry_admission_for_turn`) 머지
 - 신규 variant `Retry_admission_denied` 와 `retry_admission_denial` 타입을 `keeper_turn_driver.mli` 에 정의만 (caller 0)
 - `masc_internal_error_to_json`, `summary_of_masc_internal_error` 등 helper 함수에 신규 arm 추가
-- 신규 prometheus label 등록 (emit 0)
+- 신규 legacy metrics backend label 등록 (emit 0)
 - 검증: `dune build` GREEN, `Retry_admission_denied` 사용 site 0 (`rg -nc "Retry_admission_denied" lib/`)
 
 ### Phase B — downstream exhaustive match 채우기
 
-- 약 30+ 사이트별 PR (or 의미 범주별 묶음 PR — disposition / supervisor / cascade / test 4 묶음 권장)
+- 약 30+ 사이트별 PR (or 의미 범주별 묶음 PR — disposition / supervisor / runtime / test 4 묶음 권장)
 - 각 PR 은 단독 머지 가능, `Retry_admission_denied` emit 0 유지
 - 검증: `dune build` GREEN per PR
 
@@ -205,7 +205,7 @@ Phase D 완료 후 24h sustained:
 |---|---|
 | `masc_oas_error_total{kind="oas_timeout_budget"}` | ≤ 320/day (Team JJ baseline 1077 의 30%, ≥ 70% 감소) |
 | `masc_oas_error_total{kind="retry_admission_denied", is_retry="true"}` | 600-1000/day (Team JJ retry-path ~800 추정치 ±25%) |
-| `Oas_timeout_budget.source` distinct values in emit | `{"cascade_attempt_watchdog"}` 만 |
+| `Oas_timeout_budget.source` distinct values in emit | `{"runtime_attempt_watchdog"}` 만 |
 | `rg -n "pre_retry_budget_unavailable" lib/` | 0 hit |
 | `dune build` + `dune runtest` | GREEN |
 | `Oas_timeout_budget_loop` counter (supervisor) | retry-admission denial 미기여 (분량 감소 확인) |
@@ -255,8 +255,8 @@ Team OO POC 가 `retry_admission_denial` record 내 `is_retry` 필드를 이미 
 
 ### Q3: Team OO POC `decide_retry_admission_for_turn` 의 export 범위
 
-POC 가 `keeper_turn_cascade_budget.ml` 내부 함수면 `.mli` 에 export 필요. Phase A 의 첫 작업.
+POC 가 `keeper_turn_runtime_budget.ml` 내부 함수면 `.mli` 에 export 필요. Phase A 의 첫 작업.
 
-### Q4: cascade rotation 처리 (`cascade_attempt_fsm.ml`)
+### Q4: runtime rotation 처리 (`runtime_attempt_fsm.ml`)
 
-`Retry_admission_denied` 는 cascade rotation 가치가 없다 (다음 candidate 도 동일 budget) — `should_skip_cascade_rotation = true` 로 처리하면 cascade 비용 절약. 그러나 *budget 이 candidate-specific* 인 경우 (per-provider timeout) 는 rotation 의미가 있을 수 있음. Phase B 의 `cascade_attempt_fsm.ml` PR 에서 결정.
+`Retry_admission_denied` 는 runtime rotation 가치가 없다 (다음 candidate 도 동일 budget) — `should_skip_runtime_rotation = true` 로 처리하면 runtime 비용 절약. 그러나 *budget 이 candidate-specific* 인 경우 (per-provider timeout) 는 rotation 의미가 있을 수 있음. Phase B 의 `runtime_attempt_fsm.ml` PR 에서 결정.

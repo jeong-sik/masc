@@ -153,11 +153,11 @@
     "turn_dispatch_receives_proactive_warmup_elapsed": true
   },
   "implementation_pr_refs": [
-    "https://github.com/jeong-sik/masc-mcp/pull/13119",
-    "https://github.com/jeong-sik/masc-mcp/pull/13156",
-    "https://github.com/jeong-sik/masc-mcp/pull/13167"
+    "https://github.com/jeong-sik/masc/pull/13119",
+    "https://github.com/jeong-sik/masc/pull/13156",
+    "https://github.com/jeong-sik/masc/pull/13167"
   ],
   "tracking_issue_refs": [
-    "https://github.com/jeong-sik/masc-mcp/issues/13690"
+    "https://github.com/jeong-sik/masc/issues/13690"
   ]
 }

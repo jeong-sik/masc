@@ -12,13 +12,13 @@ collision_note: "RFC-0064 number is used by two files (this + RFC-0064-two-surfa
 | Field    | Value                                              |
 |----------|----------------------------------------------------|
 | Status   | Active (frontmatter SSOT; ⚠️ number collision)     |
-| Scope    | `lib/cascade/cascade_capacity_probe.ml` (new), `lib/keeper/` |
+| Scope    | `lib/runtime/runtime_capacity_probe.ml` (new), `lib/keeper/` |
 | Conflict | None expected                                      |
 
 ## 1. Problem
 
-`Cascade_http_probe` (formerly `Cascade_ollama_probe`) is the only provider-specific
-capacity probe in the cascade system. Keeper modules (`keeper_turn_driver`,
+`Runtime_http_probe` (formerly `Runtime_ollama_probe`) is the only provider-specific
+capacity probe in the runtime system. Keeper modules (`keeper_turn_driver`,
 `keeper_turn_liveness`, `keeper_unified_turn`) import it directly and call
 `is_ollama_url` to branch on provider identity before invoking probe functions
 (`try_probe`, `cached_capacity`, `refresh_many`).
@@ -31,19 +31,19 @@ Current capacity resolution is a hardcoded 3-tier chain scattered across
 callers:
 
 ```
-Cascade_throttle.capacity url
-  |> fallback Cascade_http_probe.cached_capacity url
-  |> fallback Cascade_client_capacity.capacity url
+Runtime_throttle.capacity url
+  |> fallback Runtime_http_probe.cached_capacity url
+  |> fallback Runtime_client_capacity.capacity url
 ```
 
 ## 2. Proposal
 
-Extract a provider-agnostic `Cascade_capacity_probe` module with:
+Extract a provider-agnostic `Runtime_capacity_probe` module with:
 
 1. A `Probe` module type (signature) declaring `can_probe`, `probe`, `cached`
-2. An HTTP implementation reusing the existing `Cascade_http_probe` internals
+2. An HTTP implementation reusing the existing `Runtime_http_probe` internals
 3. A registry of registered probes, iterated by the resolution chain
-4. Keeper callers simplified to a single `Cascade_capacity_probe.capacity` call
+4. Keeper callers simplified to a single `Runtime_capacity_probe.capacity` call
 
 ### 2.1 Module Type
 
@@ -56,8 +56,8 @@ module type Probe = sig
     url:string ->
     ?timeout_s:float ->
     unit ->
-    Cascade_throttle.capacity_info option
-  val cached : url:string -> ?now:float -> unit -> Cascade_throttle.capacity_info option
+    Runtime_throttle.capacity_info option
+  val cached : url:string -> ?now:float -> unit -> Runtime_throttle.capacity_info option
   val refresh_many :
     sw:Eio.Switch.t ->
     net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
@@ -71,9 +71,9 @@ end
 ### 2.2 Resolution Chain
 
 ```ocaml
-(* Cascade_capacity_probe *)
+(* Runtime_capacity_probe *)
 let capacity url =
-  match Cascade_throttle.capacity url with
+  match Runtime_throttle.capacity url with
   | Some _ as v -> v
   | None ->
     (* iterate registered probes *)
@@ -82,7 +82,7 @@ let capacity url =
     ) !registered_probes
     |> fun v -> match v with
     | Some _ as v -> v
-    | None -> Cascade_client_capacity.capacity url
+    | None -> Runtime_client_capacity.capacity url
 ```
 
 ### 2.3 Keeper Caller Simplification
@@ -90,50 +90,50 @@ let capacity url =
 Before (keeper_turn_driver.ml:842-848):
 ```ocaml
 capacity = (fun url ->
-  match Cascade_throttle.capacity url with
+  match Runtime_throttle.capacity url with
   | Some _ as v -> v
   | None ->
-    match Cascade_http_probe.cached_capacity url with
+    match Runtime_http_probe.cached_capacity url with
     | Some _ as v -> v
-    | None -> Cascade_client_capacity.capacity url);
+    | None -> Runtime_client_capacity.capacity url);
 ```
 
 After:
 ```ocaml
-capacity = Cascade_capacity_probe.capacity;
+capacity = Runtime_capacity_probe.capacity;
 ```
 
 ## 3. File Changes
 
 | File | Action | Description |
 |------|--------|-------------|
-| `lib/cascade/cascade_capacity_probe.ml` | **New** | Module type + registry + resolution chain |
-| `lib/cascade/cascade_capacity_probe.mli` | **New** | Public interface |
-| `lib/cascade/cascade_http_probe.ml` | Modify | Wrap internals as `Http_probe : Probe` |
-| `lib/cascade/cascade_http_probe.mli` | Modify | Export `Http_probe` module for registration |
-| `lib/keeper/keeper_turn_driver.ml` | Modify | Replace 3-tier chain with `Cascade_capacity_probe.capacity` |
+| `lib/runtime/runtime_capacity_probe.ml` | **New** | Module type + registry + resolution chain |
+| `lib/runtime/runtime_capacity_probe.mli` | **New** | Public interface |
+| `lib/runtime/runtime_http_probe.ml` | Modify | Wrap internals as `Http_probe : Probe` |
+| `lib/runtime/runtime_http_probe.mli` | Modify | Export `Http_probe` module for registration |
+| `lib/keeper/keeper_turn_driver.ml` | Modify | Replace 3-tier chain with `Runtime_capacity_probe.capacity` |
 | `lib/keeper/keeper_turn_liveness.ml` | Modify | Replace `is_ollama_url` branch with probe dispatch |
-| `lib/keeper/keeper_unified_turn.ml` | Modify | Replace `Cascade_http_probe.cached_capacity` direct call |
+| `lib/keeper/keeper_unified_turn.ml` | Modify | Replace `Runtime_http_probe.cached_capacity` direct call |
 | `lib/dune` | No change | Uses `(include_subdirs unqualified)` — new files auto-discovered |
 
 ## 4. Migration Path
 
-1. Create `Cascade_capacity_probe` with the HTTP probe as the sole registered probe.
+1. Create `Runtime_capacity_probe` with the HTTP probe as the sole registered probe.
 2. Update keeper callers one at a time (3 files).
-3. `Cascade_http_probe` internals remain unchanged — only wrapped with a
+3. `Runtime_http_probe` internals remain unchanged — only wrapped with a
    `Probe` module type and re-exported as `Http_probe`.
 4. No behavioral change: same resolution chain, same caching, same fail-open.
 
 ## 5. Future Extensions
 
 Adding a vLLM probe requires only:
-1. Create `cascade_vllm_probe.ml` implementing `Probe`
-2. Register it in `Cascade_capacity_probe` startup
+1. Create `runtime_vllm_probe.ml` implementing `Probe`
+2. Register it in `Runtime_capacity_probe` startup
 3. Zero keeper changes
 
 ## 6. Risk Assessment
 
 - **Low risk**: This is a pure refactoring. The resolution chain and caching
   behavior are identical to the current hardcoded chain.
-- **Test coverage**: Existing `test_cascade_http_probe.ml` covers the probe
+- **Test coverage**: Existing `test_runtime_http_probe.ml` covers the probe
   internals. New integration test for the adapter dispatch.

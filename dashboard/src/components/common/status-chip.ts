@@ -21,7 +21,7 @@
 // Caller helpers continue to work without audit.
 //
 // Also adds `children` support. The prior API was label-only but
-// ~12 caller sites already pass children (cascade-config-panel,
+// ~12 caller sites already pass children (runtime-config-panel,
 // verification-requests-panel.test mocks). Accepting both keeps
 // every existing usage compiling while the caller mix converges.
 //
@@ -206,6 +206,7 @@ export interface StatusChipProps {
       where uppercase would change the visual grammar — typically
       file paths, enum values, short textual tags). */
   uppercase?: boolean
+  title?: string
   children?: ComponentChildren
   testId?: string
 }
@@ -214,6 +215,7 @@ export function StatusChip({
   tone = '',
   class: cx,
   uppercase = true,
+  title,
   children,
   testId,
 }: StatusChipProps) {
@@ -237,6 +239,7 @@ export function StatusChip({
     data-status-chip-has-test-id=${summary.hasTestId}
     data-status-chip-class-length=${summary.classNameLength}
     data-status-chip-test-id-length=${summary.testIdLength}
+    title=${title}
     data-testid=${testId}
   >${content}</span>`
 }

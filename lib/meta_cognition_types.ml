@@ -1,4 +1,4 @@
-(** Meta_cognition_types — Types and utilities for room-level meta-cognition.
+(** Meta_cognition_types — Types and utilities for workspace-level meta-cognition.
 
     Contains all shared type definitions and leaf utility functions used
     across the meta-cognition sub-modules.
@@ -95,7 +95,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_room
+  | Stagnant_workspace
 
 type interpretation = {
   primary_salience : salience;
@@ -119,13 +119,7 @@ type digest_ref = {
 (* Leaf utilities                                                    *)
 (* ================================================================ *)
 
-let take n xs =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
+let take = List.take
 
 let unique_non_empty values =
   values
@@ -133,17 +127,12 @@ let unique_non_empty values =
   |> List.filter (fun value -> value <> "")
   |> List.sort_uniq String.compare
 
-let clamp ~min_v ~max_v value =
-  if value < min_v then min_v
-  else if value > max_v then max_v
-  else value
-
 let salience_to_string = function
   | Stable -> "stable"
   | Contested_belief -> "contested_belief"
   | Operator_tension -> "operator_tension"
   | Operator_desire -> "operator_desire"
-  | Stagnant_room -> "stagnant_room"
+  | Stagnant_workspace -> "stagnant_workspace"
 
 let preview ?(max_len = 120) text =
   let text =
@@ -155,10 +144,7 @@ let preview ?(max_len = 120) text =
   in
   String_util.utf8_safe ~max_bytes:((max 0 (max_len - 1)) + 3) ~suffix:"…" text |> String_util.to_string
 
-let contains_ci haystack needle =
-  String_util.contains_substring
-    (String.lowercase_ascii haystack)
-    (String.lowercase_ascii needle)
+let contains_ci = String_util.contains_substring_ci
 
 let contains_any_ci haystack needles =
   List.exists (fun needle -> contains_ci haystack needle) needles

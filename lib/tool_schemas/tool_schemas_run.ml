@@ -1,7 +1,7 @@
 (** Tool_schemas_run — SSOT for run-tracking tool schemas.
 
-    Defines schemas for task execution lifecycle: init, plan, log,
-    deliverable, get, and list.
+    Defines schemas for task execution lifecycle: init, plan, get,
+    and list.
 *)
 
 open Masc_domain
@@ -44,44 +44,9 @@ let schemas : Masc_domain.tool_schema list =
           ];
     };
     {
-      name = "masc_run_log";
-      description =
-        "Append a timestamped note to a task's execution log for audit and handoff continuity. Use when reaching milestones, finding blockers, or making key decisions during execution.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("note", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "task_id"; `String "note" ]);
-            ("additionalProperties", `Bool false);
-          ];
-    };
-    {
-      name = "masc_run_deliverable";
-      description = "Record the final deliverable/output of a task run.";
-      input_schema =
-        `Assoc
-          [
-            ("type", `String "object");
-            ( "properties",
-              `Assoc
-                [
-                  ("task_id", `Assoc [ ("type", `String "string") ]);
-                  ("deliverable", `Assoc [ ("type", `String "string") ]);
-                ] );
-            ("required", `List [ `String "task_id"; `String "deliverable" ]);
-            ("additionalProperties", `Bool false);
-          ];
-    };
-    {
       name = "masc_run_get";
       description =
-        "Retrieve the full execution history for a task including plan revisions, log notes, and deliverables. Use when reviewing progress before handoff or for post-mortem analysis.";
+        "Retrieve the full execution history for a task including plan revisions, log notes, and deliverables. If the task has no run record yet, create an empty run scaffold and return it. Use when reviewing progress before handoff or for post-mortem analysis.";
       input_schema =
         `Assoc
           [

@@ -9,23 +9,6 @@ val allowed_repositories :
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of
     repository IDs that [keeper_id] is allowed to access. *)
 
-val credentials_for_keeper :
-  base_path:string -> keeper_id:string -> (credential list, string) result
-(** [credentials_for_keeper ~base_path ~keeper_id] resolves the
-    credential currently mapped to [keeper_id].  A direct [credential_id]
-    TOML or JSON field on the keeper mapping wins and must reference a repo
-    CLI credential; otherwise this resolves the unique credentials by
-    walking every repository the keeper is allowed to access and looking up each repository's
-    [credential_id] in the credential store.
-
-    Returns [Ok []] when the keeper has no mapping, preserving a distinct
-    missing-mapping signal for strict credential-provider dispatch.
-
-    Repository IDs from the mapping are resolved against the loaded
-    repositories; unknown repository IDs are ignored by this resolution.
-    Returns [Error _] on mapping load failures (including parse/validation
-    failures) or when a referenced credential cannot be found. *)
-
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool
 (** [is_allowed ~keeper_id ~repository_id ~base_path] returns [true] if

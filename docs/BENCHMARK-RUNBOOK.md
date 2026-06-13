@@ -45,7 +45,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 - 두 스크립트 모두 session-less `tools/call`을 재지 않는다.
 - 항상 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 순서를 포함한다.
 - `mcp_session_init`은 세션 생성 비용이다.
-- `mcp_read_*`, `mcp_coord_*`, `mcp_lock`, `mcp_a2a_*`는 established session 위의 MCP path다.
+- `mcp_read_*`, `mcp_workspace_*`, `mcp_lock`, `mcp_a2a_*`는 established session 위의 MCP path다.
 - `oas_runtime_status`, `oas_runtime_single`은 raw local runtime lane이다.
 - `local64`는 target runtime profile 이름이다. 실제 병렬 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`를 기준으로 읽는다.
 
@@ -75,7 +75,7 @@ Command Plane search-fabric benchmark는 제거되었다. `best_first_v1` synthe
 
 ## Repo Synthesis Phase 1
 
-Phase 1 corpus는 `masc-mcp` 단일 repo다.
+Phase 1 corpus는 `masc` 단일 repo다.
 
 - front door:
   - none; benchmark inputs are read from command-plane truth surfaces and artifacts
@@ -129,7 +129,7 @@ scripts/harness/workload/agent_swarm_live.sh
 - 18명 이상 keeper의 runtime manifest evidence가 있는지 확인한다
 - 각 keeper가 provider-dispatched successful turn을 충분히 남겼는지 확인한다
 - `.masc/keepers/<keeper>/runtime-manifests`, execution receipts,
-  checkpoints, memory injection rows, tool-call log links가 서로 이어지는지
+  checkpoints, memory-bank rows, tool-call log links가 서로 이어지는지
   확인한다
 - 결과를 `logs/keeper_fleet_readiness/<run-id>/summary.json`에 남긴다
 
@@ -142,7 +142,7 @@ scripts/harness/workload/agent_swarm_live.sh
 
 ## session runtime local64 compat lane
 
-Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for coordination truth and the canonical dashboard projections (`/api/v1/dashboard/mission`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
+Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for workspace collaboration truth and the canonical dashboard projections (`/api/v1/dashboard/briefing`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
 
 Operation/unit/detachment tool variants were removed (no implementation existed).
 
@@ -291,10 +291,10 @@ dune runtest test/test_tool_call_quality_benchmark.ml
   observation 1 회.
 - `masc_oas_make_tool_bundle_sec` — sum/count, 매 keeper turn 1 회.
 
-masc-mcp 의 `Prometheus.observe_histogram` 은 sum + `_count` 만 저장하므로
+masc 의 hot-path metric surface 는 sum + `_count` 만 저장하므로
 *평균(avg = sum/count)* 까지가 in-tree 측정 한계다. p50/p95/p99 quantile 이
-필요하면 외부 Prometheus scraper + `histogram_quantile()` 또는 별도 raw-sample
-경로가 필요하다 (현재 Phase B 범위 밖).
+필요하면 외부 time-series backend 또는 별도 raw-sample 경로가 필요하다
+(현재 Phase B 범위 밖).
 
 ### Smoke run
 
@@ -304,13 +304,13 @@ BENCH_ITERATIONS=50 BENCH_WARMUP_ITERATIONS=1 \
   ./scripts/harness_tool_call_quality.sh --live --keepers bench-analyst \
     --models <provider:model>
 
-# 2. /metrics 스크레이프 + CSV 저장.
-./scripts/harness_oas_dispatch.sh scrape --label baseline
-
-# 3. 비교 (e.g. memoization 적용 전후, 또는 hist on/off).
-./scripts/harness_oas_dispatch.sh diff \
-  benchmarks/results/oas-baseline-<base>.csv \
-  benchmarks/results/oas-baseline-<current>.csv
+# 2. configured OTel backend에서 아래 series의 sum/count를 query한다.
+#    - masc_oas_params_of_schema_sec
+#    - masc_oas_params_of_schema_sec_count
+#    - masc_oas_make_tool_bundle_sec
+#    - masc_oas_make_tool_bundle_sec_count
+#
+# 3. 비교는 backend query 결과의 avg = sum/count 기준으로 수행한다.
 ```
 
 ### Histogram-overhead control

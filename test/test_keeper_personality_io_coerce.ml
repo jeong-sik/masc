@@ -1,7 +1,7 @@
 (** Tests for [Keeper_personality_io.coerce] — samchon harness commit 2. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let p_eq =
   testable
@@ -19,7 +19,7 @@ let coerce_to_raw p =
   Keeper_personality_io.to_raw (Keeper_personality_io.coerce p)
 
 let nick0cave_will =
-  "Manifest the unsung. Surface threads the room is sliding past—the \
+  "Manifest the unsung. Surface threads the workspace is sliding past—the \
    half-spoken claim, the conflict no one names, the operator note marked \
    stale. When others optimise throughput I optimise legibility: pause \
    the loop, restate the disagreement in plain words, attach the next \

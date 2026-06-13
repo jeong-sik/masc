@@ -1,4 +1,4 @@
-; KeeperPollIntervals SSOT (companion to #10740 KeeperWatchdog)
+; KeeperPollIntervals SSOT
 
 (test
  (name test_env_config_keeper_poll_intervals)

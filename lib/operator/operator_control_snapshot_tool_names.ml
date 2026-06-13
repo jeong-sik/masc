@@ -4,8 +4,6 @@
     Pure JSON/string helpers used to surface the recent tools a keeper
     has called in the operator's "recent" view. *)
 
-module U = Yojson.Safe.Util
-
 let merge_tool_name_lists primary secondary =
   let seen = Hashtbl.create 16 in
   let add acc raw_name =
@@ -20,23 +18,10 @@ let merge_tool_name_lists primary secondary =
 ;;
 
 let tool_names_of_recent_json (json : Yojson.Safe.t) =
-  let tools_used =
-    match U.member "tools_used" json with
-    | `List items ->
-      List.filter_map
-        (function
-          | `String value ->
-            let trimmed = String.trim value in
-            if trimmed = "" then None else Some trimmed
-          | _ -> None)
-        items
-    | _ -> []
-  in
+  let tools_used = Json_util.get_string_list json "tools_used" in
   let single_tool =
-    match U.member "tool" json with
-    | `String value ->
-      let trimmed = String.trim value in
-      if trimmed = "" then [] else [ trimmed ]
+    match Json_util.get_string json "tool" with
+    | Some value when String.trim value <> "" -> [ value ]
     | _ -> []
   in
   merge_tool_name_lists single_tool tools_used

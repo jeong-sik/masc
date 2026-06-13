@@ -21,14 +21,43 @@ let role_of_string_opt = function
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
-  `List (List.map Agent_sdk.Api.content_block_to_json blocks)
+  `List
+    (List.map
+       (function
+        | Agent_sdk.Types.Thinking { thinking_type; content } ->
+          `Assoc
+            [ ("type", `String "thinking")
+            ; ("thinking", `String content)
+            ; ("thinking_type", `String thinking_type)
+            ]
+        | Agent_sdk.Types.RedactedThinking text ->
+          `Assoc
+            [ ("type", `String "redacted_thinking")
+            ; ("data", `String text)
+            ]
+        | block -> Agent_sdk.Api.content_block_to_json block)
+       blocks)
 
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
-  let open Yojson.Safe.Util in
-  match json |> member "content_blocks" with
-  | `List blocks ->
-      let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
+  match Json_util.assoc_member_opt "content_blocks" json with
+  | Some (`List blocks) ->
+      let parse_block = function
+        | `Assoc _ as j ->
+          (match Json_util.get_string j "type" with
+           | Some "thinking" ->
+             (match Json_util.get_string j "thinking" with
+              | Some content ->
+                Some (Agent_sdk.Types.Thinking { thinking_type = "thinking"; content })
+              | None -> None)
+           | Some "redacted_thinking" ->
+             (match Json_util.get_string j "data" with
+              | Some text -> Some (Agent_sdk.Types.RedactedThinking text)
+              | None -> None)
+           | _ -> Agent_sdk.Api.content_block_of_json j)
+        | _ -> None
+      in
+      let parsed = List.filter_map parse_block blocks in
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 
@@ -38,8 +67,8 @@ let string_field_opt key value =
   | None -> []
 
 let metadata_of_json (json : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
-  match Yojson.Safe.Util.member "metadata" json with
-  | `Assoc fields -> fields
+  match Json_util.assoc_member_opt "metadata" json with
+  | Some (`Assoc fields) -> fields
   | _ -> []
 
 let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
@@ -81,8 +110,11 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
      @ if m.metadata = [] then [] else [ ("metadata", `Assoc m.metadata) ])
 
 let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
-  let open Yojson.Safe.Util in
-  let raw_role = json |> member "role" |> to_string in
+  let raw_role =
+    match Json_util.get_string json "role" with
+    | Some s -> s
+    | None -> invalid_arg "keeper_context_core: missing role field"
+  in
   let role =
     match role_of_string_opt raw_role with
     | Some role -> role
@@ -101,10 +133,10 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
       Agent_sdk.Types.role;
       content;
       name =
-        (json |> member "name" |> to_string_option
+        (Json_util.get_string json "name"
          |> Option.map Inference_utils.sanitize_text_utf8);
       tool_call_id =
-        (json |> member "tool_call_id" |> to_string_option
+        (Json_util.get_string json "tool_call_id"
          |> Option.map Inference_utils.sanitize_text_utf8);
       metadata = [];
     }

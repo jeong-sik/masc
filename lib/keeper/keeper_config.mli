@@ -7,32 +7,15 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns. Resolved each call against
-    the live [Cascade_catalog_runtime] snapshot so the answer reflects
-    the currently-installed catalog rather than module-init state. Falls
-    back to [Cascade_routes.cascade_name_for_use Keeper_turn] when the
-    snapshot is not yet available (early boot).
+(** Default runtime name for keeper turns = the default Runtime's id.
+
+    runtime→Runtime 숙청: 이전의 phase_recovery / phase_buffer /
+    tool_action / phase_routing 구분은 모두 동일한 default Runtime 으로
+    수렴하는 죽은 추상화였으므로 이 단일 thunk 로 collapse 되었다.
     @since v2.128.0
     @since RFC-0066 Phase 1: changed from a string value to a thunk
     (issue #14624). *)
-val default_cascade_name : unit -> string
-
-(** Cascade name for recovery turns (Failing phase). In the two-profile
-    catalog this resolves to the canonical keeper cascade.
-    @since Core Triad *)
-val phase_recovery_cascade_name : string
-
-(** Cascade name for buffer operations (Compacting, HandingOff). In the
-    two-profile catalog this resolves to the canonical keeper cascade.
-    @since Core Triad *)
-val phase_buffer_cascade_name : string
-
-(** Cascade names that are selected by keeper phase-routing rather than by
-    keeper-assignable profile choice. *)
-val phase_routing_cascade_names : string list
-
-(** Cascade name for turns that must use a tool-capable provider lane. *)
-val tool_required_cascade_name : string
+val default_runtime_id : unit -> string
 
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int
@@ -60,10 +43,8 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
-val legacy_provider_filter_name : string
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_self_model_text] when called from prompt rendering.
@@ -111,9 +92,6 @@ val removed_keeper_input_key_names : string list
 (** Field names that are no longer accepted in keeper message input. *)
 val removed_keeper_msg_input_key_names : string list
 
-(** Field names that are no longer accepted in keeper metadata. *)
-val removed_keeper_meta_key_names : string list
-
 (** Return which [keys] are present as top-level keys in the JSON object. *)
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 
@@ -126,9 +104,6 @@ val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 
 (** {1 UTF-8 Safety} *)
-
-(** Truncate a string to at most [max_bytes] bytes on a valid UTF-8 boundary. *)
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
 
 (** Replace invalid UTF-8 sequences with U+FFFD. *)
 val utf8_repair_string : string -> string
@@ -192,19 +167,6 @@ val normalize_continuity_compaction_cooldown_sec : int -> int
     behavior in [Keeper_compact_policy]. *)
 val default_keep_recent_tool_results : int
 
-(** Default message-count floor for the tool-heavy compaction gate.
-    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
-    [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD] (valid range [1, 10_000];
-    out-of-range warns and falls back to 40, mirroring
-    [Keeper_compact_policy.emergency_compact_ratio_threshold]). *)
-val default_tool_heavy_msg_threshold : int
-
-(** Default context-ratio floor for the tool-heavy compaction gate.
-    Wired into [decide_compaction] by PR-B.  Operator override (PR-C):
-    [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR] (valid range [0.0, 1.0);
-    out-of-range or non-finite values warn and fall back to 0.15). *)
-val default_tool_heavy_ratio_floor : float
-
 (** Hard upper bound for operator-supplied
     [keep_recent_tool_results] (typo guard). *)
 val keep_recent_tool_results_max : int
@@ -240,19 +202,11 @@ val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 
 val keeper_batch_limit : unit -> int
-val keeper_board_debounce_window_sec : unit -> float
-(** Time window (seconds) to coalesce board signals into a single keeper turn.
-    Env: [MASC_KEEPER_BOARD_DEBOUNCE_SEC], default [2.0], range [0.0..30.0]. *)
-val keeper_tool_cost_max_usd : unit -> float option
-val keeper_max_tools_per_turn : unit -> int
-val keeper_retry_max_tools_per_turn : unit -> int
-val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_cascade : unit -> string
-(** Reranker cascade profile. Defaults through [routes.llm_rerank]; env
+val keeper_llm_rerank_runtime : unit -> string
+(** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
     overrides may be either a concrete profile name or a logical route key. *)
 
-val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float
@@ -266,30 +220,12 @@ val keeper_tool_search_top_k : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 
-val keeper_slot_pool_size : unit -> int
-
-(** Compute a deterministic slot_id for a keeper name.
-    Returns [None] when slot pinning is disabled. *)
-val keeper_slot_id : string -> int option
-
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
-
-(** When true, each turn's [enable_thinking] boolean is chosen per turn by
-    [Keeper_turn_intent.classify] (Mechanical → false, Cognitive → true)
-    and injected via the [before_turn_params] hook. When false, the static
-    [keeper_enable_thinking ()] base is used for every turn.
-
-    Independent of [keeper_adaptive_thinking_enabled] (which only tunes
-    the thinking budget, not the on/off choice). *)
-val keeper_adaptive_thinking_mode : unit -> bool
 
 (** {1 Runtime Param Handles}
 
     Exposed for test use only (e.g. [Runtime_params.clear]). *)
-
-(** Coord signal prompt enabled override from env var. *)
-val keeper_room_signal_prompt_enabled_override : unit -> bool option
 
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore].  Call from server bootstrap. *)

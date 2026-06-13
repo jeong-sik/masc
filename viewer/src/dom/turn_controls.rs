@@ -25,7 +25,7 @@ use wasm_bindgen::prelude::*;
 use crate::config;
 #[cfg(any(target_arch = "wasm32", test))]
 use crate::game::lifecycle::{TrpgLifecycleState, TrpgUiState};
-use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
+use crate::game::state::{ConnectionStatus, WorkspaceState, TurnProgressState};
 
 #[cfg(any(target_arch = "wasm32", test))]
 fn connection_ready(status: &ConnectionStatus) -> bool {
@@ -231,13 +231,11 @@ fn derive_trpg_ui_state(
     // Only honour round_running when the session is actually active.
     // Stale DOM attributes (data-round-runner-active) can persist after a
     // session ends abnormally, locking the UI in RoundRunning even though
-    // the lifecycle has returned to Lobby/Ended.
+    // the lifecycle has returned to Idle/Ended.
     if round_running
         && !matches!(
             lifecycle,
-            TrpgLifecycleState::Lobby
-                | TrpgLifecycleState::Ended
-                | TrpgLifecycleState::Unknown
+            TrpgLifecycleState::Idle | TrpgLifecycleState::Ended | TrpgLifecycleState::Unknown
         )
     {
         return TrpgUiState::RoundRunning;
@@ -249,11 +247,11 @@ fn derive_trpg_ui_state(
         TrpgLifecycleState::Running => TrpgUiState::SessionRunning,
         TrpgLifecycleState::Stopped => TrpgUiState::Paused,
         TrpgLifecycleState::Ended => TrpgUiState::Ended,
-        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => {
+        TrpgLifecycleState::Idle | TrpgLifecycleState::Unknown => {
             if preflight_ok && wizard_ready {
                 TrpgUiState::ConfigReady
             } else {
-                TrpgUiState::Lobby
+                TrpgUiState::Idle
             }
         }
         TrpgLifecycleState::Loading => TrpgUiState::SessionStarting,
@@ -394,17 +392,17 @@ pub fn unbind_turn_controls(mut commands: Commands) {
 
 /// Show turn controls only when a round-run capable assignment exists.
 pub fn sync_turn_controls_visibility(
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
     connection: Res<ConnectionStatus>,
 ) {
-    let _ = (&room_state, &progress);
+    let _ = (&workspace_state, &progress);
     let _ = &connection;
 
     #[cfg(target_arch = "wasm32")]
     {
         let lifecycle =
-            TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
+            TrpgLifecycleState::from_workspace_progress(&workspace_state.status, &progress.workspace_status);
         let connection_ok = connection_ready(&connection);
 
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -422,13 +420,13 @@ pub fn sync_turn_controls_visibility(
         let lock_owner = current_round_flight_owner(&doc);
 
         // ── Stale DOM cleanup ──────────────────────────────────────────
-        // When the lifecycle has returned to a terminal state (Lobby or
+        // When the lifecycle has returned to a terminal state (Idle or
         // Ended), any lingering round-runner / flight-owner DOM flags are
         // stale leftovers from a previous session that ended abnormally.
         // Force-clear them so the UI is not permanently locked.
         if matches!(
             lifecycle,
-            TrpgLifecycleState::Lobby | TrpgLifecycleState::Ended
+            TrpgLifecycleState::Idle | TrpgLifecycleState::Ended
         ) {
             if let Some(dashboard) = doc.get_element_by_id("dashboard") {
                 let _ = dashboard.set_attribute("data-round-runner-active", "0");
@@ -474,13 +472,13 @@ pub fn sync_turn_controls_visibility(
 
         let dm_ready = !progress.dm_keeper.trim().is_empty()
             || read_dom_input(&doc, "round-run-dm")
-                .or_else(|| read_claimed_keeper_for_current_room(&doc))
+                .or_else(|| read_claimed_keeper_for_current_workspace(&doc))
                 .or_else(|| read_dom_input(&doc, "new-game-dm-select"))
                 .is_some();
         let player_pairs_raw = read_dom_text_value(&doc, "round-run-players").unwrap_or_default();
         let mut player_count = parse_player_keeper_pairs(&player_pairs_raw).len();
         if player_count == 0 {
-            if read_claimed_actor_keeper_for_current_room(&doc).is_some() {
+            if read_claimed_actor_keeper_for_current_workspace(&doc).is_some() {
                 player_count = 1;
             }
         }
@@ -1055,7 +1053,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
 
     let url = config::build_masc_url("api/v1/trpg/rounds/run");
     let body = json!({
-        "room_id": config::current_room_id(),
+        "workspace_id": config::current_workspace_id(),
         "dm_keeper": plan.dm_keeper,
         "player_keepers": Value::Object(player_keepers),
         "phase": plan.phase,
@@ -1089,7 +1087,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
             return Ok(RoundRunOutcome::InFlight {
                 status: "라운드 실행이 이미 진행 중입니다.".to_string(),
                 detail:
-                    "같은 room에서 이미 라운드 실행 중입니다. 다른 탭/자동 진행 결과를 기다린 뒤 자동으로 상태가 갱신됩니다."
+                    "같은 workspace에서 이미 라운드 실행 중입니다. 다른 탭/자동 진행 결과를 기다린 뒤 자동으로 상태가 갱신됩니다."
                         .to_string(),
             });
         }
@@ -1116,7 +1114,7 @@ async fn advance_turn() -> Result<RoundRunOutcome, JsValue> {
                 return Ok(RoundRunOutcome::InFlight {
                     status: "라운드 실행이 이미 진행 중입니다.".to_string(),
                     detail: format!(
-                        "같은 room 라운드가 이미 처리 중입니다. {}",
+                        "같은 workspace 라운드가 이미 처리 중입니다. {}",
                         shorten_reason(&api_error, 100)
                     ),
                 });
@@ -1193,7 +1191,7 @@ fn round_response_api_error(json: &Value) -> Option<String> {
 fn is_transient_round_conflict(status: Option<u16>, detail: &str) -> bool {
     let lowered = detail.to_ascii_lowercase();
     let has_conflict_phrase = lowered.contains("round run already in progress")
-        || lowered.contains("already in progress for room")
+        || lowered.contains("already in progress for workspace")
         || lowered.contains("single-flight")
         || lowered.contains("already running")
         || lowered.contains("in progress");
@@ -1836,14 +1834,14 @@ fn read_dom_input(doc: &web_sys::Document, id: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn claim_matches_current_room(doc: &web_sys::Document) -> bool {
-    let claimed_room = read_dom_input(doc, "claimed-room-id").unwrap_or_default();
-    !claimed_room.is_empty() && claimed_room == config::current_room_id()
+fn claim_matches_current_workspace(doc: &web_sys::Document) -> bool {
+    let claimed_workspace = read_dom_input(doc, "claimed-workspace-id").unwrap_or_default();
+    !claimed_workspace.is_empty() && claimed_workspace == config::current_workspace_id()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_claimed_keeper_for_current_room(doc: &web_sys::Document) -> Option<String> {
-    if claim_matches_current_room(doc) {
+fn read_claimed_keeper_for_current_workspace(doc: &web_sys::Document) -> Option<String> {
+    if claim_matches_current_workspace(doc) {
         read_dom_input(doc, "claimed-keeper")
     } else {
         None
@@ -1851,8 +1849,8 @@ fn read_claimed_keeper_for_current_room(doc: &web_sys::Document) -> Option<Strin
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_claimed_actor_keeper_for_current_room(doc: &web_sys::Document) -> Option<(String, String)> {
-    if !claim_matches_current_room(doc) {
+fn read_claimed_actor_keeper_for_current_workspace(doc: &web_sys::Document) -> Option<(String, String)> {
+    if !claim_matches_current_workspace(doc) {
         return None;
     }
     let claimed_actor = read_dom_input(doc, "claimed-actor-id").unwrap_or_default();
@@ -1900,7 +1898,7 @@ fn normalize_round_phase_input(raw: &str) -> String {
 #[cfg(target_arch = "wasm32")]
 fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> {
     let dm_keeper = read_dom_input(doc, "round-run-dm")
-        .or_else(|| read_claimed_keeper_for_current_room(doc))
+        .or_else(|| read_claimed_keeper_for_current_workspace(doc))
         .or_else(|| read_dom_input(doc, "new-game-dm-select"))
         .unwrap_or_default();
     if dm_keeper.is_empty() {
@@ -1922,7 +1920,7 @@ fn read_round_run_plan(doc: &web_sys::Document) -> Result<RoundRunPlan, String> 
     let mut player_keepers = parse_player_keeper_pairs(&player_pairs_raw);
     if player_keepers.is_empty() {
         if let Some((claimed_actor, claimed_keeper)) =
-            read_claimed_actor_keeper_for_current_room(doc)
+            read_claimed_actor_keeper_for_current_workspace(doc)
         {
             player_keepers.push((claimed_actor, claimed_keeper));
         }
@@ -1954,7 +1952,7 @@ mod tests {
     #[test]
     fn derive_round_control_state_requires_running_or_stopped() {
         let (can_run, reason, css) =
-            derive_round_control_state(TrpgLifecycleState::Lobby, true, None);
+            derive_round_control_state(TrpgLifecycleState::Idle, true, None);
         assert!(!can_run);
         assert!(reason.contains("실행 대기"));
         assert_eq!(css, "status-info");
@@ -2021,7 +2019,7 @@ mod tests {
     fn round_readiness_rows_report_missing_requirements() {
         let rows = derive_round_readiness_rows(
             false,
-            TrpgLifecycleState::Lobby,
+            TrpgLifecycleState::Idle,
             false,
             0,
             Some("자동 라운드 실행 중"),
@@ -2045,18 +2043,16 @@ mod tests {
 
     #[test]
     fn derive_trpg_ui_state_requires_preflight_before_ready() {
-        let state =
-            derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, false, true, false);
-        assert_eq!(state, TrpgUiState::Lobby);
+        let state = derive_trpg_ui_state(TrpgLifecycleState::Idle, true, false, false, true, false);
+        assert_eq!(state, TrpgUiState::Idle);
     }
 
     /// Stale `data-round-runner-active` DOM attribute must NOT lock the UI
-    /// when lifecycle has returned to Lobby (e.g. after abnormal session end).
+    /// when lifecycle has returned to Idle (e.g. after abnormal session end).
     #[test]
-    fn derive_trpg_ui_state_ignores_stale_round_running_in_lobby() {
-        // round_running=true but lifecycle=Lobby → should NOT be RoundRunning
-        let state =
-            derive_trpg_ui_state(TrpgLifecycleState::Lobby, true, false, true, true, true);
+    fn derive_trpg_ui_state_ignores_stale_round_running_in_idle() {
+        // round_running=true but lifecycle=Idle → should NOT be RoundRunning
+        let state = derive_trpg_ui_state(TrpgLifecycleState::Idle, true, false, true, true, true);
         assert_ne!(state, TrpgUiState::RoundRunning);
         // With preflight+wizard ready, it should be ConfigReady
         assert_eq!(state, TrpgUiState::ConfigReady);
@@ -2065,8 +2061,7 @@ mod tests {
     /// Same stale-state protection for Ended lifecycle.
     #[test]
     fn derive_trpg_ui_state_ignores_stale_round_running_in_ended() {
-        let state =
-            derive_trpg_ui_state(TrpgLifecycleState::Ended, true, false, true, true, true);
+        let state = derive_trpg_ui_state(TrpgLifecycleState::Ended, true, false, true, true, true);
         assert_ne!(state, TrpgUiState::RoundRunning);
         assert_eq!(state, TrpgUiState::Ended);
     }
@@ -2077,7 +2072,7 @@ mod tests {
         let state =
             derive_trpg_ui_state(TrpgLifecycleState::Unknown, true, false, false, false, true);
         assert_ne!(state, TrpgUiState::RoundRunning);
-        assert_eq!(state, TrpgUiState::Lobby);
+        assert_eq!(state, TrpgUiState::Idle);
     }
 
     /// round_running in Running lifecycle should still be honoured.
@@ -2096,7 +2091,7 @@ mod tests {
     fn transient_round_conflict_detection_by_status_and_message() {
         assert!(is_transient_round_conflict(
             Some(400),
-            "HTTP 400: round run already in progress for room_id=test",
+            "HTTP 400: round run already in progress for workspace_id=test",
         ));
         assert!(!is_transient_round_conflict(
             Some(400),
@@ -2108,11 +2103,11 @@ mod tests {
     fn round_response_api_error_extracts_error_when_ok_false() {
         let payload = serde_json::json!({
             "ok": false,
-            "error": "round run already in progress for room_id=abc"
+            "error": "round run already in progress for workspace_id=abc"
         });
         assert_eq!(
             round_response_api_error(&payload),
-            Some("round run already in progress for room_id=abc".to_string())
+            Some("round run already in progress for workspace_id=abc".to_string())
         );
     }
 }

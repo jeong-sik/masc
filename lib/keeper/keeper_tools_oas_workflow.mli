@@ -8,6 +8,8 @@
     before execution. Missing policy is deliberately observe-only. *)
 type workflow_rejection_scope_policy =
   | Observe_scope
+  (** Legacy diagnostic value accepted for compatibility with older
+      payloads. Runtime scope blocking is not driven by this field. *)
   | Block_scope
 
 val workflow_rejection_scope_policy_to_string :
@@ -89,9 +91,6 @@ val workflow_rejection_payload_json
 (** Extract [workflow_rejection_info] from a raw JSON string. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
 
-(** True only when the producing tool explicitly requested a scope block. *)
-val workflow_rejection_should_scope_block : workflow_rejection_info -> bool
-
 (** Build a stable family key for deduplication. *)
 val workflow_rejection_family_key
   :  tool_name:string
@@ -120,25 +119,3 @@ val json_has_nonempty_evidence_refs : Yojson.Safe.t -> bool
 
 (** Build a workflow-submit evidence marker string. *)
 val workflow_submit_evidence_marker : Yojson.Safe.t -> string
-
-(** Build a scope key from tool input for workflow rejection dedup. *)
-val workflow_scope_key_of_input
-  :  tool_name:string
-  -> Yojson.Safe.t
-  -> string option
-
-(** Block record stored in [failure_counts.workflow_block_table].
-    Defined here because [workflow_rejection_scope_block_fields] uses it. *)
-type workflow_rejection_block =
-  { count : int
-  ; rule_id : string option
-  ; tool_suggestion : string option
-  ; hint : string option
-  ; blocked_at : float
-  }
-
-(** Build structured recovery fields from a workflow rejection block. *)
-val workflow_rejection_scope_block_fields
-  :  tool_name:string
-  -> workflow_rejection_block
-  -> (string * Yojson.Safe.t) list

@@ -16,7 +16,7 @@ open Alcotest
 let test_with_span_invokes_callback_once () =
   let invoked = ref 0 in
   let _result, _outcome =
-    Masc_mcp.Tool_telemetry.with_span ~tool_name:"test_tool_unit" (fun _trace_id ->
+    Masc.Tool_telemetry.with_span ~tool_name:"test_tool_unit" (fun _trace_id ->
       incr invoked;
       (), "handled")
   in
@@ -25,7 +25,7 @@ let test_with_span_invokes_callback_once () =
 
 let test_with_span_returns_outcome_label () =
   let _result, outcome =
-    Masc_mcp.Tool_telemetry.with_span ~tool_name:"test_outcome_label" (fun _trace_id ->
+    Masc.Tool_telemetry.with_span ~tool_name:"test_outcome_label" (fun _trace_id ->
       (), "no_handler")
   in
   (check string) "outcome label propagates to caller" "no_handler" outcome
@@ -34,7 +34,7 @@ let test_with_span_returns_outcome_label () =
 let test_trace_id_thunk_is_callable () =
   let thunk_called = ref false in
   let _result, _outcome =
-    Masc_mcp.Tool_telemetry.with_span ~tool_name:"test_trace_id_thunk" (fun trace_id_thunk ->
+    Masc.Tool_telemetry.with_span ~tool_name:"test_trace_id_thunk" (fun trace_id_thunk ->
       let _ = trace_id_thunk () in
       thunk_called := true;
       (), "handled")
@@ -43,16 +43,16 @@ let test_trace_id_thunk_is_callable () =
 ;;
 
 let test_register_metrics_idempotent () =
-  (* Calling twice must not raise (Prometheus would otherwise reject
+  (* Calling twice must not raise (Otel_metric_store would otherwise reject
      duplicate counter registration). *)
-  Masc_mcp.Tool_telemetry.register_metrics ();
-  Masc_mcp.Tool_telemetry.register_metrics ();
+  Masc.Tool_telemetry.register_metrics ();
+  Masc.Tool_telemetry.register_metrics ();
   (check bool) "register_metrics idempotent across repeated calls" true true
 ;;
 
 let test_with_span_result_propagates () =
   let result, _outcome =
-    Masc_mcp.Tool_telemetry.with_span ~tool_name:"test_result_propagate" (fun _trace_id ->
+    Masc.Tool_telemetry.with_span ~tool_name:"test_result_propagate" (fun _trace_id ->
       42, "handled")
   in
   (check int) "result value from callback returned to caller" 42 result

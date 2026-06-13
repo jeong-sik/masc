@@ -19,7 +19,7 @@
 @import "./base.css";
 @import "./keyframes.css";
 
-/* ── Feature imports (alphabetical, a11y.css last for cascade) ── */
+/* ── Feature imports (alphabetical, a11y.css last for runtime) ── */
 
 @import "./board.css";
 @import "./chat.css";
@@ -27,7 +27,6 @@
 @import "./governance.css";
 @import "./governance-agent.css";
 @import "./keeper-detail.css";
-@import "./live-monitor.css";
 @import "./ops.css";
 @import "./pipeline.css";
 @import "./pixel-avatar.css";

@@ -371,13 +371,13 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 
-  it('routes the message room focus to the room timeline surface', () => {
-    route.value = { params: { focus: 'messages-room' } } as any
-    messages.value = [{ id: 'm-room', from: 'sangsu', room: 'ops', content: 'room update' }]
+  it('routes the message workspace focus to the workspace timeline surface', () => {
+    route.value = { params: { focus: 'messages-workspace' } } as any
+    messages.value = [{ id: 'm-workspace', from: 'sangsu', workspace: 'ops', content: 'workspace update' }]
 
     render(h(BoardSurface, null))
 
-    expect(screen.getByRole('heading', { name: 'Room timeline' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Workspace timeline' })).toBeInTheDocument()
     expect(screen.queryByText('+ 새 글 작성')).not.toBeInTheDocument()
   })
 

@@ -22,17 +22,12 @@ type keeper_profile_defaults = {
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
   proactive_cooldown_sec : int option;
-  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  repo_cli_identity : string option;
-  git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_access : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
@@ -41,8 +36,8 @@ type keeper_profile_defaults = {
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
-  models : string list option;
+  (* No per-keeper [model]/[runtime_id] field: keeper→runtime assignment lives
+     solely in runtime.toml [[runtime.assignments]] (persona⊥{model,runtime}). *)
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;

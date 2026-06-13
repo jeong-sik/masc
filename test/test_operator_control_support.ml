@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 module Types = Masc_domain
 
@@ -12,7 +12,7 @@ let temp_dir () =
   dir
 
 (** Ensure Fs_compat has the Eio fs handle set.
-    Call inside Eio_main.run before creating Coord config. *)
+    Call inside Eio_main.run before creating Workspace config. *)
 let ensure_fs env =
   Masc_test_deps.init_eio_clock env;
   if not (Fs_compat.has_fs ()) then
@@ -48,11 +48,9 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
   }
 
 let dispatch_keeper_exn ctx ~name ~args =
-  match Tool_keeper.dispatch ctx ~name ~args with
+  match Keeper_tool_surface.dispatch ctx ~name ~args with
   | Some result -> Tool_result.is_success result, Tool_result.message result
   | None -> failwith ("keeper dispatch missing: " ^ name)
-
-(* unit_update_exn / start_operation_exn removed (CP purge: Command_plane_v2 deleted) *)
 
 let iso_of_unix unix_ts =
   let tm = Unix.gmtime unix_ts in
@@ -60,11 +58,10 @@ let iso_of_unix unix_ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let record_operator_judgment config ~surface ~target_type ~target_id ~summary
-    ?recommended_action ~fresh_for_sec () =
+let record_operator_judgment config ~surface ~summary ?recommended_action ~fresh_for_sec () =
   let now_unix = Unix.gettimeofday () in
   ignore
-    (Operator_judgment.record config ~surface ~target_type ~target_id ~summary
+    (Operator_judgment.record config ~surface ~summary
        ~confidence:0.91 ?recommended_action ~generated_at:(Masc_domain.now_iso ())
        ~generated_at_unix:now_unix
        ~fresh_until:(iso_of_unix (now_unix +. fresh_for_sec))

@@ -40,7 +40,7 @@ implementation_prs: [15200]
 
 PR diff 에서 `^\+\+\+ b/docs/rfc/RFC-(\d{4})-` 패턴 추출. 각 N 에 대해 `git ls-tree origin/main docs/rfc/RFC-${N}-*.md` 결과가 *같은 PR 의 추가 파일* 이 아닌 *다른 파일* 이면 fail. PR comment 로 "RFC-${N} already used by `<path>`. Allocate next via `scripts/rfc-allocate-next.sh`" 안내.
 
-Multi-phase RFC 패턴 (예: `RFC-0058-declarative-cascade-config.md` + `RFC-0058-phase-5-...md`) 은 *명시적 opt-in* 으로 허용 — PR body 에 `RFC-EXTEND: NNNN` 라인 (또는 본문 frontmatter `extends: "NNNN"`) 이 있으면 main 의 기존 NNNN 위에 phase 추가 가능. 옵트인 없이 같은 NNNN 점유 시 fail.
+Multi-phase RFC 패턴 (예: `RFC-NNNN-main-topic.md` + `RFC-NNNN-phase-5-...md`) 은 *명시적 opt-in* 으로 허용 — PR body 에 `RFC-EXTEND: NNNN` 라인 (또는 본문 frontmatter `extends: "NNNN"`) 이 있으면 main 의 기존 NNNN 위에 phase 추가 가능. 옵트인 없이 같은 NNNN 점유 시 fail.
 
 ## §3 Components
 

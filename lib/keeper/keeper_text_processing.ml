@@ -61,7 +61,7 @@ let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
    .tmp/memory-compacting-analysis.html (reply skill-route scrub
    visibility). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ReplySkillRouteStrips)
     ~help:
       "Total [Keeper_text_processing.strip_internal_reply_markup] \
@@ -69,7 +69,7 @@ let () =
        SKILL_REASON: lines.  Rising rate is the resonance-loop \
        input indicator for the *skill* marker."
     ();
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ReplySkillRouteLinesRemoved)
     ~help:
       "Total SKILL: / SKILL_REASON: lines stripped from raw replies. \
@@ -86,7 +86,7 @@ let () =
    .tmp/memory-compacting-analysis.html (user-visible reply
    fallback chain). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string UserVisibleReplySource)
     ~help:
       "Total [user_visible_reply_text] returns, classified by label \
@@ -98,7 +98,7 @@ let () =
 
 let record_user_visible_reply_source
     ~(source : Keeper_user_visible_reply_source.t) =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string UserVisibleReplySource)
     ~labels:
       [ ("source", Keeper_user_visible_reply_source.to_label source) ]
@@ -107,10 +107,10 @@ let record_user_visible_reply_source
 let strip_internal_reply_markup (raw : string) : string =
   let skill_lines = Keeper_skill_routing.count_skill_route_lines raw in
   if skill_lines > 0 then begin
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReplySkillRouteStrips)
       ();
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReplySkillRouteLinesRemoved)
       ~delta:(float_of_int skill_lines)
       ()

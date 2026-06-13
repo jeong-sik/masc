@@ -6,7 +6,7 @@ module Types = Masc_domain
     They intentionally do not introduce a new FSM or change transition policy. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let counter = ref 0
 
@@ -37,19 +37,19 @@ let with_config f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-       let config = Coord.default_config dir in
-       ignore (Coord.init config ~agent_name:(Some "worker"));
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "worker"));
        f config)
 ;;
 
 let add_task config =
   ignore
-    (Coord.add_task
+    (Workspace.add_task
        config
        ~title:"north-star task"
        ~priority:3
        ~description:"behavior lock");
-  match (Coord.read_backlog config).tasks with
+  match (Workspace.read_backlog config).tasks with
   | task :: _ -> task.id
   | [] -> fail "fixture task not created"
 ;;
@@ -58,7 +58,7 @@ let task config task_id =
   match
     List.find_opt
       (fun (task : Masc_domain.task) -> String.equal task.id task_id)
-      (Coord.read_backlog config).tasks
+      (Workspace.read_backlog config).tasks
   with
   | Some task -> task
   | None -> fail ("task not found: " ^ task_id)
@@ -80,7 +80,7 @@ let expect_invalid_transition label = function
 ;;
 
 let transition config ~agent_name ~task_id ~action ?(notes = "") ?(reason = "") () =
-  Coord.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
+  Workspace.transition_task_r config ~agent_name ~task_id ~action ~notes ~reason ()
 ;;
 
 let test_claim_start_done_path () =
@@ -179,7 +179,7 @@ let test_done_is_idempotent_terminal () =
          ~notes:"first"
          ()
        |> expect_ok "done");
-    let before_version = (Coord.read_backlog config).version in
+    let before_version = (Workspace.read_backlog config).version in
     ignore
       (transition
          config
@@ -189,7 +189,7 @@ let test_done_is_idempotent_terminal () =
          ~notes:"second"
          ()
        |> expect_ok "done idempotent");
-    let after_backlog = Coord.read_backlog config in
+    let after_backlog = Workspace.read_backlog config in
     check
       int
       "idempotent done does not rewrite backlog"

@@ -149,14 +149,15 @@ let report_verdict_schema : Masc_domain.tool_schema =
   }
 
 let parse_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
-  let open Yojson.Safe.Util in
   try
     let verdict_str =
-      args |> member "verdict" |> to_string |> String.uppercase_ascii
+      Json_util.get_string args "verdict"
+      |> Option.value ~default:""
+      |> String.uppercase_ascii
     in
     let reason =
-      try args |> member "reason" |> to_string
-      with Type_error _ -> ""
+      Json_util.get_string args "reason"
+      |> Option.value ~default:""
     in
     match verdict_str with
     | "PASS" -> Ok Pass
@@ -169,7 +170,7 @@ let parse_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) result =
     | other ->
       Error (sprintf "unexpected verdict value: %s" other)
   with
-  | Type_error (msg, _) ->
+  | Yojson.Safe.Util.Type_error (msg, _) ->
     Error (sprintf "verdict JSON type error: %s" msg)
   | exn ->
     Error (sprintf "verdict JSON parse error: %s" (Printexc.to_string exn))

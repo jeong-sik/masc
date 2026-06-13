@@ -33,10 +33,18 @@ let assess_risk = Governance_pipeline_risk.assess_risk
 
 (* ── Trace ID generation ────────────────────────────────────── *)
 
+let trace_id prefix =
+  let entropy =
+    Printf.sprintf "%s|%d|%.6f|%d"
+      prefix (Unix.getpid ()) (Unix.gettimeofday ()) (Random.bits ())
+  in
+  let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
+  prefix ^ "_" ^ String.sub digest 0 16
+
 let generate_trace_id () =
   match Otel_spans.current_trace_id () with
   | Some otel_tid -> otel_tid
-  | None -> Operator_pending_confirm.trace_id "gov"
+  | None -> trace_id "gov"
 ;;
 
 (* ── Policy Decision ────────────────────────────────────────── *)
@@ -47,22 +55,28 @@ let generate_trace_id () =
     requires confirmation for [Critical] risk and warns the operator instead
     of silently allowing every tool through. Mirrors the fail-closed posture
     of [audit_threshold] just below. See #7641 / #8605. *)
-let confirm_threshold = function
-  | "paranoid" -> Some Medium
-  | "enterprise" -> Some High
-  | "production" -> Some Critical
-  | "development" -> None
-  | other ->
-    Log.Governance.warn
-      "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at \
-       Critical); see #7641"
-      other;
-    Some Critical
+let confirm_threshold governance_level =
+  if Env_config_core.disable_hitl () then None
+  else
+    match governance_level with
+    | "paranoid" -> Some Medium
+    | "enterprise" -> Some High
+    | "production" -> Some Critical
+    | "development" -> None
+    | other ->
+      Log.Governance.warn
+        "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at \
+         Critical); see #7641"
+        other;
+      Some Critical
 ;;
 
-let keeper_confirm_threshold = function
-  | "production" -> Some High
-  | other -> confirm_threshold other
+let keeper_confirm_threshold governance_level =
+  if Env_config_core.disable_hitl () then None
+  else
+    match governance_level with
+    | "production" -> Some High
+    | other -> confirm_threshold other
 ;;
 
 (** Minimum risk level that triggers audit logging. *)
@@ -98,7 +112,7 @@ let should_audit ~governance_level risk =
   | None -> false
 ;;
 
-let audit_decision (config : Coord.config) (decision : governance_decision) =
+let audit_decision (config : Workspace.config) (decision : governance_decision) =
   let audit_decision, action_str =
     match decision.action with
     | `Allow -> Audit_log.Governance_allow, "allow"
@@ -211,17 +225,8 @@ let nonempty_trimmed value =
 
 let selected_model_of_meta = function
   | None -> None
-  | Some (meta : Keeper_types.keeper_meta) ->
-    (match nonempty_trimmed meta.runtime.usage.last_model_used with
-     | Some _ as selected_model -> selected_model
-     | None ->
-       (try
-          match Keeper_model_labels.configured_model_labels_of_meta meta with
-          | model :: _ -> nonempty_trimmed model
-          | [] -> None
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | Failure _ | Invalid_argument _ -> None))
+  | Some (_ : Keeper_meta_contract.keeper_meta) ->
+    None
 ;;
 
 let input_op_opt input =
@@ -253,14 +258,14 @@ let destructive_tool_or_op ~tool_name ~input =
 
 let runtime_auto_approval_blocked = function
   | None -> false
-  | Some (meta : Keeper_types.keeper_meta) ->
+  | Some (meta : Keeper_meta_contract.keeper_meta) ->
     (match meta.runtime.last_blocker with
      | None -> false
      | Some info ->
-       let continue_gate = Keeper_types.blocker_class_continue_gate info.klass in
+       let continue_gate = Keeper_meta_contract.blocker_class_continue_gate info.klass in
        let typed_blocked =
          match info.klass with
-         | Keeper_types.Completion_contract_violation | Keeper_types.Cascade_exhausted _
+         | Keeper_meta_contract.Completion_contract_violation | Keeper_meta_contract.Runtime_exhausted _
            -> true
          | _ -> false
        in
@@ -286,7 +291,7 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
     permitted to override.
 
     - Hard forbidden = the request is at Critical risk OR a runtime
-      blocker (cascade_exhausted, completion_contract_violation,
+      blocker (runtime_exhausted, completion_contract_violation,
       sandbox/manual block) is set.  Routine matchers must not
       bypass these — this is where real safety walls live.
     - Soft forbidden = the tool name or op string trips
@@ -350,7 +355,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
     then (
       let turn_id =
         Option.map
-          (fun (meta : Keeper_types.keeper_meta) -> meta.runtime.usage.total_turns + 1)
+          (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.runtime.usage.total_turns + 1)
           meta
       in
       let task_id =
@@ -363,7 +368,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
       in
       let goal_ids =
         Option.map
-          (fun (keeper_meta : Keeper_types.keeper_meta) -> keeper_meta.active_goal_ids)
+          (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
           meta
       in
       let runtime_contract =
@@ -372,53 +377,34 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
              Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
           meta
       in
+      let sandbox_profile, backend, sandbox_target =
+        match meta with
+        | Some keeper_meta ->
+          let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
+          ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
+          , Some backend
+          , Some backend )
+        | None -> None, None, None
+      in
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path =
-        Option.map (fun (config : Coord.config) -> config.base_path) config
+        Option.map (fun (config : Workspace.config) -> config.base_path) config
       in
-      (* PR-E (Plan v3 Leak 1+3): evaluate the routine allowlist BEFORE
-         the soft-forbidden check.  A routine match is the operator's
-         pre-blessed exception to the substring-based
-         [destructive_tool_or_op] filter (which today blocks every
-         structured search call regardless of op).  The hard-forbidden
-         component (Critical risk or a runtime blocker) is still
-         evaluated, so a routine match cannot bypass real safety
-         walls — only the pattern-matching overlay. *)
-      let routine_label =
-        match config, meta with
-        | Some config, Some meta ->
-          (match
-             Keeper_routine_allowlist.sandboxed_code_write_rule_label
-               ~config
-               ~meta
-               ~tool_name
-               ~input
-               ~risk_level
-           with
-           | Some _ as label -> label
-           | None ->
-             Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level)
-        | _ -> Keeper_routine_allowlist.rule_label ~tool_name ~input ~risk_level
+      let hard_forbidden =
+        runtime_auto_approval_blocked meta
+        || risk = Critical
       in
-      let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
       let soft_forbidden =
-        if Option.is_some routine_label
-        then false
-        else auto_approval_soft_forbidden ~tool_name ~input
+        auto_approval_soft_forbidden ~tool_name ~input
       in
       let forbidden = hard_forbidden || soft_forbidden in
-      (* If the hard wall fires we still want the routine_label
-         downstream-suppressed so the audit log shows
-         "auto_approved_keeper_routine" only when the routine path
-         actually wins.  Recompute after-the-fact. *)
-      let routine_label = if hard_forbidden then None else routine_label in
       let always_approve =
-        Option.bind meta (fun (m : Keeper_types.keeper_meta) -> m.always_approve)
+        Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
       let rule_match =
-        if forbidden || Option.is_some routine_label
+        if forbidden
         then None
         else
           Keeper_approval_queue.find_matching_rule
@@ -427,6 +413,8 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
             ~tool_name
             ~input
             ~risk_level
+            ?sandbox_profile
+            ?backend
             ?runtime_contract
             ()
       in
@@ -443,6 +431,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
           ?task_id
           ?goal_id
           ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?sandbox_target
           ?runtime_contract
           ?selected_model
           ~disposition:"Pass"
@@ -451,34 +440,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
           ();
         Agent_sdk.Hooks.Approve)
       else (
-        match routine_label with
-        | Some label ->
-          Keeper_approval_queue.audit_approval_event
-            ?base_path
-            ~event_type:"auto_approved_keeper_routine"
-            ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
-            ~keeper_name
-            ~tool_name
-            ~risk_level
-            ?turn_id
-            ?task_id
-            ?goal_id
-            ~goal_ids:(Option.value ~default:[] goal_ids)
-            ?runtime_contract
-            ?selected_model
-            ~disposition:"Pass"
-            ~disposition_reason:label
-            ~auto_approved:true
-            ();
-          Log.Governance.debug
-            "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
-            keeper_name
-            tool_name
-            (risk_level_to_string risk)
-            label;
-          Agent_sdk.Hooks.Approve
-        | None ->
-          (match rule_match with
+        match rule_match with
            | Some matched ->
              Keeper_approval_queue.audit_approval_event
                ?base_path
@@ -491,6 +453,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ?task_id
                ?goal_id
                ~goal_ids:(Option.value ~default:[] goal_ids)
+               ?sandbox_target
                ?runtime_contract
                ?selected_model
                ~disposition:"Pass"
@@ -509,12 +472,15 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
                ?task_id
                ?goal_id
                ?goal_ids
+               ?sandbox_target
+               ?sandbox_profile
+               ?backend
                ?runtime_contract
                ?selected_model
                ~disposition:"Blocked"
                ~disposition_reason:"waiting_approval"
                ~risk_level
                ?clock
-               ())))
+               ()))
     else Agent_sdk.Hooks.Approve
 ;;

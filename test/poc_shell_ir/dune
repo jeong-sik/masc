@@ -12,8 +12,12 @@
 
 (rule
  (target synthetic_walkers.ml)
- (deps (:gen %{exe:../../bin/poc_shell_ir_gen.exe}))
- (action (with-stdout-to %{target} (run %{gen}))))
+ (deps
+  (:gen %{exe:../../bin/poc_shell_ir_gen.exe}))
+ (action
+  (with-stdout-to
+   %{target}
+   (run %{gen}))))
 
 (test
  (name test_synthetic_walkers)

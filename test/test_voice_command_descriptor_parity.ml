@@ -1,6 +1,6 @@
-(** Parity gate between [Agent_tool_voice_runtime.voice_command]
+(** Parity gate between [Keeper_tool_voice_runtime.voice_command]
     enumeration and the [keeper_voice_*] entries registered in
-    [Agent_tool_descriptor.all_descriptors].
+    [Keeper_tool_descriptor.all_descriptors].
 
     The previous string-classifier wiring (raw [match name with
     "keeper_voice_speak" -> ...]) had no compiler-level link between
@@ -13,8 +13,8 @@
     time. *)
 
 open Alcotest
-module Descriptor = Masc_mcp.Agent_tool_descriptor
-module Voice = Masc_mcp.Agent_tool_voice_runtime
+module Descriptor = Masc.Keeper_tool_descriptor
+module Voice = Masc.Keeper_tool_voice_runtime
 
 let voice_prefix = "keeper_voice_"
 

@@ -6,7 +6,6 @@ val task_link_already_recorded :
   keeper:string -> task_id:string -> trace_id:string -> bool
 
 val per_provider_timeout_for_turn :
-  meta:Keeper_types.keeper_meta ->
   ?oas_timeout_s:float ->
   ?oas_timeout_is_explicit:bool ->
   timeout_s:float ->
@@ -21,22 +20,10 @@ val registry_progress_on_event :
   Agent_sdk.Types.sse_event ->
   unit
 
-val select_cdal_proof :
-  result_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option ->
-  captured_proof:Masc_mcp_cdal_runtime.Cdal_proof.t option ->
-  Masc_mcp_cdal_runtime.Cdal_proof.t option
-
-val should_require_provider_tool_choice_support :
-  initial_tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
-  actionable_observation_requires_tool_support:bool ->
-  bool
-
-val tool_contract_result_for_observed_tools :
-  required_tool_names:string list ->
-  missing_visible_required:string list ->
+val completion_contract_result_for_progress_evidence :
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->
-  Keeper_execution_receipt.tool_contract_result
+  Keeper_execution_receipt.completion_contract_result
 
 val emit_turn_end_safely : keeper_name:string -> unit -> unit
 val digest_text : string -> string
@@ -51,12 +38,12 @@ val runtime_manifest_context :
   Keeper_runtime_manifest.turn_context
 
 val append_runtime_manifest :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
   generation:int ->
-  cascade_name:string ->
+  runtime_id:string ->
   ?status:string ->
   ?decision:Yojson.Safe.t ->
   ?keeper_turn_id:int ->
@@ -76,18 +63,18 @@ val cleanup_agent_setup :
 val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 
 val make_append_manifest :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
   generation:int ->
-  cascade_name:string ->
+  runtime_id:string ->
   turn_start:Mtime.t ->
   seq_ref:int ref ->
   Keeper_agent_run_sidecar.append_manifest_fn
 
 val turn_progress_callbacks :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string ->
   downstream:(Agent_sdk.Types.sse_event -> unit) option ->
   turn_id:int ->

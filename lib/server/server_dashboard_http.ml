@@ -7,9 +7,11 @@ include Server_dashboard_http_namespace_truth
 open Masc_domain
 open Server_utils
 
+let board_governance_cache_ttl_s = Server_dashboard_http_core_cache.board_governance_cache_ttl_s
+
 (* Wire task mutation hook: invalidate execution cache on any task
    add/transition so the dashboard serves fresh backlog data. *)
-let () = Atomic.set Coord_hooks.on_task_mutation_fn invalidate_execution_cache
+let () = Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
 
 let dashboard_namespace_truth_focus_json =
   Server_dashboard_http_namespace_truth_support.dashboard_namespace_truth_focus_json
@@ -39,7 +41,7 @@ let dashboard_board_json
   let config_key =
     match config with
     | None -> "-"
-    | Some config -> config.Coord.base_path
+    | Some config -> config.Workspace.base_path
   in
   let cache_key =
     Printf.sprintf
@@ -55,7 +57,7 @@ let dashboard_board_json
       (Option.value ~default:"-" voter)
       blind_votes
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
        fleets.  The compute below scans the post store, fetches the
        karma map, and per-post enriches with vote + contributor
@@ -181,7 +183,7 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let cache_key =
     Printf.sprintf "governance:%s;%d;%d" base_path limit offset
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter))
 ;;
@@ -206,7 +208,7 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
    push the compute through [Domain_pool_ref.submit_io_or_inline]
    so the main domain keeps serving requests during refresh. *)
 let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
-  let base_path = config.Coord.base_path in
+  let base_path = config.Workspace.base_path in
   (* Single disk scan via [proof_compose]; the historical
      [summary_json] + [requests_json] sequence walked the verification
      store twice per refresh. *)
@@ -284,9 +286,9 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
     int_query_param request "recent" ~default:5 |> clamp ~min_v:0 ~max_v:20
   in
   let key =
-    Printf.sprintf "dashboard.proof:%s;%d;%d" config.Coord.base_path limit recent
+    Printf.sprintf "dashboard.proof:%s;%d;%d" config.Workspace.base_path limit recent
   in
-  Dashboard_cache.get_or_compute key ~ttl:10.0 (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:board_governance_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       dashboard_proof_compute ~config ~limit ~recent ()))
 ;;
@@ -380,7 +382,7 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojs
    Decisions are strictly approve | reject — unknown values return
    Bad_request rather than defaulting, per Det/NonDet boundary. *)
 let dashboard_verification_resolve_http_json
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(verifier : string)
       ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
@@ -443,7 +445,7 @@ let dashboard_verification_resolve_http_json
           ~reason)
   in
   let fsm_result =
-    Coord.transition_task_r
+    Workspace.transition_task_r
       config
       ~agent_name:verifier
       ~task_id
@@ -475,7 +477,7 @@ let dashboard_verification_resolve_http_json
      | Masc_domain.Cancel
      | Masc_domain.Release
      | Masc_domain.Submit_for_verification
-     | Masc_domain.Submit_pr_evidence -> ());
+     -> ());
     Ok
       (`Assoc
           [ "ok", `Bool true
@@ -486,7 +488,7 @@ let dashboard_verification_resolve_http_json
           ])
 ;;
 
-let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
+let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
   let task_rollup =
@@ -520,15 +522,86 @@ let dashboard_planning_http_json ~(config : Coord.config) : Yojson.Safe.t =
     ]
 ;;
 
-let dashboard_goals_tree_http_json ~(config : Coord.config) : Yojson.Safe.t =
+let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   Dashboard_goals.dashboard_goals_tree_json ~config
 ;;
 
-let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
+let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   `Assoc
     [ "planning", dashboard_planning_http_json ~config
     ; "tree", dashboard_goals_tree_http_json ~config
     ]
+
+let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
+  let base_path = config.base_path in
+  let partition = Ide_paths.Orphan in
+  let limit = 10 in
+  let events =
+    Ide_bridge.list_events
+      ~base_path
+      ~partition
+      ~limit
+      ~offset:0
+      ()
+  in
+  let cursors =
+    Ide_bridge.list_cursors
+      ~base_path
+      ~partition
+      ~limit
+      ~offset:0
+      ()
+  in
+  let annotations =
+    Ide_annotations.list
+      ~base_dir:base_path
+      ~partition
+      ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
+      ()
+  in
+  let regions =
+    Ide_region_tracker.read_regions
+      ~base_dir:base_path
+      ~partition
+      ()
+  in
+  let active_keepers =
+    try
+      List.map
+        (fun (a : Client_identity.t) ->
+           `Assoc
+             [ "keeper_id", `String a.Client_identity.agent_name
+             ; "last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
+             ])
+        (Client_registry_eio.list_active ~within_seconds:300.0 ())
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _exn -> []
+  in
+  `Assoc
+    [ "events", `Assoc
+        [ "count", `Int (List.length events)
+        ; "recent", `List events
+        ]
+    ; "cursors", `Assoc
+        [ "count", `Int (List.length cursors)
+        ; "recent", `List cursors
+        ]
+    ; "annotations", `Assoc
+        [ "count", `Int (List.length annotations)
+        ]
+    ; "regions", `Assoc
+        [ "count", `Int (List.length regions)
+        ]
+    ; "presence", `Assoc
+        [ "active_keepers", `List active_keepers
+        ; "count", `Int (List.length active_keepers)
+        ]
+    ; "freshness", `Assoc
+        [ "snapshot_at", `String (Masc_domain.now_iso ())
+        ]
+    ]
+;;
 ;;
 
 
@@ -536,7 +609,7 @@ let dashboard_goals_snapshot_json ~(config : Coord.config) : Yojson.Safe.t =
    extracted to [Server_dashboard_http_composite] (godfile decomp). *)
 include Server_dashboard_http_composite
 
-let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id : Yojson.Safe.t =
+let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojson.Safe.t =
   match Dashboard_goals.goal_detail_json ~config ~goal_id with
   | Ok json -> json
   | Error message ->
@@ -546,11 +619,11 @@ let dashboard_goal_detail_http_json ~(config : Coord.config) ~goal_id : Yojson.S
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:state.Mcp_server.room_config.base_path
+      ~base_path:state.Mcp_server.workspace_config.base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = state.Mcp_server.room_config
+    { config = state.Mcp_server.workspace_config
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
@@ -565,11 +638,11 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
 let operator_confirm_http_json ~state ~sw ~clock request ~args =
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:state.Mcp_server.room_config.base_path
+      ~base_path:state.Mcp_server.workspace_config.base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = state.Mcp_server.room_config
+    { config = state.Mcp_server.workspace_config
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
@@ -629,14 +702,24 @@ let dashboard_bootstrap_http_json
         ?clock:state.Mcp_server.clock
         ~request
         ~light:true
-        state.Mcp_server.room_config)
+        state.Mcp_server.workspace_config)
   in
   let execution =
     slice "execution" (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
   in
   let planning =
+    (* Share the standalone /api/v1/dashboard/planning cache (same key + ttl) so
+       a page that loads bootstrap and the planning panel computes the planning
+       slice once. Previously bootstrap called the compute path directly,
+       bypassing Dashboard_cache and re-reading goals/backlog on every load. *)
     slice "planning" (fun () ->
-      dashboard_planning_http_json ~config:state.Mcp_server.room_config)
+      let cache_key =
+        Printf.sprintf "planning:%s" state.Mcp_server.workspace_config.base_path
+      in
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            dashboard_planning_http_json ~config:state.Mcp_server.workspace_config)))
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -650,12 +733,19 @@ let dashboard_bootstrap_http_json
         ~state ~sw ~clock request)
   in
   let goals =
+    (* Share the standalone /api/v1/dashboard/goals cache (same key + ttl). *)
     slice "goals" (fun () ->
-      dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config)
+      let cache_key =
+        Printf.sprintf "goals_tree:%s" state.Mcp_server.workspace_config.base_path
+      in
+      Dashboard_cache.get_or_compute cache_key
+        ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            dashboard_goals_tree_http_json ~config:state.Mcp_server.workspace_config)))
   in
   let goal_loop_status =
     slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json ~base_path:state.Mcp_server.room_config.base_path ())
+      Dashboard_goal_loop.status_json ~base_path:state.Mcp_server.workspace_config.base_path ())
   in
   `Assoc
     [ "served_at", `String (Masc_domain.now_iso ())

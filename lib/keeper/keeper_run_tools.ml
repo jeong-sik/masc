@@ -4,6 +4,8 @@
    Extracted from keeper_agent_run.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_agent_tool_surface
 open Keeper_agent_result
 open Keeper_agent_error
@@ -17,44 +19,35 @@ module Tool_search = Keeper_run_tools_search
     they write into this single mutable record during Agent.run execution.
     After execution completes, {!freeze} produces an immutable snapshot. *)
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
-  { mutable meta : Keeper_types.keeper_meta
+  { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
-  ; mutable completion_contract : Keeper_tool_completion_contract.completion_contract
-  ; mutable required_tool_use_seen : bool
-  ; mutable keeper_surface_tool_used : bool
   ; mutable discovered : Keeper_discovered_tools.t
   ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
-  ; mutable requested_tool_names_seen : string list
-  ; mutable receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
-  ; mutable contract_violation_retries : int
+  ; mutable receipt_completion_contract_result :
+      Keeper_execution_receipt.completion_contract_result
+  ; mutable prompt_blocks : Turn_record.prompt_block list
+  ; mutable extra_system_context_digest : string option
+  ; mutable extra_system_context_size : int option
   }
 
 type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
-  { out_meta : Keeper_types.keeper_meta
+  { out_meta : Keeper_meta_contract.keeper_meta
   ; out_tool_calls : tool_call_detail list
-  ; out_completion_contract : Keeper_tool_completion_contract.completion_contract
-  ; out_required_tool_use_seen : bool
-  ; out_keeper_surface_tool_used : bool
   ; out_discovered : Keeper_discovered_tools.t
   ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
-  ; out_requested_tool_names_seen : string list
-  ; out_receipt_tool_contract_result :
-      Keeper_execution_receipt.tool_contract_result
-  ; out_contract_violation_retries : int
+  ; out_receipt_completion_contract_result :
+      Keeper_execution_receipt.completion_contract_result
   }
 
 let freeze = Keeper_run_tools_hook_accumulator.freeze
-let merge_requested_tool_names_seen = Keeper_run_tools_hook_accumulator.merge_requested_tool_names_seen
 let record_requested_tool_names = Keeper_run_tools_hook_accumulator.record_requested_tool_names
 
 let task_scope_tool_names = Keeper_run_tools_task_scope.task_scope_tool_names
-let json_string_opt = Keeper_run_tools_task_scope.json_string_opt
 let task_id_scope_of_tool_input = Keeper_run_tools_task_scope.task_id_scope_of_tool_input
 let task_id_scope_of_claim_output = Keeper_run_tools_task_scope.task_id_scope_of_claim_output
 let task_id_scope_of_tool_call = Keeper_run_tools_task_scope.task_id_scope_of_tool_call
@@ -66,7 +59,6 @@ type tool_search_hit_partition = Tool_search.tool_search_hit_partition =
   }
 
 let partition_tool_search_hits = Tool_search.partition_tool_search_hits
-let truncate_tool_surface_names = Tool_search.truncate_tool_surface_names
 
 (** Agent setup produced by Step 7.
 
@@ -78,22 +70,13 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
-  ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
-  ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
-  ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
-  ; receipt_stop_reason_ref : Cascade_runner.stop_reason option ref
-  ; receipt_cascade_observation_ref : Cascade_observation.cascade_observation option ref
+  ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
+  ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; reported_tool_names_ref : string list ref
-  ; observed_tool_names_ref : string list ref
-  ; canonical_tool_names_ref : string list ref
-  ; unexpected_tool_names_ref : string list ref
-  ; actual_keeper_tool_names_ref : string list ref
   }
 
 

@@ -1,12 +1,13 @@
 (** Keeper status bridge helpers. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
-let string_list_to_json = Json_util.json_string_list
 
 let drift_surface_json ~unknown_toml_keys =
   `Assoc
-    [ "unknown_toml_keys", string_list_to_json unknown_toml_keys
+    [ "unknown_toml_keys", Json_util.json_string_list unknown_toml_keys
     ; "unknown_toml_keys_count", `Int (List.length unknown_toml_keys)
     ]
 ;;
@@ -15,24 +16,22 @@ let auto_execution_session_surface_json () =
   `Assoc [ "status", `String "removed"; "enabled", `Bool false ]
 ;;
 
-let coordination_surface_json (meta : keeper_meta) =
+let workspace_surface_json (meta : keeper_meta) =
   `Assoc
-    [ "mention_targets", string_list_to_json meta.mention_targets
-    ; "joined_room_ids", string_list_to_json meta.joined_room_ids
+    [ "mention_targets", Json_util.json_string_list meta.mention_targets
     ]
 ;;
 
-let effective_declarative_cascade_name
-      (defaults : keeper_profile_defaults)
+let effective_declarative_runtime_id
+      (_defaults : keeper_profile_defaults)
       (meta : keeper_meta)
   =
-  match defaults.cascade_name, defaults.manifest_path with
-  | Some cascade_name, _ ->
-    Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
-  | None, Some _ -> (Keeper_config.default_cascade_name ())
-  | None, None ->
-    Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-      (cascade_name_of_meta meta)
+  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+     not in [_defaults].  Delegate to
+     {!Keeper_meta_contract.runtime_id_of_meta} (the dispatcher), matching the
+     keeper_runtime.ml copy, so the status override view and the wire share ONE
+     source by construction (no re-sync storm, cf. #10061). *)
+  runtime_id_of_meta meta
 ;;
 
 type override_field_detail =
@@ -55,36 +54,72 @@ let maybe_string_option_override =
 let live_override_details (meta : keeper_meta) (defaults : keeper_profile_defaults)
   : override_field_detail list
   =
-  let effective_cascade_name = effective_declarative_cascade_name defaults meta in
+  let default_string default live =
+    match default with
+    | Some value when String.trim live = "" -> value
+    | _ -> live
+  in
+  let default_string_list default live =
+    match default, live with
+    | Some values, [] -> values
+    | _, values -> values
+  in
+  let default_nonempty_string_list default live =
+    match default, live with
+    | values, [] when values <> [] -> values
+    | _, values -> values
+  in
+  let effective_runtime_id = effective_declarative_runtime_id defaults meta in
   []
   |> maybe_string_override
        "prompt.goal"
        ~normalize:normalize_goal_horizon_text
        defaults.goal
-       meta.goal
-  |> maybe_string_override "prompt.short_goal" defaults.short_goal meta.short_goal
-  |> maybe_string_override "prompt.mid_goal" defaults.mid_goal meta.mid_goal
-  |> maybe_string_override "prompt.long_goal" defaults.long_goal meta.long_goal
-  |> maybe_string_override "prompt.will" defaults.will meta.will
-  |> maybe_string_override "prompt.needs" defaults.needs meta.needs
-  |> maybe_string_override "prompt.desires" defaults.desires meta.desires
-  |> maybe_string_override "prompt.instructions" defaults.instructions meta.instructions
+       (default_string defaults.goal meta.goal)
+  |> maybe_string_override
+       "prompt.short_goal"
+       defaults.short_goal
+       (default_string defaults.short_goal meta.short_goal)
+  |> maybe_string_override
+       "prompt.mid_goal"
+       defaults.mid_goal
+       (default_string defaults.mid_goal meta.mid_goal)
+  |> maybe_string_override
+       "prompt.long_goal"
+       defaults.long_goal
+       (default_string defaults.long_goal meta.long_goal)
+  |> maybe_string_override
+       "prompt.will"
+       defaults.will
+       (default_string defaults.will meta.will)
+  |> maybe_string_override
+       "prompt.needs"
+       defaults.needs
+       (default_string defaults.needs meta.needs)
+  |> maybe_string_override
+       "prompt.desires"
+       defaults.desires
+       (default_string defaults.desires meta.desires)
+  |> maybe_string_override
+       "prompt.instructions"
+       defaults.instructions
+       (default_string defaults.instructions meta.instructions)
   |> nonempty_string_list_override
-       "coordination.mention_targets"
+       "workspace.mention_targets"
        defaults.mention_targets
-       meta.mention_targets
+       (default_nonempty_string_list defaults.mention_targets meta.mention_targets)
   |> maybe_string_list_override
        "tools.tool_denylist"
        defaults.tool_denylist
-       meta.tool_denylist
+       (default_string_list defaults.tool_denylist meta.tool_denylist)
   |> (fun acc ->
-  let cascade_name = cascade_name_of_meta meta in
-  if effective_cascade_name <> cascade_name
+  let runtime_id = runtime_id_of_meta meta in
+  if effective_runtime_id <> runtime_id
   then
     override_field
-      "model.cascade_name"
-      ~default_value:(`String effective_cascade_name)
-      ~live_value:(`String cascade_name)
+      "model.runtime_id"
+      ~default_value:(`String effective_runtime_id)
+      ~live_value:(`String runtime_id)
     :: acc
   else acc)
   |> maybe_bool_override
@@ -100,229 +135,70 @@ let live_override_fields (meta : keeper_meta) (defaults : keeper_profile_default
   live_override_details meta defaults |> List.map (fun detail -> detail.field)
 ;;
 
-let runtime_registry_entry (config : Coord_utils.config) name =
+let runtime_registry_entry (config : Workspace_utils.config) name =
   Keeper_registry.get ~base_path:config.base_path name
 ;;
 
-let runtime_keepalive_running (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_keepalive_running (config : Workspace_utils.config) (meta : keeper_meta) =
   Keeper_registry.is_running ~base_path:config.base_path meta.name
 ;;
 
-let runtime_keepalive_started_at (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_keepalive_started_at (config : Workspace_utils.config) (meta : keeper_meta) =
   Keeper_registry.started_at ~base_path:config.base_path meta.name
 ;;
 
 (* ── Structured blocker classification ──────────────────────── *)
-(* Types blocker_class, cascade_exhaustion_reason, blocker_class_to_string,
-   cascade_exhaustion_summary, blocker_class_continue_gate
+(* Types blocker_class, runtime_exhaustion_reason, blocker_class_to_string,
+   runtime_exhaustion_summary, blocker_class_continue_gate
    are defined in Keeper_types (keeper_types.ml). *)
 
 
 include Keeper_status_bridge_blocker
 
 
-let has_any_ci text needles = List.exists (String_util.contains_substring_ci text) needles
-
-let first_nonempty_line label values =
-  values
-  |> List.map String.trim
-  |> List.find_map (fun value ->
-    if String.equal value "" then None else Some (Printf.sprintf "%s: %s" label value))
-;;
-
-let progress_snapshot_narrative_lines
-      (snapshot : Keeper_memory_policy.keeper_state_snapshot)
-  =
-  [ (match snapshot.progress with
-     | Some progress -> Some ("Progress: " ^ String.trim progress)
-     | None -> None)
-  ; (match snapshot.done_summary with
-     | Some done_summary -> Some ("Done: " ^ String.trim done_summary)
-     | None -> None)
-  ; (match snapshot.next_summary with
-     | Some next_summary -> Some ("Next plan: " ^ String.trim next_summary)
-     | None -> None)
-  ; first_nonempty_line "Next" snapshot.next_items
-  ; first_nonempty_line "Decisions" snapshot.decisions
-  ; first_nonempty_line "OpenQuestions" snapshot.open_questions
-  ; first_nonempty_line "Constraints" snapshot.constraints
-  ]
-  |> List.filter_map (function
-    | Some line when not (String.equal (String.trim line) "") -> Some line
-    | _ -> None)
-;;
-
-let narrative_summary line =
-  String_util.utf8_safe ~max_bytes:220 ~suffix:"..." line |> String_util.to_string
-;;
-
-let runtime_blocker_surface_of_progress_snapshot
-      (snapshot : Keeper_memory_policy.keeper_state_snapshot)
-  =
-  let lines = progress_snapshot_narrative_lines snapshot in
-  let text = String.concat "\n" lines in
-  let line_with needles = List.find_opt (fun line -> has_any_ci line needles) lines in
-  let surface blocker_class line =
-    Some { blocker_class; summary = narrative_summary line; continue_gate = false }
-  in
-  if lines = []
-  then None
-  else (
-    match
-      line_with
-        [ "sandbox egress"
-        ; "push egress"
-        ; "github.com push"
-        ; "github push"
-        ; "network egress"
-        ; "sandbox"
-        ]
-    with
-    | Some line when has_any_ci line [ "egress"; "push"; "github.com"; "network" ] ->
-      surface "awaiting_sandbox_egress" line
-    | _ ->
-      (match line_with [ "supervisor"; "supervisor가" ] with
-       | Some line when has_any_ci line [ "pause"; "paused"; "unpause"; "의도" ] ->
-         surface "supervisor_paused" line
-       | _ ->
-         (match
-            line_with
-              [ "push gate"
-              ; "operator"
-              ; "human"
-              ; "approval"
-              ; "approve"
-              ; "decision tree"
-              ; "4-gate"
-              ; "4 gate"
-              ; "unblock"
-              ; "manual"
-              ]
-          with
-          | Some line
-            when has_any_ci
-                   line
-                   [ "waiting"
-                   ; "await"
-                   ; "blocked"
-                   ; "respond"
-                   ; "resolved"
-                   ; "gate"
-                   ; "decision"
-                   ; "approval"
-                   ; "approve"
-                   ; "unblock"
-                   ; "manual"
-                   ] -> surface "awaiting_operator" line
-          | _ ->
-            if
-              Keeper_synthetic_marker.contains_marker text
-              && has_any_ci
-                   text
-                   [ "no visible output"
-                   ; "last output"
-                   ; "belief_summary"
-                   ; "social_model"
-                   ; "실제 막힘"
-                   ]
-            then
-              (* The outer [if lines = [] then None] guard (line 168)
-                 already returns early on an empty narrative; the
-                 [[]] arm below is unreachable here but typed for
-                 exhaustiveness so a future refactor that drops the
-                 outer guard does not silently fall through to a
-                 Sys_error from [List.hd]. *)
-              let first_line =
-                match lines with
-                | [] -> ""
-                | h :: _ -> h
-              in
-              surface
-                "synthetic_stall"
-                (line_with [ Keeper_synthetic_marker.marker_prefix ]
-                 |> Option.value ~default:first_line)
-            else (
-              match
-                line_with
-                  [ "watching"
-                  ; "monitor"
-                  ; "no action"
-                  ; "no next action"
-                  ; "자체 action 부재"
-                  ; "감시"
-                  ]
-              with
-              | Some line -> surface "self_imposed_idle" line
-              | None -> None))))
-;;
-
-let runtime_blocker_surface_of_progress_narrative config (meta : keeper_meta) =
-  let from_continuity_summary =
-    match
-      Keeper_memory_policy.progress_snapshot_cache_of_text meta.continuity_summary
-    with
-    | Some cache -> runtime_blocker_surface_of_progress_snapshot cache.snapshot
-    | None -> None
-  in
-  match from_continuity_summary with
-  | Some _ as blocker -> blocker
+let runtime_blocker_surface_opt (config : Workspace_utils.config) (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some info ->
+    Some (runtime_blocker_surface_of_typed_class ~summary:info.detail info.klass)
   | None ->
-    (match Keeper_memory_policy.read_progress_snapshot ~config ~name:meta.name with
-     | Some snapshot -> runtime_blocker_surface_of_progress_snapshot snapshot
+    (match runtime_registry_entry config meta.name with
+     | Some entry ->
+       (match entry.last_failure_reason with
+        | Some reason -> runtime_blocker_surface_of_failure_reason reason
+        | None -> None)
      | None -> None)
 ;;
 
-let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_meta) =
-  let derived =
-    match meta.runtime.last_blocker with
-    | Some info ->
-      Some (runtime_blocker_surface_of_typed_class ~summary:info.detail info.klass)
-    | None ->
-      (match runtime_registry_entry config meta.name with
-       | Some entry ->
-         (match entry.last_failure_reason with
-          | Some reason -> runtime_blocker_surface_of_failure_reason reason
-          | None -> None)
-       | None -> None)
-  in
-  let derived =
-    match derived with
-    | Some blocker -> Some blocker
-    | None -> runtime_blocker_surface_of_progress_narrative config meta
-  in
-  derived
-;;
-
-let cascade_attempt_outcome_json = function
+let runtime_attempt_outcome_json = function
   | `Success -> `Assoc [ "kind", `String "success"; "detail", `Null ]
   | `Failure detail ->
     `Assoc [ "kind", `String "failure"; "detail", `String detail ]
 ;;
 
-let cascade_attempt_record_json (attempt : cascade_attempt_record) =
+let runtime_attempt_record_json (attempt : runtime_attempt_record) =
   `Assoc
     [ "provider_id", `String attempt.provider_id
     ; "http_status", Json_util.int_opt_to_json attempt.http_status
-    ; "outcome", cascade_attempt_outcome_json attempt.outcome
+    ; "outcome", runtime_attempt_outcome_json attempt.outcome
     ; "timestamp_unix", `Float attempt.timestamp
     ]
 ;;
 
-let last_cascade_attempt_json (meta : keeper_meta) =
-  match meta.runtime.last_cascade_attempt with
+let last_runtime_attempt_json (meta : keeper_meta) =
+  match meta.runtime.last_runtime_attempt with
   | None -> `Null
-  | Some attempt -> cascade_attempt_record_json attempt
+  | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_cascade_attempt"
-    ; "cascade_name", `String (cascade_name_of_meta meta)
-    ; "last_cascade_attempt", last_cascade_attempt_json meta
+    [ "source", `String "keeper_runtime.last_runtime_attempt"
+    ; "runtime_id", `String (runtime_id_of_meta meta)
+    ; "last_runtime_attempt", last_runtime_attempt_json meta
     ]
 ;;
 
-let runtime_blocker_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   match runtime_blocker_surface_opt config meta with
   | Some blocker ->
     [ "runtime_blocker_class", `String blocker.blocker_class
@@ -338,7 +214,7 @@ let runtime_blocker_fields_json (config : Coord_utils.config) (meta : keeper_met
     ]
 ;;
 
-let runtime_state_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   let runtime_blocker = runtime_blocker_surface_opt config meta in
   let pause_state = if meta.paused then "paused" else "active" in
   let blocker_state =
@@ -350,7 +226,7 @@ let runtime_state_fields_json (config : Coord_utils.config) (meta : keeper_meta)
   [ "pause_state", `String pause_state; "runtime_blocker_state", `String blocker_state ]
 ;;
 
-let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
+let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
@@ -367,16 +243,12 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
         true, Some "continue_gate_required", Some "approve_or_reject_continue"
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
-      | Some blocker when is_cascade_exhausted_blocker_class blocker.blocker_class ->
-        true, Some "cascade_attempts_exhausted", Some "inspect_cascade_attempts"
-      | Some blocker when is_no_tool_capable_provider_blocker_class blocker.blocker_class ->
-        true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
-      | Some blocker when is_completion_contract_blocker_class blocker.blocker_class ->
-        true, Some "completion_contract_violation", Some "inspect_completion_contract"
+      | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
+        true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some blocker when is_stale_watchdog_blocker_class blocker.blocker_class ->
-        true, Some "watchdog_stale_turn", Some "inspect_watchdog_root_cause"
+      | Some blocker when is_stale_turn_timeout_blocker_class blocker.blocker_class ->
+        true, Some "stale_turn_timeout", Some "inspect_stale_turn_root_cause"
       | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
@@ -391,12 +263,7 @@ let attention_fields_json (config : Coord_utils.config) (meta : keeper_meta) =
   ]
 ;;
 
-let json_string_opt_member json key =
-  match Yojson.Safe.Util.member key json with
-  | `String value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | _ -> None
+let json_string_opt_member = Json_util.get_string_nonempty
 ;;
 
 let assoc_upsert fields key value =
@@ -465,9 +332,7 @@ let social_model_resolution_fields_json (meta : keeper_meta) =
   ; "configured_social_model", trimmed_string_json meta.social_model
   ; "social_model_recognized", `Bool recognized
   ; ( "social_model_fallback"
-    , match Keeper_social_model.fallback_social_model meta.social_model with
-      | Some fallback -> `String fallback
-      | None -> `Null )
+    , Json_util.string_opt_to_json (Keeper_social_model.fallback_social_model meta.social_model) )
   ]
 ;;
 
@@ -511,12 +376,9 @@ let runtime_surface_json config (meta : keeper_meta) =
   `Assoc
     ([ "paused", `Bool meta.paused
      ; "keepalive_running", `Bool keepalive_running
-     ; ( "phase"
-       , match phase with
-         | Some p -> `String p
-         | None -> `Null )
+     ; ( "phase", Json_util.string_opt_to_json phase )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
-     ; "last_cascade_attempt", last_cascade_attempt_json meta
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]
      @ social_runtime_fields_json meta
      @ runtime_state_fields_json config meta
@@ -539,18 +401,15 @@ let optional_existing_path_json ?source = function
   | None -> `Null
 ;;
 
-(* RFC-0058 §9 Phase 9.3: on-disk cascade JSON is no longer generated or
-   consumed. [cascade_runtime_json_path] / [cascade_runtime_json_editable]
+(* RFC-0058 §9 Phase 9.3: on-disk runtime JSON is no longer generated or
+   consumed. [runtime_runtime_json_path] / [runtime_runtime_json_editable]
    dropped from the status payload because there is no runtime JSON
    sibling to point at. Source identity is now fully described by the
    TOML path + the single-arm [source_kind]. *)
-let cascade_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
-  let source =
-    Cascade_toml_materializer.source_info ~config_path:resolution.cascade.path
-  in
-  [ ( "cascade_catalog_source_kind"
-    , `String (Cascade_toml_materializer.source_kind_to_string source.kind) )
-  ; "cascade_catalog_source_path", `String source.source_path
+let runtime_catalog_source_fields (resolution : Config_dir_resolver.resolution) =
+  [ ( "runtime_catalog_source_kind"
+    , `String "runtime" )
+  ; "runtime_catalog_source_path", `String resolution.config_root.path
   ]
 ;;
 
@@ -607,9 +466,8 @@ let source_provenance_json config (meta : keeper_meta) =
      ; "config_resolution", Config_dir_resolver.to_json resolution
      ; "precedence", `List [ `String "live_meta"; `String "toml"; `String "persona" ]
      ]
-     @ cascade_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
-       ; "override_fields", string_list_to_json override_fields
+       ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"
          , `List
              (List.map

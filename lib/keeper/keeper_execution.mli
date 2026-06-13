@@ -1,12 +1,14 @@
 (** Keeper_execution — keeper tool execution loop, prompting,
     compaction, and keepalive runtime.
 
-    Internal helpers (proactive quality checks, explicit room replies,
+    Internal helpers (proactive quality checks, explicit workspace replies,
     autonomous execution) are hidden. Only externally-called functions
     and types are exposed.
 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Error Logging} *)
 
@@ -23,15 +25,12 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
-(** Ensure keeper is joined to all configured rooms. *)
-val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
-
 (** Default JSON for memory check tool. *)
 val memory_check_default_json : unit -> Yojson.Safe.t
 
 (** {1 Keepalive Runtime} *)
 
-(* Proactive emission and explicit room replies are now handled
+(* Proactive emission and explicit workspace replies are now handled
    by Keeper_unified_turn via the unified keeper loop. *)
 
 (** {1 Compaction} *)
@@ -46,14 +45,6 @@ val generate_trace_id : ?now:float -> unit -> string
 
 (** Resolve effective model labels for a turn. *)
 val effective_model_labels_for_turn : keeper_meta -> string list
-
-(** {1 Coord Cursor} *)
-
-(** Get last-seen sequence number for a room. *)
-val room_cursor_for : keeper_meta -> string -> int
-
-(** Set last-seen sequence number for a room. *)
-val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
 
 (** {1 Mention Detection} *)
 
@@ -74,6 +65,7 @@ val build_keeper_system_prompt :
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->
+  ?home_ground:string ->
   ?active_goals:(string * string * string) list ->
   unit ->
   string

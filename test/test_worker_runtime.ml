@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -44,7 +44,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.toml") "";
+  write_file (Filename.concat config "runtime.toml") "";
   config
 
 (* OCaml stdlib lacks Unix.unsetenv; putenv name "" is only an
@@ -102,16 +102,16 @@ let test_worker_runtime_config_prefers_env_override () =
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "file config enables docker backend" "docker"
-    (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()));
+    (Worker_execution_backend.to_string
+       (Worker_runtime_config.backend ()));
   with_env "MASC_WORKER_RUNTIME_BACKEND" (Some "local_playground") @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "env override forces local backend" "local_playground"
-    (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()))
+    (Worker_execution_backend.to_string
+       (Worker_runtime_config.backend ()))
 
 let test_worker_runtime_helper_protocol_roundtrip () =
   let run_result : Lib.Worker_container_types.run_result =
@@ -126,7 +126,6 @@ let test_worker_runtime_helper_protocol_roundtrip () =
       session_id = "worker-session";
       raw_trace_run = None;
       api_response = None;
-      proof = None;
     }
   in
   let encoded =
@@ -155,12 +154,12 @@ let test_worker_runtime_invalid_config_fails_closed () =
   with_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
   with_env "MASC_WORKER_RUNTIME_BACKEND" None @@ fun () ->
   Config_dir_resolver.reset ();
-  Lib.Worker_runtime_config.reset ();
+  Worker_runtime_config.reset ();
   check string "malformed config resolves to fail-closed docker backend" "docker"
-    (Lib.Worker_execution_backend.to_string
-       (Lib.Worker_runtime_config.backend ()));
+    (Worker_execution_backend.to_string
+       (Worker_runtime_config.backend ()));
   check string "malformed config clears docker image" ""
-    (Lib.Worker_runtime_config.docker_image ())
+    (Worker_runtime_config.docker_image ())
 
 let test_run_worker_oas_rejects_invalid_explicit_model_label () =
   with_temp_dir "worker-runtime-local" @@ fun root ->
@@ -171,13 +170,13 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
     ~finally:(fun () -> Time_compat.clear_clock ())
     (fun () ->
       Eio.Switch.run @@ fun sw ->
-      let spec : Lib.Worker_execution_spec.t =
+      let spec : Worker_execution_spec.t =
         {
           base_path = root;
           worker_name = "worker-local";
           model_label = "not-a-model-label";
           working_dir = None;
-          runtime_backend = Masc_mcp.Worker_execution_backend.Local_playground;
+          runtime_backend = Worker_execution_backend.Local_playground;
           thinking_enabled = Some false;
           worker_run_id = Some "run-local";
           role = Some "worker";
@@ -189,7 +188,7 @@ let test_run_worker_oas_rejects_invalid_explicit_model_label () =
       match
         Lib.Worker_runtime.run_worker_oas ~sw
           ~net:(Eio.Stdenv.net env)
-          ~room_config:None spec ()
+          ~workspace_config:None spec ()
       with
       | Ok _ ->
           fail "expected invalid explicit model label to fail before execution"
@@ -210,7 +209,7 @@ let test_worker_execution_spec_rejects_removed_fields () =
   "allowed_tools": ["masc_status"]
 }|}
   in
-  match Lib.Worker_execution_spec.of_yojson json with
+  match Worker_execution_spec.of_yojson json with
   | Ok _ -> fail "expected removed worker spec field to be rejected"
   | Error msg ->
       check bool "mentions removed field" true

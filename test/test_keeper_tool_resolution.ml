@@ -1,6 +1,6 @@
 open Alcotest
 
-module TR = Masc_mcp.Keeper_tool_resolution
+module TR = Masc.Keeper_tool_resolution
 
 (* ── resolve returns correct tried_source for each admission path ── *)
 
@@ -15,11 +15,11 @@ let test_public_descriptor_admits_execute () =
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
                | TR.Unknown _ -> "Unknown"))
 
-let test_tool_name_variant_admits_keeper_board_post () =
+let test_registry_admits_keeper_board_post () =
   match TR.resolve "keeper_board_post" with
-  | TR.Resolved { via = TR.Tool_name_variant; _ } -> ()
+  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
   | other ->
-      fail (Printf.sprintf "expected Resolved via Tool_name_variant, got: %s"
+      fail (Printf.sprintf "expected keeper_board_post to resolve, got: %s"
               (match other with
                | TR.Resolved { via; _ } -> "Resolved via " ^ TR.string_of_tried_source via
                | TR.Alias_to { via; _ } -> "Alias_to via " ^ TR.string_of_tried_source via
@@ -37,13 +37,33 @@ let test_unknown_returns_tried_list () =
   match TR.resolve "__nonexistent_tool_xyz" with
   | TR.Unknown { name; tried } ->
       check string "name preserved" "__nonexistent_tool_xyz" name;
-      check bool "at least 13 tried sources" true (List.length tried >= 13)
+      (* 7 base sources after Tool_name admission, the dead public MCP source, and the
+         per-actor Surface sources were removed. *)
+      check bool "at least 7 tried sources" true (List.length tried >= 7)
   | _ ->
       fail "__nonexistent_tool_xyz should be Unknown"
 
+let test_descriptor_registry_admits_masc_keeper_cluster () =
+  (* Boot regression guard: #19797 purged masc_keeper_* from surface lists.
+     Descriptor_registry source (over internal_descriptors public names)
+     (over internal_descriptors public names) restores admission without
+     touching dispatch. @check does NOT exercise this path, hence this test. *)
+  List.iter
+    (fun name ->
+      match TR.resolve name with
+      | TR.Resolved { via = TR.Descriptor_registry; _ } -> ()
+      | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
+          fail (Printf.sprintf
+                  "%s should resolve via Descriptor_registry, got via: %s"
+                  name (TR.string_of_tried_source via))
+      | TR.Unknown { tried; _ } ->
+          fail (Printf.sprintf
+                  "%s must resolve (boot policy gate would exit 1), got Unknown (tried: %s)"
+                  name (TR.string_of_tried tried)))
+    [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
+
 let test_extend_turns_resolved () =
-  (* extend_turns is in core_always_tools (S7: Registry_core_tools) or
-     Tool_name_variant depending on order *)
+  (* extend_turns is in core_always_tools (Registry_core_tools). *)
   match TR.resolve "extend_turns" with
   | TR.Resolved _ -> ()
   | TR.Alias_to _ -> ()
@@ -51,18 +71,35 @@ let test_extend_turns_resolved () =
       fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_surface_admits_tool_execute () =
+let test_keeper_report_state_core_always () =
+  check bool
+    "keeper_report_state is core always"
+    true
+    (Masc.Keeper_tool_registry.is_core_always_tool "keeper_report_state");
+  match TR.resolve "keeper_report_state" with
+  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
+  | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
+      fail
+        (Printf.sprintf
+           "keeper_report_state should resolve via Registry_core_tools, got via %s"
+           (TR.string_of_tried_source via))
+  | TR.Unknown { tried; _ } ->
+      fail
+        (Printf.sprintf
+           "keeper_report_state should resolve, got Unknown (tried: %s)"
+           (TR.string_of_tried tried))
+
+let test_tool_execute_resolves () =
+  (* Was "resolves via surface"; the per-actor Surface source was removed in
+     the surface-cut refactor. tool_execute now resolves via an earlier source
+     (Dispatch_table / Public_descriptor). *)
   match TR.resolve "tool_execute" with
-  | TR.Resolved { via = TR.Surface _; _ } -> ()
-  | TR.Resolved { via; _ } ->
-      (* Admitted through a different source — still ok for shim *)
-      ignore via
-  | TR.Alias_to _ -> ()
+  | TR.Resolved _ | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
       fail (Printf.sprintf "tool_execute should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_alias_masc_to_internal () =
+let test_masc_board_post_resolves () =
   match TR.resolve "masc_board_post" with
   | TR.Resolved _ | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
@@ -81,7 +118,8 @@ let policy_validation_tool_names =
   ; "tool_search_files"
   ; "tool_execute"
   ; "Execute"
-  ; "ReadFile"
+  ; "Read"
+  ; "Search"
   ; "keeper_task_done"
   ; "keeper_time_now"
   ; "masc_status"
@@ -98,12 +136,33 @@ let test_policy_validation_known_tools_resolve () =
 let test_policy_validation_unknown_tool_misses () =
   check bool "__missing_tool misses" false (resolves "__missing_tool")
 
+let test_public_descriptor_names_resolve () =
+  List.iter
+    (fun name -> check bool (name ^ " resolves") true (resolves name))
+    [
+      "Execute";
+      "Grep";
+      "Search";
+      "Read";
+      "Edit";
+      "Write";
+      "WebSearch";
+      "WebFetch";
+    ]
+
 let test_retired_public_names_miss () =
   List.iter
     (fun name -> check bool (name ^ " misses") false (resolves name))
-    [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
+    [
+      "Bash";
+      "SearchFiles";
+      "ReadFile";
+      "EditFile";
+      "WriteFile";
+      "keeper_task_submit_for_verification";
+    ]
 
-(* ── Policy matrix: active tool_policy.toml names resolve ── *)
+(* ── Core tool names that must resolve ── *)
 
 let policy_tool_names =
   List.sort_uniq String.compare
@@ -121,6 +180,9 @@ let policy_tool_names =
       "keeper_broadcast";
       "keeper_context_status";
       "keeper_library_read";
+      "keeper_surface_read";
+      "keeper_surface_post";
+      "keeper_person_note_set";
       "keeper_library_search";
       "keeper_memory_search";
       "keeper_memory_write";
@@ -128,7 +190,6 @@ let policy_tool_names =
       "keeper_task_create";
       "keeper_task_done";
       "keeper_task_force_release";
-      "keeper_task_submit_for_verification";
       "keeper_tasks_audit";
       "keeper_tasks_list";
       "keeper_time_now";
@@ -143,22 +204,21 @@ let policy_tool_names =
       "masc_add_task";
       "masc_agent_card";
       "masc_agents";
-      "masc_approval_pending";
       "masc_batch_add_tasks";
       "masc_broadcast";
-      "masc_claim_next";
+
       "masc_dashboard";
       "masc_goal_list";
       "masc_goal_transition";
       "masc_goal_upsert";
       "masc_goal_verify";
       "masc_heartbeat";
-      "masc_join";
       "masc_keeper_list";
       "masc_keeper_msg";
       "masc_keeper_msg_result";
+      "masc_keeper_msg_cancel";
+      "masc_keeper_msg_queue";
       "masc_keeper_status";
-      "masc_leave";
       "masc_messages";
       "masc_plan_get";
       "masc_plan_get_task";
@@ -169,7 +229,7 @@ let policy_tool_names =
       "masc_transition";
       "masc_web_fetch";
       "masc_web_search";
-      "masc_who";
+      "masc_agents";
       "tool_edit_file";
       "tool_execute";
       "tool_read_file";
@@ -197,9 +257,9 @@ let test_all_policy_tools_resolve () =
       | TR.Unknown _ -> Some name
     ) policy_tool_names
   in
-  check int "all active policy tools should resolve" 0 (List.length unresolved);
   if unresolved <> [] then
-    fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved))
+    fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved));
+  check int "all active policy tools should resolve" 0 (List.length unresolved)
 
 let test_matrix_report () =
   let results =
@@ -270,16 +330,19 @@ let () =
   Alcotest.run "test_tool_resolution"
     [ "resolve", [
         test_case "Execute resolves via public descriptor" `Quick test_public_descriptor_admits_execute;
-        test_case "keeper_board_post resolves via Tool_name_variant" `Quick test_tool_name_variant_admits_keeper_board_post;
+        test_case "keeper_board_post resolves via registry" `Quick test_registry_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
-        test_case "tool_execute resolves via surface" `Quick test_surface_admits_tool_execute;
-        test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
+        test_case "keeper_report_state is core-always structured state tool" `Quick test_keeper_report_state_core_always;
+        test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
+        test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
+        test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;
       ]
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;
         test_case "unknown tools miss" `Quick test_policy_validation_unknown_tool_misses;
+        test_case "public descriptor names resolve" `Quick test_public_descriptor_names_resolve;
         test_case "retired public names miss" `Quick test_retired_public_names_miss;
       ]
     ; "matrix", [

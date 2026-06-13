@@ -5,23 +5,28 @@
     [Server_dashboard_http] does
     [include Server_dashboard_http_runtime_info], so
     everything reached unqualified through the facade
-    must be exposed here.  Pre-flight cascade grep
+    must be exposed here.  Pre-flight runtime grep
     (cycle 218 lesson) confirms only
-    {!runtime_resolution_json} escapes to the cascade
+    {!runtime_resolution_json} escapes to the runtime
     chain unqualified; the remaining surface is reached
     via [Server_dashboard_http.X] qualified calls or via
     a [module Runtime = ...] alias inside
     [test/test_dashboard_cache].
 
-    External surface (15 entries + one test record type):
+    External surface:
     - {b runtime resolution + HTTP routes}
       ({!runtime_resolution_json},
+      {!light_runtime_resolution_json},
       {!dashboard_runtime_probe_http_json},
+      {!runtime_inventory_json},
       {!dashboard_perf_http_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
       {!clear_dashboard_runtime_probe_runner_for_tests},
+      {!dashboard_runtime_probe_payload_json_for_tests},
+      {!set_dashboard_runtime_provider_http_get_for_tests},
+      {!clear_dashboard_runtime_provider_http_get_for_tests},
       {!clear_dashboard_runtime_probe_cache_for_tests}).
     - {b git rev-parse short test seams}
       ({!git_rev_parse_short},
@@ -44,15 +49,15 @@
 
 (** {1 Runtime resolution} *)
 
-val runtime_resolution_json : Coord.config -> Yojson.Safe.t
+val runtime_resolution_json : Workspace.config -> Yojson.Safe.t
 (** Renders the runtime resolution envelope: build
     identity + workspace / base-path commit shas (via
     {!git_rev_parse_short}) + server/workspace path
     mismatch visibility + base-path resolution inputs.
     Reached unqualified through the
-    [Server_dashboard_http_core] cascade consumer. *)
+    [Server_dashboard_http_core] runtime consumer. *)
 
-val light_runtime_resolution_json : Coord.config -> Yojson.Safe.t
+val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
 (** Renders the cheap runtime/fleet subset used by
     [/api/v1/dashboard/shell?light=true].  This keeps the shell health strip
     aligned with [/health] fleet safety without running git probes or other
@@ -70,7 +75,19 @@ val dashboard_runtime_probe_http_json :
     includes a [cache_hit] flag so dashboards can show
     the freshness state. *)
 
-val dashboard_perf_http_json : Coord.config -> Yojson.Safe.t
+val dashboard_runtime_probe_payload_json_for_tests :
+  ?default_id:string -> Runtime.t list -> Yojson.Safe.t
+(** Test-only pure projection for the production runtime reachability payload.
+    HTTP execution is supplied through
+    {!set_dashboard_runtime_provider_http_get_for_tests}. *)
+
+val runtime_inventory_json : unit -> Yojson.Safe.t
+(** Returns the materialized runtime.toml inventory loaded by
+    {!Runtime.init_default}. This is the dashboard-compatible projection for
+    the legacy [/api/v1/providers] route; it does not execute providers or
+    infer defaults outside the Runtime SSOT. *)
+
+val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
 (** Renders the dashboard performance envelope (build
     identity, runtime / workspace commits, system clock
     skew, etc). *)
@@ -78,7 +95,7 @@ val dashboard_perf_http_json : Coord.config -> Yojson.Safe.t
 val dashboard_tools_http_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** Renders the dashboard tools projection.  [?actor]
     selects the per-agent tool catalogue when present;
@@ -99,6 +116,21 @@ val clear_dashboard_runtime_probe_runner_for_tests :
   unit -> unit
 (** Removes the test runner installed by
     {!set_dashboard_runtime_probe_runner_for_tests}. *)
+
+val set_dashboard_runtime_provider_http_get_for_tests :
+  (url:string ->
+   headers:(string * string) list ->
+   timeout_sec:float ->
+   (int * (string * string) list * string, string) result) ->
+  unit
+(** Installs a deterministic HTTP GET hook used by the provider reachability
+    probe.  The hook receives the final probe URL and in-memory headers; callers
+    must not persist header values in assertion failure messages. *)
+
+val clear_dashboard_runtime_provider_http_get_for_tests :
+  unit -> unit
+(** Removes the provider HTTP GET hook installed by
+    {!set_dashboard_runtime_provider_http_get_for_tests}. *)
 
 val clear_dashboard_runtime_probe_cache_for_tests :
   unit -> unit

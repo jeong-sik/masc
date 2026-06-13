@@ -40,12 +40,12 @@ fields (`phase`, `pipeline_stage`). The fifth — already deployed at
 | `ksm_phase` (KSM) | `snapshot.phase` | flat → 4 panels (above), composite → FsmHub |
 | `ktc_turn_phase` (KTC) | `snapshot.turn_phase` | composite → FsmHub only |
 | `kdp_decision` (KDP) | `snapshot.decision.stage` | composite → FsmHub only |
-| `kcl_cascade_state` (KCL) | `snapshot.cascade.state` | composite → FsmHub only |
+| `kcl_runtime_state` (KCL) | `snapshot.runtime.state` | composite → FsmHub only |
 | `kmc_compaction` (KMC) | `snapshot.compaction.stage` | composite → FsmHub only |
 | `circuit_breaker.state` | `snapshot.circuit_breaker.state` | composite → FsmHub only |
 
 Result: an operator opening keeper detail sees **`phase` four times** but
-**zero** of `turn_phase / decision / cascade / compaction / breaker`. To
+**zero** of `turn_phase / decision / runtime / compaction / breaker`. To
 get the full FSM picture they must back out to fleet view, find the
 keeper, and use the FsmHub drill-down. Per-keeper analysis is the *exact*
 flow that needs the composite, and it is the flow without it.
@@ -186,7 +186,7 @@ prefers smaller diffs.
 ## 8. Acceptance criteria
 
 - [ ] Operator opening `monitoring?section=agents&view=keepers&keeper=X`
-      sees all six FSM lanes (phase, turn_phase, decision, cascade,
+      sees all six FSM lanes (phase, turn_phase, decision, runtime,
       compaction, circuit_breaker) at the top of 운영 상태 개요.
 - [ ] No component on the detail surface reads `keeper.phase` /
       `keeper.pipeline_stage` directly *except* the page-header

@@ -43,7 +43,7 @@ type agent =
   ; status : agent_status
   ; capabilities : string list
   ; current_task : string option [@default None]
-  ; joined_at : string
+  ; session_bound_at : string
   ; last_seen : string
   ; meta : agent_meta option [@default None]
   }
@@ -52,26 +52,8 @@ type agent =
 val agent_to_yojson : agent -> Yojson.Safe.t
 val agent_of_yojson : Yojson.Safe.t -> (agent, string) result
 val iso8601_of_unix_seconds : float -> string
-val normalize_agent_last_seen : joined_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
+val normalize_agent_last_seen : session_bound_at:Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option
 val short_json_repr : Yojson.Safe.t -> string
-
-type room_info =
-  { id : string
-  ; name : string
-  ; description : string option [@default None]
-  ; created_at : string
-  ; created_by : string option [@default None]
-  ; agent_count : int [@default 0]
-  ; task_count : int [@default 0]
-  }
-[@@deriving yojson { strict = false }, show]
-
-type room_registry =
-  { rooms : room_info list [@default []]
-  ; default_room : string [@default "default"]
-  ; current_room : string option [@default None]
-  }
-[@@deriving yojson { strict = false }, show]
 
 type task_action =
   | Claim
@@ -82,13 +64,19 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 [@@deriving show]
 
 val task_action_of_string : string -> (task_action, string) result
 val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
+
+(* RFC-0220: verification sub-state folded into [task_status] (was a separate
+   request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+  | Verifier_assigned of { verifier : string }
+[@@deriving show]
 
 type task_status =
   | Todo
@@ -98,11 +86,23 @@ type task_status =
       { assignee : string
       ; submitted_at : string
       ; verification_id : string
-      ; deadline : string option
+      ; phase : verification_phase
       }
   | Done of { assignee : string; completed_at : string; notes : string option }
   | Cancelled of { cancelled_by : string; cancelled_at : string; reason : string option }
 [@@deriving show]
+
+(** RFC-0220 §3.5: [task_status] of an [AwaitingVerification] obligation once
+    [verifier] has claimed it as its satisfier — status preserved, verifier
+    recorded in [phase]. Single construction authority shared by [decide] and
+    both claim writers. Advisory binding: records who is verifying, not who is
+    permitted to (any non-submitter may still approve/reject). *)
+val bind_verifier
+  :  verifier:string
+  -> assignee:string
+  -> submitted_at:string
+  -> verification_id:string
+  -> task_status
 
 val task_status_to_string : task_status -> string
 val string_of_task_status : task_status -> string
@@ -125,11 +125,18 @@ type task_execution_links =
 type task_contract =
   { strict : bool [@default false]
   ; completion_contract : string list [@default []]
-  ; required_tools : string list [@default []]
   ; required_evidence : string list [@default []]
-  ; required_evidence_typed : Evidence_claim.t list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
+  ; evidence_claims : Evidence_claim.t list [@default []]
+        (* RFC-0199 Phase B: typed deterministic completion criteria the
+           harness can check without verifier judgment. Declared by the task
+           author (masc_add_task contract arg), evaluated by
+           Deterministic_evidence_evaluator. Re-introduced with producer +
+           consumer wired (unlike the fan-in-0 required_evidence_typed removed
+           2026-06-03); legacy required_evidence strings are NOT auto-parsed
+           into claims (that would be a substring classifier). *)
+  ; stale_claim_timeout_sec : int [@default 0]
   ; links : task_execution_links
         [@default { operation_id = None; session_id = None }]
   }
@@ -166,8 +173,6 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
-  ; goal_id : string option [@default None]
-  ; stage : Task_stage.t option [@default None]
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
@@ -232,7 +237,7 @@ type message =
   }
 [@@deriving yojson { strict = false }, show]
 
-type room_state =
+type workspace_state =
   { protocol_version : string
   ; project : string
   ; started_at : string
@@ -284,56 +289,6 @@ type backlog =
 val backlog_to_yojson : backlog -> Yojson.Safe.t
 val backlog_of_yojson : Yojson.Safe.t -> (backlog, string) result
 
-type a2a_task_status =
-  | A2APending
-  | A2ARunning
-  | A2ACompleted
-  | A2AFailed
-  | A2ACanceled
-[@@deriving show { with_path = false }]
-
-val a2a_task_status_to_string : a2a_task_status -> string
-val a2a_task_status_of_string : string -> (a2a_task_status, string) result
-val a2a_task_status_to_yojson : a2a_task_status -> Yojson.Safe.t
-val a2a_task_status_of_yojson : Yojson.Safe.t -> (a2a_task_status, string) result
-
-type portal_state =
-  | PortalOpen
-  | PortalClosed
-[@@deriving show { with_path = false }]
-
-val portal_state_to_string : portal_state -> string
-val portal_state_of_string : string -> (portal_state, string) result
-val portal_state_to_yojson : portal_state -> Yojson.Safe.t
-val portal_state_of_yojson : Yojson.Safe.t -> (portal_state, string) result
-
-type a2a_task =
-  { a2a_id : string [@key "id"]
-  ; from_agent : string [@key "from"]
-  ; to_agent : string [@key "to"]
-  ; a2a_message : string [@key "message"]
-  ; a2a_status : a2a_task_status [@key "status"]
-  ; a2a_result : string option [@key "result"] [@default None]
-  ; created_at : string [@key "createdAt"]
-  ; updated_at : string [@key "updatedAt"]
-  }
-[@@deriving show]
-
-val a2a_task_to_yojson : a2a_task -> Yojson.Safe.t
-val a2a_task_of_yojson : Yojson.Safe.t -> (a2a_task, string) result
-
-type portal =
-  { portal_from : string [@key "from"]
-  ; portal_target : string [@key "target"]
-  ; portal_opened_at : string [@key "openedAt"]
-  ; portal_status : portal_state [@key "status"]
-  ; task_count : int [@key "taskCount"]
-  }
-[@@deriving show]
-
-val portal_to_yojson : portal -> Yojson.Safe.t
-val portal_of_yojson : Yojson.Safe.t -> (portal, string) result
-
 type sse_session =
   { agent_name : string
   ; connected_at : string
@@ -364,6 +319,7 @@ type claim_next_result =
       ; priority : int
       ; released_task_id : string option
       ; message : string
+      ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
@@ -371,10 +327,7 @@ type claim_next_result =
       ; blocked_count : int
       ; verification_blocked_count : int
       ; scope_excluded_count : int
-      ; required_tool_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int
-      ; receipt_required_tool_blocked : bool
-      ; agent_tool_names_known : bool
       }
   | Claim_next_error of string

@@ -1,21 +1,21 @@
-# masc-mcp Roadmap
+# masc Roadmap
 
-> Current package version: v0.19.31
-> Latest changelog entry: v0.19.31 (2026-05-26)
-> Latest published GitHub release: v0.19.27 (2026-05-20)
-> Updated: 2026-05-24
+> Current package version: v0.19.43
+> Latest changelog entry: v0.19.43 (2026-06-12)
+> Latest published GitHub release: v0.19.41 (2026-06-12)
+> Updated: 2026-06-12
 
-This roadmap is the 6-8 week operating view for `masc-mcp`.
+This roadmap is the 6-8 week operating view for `masc`.
 For the product promise and GitHub operating model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
 For historical feature-train rules and release intake background, see [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
 
 ## Product Promise
 
-`masc-mcp` is a repo-local MCP server for coordinating multiple coding agents inside one repository.
+`masc` is a repo-local MCP server for aligning multiple coding agents inside one repository.
 
 Promise levels:
 
-- Front door: repo coordination
+- Front door: repo workspace collaboration
 - Supporting: dashboard and operator visibility
 - Deferred or experimental: broad research surfaces, extraction work, and deep architecture cleanup
 
@@ -75,10 +75,10 @@ Important work that stays visible but does not drive the next 6-8 weeks:
 ## Release Lane Rules
 
 - The active release line is pre-1.0: `0.y.0` opens a user-visible train and `0.y.z` stabilizes it.
-- Do not open `1.0.0` until repo coordination, release truth, and the core operator path are trustworthy without caveats.
+- Do not open `1.0.0` until repo workspace collaboration, release truth, and the core operator path are trustworthy without caveats.
 - Historical `v2.*` tags remain audit history only; they do not define the active SemVer policy.
 - Do not tag a release while `release-blocker` issues remain open.
-- Do not tag a release while version truth is broken across `dune-project`, `masc_mcp.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
+- Do not tag a release while version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`.
 - Prefer `target:now`, `target:next`, and `target:later` over vague backlog buckets.
 
 ## Completed Reference Points

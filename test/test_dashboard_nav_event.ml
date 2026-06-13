@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let parse_ok json_str =
   match Dashboard_nav_event.parse_event_json (Yojson.Safe.from_string json_str) with
@@ -108,7 +108,7 @@ let test_section_null_explicit () =
 
 let test_record_increments_surface_counter () =
   let before =
-    Prometheus.get_metric_value
+    Otel_metric_store.get_metric_value
       "dashboard_surface_open_total"
       ~labels:[ "surface", "overview" ]
       ()
@@ -117,7 +117,7 @@ let test_record_increments_surface_counter () =
   Dashboard_nav_event.record
     { surface = "overview"; section = None; redirected_from = None };
   let after =
-    Prometheus.get_metric_value
+    Otel_metric_store.get_metric_value
       "dashboard_surface_open_total"
       ~labels:[ "surface", "overview" ]
       ()
@@ -134,7 +134,7 @@ let test_record_increments_section_counter_with_redirect_label () =
     ]
   in
   let before =
-    Prometheus.get_metric_value "dashboard_section_open_total" ~labels ()
+    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
     |> Option.value ~default:0.0
   in
   Dashboard_nav_event.record
@@ -143,7 +143,7 @@ let test_record_increments_section_counter_with_redirect_label () =
     ; redirected_from = Some "monitoring:git-graph"
     };
   let after =
-    Prometheus.get_metric_value "dashboard_section_open_total" ~labels ()
+    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
     |> Option.value ~default:0.0
   in
   check (float 1e-9) "incremented by 1" 1.0 (after -. before)
@@ -152,13 +152,13 @@ let test_record_increments_section_counter_with_redirect_label () =
 let test_record_section_counter_redirect_none_label () =
   let labels = [ "surface", "lab"; "section", "tools"; "redirected_from", "none" ] in
   let before =
-    Prometheus.get_metric_value "dashboard_section_open_total" ~labels ()
+    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
     |> Option.value ~default:0.0
   in
   Dashboard_nav_event.record
     { surface = "lab"; section = Some "tools"; redirected_from = None };
   let after =
-    Prometheus.get_metric_value "dashboard_section_open_total" ~labels ()
+    Otel_metric_store.get_metric_value "dashboard_section_open_total" ~labels ()
     |> Option.value ~default:0.0
   in
   check (float 1e-9) "incremented by 1 with 'none' label" 1.0 (after -. before)

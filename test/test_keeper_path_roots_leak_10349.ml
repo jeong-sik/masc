@@ -26,7 +26,7 @@
        matchers keep recognising the error class. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let counter = ref 0
 
@@ -67,8 +67,8 @@ let with_clean_env f =
     f
 
 let counter_value labels =
-  Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string PathRejection)
+  Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string PathRejection)
     ~labels ()
 
 let assert_no_roots_leak msg err =
@@ -96,7 +96,7 @@ let test_path_outside_sandbox_no_leak () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let labels = [ ("kind", "out_of_roots") ] in
       let before = counter_value labels in
       let result =
@@ -126,7 +126,7 @@ let test_out_of_roots_no_leak () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let labels = [ ("kind", "out_of_roots") ] in
       let before = counter_value labels in
       (* Relative path inside root with trailing slash and a
@@ -160,7 +160,7 @@ let test_not_found_relative_no_leak () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let labels = [ ("kind", "not_found_relative") ] in
       let before = counter_value labels in
       let result =
@@ -187,7 +187,7 @@ let test_absolute_path_rejected () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let labels = [ ("kind", "absolute_path_rejected") ] in
       let before = counter_value labels in
       let target = Filename.concat dir "lib/foo.ml" in
@@ -218,7 +218,7 @@ let test_counter_labels_isolated () =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
+      let config = Workspace.default_config dir in
       let other_labels = [ ("kind", "out_of_roots") ] in
       let before_other = counter_value other_labels in
       let _ =

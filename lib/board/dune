@@ -1,0 +1,49 @@
+(include_subdirs no)
+
+(library
+ (name masc_board_handlers)
+ (public_name masc.board_handlers)
+ (wrapped true)
+ (modules
+  board
+  board_agent_effect_hooks
+  board_attachment_meta
+  board_comment_rate_limit
+  board_core
+  board_core_classify
+  board_core_json
+  board_core_payload
+  board_core_persist
+  board_core_status_rollup
+  board_curation
+  board_dispatch
+  board_effect_hooks
+  board_metrics_hooks
+  board_moderation
+  board_paths
+  board_sub_board_json
+  board_votes
+  board_votes_json)
+ (flags
+  (:standard -w -4))
+ (libraries
+  yojson
+  unix
+  re
+  re.str
+  re.pcre
+  eio
+  time_compat
+  fs_compat
+  masc_random_id
+  masc.config
+  masc.masc_board
+  masc_types
+  masc_core
+  masc_log
+  masc_economy
+  masc_workspace
+  masc_thompson
+  masc_eio_context)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_tla)))

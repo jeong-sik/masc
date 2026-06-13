@@ -1,6 +1,7 @@
 
 open Server_auth
 
+module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 
 type keeper_chat_stream_request = {
@@ -10,7 +11,8 @@ type keeper_chat_stream_request = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
+  attachments : Keeper_chat_store.attachment list;
 }
 
 let keeper_chat_stream_error_json message =
@@ -19,6 +21,87 @@ let keeper_chat_stream_error_json message =
       ( "error",
         `Assoc [ ("message", `String message) ] );
     ]
+
+let keeper_chat_request_prefixes =
+  [
+    "/api/v1/gate/message/requests/";
+    "/api/v1/keepers/chat/requests/";
+  ]
+
+let has_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+
+let keeper_chat_request_suffix request =
+  let path = Http.Request.path request in
+  let rec loop = function
+    | [] -> None
+    | prefix :: rest ->
+        if has_prefix ~prefix path then
+          Some
+            (String.sub path (String.length prefix)
+               (String.length path - String.length prefix))
+        else loop rest
+  in
+  loop keeper_chat_request_prefixes
+
+let parse_keeper_chat_request_result_path request =
+  match keeper_chat_request_suffix request with
+  | Some suffix -> (
+      match String.split_on_char '/' suffix with
+      | [ request_id ] when String.trim request_id <> "" -> Ok request_id
+      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>" )
+  | None -> Error "invalid keeper chat request path"
+
+let parse_keeper_chat_request_cancel_path request =
+  match keeper_chat_request_suffix request with
+  | Some suffix -> (
+      match String.split_on_char '/' suffix with
+      | [ request_id; "cancel" ] when String.trim request_id <> "" ->
+          Ok request_id
+      | _ -> Error "expected /api/v1/gate/message/requests/<request_id>/cancel" )
+  | None -> Error "invalid keeper chat request path"
+
+let handle_keeper_chat_request_result state request reqd =
+  match parse_keeper_chat_request_result_path request with
+  | Error message ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json message)
+  | Ok request_id -> (
+      match
+        Keeper_msg_async.poll
+          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+      with
+      | None ->
+          respond_json_value_with_cors ~status:`Not_found request reqd
+            (keeper_chat_stream_error_json "request_id not found")
+      | Some entry ->
+          respond_json_value_with_cors ~status:`OK request reqd
+            (Keeper_msg_async.entry_to_json entry) )
+
+let handle_keeper_chat_request_cancel state request reqd =
+  match parse_keeper_chat_request_cancel_path request with
+  | Error message ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json message)
+  | Ok request_id ->
+      let cancelled =
+        Keeper_msg_async.cancel
+          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+      in
+      if cancelled then
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+            [
+              ("request_id", `String request_id);
+              ("status", `String "cancelled");
+              ("message", `String "Keeper turn cancelled successfully.");
+            ])
+      else
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json
+             "request_id not found or already finished")
 
 (* No external timeout for keeper_msg. Keeper has its own internal limits
    (max_turns, max_cost_usd, max_tokens) that control call duration.
@@ -29,9 +112,9 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
   let start_time = Eio.Time.now clock in
   let success, body =
     try
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.room_config;
+          config = state.Mcp_server.workspace_config;
           agent_name;
           sw;
           clock;
@@ -39,12 +122,12 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
           net = state.Mcp_server.net;
         }
       in
-      match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
+      match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
       | Some result -> Tool_result.is_success result, Tool_result.message result
       | None -> (false, "masc_keeper_msg dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Coord.Not_initialized ->
+    | Workspace.Not_initialized ->
         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
@@ -57,10 +140,10 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.room_config
+  Audit_log.log_tool_call state.Mcp_server.workspace_config
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
-    Log.emit Log.Error ~module_name:"Keeper"
+    Log.Keeper.emit Log.Error
       ~details:
         (`Assoc
           [
@@ -80,9 +163,9 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
-             ~source:(Tool_registry.string_of_source Keeper_internal)
+             ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -91,66 +174,99 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              (Printexc.to_string exn))
     | None -> ()
   );
-  Tool_registry.record_call_if_known ~source:Keeper_internal
+  Tool_registry.record_call_if_known ~source:Agent_internal
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
 let parse_keeper_chat_stream_request body_str =
-  let open Yojson.Safe.Util in
   try
     let json = Yojson.Safe.from_string body_str in
     if not (match json with `Assoc _ -> true | _ -> false) then
       Error "request body must be a JSON object"
     else
-      let name = json |> member "name" |> to_string_option |> Option.value ~default:"" |> String.trim in
+      let name = Json_util.get_string_with_default json ~key:"name" ~default:"" |> String.trim in
       let message =
-        json |> member "message" |> to_string_option |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"message" ~default:""
         |> String.trim
       in
       let channel =
-        json |> member "channel" |> to_string_option |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"channel" ~default:""
         |> String.trim
       in
       let channel_user_id =
-        json |> member "channel_user_id" |> to_string_option
-        |> Option.value ~default:""
+        Json_util.get_string_with_default json ~key:"channel_user_id" ~default:""
         |> String.trim
       in
       let channel_user_name =
-        json |> member "channel_user_name" |> to_string_option
+        Json_util.get_string json "channel_user_name"
         |> Option.value ~default:""
         |> String.trim
       in
-      let channel_room_id =
-        json |> member "channel_room_id" |> to_string_option
+      let channel_workspace_id =
+        Json_util.get_string json "channel_workspace_id"
         |> Option.value ~default:""
         |> String.trim
       in
       let has_connector_context =
         channel <> "" || channel_user_id <> ""
-        || channel_user_name <> "" || channel_room_id <> ""
+        || channel_user_name <> "" || channel_workspace_id <> ""
       in
       let timeout_sec =
-        match json |> member "timeout_sec" with
-        | `Null -> Ok None
-        | `Int value when value > 0 -> Ok (Some (max 5 (min 300 value)))
-        | `Float value when value > 0.0 ->
+        match Json_util.assoc_member_opt "timeout_sec" json with
+        | None | Some `Null -> Ok None
+        | Some (`Int value) when value > 0 -> Ok (Some (max 5 (min 300 value)))
+        | Some (`Float value) when value > 0.0 ->
             Ok (Some (max 5 (min 300 (int_of_float (Float.ceil value)))))
-        | `Int _ | `Float _ -> Ok None
-        | _ -> Error "timeout_sec must be a positive number"
+        | Some (`Int _) | Some (`Float _) -> Ok None
+        | Some _ -> Error "timeout_sec must be a positive number"
+      in
+      let attachments : Keeper_chat_store.attachment list =
+        match Json_util.assoc_member_opt "attachments" json with
+        | Some (`List att_list) ->
+            List.filter_map
+              (fun att_json ->
+                match att_json with
+                | `Assoc _ -> (
+                    try
+                      let id =
+                        Json_util.get_string_with_default att_json ~key:"id" ~default:""
+                      in
+                      let att_type =
+                        Json_util.get_string_with_default att_json ~key:"type" ~default:""
+                      in
+                      let name =
+                        Json_util.get_string_with_default att_json ~key:"name" ~default:""
+                      in
+                      let size =
+                        match Json_util.assoc_member_opt "size" att_json with
+                        | Some (`Int i) -> i
+                        | _ -> 0
+                      in
+                      let mime_type =
+                        Json_util.get_string_with_default att_json ~key:"mime_type" ~default:""
+                      in
+                      let data =
+                        Json_util.get_string_with_default att_json ~key:"data" ~default:""
+                      in
+                      if id = "" || data = "" then None
+                      else Some { Keeper_chat_store.id; att_type; name; size; mime_type; data }
+                    with _ -> None)
+                | _ -> None)
+              att_list
+        | _ -> []
       in
       if name = "" then
         Error "name is required"
       else if message = "" then
         Error "message is required"
       else if has_connector_context
-              && (channel = "" || channel_user_id = "" || channel_room_id = "")
+              && (channel = "" || channel_user_id = "" || channel_workspace_id = "")
       then
         Error
-          "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
+          "channel, channel_user_id, and channel_workspace_id are required when connector context is supplied"
       else
         match
-          Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_msg" json
+          Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg" json
         with
         | Error err -> Error err
         | Ok () -> (
@@ -164,7 +280,8 @@ let parse_keeper_chat_stream_request body_str =
                   channel;
                   channel_user_id;
                   channel_user_name;
-                  channel_room_id;
+                  channel_workspace_id;
+                  attachments;
                 }
           | Error err -> Error err )
   with Yojson.Json_error e ->
@@ -248,14 +365,14 @@ let keeper_stream_send_event writer mutex closed event =
     Projects the typed keeper result into the local HTTP stream response pair.
     No external timeout — keeper internal limits control duration
     (aligned with MCP path, see mcp_server_eio_call_tool.ml:139-143). *)
-let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
+let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event state
     ~agent_name ~arguments ~on_text_delta =
   let start_time = Eio.Time.now clock in
   let success, body =
     try
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.room_config;
+          config = state.Mcp_server.workspace_config;
           agent_name;
           sw;
           clock;
@@ -264,14 +381,14 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
         }
       in
       match
-        Tool_keeper.dispatch_stream ~on_text_delta keeper_ctx
+        Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event keeper_ctx
           ~name:"masc_keeper_msg" ~args:arguments
       with
       | Some result -> Tool_result.is_success result, Tool_result.message result
       | None -> (false, "masc_keeper_msg stream dispatch unavailable")
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Coord.Not_initialized ->
+    | Workspace.Not_initialized ->
         (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
     | exn ->
         let err = Printexc.to_string exn in
@@ -284,10 +401,10 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.room_config ~agent_id:agent_name
+  Audit_log.log_tool_call state.Mcp_server.workspace_config ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
-    Log.emit Log.Error ~module_name:"Keeper"
+    Log.Keeper.emit Log.Error
       ~details:
         (`Assoc
           [
@@ -307,9 +424,9 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
+           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
-             ~duration_ms ~source:(Tool_registry.string_of_source Keeper_internal)
+             ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
@@ -317,7 +434,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
            Log.Misc.error "telemetry tracking failed: %s"
              (Printexc.to_string exn))
     | None -> ());
-  Tool_registry.record_call_if_known ~source:Keeper_internal
+  Tool_registry.record_call_if_known ~source:Agent_internal
     ~tool_name:"masc_keeper_msg" ~success ~duration_ms ();
   (success, body)
 
@@ -331,18 +448,6 @@ let send_keeper_error writer mutex closed ~thread_id ~run_id err =
            ~custom_value:(Some (`Assoc [ ("message", `String err) ]))
            Run_error))
 
-(** Send Text_message_end + Run_finished sequence to complete the stream. *)
-let send_keeper_stream_finish writer mutex closed ~thread_id ~run_id
-    ~message_id =
-  ignore
-    (keeper_stream_send_event writer mutex closed
-       Ag_ui.(
-         make_event ~thread_id ~run_id:(Some run_id)
-           ~message_id:(Some message_id) Text_message_end));
-  ignore
-    (keeper_stream_send_event writer mutex closed
-       Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_finished))
-
 (** Extract visible reply from the keeper pipeline result body.
     Parses JSON if possible and strips internal markers. *)
 let extract_visible_reply body =
@@ -354,9 +459,7 @@ let extract_visible_reply body =
     match payload_json_opt with
     | Some payload_json ->
         let reply_raw =
-          payload_json
-          |> Yojson.Safe.Util.member "reply"
-          |> Yojson.Safe.Util.to_string_option
+          Json_util.get_string payload_json "reply"
           |> Option.value ~default:""
         in
         let visible =
@@ -365,7 +468,7 @@ let extract_visible_reply body =
         in
         if visible = "" then
           Option.value ~default:"(empty reply)"
-            (Yojson.Safe.Util.to_string_option payload_json)
+            (match payload_json with `String s -> Some s | _ -> None)
         else visible
     | None ->
         let visible = strip_keeper_visible_reply body in
@@ -373,7 +476,391 @@ let extract_visible_reply body =
   in
   (payload_json_opt, visible_reply)
 
+let persisted_error_reply err =
+  let detail =
+    match String.trim err with
+    | "" -> "unknown error"
+    | trimmed -> trimmed
+  in
+  "Keeper request failed: " ^ detail
+
+let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
+    ?(message = "") () =
+  let fields =
+    [
+      ("request_id", `String request_id);
+      ("keeper_name", `String keeper_name);
+      ("status", `String status);
+      ("ok", `Bool ok);
+    ]
+  in
+  let fields =
+    if String.trim message = "" then fields
+    else ("message", `String message) :: fields
+  in
+  `Assoc fields
+
+type keeper_stream_worker_event =
+  | Stream_event of Agent_sdk.Types.sse_event
+  | Stream_terminal of bool * string
+
+let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
+    ~payload ~run_id ~message_id ~agent_name
+    ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
+  let base_path = state.Mcp_server.workspace_config.base_path in
+  let redaction =
+    Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
+  Keeper_chat_events.publish events
+    (Run_started { run_id; thread_id });
+  Keeper_chat_events.publish events
+    (Text_message_start { message_id; role = Assistant });
+  let has_connector_context =
+    payload.channel <> "" && payload.channel_user_id <> ""
+  in
+  let message =
+    if has_connector_context then
+      Gate_keeper_backend.contextualize_message
+         ~channel:payload.channel
+         ~channel_user_id:payload.channel_user_id
+         ~channel_user_name:payload.channel_user_name
+         ~channel_workspace_id:payload.channel_workspace_id
+         ~metadata:[]
+         ~content:payload.message
+    else
+      payload.message
+  in
+  let attachment_json att =
+    `Assoc
+      [ ("id", `String att.Keeper_chat_store.id);
+        ("type", `String att.att_type);
+        ("name", `String att.name);
+        ("size", `Int att.size);
+        ("mime_type", `String att.mime_type);
+        ("data", `String att.data) ]
+  in
+  let args =
+    let base_fields =
+      [ ("name", `String payload.name);
+        ("message", `String message);
+        ("direct_reply", `Bool true) ]
+      @
+      (match payload.timeout_sec with
+       | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
+       | None -> [])
+    in
+    let connector_fields =
+      if has_connector_context then
+        [ ("channel", `String payload.channel);
+          ("channel_user_id", `String payload.channel_user_id);
+          ("channel_user_name", `String payload.channel_user_name);
+          ("channel_workspace_id", `String payload.channel_workspace_id) ]
+      else
+        []
+    in
+    let fields = base_fields @ connector_fields in
+    `Assoc
+      (if payload.attachments = [] then fields
+       else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
+  in
+  (* Stream model text deltas live with per-delta redaction — the same
+     treatment ThinkingDelta and Tool_call_args already get in
+     [consume_worker_events]. The once-only invariant (live emit + terminal
+     re-send suppression + raw fallback) is owned by
+     [Keeper_stream_text_accum]; see its interface for the #20825/#20854/
+     #20869 history this guards against. *)
+  let text_accum = Keeper_stream_text_accum.create () in
+  let worker_events = Eio.Stream.create 512 in
+  let push_worker_event event =
+    if not !closed then
+      try Eio.Stream.add worker_events event
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Keeper.warn
+            "keeper_stream: worker event push failed: %s"
+            (Printexc.to_string exn)
+  in
+  (* Mirror tool-call SDK events flowing through [on_event] so the
+     completed turn persists tool lines alongside the user/assistant
+     pair (the dashboard re-renders tool cards after a reload). The
+     accumulator runs in the worker fiber and is collected after
+     dispatch returns in that same fiber, so no synchronisation is
+     needed. The non-streaming fallback path emits no events and
+     therefore persists no tool lines. *)
+  let tool_call_cells : (int, Buffer.t) Hashtbl.t = Hashtbl.create 4 in
+  let tool_calls_rev : (string * string * Buffer.t) list ref = ref [] in
+  let record_tool_event = function
+    | Agent_sdk.Types.ContentBlockStart
+        { index; tool_id = Some tool_id; tool_name = Some tool_name; _ } ->
+        let buf = Buffer.create 64 in
+        Hashtbl.replace tool_call_cells index buf;
+        tool_calls_rev := (tool_id, tool_name, buf) :: !tool_calls_rev
+    | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
+        (match Hashtbl.find_opt tool_call_cells index with
+         | Some buf -> Buffer.add_string buf args
+         | None -> ())
+    | _ -> ()
+  in
+  let collected_tool_calls () =
+    List.rev_map
+      (fun (call_id, call_name, buf) ->
+        { Keeper_chat_store.call_id; call_name; args = Buffer.contents buf })
+      !tool_calls_rev
+  in
+  (* RFC-0232 P5: the typed surface is the write-side truth; the label
+     [chat_source] is its derivation, used for broadcast metadata. *)
+  let chat_surface =
+    if has_connector_context then
+      Surface_ref.Gate { label = payload.channel; address = [] }
+    else Surface_ref.Dashboard { session_id = None }
+  in
+  let chat_source = Surface_ref.lane_label chat_surface in
+  (* RFC-0223 P1: authority derives from the arrival route. Connector
+     context means an arbitrary external person on that channel; its
+     absence means the authenticated dashboard operator (the route is
+     bearer-gated, and the dashboard supplies no per-user identity). *)
+  let chat_speaker : Keeper_chat_store.speaker =
+    if has_connector_context then
+      { speaker_id = Some payload.channel_user_id;
+        speaker_name =
+          (let name = String.trim payload.channel_user_name in
+           if name = "" then None else Some name);
+        speaker_authority = Keeper_chat_store.External }
+    else
+      { speaker_id = None;
+        speaker_name = None;
+        speaker_authority = Keeper_chat_store.Owner }
+  in
+  let on_event evt =
+    record_tool_event evt;
+    push_worker_event (Stream_event evt)
+  in
+  let persist_failure_reply err =
+    (* The failure marker is typed, not an utterance: it renders for the
+       operator but does not advance the lane watermark, so the user
+       message it failed to answer stays pending for the keeper's next
+       turn — and the keeper never reads the error as its own words. *)
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatTransportFailures)
+      ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
+      ();
+    Keeper_chat_store.append_turn
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~user_content:payload.message
+      ~user_attachments:payload.attachments
+      ~tool_calls:(collected_tool_calls ())
+      ~surface:chat_surface
+      ~speaker:chat_speaker
+      ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+      ~assistant_content:(persisted_error_reply err)
+      ();
+    Keeper_chat_broadcast.chat_appended
+      ~keeper_name:payload.name ~source:chat_source
+  in
+  let timeout_sec = Option.map float_of_int payload.timeout_sec in
+  let request_id =
+    Keeper_msg_async.submit ?timeout_sec ~clock ~sw
+      ~base_path
+      ~keeper_name:payload.name
+      ~f:(fun () ->
+        let start_time = Time_compat.now () in
+        let dispatch_result =
+          try
+            Ok
+              (execute_keeper_stream_tool_streaming ~sw ~clock
+                 ?auth_token
+                 state ~agent_name ~arguments:args ~on_event ~on_text_delta:(fun _ -> ()))
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+              Log.Keeper.warn
+                "keeper_stream: streaming dispatch raised: %s"
+                (Printexc.to_string exn);
+              (try
+                 Ok
+                   (execute_keeper_stream_tool ~sw ~clock
+                      ?auth_token
+                      state ~agent_name ~arguments:args)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn2 -> Error (Printexc.to_string exn2))
+        in
+        match dispatch_result with
+        | Ok (true, body) ->
+            let payload_json_opt, visible_reply = extract_visible_reply body in
+            (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> ()
+            | Keeper_turn_outcome.Visible_reply ->
+              Keeper_chat_store.append_turn
+                ~base_dir:base_path
+                ~keeper_name:payload.name
+                ~user_content:payload.message
+                ~user_attachments:payload.attachments
+                ~tool_calls:(collected_tool_calls ())
+                ~surface:chat_surface
+                ~speaker:chat_speaker
+                ~assistant_content:visible_reply
+                ();
+              Keeper_chat_broadcast.chat_appended
+                ~keeper_name:payload.name ~source:chat_source);
+            push_worker_event (Stream_terminal (true, body));
+            Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+        | Ok (false, err) ->
+            persist_failure_reply err;
+            push_worker_event (Stream_terminal (false, err));
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+        | Error err ->
+            persist_failure_reply err;
+            push_worker_event (Stream_terminal (false, err));
+            Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err)
+      ()
+  in
+  Log.Keeper.info
+    "keeper_stream: queued request keeper=%s request_id=%s surface=%s"
+    payload.name request_id
+    (if has_connector_context then payload.channel else "dashboard");
+  Keeper_chat_events.publish events
+    (Custom
+       { name = "KEEPER_QUEUE_REQUEST";
+         value =
+           Gate_protocol.message_request_to_json
+             { request_id;
+               destination_type = "keeper";
+               destination_id = payload.name;
+               channel =
+                 (if has_connector_context then payload.channel
+                  else "dashboard");
+               actor_id = Some agent_name;
+               status = Gate_protocol.Queued;
+               modalities = [ "text" ];
+               transport = Some "sse";
+               metadata =
+                 [
+                   ("projection", "keeper_chat_stream");
+                   ("protocol", "gate_message_request");
+                 ];
+             }
+       });
+  let publish_terminal ~status ~ok ?(message = "") () =
+    let message = redact_text message in
+    let payload_json =
+      keeper_request_terminal_payload ~request_id ~keeper_name:payload.name
+        ~status ~ok ~message ()
+    in
+    if ok then
+      Log.Keeper.info
+        "keeper_stream: request terminal keeper=%s request_id=%s status=%s"
+        payload.name request_id status
+    else
+      Log.Keeper.warn
+        "keeper_stream: request terminal keeper=%s request_id=%s status=%s message=%s"
+        payload.name request_id status message;
+      Keeper_chat_events.publish events
+        (Custom { name = "KEEPER_REQUEST_TERMINAL"; value = payload_json })
+  in
+  let index_to_tool_id = Hashtbl.create 4 in
+  let rec consume_worker_events () =
+    match Eio.Stream.take worker_events with
+    | Stream_event evt ->
+        (match evt with
+         | Agent_sdk.Types.Connected ->
+             Keeper_chat_events.publish events (Custom { name = "KEEPER_CONNECTED"; value = `Null })
+         | Agent_sdk.Types.Timeout reason ->
+             Keeper_chat_events.publish events
+               (Event_error { message = redact_text ("Timeout: " ^ reason) })
+         | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
+             Keeper_chat_events.publish events
+               (Text_delta
+                  (Keeper_stream_text_accum.on_delta text_accum
+                     ~redact:redact_text text))
+         | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
+             Keeper_chat_events.publish events
+               (Custom
+                  { name = "KEEPER_THINKING_DELTA";
+                    value = `Assoc [ ("delta", `String (redact_text text)) ] })
+         | Agent_sdk.Types.ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ } ->
+             Hashtbl.replace index_to_tool_id index tid;
+             Keeper_chat_events.publish events (Tool_call_start { tool_call_id = tid; tool_call_name = tname })
+         | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
+             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             Keeper_chat_events.publish events
+               (Tool_call_args { tool_call_id = tid; delta = redact_text args })
+         | Agent_sdk.Types.ContentBlockStop { index } ->
+             let tid = Hashtbl.find_opt index_to_tool_id index |> Option.value ~default:"" in
+             Keeper_chat_events.publish events (Tool_call_end { tool_call_id = tid })
+         | _ -> ());
+        consume_worker_events ()
+    | Stream_terminal (false, err) ->
+        let err = redact_text err in
+        publish_terminal ~status:"error" ~ok:false ~message:err ();
+        Keeper_chat_events.publish events (Event_error { message = err })
+    | Stream_terminal (true, body) -> (
+        try
+          let payload_json_opt, visible_reply = extract_visible_reply body in
+          let visible_reply =
+            match String.trim visible_reply with
+            | "" ->
+                let streamed =
+                  Keeper_stream_text_accum.streamed_text text_accum |> String.trim
+                in
+                if streamed = "" then visible_reply else streamed
+            | _ -> visible_reply
+          in
+          let visible_reply = redact_text visible_reply in
+          let is_checkpoint =
+            match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> true
+            | Keeper_turn_outcome.Visible_reply -> false
+          in
+          if
+            (not is_checkpoint)
+            && not (Keeper_stream_text_accum.suppress_terminal_resend text_accum)
+          then
+            split_keeper_reply_chunks visible_reply
+            |> List.iter (fun chunk ->
+                   Keeper_chat_events.publish events (Text_delta chunk));
+          (match payload_json_opt with
+           | Some payload_json ->
+               Keeper_chat_events.publish events
+                 (Custom
+                    { name = "KEEPER_REPLY_DETAILS";
+                      value = redact_json payload_json })
+           | None -> ());
+          if is_checkpoint then
+            Keeper_chat_events.publish events
+              (Custom
+                 { name = "KEEPER_CONTINUATION_CHECKPOINT";
+                   value =
+                     `Assoc
+                       [ ("request_id", `String request_id);
+                         ("message", `String visible_reply) ]
+                 });
+          publish_terminal ~status:"done" ~ok:true ();
+          Keeper_chat_events.publish events Text_message_end;
+          Keeper_chat_events.publish events (Run_finished { run_id })
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            let message = redact_text (Printexc.to_string exn) in
+            publish_terminal ~status:"error" ~ok:false ~message ();
+            Keeper_chat_events.publish events
+              (Event_error { message }))
+  in
+  consume_worker_events ()
+
+
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
+  let redaction =
+    Keeper_secret_redaction.snapshot
+      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~keeper_name:payload.name
+  in
+  let redact_text = Keeper_secret_redaction.redact_text redaction in
+  let redact_json = Keeper_secret_redaction.redact_json redaction in
   let origin = get_origin request in
   let headers =
     Httpun.Headers.of_list
@@ -395,150 +882,152 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
       (* Catch all exceptions including Cancelled — this function is called
          from Switch.on_release where re-raising would mask the original exn. *)
       (try Httpun.Body.Writer.close writer
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+       with exn ->
          Log.Misc.warn "keeper_stream writer close: %s"
            (Printexc.to_string exn))
     end
   in
   let now_id () = int_of_float (Time_compat.now () *. 1000.0) in
   let thread_id = "keeper:" ^ payload.name in
-  let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
-  let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+
+  let sse_adapter_loop ~events ~writer ~mutex ~closed =
+    let current_thread_id = ref Ag_ui.default_thread_id in
+    let current_run_id = ref None in
+    let current_message_id = ref None in
+    let ag_role (role : Keeper_chat_events.role) =
+      match role with
+      | Keeper_chat_events.User -> Ag_ui.User
+      | Keeper_chat_events.Assistant -> Ag_ui.Assistant
+    in
+    let send_error message =
+      let message = redact_text message in
+      match !current_run_id with
+      | Some run_id ->
+          send_keeper_error writer mutex closed ~thread_id:!current_thread_id
+            ~run_id message
+      | None ->
+          ignore
+            (keeper_stream_send_event writer mutex closed
+               Ag_ui.(
+                 make_event ~thread_id:!current_thread_id
+                   ~custom_name:(Some "KEEPER_CHAT_ERROR")
+                   ~custom_value:(Some (`Assoc [ ("message", `String message) ]))
+                   Run_error))
+    in
+    let rec loop () =
+      if not !closed then
+        match Keeper_chat_events.subscribe events with
+        | Run_started { run_id; thread_id } ->
+            current_thread_id := thread_id;
+            current_run_id := Some run_id;
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(make_event ~thread_id ~run_id:(Some run_id) Run_started)
+            then loop ()
+        | Text_message_start { message_id; role } ->
+            current_message_id := Some message_id;
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:(Some message_id) ~role:(Some (ag_role role))
+                    Text_message_start)
+            then loop ()
+        | Text_delta text ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:!current_message_id
+                    ~delta:(Some (redact_text text))
+                    Text_message_content)
+            then loop ()
+        | Text_message_end ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~message_id:!current_message_id Text_message_end)
+            then loop ()
+        | Custom { name; value } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~custom_name:(Some name)
+                    ~custom_value:(Some (redact_json value))
+                    Custom)
+            then loop ()
+        | Tool_call_start { tool_call_id; tool_call_name } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id) ~tool_call_name:(Some tool_call_name)
+                    Tool_call_start)
+            then loop ()
+        | Tool_call_args { tool_call_id; delta } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id)
+                    ~delta:(Some (redact_text delta))
+                    Tool_call_args)
+            then loop ()
+        | Tool_call_end { tool_call_id } ->
+            if
+              keeper_stream_send_event writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id)
+                    Tool_call_end)
+            then loop ()
+        | Event_error { message } -> send_error message
+        | Run_finished { run_id } ->
+            current_run_id := Some run_id;
+            ignore
+              (keeper_stream_send_event writer mutex closed
+                 Ag_ui.(
+                   make_event ~thread_id:!current_thread_id ~run_id:(Some run_id)
+                     Run_finished))
+    in
+    loop ()
+  in
+
+
   ignore (keeper_stream_send_raw writer mutex closed "retry: 1500\n\n");
   Eio.Fiber.fork ~sw (fun () ->
       ignore
         (Eio.Switch.run @@ fun stream_sw ->
            Eio.Switch.on_release stream_sw close_stream;
-          (* --- 1. Lifecycle: Run_started + Text_message_start --- *)
-          ignore
-            (keeper_stream_send_event writer mutex closed
-               Ag_ui.(
-                 make_event ~thread_id ~run_id:(Some run_id) Run_started));
-          ignore
-            (keeper_stream_send_event writer mutex closed
-               Ag_ui.(
-                 make_event ~thread_id ~run_id:(Some run_id)
-                   ~message_id:(Some message_id)
-                   ~role:(Some Assistant) Text_message_start));
-          let has_connector_context =
-            payload.channel <> "" && payload.channel_user_id <> ""
-          in
-          let message =
-            if has_connector_context then
-              Gate_keeper_backend.contextualize_message
-                ~channel:payload.channel
-                ~channel_user_id:payload.channel_user_id
-                ~channel_user_name:payload.channel_user_name
-                ~channel_room_id:payload.channel_room_id
-                ~content:payload.message
-            else
-              payload.message
-          in
-          let args =
-            `Assoc
-              [ ("name", `String payload.name);
-                ("message", `String message);
-                ("direct_reply", `Bool true) ]
-          in
-          let agent_name =
-            if has_connector_context then
-              Gate_keeper_backend.agent_name_for_channel_actor
-                ~channel:payload.channel
-                ~channel_room_id:payload.channel_room_id
-                ~channel_user_id:payload.channel_user_id
-            else
-              match agent_from_request request with
-              | Some raw ->
-                  let trimmed = String.trim raw in
-                  if trimmed <> "" then trimmed else "unknown"
-              | None -> "unknown"
-          in
-          (* Track whether any text deltas were streamed to the client.
-             When streaming is active, the MODEL text is sent token-by-token
-             during the call; we only need to send the final batch chunks
-             if no deltas were emitted (fallback path). *)
-          let deltas_sent = ref false in
-          let on_text_delta text =
-            if String.length text > 0 then begin
-              deltas_sent := true;
-              ignore
-                (keeper_stream_send_event writer mutex closed
-                   Ag_ui.(
-                     make_event ~thread_id ~run_id:(Some run_id)
-                       ~message_id:(Some message_id)
-                       ~delta:(Some text) Text_message_content))
-            end
-          in
-
-          (* --- 2. Try real streaming path first --- *)
-          let dispatch_result =
-            try
-              Ok
-                (execute_keeper_stream_tool_streaming ~sw ~clock
-                   ?auth_token:(auth_token_from_request request)
-                   state ~agent_name ~arguments:args ~on_text_delta)
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-              Log.Keeper.warn
-                "keeper_stream: streaming dispatch raised: %s"
-                (Printexc.to_string exn);
-              (* --- 3. Fallback to batch on exception --- *)
-              (try
-                 Ok
-                   (execute_keeper_stream_tool ~sw ~clock
-                      ?auth_token:(auth_token_from_request request)
-                      state ~agent_name ~arguments:args)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn2 -> Error (Printexc.to_string exn2))
-          in
-          match dispatch_result with
-          | Error err ->
-              send_keeper_error writer mutex closed ~thread_id ~run_id err
-          | Ok (false, err) ->
-              send_keeper_error writer mutex closed ~thread_id ~run_id err
-          | Ok (true, body) -> (
-              try
-                let payload_json_opt, visible_reply =
-                  extract_visible_reply body
-                in
-                (* If no deltas were streamed during the MODEL call
-                   (batch fallback or tool-call-only response),
-                   send the visible reply as chunked content now. *)
-                if not !deltas_sent then
-                  split_keeper_reply_chunks visible_reply
-                  |> List.iter (fun chunk ->
-                         ignore
-                           (keeper_stream_send_event writer mutex closed
-                              Ag_ui.(
-                                make_event ~thread_id
-                                  ~run_id:(Some run_id)
-                                  ~message_id:(Some message_id)
-                                  ~delta:(Some chunk)
-                                  Text_message_content)));
-                (* Always send the structured reply details *)
-                (match payload_json_opt with
-                 | Some payload_json ->
-                     ignore
-                       (keeper_stream_send_event writer mutex closed
-                          Ag_ui.(
-                            make_event ~thread_id ~run_id:(Some run_id)
-                              ~custom_name:(Some "KEEPER_REPLY_DETAILS")
-                              ~custom_value:(Some payload_json) Custom))
-                 | None -> ());
-                (* Persist user + assistant messages in a single write *)
-                Keeper_chat_store.append_pair
-                  ~base_dir:state.Mcp_server.room_config.base_path
-                  ~keeper_name:payload.name
-                  ~user_content:payload.message
-                  ~assistant_content:visible_reply;
-                send_keeper_stream_finish writer mutex closed ~thread_id
-                  ~run_id ~message_id
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                send_keeper_error writer mutex closed ~thread_id ~run_id
-                  (Printexc.to_string exn))))
+           let has_connector_context =
+             payload.channel <> "" && payload.channel_user_id <> ""
+           in
+           let agent_name =
+             if has_connector_context then
+               Gate_keeper_backend.agent_name_for_channel_actor
+                 ~channel:payload.channel
+                 ~channel_workspace_id:payload.channel_workspace_id
+                 ~channel_user_id:payload.channel_user_id
+             else
+               match agent_from_request request with
+               | Some raw ->
+                   let trimmed = String.trim raw in
+                   if trimmed <> "" then trimmed else "unknown"
+               | None -> "unknown"
+           in
+           let run_id = Printf.sprintf "keeper-run-%d" (now_id ()) in
+           let message_id = Printf.sprintf "keeper-msg-%d" (now_id ()) in
+           let events = Keeper_chat_events.create () in
+           Eio.Fiber.fork ~sw:stream_sw (fun () ->
+             sse_adapter_loop ~events ~writer ~mutex ~closed);
+           process_single_turn ~state ~clock ~sw
+             ~auth_token:(auth_token_from_request request)
+             ~thread_id ~closed
+             ~payload ~run_id ~message_id ~agent_name ~events;
+           (* Queue drain is now handled by Keeper_chat_consumer
+              (started in server_bootstrap_loops). *)
+           ))
 
 (** Build routes for MCP server *)

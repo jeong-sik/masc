@@ -25,7 +25,9 @@ module Float = Stdlib.Float
 
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
-  | Policy_rejection (** Auth/permission/boundary — permanent *)
+  | Policy_rejection
+      (** Permission, guardrail, validation reject (RFC-0062 §3.2) — permanent.
+          Covers caller-input/argument validation, not only auth/boundary. *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
 [@@deriving yojson, show]
@@ -53,6 +55,22 @@ let is_retryable = function
 let log_level_of_failure_class = function
   | Workflow_rejection | Policy_rejection | Transient_error -> Log.Warn
   | Runtime_failure -> Log.Error
+;;
+
+(** Lightweight outcome classification for MCP/keeper tool call logging.
+    Unlike {!tool_failure_class} (which carries retry/telemetry semantics),
+    this tri-state maps directly from the wire format or result variant. *)
+type tool_call_outcome = Ok | Error | Unknown
+
+let string_of_tool_call_outcome = function
+  | Ok -> "ok"
+  | Error -> "error"
+  | Unknown -> "unknown"
+;;
+
+let log_level_of_tool_call_outcome = function
+  | Error -> Log.Error
+  | Ok | Unknown -> Log.Info
 ;;
 
 (** Classify a tool failure from an exception raised during execution.

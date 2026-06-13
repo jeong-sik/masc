@@ -9,7 +9,7 @@
     Memory bank append, episode flush, and Hebbian learning are recorded
     elsewhere:
     - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
-    - hebbian: task lifecycle in [Coord_task]
+    - hebbian: task lifecycle in [Workspace_task]
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split.
 
@@ -22,7 +22,7 @@
       - lib/keeper/keeper_post_turn.ml   (this file — post-turn pipeline)
       - lib/keeper/keeper_rollover.ml    (rollover semantics — anchored
                                           in #11612)
-      - lib/keeper/keeper_types.mli      (type lineage — anchor deferred)
+      - lib/keeper_types/keeper_types.mli (type lineage — anchor deferred)
 
     This block is the reverse-direction citation so code search for
     "KeeperGenerationLineage" lands here.
@@ -49,12 +49,22 @@
     does not *select* the strategy. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_context_core
 
 type compaction_event = {
   attempted : bool;
   applied : bool;
+  (** [started_dispatched] is [true] when the [on_compaction_started] callback
+      successfully dispatched [Compaction_started] to the registry, placing the
+      FSM in [Compaction_compacting].  When [false] (callback failed, skipped,
+      or not attempted), the FSM is still at [Compaction_accumulating] and
+      [dispatch_post_turn_lifecycle_events] must dispatch [Compaction_started]
+      before [Compaction_completed] to avoid the forbidden
+      accumulating -> done transition. *)
+  started_dispatched : bool;
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
@@ -83,6 +93,30 @@ type overflow_retry_recovery = {
   turn_generation : int;
 } [@@warning "-69"]
 
+let log_orphan_tool_result_repair
+    ~keeper_name
+    ~site
+    (stats : Keeper_context_core.tool_pair_repair_stats) =
+  if Keeper_context_core.tool_pair_repair_stats_changed stats then
+    Log.Harness.emit
+      Log.Warn
+      ~details:
+        (`Assoc
+            [ "keeper_name", `String keeper_name
+            ; "site", `String site
+            ; "dropped_tool_results", `Int stats.dropped_tool_results
+            ; ( "dropped_tool_result_ids"
+              , `List
+                  (List.map
+                     (fun tool_use_id -> `String tool_use_id)
+                     stats.dropped_tool_result_ids) )
+            ])
+      (Printf.sprintf
+         "orphan_tool_result_repair keeper=%s site=%s dropped_tool_results=%d"
+         keeper_name
+         site
+         stats.dropped_tool_results)
+
 (* ── Tier A5: autonomous post-turn wire-in (Cycle 22) ──────────────
    Feature-flag-gated, non-invasive layer. When [MASC_AUTONOMOUS] is
    off (default), this is a pure pass-through — zero impact on the
@@ -96,7 +130,7 @@ type overflow_retry_recovery = {
 
 (* The two pure helpers ([masc_autonomous_enabled] / [upsert_autonomous_meta])
    live in [lib/autonomous/wirein_helpers.{mli,ml}] so unit tests can
-   call them without depending on the full [masc_mcp] library. The
+   call them without depending on the full [masc] library. The
    wire-in below dispatches through [Autonomous.Wirein_helpers]. *)
 
 let bridge_after_tick (bridge : Autonomous.Autonomous_bridge.t) ~now :
@@ -152,7 +186,7 @@ let apply_autonomous_wirein
           Log.Keeper.warn
             "keeper:%s autonomous wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "autonomous")]
             ();
@@ -213,7 +247,7 @@ let apply_resilience_wirein
           Log.Keeper.warn
             "keeper:%s resilience wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "resilience")]
             ();
@@ -283,7 +317,7 @@ let apply_tool_emission_wirein
             "keeper:%s tool emission drain failed: %s"
             lifecycle.updated_meta.name
             (Printexc.to_string exn);
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "tool_emission_drain")]
             ();
@@ -331,10 +365,7 @@ let apply_multimodal_wirein
               [
                 ("added_this_turn", `Int !added_count);
                 ("workspace_size", `Int workspace_size);
-                ( "last_artifact_id",
-                  match !last_id with
-                  | Some s -> `String s
-                  | None -> `Null );
+                ( "last_artifact_id", Json_util.string_opt_to_json !last_id );
                 ("at", `Float now);
               ]
           in
@@ -352,7 +383,7 @@ let apply_multimodal_wirein
           Log.Keeper.warn
             "keeper:%s multimodal wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "multimodal")]
             ();
@@ -410,19 +441,16 @@ let apply_post_turn_lifecycle_with_resilience_handles
     in
     match snapshot with
     | None ->
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ContinuityNoState)
-          ~labels:[("keeper", meta.name)]
-          ();
         (* No state captured this turn — neither LLM [STATE] block nor OAS
            checkpoint working_context produced a snapshot.  Still advance the
            continuity cooldown timestamp so the compaction cooldown gate in
            Keeper_compact_policy treats this as an attempted reflection;
            otherwise keepers that never emit [STATE] would bypass the
            cooldown every turn while only emergency ratio (0.8) acts as a
-           safety net.  Record a counter so prompt / cascade drift becomes
-           observable. *)
-        Prometheus.inc_counter
+           safety net.  Record a counter so prompt / runtime drift becomes
+           observable.  (ContinuityNoState was an exact duplicate of this
+           counter — same site, same labels — and was removed.) *)
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels:[("keeper", meta.name)]
           ();
@@ -435,6 +463,17 @@ let apply_post_turn_lifecycle_with_resilience_handles
             };
         }
     | Some snapshot ->
+        (* Gen7: sanitize snapshot goal against validated active_goal_ids.
+           Prevents ghost goals from persisting into progress.md. *)
+        let snapshot =
+          match snapshot.goal with
+          | Some goal_id when not (List.mem goal_id meta.active_goal_ids) ->
+              Log.Keeper.warn
+                "keeper:%s snapshot goal %s not in active_goal_ids, clearing"
+                meta.name goal_id;
+              { snapshot with goal = None }
+          | _ -> snapshot
+        in
         (* Gen7: cap snapshot size before rendering + persisting.
            Bounds string prose and list items so meta.continuity_summary
            cannot grow unboundedly even when the LLM produces a longer
@@ -455,7 +494,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
              Log.Keeper.warn
                "keeper:%s progress snapshot write failed: %s"
                meta.name err;
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string SnapshotWriteFailures)
                ~labels:[("keeper", meta.name)]
                ());
@@ -500,6 +539,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           {
             attempted = false;
             applied = false;
+            started_dispatched = false;
             failure_reason = None;
             trigger = None;
             decision = no_checkpoint_decision;
@@ -537,6 +577,14 @@ let apply_post_turn_lifecycle_with_resilience_handles
       let compaction_decided =
         Keeper_compact_policy.compaction_decision_applied decision
       in
+      (* Track whether on_compaction_started succeeded, so
+         dispatch_post_turn_lifecycle_events knows the FSM state.
+         If the callback raised (swallowed by Cancel_safe.observe) or
+         dispatch_event returned Error (silently logged by
+         dispatch_keeper_phase_event), the FSM is still at
+         Compaction_accumulating and the downstream dispatch must
+         emit Compaction_started before Compaction_completed. *)
+      let started_dispatched = ref false in
       (* Attempt save before updating meta so that a save failure is treated as
          compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
       let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
@@ -561,20 +609,28 @@ let apply_post_turn_lifecycle_with_resilience_handles
               ~on_exn:(fun exn ->
                 Keeper_callback_failure.record ~base_dir ~meta:base_meta
                   ~callback:"on_compaction_started" exn)
-              on_compaction_started
+              (fun () ->
+                 on_compaction_started ();
+                 started_dispatched := true)
           in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in
           let compacted_ctx =
+            let messages, pair_repair_stats =
+              repair_orphan_tool_result_messages_with_stats
+                (messages_of_context compacted_ctx)
+            in
+            log_orphan_tool_result_repair
+              ~keeper_name:base_meta.agent_name
+              ~site:"post_turn_compaction"
+              pair_repair_stats;
             {
               compacted_ctx with
               checkpoint =
                 {
                   (checkpoint_of_context compacted_ctx) with
-                  messages =
-                    repair_orphan_tool_result_messages
-                      (messages_of_context compacted_ctx);
+                  messages;
                 };
             }
           in
@@ -582,14 +638,14 @@ let apply_post_turn_lifecycle_with_resilience_handles
                ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                ~session
                ~agent_name:base_meta.agent_name
-               ~model ~ctx:compacted_ctx ~generation:current_generation
+               ~ctx:compacted_ctx ~generation:current_generation
           with
           | Ok saved_cp -> (true, None, compacted_ctx, Some saved_cp)
           | Error e ->
               Log.Keeper.error
                 "keeper:%s compaction checkpoint save failed: %s"
                 base_meta.name e;
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", base_meta.name); ("phase", "compaction_save")]
                 ();
@@ -652,6 +708,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
           {
             attempted = compaction_decided;
             applied = effective_compaction_applied;
+            started_dispatched = !started_dispatched;
             failure_reason = compaction_failure_reason;
             trigger;
             decision;
@@ -735,7 +792,7 @@ let recover_latest_checkpoint_for_overflow_retry
    | Error (Parse_error d | Store_error d | Io_error d | Sdk_other_error d) ->
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d;
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string OasExecutionErrors)
          ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load))]
          ()
@@ -757,7 +814,7 @@ let recover_latest_checkpoint_for_overflow_retry
         sanitize_oas_checkpoint ~repair_orphans:false checkpoint
       in
       if checkpoint_sanitize_changed stats then begin
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", meta.name); ("site", "overflow_retry_sanitize")]
           ();
@@ -776,7 +833,7 @@ let recover_latest_checkpoint_for_overflow_retry
                "keeper:%s overflow-retry OAS checkpoint sanitize save failed: %s"
                (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                detail;
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("keeper", meta.name); ("phase", "overflow_sanitize_save")]
                ())
@@ -827,6 +884,7 @@ let recover_latest_checkpoint_for_overflow_retry
           {
             attempted = true;
             applied = true;
+            started_dispatched = false;  (* recovery path: no callback fires *)
             failure_reason = None;
             trigger;
             decision = base_decision;
@@ -836,14 +894,20 @@ let recover_latest_checkpoint_for_overflow_retry
           }
         in
         let compacted_ctx =
+          let messages, pair_repair_stats =
+            repair_orphan_tool_result_messages_with_stats
+              (messages_of_context compacted_ctx)
+          in
+          log_orphan_tool_result_repair
+            ~keeper_name:meta.agent_name
+            ~site:"post_turn_compaction_recovery"
+            pair_repair_stats;
           {
             compacted_ctx with
             checkpoint =
               {
                 (checkpoint_of_context compacted_ctx) with
-                messages =
-                  repair_orphan_tool_result_messages
-                    (messages_of_context compacted_ctx);
+                messages;
               };
           }
         in
@@ -852,14 +916,14 @@ let recover_latest_checkpoint_for_overflow_retry
               ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
               ~session
               ~agent_name:retry_meta.agent_name
-              ~model ~ctx:compacted_ctx ~generation:turn_generation
+              ~ctx:compacted_ctx ~generation:turn_generation
           with
           | Ok checkpoint ->
               Some { checkpoint; compaction; turn_generation }
           | Error e ->
               Log.Keeper.error
                 "overflow retry checkpoint save failed: %s" e;
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", retry_meta.agent_name); ("operation", "overflow_save")]
                 ();

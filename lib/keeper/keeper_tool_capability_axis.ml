@@ -1,6 +1,6 @@
 (** Keeper_tool_capability_axis -- semantic capability classification for tool names.
 
-    Callers may pass public aliases ([Execute], [WriteFile], ...), public MCP
+    Callers may pass public aliases ([Execute], [Write], ...), public MCP
     names, prefixed MCP names, or internal handler names. This module
     normalizes names through descriptor resolution before answering capability
     predicates. *)
@@ -10,21 +10,11 @@ type t =
   | Board_activity
   | Shell_command_input
 
-let keeper_name (tool : Tool_name.Keeper.t) =
-  Tool_name.to_string (Tool_name.Keeper tool)
-;;
 
-let masc_name (tool : Tool_name.Masc.t) =
-  Tool_name.to_string (Tool_name.Masc tool)
-;;
-
-let masc_keeper_name (tool : Tool_name.Masc_keeper.t) =
-  Tool_name.to_string (Tool_name.Masc_keeper tool)
-;;
 
 let canonical_tool_name name =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
+  match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
   | Some internal -> internal
   | None -> stripped
 ;;
@@ -36,19 +26,19 @@ let candidate_names name =
 ;;
 
 let claim_task_tool_names =
-  [ keeper_name Tool_name.Keeper.Task_claim; masc_name Tool_name.Masc.Claim_next ]
+  [ Keeper_tool_name.(to_string Task_claim) ]
 ;;
 
 let board_activity_tool_names =
-  [ keeper_name Tool_name.Keeper.Board_post
-  ; keeper_name Tool_name.Keeper.Board_comment
-  ; masc_name Tool_name.Masc.Broadcast
-  ; masc_keeper_name Tool_name.Masc_keeper.Msg
+  [ Keeper_tool_name.(to_string Board_post)
+  ; Keeper_tool_name.(to_string Board_comment)
+  ; "masc_broadcast"
+  ; "masc_keeper_msg"
   ]
 ;;
 
 let shell_command_input_tool_names =
-  [ keeper_name Tool_name.Keeper.Execute ]
+  [ "tool_execute" ]
 ;;
 
 let tool_names = function
@@ -66,13 +56,6 @@ let supports_any capability names =
   List.exists (supports capability) names
 ;;
 
-let json_string_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | Some _ | None -> None)
-  | _ -> None
-;;
 
 let shell_quote_token token =
   let needs_quote =
@@ -101,14 +84,14 @@ let command_of_exec_stage ~executable ~argv =
 ;;
 
 let typed_execute_command_candidates input =
-  match Agent_tool_execute_typed_input.of_json input with
+  match Keeper_tool_execute_typed_input.of_json input with
   | Error _ -> []
-  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
     command_of_exec_stage ~executable ~argv |> Option.to_list
-  | Ok (Agent_tool_execute_typed_input.Pipeline { stages; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages; _ }) ->
     let commands =
       stages
-      |> List.filter_map (fun { Agent_tool_execute_typed_input.executable; argv } ->
+      |> List.filter_map (fun { Keeper_tool_execute_typed_input.executable; argv } ->
            command_of_exec_stage ~executable ~argv)
     in
     (match commands with
@@ -128,7 +111,7 @@ let shell_command_input_candidates tool_name input =
   then
     match canonical_tool_name tool_name with
     | "tool_execute" ->
-      let candidates = [] |> add_candidate (json_string_opt "cmd" input) in
+      let candidates = [] |> add_candidate (Json_util.get_string input "cmd") in
       List.fold_left
         (fun acc command -> add_candidate (Some command) acc)
         candidates

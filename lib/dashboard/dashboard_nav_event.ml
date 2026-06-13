@@ -31,9 +31,7 @@ let valid_sections =
       ; "agents"
       ; "cognition"
       ; "runtime"
-      ; "cascade-config"
       ; "fleet-health"
-      ; "doctor"
       ; "transport-health"
       ; "feature-health"
       ] )
@@ -57,14 +55,14 @@ let counter_surface = "dashboard_surface_open_total"
 let counter_section = "dashboard_section_open_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:counter_surface
     ~help:"Top-level dashboard surface opens (RFC-0049). Aggregate, no PII."
     ()
 ;;
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:counter_section
     ~help:
       "Section-level opens within a dashboard surface (RFC-0049). redirected_from \
@@ -94,23 +92,23 @@ let parse_redirected_from ~target_surface ~target_section raw =
 ;;
 
 let parse_event_json json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
     let surface =
-      match member "surface" json with
+      match m "surface" with
       | `String s -> s
-      | `Null -> raise (Type_error ("missing surface", json))
-      | _ -> raise (Type_error ("surface must be string", json))
+      | `Null -> raise (Yojson.Safe.Util.Type_error ("missing surface", json))
+      | _ -> raise (Yojson.Safe.Util.Type_error ("surface must be string", json))
     in
     if not (is_valid_surface surface)
     then Error (Printf.sprintf "unknown surface: %s" surface)
     else (
       let section =
-        match member "section" json with
+        match m "section" with
         | `Null -> None
         | `String "" -> None
         | `String s -> Some s
-        | _ -> raise (Type_error ("section must be string or null", json))
+        | _ -> raise (Yojson.Safe.Util.Type_error ("section must be string or null", json))
       in
       let section_ok =
         match section with
@@ -124,7 +122,7 @@ let parse_event_json json =
       | Error e -> Error e
       | Ok () ->
         let redirected_from_result =
-          match member "redirected_from" json with
+          match m "redirected_from" with
           | `Null -> Ok None
           | `String "" -> Ok None
           | `String "none" -> Ok None
@@ -140,12 +138,12 @@ let parse_event_json json =
          | Error e -> Error e
          | Ok redirected_from -> Ok { surface; section; redirected_from }))
   with
-  | Type_error (msg, _) -> Error msg
+  | Yojson.Safe.Util.Type_error (msg, _) -> Error msg
   | Yojson.Json_error msg -> Error msg
 ;;
 
 let record { surface; section; redirected_from } =
-  Prometheus.inc_counter counter_surface ~labels:[ "surface", surface ] ~delta:1.0 ();
+  Otel_metric_store.inc_counter counter_surface ~labels:[ "surface", surface ] ~delta:1.0 ();
   match section with
   | None -> ()
   | Some s ->
@@ -155,5 +153,5 @@ let record { surface; section; redirected_from } =
       ; "redirected_from", Option.value ~default:"none" redirected_from
       ]
     in
-    Prometheus.inc_counter counter_section ~labels ~delta:1.0 ()
+    Otel_metric_store.inc_counter counter_section ~labels ~delta:1.0 ()
 ;;

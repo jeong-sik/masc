@@ -2,17 +2,6 @@
   "findings": [
     {
       "count": 0,
-      "finding_id": "R-FATAL-1",
-      "patterns": [
-        "keeper_skipping_turn"
-      ],
-      "samples": [],
-      "severity": "critical",
-      "status": "EVIDENCE_ABSENT",
-      "title": "keeper_semaphore_wait_no_fallback"
-    },
-    {
-      "count": 0,
       "finding_id": "CF-1",
       "patterns": [
         "pricing_catalog_miss"
@@ -53,22 +42,6 @@
       "severity": "critical",
       "status": "EVIDENCE_PRESENT",
       "title": "credential_archived_all_keepers"
-    },
-    {
-      "count": 6,
-      "finding_id": "NF-3",
-      "patterns": [
-        "alive_but_stuck"
-      ],
-      "samples": [
-        {
-          "line": "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s, threshold=1800s)",
-          "line_no": 31
-        }
-      ],
-      "severity": "critical",
-      "status": "EVIDENCE_PRESENT",
-      "title": "alive_but_stuck_no_recovery"
     },
     {
       "count": 2,

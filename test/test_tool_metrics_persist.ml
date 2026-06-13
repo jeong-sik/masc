@@ -1,7 +1,7 @@
 (** Tests for Tool_metrics_persist — JSONL disk persistence round-trip *)
 
-module P = Masc_mcp.Tool_metrics_persist
-module M = Masc_mcp.Tool_metrics
+module P = Masc.Tool_metrics_persist
+module M = Tool_metrics
 module R = Tool_result
 
 let make_result ~name ~success ~duration_ms : R.result =

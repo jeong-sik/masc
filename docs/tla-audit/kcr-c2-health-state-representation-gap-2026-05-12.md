@@ -2,10 +2,10 @@
 
 **Iteration**: 23 (/loop FSM/TLA+/OCaml drift hunt)
 **Date**: 2026-05-12
-**Spec**: `specs/keeper-state-machine/KeeperCascadeRouting.tla` §57 (item_health), §189-193 (ItemRecover), §144-167 (ItemDegrade)
+**Spec**: `specs/keeper-state-machine/KeeperRuntimeRouting.tla` §57 (item_health), §189-193 (ItemRecover), §144-167 (ItemDegrade)
 **OCaml**:
   - `lib/keeper/keeper_health_probe.ml:9-12` (`type health_status`)
-  - `lib/cascade/cascade_health_tracker.ml:297, 509, 524-555` (`consecutive_failures` mutation)
+  - `lib/runtime/runtime_health_tracker.ml:297, 509, 524-555` (`consecutive_failures` mutation)
 **Risk**: MID — spec and OCaml encode the same asymmetric "multi-hop fail / one-shot recover" semantics, but with *different state representations*.  Spec invariants are well-formed but cannot speak about the OCaml temporal cooldown dimension.
 **Type**: Audit-only (no code change in this PR).
 
@@ -52,10 +52,10 @@ type health_status =
 **Only 2 states, no Degraded variant.**  Module comment at line 41-42:
 > "Success -> Healthy immediately. Failure -> Unhealthy (no Degraded intermediate for now)."
 
-### Implicit intermediate — `cascade_health_tracker.consecutive_failures`
+### Implicit intermediate — `runtime_health_tracker.consecutive_failures`
 
 ```ocaml
-(* lib/cascade/cascade_health_tracker.ml:297 *)
+(* lib/runtime/runtime_health_tracker.ml:297 *)
 mutable consecutive_failures: int;
 
 (* Success: reset *)
@@ -127,7 +127,7 @@ the spec must transition through `ItemRecover` to leave the state.
 ### 3. Per-item-per-keeper vs per-provider-key granularity
 
 Spec key: `<<keeper, item>>` — health is per (keeper, item) pair.
-OCaml `cascade_health_tracker` keys: `provider_key` (a single string,
+OCaml `runtime_health_tracker` keys: `provider_key` (a single string,
 shared across keepers per cooldown_config — see `cooldown_config_for
 ~provider_key`).  This means in OCaml two keepers using the same
 provider share the cooldown state; in spec they don't.
@@ -138,12 +138,12 @@ comment *"Structural invariant: enforced by variable typing"* — the
 spec asserts isolation that production *does not* uphold for the
 cooldown axis.
 
-### 4. The 2-state OCaml `health_status` is unused for cascade health
+### 4. The 2-state OCaml `health_status` is unused for runtime health
 
 `Keeper_health_probe.health_status` (Healthy/Unhealthy) is the *probe*
-type — it summarizes cascade ratio observability, not the cascade
+type — it summarizes runtime ratio observability, not the runtime
 selector's per-item decision.  The selector
-(`keeper_cascade_selector.try_group`) calls
+(`keeper_runtime_selector.try_group`) calls
 `Keeper_health_probe.is_item_healthy ~keeper_name ~item_id` which
 returns a `bool` derived from a different cache.  The spec's 3-state
 typing doesn't live in OCaml at all — it's distributed across the
@@ -156,12 +156,12 @@ boolean predicate.
 |---|---|---|
 | R-C-2.a | OCaml typed surface — add `Degraded of { failures: int }` variant to expose the implicit state.  Pure types refactor — derives from `consecutive_failures` count via smart constructor.  Dashboards / `is_item_healthy` benefit. | MID (signature change) |
 | R-C-2.b | Spec extension — add `SoftRateLimit(keeper, item)` action that transitions `item_health` to `Unhealthy` via cooldown semantics, separate from `cf` threshold.  Requires a `cooldown_until` variable.  Then drop `PerKeeperIsolation == TRUE` placeholder. | MID (spec change + TLC re-verify) |
-| R-C-2.c | Drop `PerKeeperIsolation` placeholder — replace with a documented operational invariant that the *cascade tracker keys by provider, not keeper*.  Spec less precise, but honest. | LOW (spec doc change only) |
+| R-C-2.c | Drop `PerKeeperIsolation` placeholder — replace with a documented operational invariant that the *runtime tracker keys by provider, not keeper*.  Spec less precise, but honest. | LOW (spec doc change only) |
 
 R-C-2.c is the cheapest *correction* — removes a spec lie.
 R-C-2.a is the highest-leverage *production* fix — makes
 state-implicit thinking explicit, paving the way for snapshot invariant
-checking (the R-A-6.c pattern applied to cascade health).
+checking (the R-A-6.c pattern applied to runtime health).
 
 ## Out-of-scope for this iteration
 
@@ -177,7 +177,7 @@ checking (the R-A-6.c pattern applied to cascade health).
 
 - KCR spec §57, §189-193, §144-167, §250-256
 - `lib/keeper/keeper_health_probe.ml:9-12` (typed 2-state)
-- `lib/cascade/cascade_health_tracker.ml:297, 500-580` (implicit intermediate + cooldown)
+- `lib/runtime/runtime_health_tracker.ml:297, 500-580` (implicit intermediate + cooldown)
 - KSM A-1 audit (`ksm-init-mapping-2026-05-12.md`) — same shape "OCaml different representation, spec stricter typing"
 - KCR C-1 audit (`kcr-c1-fallback-cap-mechanism-gap-2026-05-12.md`) — sibling drift class (counter mechanism mismatch)
 - PR #14668 (spec tightening that exposed C-1)

@@ -65,10 +65,9 @@ let contains_ci text needle = String_util.contains_substring_ci text needle
 let contract_code_from_error_text raw_error =
   if
     contains_ci raw_error "no ToolUse block"
-    || contains_ci raw_error "called no keeper tools"
     || contains_ci raw_error "returned no keeper tool"
-  then "required_tool_use_no_tool_call"
-  else "required_tool_use_unsatisfied"
+  then "completion_contract_no_progress"
+  else "completion_contract_unsatisfied"
 ;;
 
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =
@@ -79,26 +78,18 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
     | Some (Keeper_turn_driver.Provider_timeout _) ->
       of_disposition
         ~source:"typed_error"
-        Keeper_turn_disposition.Turn_wall_clock_timeout
+        (Keeper_turn_disposition.Provider_error
+           (Keeper_turn_terminal_code.Provider_runtime_error "provider_timeout"))
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       make ~source:"typed_error" "capacity_backpressure"
-    | Some (Keeper_turn_driver.Cascade_exhausted _) ->
+    | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       of_disposition
         ~source:"typed_error"
-        Keeper_turn_disposition.Cascade_attempts_exhausted
+        Keeper_turn_disposition.Runtime_attempts_exhausted
     | Some (Keeper_turn_driver.Turn_timeout _) ->
       make ~source:"typed_error" "turn_wall_clock_timeout"
     | _ ->
       (match err with
-       | Agent_sdk.Error.Agent
-           (Agent_sdk.Error.CompletionContractViolation
-              { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ }) ->
-         let code =
-           if tool_call_count <= 0
-           then contract_code_from_error_text raw_error
-           else "required_tool_use_unsatisfied"
-         in
-         make ~source:"typed_error" code
        | _ ->
          (* RFC-0047 follow-up: emit typed [Provider_error] directly via
             [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]
@@ -129,10 +120,7 @@ let to_json reason =
     ; "source", `String reason.source
     ; "severity", `String (severity_to_string reason.severity)
     ; "summary", `String reason.summary
-    ; ( "next_action"
-      , match reason.next_action with
-        | Some action -> `String action
-        | None -> `Null )
+    ; ( "next_action", Json_util.string_opt_to_json reason.next_action )
     ]
 ;;
 

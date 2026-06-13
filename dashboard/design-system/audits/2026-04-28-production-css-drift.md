@@ -4,7 +4,7 @@
 - **Branch**: `feature/ds-drift-phase0-audit`
 - **Base commit**: `86053a88bb`
 - **Scope**: 19 hand-written CSS files under `dashboard/src/styles/` (excluding `tokens.generated.css`/`tokens.generated.ts`)
-- **Plan**: `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md`
+- **Plan**: `~/me/planning/claude-plans/20m-me-workspace-yousleepwhen-masc-h-curious-dusk.md`
 - **Method**: comments stripped (`/\*…\*/`), then `rg` counts. Hex catalog lower-cased, deduped per file.
 
 ---
@@ -58,7 +58,7 @@ The drift is **not uniform**. Two files account for >70 % of all hard-coded hexe
 ### Findings derived from the table
 
 1. **75.6 %** of colour/text references are already token-routed. The drift hypothesis "preview is far from production" is **false at the token-usage axis**; the drift is in *vocabulary coverage* (production owns domain words preview never visualises) not in raw-hex anarchy.
-2. **`paper-theme.css`** is the single largest legitimate hex source (32 hexes, all theme-override values). Its hexes are intentional: they redefine `--bg-0…4`, `--fg-1…4`, `--accent-*`, `--ok/warn/err/info`, `--p-provider-a/provider-b/provider-d/provider-e` for the *paper* theme. Phase 2 should keep them as raw-tier overrides under `[data-theme="paper"]`, but **lift the palette into `tokens/source.ts` `paperOverrides`** so the codegen owns it.
+2. **`paper-theme.css`** is the single largest legitimate hex source (32 hexes, all theme-override values). Its hexes are intentional: they redefine `--bg-0…4`, `--fg-1…4`, `--accent-*`, `--ok/warn/err/info`, `--p-runtime-slot-a/runtime-slot-b/runtime-slot-c/runtime-slot-d` for the *paper* theme. Phase 2 should keep them as raw-tier overrides under `[data-theme="paper"]`, but **lift the palette into `tokens/source.ts` `paperOverrides`** so the codegen owns it.
 3. **`variables.css`** carries 40 hexes inside a single `:root` block. It is a **legacy semantic catalog** (slate scale, purple scale, brick scale, brass scale, status alphas). Phase 2 should migrate this entire file into `tokens/source.ts` and delete it; this is the highest-ROI single-file rewrite.
 4. Seven files (`chat`, `pipeline`, `live-monitor`, `keeper-detail`, `pixel-avatar`, `responsive`, `a11y`) ship in tree but are not imported. Either they were inlined into `global.css` `@utility` blocks (the `chat.css` comment in `main.ts:26` confirms this for one of them), or they are dead. **Phase 1 must verify per file** before treating them as production source.
 5. Of the 96 hex occurrences, **72 are concentrated in 2 files** (paper-theme + variables). The "hardcoded value problem" outside those two files is small (24 occurrences across 17 files, average <2/file).
@@ -75,7 +75,7 @@ The drift is **not uniform**. Two files account for >70 % of all hard-coded hexe
 | `#e2e8f0` | 2 | `variables.css`, `a11y.css` | (none — Tailwind slate-200) | **new token** `--slate-200` (light theme placeholder) |
 | `#ccc` | 2 | `board.css`, `dashboard.css` | `--fg-3` (`#7a7065`) loose match | replace with `--color-fg-muted` |
 | `#b8c0cc` | 2 | `global.css` (×2) | (none — neutral grey-blue) | **new token** `--neutral-300` |
-| `#7193ff` | 2 | `board.css`, `dashboard.css` | `--p-provider-b` (`#8a98c9`) loose | replace with semantic `--link` token (new) |
+| `#7193ff` | 2 | `board.css`, `dashboard.css` | `--p-runtime-slot-b` (`#8a98c9`) loose | replace with semantic `--link` token (new) |
 | `#0c1424` | 2 | `base.css`, `variables.css` | `--bg-0` (`#0c0b08`) very close | **alias to `--bg-0`** or new `--bg-0-cool` |
 | `#ffffff` | 1 | `variables.css` | n/a (pure white) | OK as raw — used for opacity recipes |
 | `#0a0f1a` | 1 | `a11y.css` | `--bg-0` close | alias `--bg-0` |
@@ -145,7 +145,7 @@ Plan §Phase 1 split, with audited file size and risk.
 - `--governance-bg-section` ← currently uses `--bg-2`; consider semantic alias `--color-bg-governance`. No new raw value needed.
 
 ### 5.2 paper-theme domain
-- Lift the 32 hexes from `paper-theme.css` into `tokens/source.ts` as `paperOverrides: ThemeOverride[]`, mirroring the existing `lightOverrides` pattern. Names follow current `--bg-0/1/2/…`, `--fg-1/2/3/…`, `--brass-1/2/3`, `--ok/warn/err/info`, `--p-provider-a/provider-b/provider-d/provider-e`. No new token *names* — just override values codified in source.
+- Lift the 32 hexes from `paper-theme.css` into `tokens/source.ts` as `paperOverrides: ThemeOverride[]`, mirroring the existing `lightOverrides` pattern. Names follow current `--bg-0/1/2/…`, `--fg-1/2/3/…`, `--brass-1/2/3`, `--ok/warn/err/info`, `--p-runtime-slot-a/runtime-slot-b/runtime-slot-c/runtime-slot-d`. No new token *names* — just override values codified in source.
 
 ### 5.3 ops domain
 - `--ops-warn-soft` (raw `#fecaca`, source `ops.css:1`) — light-theme red tint for warning row.
@@ -181,7 +181,7 @@ Plan §Phase 1 split, with audited file size and risk.
 
 ---
 
-## 6. AGENT-LLM-A.md governance note <a id="governance-note"></a>
+## 6. AGENT-RUNTIME-A.md governance note <a id="governance-note"></a>
 
 The user-memory entry `feedback_tailwind-only-dashboard` (`memory/feedback_tailwind-only-dashboard.md`) declares:
 > Preact `dashboard/`=Tailwind utility only. Bonsai `dashboard_bonsai/`=ppx_css only. **No handwritten CSS files**.

@@ -15,6 +15,8 @@
     label shape so a future refactor cannot silently flip the
     cardinality or rename the labels. *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat
@@ -24,16 +26,16 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc_mcp.Prometheus
+module Metrics = Masc.Otel_metric_store
 
 let noop_for ~keeper ~trigger =
-  Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ()
 ;;
 
-(* Metric is registered at module init via [Prometheus.add ~labels:[]],
+(* Metric is registered at module init via [Otel_metric_store.add ~labels:[]],
    so [get_metric_value ~labels:[] ()] returns [Some 0.0] iff the
    registration ran. If a future refactor accidentally drops the
    [add metric_keeper_compaction_noop ...] call, this returns [None]
@@ -44,7 +46,7 @@ let noop_for ~keeper ~trigger =
    "registered but no observations yet". *)
 let test_metric_registered () =
   let registered =
-    Prom.get_metric_value Masc_mcp.Keeper_metrics.(to_string CompactionNoop) ()
+    Metrics.get_metric_value Keeper_metrics.(to_string CompactionNoop) ()
   in
   Alcotest.(check bool) "metric registered at init" true (Option.is_some registered)
 ;;
@@ -56,8 +58,8 @@ let test_counter_advances_for_noop_pattern () =
   let keeper = "test-keeper-compaction-noop-9943" in
   let trigger = "context_overflow_imminent" in
   let before = noop_for ~keeper ~trigger in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -73,12 +75,12 @@ let test_distinct_triggers_separate_rows () =
   let keeper = "test-keeper-compaction-noop-9943-trigger" in
   let before_overflow = noop_for ~keeper ~trigger:"context_overflow_imminent" in
   let before_proactive = noop_for ~keeper ~trigger:"proactive_warmup" in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "context_overflow_imminent" ]
     ();
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "proactive_warmup" ]
     ();
   Alcotest.(check (float 0.0001))
@@ -100,12 +102,12 @@ let test_per_keeper_isolation () =
   let b = "test-keeper-compaction-noop-9943-iso-B" in
   let trigger = "context_overflow_imminent" in
   let before_b = noop_for ~keeper:b ~trigger in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  Metrics.inc_counter
+    Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -114,30 +116,24 @@ let test_per_keeper_isolation () =
     (noop_for ~keeper:b ~trigger)
 ;;
 
-(* Prometheus text export must include the metric name and the
-   keeper / trigger label keys — PromQL queries depend on this. *)
-let test_prometheus_text_export () =
+(* The in-process registry must preserve the metric name and
+   keeper / trigger label keys; the OTel exporter reads this snapshot. *)
+let test_registry_snapshot_includes_label_shape () =
   let keeper = "test-keeper-compaction-noop-9943-export" in
   let trigger = "context_overflow_imminent" in
-  Prom.inc_counter
-    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
+  let metric = Keeper_metrics.(to_string CompactionNoop) in
+  Metrics.inc_counter
+    metric
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
-  let text = Prom.to_prometheus_text () in
-  let contains s sub =
-    let n = String.length s
-    and m = String.length sub in
-    let rec loop i =
-      if i + m > n then false else if String.sub s i m = sub then true else loop (i + 1)
-    in
-    loop 0
+  let has_metric =
+    Metrics.snapshot ()
+    |> List.exists (fun (m : Metrics.metric) ->
+      String.equal m.name metric
+      && List.mem ("keeper", keeper) m.labels
+      && List.mem ("trigger", trigger) m.labels)
   in
-  Alcotest.(check bool)
-    "metric name in export"
-    true
-    (contains text Masc_mcp.Keeper_metrics.(to_string CompactionNoop));
-  Alcotest.(check bool) "keeper label key in export" true (contains text "keeper=");
-  Alcotest.(check bool) "trigger label key in export" true (contains text "trigger=")
+  Alcotest.(check bool) "metric label shape in registry" true has_metric
 ;;
 
 let () =
@@ -156,11 +152,11 @@ let () =
             test_distinct_triggers_separate_rows
         ; Alcotest.test_case "per-keeper isolation" `Quick test_per_keeper_isolation
         ] )
-    ; ( "export"
+    ; ( "registry"
       , [ Alcotest.test_case
-            "metric + labels appear in /metrics"
+            "metric + labels appear in registry"
             `Quick
-            test_prometheus_text_export
+            test_registry_snapshot_includes_label_shape
         ] )
     ]
 ;;

@@ -1,8 +1,8 @@
 module Types = Masc_domain
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Config = Masc_mcp.Config
-module Goal_store = Masc_mcp.Goal_store
+module Mcp_eio = Masc.Mcp_server_eio
+module Config = Masc.Config
+module Goal_store = Goal_store
 
 type init_mode =
   | Fresh
@@ -60,13 +60,11 @@ let strict_success_names =
     "masc_board_vote";
     "masc_broadcast";
     "masc_check";
-    "masc_claim_next";
+
     "masc_dashboard";
     "masc_heartbeat";
-    "masc_join";
     "masc_keeper_down";
     "masc_keeper_list";
-    "masc_leave";
     "masc_library_add";
     "masc_library_list";
     "masc_messages";
@@ -80,7 +78,6 @@ let strict_success_names =
     "masc_transition";
     "masc_transport_status";
     "masc_websocket_discovery";
-    "masc_who";
     "masc_workflow_guide";
     (* Removed post-pruning:
        masc_init, masc_auth_*, masc_handover_*, masc_verify_* *)
@@ -89,6 +86,7 @@ let strict_success_names =
 let strict_guard_cases =
   [
     ("masc_reset", [ "confirm" ]);
+    ("masc_keeper_msg", [ "requires Eio context" ]);
   ]
 
 let endpoint_unavailable_guard_names =
@@ -111,7 +109,10 @@ let generic_matrix_excluded_names =
   [
     "masc_keeper_msg";
     "masc_operator_snapshot";
-    "masc_tool_admin_snapshot";
+    (* Excluded: masc_keeper_msg / masc_operator_snapshot require a live
+       keeper context to pass tag_registry validation in the standalone runner.
+       TODO: wire into the matrix runner with a minimal keeper stub,
+       or split into a keeper-matrix suite. *)
   ]
 
 let string_starts_with ~prefix s =
@@ -296,27 +297,26 @@ let execute_tool_ok fixture ~name ~arguments =
   else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
-  (* masc_init pruned from registry. Initialise the room state
-     directly so downstream masc_join and other tools can work. *)
+  (* masc_init pruned from registry. Initialise the workspace state directly so
+     downstream tools can work. *)
   ignore
-    (Masc_mcp.Coord.init fixture.state.room_config
+    (Masc.Workspace.init fixture.state.workspace_config
        ~agent_name:(Some fixture.agent_name))
 
-let ensure_joined fixture =
+let ensure_bound fixture =
   let result =
-    execute_tool fixture ~name:"masc_join"
+    execute_tool fixture ~name:"masc_start"
       ~arguments:
         (`Assoc
           [
-            ("agent_name", `String fixture.agent_name);
-            ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
+            ("path", `String fixture.base_path);
           ])
   in
   if (Tool_result.is_success result) then ()
   else begin
     let body = (Tool_result.message result) in
     if contains_substring body "already joined" then ()
-    else failwith ("masc_join failed: " ^ body)
+    else failwith ("masc_start failed: " ^ body)
   end
 
 let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
@@ -336,7 +336,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   seed_persona_dir base_path tool_matrix_agent_name;
   let auth_token =
     match
-      Masc_mcp.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
+      Masc.Auth.create_token base_path ~agent_name:tool_matrix_agent_name
         ~role:Masc_domain.Admin
     with
     | Ok (token, _cred) -> token
@@ -370,7 +370,7 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   | Init_only -> ensure_initialized fixture
   | Init_joined ->
       ensure_initialized fixture;
-      ensure_joined fixture);
+      ensure_bound fixture);
   fixture
 
 let ensure_goal fixture =
@@ -379,7 +379,7 @@ let ensure_goal fixture =
   | None ->
       let goal =
         match
-          Goal_store.upsert_goal fixture.state.room_config
+          Goal_store.upsert_goal fixture.state.workspace_config
             ~title:"Tool Matrix Goal" ()
         with
         | Ok (goal, _status) -> goal
@@ -456,11 +456,11 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc_mcp.Coord.masc_dir fixture.state.room_config
+        Masc.Workspace.masc_dir fixture.state.workspace_config
       in
       let req =
         match
-          Masc_mcp.Verification.create_request ~base_path
+          Masc.Verification.create_request ~base_path
             ~task_id:(ensure_task fixture) ~output:(`String "tool matrix output")
             ~criteria:[] ~worker:"tool-matrix-worker"
             ~verifier:fixture.agent_name ()
@@ -482,8 +482,8 @@ let ensure_library_topic fixture =
   match fixture.library_topic with
   | Some topic -> topic
   | None ->
-      mkdir_p (Filename.concat fixture.base_path "me/docs/library");
-      mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates");
+      mkdir_p (Filename.concat fixture.base_path "docs/library");
+      mkdir_p (Filename.concat fixture.base_path "docs/library/candidates");
       ignore
         (execute_tool_ok fixture ~name:"masc_library_add"
            ~arguments:
@@ -509,7 +509,7 @@ let ensure_code_file fixture =
       relative_path
 
 let prepare_for_name fixture name =
-  if List.mem name [ "masc_claim_next"; "masc_transition"; "masc_plan_set_task" ] then
+  if List.mem name [ "keeper_task_claim"; "masc_transition"; "masc_plan_set_task" ] then
     ignore (ensure_task fixture);
   if List.mem name [ "masc_plan_get"; "masc_plan_update"; "masc_plan_get_task"; "masc_plan_clear_task" ] then
     ensure_plan_initialized fixture;
@@ -527,8 +527,8 @@ let prepare_for_name fixture name =
   then
     ignore (ensure_code_file fixture);
   if name = "masc_library_add" then begin
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library");
-    mkdir_p (Filename.concat fixture.base_path "me/docs/library/candidates")
+    mkdir_p (Filename.concat fixture.base_path "docs/library");
+    mkdir_p (Filename.concat fixture.base_path "docs/library/candidates")
   end;
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_promote"; "masc_library_search" ] then
     ignore (ensure_library_topic fixture);
@@ -567,7 +567,7 @@ let task_id_for_tool fixture _tool_name = ensure_task fixture
 let goal_principal fixture =
   `Assoc
     [
-      ("kind", `String "keeper");
+      ("kind", `String "agent");
       ("id", `String fixture.agent_name);
     ]
 
@@ -576,7 +576,7 @@ let field_value fixture ~tool_name field_name schema =
   match field_name with
   | "agent_name" | "author" | "owner" | "worker" | "agent" | "leader_id" ->
       `String fixture.agent_name
-  | "path" when tool_name = "masc_set_room" || tool_name = "masc_start" ->
+  | "path" when tool_name = "masc_set_workspace" || tool_name = "masc_start" ->
       `String fixture.base_path
   | "path"
     when List.mem tool_name
@@ -615,6 +615,7 @@ let field_value fixture ~tool_name field_name schema =
   | "progress" -> `String "tool matrix progress"
   | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
   | "notes" | "note" | "reason" -> `String "tool matrix note"
+  | "override_note" -> `String "tool matrix override"
   | "priority" -> `Int 2
   | "assertions" -> `List [ `String "joined" ]
   | "agents" -> `List [ `String "definitely-missing-agent" ]
@@ -688,7 +689,7 @@ let field_value fixture ~tool_name field_name schema =
   | "search" -> `String "tool matrix"
   | "prompt" -> `String "tool matrix"
   | "topic_id" -> `String "topic-001"
-  | "room_id" -> `String "default"
+  | "workspace_id" -> `String "default"
   | "checkpoint_ref" -> `String "checkpoint-001"
   | "intent_id" -> `String "intent-001"
   | "operation_id" -> `String "operation-001"
@@ -745,6 +746,8 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              the handler layer so body/content aliases both work). Matrix
              test still needs to supply body so board_core accepts it. *)
           [ "body" ]
+      | "masc_goal_transition" ->
+          [ "override_note"; "note" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)
@@ -766,6 +769,7 @@ let provider_guard_fragments =
     "connection refused";
     "failed to connect";
     "no runtime";
+    "runtime not initialized";
     "spawn error";
     "no such file";
   ]
@@ -777,8 +781,8 @@ let state_guard_fragments =
     "required";
     "invalid";
     "must be";
-    "join required";
-    "room not initialized";
+    "bind required";
+    "workspace not initialized";
     "already exists";
     "no active";
     "unknown";
@@ -812,6 +816,10 @@ let guard_fragments_for_name name =
   if String.equal name "masc_web_search" then
     web_search_guard_fragments
   else if
+    string_starts_with ~prefix:"keeper_" name
+  then
+    endpoint_unavailable_guard_fragments @ state_guard_fragments
+  else if
     string_starts_with ~prefix:"tool_" name
   then
     endpoint_unavailable_guard_fragments @ state_guard_fragments @ git_guard_fragments
@@ -819,7 +827,6 @@ let guard_fragments_for_name name =
     List.exists
       (fun prefix -> string_starts_with ~prefix name)
       [
-        "masc_a2a_";
         "masc_handover_";
         "masc_keeper_";
         "masc_local_runtime_";
@@ -843,8 +850,7 @@ let guard_fragments_for_name name =
 let case_for_name name =
   let init_mode =
     match name with
-    | "masc_init" | "masc_start" | "masc_set_room" -> Fresh
-    | "masc_join" -> Init_only
+    | "masc_init" | "masc_start" | "masc_set_workspace" -> Fresh
     | _ -> Init_joined
   in
   let prepare fixture = prepare_for_name fixture name in

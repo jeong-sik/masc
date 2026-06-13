@@ -125,7 +125,7 @@ type agent = {
   status: agent_status;
   capabilities: string list;
   current_task: string option; [@default None]
-  joined_at: string;
+  session_bound_at: string;
   last_seen: string;
   meta: agent_meta option; [@default None] (* session metadata *)
 } [@@deriving yojson { strict = false }, show]
@@ -138,13 +138,13 @@ let iso8601_of_unix_seconds ts =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
-let normalize_agent_last_seen ~joined_at = function
+let normalize_agent_last_seen ~session_bound_at = function
   | `String _ as value -> Some value
   | `Int seconds ->
       Some (`String (iso8601_of_unix_seconds (float_of_int seconds)))
   | `Float seconds ->
       Some (`String (iso8601_of_unix_seconds seconds))
-  | `Null -> joined_at  (* bootstrap from joined_at — see #7947 *)
+  | `Null -> session_bound_at  (* bootstrap from session_bound_at — see #7947 *)
   | _ -> None
 
 let short_json_repr = function
@@ -167,8 +167,8 @@ let agent_of_yojson json =
   | Error original_error -> (
       match json with
       | `Assoc fields ->
-          let joined_at_value =
-            match List.assoc_opt "joined_at" fields with
+          let session_bound_at_value =
+            match List.assoc_opt "session_bound_at" fields with
             | Some (`String _ as v) -> Some v
             | _ -> None
           in
@@ -187,15 +187,15 @@ let agent_of_yojson json =
           let normalized_last_seen =
             match last_seen_raw with
             | Some value ->
-                normalize_agent_last_seen ~joined_at:joined_at_value value
+                normalize_agent_last_seen ~session_bound_at:session_bound_at_value value
             | None ->
-                (* Missing last_seen → bootstrap from joined_at when
+                (* Missing last_seen → bootstrap from session_bound_at when
                    present, otherwise fall back to the current wall-clock
                    time (#9751).  [last_seen] is a liveness marker, not
                    identity-critical; a recent-but-approximate timestamp
                    is strictly better than failing the whole record
                    deserialisation for an optional field. *)
-                (match joined_at_value with
+                (match session_bound_at_value with
                  | Some _ as v -> v
                  | None -> Some (now_iso ()))
           in
@@ -205,45 +205,23 @@ let agent_of_yojson json =
                 ("last_seen", normalized_last_seen)
                 :: List.remove_assoc "last_seen" fields
               in
-              (* If joined_at is also unusable, inject a now() value so
+              (* If session_bound_at is also unusable, inject a now() value so
                  the generated deserialiser's required-field check passes.
                  The agent record can always be rebuilt from a heartbeat;
                  losing the whole entry because of a missing timestamp is
                  strictly worse (#9751). *)
               let normalized_fields =
-                match joined_at_value with
+                match session_bound_at_value with
                 | Some _ -> fields_without_last_seen
                 | None ->
-                    ("joined_at", now_iso ())
-                    :: List.remove_assoc "joined_at" fields_without_last_seen
+                    ("session_bound_at", now_iso ())
+                    :: List.remove_assoc "session_bound_at" fields_without_last_seen
               in
               (match agent_of_yojson_generated (`Assoc normalized_fields) with
                | Ok _ as ok -> ok
                | Error _ -> Error (annotated_error ()))
           | None -> Error (annotated_error ()))
       | _ -> Error original_error)
-
-(* ============================================ *)
-(* Multi-Coord Types                             *)
-(* ============================================ *)
-
-(** Coord metadata - information about a coordination room *)
-type room_info = {
-  id: string;                                 (* unique ID: slugified name *)
-  name: string;                               (* display name *)
-  description: string option; [@default None] (* optional description *)
-  created_at: string;                         (* ISO timestamp *)
-  created_by: string option; [@default None]  (* agent who created the room *)
-  agent_count: int; [@default 0]              (* current agent count *)
-  task_count: int; [@default 0]               (* active task count *)
-} [@@deriving yojson { strict = false }, show]
-
-(** Coord registry - tracks all available rooms *)
-type room_registry = {
-  rooms: room_info list; [@default []]        (* list of rooms *)
-  default_room: string; [@default "default"]  (* default room ID *)
-  current_room: string option; [@default None] (* currently active room *)
-} [@@deriving yojson { strict = false }, show]
 
 (** Task status - state transitions enforced by types *)
 type task_action =
@@ -255,7 +233,6 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 [@@deriving show]
 
 let task_action_of_string s =
@@ -268,7 +245,6 @@ let task_action_of_string s =
   | "submit_for_verification" -> Ok Submit_for_verification
   | "approve" -> Ok Approve_verification
   | "reject" -> Ok Reject_verification
-  | "submit_pr_evidence" -> Ok Submit_pr_evidence
   | other -> Error (Printf.sprintf "Unknown task action: %s" other)
 
 let task_action_to_string = function
@@ -280,14 +256,22 @@ let task_action_to_string = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
-  | Submit_pr_evidence -> "submit_pr_evidence"
 
 (** All valid task actions, derived from the ADT (single source of truth). *)
 let all_task_actions =
   [ Claim; Start; Done_action; Cancel; Release;
-    Submit_for_verification; Approve_verification; Reject_verification;
-    Submit_pr_evidence ]
+    Submit_for_verification; Approve_verification; Reject_verification ]
 let valid_task_action_strings = List.map task_action_to_string all_task_actions
+
+(* RFC-0220: the verification sub-state (previously a separate request_status
+   store: `Pending / `Assigned) is folded into [task_status] so the illegal
+   "task Todo + request Pending" pair is unrepresentable. *)
+type verification_phase =
+  | Awaiting_verifier
+      (** No verifier assigned yet (was verification request [`Pending]). *)
+  | Verifier_assigned of { verifier: string }
+      (** A verifier keeper is assigned (was [`Assigned verifier]). *)
+[@@deriving show]
 
 type task_status =
   | Todo
@@ -297,11 +281,28 @@ type task_status =
       assignee: string;
       submitted_at: string;
       verification_id: string;
-      deadline: string option;
+      phase: verification_phase;
+        (** RFC-0220: replaces [deadline : string option]. The deadline is
+            dropped per I2 (no per-obligation wall-clock deadline); the
+            verification sub-state lives here so it cannot drift from a
+            separate store. *)
     }
   | Done of { assignee: string; completed_at: string; notes: string option }
   | Cancelled of { cancelled_by: string; cancelled_at: string; reason: string option }
 [@@deriving show]
+
+(** RFC-0220 §3.5: the [task_status] of an [AwaitingVerification] obligation
+    once [verifier] has claimed it as its satisfier. The obligation is preserved
+    (it stays in the verifier pool, and any non-submitter can still
+    approve/reject it — [decide]'s approval arms match the phase with [_]) and
+    the verifier is recorded in [phase]. Single construction site shared by the
+    FSM decider and both claim writers ([claim_task_r], [claim_next_r]) so the
+    bound-verifier shape never drifts across surfaces. The binding is advisory:
+    it records who is verifying, not who is permitted to — an abandoned
+    [Verifier_assigned] task is re-claimable by another verifier. *)
+let bind_verifier ~verifier ~assignee ~submitted_at ~verification_id =
+  AwaitingVerification
+    { assignee; submitted_at; verification_id; phase = Verifier_assigned { verifier } }
 
 (* Simple string representation for dashboard *)
 let task_status_to_string = function
@@ -314,7 +315,7 @@ let task_status_to_string = function
 
 let string_of_task_status = task_status_to_string
 
-(** Display icon for task status. Used by coord_status and coord_query
+(** Display icon for task status. Used by workspace_status and workspace_query
     rendering. Exhaustive match — adding a constructor forces an update here. *)
 let task_status_icon = function
   | Todo -> "📋"
@@ -333,7 +334,7 @@ let task_display_assignee = function
   | Todo -> "unclaimed"
 
 (** Extract assignee as [Some string], or [None] for Todo/Cancelled.
-    Canonical ownership-check helper — used by coord_task, gRPC, etc. *)
+    Canonical ownership-check helper — used by task_state, gRPC, etc. *)
 let task_assignee_of_status = function
   | Claimed { assignee; _ } -> Some assignee
   | InProgress { assignee; _ } -> Some assignee
@@ -390,7 +391,7 @@ let task_status_schema_witnesses : task_status list =
       { assignee = placeholder
       ; submitted_at = placeholder
       ; verification_id = placeholder
-      ; deadline = None
+      ; phase = Awaiting_verifier
       }
   ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
   ; Cancelled
@@ -424,15 +425,20 @@ let task_status_to_yojson = function
         ("completed_at", `String completed_at);
         ("notes", Json_util.string_opt_to_json notes);
       ]
-  | AwaitingVerification { assignee; submitted_at; verification_id;
-                           deadline; _ } ->
-      `Assoc [
+  | AwaitingVerification { assignee; submitted_at; verification_id; phase } ->
+      let phase_fields =
+        match phase with
+        | Awaiting_verifier -> [ ("phase", `String "awaiting_verifier") ]
+        | Verifier_assigned { verifier } ->
+            [ ("phase", `String "verifier_assigned");
+              ("verifier", `String verifier) ]
+      in
+      `Assoc ([
         ("status", `String "awaiting_verification");
         ("assignee", `String assignee);
         ("submitted_at", `String submitted_at);
         ("verification_id", `String verification_id);
-        ("deadline", Json_util.string_opt_to_json deadline);
-      ]
+      ] @ phase_fields)
   | Cancelled { cancelled_by; cancelled_at; reason } ->
       `Assoc [
         ("status", `String "cancelled");
@@ -442,35 +448,39 @@ let task_status_to_yojson = function
       ]
 
 let task_status_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
+  let opt key = Json_util.get_string json key in
   try
-    let status = json |> member "status" |> to_string in
-    match status with
+    match req "status" with
     | "todo" -> Ok Todo
     | "claimed" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let claimed_at = json |> member "claimed_at" |> to_string in
-        Ok (Claimed { assignee; claimed_at })
+        Ok (Claimed { assignee = req "assignee"; claimed_at = req "claimed_at" })
     | "in_progress" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let started_at = json |> member "started_at" |> to_string in
-        Ok (InProgress { assignee; started_at })
+        Ok (InProgress { assignee = req "assignee"; started_at = req "started_at" })
     | "done" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let completed_at = json |> member "completed_at" |> to_string in
-        let notes = json |> member "notes" |> to_string_option in
-        Ok (Done { assignee; completed_at; notes })
+        Ok (Done { assignee = req "assignee"; completed_at = req "completed_at"; notes = opt "notes" })
     | "awaiting_verification" ->
-        let assignee = json |> member "assignee" |> to_string in
-        let submitted_at = json |> member "submitted_at" |> to_string in
-        let verification_id = json |> member "verification_id" |> to_string in
-        let deadline = json |> member "deadline" |> to_string_option in
-        Ok (AwaitingVerification { assignee; submitted_at; verification_id; deadline })
+        (* RFC-0220 migration tolerance: legacy backlogs carry [deadline]
+           (now dropped) and no [phase]; a missing/legacy phase defaults to
+           [Awaiting_verifier]. *)
+        let phase =
+          match opt "phase" with
+          | Some "verifier_assigned" ->
+              Verifier_assigned { verifier = req "verifier" }
+          | Some "awaiting_verifier" | None | Some _ -> Awaiting_verifier
+        in
+        Ok (AwaitingVerification
+              { assignee = req "assignee"
+              ; submitted_at = req "submitted_at"
+              ; verification_id = req "verification_id"
+              ; phase
+              })
     | "cancelled" ->
-        let cancelled_by = json |> member "cancelled_by" |> to_string in
-        let cancelled_at = json |> member "cancelled_at" |> to_string in
-        let reason = json |> member "reason" |> to_string_option in
-        Ok (Cancelled { cancelled_by; cancelled_at; reason })
+        Ok (Cancelled
+              { cancelled_by = req "cancelled_by"
+              ; cancelled_at = req "cancelled_at"
+              ; reason = opt "reason"
+              })
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
 
@@ -482,21 +492,37 @@ type task_execution_links = {
 
 (** Task contract - persisted deterministic gate inputs.
 
-    RFC-0199 Phase A: [required_evidence_typed] carries the closed-sum
-    typed evidence schema consumed by [Deterministic_evidence_evaluator]
-    (Phase B). The legacy [required_evidence : string list] is kept for
-    backward compatibility — neither writer nor reader is removed in
-    Phase A; migration tool comes with Phase B/C. New task creators
-    should populate [required_evidence_typed] and may also mirror to
-    [required_evidence] for legacy consumers. *)
+    [required_evidence : string list] is the live source of truth: the CDAL
+    evidence gate ([Cdal_evidence_gate]) substring-matches each entry against
+    task-completion notes / handoff refs to decide whether a contracted task
+    may complete.
+
+    RFC-0199 Phase A added a parallel [required_evidence_typed :
+    Evidence_claim.t list] meant for a future [Deterministic_evidence_evaluator]
+    (Phase B). That field was removed (2026-06-03): fan-in was 0 — no producer
+    ever populated it (every site wrote [[]]), no consumer ever read it, and the
+    Phase B evaluator was never implemented. The [Evidence_claim] schema module
+    is retained for when Phase B is built; see RFC-0199 for the deferral note.
+    A future Phase B should re-introduce a typed field with a migration that
+    parses legacy [required_evidence] strings (RFC-0199 open question), not a
+    silently-empty parallel field.
+
+    A [required_tools : string list] field was also removed (2026-06-03,
+    same fan-in-0 pattern): it was deprecated and ignored by task claim
+    routing, always normalized to [[]] by [Workspace_task_classify], had no
+    production reader, and the keeper turn layer rejects the [required_tools]
+    key outright (#19806, [Keeper_config_text]). Later cleanup removed the
+    same-named dashboard and tool-call benchmark fields too, so the string no
+    longer names any task, dashboard, or benchmark contract surface. *)
 type task_contract = {
   strict : bool; [@default false]
   completion_contract : string list; [@default []]
-  required_tools : string list; [@default []]
   required_evidence : string list; [@default []]
-  required_evidence_typed : Evidence_claim.t list; [@default []]
   inspect_gate_evidence : string list; [@default []]
   verify_gate_evidence : string list; [@default []]
+  evidence_claims : Evidence_claim.t list; [@default []]
+  (* RFC-0199 Phase B: typed deterministic completion criteria (see .mli). *)
+  stale_claim_timeout_sec : int; [@default 0]
   links : task_execution_links; [@default { operation_id = None; session_id = None }]
 } [@@deriving show, yojson { strict = false }]
 
@@ -543,8 +569,6 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
-  goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
-  stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
@@ -594,9 +618,14 @@ let task_claim_decision (task : task) =
        Claim_available (task_claim_readiness task)
      | Reclaim_gate_blocked_by_policy reason ->
        Claim_unavailable (Claim_block_reclaim_policy reason))
+  | AwaitingVerification { verification_id; _ } ->
+    (* Verification tasks with a valid verification_id can be claimed by
+       other agents for cross-agent verification dispatch. The actual
+       cross-agent check (self-verification block) happens in claim_task_r.
+       Issue #19314. verification_id is a non-empty string — always claimable. *)
+    Claim_available (task_claim_readiness task)
   | Claimed _
   | InProgress _
-  | AwaitingVerification _
   | Done _
   | Cancelled _ ->
     Claim_unavailable (Claim_block_not_todo task.task_status)
@@ -639,19 +668,10 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  let with_goal_id = match t.goal_id with
-    | None -> with_created_by
-    | Some goal_id -> with_created_by @ [("goal_id", `String goal_id)]
-  in
-  (* Add stage if present *)
-  let with_stage = match t.stage with
-    | None -> with_goal_id
-    | Some s -> with_goal_id @ [("stage", Task_stage.to_yojson s)]
-  in
   let with_contract = match t.contract with
-    | None -> with_stage
+    | None -> with_created_by
     | Some contract ->
-        with_stage @ [ ("contract", task_contract_to_yojson contract) ]
+        with_created_by @ [ ("contract", task_contract_to_yojson contract) ]
   in
   let with_handoff_context = match t.handoff_context with
     | None -> with_contract
@@ -683,49 +703,41 @@ let task_to_yojson t =
   | _ -> `Assoc with_do_not_reclaim
 
 let task_of_yojson json =
-  let open Yojson.Safe.Util in
+  let req key = Json_util.get_string_with_default json ~key ~default:"" in
+  let opt key = Json_util.get_string json key in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
-    let id = json |> member "id" |> to_string in
-    let title = json |> member "title" |> to_string in
-    let description = json |> member "description" |> to_string_option |> Option.value ~default:"" in
-    let priority = json |> member "priority" |> to_int_option |> Option.value ~default:3 in
-    let files = json |> member "files" |> to_list |> List.map to_string in
-    let created_at = json |> member "created_at" |> to_string in
-    let created_by = json |> member "created_by" |> to_string_option in
-    let goal_id = json |> member "goal_id" |> to_string_option in
-    (* Parse optional stage field *)
-    let stage = match json |> member "stage" |> to_string_option with
-      | Some s -> (match Task_stage.of_string s with Ok st -> Some st | Error _ -> None)
-      | None -> None
-    in
-    let contract = match json |> member "contract" with
+    let id = req "id" in
+    let title = req "title" in
+    let description = opt "description" |> Option.value ~default:"" in
+    let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
+    let files = Json_util.get_string_list json "files" in
+    let created_at = req "created_at" in
+    let created_by = opt "created_by" in
+    let contract = match m "contract" with
       | `Null -> None
       | contract_json ->
           (match task_contract_of_yojson contract_json with
            | Ok contract -> Some contract
            | Error _ -> None)
     in
-    let handoff_context = match json |> member "handoff_context" with
+    let handoff_context = match m "handoff_context" with
       | `Null -> None
       | handoff_json ->
           (match task_handoff_context_of_yojson handoff_json with
            | Ok handoff_context -> Some handoff_context
            | Error _ -> None)
     in
-    let cycle_count =
-      json |> member "cycle_count" |> to_int_option |> Option.value ~default:0
-    in
+    let cycle_count = Json_util.get_int json "cycle_count" |> Option.value ~default:0 in
     let reclaim_policy =
-      match json |> member "reclaim_policy" with
+      match m "reclaim_policy" with
       | `Null -> None
       | reclaim_policy_json ->
           (match task_reclaim_policy_of_yojson reclaim_policy_json with
            | Ok policy -> Some policy
            | Error _ -> None)
     in
-    let do_not_reclaim_reason =
-      json |> member "do_not_reclaim_reason" |> to_string_option
-    in
+    let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
     match task_status_of_yojson json with
     | Ok task_status ->
         Ok
@@ -738,8 +750,6 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
-            goal_id;
-            stage;
             contract;
             handoff_context;
             cycle_count;
@@ -762,8 +772,8 @@ type message = {
   relevance: string; [@default "medium"]
 } [@@deriving yojson { strict = false }, show]
 
-(** Coord state *)
-type room_state = {
+(** Workspace state *)
+type workspace_state = {
   protocol_version: string;
   project: string;
   started_at: string;
@@ -771,7 +781,7 @@ type room_state = {
   active_agents: string list;
   paused: bool; [@default false]  (** Global pause flag - when true, orchestrator won't spawn *)
   pause_reason: string option; [@default None]  (** Reason for pause *)
-  paused_by: string option; [@default None]  (** Who paused the room *)
+  paused_by: string option; [@default None]  (** Who paused the workspace *)
   paused_at: string option; [@default None]  (** When paused *)
   search_strategy_default: string option; [@default None]
   speculation_enabled: bool; [@default false]
@@ -842,13 +852,12 @@ let tempo_config_to_yojson c =
   ]
 
 let tempo_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let mode_str = json |> member "mode" |> to_string in
-    let delay_ms = json |> member "delay_ms" |> to_int_option |> Option.value ~default:0 in
-    let reason = json |> member "reason" |> to_string_option in
-    let set_by = json |> member "set_by" |> to_string_option in
-    let set_at = json |> member "set_at" |> to_string_option in
+    let mode_str = Json_util.get_string_with_default json ~key:"mode" ~default:"" in
+    let delay_ms = Json_util.get_int json "delay_ms" |> Option.value ~default:0 in
+    let reason = Json_util.get_string json "reason" in
+    let set_by = Json_util.get_string json "set_by" in
+    let set_at = Json_util.get_string json "set_at" in
     match tempo_mode_of_string mode_str with
     | Ok mode -> Ok { mode; delay_ms; reason; set_by; set_at }
     | Error e -> Error e
@@ -869,9 +878,9 @@ let backlog_to_yojson b =
   ]
 
 let backlog_of_yojson json =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
   try
-    let tasks_json = json |> member "tasks" |> to_list in
+    let tasks_json = match m "tasks" with `List l -> l | _ -> [] in
     let tasks = List.filter_map (fun j ->
       match task_of_yojson j with Ok t -> Some t | Error _ -> None
     ) tasks_json in
@@ -885,144 +894,12 @@ let backlog_of_yojson json =
        failed] entries/day driven [stale-claims] GC to skip mutation,
        so claims never transitioned).  Tolerate missing/null fields. *)
     let last_updated =
-      json |> member "last_updated" |> to_string_option
-      |> Option.value ~default:""
+      Json_util.get_string_with_default json ~key:"last_updated" ~default:""
     in
     let version =
-      json |> member "version" |> to_int_option
-      |> Option.value ~default:1
+      Json_util.get_int json "version" |> Option.value ~default:1
     in
     Ok { tasks; last_updated; version }
-  with e -> Error (Printexc.to_string e)
-
-(** A2A Task status - enforced at compile time *)
-type a2a_task_status =
-  | A2APending
-  | A2ARunning
-  | A2ACompleted
-  | A2AFailed
-  | A2ACanceled
-[@@deriving show { with_path = false }]
-
-let a2a_task_status_to_string = function
-  | A2APending -> "pending"
-  | A2ARunning -> "running"
-  | A2ACompleted -> "completed"
-  | A2AFailed -> "failed"
-  | A2ACanceled -> "canceled"
-
-let a2a_task_status_of_string = function
-  | "pending" -> Ok A2APending
-  | "running" -> Ok A2ARunning
-  | "completed" -> Ok A2ACompleted
-  | "failed" -> Ok A2AFailed
-  | "canceled" -> Ok A2ACanceled
-  | s -> Error ("Unknown A2A task status: " ^ s)
-
-let a2a_task_status_to_yojson s = `String (a2a_task_status_to_string s)
-
-let a2a_task_status_of_yojson = function
-  | `String s -> a2a_task_status_of_string s
-  | other ->
-    Error
-      (Printf.sprintf "Expected string for A2A task status (received %s)"
-         (Json_util.kind_name other))
-
-(** Portal status - enforced at compile time *)
-type portal_state =
-  | PortalOpen
-  | PortalClosed
-[@@deriving show { with_path = false }]
-
-let portal_state_to_string = function
-  | PortalOpen -> "open"
-  | PortalClosed -> "closed"
-
-let portal_state_of_string = function
-  | "open" -> Ok PortalOpen
-  | "closed" -> Ok PortalClosed
-  | s -> Error ("Unknown portal state: " ^ s)
-
-let portal_state_to_yojson s = `String (portal_state_to_string s)
-
-let portal_state_of_yojson = function
-  | `String s -> portal_state_of_string s
-  | other ->
-    Error
-      (Printf.sprintf "Expected string for portal state (received %s)"
-         (Json_util.kind_name other))
-
-(** A2A Task - Google A2A Protocol task object *)
-type a2a_task = {
-  a2a_id: string; [@key "id"]
-  from_agent: string; [@key "from"]
-  to_agent: string; [@key "to"]
-  a2a_message: string; [@key "message"]
-  a2a_status: a2a_task_status; [@key "status"]
-  a2a_result: string option; [@key "result"] [@default None]
-  created_at: string; [@key "createdAt"]
-  updated_at: string; [@key "updatedAt"]
-} [@@deriving show]
-
-(* Manual JSON conversion for a2a_task *)
-let a2a_task_to_yojson t =
-  `Assoc [
-    ("id", `String t.a2a_id);
-    ("from", `String t.from_agent);
-    ("to", `String t.to_agent);
-    ("message", `String t.a2a_message);
-    ("status", a2a_task_status_to_yojson t.a2a_status);
-    ("result", Json_util.string_opt_to_json t.a2a_result);
-    ("createdAt", `String t.created_at);
-    ("updatedAt", `String t.updated_at);
-  ]
-
-let a2a_task_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let a2a_id = json |> member "id" |> to_string in
-    let from_agent = json |> member "from" |> to_string in
-    let to_agent = json |> member "to" |> to_string in
-    let a2a_message = json |> member "message" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let a2a_result = json |> member "result" |> to_string_option in
-    let created_at = json |> member "createdAt" |> to_string in
-    let updated_at = json |> member "updatedAt" |> to_string in
-    match a2a_task_status_of_string status_str with
-    | Ok a2a_status -> Ok { a2a_id; from_agent; to_agent; a2a_message; a2a_status; a2a_result; created_at; updated_at }
-    | Error e -> Error e
-  with e -> Error (Printexc.to_string e)
-
-(** Portal - bidirectional A2A connection *)
-type portal = {
-  portal_from: string; [@key "from"]
-  portal_target: string; [@key "target"]
-  portal_opened_at: string; [@key "openedAt"]
-  portal_status: portal_state; [@key "status"]
-  task_count: int; [@key "taskCount"]
-} [@@deriving show]
-
-(* Manual JSON conversion for portal *)
-let portal_to_yojson p =
-  `Assoc [
-    ("from", `String p.portal_from);
-    ("target", `String p.portal_target);
-    ("openedAt", `String p.portal_opened_at);
-    ("status", portal_state_to_yojson p.portal_status);
-    ("taskCount", `Int p.task_count);
-  ]
-
-let portal_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let portal_from = json |> member "from" |> to_string in
-    let portal_target = json |> member "target" |> to_string in
-    let portal_opened_at = json |> member "openedAt" |> to_string in
-    let status_str = json |> member "status" |> to_string in
-    let task_count = json |> member "taskCount" |> to_int in
-    match portal_state_of_string status_str with
-    | Ok portal_status -> Ok { portal_from; portal_target; portal_opened_at; portal_status; task_count }
-    | Error e -> Error e
   with e -> Error (Printexc.to_string e)
 
 (** SSE Session info (for tracking connected agents) *)
@@ -1057,7 +934,7 @@ type tool_schema = {
 }
 
 (** Structured result for claim_next scheduling (avoids brittle string parsing).
-    Defined here so that both Coord_task_schedule (producer) and consumers
+    Defined here so that both Workspace_task_schedule (producer) and consumers
     (tool_task, orchestrator) can reference the type without
     triggering warning 34 from [include] re-export. *)
 type claim_next_result =
@@ -1067,6 +944,11 @@ type claim_next_result =
       priority : int;
       released_task_id : string option;  (** Legacy field; claim_next no longer auto-releases active work. *)
       message : string;
+      scope_widened : bool;
+          (** True when goal-scope was widened to all_tasks because no scoped
+              task was admission-eligible (schedule-level fallback). Lets the
+              operator distinguish a scope-overriding claim from an ordinary
+              in-scope claim. *)
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
@@ -1074,10 +956,7 @@ type claim_next_result =
       ; blocked_count : int
       ; verification_blocked_count : int
       ; scope_excluded_count : int
-      ; required_tool_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int
-      ; receipt_required_tool_blocked : bool
-      ; agent_tool_names_known : bool
       }
   | Claim_next_error of string

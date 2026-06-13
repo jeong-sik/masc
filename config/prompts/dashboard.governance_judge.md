@@ -28,7 +28,7 @@ Output strict JSON only with this shape:
 {
   "items": [
     {
-      "kind": "case|agent_health|room_state",
+      "kind": "case|agent_health|workspace_state",
       "id": string,
       "summary": string,
       "confidence": number,

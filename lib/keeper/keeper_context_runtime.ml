@@ -10,6 +10,8 @@
     do not need updating. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 
 (* ================================================================ *)
@@ -56,7 +58,6 @@ let total_tokens = Keeper_context_core.total_tokens
 let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let checkpoint_max_tokens = Keeper_context_core.checkpoint_max_tokens
 let context_of_oas_checkpoint = Keeper_context_core.context_of_oas_checkpoint
-let checkpoint_model_of_meta = Keeper_context_core.checkpoint_model_of_meta
 let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
@@ -113,6 +114,7 @@ let compaction_decision_applied =
 type compaction_event = Keeper_post_turn.compaction_event = {
   attempted : bool;
   applied : bool;
+  started_dispatched : bool;
   failure_reason : string option;
   trigger : Compaction_trigger.t option;
   decision : Keeper_compact_policy.compaction_decision;
@@ -144,7 +146,7 @@ type overflow_retry_recovery = Keeper_post_turn.overflow_retry_recovery = {
 type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
-  cascade_budget : int;
+  runtime_budget : int;
   turn_budget : int;
   effective_budget : int;
 }
@@ -154,8 +156,20 @@ let apply_post_turn_lifecycle_with_resilience_handles =
 let recover_latest_checkpoint_for_overflow_retry =
   Keeper_post_turn.recover_latest_checkpoint_for_overflow_retry
 
+let record_lifecycle_dispatch_rejection ~keeper_name ~origin event ~error =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
+    ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
+    ();
+  Log.Keeper.warn
+    "%s: keeper lifecycle dispatch rejected origin=%s event=%s error=%s"
+    keeper_name
+    (Keeper_registry.lifecycle_event_origin_to_string origin)
+    (Keeper_state_machine.event_to_string event)
+    error
+
 let dispatch_keeper_phase_event
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ?(origin = Keeper_registry.Generic_dispatch)
     ~keeper_name
     event =
@@ -168,18 +182,20 @@ let dispatch_keeper_phase_event
   with
   | Ok _ -> ()
   | Error err ->
-      Prometheus.inc_counter
-        Keeper_metrics.(to_string LifecycleDispatchRejections)
-        ~labels:[ ("keeper", keeper_name); ("event", Keeper_state_machine.event_to_string event) ]
-        ();
-      Log.Keeper.warn
-        "%s: post-turn lifecycle dispatch failed event=%s error=%s"
-        keeper_name
-        (Keeper_state_machine.event_to_string event)
-        (Keeper_state_machine.transition_error_to_string err)
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        ~origin
+        event
+        ~error:(Keeper_state_machine.transition_error_to_string err)
+  | exception (Keeper_registry_types.Compaction_transition_violation _ as exn) ->
+      record_lifecycle_dispatch_rejection
+        ~keeper_name
+        ~origin
+        event
+        ~error:(Printexc.to_string exn)
 
 (* #9988 Option B follow-up: centralize [Compaction_completed] dispatch
-   so both emit paths (manual recovery in [tool_keeper] and automatic
+   so both emit paths (manual recovery in [keeper_tool_surface] and automatic
    post-turn lifecycle) share the same outcome counter + warn log.
 
    [masc_keeper_compaction_outcome_total{keeper,outcome}] splits into
@@ -192,7 +208,7 @@ let dispatch_keeper_phase_event
 let compaction_outcome_metric = "masc_keeper_compaction_outcome_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:compaction_outcome_metric
     ~help:
       "Total Compaction_completed dispatches classified by token \
@@ -205,11 +221,11 @@ let () =
 (* Observability-only: bump the outcome counter and log the warn
    when saved_tokens <= 0.  Split from [dispatch_compaction_completed]
    so unit tests can verify classification without needing a full
-   [Coord.config] / [Keeper_registry] setup. *)
+   [Workspace.config] / [Keeper_registry] setup. *)
 let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
   let saved_tokens = before_tokens - after_tokens in
   let outcome = if saved_tokens > 0 then "ok" else "noop" in
-  Prometheus.inc_counter compaction_outcome_metric
+  Otel_metric_store.inc_counter compaction_outcome_metric
     ~labels:[ ("keeper", keeper_name); ("outcome", outcome) ] ();
   if saved_tokens <= 0 then
     Log.Keeper.warn
@@ -220,30 +236,53 @@ let record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens =
       saved_tokens before_tokens after_tokens keeper_name
 
 let dispatch_compaction_completed
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~origin
     ~keeper_name
     ~before_tokens
     ~after_tokens =
   record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens;
-  Prometheus.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
+  Otel_metric_store.inc_counter Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
   dispatch_keeper_phase_event ~config ~origin ~keeper_name
     (Keeper_state_machine.Compaction_completed
        { before_tokens; after_tokens })
 
 let dispatch_post_turn_lifecycle_events
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~keeper_name
     (lifecycle : post_turn_lifecycle) =
   if lifecycle.compaction.attempted then
-    if lifecycle.compaction.applied then
+    if lifecycle.compaction.applied then begin
+      (* FSM boundary: compaction_stage must be Compaction_compacting
+         before we dispatch Compaction_completed.  If the
+         on_compaction_started callback succeeded (started_dispatched =
+         true), the FSM is already in compacting.  If it failed or was
+         never called (recovery path), the FSM is still at accumulating
+         and we must dispatch Compaction_started first.  The Started
+         dispatch is idempotent from compacting, so this is safe in
+         both cases. *)
+      if not lifecycle.compaction.started_dispatched then begin
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string CompactionCallbackRecoveries)
+          ~labels:[ ("keeper", keeper_name) ] ();
+        Log.Keeper.warn
+          "%s: on_compaction_started callback did not fire — \
+           dispatching Compaction_started before Completed to recover \
+           FSM path.  If this repeats, investigate registry contention \
+           or keeper registration timing."
+          keeper_name;
+        dispatch_keeper_phase_event ~config
+          ~origin:Keeper_registry.Post_turn_lifecycle
+          ~keeper_name
+          Keeper_state_machine.Compaction_started
+      end;
       dispatch_compaction_completed
         ~config
         ~origin:Keeper_registry.Post_turn_lifecycle
         ~keeper_name
         ~before_tokens:lifecycle.compaction.before_tokens
         ~after_tokens:lifecycle.compaction.after_tokens
+    end
     else
       dispatch_keeper_phase_event
         ~config
@@ -289,31 +328,38 @@ let dispatch_post_turn_lifecycle_events
 
 let generate_trace_id = Keeper_identity.generate_trace_id
 
-let keeper_board_write_tool_names = Tool_name.Keeper.board_write_tool_names
+let keeper_board_write_tool_names =
+  [ "keeper_board_post"
+  ; "keeper_board_comment"
+  ; "keeper_board_vote"
+  ; "keeper_board_curation_submit"
+  ]
+
+let canonical_tool_name name = Keeper_tool_resolution.canonical_tool_name name
 
 let keeper_tool_name_matches tool name =
-  match Tool_name.Keeper.of_string name with
-  | Some parsed -> parsed = tool
-  | None -> false
+  String.equal (canonical_tool_name name) tool
 
 let keeper_write_done tool_names =
   List.exists
     (fun name ->
-       match Tool_name.Keeper.of_string name with
-       | Some tool -> Tool_name.Keeper.is_board_write tool
-       | None -> false)
+       List.exists (fun tool -> keeper_tool_name_matches tool name)
+         keeper_board_write_tool_names)
     tool_names
 
 let keeper_action_kind_of_tool_names tool_names =
-  Tool_name.Keeper.board_write_tools
-  |> List.find_map (fun tool ->
-    if List.exists (keeper_tool_name_matches tool) tool_names then
-      Tool_name.Keeper.board_write_action_kind tool
+  [ "keeper_board_post", "post"
+  ; "keeper_board_comment", "comment"
+  ; "keeper_board_vote", "vote"
+  ; "keeper_board_curation_submit", "curation"
+  ]
+  |> List.find_map (fun (tool, action_kind) ->
+    if List.exists (keeper_tool_name_matches tool) tool_names then Some action_kind
     else None)
   |> Option.value ~default:"none"
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  (* provider filtering now handled by OAS cascade via ~provider_filter *)
+  (* provider filtering now handled by OAS runtime via ~provider_filter *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
   match String.trim (Keeper_status_runtime.active_model_of_meta m) with
   | "" -> configured
@@ -322,7 +368,7 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
         List.mem model configured
         || List.exists
              (fun label ->
-               Cascade_runtime_candidate.label_matches_runtime_id
+               Runtime_provider_binding.label_matches_runtime_id
                  ~label
                  ~runtime_id:model)
              configured
@@ -335,20 +381,24 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
     : max_context_resolution =
   let min_keeper_context = Keeper_config.min_keeper_context_tokens in
   let clamp resolved =
-    let local_clamped =
-      Cascade_runtime.clamp_context_for_pure_local_labels
-        ~labels ~max_context:resolved
-    in
+    let local_clamped = resolved in
     max min_keeper_context local_clamped
   in
-  let primary_budget =
-    Cascade_runtime.resolve_primary_max_context labels
-    |> clamp
+  let default_budget = Runtime.default_max_context () |> clamp in
+  let runtime_budget =
+    labels
+    |> List.find_map (fun label ->
+           String.trim label
+           |> Runtime.max_context_of_runtime_id
+           |> Option.map clamp)
+    (* Labels are an ordered runtime-budget preference list. If none resolve,
+       the precomputed default runtime budget preserves config-less tests.
+       DET-OK: dispatch still fail-fast validates the selected runtime id before
+       provider execution. *)
+    |> Option.value ~default:default_budget
   in
-  let cascade_budget =
-    Cascade_runtime.resolve_max_cascade_context labels
-    |> clamp
-  in
+  (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
+  let primary_budget = runtime_budget in
   let turn_budget =
     match requested_override with
     | Some requested when requested > 0 ->
@@ -356,85 +406,23 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
     | _ -> primary_budget
   in
   let effective_budget = min turn_budget primary_budget in
-  { requested_override; primary_budget; cascade_budget; turn_budget; effective_budget }
+  { requested_override; primary_budget; runtime_budget; turn_budget; effective_budget }
 
 let resolve_max_context_resolution_of_meta (m : keeper_meta)
     : max_context_resolution =
-  let labels = effective_model_labels_for_turn m in
+  (* RFC-0207: the per-keeper routed runtime ([runtime_id_of_meta] — the same id
+     [keeper_turn_driver] dispatches to) is the authoritative budget source.
+     [effective_model_labels_for_turn] projects through
+     [Provider_runtime_projection.default_execution_model_strings], which ignores
+     the runtime id and returns the GLOBAL preferred labels (an RFC-0206
+     single-binding artifact), so on its own the budget would size against
+     [runtime].default and could admit prompts exceeding a smaller per-keeper
+     model's window.  Prepend the routed id so [resolve_max_context_resolution]'s
+     [find_map] sizes against it first; the projection labels remain as
+     fallback. *)
+  let labels = runtime_id_of_meta m :: effective_model_labels_for_turn m in
   resolve_max_context_resolution
     ~requested_override:m.max_context_override labels
-
-let room_cursor_for meta room_id =
-  meta.last_seen_seq_by_room
-  |> List.find_map (fun (rid, seq) -> if rid = room_id then Some seq else None)
-  |> Option.value ~default:0
-
-let set_room_cursor meta room_id seq =
-  let kept =
-    meta.last_seen_seq_by_room
-    |> List.filter (fun (rid, _) -> rid <> room_id)
-  in
-  {
-    meta with
-    last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept);
-  }
-
-let room_ids_for_meta _config (_meta : keeper_meta) : string list =
-  [ "default" ]
-
-let keeper_room_capabilities (meta : keeper_meta) =
-  let preset_cap =
-    match Keeper_types.tool_access_preset meta.tool_access with
-    | Some p -> [ "preset:" ^ Keeper_types.tool_preset_to_string p ]
-    | None -> []
-  in
-  [ "keeper" ] @ preset_cap
-
-let keeper_room_capabilities_need_sync config (meta : keeper_meta) capabilities =
-  let agent_file =
-    Filename.concat (Coord.agents_dir config)
-      (Coord.safe_filename meta.agent_name ^ ".json")
-  in
-  (* Use backend-aware read_json_opt instead of Sys.file_exists which
-     returns false for non-filesystem backends (PG, Memory). *)
-  match Coord.read_json_opt config agent_file with
-  | None -> true
-  | Some json -> (
-      match Masc_domain.agent_of_yojson json with
-      | Ok agent -> agent.capabilities <> capabilities
-      | Error _ -> true)
-
-let ensure_keeper_room_presence config (meta : keeper_meta) : keeper_meta =
-  let room_ids = room_ids_for_meta config meta in
-  let capabilities = keeper_room_capabilities meta in
-  let successful_rooms =
-    List.fold_left
-      (fun acc room_id ->
-        try
-          let joined =
-            Coord.is_agent_joined config ~agent_name:meta.agent_name
-          in
-          if not joined
-          then begin
-            Coord.ensure_room_bootstrap config;
-            ignore
-              (Coord.join config ~agent_name:meta.agent_name
-                 ~capabilities ())
-          end;
-          if joined && keeper_room_capabilities_need_sync config meta capabilities
-          then
-            ignore
-              (Coord.update_agent_r config ~agent_name:meta.agent_name
-                 ~capabilities ());
-          ignore
-            (Coord.heartbeat config ~agent_name:meta.agent_name);
-          room_id :: acc
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          Keeper_context_core.log_keeper_exn ~label:(Printf.sprintf "room presence sync failed for %s in %s" meta.name room_id) exn;
-          acc)
-      [] room_ids
-  in
-  { meta with joined_room_ids = List.rev successful_rooms }
 
 let exact_direct_mention_present ~(targets : string list) (content : string) :
     bool =

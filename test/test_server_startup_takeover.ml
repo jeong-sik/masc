@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
@@ -185,7 +185,7 @@ let test_server_command_heuristic () =
        "/tmp/_build/default/bin/main_eio.exe --port 8935");
   Alcotest.(check bool) "public name accepted" true
     (Server_startup_takeover.looks_like_server_command
-       "/usr/local/bin/masc-mcp --host 127.0.0.1");
+       "/usr/local/bin/masc --host 127.0.0.1");
   Alcotest.(check bool) "unrelated process rejected" false
     (Server_startup_takeover.looks_like_server_command
        "python3 -m http.server 8935")

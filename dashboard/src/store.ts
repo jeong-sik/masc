@@ -24,11 +24,11 @@ import type {
   DashboardRuntimeResolution,
   DashboardShellAuthSummary,
   DashboardShellResponse,
-  DashboardCoordinationFsmEvidence,
-  DashboardCoordinationFsmProduct,
-  DashboardCoordinationFsmRefs,
-  DashboardCoordinationFsmSnapshot,
-  DashboardCoordinationFsmViolation,
+  DashboardWorkspaceFsmEvidence,
+  DashboardWorkspaceFsmProduct,
+  DashboardWorkspaceFsmRefs,
+  DashboardWorkspaceFsmSnapshot,
+  DashboardWorkspaceFsmViolation,
 } from './types'
 import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-hot'
 import { journal } from './sse'
@@ -214,7 +214,7 @@ export function removeBoardPost(postId: string | undefined): void {
 
 export const goals = signal<Goal[]>([])
 export const goalsLoading = signal(false)
-export const coordinationFsmSnapshot = signal<DashboardCoordinationFsmSnapshot | null>(null)
+export const workspaceFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>(null)
 
 // --- OAS monitoring state ---
 
@@ -434,6 +434,7 @@ export const oasHealthSummary: ReadonlySignal<OasHealthSummary> = computed(() =>
   replayLoadedEvents: oasReplayLoadedEvents.value,
   replayTotalMatchingEvents: oasReplayTotalMatchingEvents.value,
   replayTruncated: oasReplayTruncated.value,
+  hasMore: oasReplayTruncated.value,
   totalLlmCalls: oasTotalLlmCalls.value,
   totalErrors: oasTotalErrors.value,
   lastLlmCallTs: oasLastLlmCallTs.value,
@@ -644,7 +645,7 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   return inflightDashboardRefresh
 }
 
-function normalizeCoordinationFsmRefs(raw: unknown): DashboardCoordinationFsmRefs {
+function normalizeWorkspaceFsmRefs(raw: unknown): DashboardWorkspaceFsmRefs {
   const refsRecord = isRecord(raw) ? raw : {}
   return {
     goal_id: asString(refsRecord.goal_id) ?? null,
@@ -654,7 +655,7 @@ function normalizeCoordinationFsmRefs(raw: unknown): DashboardCoordinationFsmRef
   }
 }
 
-function normalizeCoordinationFsmEvidence(raw: unknown): DashboardCoordinationFsmEvidence | null {
+function normalizeWorkspaceFsmEvidence(raw: unknown): DashboardWorkspaceFsmEvidence | null {
   if (!isRecord(raw)) return null
   return {
     source: asString(raw.source) ?? undefined,
@@ -663,21 +664,21 @@ function normalizeCoordinationFsmEvidence(raw: unknown): DashboardCoordinationFs
     label: asString(raw.label) ?? undefined,
     detail: asString(raw.detail) ?? undefined,
     timestamp: asNumber(raw.timestamp) ?? null,
-    refs: normalizeCoordinationFsmRefs(raw.refs),
+    refs: normalizeWorkspaceFsmRefs(raw.refs),
   }
 }
 
-function normalizeCoordinationFsmEvidenceList(raw: unknown): DashboardCoordinationFsmEvidence[] {
+function normalizeWorkspaceFsmEvidenceList(raw: unknown): DashboardWorkspaceFsmEvidence[] {
   return Array.isArray(raw)
     ? raw
-      .map(normalizeCoordinationFsmEvidence)
-      .filter((row): row is DashboardCoordinationFsmEvidence => row !== null)
+      .map(normalizeWorkspaceFsmEvidence)
+      .filter((row): row is DashboardWorkspaceFsmEvidence => row !== null)
     : []
 }
 
 function refsOverlap(
-  left: DashboardCoordinationFsmRefs | undefined,
-  right: DashboardCoordinationFsmRefs | undefined,
+  left: DashboardWorkspaceFsmRefs | undefined,
+  right: DashboardWorkspaceFsmRefs | undefined,
 ): boolean {
   if (!left || !right) return false
   if (left.goal_id && left.goal_id === right.goal_id) return true
@@ -686,51 +687,51 @@ function refsOverlap(
   return (left.post_ids ?? []).some(postId => (right.post_ids ?? []).includes(postId))
 }
 
-function normalizeCoordinationFsmSnapshot(raw: unknown): DashboardCoordinationFsmSnapshot | null {
+function normalizeWorkspaceFsmSnapshot(raw: unknown): DashboardWorkspaceFsmSnapshot | null {
   if (!isRecord(raw)) return null
   const summaryRecord = isRecord(raw.summary) ? raw.summary : {}
   const severityRecord = isRecord(summaryRecord.severity_counts)
     ? summaryRecord.severity_counts
     : {}
-  const products: DashboardCoordinationFsmProduct[] = Array.isArray(raw.products)
+  const products: DashboardWorkspaceFsmProduct[] = Array.isArray(raw.products)
     ? raw.products
-      .map((row): DashboardCoordinationFsmProduct | null => {
+      .map((row): DashboardWorkspaceFsmProduct | null => {
         if (!isRecord(row)) return null
         return {
-          refs: normalizeCoordinationFsmRefs(row.refs),
+          refs: normalizeWorkspaceFsmRefs(row.refs),
           goal: asString(row.goal) ?? null,
           task: asString(row.task) ?? undefined,
           board: asString(row.board) ?? undefined,
           reward: asString(row.reward) ?? undefined,
-          evidence: normalizeCoordinationFsmEvidenceList(row.evidence),
+          evidence: normalizeWorkspaceFsmEvidenceList(row.evidence),
           violations: Array.isArray(row.violations)
             ? row.violations
-              .map((violation): DashboardCoordinationFsmViolation | null => {
+              .map((violation): DashboardWorkspaceFsmViolation | null => {
                 if (!isRecord(violation)) return null
                 return {
                   axis: asString(violation.axis) ?? undefined,
                   code: asString(violation.code) ?? undefined,
                   severity: asString(violation.severity) ?? undefined,
                   message: asString(violation.message) ?? undefined,
-                  refs: normalizeCoordinationFsmRefs(violation.refs),
-                  evidence: normalizeCoordinationFsmEvidenceList(violation.evidence),
+                  refs: normalizeWorkspaceFsmRefs(violation.refs),
+                  evidence: normalizeWorkspaceFsmEvidenceList(violation.evidence),
                 }
               })
-              .filter((violation): violation is DashboardCoordinationFsmViolation => violation !== null)
+              .filter((violation): violation is DashboardWorkspaceFsmViolation => violation !== null)
             : [],
         }
       })
-      .filter((row): row is DashboardCoordinationFsmProduct => row !== null)
+      .filter((row): row is DashboardWorkspaceFsmProduct => row !== null)
     : []
   const fallbackEvidence = products.flatMap(product => product.evidence ?? [])
-  const snapshotEvidence = normalizeCoordinationFsmEvidenceList(raw.evidence)
+  const snapshotEvidence = normalizeWorkspaceFsmEvidenceList(raw.evidence)
   const evidence = snapshotEvidence.length > 0 ? snapshotEvidence : fallbackEvidence
   const violations = Array.isArray(raw.violations)
     ? raw.violations
-      .map((row): DashboardCoordinationFsmViolation | null => {
+      .map((row): DashboardWorkspaceFsmViolation | null => {
         if (!isRecord(row)) return null
-        const refs = normalizeCoordinationFsmRefs(row.refs)
-        const rowEvidence = normalizeCoordinationFsmEvidenceList(row.evidence)
+        const refs = normalizeWorkspaceFsmRefs(row.refs)
+        const rowEvidence = normalizeWorkspaceFsmEvidenceList(row.evidence)
         return {
           axis: asString(row.axis) ?? undefined,
           code: asString(row.code) ?? undefined,
@@ -742,7 +743,7 @@ function normalizeCoordinationFsmSnapshot(raw: unknown): DashboardCoordinationFs
             : fallbackEvidence.filter(item => refsOverlap(refs, item.refs)).slice(0, 5),
         }
       })
-      .filter((row): row is DashboardCoordinationFsmViolation => row !== null)
+      .filter((row): row is DashboardWorkspaceFsmViolation => row !== null)
     : []
   return {
     schema_version: asNumber(raw.schema_version) ?? undefined,
@@ -765,7 +766,7 @@ function normalizeCoordinationFsmSnapshot(raw: unknown): DashboardCoordinationFs
 }
 
 function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
-  coordinationFsmSnapshot.value = normalizeCoordinationFsmSnapshot(data.coordination_fsm)
+  workspaceFsmSnapshot.value = normalizeWorkspaceFsmSnapshot(data.workspace_fsm)
   goals.value = (Array.isArray(data.goals) ? data.goals : [])
     .map((row): Goal | null => {
       if (!isRecord(row)) return null
@@ -824,14 +825,20 @@ function normalizeShellAuthSummary(raw: unknown): DashboardShellAuthSummary | nu
   }
 }
 
-export function hydrateShellSnapshot(data: DashboardShellResponse, opts?: { light?: boolean }): void {
+export function hydrateShellSnapshot(
+  data: DashboardShellResponse,
+  opts?: { light?: boolean; preserveAuth?: boolean },
+): void {
   const wantsLight = opts?.light === true
+  const preserveAuth = opts?.preserveAuth === true
   const normalizedAuth = normalizeShellAuthSummary(data.auth)
-  setCanonicalDashboardActor(
-    normalizedAuth?.token_valid
-      ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
-      : null,
-  )
+  if (!preserveAuth) {
+    setCanonicalDashboardActor(
+      normalizedAuth?.token_valid
+        ? normalizedAuth.effective_agent ?? normalizedAuth.token_agent ?? null
+        : null,
+    )
+  }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
@@ -845,7 +852,9 @@ export function hydrateShellSnapshot(data: DashboardShellResponse, opts?: { ligh
       configured_keepers: data.configured_keepers ?? 0,
     }
   }
-  shellAuthSummary.value = normalizedAuth
+  if (!preserveAuth) {
+    shellAuthSummary.value = normalizedAuth
+  }
   const normalizedConfigResolution = normalizeDashboardConfigResolution(data.config_resolution)
   const normalizedRuntimeResolution = normalizeDashboardRuntimeResolution(data.runtime_resolution)
   if (!wantsLight || normalizedConfigResolution) {
@@ -890,7 +899,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   if (normalizedStatus) {
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
-  const roomChanged =
+  const workspaceChanged =
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
@@ -905,7 +914,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
-  messages.value = roomChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+  messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
   keepers.value = normalizeKeepers(data.keepers)
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)

@@ -19,7 +19,7 @@ val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:s
 (** [start_flush_fiber ~sw ~clock ~base_path] spawns a background fiber that
     drains buffered records to JSONL every 5 minutes.  Also registers a
     shutdown hook to flush remaining records.
-    [base_path] is the workspace root (e.g. [state.room_config.base_path]). *)
+    [base_path] is the workspace root (e.g. [state.workspace_config.base_path]). *)
 
 val restore : base_path:string -> int
 (** [restore ~base_path] reads all existing JSONL day-files under

@@ -115,7 +115,7 @@
   <div class="page">
     <a class="back" href="index.html">← design system</a>
     <h1>Tok/sec · streaming metrics</h1>
-    <p class="sub">Live token throughput from the cascade. The fleet's pulse, at different zoom levels: a spark chip in the KPI strip, a dial in the cockpit, a provider breakdown in the rail. All tabular, all mono, all brass-on-black.</p>
+    <p class="sub">Live token throughput from the runtime. The fleet's pulse, at different zoom levels: a spark chip in the KPI strip, a dial in the cockpit, a provider breakdown in the rail. All tabular, all mono, all brass-on-black.</p>
 
     <h2>KPI tiles <span class="tag">cockpit strip</span></h2>
     <div class="seg">
@@ -185,7 +185,7 @@
           <div class="row"><span class="k">p50</span><span class="v">2,105 t/s</span><span class="x"></span></div>
           <div class="row"><span class="k">ttft (p95)</span><span class="v" style="color:var(--warn)">820 ms</span><span class="x"></span></div>
           <div class="row"><span class="k">context used</span><span class="v">92.4k / 128k</span><span class="x" style="color:var(--color-accent-fg)">72%</span></div>
-          <div class="row"><span class="k">cost · hour</span><span class="v">$1.47</span><span class="x">provider-b@2</span></div>
+          <div class="row"><span class="k">cost · hour</span><span class="v">$1.47</span><span class="x">runtime-slot-b@2</span></div>
         </div>
       </div>
     </div>
@@ -235,11 +235,11 @@
           <tr><th>provider</th><th>model</th><th>status</th><th>tok/s</th><th>ttft</th><th>ctx</th><th>$/1k</th><th>share · fleet</th></tr>
         </thead>
         <tbody>
-          <tr><td class="pname">provider-b</td><td>model-c</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.4)">1,412</td><td>610ms</td><td>84k/128k</td><td>$.0080</td><td><span class="mbar"><span class="b" style="--w:62%"></span>49.6%</span></td></tr>
-          <tr><td class="pname">provider-a</td><td>model-a-sonnet</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg)">684</td><td>720ms</td><td>48k/200k</td><td>$.0120</td><td><span class="mbar"><span class="b" style="--w:32%"></span>24.0%</span></td></tr>
-          <tr><td class="pname">provider-d</td><td>model-d</td><td><span class="status slow"><span class="d"></span>slow</span></td><td style="color:var(--warn)">426</td><td style="color:var(--warn)">1.42s</td><td>30k/256k</td><td>$.0140</td><td><span class="mbar"><span class="b" style="--w:18%; background: var(--warn) !important"></span>15.0%</span></td></tr>
-          <tr><td class="pname">provider-g</td><td>r1-lite</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg)">285</td><td>540ms</td><td>21k/64k</td><td>$.0018</td><td><span class="mbar"><span class="b" style="--w:11%"></span>10.0%</span></td></tr>
-          <tr><td class="pname">local/model-llama</td><td>70b-q4</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td>40</td><td>240ms</td><td>8k/32k</td><td>$.0000</td><td><span class="mbar"><span class="b" style="--w:2%"></span>1.4%</span></td></tr>
+          <tr><td class="pname">runtime-slot-b</td><td>capability-tier-b</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.4)">1,412</td><td>610ms</td><td>84k/128k</td><td>$.0080</td><td><span class="mbar"><span class="b" style="--w:62%"></span>49.6%</span></td></tr>
+          <tr><td class="pname">runtime-slot-a</td><td>capability-tier-a-plus</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg)">684</td><td>720ms</td><td>48k/200k</td><td>$.0120</td><td><span class="mbar"><span class="b" style="--w:32%"></span>24.0%</span></td></tr>
+          <tr><td class="pname">runtime-slot-c</td><td>capability-tier-c</td><td><span class="status slow"><span class="d"></span>slow</span></td><td style="color:var(--warn)">426</td><td style="color:var(--warn)">1.42s</td><td>30k/256k</td><td>$.0140</td><td><span class="mbar"><span class="b" style="--w:18%; background: var(--warn) !important"></span>15.0%</span></td></tr>
+          <tr><td class="pname">runtime-slot-d</td><td>capability-tier-d</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td style="color:var(--color-accent-fg)">285</td><td>540ms</td><td>21k/64k</td><td>$.0018</td><td><span class="mbar"><span class="b" style="--w:11%"></span>10.0%</span></td></tr>
+          <tr><td class="pname">local/capability-tier-local</td><td>70b-q4</td><td><span class="status ok"><span class="d"></span>healthy</span></td><td>40</td><td>240ms</td><td>8k/32k</td><td>$.0000</td><td><span class="mbar"><span class="b" style="--w:2%"></span>1.4%</span></td></tr>
           <tr><td class="pname">fireworks</td><td>yi-large</td><td><span class="status down"><span class="d"></span>429 rl</span></td><td style="color:var(--err-fg)">0</td><td>—</td><td>—</td><td>$.0030</td><td><span style="color:var(--color-fg-disabled)">backoff · 12s</span></td></tr>
         </tbody>
       </table>
@@ -259,7 +259,7 @@
 <span class="out">async function tick() {
   if (this.state !== 'running') return;
   emit('heartbeat');
-  await this.runCascade('provider-b');
+  await this.runRuntime('runtime-slot-b');
   return this.state;</span><span class="partial"> // advance cursor</span><span class="cursor"></span>
       </div>
     </div>

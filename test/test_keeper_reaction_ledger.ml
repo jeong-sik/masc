@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 open Yojson.Safe.Util
 
 let with_temp_base f =
@@ -124,14 +124,14 @@ let test_cursor_ack_is_replayable_state_entry () =
 
 let test_execution_receipt_links_to_reaction_ledger () =
   with_temp_base @@ fun base_path ->
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let keeper_name = "receipt-keeper" in
   let receipt_json =
     `Assoc
       [ "schema", `String "keeper.execution_receipt.v1"
       ; "trace_id", `String "trace-1"
       ; "outcome", `String "receipt_failed"
-      ; "terminal_reason_code", `String "tool_contract_violation"
+      ; "terminal_reason_code", `String "completion_contract_violation"
       ]
   in
   Keeper_reaction_ledger.record_execution_receipt_reaction
@@ -142,7 +142,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
     ~current_task_id:(Some "task-275")
     ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
     ~outcome:"receipt_failed"
-    ~terminal_reason_code:"tool_contract_violation"
+    ~terminal_reason_code:"completion_contract_violation"
     ~receipt_json
     ();
   let row =
@@ -155,7 +155,7 @@ let test_execution_receipt_links_to_reaction_ledger () =
   check_member_string "terminal reaction kind" "terminal_reason" "kind" reaction;
   check_member_string
     "terminal reason"
-    "tool_contract_violation"
+    "completion_contract_violation"
     "terminal_reason_code"
     reaction;
   check_member_string

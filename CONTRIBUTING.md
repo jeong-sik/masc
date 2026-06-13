@@ -1,13 +1,13 @@
 # Contributing to MASC MCP
 
-MASC (Multi-Agent Streaming Coordination) is an OCaml 5.x MCP server for coordinating multiple coding agents inside one repository.
+MASC (Multi-Agent Shared Context) is an OCaml 5.x MCP server for alignment multiple coding agents inside one repository.
 
 ## Quick Start
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/jeong-sik/masc-mcp.git
-cd masc-mcp
+git clone https://github.com/jeong-sik/masc.git
+cd masc
 
 # 2. Pin external OCaml dependencies
 chmod +x scripts/opam-pin-external-deps.sh
@@ -23,7 +23,7 @@ dune build --root .
 make test
 
 # 6. Start server (HTTP mode)
-./start-masc-mcp.sh --http
+./start-masc.sh --http
 ```
 
 ## Development Guidelines
@@ -53,7 +53,7 @@ lib/
 ├── dashboard/                # dashboard providers and read models
 ├── board/                    # board/social surface helpers
 ├── grpc/                     # gRPC transport support
-├── room/                     # room/session/task coordination
+├── workspace/                     # workspace/session/task workspace collaboration
 └── tools.ml                  # tool schema registry entrypoint
 
 dashboard/                    # TypeScript + Preact SPA source
@@ -140,7 +140,7 @@ chore: bump version to 0.9.0
 
 ## GitHub Planning Rules
 
-`masc-mcp` uses GitHub as an operating system for product planning.
+`masc` uses GitHub as an operating system for product planning.
 
 Every new issue should end with:
 
@@ -154,7 +154,7 @@ Every new issue should end with:
 Current label groups:
 
 - `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs`
-- `area:coordination`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
+- `area:workspace collaboration`, `area:team-session`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental`
 - `target:now`, `target:next`, `target:later`
 
 Triage defaults:
@@ -177,7 +177,7 @@ PRs should include these sections:
 
 State which promise the PR affects:
 
-- `repo coordination`
+- `repo workspace collaboration`
 - `ops visibility`
 - `none/internal`
 
@@ -199,30 +199,29 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 - On restart, files can be synced to Neo4j
 - State files are JSON, human-readable
 
-### MODEL Cascade
+### MODEL Runtime
 
-- Runtime order is controlled by `Provider_registry` and `config/cascade.toml` (hot-reloaded)
-- Missing or invalid `cascade.toml` is a config error; the retired `cascade.json` fallback is not used.
+- Runtime order is controlled by `runtime.toml` at the resolved config root.
+- Missing or invalid `runtime.toml` is a config error; the retired `runtime.json` fallback is not used.
 - If a slot returns empty or errors, the next slot is tried
 - Claude API keys are rotated round-robin per heartbeat tick
-- Configuration in `config/cascade.toml`, hot-reloaded by mtime check
+- Runtime catalog changes in `runtime.toml` apply on the next runtime resolve.
 
 ### Runtime Lens Boundary (provider/model identity in JSON)
 
 The Runtime Lens redacts provider/model identity at **external** surfaces
-(Prometheus labels, dashboard OAS bridge, provider error envelopes,
+(metric labels, dashboard OAS bridge, provider error envelopes,
 keeper unified metrics redacted variants). It must **NOT** redact at
 **internal observability** surfaces (boot log, audit log,
 operator-facing `Log.*.info`).
 
-Before adding a new `*_to_yojson` function or Prometheus emitter that
+Before adding a new `*_to_yojson` function or metric emitter that
 touches provider/model identity, read
-[`docs/architecture/runtime-lens-boundary.md`](docs/architecture/runtime-lens-boundary.md)
 and apply its 3-question decision rule (who reads it / is there a
 `redacted_*` companion / sibling field consistency).
 
 Regression coverage lives in
-`test/test_cascade_catalog_runtime_yojson.ml` — 8 cases across the two
+`test/test_runtime_catalog_runtime_yojson.ml` — 8 cases across the two
 internal carve-out sites. New internal serializers should add a
 companion test there using the helpers (`assoc_string`, substring
 scanner).
@@ -238,7 +237,7 @@ When reporting issues, please include:
 2. **OS and version**
 3. **Steps to reproduce**
 4. **Expected vs actual behavior**
-5. **Error messages/logs** (`start-masc-mcp.sh` stdout/stderr or relevant harness output)
+5. **Error messages/logs** (`start-masc.sh` stdout/stderr or relevant harness output)
 
 ## License
 

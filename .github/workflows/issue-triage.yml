@@ -39,7 +39,7 @@ jobs:
             const repo = context.repo.repo;
 
             const AREA_LABEL_BY_FORM_VALUE = new Map([
-              ['Repo coordination', 'area:coordination'],
+              ['Repo workspace', 'area:workspace'],
               ['Supervised delivery', 'area:supervised-execution'],
               ['Dashboard and read models', 'area:dashboard'],
               ['Operator and intervention', 'area:operator'],
@@ -57,9 +57,9 @@ jobs:
             ]);
 
             const LABEL_DEFINITIONS = {
-              'area:coordination': {
+              'area:workspace': {
                 color: '1d76db',
-                description: 'Repo coordination and room/task flows',
+                description: 'Repo workspace and task flows',
               },
               'area:supervised-execution': {
                 color: '0052cc',

@@ -12,7 +12,7 @@
     one [verdict], which validation, telemetry, native dispatch, path
     validation, and exit classification all share.
 
-    The lib-root [Masc_mcp.Shell_command_gate] transition facade has
+    The lib-root [Masc.Shell_command_gate] transition facade has
     been retired. Raw-string boundaries use [gate_raw] to cross into
     Shell IR once; typed callers use [gate_typed] or
     [lower_typed_pipeline] directly.
@@ -35,21 +35,8 @@
     composition contract (G2.2) is enforced at the facade boundary
     rather than emerging as a silent behavior in dispatch. *)
 
-(** Caller identity for telemetry partition.
-
-    The optional [?caller] arg on {!gate_typed} and
-    {!lower_typed_pipeline} is part of the stable caller/verdict
-    telemetry surface. The gate verdict itself is independent of the
-    caller tag. *)
-type caller =
-  | Worker_dev_tools
-  | Filesystem_write
-  | Agent_tool_execute_shell_ir
-
 (** Parsed-but-rejected reasons. *)
 type reject_reason =
-  | Command_not_in_allowlist of { bin : string }
-  | Pipeline_segment_disallowed of { stage : int; bin : string }
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
   | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
@@ -105,15 +92,13 @@ type verdict =
   | Cannot_parse of { reason : parse_reason }
   | Too_complex of { reason : too_complex_reason }
 
-(** Allowlist policy. [allow_pipes = true] keeps the existing legacy
+(** Syntax policy. [allow_pipes = true] keeps the existing legacy
     behavior; [false] yields {!Pipes_not_allowed} for any pipeline with
-    two or more stages. Redirects are always rejected, including fd-to-fd redirects such as
-    syntax, including fd-to-fd redirects such as [2>&1]. *)
-type allowlist_policy = {
+    two or more stages. Redirects are controlled by [redirect_allowed],
+    including fd-to-fd redirects such as [2>&1]. *)
+type syntax_policy = {
   redirect_allowed : bool;
-  allowed_commands : string list;
   allow_pipes : bool;
-  
 }
 
 (** Path policy applied to literal path arguments and file redirect
@@ -136,29 +121,33 @@ type sandbox_context = {
 val allow_all_paths : path_policy
 (** A path policy that approves every literal — useful when the
     caller has its own validator and only wants the Shell IR parse +
-    allowlist check. *)
+    syntax check. *)
+
+val forbid_masc_internal_state_paths : path_policy
+(** Path policy that rejects probes against [.masc/] internal state
+    (backlog.json, goal-loop, traces, keepalives).  Diagnostic contains
+    [task_state_file_probe_blocked] so the deterministic retry classifier
+    recognises the rejection. *)
 
 val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)
 
 val gate_typed
-  :  ?caller:caller
-  -> ir:Masc_exec.Shell_ir.t
-  -> allowlist:allowlist_policy
+  :  ir:Masc_exec.Shell_ir.t
+  -> syntax_policy:syntax_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
   -> verdict
 (** Policy-aware typed entrypoint for callers that already have a
     {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
-    the same allowlist, redirect, path-policy, sandbox, and nested
+    the same syntax, path-policy, sandbox, and nested
     pipeline handling as the legacy [gate] entrypoint. *)
 
 val gate_raw
-  :  ?caller:caller
-  -> text:string
-  -> allowlist:allowlist_policy
+  :  text:string
+  -> syntax_policy:syntax_policy
   -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
@@ -169,24 +158,20 @@ val gate_raw
     while preserving the same {!verdict} surface as {!gate_typed}. *)
 
 val lower_typed_pipeline
-  :  ?caller:caller
-  -> stages:Masc_exec.Shell_ir.simple list
+  :  stages:Masc_exec.Shell_ir.simple list
   -> sandbox:sandbox_context
   -> unit
   -> verdict
-(** Lower a typed pipeline (e.g. from {!Agent_tool_execute_typed_input}) into
+(** Lower a typed pipeline (e.g. from {!Keeper_tool_execute_typed_input}) into
     the same {!verdict} shape. Empty input yields {!Cannot_parse
     Parse_error}; a single stage yields [Allow] with a [Simple] AST;
     multiple stages yield [Allow] with a non-nested
     [Pipeline]. Nested pipelines are forbidden because the input type
     already guarantees [Simple] stages — this helper exists so typed
-    input shares the {!verdict} surface with raw input.  [?caller] is
-    captured for the upcoming telemetry partition (RFC-0131 PR-3) and
-    does not affect the verdict. *)
+    input shares the {!verdict} surface with raw input. *)
 
 (** {1 Tags for telemetry} *)
 
-val caller_tag : caller -> string
 val verdict_tag : verdict -> string
 val reject_reason_tag : reject_reason -> string
 val parse_reason_tag : parse_reason -> string

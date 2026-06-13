@@ -12,15 +12,13 @@ type t =
   | Telemetry_or_metadata_parse_drop
   | Host_fd_pressure
   | Docker_start_pressure
-  | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
-  | Provider_cascade_exhaustion
-  | Required_tool_contract_mismatch
+  | Provider_runtime_exhaustion
   | Task_state_probe_misuse
   | Verifier_action_guard
   | Network_error_other
   | Other_boundary_unclassified of { hint : string }
-(** 14 variants reverse-engineered from [measure.py:system_category]
+(** 13 variants reverse-engineered from [measure.py:system_category]
     (PR #17146 reference). [Other_boundary_unclassified] is reserved
     for external boundary noise; its [hint] is the trace for promoting
     to a typed variant when frequency justifies. *)

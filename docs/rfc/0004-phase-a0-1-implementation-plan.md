@@ -7,7 +7,7 @@ Related: PR #15745 (quick-win null guard), PR #15747 (RFC-0004 body resume), me 
 ## Completion summary (2026-05-17)
 
 All sub-PRs merged.  Every `Agent_sdk.Event_bus` variant arm in
-`lib/cascade/cascade_event_bridge.ml` routes through a typed
+`lib/runtime/runtime_event_bridge.ml` routes through a typed
 `Sse_event` constructor.  The `wrap_event` helper remains live for
 the catch-all kind-only fallback (warning 11 idiom, defending the
 OAS pin-bump P0 class — see plan §4 row "PR-4" completion criteria).
@@ -33,7 +33,7 @@ OAS pin-bump P0 class — see plan §4 row "PR-4" completion criteria).
   to cover the remaining two arms without leaking the dep.
 
 - **`wrap_event` retained**: The catch-all arm
-  (`cascade_event_bridge.ml` near line 831) emits a kind-only
+  (`runtime_event_bridge.ml` near line 831) emits a kind-only
   placeholder for any unmigrated OAS variant.  This path stays on
   `wrap_event` by design — see plan §4 footnote on the warning-11
   catch-all.
@@ -45,8 +45,8 @@ event (19 cases total: 14 envelopes + 1 `json_string_opt` regression
 + 4 PR-3b cases including the empty-addendum guard).  The baseline
 algorithm is an inline replica of `wrap_event` + `json_string_opt`,
 deliberately re-stated in the test file to avoid linking the heavy
-`cascade` dependency chain.  Any future change to the wire envelope
-must update both the cascade emitter and the inline replica — the
+`runtime` dependency chain.  Any future change to the wire envelope
+must update both the runtime emitter and the inline replica — the
 test will diverge until both sides match.
 
 ### What this unlocks (next phases)
@@ -54,16 +54,16 @@ test will diverge until both sides match.
 Phase A0.2 work (TypeScript decoder generation, golden-file replay,
 CLI emitter) can now consume `lib/sse_event/sse_event.atd` as a SSOT
 without any per-event work on the OCaml side.  The atd file is the
-contract; the cascade arms are the publishers; the test harness is
+contract; the runtime arms are the publishers; the test harness is
 the gate.
 
 ## 1. 작업 범위 재정의 (research 후속)
 
-`lib/cascade/cascade_event_bridge.ml` 분석 결과 (2026-05-17):
+`lib/runtime/runtime_event_bridge.ml` 분석 결과 (2026-05-17):
 
 - `Agent_sdk.Event_bus.payload` 는 **이미 upstream typed variant** (16 case)
 - SSE 경계에서 ad-hoc `Yojson.Safe.t` `Assoc` 직접 조립 — typed envelope 부재
-- `wrap_event` 함수 (`lib/cascade/cascade_event_bridge.ml:507-531`) 가 모든 event 의 공통 envelope 정의
+- `wrap_event` 함수 (`lib/runtime/runtime_event_bridge.ml:507-531`) 가 모든 event 의 공통 envelope 정의
 
 → Phase A0.1 의 정확한 작업은 **SSE wire envelope 의 typed 표현** 도입. Upstream variant 새로 만드는 작업 아님.
 
@@ -88,7 +88,7 @@ the gate.
 
 ## 3. SSE envelope schema (atd 후보)
 
-`wrap_event` (cascade_event_bridge.ml:507) 의 emit 형식 그대로 매핑:
+`wrap_event` (runtime_event_bridge.ml:507) 의 emit 형식 그대로 매핑:
 
 ```atd
 (* lib/sse_event.atd *)
@@ -151,13 +151,13 @@ type agent_completed_payload = {
 
 atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `event_type` literal 과 1:1 매핑되도록 `<json name="...">` annotation 명시. atdgen 이 자동 일치 검증.
 
-## 4. Sub-PR sequencing (Wave 1 = 16 cascade events)
+## 4. Sub-PR sequencing (Wave 1 = 16 runtime events)
 
 | PR | 산출물 | 변경 site | 추정 LOC |
 |---|---|---|---|
 | **A0.1-PR-0** (이 plan) | docs/rfc/0004-phase-a0-1-implementation-plan.md | docs only | ~150 |
 | **A0.1-PR-1** | atd schema + atdgen dune wiring + envelope+payload type 정의 (모든 16 variant skeleton, body=`[]`) | `lib/sse_event.atd`, `dune` rule, no callsite change | ~300 |
-| **A0.1-PR-2** | AgentStarted/Completed/Failed migrate (3 events) — `wrap_event` → `Sse_event.to_yojson`. Byte-equal golden test 3개 | `lib/cascade/cascade_event_bridge.ml` (3 arms), `test/test_sse_event_golden.ml` | ~250 |
+| **A0.1-PR-2** | AgentStarted/Completed/Failed migrate (3 events) — `wrap_event` → `Sse_event.to_yojson`. Byte-equal golden test 3개 | `lib/runtime/runtime_event_bridge.ml` (3 arms), `test/test_sse_event_golden.ml` | ~250 |
 | **A0.1-PR-3** | Tool/Turn migrate (5 events: ToolCalled/Completed, TurnStarted/Completed/Ready) | 동상 | ~200 |
 | **A0.1-PR-4** | Handoff/Context/Content/Slot migrate (8 events) | 동상 | ~350 |
 
@@ -172,7 +172,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 마이그레이션 안전성의 핵심. 각 PR 에서:
 
 1. Pre-migration baseline 캡처:
-   - `lib/cascade/cascade_event_bridge_capture.ml` 도구 — fixed `Agent_sdk.Event_bus.event` 입력 → 현 `wrap_event` 가 emit 한 JSON string 을 `test/golden/sse_event_<name>.json` 으로 저장
+   - `lib/runtime/runtime_event_bridge_capture.ml` 도구 — fixed `Agent_sdk.Event_bus.event` 입력 → 현 `wrap_event` 가 emit 한 JSON string 을 `test/golden/sse_event_<name>.json` 으로 저장
    - **PR-1 머지 *전*** baseline 캡처 (PR-1 머지 직후 frozen)
 2. Post-migration 검증:
    - 새 `Sse_event.to_yojson` 가 동일 입력에 대해 *바이트 동일* JSON emit
@@ -212,7 +212,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
               |
               v
 +-------------------------------+
-|  lib/cascade/cascade_event_bridge.ml   <-- callsite
+|  lib/runtime/runtime_event_bridge.ml   <-- callsite
 +-------------------------------+
 ```
 
@@ -220,12 +220,12 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 
 ## 7. 비범위 (out of scope for A0.1)
 
-- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/governance_pipeline.ml`, `lib/server/server_dashboard_http*.ml`, `lib/coord_goals.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
+- 다른 emitter (`lib/keeper/keeper_approval_queue.ml`, `lib/governance_pipeline.ml`, `lib/server/server_dashboard_http*.ml`, `lib/workspace_goals.ml`) 의 ad-hoc Yojson — **Wave 2 이후**
 - Frontend TS gen (atdts) — **A0.3**
 - `SSEMessageSchema` 교체 — **A0.4**
 - OAS event passthrough 정책 — **A0.2 또는 별 RFC**
 
-본 plan 은 *cascade_event_bridge.ml 한정* (16 event, 49 site 중 11+5 site, 약 33%).
+본 plan 은 *runtime_event_bridge.ml 한정* (16 event, 49 site 중 11+5 site, 약 33%).
 
 ## 8. 사용자 결정 필요 항목
 
@@ -239,7 +239,7 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 
 ## 9. Open follow-ups
 
-- frontend SSEEventType 68 vs backend distinct emit 39 = gap 29. 별도 inventory 필요 (`lib/keeper/`, `lib/coord_goals.ml`, `lib/server/server_dashboard_http*.ml` 분포 — Wave 2 작업)
+- frontend SSEEventType 68 vs backend distinct emit 39 = gap 29. 별도 inventory 필요 (`lib/keeper/`, `lib/workspace_goals.ml`, `lib/server/server_dashboard_http*.ml` 분포 — Wave 2 작업)
 - IDE crash root cause = `AnchoredThread` 가공 layer (research §6 별 트랙). A0.4 에서 nested 검증 도입 시 자동 해결 예상
 - atd schema repo 위치 — `lib/sse_event.atd` (lib 내부) vs `schema/sse_event.atd` (top-level). 본 plan 은 lib 내부 가정
 
@@ -248,5 +248,5 @@ atd `oas_payload` variant constructor 이름 (`Agent_started` 등) 이 wire `eve
 본 PR (A0.1-PR-0) 머지 후:
 
 1. 사용자 §8 3개 결정
-2. atdgen 의존성 dune 검증 (`opam list atdgen` + masc-mcp dune-project)
+2. atdgen 의존성 dune 검증 (`opam list atdgen` + masc dune-project)
 3. PR-1 진입 — atd schema + AgentStarted 1 event round-trip 검증 → 16 variant skeleton

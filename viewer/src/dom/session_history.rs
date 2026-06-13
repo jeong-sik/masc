@@ -1,6 +1,6 @@
 //! TRPG session timeline.
 //!
-//! Captures narrative, dice, and turn-progress events into per-room,
+//! Captures narrative, dice, and turn-progress events into per-workspace,
 //! per-turn history and renders them as a compact browser.
 
 #![allow(dead_code)] // Many helpers used only in wasm32 cfg blocks.
@@ -16,12 +16,12 @@ use wasm_bindgen::JsCast;
 use crate::game::events::{
     DiceRolled, NarrativeReceived, SessionStarted, TurnAdvanced, TurnProgressUpdated,
 };
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::state::{WorkspaceState, TurnProgressState};
 
-const MAX_ROOMS_TO_KEEP: usize = 24;
+const MAX_WORKSPACES_TO_KEEP: usize = 24;
 const MAX_TURNS_TO_KEEP: usize = 24;
 const MAX_EVENTS_PER_TURN: usize = 80;
-const UNKNOWN_ROOM_ID: &str = "room-unknown";
+const UNKNOWN_WORKSPACE_ID: &str = "workspace-unknown";
 
 #[derive(Clone, Debug, PartialEq)]
 struct HistoryEvent {
@@ -39,8 +39,8 @@ struct TurnHistory {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct RoomHistory {
-    room_id: String,
+struct WorkspaceHistory {
+    workspace_id: String,
     status: String,
     turns: Vec<TurnHistory>,
     updated_turn: u32,
@@ -49,7 +49,7 @@ struct RoomHistory {
 
 #[derive(Resource, Default)]
 pub struct SessionHistoryCache {
-    rooms: Vec<RoomHistory>,
+    workspaces: Vec<WorkspaceHistory>,
 }
 
 #[derive(SystemParam)]
@@ -68,26 +68,26 @@ fn sanitize_key(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
-fn normalize_room_id(raw: &str) -> String {
-    let normalized = crate::config::sanitize_room_id(raw)
+fn normalize_workspace_id(raw: &str) -> String {
+    let normalized = crate::config::sanitize_workspace_id(raw)
         .unwrap_or_else(|| raw.trim().to_string())
         .trim()
         .to_ascii_lowercase();
     if normalized.is_empty() {
-        UNKNOWN_ROOM_ID.to_string()
+        UNKNOWN_WORKSPACE_ID.to_string()
     } else {
         normalized
     }
 }
 
-fn normalize_room_status(raw: &str) -> String {
+fn normalize_workspace_status(raw: &str) -> String {
     let key = sanitize_key(raw);
     match key.as_str() {
         "active" | "running" | "started" | "in_progress" | "in-progress" | "playing" | "open" => {
             "active"
         }
         "paused" | "pause" | "stopped" | "on_hold" | "on-hold" => "paused",
-        "idle" | "lobby" | "created" | "ready" => "unknown",
+        "idle" | "created" | "ready" => "unknown",
         "ended" | "finished" | "completed" | "closed" | "done" | "archived" | "terminated" => {
             "ended"
         }
@@ -96,8 +96,8 @@ fn normalize_room_status(raw: &str) -> String {
     .to_string()
 }
 
-fn room_status_bucket(status: &str) -> u8 {
-    match normalize_room_status(status).as_str() {
+fn workspace_status_bucket(status: &str) -> u8 {
+    match normalize_workspace_status(status).as_str() {
         "active" => 0,
         "paused" => 1,
         "ended" => 2,
@@ -105,8 +105,8 @@ fn room_status_bucket(status: &str) -> u8 {
     }
 }
 
-fn room_status_label_ko(status: &str) -> &'static str {
-    match normalize_room_status(status).as_str() {
+fn workspace_status_label_ko(status: &str) -> &'static str {
+    match normalize_workspace_status(status).as_str() {
         "active" => "진행중",
         "paused" => "멈춤",
         "ended" => "종료",
@@ -114,8 +114,8 @@ fn room_status_label_ko(status: &str) -> &'static str {
     }
 }
 
-fn room_status_class(status: &str) -> &'static str {
-    match normalize_room_status(status).as_str() {
+fn workspace_status_class(status: &str) -> &'static str {
+    match normalize_workspace_status(status).as_str() {
         "active" => "active",
         "paused" => "paused",
         "ended" => "ended",
@@ -123,11 +123,11 @@ fn room_status_class(status: &str) -> &'static str {
     }
 }
 
-fn compare_room_priority(a: &RoomHistory, b: &RoomHistory) -> Ordering {
-    room_status_bucket(&a.status)
-        .cmp(&room_status_bucket(&b.status))
+fn compare_workspace_priority(a: &WorkspaceHistory, b: &WorkspaceHistory) -> Ordering {
+    workspace_status_bucket(&a.status)
+        .cmp(&workspace_status_bucket(&b.status))
         .then_with(|| b.updated_turn.cmp(&a.updated_turn))
-        .then_with(|| a.room_id.cmp(&b.room_id))
+        .then_with(|| a.workspace_id.cmp(&b.workspace_id))
 }
 
 fn history_kind_class(kind: &str) -> &'static str {
@@ -172,32 +172,32 @@ fn ensure_turn_entry(turns: &mut Vec<TurnHistory>, turn: u32, phase: &str) -> (u
     (idx, true)
 }
 
-fn ensure_room_entry(
-    rooms: &mut Vec<RoomHistory>,
-    room_id: &str,
+fn ensure_workspace_entry(
+    workspaces: &mut Vec<WorkspaceHistory>,
+    workspace_id: &str,
     status: &str,
     updated_turn: u32,
 ) -> (usize, bool) {
-    let normalized_room_id = normalize_room_id(room_id);
-    let normalized_status = normalize_room_status(status);
+    let normalized_workspace_id = normalize_workspace_id(workspace_id);
+    let normalized_status = normalize_workspace_status(status);
 
-    for (idx, room) in rooms.iter_mut().enumerate() {
-        if room.room_id == normalized_room_id {
+    for (idx, workspace) in workspaces.iter_mut().enumerate() {
+        if workspace.workspace_id == normalized_workspace_id {
             let mut changed = false;
-            if normalized_status != "unknown" && room.status != normalized_status {
-                room.status = normalized_status.clone();
+            if normalized_status != "unknown" && workspace.status != normalized_status {
+                workspace.status = normalized_status.clone();
                 changed = true;
             }
-            if updated_turn > room.updated_turn {
-                room.updated_turn = updated_turn;
+            if updated_turn > workspace.updated_turn {
+                workspace.updated_turn = updated_turn;
                 changed = true;
             }
             return (idx, changed);
         }
     }
 
-    rooms.push(RoomHistory {
-        room_id: normalized_room_id.clone(),
+    workspaces.push(WorkspaceHistory {
+        workspace_id: normalized_workspace_id.clone(),
         status: if normalized_status == "unknown" {
             "active".to_string()
         } else {
@@ -208,31 +208,31 @@ fn ensure_room_entry(
         session_id: String::new(),
     });
 
-    while rooms.len() > MAX_ROOMS_TO_KEEP {
-        let remove_idx = rooms
+    while workspaces.len() > MAX_WORKSPACES_TO_KEEP {
+        let remove_idx = workspaces
             .iter()
             .enumerate()
             .min_by(|(_, a), (_, b)| {
                 a.updated_turn
                     .cmp(&b.updated_turn)
-                    .then_with(|| room_status_bucket(&b.status).cmp(&room_status_bucket(&a.status)))
-                    .then_with(|| b.room_id.cmp(&a.room_id))
+                    .then_with(|| workspace_status_bucket(&b.status).cmp(&workspace_status_bucket(&a.status)))
+                    .then_with(|| b.workspace_id.cmp(&a.workspace_id))
             })
             .map(|(idx, _)| idx)
             .unwrap_or(0);
-        let _ = rooms.remove(remove_idx);
+        let _ = workspaces.remove(remove_idx);
     }
 
-    let idx = rooms
+    let idx = workspaces
         .iter()
-        .position(|room| room.room_id == normalized_room_id)
+        .position(|workspace| workspace.workspace_id == normalized_workspace_id)
         .unwrap_or(0);
     (idx, true)
 }
 
 struct EventAppendInput<'a> {
-    room_id: &'a str,
-    room_status: &'a str,
+    workspace_id: &'a str,
+    workspace_status: &'a str,
     turn: u32,
     phase: &'a str,
     kind: &'a str,
@@ -241,22 +241,22 @@ struct EventAppendInput<'a> {
     detail: &'a str,
 }
 
-fn append_event(rooms: &mut Vec<RoomHistory>, input: EventAppendInput<'_>) -> (bool, bool) {
+fn append_event(workspaces: &mut Vec<WorkspaceHistory>, input: EventAppendInput<'_>) -> (bool, bool) {
     let normalized_turn = input.turn.max(1);
-    let (room_idx, mut changed) =
-        ensure_room_entry(rooms, input.room_id, input.room_status, normalized_turn);
-    let Some(room) = rooms.get_mut(room_idx) else {
+    let (workspace_idx, mut changed) =
+        ensure_workspace_entry(workspaces, input.workspace_id, input.workspace_status, normalized_turn);
+    let Some(workspace) = workspaces.get_mut(workspace_idx) else {
         return (false, changed);
     };
 
-    if normalized_turn > room.updated_turn {
-        room.updated_turn = normalized_turn;
+    if normalized_turn > workspace.updated_turn {
+        workspace.updated_turn = normalized_turn;
         changed = true;
     }
 
-    let (turn_idx, turn_changed) = ensure_turn_entry(&mut room.turns, normalized_turn, input.phase);
+    let (turn_idx, turn_changed) = ensure_turn_entry(&mut workspace.turns, normalized_turn, input.phase);
     changed = changed || turn_changed;
-    let Some(row) = room.turns.get_mut(turn_idx) else {
+    let Some(row) = workspace.turns.get_mut(turn_idx) else {
         return (false, changed);
     };
 
@@ -300,8 +300,8 @@ fn label_progress_event(
         "combat.attack" => "공격",
         "combat.defense" => "방어",
         "session.outcome" => "세션 결과",
-        "room.started" => "룸 시작",
-        "room.ended" => "룸 종료",
+        "workspace.started" => "룸 시작",
+        "workspace.ended" => "룸 종료",
         "world.event" => "월드 이벤트",
         "scene.transition" => "씬 이동",
         "quest.update" => "퀘스트 업데이트",
@@ -331,7 +331,7 @@ fn label_progress_event(
         "turn"
     } else if matches!(
         payload.event_type.as_str(),
-        "combat.attack" | "combat.defense" | "session.outcome" | "room.started" | "room.ended"
+        "combat.attack" | "combat.defense" | "session.outcome" | "workspace.started" | "workspace.ended"
     ) {
         "system"
     } else {
@@ -346,52 +346,52 @@ fn label_progress_event(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn sorted_room_refs(rooms: &[RoomHistory]) -> Vec<&RoomHistory> {
-    let mut refs = rooms.iter().collect::<Vec<_>>();
-    let has_real_room = refs.iter().any(|room| room.room_id != UNKNOWN_ROOM_ID);
-    if has_real_room {
-        refs.retain(|room| room.room_id != UNKNOWN_ROOM_ID);
+fn sorted_workspace_refs(workspaces: &[WorkspaceHistory]) -> Vec<&WorkspaceHistory> {
+    let mut refs = workspaces.iter().collect::<Vec<_>>();
+    let has_real_workspace = refs.iter().any(|workspace| workspace.workspace_id != UNKNOWN_WORKSPACE_ID);
+    if has_real_workspace {
+        refs.retain(|workspace| workspace.workspace_id != UNKNOWN_WORKSPACE_ID);
     }
-    refs.sort_by(|a, b| compare_room_priority(a, b));
+    refs.sort_by(|a, b| compare_workspace_priority(a, b));
     refs
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_room_bucket_html(title: &str, rooms: &[&RoomHistory], extra_class: &str) -> String {
-    if rooms.is_empty() {
+fn render_workspace_bucket_html(title: &str, workspaces: &[&WorkspaceHistory], extra_class: &str) -> String {
+    if workspaces.is_empty() {
         return String::new();
     }
 
-    let chips = rooms
+    let chips = workspaces
         .iter()
-        .map(|room| {
-            let room_attr = html_escape(&sanitize_text(&room.room_id));
-            let room_label = html_escape(&sanitize_text(&room.room_id));
-            let status = normalize_room_status(&room.status);
-            let status_label = room_status_label_ko(&status);
-            let status_class = room_status_class(&status);
-            let latest_turn = room
+        .map(|workspace| {
+            let workspace_attr = html_escape(&sanitize_text(&workspace.workspace_id));
+            let workspace_label = html_escape(&sanitize_text(&workspace.workspace_id));
+            let status = normalize_workspace_status(&workspace.status);
+            let status_label = workspace_status_label_ko(&status);
+            let status_class = workspace_status_class(&status);
+            let latest_turn = workspace
                 .turns
                 .iter()
                 .map(|row| row.turn)
                 .max()
                 .or_else(|| {
-                    if room.updated_turn > 0 {
-                        Some(room.updated_turn)
+                    if workspace.updated_turn > 0 {
+                        Some(workspace.updated_turn)
                     } else {
                         None
                     }
                 })
                 .unwrap_or(1);
             format!(
-                r#"<button class="history-room-chip status-{status_class}" data-room="{room_attr}" data-latest-turn="{latest_turn}" title="{room_label}" type="button"><span class="history-room-id">{room_label}</span><span class="history-room-meta">{status_label} · T{latest_turn}</span></button>"#
+                r#"<button class="history-workspace-chip status-{status_class}" data-workspace="{workspace_attr}" data-latest-turn="{latest_turn}" title="{workspace_label}" type="button"><span class="history-workspace-id">{workspace_label}</span><span class="history-workspace-meta">{status_label} · T{latest_turn}</span></button>"#
             )
         })
         .collect::<Vec<_>>()
         .join("");
 
     format!(
-        r#"<section class="history-room-bucket {extra_class}"><h4 class="history-room-bucket-title">{title}</h4><div class="history-room-list">{chips}</div></section>"#,
+        r#"<section class="history-workspace-bucket {extra_class}"><h4 class="history-workspace-bucket-title">{title}</h4><div class="history-workspace-list">{chips}</div></section>"#,
         title = html_escape(&sanitize_text(title)),
         extra_class = html_escape(extra_class),
         chips = chips
@@ -427,8 +427,8 @@ fn render_turn_event_html(ev: &HistoryEvent) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_turn_panel_html(room: &RoomHistory, row: &TurnHistory) -> String {
-    let room_attr = html_escape(&sanitize_text(&room.room_id));
+fn render_turn_panel_html(workspace: &WorkspaceHistory, row: &TurnHistory) -> String {
+    let workspace_attr = html_escape(&sanitize_text(&workspace.workspace_id));
     let phase_raw = if row.phase.trim().is_empty() {
         "unknown".to_string()
     } else {
@@ -446,7 +446,7 @@ fn render_turn_panel_html(room: &RoomHistory, row: &TurnHistory) -> String {
     };
 
     format!(
-        r#"<section class="history-detail-panel" data-room="{room_attr}" data-turn="{turn}"><header class="history-detail-header"><span class="history-detail-title">TURN {turn} · {phase}</span><span class="history-event-count">{count}</span></header><ul class="history-event-list">{events}</ul></section>"#,
+        r#"<section class="history-detail-panel" data-workspace="{workspace_attr}" data-turn="{turn}"><header class="history-detail-header"><span class="history-detail-title">TURN {turn} · {phase}</span><span class="history-event-count">{count}</span></header><ul class="history-event-list">{events}</ul></section>"#,
         turn = row.turn,
         phase = phase,
         count = row.events.len(),
@@ -455,99 +455,99 @@ fn render_turn_panel_html(room: &RoomHistory, row: &TurnHistory) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> String {
-    if rooms.is_empty() {
+fn render_session_history_html(workspaces: &[WorkspaceHistory], current_workspace_id: &str) -> String {
+    if workspaces.is_empty() {
         return "<div class=\"session-history-empty\">아직 세션 히스토리가 없습니다.</div>"
             .to_string();
     }
 
-    let sorted = sorted_room_refs(rooms);
-    let current_room = normalize_room_id(current_room_id);
+    let sorted = sorted_workspace_refs(workspaces);
+    let current_workspace = normalize_workspace_id(current_workspace_id);
     let active_count = sorted
         .iter()
-        .filter(|room| normalize_room_status(&room.status) == "active")
+        .filter(|workspace| normalize_workspace_status(&workspace.status) == "active")
         .count();
     let paused_count = sorted
         .iter()
-        .filter(|room| normalize_room_status(&room.status) == "paused")
+        .filter(|workspace| normalize_workspace_status(&workspace.status) == "paused")
         .count();
     let ended_count = sorted
         .iter()
-        .filter(|room| normalize_room_status(&room.status) == "ended")
+        .filter(|workspace| normalize_workspace_status(&workspace.status) == "ended")
         .count();
 
-    let mut current_rooms = Vec::new();
-    let mut active_rooms = Vec::new();
-    let mut paused_rooms = Vec::new();
-    let mut ended_rooms = Vec::new();
-    let mut other_rooms = Vec::new();
+    let mut current_workspaces = Vec::new();
+    let mut active_workspaces = Vec::new();
+    let mut paused_workspaces = Vec::new();
+    let mut ended_workspaces = Vec::new();
+    let mut other_workspaces = Vec::new();
 
-    for room in &sorted {
-        if room.room_id == current_room {
-            current_rooms.push(*room);
+    for workspace in &sorted {
+        if workspace.workspace_id == current_workspace {
+            current_workspaces.push(*workspace);
             continue;
         }
-        match room_status_bucket(&room.status) {
-            0 => active_rooms.push(*room),
-            1 => paused_rooms.push(*room),
-            2 => ended_rooms.push(*room),
-            _ => other_rooms.push(*room),
+        match workspace_status_bucket(&workspace.status) {
+            0 => active_workspaces.push(*workspace),
+            1 => paused_workspaces.push(*workspace),
+            2 => ended_workspaces.push(*workspace),
+            _ => other_workspaces.push(*workspace),
         }
     }
 
-    let has_previous_sessions = !active_rooms.is_empty()
-        || !paused_rooms.is_empty()
-        || !ended_rooms.is_empty()
-        || !other_rooms.is_empty();
+    let has_previous_sessions = !active_workspaces.is_empty()
+        || !paused_workspaces.is_empty()
+        || !ended_workspaces.is_empty()
+        || !other_workspaces.is_empty();
 
-    let current_bucket = if current_rooms.is_empty() {
+    let current_bucket = if current_workspaces.is_empty() {
         format!(
-            r#"<section class="history-room-bucket history-room-bucket-current"><h4 class="history-room-bucket-title">현재 게임 (실시간)</h4><p class="history-room-empty">현재 game room({room})의 기록이 없습니다. 새 게임을 시작하거나 라운드를 실행하세요.</p></section>"#,
-            room = html_escape(&sanitize_text(&current_room))
+            r#"<section class="history-workspace-bucket history-workspace-bucket-current"><h4 class="history-workspace-bucket-title">현재 게임 (실시간)</h4><p class="history-workspace-empty">현재 game workspace({workspace})의 기록이 없습니다. 새 게임을 시작하거나 라운드를 실행하세요.</p></section>"#,
+            workspace = html_escape(&sanitize_text(&current_workspace))
         )
     } else {
-        render_room_bucket_html(
+        render_workspace_bucket_html(
             "현재 게임 (실시간)",
-            &current_rooms,
-            "history-room-bucket-current",
+            &current_workspaces,
+            "history-workspace-bucket-current",
         )
     };
 
-    let summary_class = if current_rooms.is_empty() {
+    let summary_class = if current_workspaces.is_empty() {
         "history-session-summary is-missing"
     } else {
         "history-session-summary"
     };
     let summary_html = if has_previous_sessions {
         format!(
-            r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션 진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
+            r#"<div class="{summary_class}"><span>현재 게임 workspace: <strong>{workspace}</strong></span><span>이전 세션 진행 {active} · 멈춤 {paused} · 종료 {ended}</span></div>"#,
             summary_class = summary_class,
-            room = html_escape(&sanitize_text(&current_room)),
+            workspace = html_escape(&sanitize_text(&current_workspace)),
             active = active_count,
             paused = paused_count,
             ended = ended_count
         )
     } else {
         format!(
-            r#"<div class="{summary_class}"><span>현재 게임 room: <strong>{room}</strong></span><span>이전 세션이 없습니다.</span></div>"#,
+            r#"<div class="{summary_class}"><span>현재 게임 workspace: <strong>{workspace}</strong></span><span>이전 세션이 없습니다.</span></div>"#,
             summary_class = summary_class,
-            room = html_escape(&sanitize_text(&current_room))
+            workspace = html_escape(&sanitize_text(&current_workspace))
         )
     };
 
-    let room_column = if has_previous_sessions {
+    let workspace_column = if has_previous_sessions {
         format!(
-            r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임 / 이전 세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
+            r#"<section class="history-browser-column history-workspace-column"><h3 class="history-column-title">현재 게임 / 이전 세션</h3>{summary}{current}{active}{paused}{ended}{other}</section>"#,
             summary = summary_html,
             current = current_bucket,
-            active = render_room_bucket_html("이전 세션 · 진행 중", &active_rooms, ""),
-            paused = render_room_bucket_html("이전 세션 · 멈춤", &paused_rooms, ""),
-            ended = render_room_bucket_html("이전 세션 · 종료", &ended_rooms, ""),
-            other = render_room_bucket_html("이전 세션 · 기타", &other_rooms, "")
+            active = render_workspace_bucket_html("이전 세션 · 진행 중", &active_workspaces, ""),
+            paused = render_workspace_bucket_html("이전 세션 · 멈춤", &paused_workspaces, ""),
+            ended = render_workspace_bucket_html("이전 세션 · 종료", &ended_workspaces, ""),
+            other = render_workspace_bucket_html("이전 세션 · 기타", &other_workspaces, "")
         )
     } else {
         format!(
-            r#"<section class="history-browser-column history-room-column"><h3 class="history-column-title">현재 게임</h3>{summary}{current}</section>"#,
+            r#"<section class="history-browser-column history-workspace-column"><h3 class="history-column-title">현재 게임</h3>{summary}{current}</section>"#,
             summary = summary_html,
             current = current_bucket
         )
@@ -555,13 +555,13 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
 
     let turn_groups = sorted
         .iter()
-        .map(|room| {
-            let room_attr = html_escape(&sanitize_text(&room.room_id));
-            let room_label = html_escape(&sanitize_text(&room.room_id));
-            let chips = if room.turns.is_empty() {
+        .map(|workspace| {
+            let workspace_attr = html_escape(&sanitize_text(&workspace.workspace_id));
+            let workspace_label = html_escape(&sanitize_text(&workspace.workspace_id));
+            let chips = if workspace.turns.is_empty() {
                 "<p class=\"history-turn-empty\">턴 기록이 없습니다.</p>".to_string()
             } else {
-                room.turns
+                workspace.turns
                     .iter()
                     .rev()
                     .map(|row| {
@@ -571,7 +571,7 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
                             row.phase.trim().to_string()
                         };
                         format!(
-                            r#"<button class="history-turn-chip" data-room="{room_attr}" data-turn="{turn}" type="button"><span class="history-turn-chip-main">T{turn}</span><span class="history-turn-chip-phase">{phase}</span><span class="history-turn-chip-count">{count}</span></button>"#,
+                            r#"<button class="history-turn-chip" data-workspace="{workspace_attr}" data-turn="{turn}" type="button"><span class="history-turn-chip-main">T{turn}</span><span class="history-turn-chip-phase">{phase}</span><span class="history-turn-chip-count">{count}</span></button>"#,
                             turn = row.turn,
                             phase = html_escape(&sanitize_text(&phase)),
                             count = row.events.len()
@@ -582,7 +582,7 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
             };
 
             format!(
-                r#"<section class="history-turn-group" data-room="{room_attr}"><h4 class="history-turn-group-title">{room_label}</h4><div class="history-turn-toolbar">{chips}</div></section>"#,
+                r#"<section class="history-turn-group" data-workspace="{workspace_attr}"><h4 class="history-turn-group-title">{workspace_label}</h4><div class="history-turn-toolbar">{chips}</div></section>"#,
                 chips = chips
             )
         })
@@ -596,18 +596,18 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
 
     let detail_panels = sorted
         .iter()
-        .map(|room| {
-            if room.turns.is_empty() {
-                let room_attr = html_escape(&sanitize_text(&room.room_id));
+        .map(|workspace| {
+            if workspace.turns.is_empty() {
+                let workspace_attr = html_escape(&sanitize_text(&workspace.workspace_id));
                 return format!(
-                    r#"<section class="history-detail-panel" data-room="{room_attr}" data-turn=""><div class="history-detail-empty">선택된 턴 기록이 없습니다.</div></section>"#
+                    r#"<section class="history-detail-panel" data-workspace="{workspace_attr}" data-turn=""><div class="history-detail-empty">선택된 턴 기록이 없습니다.</div></section>"#
                 );
             }
 
-            room.turns
+            workspace.turns
                 .iter()
                 .rev()
-                .map(|row| render_turn_panel_html(room, row))
+                .map(|row| render_turn_panel_html(workspace, row))
                 .collect::<Vec<_>>()
                 .join("")
         })
@@ -620,17 +620,17 @@ fn render_session_history_html(rooms: &[RoomHistory], current_room_id: &str) -> 
     );
 
     format!(
-        r#"<div class="history-browser">{room_column}{turn_column}{detail_column}</div>"#,
-        room_column = room_column,
+        r#"<div class="history-browser">{workspace_column}{turn_column}{detail_column}</div>"#,
+        workspace_column = workspace_column,
         turn_column = turn_column,
         detail_column = detail_column
     )
 }
 
 #[cfg(target_arch = "wasm32")]
-fn normalize_focus_room(raw: &str) -> Option<String> {
+fn normalize_focus_workspace(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(UNKNOWN_ROOM_ID) {
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case(UNKNOWN_WORKSPACE_ID) {
         None
     } else {
         Some(trimmed.to_string())
@@ -638,22 +638,22 @@ fn normalize_focus_room(raw: &str) -> Option<String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn read_focus_room(document: &web_sys::Document) -> Option<String> {
+fn read_focus_workspace(document: &web_sys::Document) -> Option<String> {
     document
         .get_element_by_id("dashboard")
-        .and_then(|el| el.get_attribute("data-focus-room"))
-        .and_then(|raw| normalize_focus_room(&raw))
+        .and_then(|el| el.get_attribute("data-focus-workspace"))
+        .and_then(|raw| normalize_focus_workspace(&raw))
 }
 
 #[cfg(target_arch = "wasm32")]
-fn write_focus_room(document: &web_sys::Document, room: Option<&str>) {
+fn write_focus_workspace(document: &web_sys::Document, workspace: Option<&str>) {
     let Some(dashboard) = document.get_element_by_id("dashboard") else {
         return;
     };
-    if let Some(room) = room.and_then(normalize_focus_room) {
-        let _ = dashboard.set_attribute("data-focus-room", &room);
+    if let Some(workspace) = workspace.and_then(normalize_focus_workspace) {
+        let _ = dashboard.set_attribute("data-focus-workspace", &workspace);
     } else {
-        let _ = dashboard.remove_attribute("data-focus-room");
+        let _ = dashboard.remove_attribute("data-focus-workspace");
     }
 }
 
@@ -694,7 +694,7 @@ fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
         return (None, None);
     };
 
-    let mut room = None;
+    let mut workspace = None;
     let mut turn = None;
     for pair in params.split('&') {
         if pair.is_empty() {
@@ -704,8 +704,8 @@ fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
         let key = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
         let value = parts.next().unwrap_or_default().trim();
         match key.as_str() {
-            "room" if room.is_none() => {
-                room = normalize_focus_room(value);
+            "workspace" if workspace.is_none() => {
+                workspace = normalize_focus_workspace(value);
             }
             "turn" if turn.is_none() => {
                 if let Ok(parsed) = value.parse::<u32>() {
@@ -717,11 +717,11 @@ fn read_focus_from_hash() -> (Option<String>, Option<u32>) {
             _ => {}
         }
     }
-    (room, turn)
+    (workspace, turn)
 }
 
 #[cfg(target_arch = "wasm32")]
-fn write_focus_hash(room: Option<&str>, turn: Option<u32>) {
+fn write_focus_hash(workspace: Option<&str>, turn: Option<u32>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -735,8 +735,8 @@ fn write_focus_hash(room: Option<&str>, turn: Option<u32>) {
         .unwrap_or("trpg");
 
     let mut params = Vec::new();
-    if let Some(room) = room.and_then(normalize_focus_room) {
-        params.push(format!("room={}", room));
+    if let Some(workspace) = workspace.and_then(normalize_focus_workspace) {
+        params.push(format!("workspace={}", workspace));
     }
     if let Some(turn) = turn.filter(|value| *value > 0) {
         params.push(format!("turn={}", turn));
@@ -768,9 +768,9 @@ fn sync_focus_state_to_hash(document: &web_sys::Document) {
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn sync_history_focus_from_dashboard(document: &web_sys::Document) {
-    let room = read_focus_room(document);
+    let workspace = read_focus_workspace(document);
     let turn = read_focus_turn(document);
-    apply_history_focus(document, room.as_deref(), turn);
+    apply_history_focus(document, workspace.as_deref(), turn);
     sync_focus_state_to_hash(document);
 }
 
@@ -778,44 +778,44 @@ pub(super) fn sync_history_focus_from_dashboard(document: &web_sys::Document) {
 pub(super) fn sync_history_focus_from_dashboard(_document: &web_sys::Document) {}
 
 #[cfg(target_arch = "wasm32")]
-fn resolve_focus_room(rooms: &[RoomHistory], preferred: Option<&str>) -> Option<String> {
-    if rooms.is_empty() {
+fn resolve_focus_workspace(workspaces: &[WorkspaceHistory], preferred: Option<&str>) -> Option<String> {
+    if workspaces.is_empty() {
         return None;
     }
 
-    if let Some(room_id) = preferred.and_then(normalize_focus_room) {
-        if rooms.iter().any(|room| room.room_id == room_id) {
-            return Some(room_id);
+    if let Some(workspace_id) = preferred.and_then(normalize_focus_workspace) {
+        if workspaces.iter().any(|workspace| workspace.workspace_id == workspace_id) {
+            return Some(workspace_id);
         }
     }
 
-    let mut refs = rooms.iter().collect::<Vec<_>>();
-    refs.sort_by(|a, b| compare_room_priority(a, b));
-    refs.first().map(|room| room.room_id.clone())
+    let mut refs = workspaces.iter().collect::<Vec<_>>();
+    refs.sort_by(|a, b| compare_workspace_priority(a, b));
+    refs.first().map(|workspace| workspace.workspace_id.clone())
 }
 
 #[cfg(target_arch = "wasm32")]
 fn resolve_focus_turn(
-    rooms: &[RoomHistory],
-    room_id: Option<&str>,
+    workspaces: &[WorkspaceHistory],
+    workspace_id: Option<&str>,
     preferred: Option<u32>,
 ) -> Option<u32> {
-    let target_room = room_id.and_then(|room| rooms.iter().find(|entry| entry.room_id == room))?;
+    let target_workspace = workspace_id.and_then(|workspace| workspaces.iter().find(|entry| entry.workspace_id == workspace))?;
 
     if let Some(turn) = preferred.filter(|value| *value > 0) {
-        if target_room.turns.iter().any(|row| row.turn == turn) {
+        if target_workspace.turns.iter().any(|row| row.turn == turn) {
             return Some(turn);
         }
     }
 
-    target_room
+    target_workspace
         .turns
         .iter()
         .map(|row| row.turn)
         .max()
         .or_else(|| {
-            if target_room.updated_turn > 0 {
-                Some(target_room.updated_turn)
+            if target_workspace.updated_turn > 0 {
+                Some(target_workspace.updated_turn)
             } else {
                 None
             }
@@ -823,8 +823,8 @@ fn resolve_focus_turn(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: Option<u32>) {
-    let room_key = room.and_then(normalize_focus_room);
+fn apply_history_focus(document: &web_sys::Document, workspace: Option<&str>, turn: Option<u32>) {
+    let workspace_key = workspace.and_then(normalize_focus_workspace);
     let turn_key = turn
         .filter(|value| *value > 0)
         .map(|value| value.to_string());
@@ -846,7 +846,7 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
         }
     }
 
-    if let Ok(chips) = document.query_selector_all("#session-history .history-room-chip") {
+    if let Ok(chips) = document.query_selector_all("#session-history .history-workspace-chip") {
         for idx in 0..chips.length() {
             let Some(node) = chips.item(idx) else {
                 continue;
@@ -854,10 +854,10 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let chip_room = el.get_attribute("data-room").unwrap_or_default();
-            let active = room_key
+            let chip_workspace = el.get_attribute("data-workspace").unwrap_or_default();
+            let active = workspace_key
                 .as_deref()
-                .map(|target| chip_room == target)
+                .map(|target| chip_workspace == target)
                 .unwrap_or(false);
             if active {
                 let _ = el.class_list().add_1("is-active");
@@ -875,15 +875,15 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let group_room = el.get_attribute("data-room").unwrap_or_default();
-            let visible = room_key
+            let group_workspace = el.get_attribute("data-workspace").unwrap_or_default();
+            let visible = workspace_key
                 .as_deref()
-                .map(|target| group_room == target)
+                .map(|target| group_workspace == target)
                 .unwrap_or(false);
             if visible {
-                let _ = el.class_list().remove_1("history-room-hidden");
+                let _ = el.class_list().remove_1("history-workspace-hidden");
             } else {
-                let _ = el.class_list().add_1("history-room-hidden");
+                let _ = el.class_list().add_1("history-workspace-hidden");
             }
         }
     }
@@ -896,17 +896,17 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let chip_room = el.get_attribute("data-room").unwrap_or_default();
+            let chip_workspace = el.get_attribute("data-workspace").unwrap_or_default();
             let chip_turn = el.get_attribute("data-turn").unwrap_or_default();
-            let room_ok = room_key
+            let workspace_ok = workspace_key
                 .as_deref()
-                .map(|target| chip_room == target)
+                .map(|target| chip_workspace == target)
                 .unwrap_or(false);
             let turn_ok = turn_key
                 .as_deref()
                 .map(|target| chip_turn == target)
                 .unwrap_or(false);
-            if room_ok && turn_ok {
+            if workspace_ok && turn_ok {
                 let _ = el.class_list().add_1("is-active");
             } else {
                 let _ = el.class_list().remove_1("is-active");
@@ -922,17 +922,17 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
             let Some(el) = node.dyn_ref::<web_sys::Element>() else {
                 continue;
             };
-            let panel_room = el.get_attribute("data-room").unwrap_or_default();
+            let panel_workspace = el.get_attribute("data-workspace").unwrap_or_default();
             let panel_turn = el.get_attribute("data-turn").unwrap_or_default();
-            let room_ok = room_key
+            let workspace_ok = workspace_key
                 .as_deref()
-                .map(|target| panel_room == target)
+                .map(|target| panel_workspace == target)
                 .unwrap_or(false);
             let turn_ok = match turn_key.as_deref() {
                 Some(target) => panel_turn == target,
                 None => panel_turn.trim().is_empty(),
             };
-            if room_ok && turn_ok {
+            if workspace_ok && turn_ok {
                 let _ = el.class_list().remove_1("history-panel-hidden");
             } else {
                 let _ = el.class_list().add_1("history-panel-hidden");
@@ -943,7 +943,7 @@ fn apply_history_focus(document: &web_sys::Document, room: Option<&str>, turn: O
 
 #[cfg(target_arch = "wasm32")]
 fn bind_history_focus_controls(document: &web_sys::Document) {
-    if let Ok(chips) = document.query_selector_all("#session-history .history-room-chip") {
+    if let Ok(chips) = document.query_selector_all("#session-history .history-workspace-chip") {
         for idx in 0..chips.length() {
             let Some(node) = chips.item(idx) else {
                 continue;
@@ -955,21 +955,21 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 continue;
             }
             let _ = el.set_attribute("data-bound", "1");
-            let room_raw = el.get_attribute("data-room").unwrap_or_default();
+            let workspace_raw = el.get_attribute("data-workspace").unwrap_or_default();
             let latest_turn_raw = el.get_attribute("data-latest-turn").unwrap_or_default();
             let cb = Closure::wrap(Box::new(move || {
                 let Some(document) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                let room = normalize_focus_room(&room_raw);
+                let workspace = normalize_focus_workspace(&workspace_raw);
                 let turn = latest_turn_raw
                     .trim()
                     .parse::<u32>()
                     .ok()
                     .filter(|value| *value > 0);
-                write_focus_room(&document, room.as_deref());
+                write_focus_workspace(&document, workspace.as_deref());
                 write_focus_turn(&document, turn);
-                apply_history_focus(&document, room.as_deref(), turn);
+                apply_history_focus(&document, workspace.as_deref(), turn);
                 sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -991,21 +991,21 @@ fn bind_history_focus_controls(document: &web_sys::Document) {
                 continue;
             }
             let _ = el.set_attribute("data-bound", "1");
-            let room_raw = el.get_attribute("data-room").unwrap_or_default();
+            let workspace_raw = el.get_attribute("data-workspace").unwrap_or_default();
             let turn_raw = el.get_attribute("data-turn").unwrap_or_default();
             let cb = Closure::wrap(Box::new(move || {
                 let Some(document) = web_sys::window().and_then(|w| w.document()) else {
                     return;
                 };
-                let room = normalize_focus_room(&room_raw);
+                let workspace = normalize_focus_workspace(&workspace_raw);
                 let turn = turn_raw
                     .trim()
                     .parse::<u32>()
                     .ok()
                     .filter(|value| *value > 0);
-                write_focus_room(&document, room.as_deref());
+                write_focus_workspace(&document, workspace.as_deref());
                 write_focus_turn(&document, turn);
-                apply_history_focus(&document, room.as_deref(), turn);
+                apply_history_focus(&document, workspace.as_deref(), turn);
                 sync_focus_state_to_hash(&document);
             }) as Box<dyn FnMut()>);
             let _ = el.dyn_ref::<web_sys::EventTarget>().map(|target| {
@@ -1047,10 +1047,10 @@ fn bump_dedup_history(document: &web_sys::Document, sample: &str) {
     let _ = dashboard.set_attribute("data-dedup-samples-history", &lines.join("\n"));
 }
 
-/// Render a per-room, per-turn timeline from TRPG stream events.
+/// Render a per-workspace, per-turn timeline from TRPG stream events.
 #[allow(unused_variables, unused_mut)]
 pub fn update_session_history_dom(
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
     mut readers: SessionHistoryReaders,
     mut cache: ResMut<SessionHistoryCache>,
@@ -1082,52 +1082,52 @@ pub fn update_session_history_dom(
         };
 
         let mut changed = false;
-        let mut base_room_id = normalize_room_id(&room_state.id);
-        let current_room_fallback = normalize_room_id(&crate::config::current_room_id());
-        if base_room_id == UNKNOWN_ROOM_ID && current_room_fallback != UNKNOWN_ROOM_ID {
-            base_room_id = current_room_fallback;
+        let mut base_workspace_id = normalize_workspace_id(&workspace_state.id);
+        let current_workspace_fallback = normalize_workspace_id(&crate::config::current_workspace_id());
+        if base_workspace_id == UNKNOWN_WORKSPACE_ID && current_workspace_fallback != UNKNOWN_WORKSPACE_ID {
+            base_workspace_id = current_workspace_fallback;
         }
-        let mut base_room_status = {
-            let from_progress = normalize_room_status(&progress.room_status);
+        let mut base_workspace_status = {
+            let from_progress = normalize_workspace_status(&progress.workspace_status);
             if from_progress == "unknown" {
-                normalize_room_status(&room_state.status)
+                normalize_workspace_status(&workspace_state.status)
             } else {
                 from_progress
             }
         };
-        if base_room_status == "unknown" {
-            base_room_status = "active".to_string();
+        if base_workspace_status == "unknown" {
+            base_workspace_status = "active".to_string();
         }
 
         let mut current_turn = if progress.turn > 0 {
             progress.turn
         } else {
-            room_state.turn.max(1)
+            workspace_state.turn.max(1)
         };
         let mut current_phase = if !progress.phase.is_empty() {
             progress.phase.clone()
         } else {
-            room_state.phase.as_str().to_string()
+            workspace_state.phase.as_str().to_string()
         };
 
-        let (room_idx, room_changed) = ensure_room_entry(
-            &mut cache.rooms,
-            &base_room_id,
-            &base_room_status,
+        let (workspace_idx, workspace_changed) = ensure_workspace_entry(
+            &mut cache.workspaces,
+            &base_workspace_id,
+            &base_workspace_status,
             current_turn,
         );
-        changed = changed || room_changed;
-        if let Some(room) = cache.rooms.get_mut(room_idx) {
+        changed = changed || workspace_changed;
+        if let Some(workspace) = cache.workspaces.get_mut(workspace_idx) {
             let (_, turn_changed) =
-                ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+                ensure_turn_entry(&mut workspace.turns, current_turn, &current_phase);
             changed = changed || turn_changed;
         }
 
         for SessionStarted(event) in session_started.read() {
-            let event_room_id = if event.room_id.trim().is_empty() {
-                base_room_id.clone()
+            let event_workspace_id = if event.workspace_id.trim().is_empty() {
+                base_workspace_id.clone()
             } else {
-                normalize_room_id(&event.room_id)
+                normalize_workspace_id(&event.workspace_id)
             };
             let incoming_session_id = event.session_id.trim().to_string();
             let event_phase = if current_phase.trim().is_empty() {
@@ -1136,33 +1136,33 @@ pub fn update_session_history_dom(
                 current_phase.clone()
             };
 
-            let (room_idx, room_changed) =
-                ensure_room_entry(&mut cache.rooms, &event_room_id, "active", 1);
-            changed = changed || room_changed;
+            let (workspace_idx, workspace_changed) =
+                ensure_workspace_entry(&mut cache.workspaces, &event_workspace_id, "active", 1);
+            changed = changed || workspace_changed;
 
-            let mut room_reset = false;
-            if let Some(room) = cache.rooms.get_mut(room_idx) {
-                let has_progress_history = room.updated_turn > 1
-                    || room.turns.iter().any(|row| row.turn > 1)
-                    || room.turns.iter().any(|row| !row.events.is_empty());
+            let mut workspace_reset = false;
+            if let Some(workspace) = cache.workspaces.get_mut(workspace_idx) {
+                let has_progress_history = workspace.updated_turn > 1
+                    || workspace.turns.iter().any(|row| row.turn > 1)
+                    || workspace.turns.iter().any(|row| !row.events.is_empty());
                 let should_reset = if incoming_session_id.is_empty() {
                     has_progress_history
                 } else {
-                    room.session_id != incoming_session_id
+                    workspace.session_id != incoming_session_id
                 };
 
                 if should_reset {
-                    room.session_id = incoming_session_id.clone();
-                    room.turns.clear();
-                    room.updated_turn = 1;
-                    room.status = "active".to_string();
-                    room_reset = true;
-                } else if room.session_id.is_empty() && !incoming_session_id.is_empty() {
-                    room.session_id = incoming_session_id.clone();
-                    room_reset = true;
+                    workspace.session_id = incoming_session_id.clone();
+                    workspace.turns.clear();
+                    workspace.updated_turn = 1;
+                    workspace.status = "active".to_string();
+                    workspace_reset = true;
+                } else if workspace.session_id.is_empty() && !incoming_session_id.is_empty() {
+                    workspace.session_id = incoming_session_id.clone();
+                    workspace_reset = true;
                 }
             }
-            changed = changed || room_reset;
+            changed = changed || workspace_reset;
 
             let detail = if incoming_session_id.is_empty() {
                 "session started".to_string()
@@ -1170,10 +1170,10 @@ pub fn update_session_history_dom(
                 format!("session_id={}", incoming_session_id)
             };
             let (appended, updated) = append_event(
-                &mut cache.rooms,
+                &mut cache.workspaces,
                 EventAppendInput {
-                    room_id: &event_room_id,
-                    room_status: "active",
+                    workspace_id: &event_workspace_id,
+                    workspace_status: "active",
                     turn: 1,
                     phase: &event_phase,
                     kind: "system",
@@ -1185,13 +1185,13 @@ pub fn update_session_history_dom(
             if !appended {
                 bump_dedup_history(
                     &document,
-                    &format!("{} | t1 | session.started | {}", event_room_id, detail),
+                    &format!("{} | t1 | session.started | {}", event_workspace_id, detail),
                 );
             }
             changed = changed || updated;
             current_turn = 1;
             current_phase = event_phase;
-            base_room_status = "active".to_string();
+            base_workspace_status = "active".to_string();
         }
 
         for TurnAdvanced(event) in turn_events.read() {
@@ -1202,10 +1202,10 @@ pub fn update_session_history_dom(
                 current_phase = event.phase.clone();
             }
 
-            let event_room_id = if event.room_id.trim().is_empty() {
-                base_room_id.clone()
+            let event_workspace_id = if event.workspace_id.trim().is_empty() {
+                base_workspace_id.clone()
             } else {
-                normalize_room_id(&event.room_id)
+                normalize_workspace_id(&event.workspace_id)
             };
 
             let turn_detail = format!(
@@ -1218,10 +1218,10 @@ pub fn update_session_history_dom(
                 }
             );
             let (appended, updated) = append_event(
-                &mut cache.rooms,
+                &mut cache.workspaces,
                 EventAppendInput {
-                    room_id: &event_room_id,
-                    room_status: &base_room_status,
+                    workspace_id: &event_workspace_id,
+                    workspace_status: &base_workspace_status,
                     turn: current_turn,
                     phase: &current_phase,
                     kind: "turn",
@@ -1235,7 +1235,7 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "{} | t{} | turn | {}",
-                        event_room_id, current_turn, current_phase
+                        event_workspace_id, current_turn, current_phase
                     ),
                 );
             }
@@ -1253,17 +1253,17 @@ pub fn update_session_history_dom(
             } else {
                 current_phase.clone()
             };
-            let event_room_id = if event.room_id.trim().is_empty() {
-                base_room_id.clone()
+            let event_workspace_id = if event.workspace_id.trim().is_empty() {
+                base_workspace_id.clone()
             } else {
-                normalize_room_id(&event.room_id)
+                normalize_workspace_id(&event.workspace_id)
             };
 
             let (appended, updated) = append_event(
-                &mut cache.rooms,
+                &mut cache.workspaces,
                 EventAppendInput {
-                    room_id: &event_room_id,
-                    room_status: &base_room_status,
+                    workspace_id: &event_workspace_id,
+                    workspace_status: &base_workspace_status,
                     turn: event_turn,
                     phase: &event_phase,
                     kind: "narrative",
@@ -1277,7 +1277,7 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "{} | t{} | narrative | {}",
-                        event_room_id,
+                        event_workspace_id,
                         event_turn,
                         event.text.trim()
                     ),
@@ -1294,10 +1294,10 @@ pub fn update_session_history_dom(
             } else {
                 current_turn
             };
-            let event_room_id = if payload.room_id.trim().is_empty() {
-                base_room_id.clone()
+            let event_workspace_id = if payload.workspace_id.trim().is_empty() {
+                base_workspace_id.clone()
             } else {
-                normalize_room_id(&payload.room_id)
+                normalize_workspace_id(&payload.workspace_id)
             };
 
             let dice_detail = format!(
@@ -1310,10 +1310,10 @@ pub fn update_session_history_dom(
                 payload.dc
             );
             let (appended, updated) = append_event(
-                &mut cache.rooms,
+                &mut cache.workspaces,
                 EventAppendInput {
-                    room_id: &event_room_id,
-                    room_status: &base_room_status,
+                    workspace_id: &event_workspace_id,
+                    workspace_status: &base_workspace_status,
                     turn: event_turn,
                     phase: &current_phase,
                     kind: "dice",
@@ -1327,7 +1327,7 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "{} | t{} | dice | {}:{}",
-                        event_room_id, event_turn, payload.character, payload.action
+                        event_workspace_id, event_turn, payload.character, payload.action
                     ),
                 );
             }
@@ -1346,15 +1346,15 @@ pub fn update_session_history_dom(
             } else {
                 current_phase.clone()
             };
-            let event_room_id = if event.room_id.trim().is_empty() {
-                base_room_id.clone()
+            let event_workspace_id = if event.workspace_id.trim().is_empty() {
+                base_workspace_id.clone()
             } else {
-                normalize_room_id(&event.room_id)
+                normalize_workspace_id(&event.workspace_id)
             };
             let event_status = {
-                let normalized = normalize_room_status(&event.room_status);
+                let normalized = normalize_workspace_status(&event.workspace_status);
                 if normalized == "unknown" {
-                    base_room_status.clone()
+                    base_workspace_status.clone()
                 } else {
                     normalized
                 }
@@ -1367,10 +1367,10 @@ pub fn update_session_history_dom(
                 &summary
             };
             let (appended, updated) = append_event(
-                &mut cache.rooms,
+                &mut cache.workspaces,
                 EventAppendInput {
-                    room_id: &event_room_id,
-                    room_status: &event_status,
+                    workspace_id: &event_workspace_id,
+                    workspace_status: &event_status,
                     turn: event_turn,
                     phase: &event_phase,
                     kind,
@@ -1384,26 +1384,26 @@ pub fn update_session_history_dom(
                     &document,
                     &format!(
                         "{} | t{} | progress | {}",
-                        event_room_id, event_turn, event.event_type
+                        event_workspace_id, event_turn, event.event_type
                     ),
                 );
             }
             changed = changed || updated;
             current_turn = event_turn.max(1);
             current_phase = event_phase;
-            base_room_status = event_status;
+            base_workspace_status = event_status;
         }
 
-        let (room_idx, room_changed) = ensure_room_entry(
-            &mut cache.rooms,
-            &base_room_id,
-            &base_room_status,
+        let (workspace_idx, workspace_changed) = ensure_workspace_entry(
+            &mut cache.workspaces,
+            &base_workspace_id,
+            &base_workspace_status,
             current_turn,
         );
-        changed = changed || room_changed;
-        if let Some(room) = cache.rooms.get_mut(room_idx) {
+        changed = changed || workspace_changed;
+        if let Some(workspace) = cache.workspaces.get_mut(workspace_idx) {
             let (_, turn_changed) =
-                ensure_turn_entry(&mut room.turns, current_turn, &current_phase);
+                ensure_turn_entry(&mut workspace.turns, current_turn, &current_phase);
             changed = changed || turn_changed;
         }
 
@@ -1411,19 +1411,19 @@ pub fn update_session_history_dom(
             return;
         }
 
-        let current_room_id = crate::config::current_room_id();
-        history.set_inner_html(&render_session_history_html(&cache.rooms, &current_room_id));
+        let current_workspace_id = crate::config::current_workspace_id();
+        history.set_inner_html(&render_session_history_html(&cache.workspaces, &current_workspace_id));
         bind_history_focus_controls(&document);
 
-        let preferred_room = read_focus_room(&document).or_else(|| Some(base_room_id.clone()));
+        let preferred_workspace = read_focus_workspace(&document).or_else(|| Some(base_workspace_id.clone()));
         let preferred_turn = read_focus_turn(&document).or(Some(current_turn.max(1)));
 
-        let focus_room = resolve_focus_room(&cache.rooms, preferred_room.as_deref());
-        let focus_turn = resolve_focus_turn(&cache.rooms, focus_room.as_deref(), preferred_turn);
+        let focus_workspace = resolve_focus_workspace(&cache.workspaces, preferred_workspace.as_deref());
+        let focus_turn = resolve_focus_turn(&cache.workspaces, focus_workspace.as_deref(), preferred_turn);
 
-        write_focus_room(&document, focus_room.as_deref());
+        write_focus_workspace(&document, focus_workspace.as_deref());
         write_focus_turn(&document, focus_turn);
-        apply_history_focus(&document, focus_room.as_deref(), focus_turn);
+        apply_history_focus(&document, focus_workspace.as_deref(), focus_turn);
         sync_focus_state_to_hash(&document);
     }
 }

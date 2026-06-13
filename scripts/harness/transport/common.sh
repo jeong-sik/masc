@@ -35,6 +35,7 @@ AUTH_BLOCKED=0
 TRANSPORT_SERVER_PID=""
 TRANSPORT_SERVER_BASE_PATH=""
 TRANSPORT_SERVER_LOG_FILE=""
+MASC_TRANSPORT_AUTH_TOKEN="${MASC_TRANSPORT_AUTH_TOKEN:-${MASC_TOKEN:-}}"
 
 pass() {
   PASS=$((PASS + 1))
@@ -85,7 +86,7 @@ ensure_server() {
 
   local server_exe
   server_exe="$(harness_find_server_exe "$ROOT_DIR" "${SERVER_EXE:-}")"
-  TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-room")"
+  TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-workspace")"
   TRANSPORT_SERVER_LOG_FILE="$(harness_mktemp_file "masc-transport-server" ".log")"
 
   # shellcheck disable=SC2031
@@ -118,6 +119,26 @@ require_server() {
   ensure_server
 }
 
+transport_auth_token() {
+  if [[ -n "${MASC_TRANSPORT_AUTH_TOKEN:-}" ]]; then
+    printf '%s\n' "$MASC_TRANSPORT_AUTH_TOKEN"
+    return 0
+  fi
+
+  local token_json token
+  token_json="$(curl -fsS --max-time 3 "${MASC_HTTP_BASE_URL}/api/v1/dashboard/dev-token" 2>/dev/null || true)"
+  if [[ -z "$token_json" ]]; then
+    return 0
+  fi
+
+  token="$(jq -r '.token // empty' <<<"$token_json" 2>/dev/null || true)"
+  if [[ -n "$token" ]]; then
+    MASC_TRANSPORT_AUTH_TOKEN="$token"
+    export MASC_TRANSPORT_AUTH_TOKEN
+    printf '%s\n' "$token"
+  fi
+}
+
 # Check if a CLI tool is available.
 require_tool() {
   local tool="$1"
@@ -129,11 +150,17 @@ require_tool() {
 }
 
 mcp_initialize_session() {
-  local headers body payload session_id
+  local headers body payload session_id token
+  local -a auth_args=()
   headers="$(harness_mktemp_file "masc-transport-init-header")"
   body="$(harness_mktemp_file "masc-transport-init-body")"
   payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-harness","version":"1.0"}}}'
+  token="$(transport_auth_token)"
+  if [[ -n "$token" ]]; then
+    auth_args=(-H "Authorization: Bearer ${token}")
+  fi
   if ! curl -fsS -D "$headers" -o "$body" -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+    "${auth_args[@]}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "$payload" >/dev/null; then
@@ -159,10 +186,16 @@ mcp_call_tool() {
   local tool_name="$2"
   local arguments_json="$3"
   local request_id="${4:-1}"
-  local payload
+  local payload token
+  local -a auth_args=()
   payload="$(printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' \
     "$request_id" "$tool_name" "$arguments_json")"
+  token="$(transport_auth_token)"
+  if [[ -n "$token" ]]; then
+    auth_args=(-H "Authorization: Bearer ${token}")
+  fi
   curl -fsS -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+    "${auth_args[@]}" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Mcp-Session-Id: ${session_id}" \
@@ -174,7 +207,7 @@ mcp_join_agent() {
   local agent_name="$2"
   mcp_call_tool \
     "$session_id" \
-    "masc_join" \
+    "masc_bind" \
     "$(printf '{"agent_name":"%s","capabilities":[]}' "$agent_name")" \
     2
 }

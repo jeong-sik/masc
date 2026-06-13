@@ -79,21 +79,21 @@ let session_to_json session =
   ]
 
 let session_of_json json =
-  let open Yojson.Safe.Util in
   {
-    session_id = json |> member "session_id" |> to_string;
-    agent_id = json |> member "agent_id" |> to_string;
-    voice = json |> member "voice" |> to_string;
-    started_at = json |> member "started_at" |> to_float;
-    last_activity = json |> member "last_activity" |> to_float;
-    turn_count = json |> member "turn_count" |> to_int;
+    session_id = Json_util.get_string_with_default json ~key:"session_id" ~default:"";
+    agent_id = Json_util.get_string_with_default json ~key:"agent_id" ~default:"";
+    voice = Json_util.get_string_with_default json ~key:"voice" ~default:"";
+    started_at = Json_util.get_float json "started_at" |> Option.value ~default:0.0;
+    last_activity = Json_util.get_float json "last_activity" |> Option.value ~default:0.0;
+    turn_count = Json_util.get_int json "turn_count" |> Option.value ~default:0;
     (* Issue #8612: a corrupt or mis-versioned status field used to
        silently decode as [Idle]. We now fail-closed at the boundary:
        unknown status defaults to [Suspended] so the session is visible
        to the operator (and won't be skipped by lifecycle GC that treats
        Idle as "nothing to clean up"). *)
     status =
-      json |> member "status" |> to_string
+      Json_util.get_string json "status"
+      |> Option.value ~default:""
       |> status_of_string_opt
       |> Option.value ~default:Suspended;
   }
@@ -244,7 +244,7 @@ let increment_turn t ~agent_id =
 
 (** {1 Zombie Cleanup} *)
 
-let cleanup_zombies t ?(timeout = Coord_resilience.default_zombie_threshold) () =
+let cleanup_zombies t ?(timeout = Workspace_resilience.default_zombie_threshold) () =
   with_lock t (fun () ->
     let now = Time_compat.now () in
     let to_remove = Hashtbl.fold (fun agent_id session acc ->

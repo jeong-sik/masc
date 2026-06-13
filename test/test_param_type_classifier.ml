@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Contract = Masc_mcp.Sdk_tool_contract
+module Contract = Masc.Sdk_tool_contract
 
 let schema_with_type t = `Assoc [ ("type", `String t) ]
 

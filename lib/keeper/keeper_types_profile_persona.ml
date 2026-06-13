@@ -95,7 +95,7 @@ let personas_root_opt () =
   with
   | Sys_error _ -> None
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ProfileLoadFailures)
       ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_root) ]
       ();
@@ -111,7 +111,7 @@ let persona_profile_path_opt name =
     with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
         ();
@@ -137,7 +137,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
     try Config_dir_resolver.personas_dirs () with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Load_persona_extended) ]
         ();
@@ -155,7 +155,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
     then
       match Safe_ops.read_file_safe path with
       | Error msg ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ProfileLoadFailures)
           ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Agent_md_read) ]
           ();
@@ -183,8 +183,8 @@ let persona_summary_of_profile_json name profile_path json =
     let role = Safe_ops.json_string_opt "role" json in
     let trait = Safe_ops.json_string_opt "trait" json in
     let has_keeper_defaults =
-      match Yojson.Safe.Util.member "keeper" json with
-      | `Assoc _ -> true
+      match Json_util.assoc_member_opt "keeper" json with
+      | Some (`Assoc _) -> true
       | _ -> false
     in
     Some { persona_name = name; display_name; role; trait; profile_path; has_keeper_defaults })
@@ -210,7 +210,7 @@ let list_persona_summaries () : persona_summary list =
     try Config_dir_resolver.personas_dirs () with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label List_persona_summaries) ]
         ();

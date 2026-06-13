@@ -3,15 +3,15 @@
     Re-exports {!Activity_graph_types}, {!Activity_graph_registry},
     and {!Activity_graph_reducer} so callers can reach the full
     type / registry / reducer surface via [Activity_graph.X].
-    Type identity is preserved end-to-end across the cascade
+    Type identity is preserved end-to-end across the runtime
     via the [include module type of struct include M end] form
-    (cycle 187 [coord_utils.mli] rationale): the [event],
+    (cycle 187 [workspace_utils.mli] rationale): the [event],
     [entity_ref], [client], and [agent_span] types reachable
     via {!Activity_graph} are the same nominal types as those
     reachable via the source modules.
 
-    On top of the cascade, six locally-defined helpers
-    persist event JSONL files under [Coord_utils.masc_dir]
+    On top of the runtime, six locally-defined helpers
+    persist event JSONL files under [Workspace_utils.masc_dir]
     and project the log into JSON views consumed by the SSE
     activity stream and the dashboard graph endpoint:
 
@@ -59,7 +59,7 @@ val format_sse_event : event -> string
 (** {1 Event emission} *)
 
 val emit :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   ?actor:entity_ref ->
   ?subject:entity_ref ->
   ?tags:string list ->
@@ -68,7 +68,7 @@ val emit :
   unit ->
   event
 (** Persists a new event under
-    [Coord_utils.masc_dir config / "activity-events" / YYYY-MM / YYYY-MM-DD.jsonl]
+    [Workspace_utils.masc_dir config / "activity-events" / YYYY-MM / YYYY-MM-DD.jsonl]
     and pushes it to every matching registered SSE client.
 
     The file lock at {!Activity_graph_registry} scope is
@@ -81,7 +81,7 @@ val emit :
 (** {1 Read paths} *)
 
 val list_events :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -97,7 +97,7 @@ val list_events :
 (** {1 JSON projections} *)
 
 val json_response :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
@@ -106,7 +106,7 @@ val json_response :
 (** Polling-friendly JSON envelope: [generated_at_iso],
     [dashboard_surface], [source], [retention], [query],
     [events], [count], [total_matching_events], [after_seq],
-    [next_after_seq], [limit], [room_id] (kept as ["default"]
+    [next_after_seq], [limit], [workspace_id] (kept as ["default"]
     for backward-compat), [kinds], [latest_seq], and
     [latest_matching_seq].  [next_after_seq] is the seq of the
     last returned event so the caller can resume cleanly on the
@@ -115,7 +115,7 @@ val json_response :
     cursors move backward. *)
 
 val graph_json :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   ?kinds:string list ->
   ?limit:int ->
   ?timeline_limit:int ->
@@ -131,7 +131,7 @@ val graph_json :
     / has_more). *)
 
 val agent_spans_json :
-  Coord_utils.config ->
+  Workspace_utils.config ->
   ?limit:int ->
   ?since_ms:int ->
   unit ->

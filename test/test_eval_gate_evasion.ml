@@ -5,7 +5,7 @@
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Eval_gate = Masc_mcp.Eval_gate
+module Eval_gate = Masc.Eval_gate
 
 (* ============================================================
    Normalization tests

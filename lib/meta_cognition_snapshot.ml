@@ -3,7 +3,7 @@ module StringMap = Set_util.StringMap
 (** Meta_cognition_snapshot — Data loading, JSON builders, and snapshot generation.
 
     Loads board posts/comments/votes/governance cases and produces
-    deterministic JSON snapshots of room-level beliefs, tensions, desires,
+    deterministic JSON snapshots of workspace-level beliefs, tensions, desires,
     and social edges.
 
     @since God file decomposition — extracted from meta_cognition.ml *)
@@ -11,6 +11,11 @@ module StringMap = Set_util.StringMap
 open Meta_cognition_types
 
 let rule_id_tension_tool_blockage = "tension:masc_tool_blockage"
+
+let clamp ~min_v ~max_v value =
+  if value < min_v then min_v
+  else if value > max_v then max_v
+  else value
 
 (* ================================================================ *)
 (* Data loading                                                     *)
@@ -28,23 +33,23 @@ let load_jsonl_safe path =
         []
 
 let load_board_posts config =
-  let path = Filename.concat (Coord.masc_dir config) "board_posts.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_posts.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.post_of_yojson
 
 let load_board_comments config =
-  let path = Filename.concat (Coord.masc_dir config) "board_comments.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_comments.jsonl" in
   load_jsonl_safe path
   |> List.filter_map Board.comment_of_yojson
 
 let load_board_vote_count config =
-  let path = Filename.concat (Coord.masc_dir config) "board_votes.jsonl" in
+  let path = Filename.concat (Workspace.masc_dir config) "board_votes.jsonl" in
   List.length (load_jsonl_safe path)
 
 let load_governance_cases config =
   let surface = "meta_cognition_snapshot" in
   let observe_drop ~reason =
-    Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+    Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
       ~labels:[("surface", surface); ("reason", reason)] ()
   in
   let report_drop ~reason ~path ~detail =
@@ -55,7 +60,7 @@ let load_governance_cases config =
       ~path
       ~detail
   in
-  let dir = Filename.concat (Coord.masc_dir config) "governance_v2/cases" in
+  let dir = Filename.concat (Workspace.masc_dir config) "governance_v2/cases" in
   if not (Sys.file_exists dir) then
     []
   else
@@ -465,7 +470,7 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.belief_rules
     |> List.filter_map (fun rule -> belief_json ~limit rule sources)
     |> List.sort (fun a b ->
-           let count_of json key = json |> Yojson.Safe.Util.member key |> Yojson.Safe.Util.to_int in
+           let count_of json key = Option.value ~default:0 (Json_util.get_int json key) in
            compare (count_of b "support_agent_count") (count_of a "support_agent_count"))
   in
   let total_belief_count = List.length all_beliefs in
@@ -473,9 +478,9 @@ let snapshot_json ?hearth ~limit config =
   let all_contested =
     all_beliefs
     |> List.filter (fun json ->
-           (match Yojson.Safe.Util.member "status" json with
-            | `String s -> String.equal s "contested"
-            | _ -> false))
+           (match Json_util.get_string json "status" with
+            | Some s -> String.equal s "contested"
+            | None -> false))
   in
   let total_contested_belief_count = List.length all_contested in
   let contested_beliefs = take limit all_contested in
@@ -483,10 +488,7 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.tension_rules
     |> List.filter_map (fun rule -> tension_json ~limit governance_cases rule sources)
     |> List.sort (fun a b ->
-           let count_of json =
-             json |> Yojson.Safe.Util.member "recurrence_count"
-             |> Yojson.Safe.Util.to_int
-           in
+           let count_of json = Option.value ~default:0 (Json_util.get_int json "recurrence_count") in
            compare (count_of b) (count_of a))
     |> take limit
   in
@@ -494,16 +496,13 @@ let snapshot_json ?hearth ~limit config =
     Meta_cognition_rules.desire_rules
     |> List.filter_map (fun rule -> desire_json ~limit rule sources)
     |> List.sort (fun a b ->
-           let count_of json =
-             json |> Yojson.Safe.Util.member "source_agent_count"
-             |> Yojson.Safe.Util.to_int
-           in
+           let count_of json = Option.value ~default:0 (Json_util.get_int json "source_agent_count") in
            compare (count_of b) (count_of a))
     |> take limit
   in
   let social_edges = social_edges_json ~limit sources in
-  let tasks = Coord.get_tasks_raw config in
-  let agents = Coord.get_agents_raw config in
+  let tasks = Workspace.get_tasks_raw config in
+  let agents = Workspace.get_agents_raw config in
   let idle_signal_count =
     sources
     |> List.filter (fun source ->
@@ -522,7 +521,7 @@ let snapshot_json ?hearth ~limit config =
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "room_state",
+      ( "workspace_state",
         `Assoc
           [
             ("active_agent_count", `Int (List.length agents));
@@ -593,8 +592,8 @@ let assoc_subset_or_null json fields =
   | value -> value
 
 let first_item_or_null json key =
-  match Yojson.Safe.Util.member key json with
-  | `List (item :: _) -> item
+  match Json_util.assoc_member_opt key json with
+  | Some (`List (item :: _)) -> item
   | _ -> `Null
 
 let summary_json ?hearth config =
@@ -602,10 +601,10 @@ let summary_json ?hearth config =
   `Assoc
     [
       ( "stagnation_score",
-        Yojson.Safe.Util.member "stagnation_score" snapshot );
-      ("belief_count", Yojson.Safe.Util.member "total_belief_count" snapshot);
+        Option.value ~default:`Null (Json_util.assoc_member_opt "stagnation_score" snapshot) );
+      ("belief_count", Option.value ~default:`Null (Json_util.assoc_member_opt "total_belief_count" snapshot));
       ("contested_belief_count",
-        Yojson.Safe.Util.member "total_contested_belief_count" snapshot);
+        Option.value ~default:`Null (Json_util.assoc_member_opt "total_contested_belief_count" snapshot));
       ( "dominant_belief",
         assoc_subset_or_null
           (first_item_or_null snapshot "beliefs")

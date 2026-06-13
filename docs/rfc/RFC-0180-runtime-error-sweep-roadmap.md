@@ -22,7 +22,7 @@ Related: RFC-0064 (LLM-native two-surface tool model), RFC-0097 (container reuse
 
 | Level | 24h count | Notes |
 |---|---|---|
-| WARN | 79,833 | ~93% 가 keeper meta legacy unknown keys (work_discovery_*, repo_cli_identity) — config sweep 로 본 cycle 처단 완료 |
+| WARN | 79,833 | ~93% 가 keeper meta legacy unknown keys (work_discovery_*, retired_credential_config) — config sweep 로 본 cycle 처단 완료 |
 | ERROR | 571 | 7 distinct 패턴 + θ (이미 fix) |
 | INFO | 45,848 | 정상 운영 |
 
@@ -33,11 +33,11 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 | α | `tool_execute sandbox_close/missing_sandbox` | 18 | `lib/types/masc_error.ml:179` IoError wrapper, literal `"missing_sandbox_clone"` 외부 runtime (agent SDK) emit |
 | β | `tool_execute executable=""` + 5-retry threshold-silence | 26 | `lib/keeper/agent_tool_execute_typed_input.ml:321,447-470` `check_exec` + retry threshold 5 |
 | γ | `tool_execute cwd_not_directory: playground/*` | 11 | `lib/keeper/agent_tool_execute_path.ml:26-40` + `keeper_failure_circuit_breaker.ml:100` |
-| δ | `cascade tier-group.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_cascade.ml:899` + `lib/cascade/provider_health.ml:88-106` |
+| δ | `runtime runtime.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_runtime.ml:899` + `lib/runtime/provider_health.ml:88-106` |
 | ε | retired PR-review helper reported closed PR state (ramarama) | 15 | `"pr_not_open"` literal 외부 MCP handler emit, board cache lag |
 | ζ | `tool_execute gh not in dev_full allowlist` | 7 | `lib/keeper/dev_exec_allowlist.ml` + `agent_tool_execute_typed_input.ml:40-44` mode dispatch |
 | η | `keeper_task_done anti-rationalization` | 6 | `lib/anti_rationalization.ml:504-600` — Issue #8688 이전 37/24h → 현재 6 = 정상 baseline |
-| θ | autoboot masc-improver failed | 11 | ✅ 본 cycle fix (repo_cli_identity 제거) |
+| θ | autoboot masc-improver failed | 11 | ✅ 본 cycle fix (retired_credential_config 제거) |
 
 ## 1. Sweep strategy
 
@@ -67,11 +67,11 @@ type system_error =
 
 ### Group 3: Eager provider reach validation (δ + boot-time fake reach check) — RFC 후속 PR-1
 
-`lib/cascade/provider_health.ml:88-106` 의 `healthcheck.enabled=false` 시 *probe 생략* — boot log 의 13 candidate 모두 `not_applicable/skipped` (config-only validation). δ 의 ERROR 가 *첫 cascade 호출 시점* 표면화 — 늦은 발견.
+`lib/runtime/provider_health.ml:88-106` 의 `healthcheck.enabled=false` 시 *probe 생략* — boot log 의 13 candidate 모두 `not_applicable/skipped` (config-only validation). δ 의 ERROR 가 *첫 runtime 호출 시점* 표면화 — 늦은 발견.
 
 **Proposal**: 
 1. `provider_health` 에 *opt-in eager mode* (`MASC_PROVIDER_HEALTH_EAGER=true`) — Eio runtime 확보 후 *first keeper turn 직전* one-shot reach validation. Result.t 반환 — fail 시 boot 차단 (not silent skip).
-2. `keeper_turn_driver_try_cascade.ml:899` 의 `runtime_candidate_label` 가 현재 literal `"runtime"` 반환 (Runtime Lens boundary 의 over-redaction). 내부 observability 는 *real model_id* 유지, 외부 surface 만 redact (memory: reference_runtime_lens_boundary_carve_out 정합).
+2. `keeper_turn_driver_try_runtime.ml:899` 의 `runtime_candidate_label` 가 현재 literal `"runtime"` 반환 (Runtime Lens boundary 의 over-redaction). 내부 observability 는 *real model_id* 유지, 외부 surface 만 redact (memory: reference_runtime_lens_boundary_carve_out 정합).
 
 **Workaround Sig 위험 점검**:
 - #1 telemetry-as-fix 함정: counter/WARN 추가 *금지*. 본 PR 은 *Result.t 반환 + boot 차단* 으로 root-fix
@@ -101,10 +101,10 @@ paused keeper 의 sandbox cleanup race — `lib/keeper/keeper_lifecycle*.ml` 의
 | **PR-0** (본 RFC) | — | This RFC (Draft → Active on merge) | Low |
 | **PR-1** | G1 β | #18686 (Draft, awaiting CI + Ready) | Low (description only) |
 | **PR-2** | G1 ζ/γ/ε partial | config-only (별 repo or `<base-path>/.masc/`) | 본 cycle 완료 |
-| **PR-3** | G2 α typed boundary | masc-mcp lib | Medium |
-| **PR-4** | G5 γ playground policy | masc-mcp lib | Low |
-| **PR-5** | G3 δ eager reach | masc-mcp lib (RFC discovery 후 별 RFC 가능) | Medium |
-| **PR-6** | G4 ε typed PR awareness | masc-mcp lib | Medium |
+| **PR-3** | G2 α typed boundary | masc lib | Medium |
+| **PR-4** | G5 γ playground policy | masc lib | Low |
+| **PR-5** | G3 δ eager reach | masc lib (RFC discovery 후 별 RFC 가능) | Medium |
+| **PR-6** | G4 ε typed PR awareness | masc lib | Medium |
 | **monitor** | G6 η | no-op, dashboard alert 만 | None |
 
 ## 3. Workaround Sig 검증 (전체)

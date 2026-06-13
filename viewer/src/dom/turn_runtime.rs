@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use crate::game::components::Actor;
 use crate::game::lifecycle::TrpgLifecycleState;
 use crate::game::round_runner::RoundRunner;
-use crate::game::state::{ConnectionStatus, RoomState, TurnProgressState};
+use crate::game::state::{ConnectionStatus, WorkspaceState, TurnProgressState};
 
 /// Tracks last-rendered runtime status snapshot to avoid redundant DOM updates.
 #[derive(Resource, Default)]
@@ -33,28 +33,28 @@ fn pretty_phase(phase: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn room_status_class(state: TrpgLifecycleState) -> &'static str {
+fn workspace_status_class(state: TrpgLifecycleState) -> &'static str {
     match state {
         TrpgLifecycleState::Running => "status-active",
         TrpgLifecycleState::Stopped => "status-paused",
         TrpgLifecycleState::Ended => "status-ended",
         TrpgLifecycleState::Unavailable => "status-unavailable",
         TrpgLifecycleState::Loading => "status-loading",
-        TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => "status-idle",
+        TrpgLifecycleState::Idle | TrpgLifecycleState::Unknown => "status-idle",
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn room_status_label(state: TrpgLifecycleState) -> &'static str {
+fn workspace_status_label(state: TrpgLifecycleState) -> &'static str {
     state.label_ko()
 }
 
 #[cfg(target_arch = "wasm32")]
-fn room_display_label(room_id: &str) -> String {
-    if room_id.eq_ignore_ascii_case(crate::config::DEFAULT_ROOM_ID) {
-        format!("{} (기본 방)", crate::config::DEFAULT_ROOM_ID)
+fn workspace_display_label(workspace_id: &str) -> String {
+    if workspace_id.eq_ignore_ascii_case(crate::config::DEFAULT_WORKSPACE_ID) {
+        format!("{} (기본 방)", crate::config::DEFAULT_WORKSPACE_ID)
     } else {
-        room_id.to_string()
+        workspace_id.to_string()
     }
 }
 
@@ -91,16 +91,16 @@ fn phase_is_aggregate_round(phase: &str) -> bool {
     normalize_phase_for_sync(phase) == "round"
 }
 
-fn phase_matches_for_sync(room_phase: &str, progress_phase: &str) -> bool {
-    let room_norm = normalize_phase_for_sync(room_phase);
+fn phase_matches_for_sync(workspace_phase: &str, progress_phase: &str) -> bool {
+    let workspace_norm = normalize_phase_for_sync(workspace_phase);
     let progress_norm = normalize_phase_for_sync(progress_phase);
-    if room_norm == progress_norm {
+    if workspace_norm == progress_norm {
         return true;
     }
-    if room_norm.is_empty() || progress_norm.is_empty() {
+    if workspace_norm.is_empty() || progress_norm.is_empty() {
         return false;
     }
-    phase_is_aggregate_round(&room_norm) || phase_is_aggregate_round(&progress_norm)
+    phase_is_aggregate_round(&workspace_norm) || phase_is_aggregate_round(&progress_norm)
 }
 
 fn compact_reason_text(raw: &str) -> String {
@@ -610,7 +610,7 @@ fn build_next_action_hint(
             TrpgLifecycleState::Unavailable => {
                 "엔진/키퍼 연결을 복구한 뒤 다시 시도하세요.".to_string()
             }
-            TrpgLifecycleState::Lobby => "세션을 시작한 뒤 라운드 실행을 누르세요.".to_string(),
+            TrpgLifecycleState::Idle => "세션을 시작한 뒤 라운드 실행을 누르세요.".to_string(),
             TrpgLifecycleState::Unknown => "상태 확인 후 라운드 실행을 다시 누르세요.".to_string(),
             TrpgLifecycleState::Running => "진행 상태를 확인하세요.".to_string(),
         };
@@ -673,8 +673,8 @@ fn build_flow_banner(
                 "is-waiting",
                 "초기화/동기화 중입니다. 완료 후 라운드를 실행하세요.".to_string(),
             ),
-            TrpgLifecycleState::Lobby | TrpgLifecycleState::Unknown => (
-                "로비",
+            TrpgLifecycleState::Idle | TrpgLifecycleState::Unknown => (
+                "대기",
                 "is-idle",
                 "새 게임을 시작하거나 실행 가능한 방으로 이동하세요.".to_string(),
             ),
@@ -736,7 +736,7 @@ fn build_flow_action_signature(
     let mut parts = Vec::new();
     if matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -852,7 +852,7 @@ fn collect_flow_banner_actions(
 
     if matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -1109,7 +1109,7 @@ fn set_ops_hud_value(document: &web_sys::Document, id: &str, text: &str, status_
 fn runtime_compact_lifecycle(lifecycle: TrpgLifecycleState) -> bool {
     matches!(
         lifecycle,
-        TrpgLifecycleState::Lobby
+        TrpgLifecycleState::Idle
             | TrpgLifecycleState::Loading
             | TrpgLifecycleState::Ended
             | TrpgLifecycleState::Unavailable
@@ -1164,7 +1164,7 @@ fn sync_runtime_advanced_toggle_ui(document: &web_sys::Document) {
         let text = if show_advanced {
             "상태 전이, 라운드 진단, DM 음성 설정"
         } else if is_compact {
-            "기본 정보만 표시 중 (로비/종료 단순 모드)"
+            "기본 정보만 표시 중 (대기/종료 단순 모드)"
         } else {
             "핵심 정보만 표시 중"
         };
@@ -1192,7 +1192,8 @@ fn ensure_runtime_advanced_toggle_binding(document: &web_sys::Document) {
             .get_attribute("data-show-advanced")
             .map(|raw| raw == "1")
             .unwrap_or(false);
-        let _ = dashboard.set_attribute("data-show-advanced", if show_advanced { "0" } else { "1" });
+        let _ =
+            dashboard.set_attribute("data-show-advanced", if show_advanced { "0" } else { "1" });
         sync_runtime_advanced_toggle_ui(&document);
     }) as Box<dyn FnMut(_)>);
     let _ = toggle.add_event_listener_with_callback("click", cb.as_ref().unchecked_ref());
@@ -1223,19 +1224,19 @@ fn sync_runtime_panel_flags(document: &web_sys::Document, lifecycle: TrpgLifecyc
 }
 
 #[cfg(target_arch = "wasm32")]
-fn round_plan_storage_key(room_id: &str) -> String {
-    format!("masc.viewer.round_plan.{}", room_id.trim())
+fn round_plan_storage_key(workspace_id: &str) -> String {
+    format!("masc.viewer.round_plan.{}", workspace_id.trim())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn restore_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
+fn restore_round_plan_inputs(document: &web_sys::Document, workspace_id: &str) {
     let Some(storage) = web_sys::window()
         .and_then(|w| w.local_storage().ok())
         .flatten()
     else {
         return;
     };
-    let Ok(Some(raw)) = storage.get_item(&round_plan_storage_key(room_id)) else {
+    let Ok(Some(raw)) = storage.get_item(&round_plan_storage_key(workspace_id)) else {
         return;
     };
     let Ok(payload) = serde_json::from_str::<serde_json::Value>(&raw) else {
@@ -1265,7 +1266,7 @@ fn restore_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
+fn persist_round_plan_inputs(document: &web_sys::Document, workspace_id: &str) {
     let Some(storage) = web_sys::window()
         .and_then(|w| w.local_storage().ok())
         .flatten()
@@ -1285,7 +1286,7 @@ fn persist_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
         .unwrap_or_default();
 
     let existing = storage
-        .get_item(&round_plan_storage_key(room_id))
+        .get_item(&round_plan_storage_key(workspace_id))
         .ok()
         .flatten()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
@@ -1321,40 +1322,40 @@ fn persist_round_plan_inputs(document: &web_sys::Document, room_id: &str) {
         "dm": dm_to_store,
         "players": players_to_store,
     });
-    let _ = storage.set_item(&round_plan_storage_key(room_id), &payload.to_string());
+    let _ = storage.set_item(&round_plan_storage_key(workspace_id), &payload.to_string());
 }
 
 /// Render live TRPG runtime progress:
-/// room/turn/phase, current thinker, next actor, last outcome, and party survival.
+/// workspace/turn/phase, current thinker, next actor, last outcome, and party survival.
 pub fn update_turn_runtime_dom(
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
     connection: Res<ConnectionStatus>,
     runner: Option<Res<RoundRunner>>,
     actors: Query<&Actor>,
     mut cache: ResMut<TurnRuntimeCache>,
 ) {
-    let room_status_raw = if !progress.room_status.trim().is_empty() {
-        progress.room_status.trim().to_string()
-    } else if !room_state.status.trim().is_empty() {
-        room_state.status.trim().to_string()
+    let workspace_status_raw = if !progress.workspace_status.trim().is_empty() {
+        progress.workspace_status.trim().to_string()
+    } else if !workspace_state.status.trim().is_empty() {
+        workspace_state.status.trim().to_string()
     } else {
         "unknown".to_string()
     };
     let lifecycle =
-        TrpgLifecycleState::from_room_progress(&room_state.status, &progress.room_status);
-    let room_status_key = crate::game::lifecycle::normalize_status(&room_status_raw);
+        TrpgLifecycleState::from_workspace_progress(&workspace_state.status, &progress.workspace_status);
+    let workspace_status_key = crate::game::lifecycle::normalize_status(&workspace_status_raw);
     let turn = if progress.turn > 0 {
         progress.turn
-    } else if room_state.turn > 0 {
-        room_state.turn
+    } else if workspace_state.turn > 0 {
+        workspace_state.turn
     } else {
         1
     };
     let phase = if !progress.phase.trim().is_empty() {
         progress.phase.trim().to_string()
     } else {
-        room_state.phase.as_str().to_string()
+        workspace_state.phase.as_str().to_string()
     };
 
     let current_actor = if !progress.current_actor.trim().is_empty() {
@@ -1413,37 +1414,37 @@ pub fn update_turn_runtime_dom(
         "입력 잠금"
     };
 
-    let room_turn_for_sync = if room_state.turn > 0 {
-        room_state.turn
+    let workspace_turn_for_sync = if workspace_state.turn > 0 {
+        workspace_state.turn
     } else {
         turn
     };
-    let room_phase_for_sync = room_state.phase.as_str().to_string();
+    let workspace_phase_for_sync = workspace_state.phase.as_str().to_string();
     let progress_turn_for_sync = if progress.turn > 0 {
         progress.turn
     } else {
         turn
     };
     let progress_phase_for_sync = if progress.phase.trim().is_empty() {
-        room_phase_for_sync.clone()
+        workspace_phase_for_sync.clone()
     } else {
         progress.phase.trim().to_string()
     };
-    let turn_mismatch = room_turn_for_sync != progress_turn_for_sync;
-    let phase_mismatch = !phase_matches_for_sync(&room_phase_for_sync, &progress_phase_for_sync);
+    let turn_mismatch = workspace_turn_for_sync != progress_turn_for_sync;
+    let phase_mismatch = !phase_matches_for_sync(&workspace_phase_for_sync, &progress_phase_for_sync);
 
     let (sync_state, sync_class) = if turn_mismatch || phase_mismatch {
         let mut reasons = Vec::new();
         if turn_mismatch {
             reasons.push(format!(
                 "turn {}≠{}",
-                room_turn_for_sync, progress_turn_for_sync
+                workspace_turn_for_sync, progress_turn_for_sync
             ));
         }
         if phase_mismatch {
             reasons.push(format!(
                 "phase {}≠{}",
-                room_phase_for_sync, progress_phase_for_sync
+                workspace_phase_for_sync, progress_phase_for_sync
             ));
         }
         (format!("불일치: {}", reasons.join(" · ")), "status-error")
@@ -1554,7 +1555,7 @@ pub fn update_turn_runtime_dom(
     );
 
     let snapshot = vec![
-        room_status_key.clone(),
+        workspace_status_key.clone(),
         turn.to_string(),
         phase.clone(),
         current_actor.clone(),
@@ -1605,7 +1606,7 @@ pub fn update_turn_runtime_dom(
             return;
         };
 
-        let room_class = room_status_class(lifecycle);
+        let workspace_class = workspace_status_class(lifecycle);
         let party_class = if total_party > 0 && alive_party <= 0 {
             "status-wipe"
         } else {
@@ -1631,47 +1632,47 @@ pub fn update_turn_runtime_dom(
         let input_class = if lifecycle.accepts_player_input() {
             "status-active"
         } else {
-            room_class
+            workspace_class
         };
 
-        let room_id = crate::config::sanitize_room_id(room_state.id.trim())
-            .unwrap_or_else(crate::config::current_room_id);
+        let workspace_id = crate::config::sanitize_workspace_id(workspace_state.id.trim())
+            .unwrap_or_else(crate::config::current_workspace_id);
         if let Some(dashboard) = document.get_element_by_id("dashboard") {
-            let _ = dashboard.set_attribute("data-room-id", &room_id);
+            let _ = dashboard.set_attribute("data-workspace-id", &workspace_id);
         }
 
-        if let Some(room_status_el) = document.get_element_by_id("room-status") {
-            let room_label = room_display_label(&room_id);
-            room_status_el.set_text_content(Some(&format!(
+        if let Some(workspace_status_el) = document.get_element_by_id("workspace-status") {
+            let workspace_label = workspace_display_label(&workspace_id);
+            workspace_status_el.set_text_content(Some(&format!(
                 "현재 게임 {} · {}",
-                room_label,
+                workspace_label,
                 lifecycle.label_ko()
             )));
-            let _ = room_status_el.set_attribute("data-lifecycle", lifecycle.css_class());
-            let _ = room_status_el.set_attribute(
+            let _ = workspace_status_el.set_attribute("data-lifecycle", lifecycle.css_class());
+            let _ = workspace_status_el.set_attribute(
                 "title",
                 &format!(
                     "{} | 턴 {} | 페이즈 {} | raw {}",
                     lifecycle.help_text(),
                     turn,
                     phase,
-                    room_status_key
+                    workspace_status_key
                 ),
             );
         }
 
-        let mut room_switched = false;
+        let mut workspace_switched = false;
         if let Some(dashboard) = document.get_element_by_id("dashboard") {
-            let previous_room = dashboard
-                .get_attribute("data-round-plan-room")
+            let previous_workspace = dashboard
+                .get_attribute("data-round-plan-workspace")
                 .unwrap_or_default();
-            if previous_room.trim() != room_id {
-                room_switched = true;
-                let _ = dashboard.set_attribute("data-round-plan-room", &room_id);
+            if previous_workspace.trim() != workspace_id {
+                workspace_switched = true;
+                let _ = dashboard.set_attribute("data-round-plan-workspace", &workspace_id);
             }
         }
 
-        if room_switched {
+        if workspace_switched {
             if let Some(dm_input) = document
                 .get_element_by_id("round-run-dm")
                 .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
@@ -1696,11 +1697,11 @@ pub fn update_turn_runtime_dom(
             {
                 claimed_keeper.set_value("");
             }
-            if let Some(claimed_room) = document
-                .get_element_by_id("claimed-room-id")
+            if let Some(claimed_workspace) = document
+                .get_element_by_id("claimed-workspace-id")
                 .and_then(|el| el.dyn_into::<HtmlInputElement>().ok())
             {
-                claimed_room.set_value("");
+                claimed_workspace.set_value("");
             }
             if let Some(el) = document.get_element_by_id("action-panel") {
                 let _ = el.set_attribute("style", "display: none;");
@@ -1715,21 +1716,21 @@ pub fn update_turn_runtime_dom(
                 summary.set_text_content(Some(""));
                 let _ = summary.set_attribute("style", "display:none");
             }
-            restore_round_plan_inputs(&document, &room_id);
+            restore_round_plan_inputs(&document, &workspace_id);
         }
 
-        set_ops_hud_value(&document, "ops-room-id", &room_id, room_class);
+        set_ops_hud_value(&document, "ops-workspace-id", &workspace_id, workspace_class);
         set_ops_hud_value(
             &document,
             "ops-session-state",
             lifecycle.label_ko(),
-            room_class,
+            workspace_class,
         );
         set_ops_hud_value(
             &document,
             "ops-round-phase",
             &format!("T{} / {}", turn, pretty_phase(&phase)),
-            room_class,
+            workspace_class,
         );
         set_ops_hud_value(
             &document,
@@ -1744,7 +1745,7 @@ pub fn update_turn_runtime_dom(
             if lifecycle.accepts_player_input() {
                 "status-active"
             } else {
-                room_class
+                workspace_class
             },
         );
         set_ops_hud_value(&document, "ops-sync-state", &sync_state, sync_class);
@@ -1832,7 +1833,7 @@ pub fn update_turn_runtime_dom(
                 let _ = summary.set_attribute("style", "display:block");
             }
         }
-        persist_round_plan_inputs(&document, &room_id);
+        persist_round_plan_inputs(&document, &workspace_id);
 
         if let Some(debug_el) = document.get_element_by_id("round-sync-debug-body") {
             let phase_sync_class = if phase_mismatch {
@@ -1847,24 +1848,24 @@ pub fn update_turn_runtime_dom(
             };
             let html = format!(
                 concat!(
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">게임 방</span><span class=\"round-sync-value\">{room_id}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">세션 상태</span><span class=\"round-sync-value {room_class}\">{lifecycle}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">턴 동기화</span><span class=\"round-sync-value {turn_sync_class}\">room {room_turn} / progress {progress_turn}</span></div>",
-                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">페이즈 동기화</span><span class=\"round-sync-value {phase_sync_class}\">room {room_phase} / progress {progress_phase}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">게임 방</span><span class=\"round-sync-value\">{workspace_id}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">세션 상태</span><span class=\"round-sync-value {workspace_class}\">{lifecycle}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">턴 동기화</span><span class=\"round-sync-value {turn_sync_class}\">workspace {workspace_turn} / progress {progress_turn}</span></div>",
+                    "<div class=\"round-sync-row\"><span class=\"round-sync-label\">페이즈 동기화</span><span class=\"round-sync-value {phase_sync_class}\">workspace {workspace_phase} / progress {progress_phase}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 이벤트</span><span class=\"round-sync-value\">{last_event}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">마지막 결과</span><span class=\"round-sync-value\">{last_result}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 상태</span><span class=\"round-sync-value\">{runner_state}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">자동 진행 응답</span><span class=\"round-sync-value\">{runner_preview}</span></div>",
                     "<div class=\"round-sync-row\"><span class=\"round-sync-label\">라운드 진단</span><span class=\"round-sync-value\">{runner_diag_preview}</span></div>"
                 ),
-                room_id = html_escape(&room_id),
-                room_class = room_class,
+                workspace_id = html_escape(&workspace_id),
+                workspace_class = workspace_class,
                 lifecycle = html_escape(lifecycle.label_ko()),
                 turn_sync_class = turn_sync_class,
-                room_turn = room_turn_for_sync,
+                workspace_turn = workspace_turn_for_sync,
                 progress_turn = progress_turn_for_sync,
                 phase_sync_class = phase_sync_class,
-                room_phase = html_escape(&room_phase_for_sync),
+                workspace_phase = html_escape(&workspace_phase_for_sync),
                 progress_phase = html_escape(&progress_phase_for_sync),
                 last_event = html_escape(if progress.last_event.trim().is_empty() {
                     "-"
@@ -1883,7 +1884,7 @@ pub fn update_turn_runtime_dom(
             debug_el.set_inner_html(&html);
         }
 
-        let lifecycle_class = format!("{} {}", room_class, lifecycle.css_class());
+        let lifecycle_class = format!("{} {}", workspace_class, lifecycle.css_class());
         let lifecycle_label =
             html_escape(&format!("{} ({})", lifecycle.label_ko(), lifecycle.label()));
         let html = format!(
@@ -1891,7 +1892,7 @@ pub fn update_turn_runtime_dom(
 <div class="turn-runtime-grid">
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">세션 상태</span><span class="v {lifecycle_class}">{lifecycle_label}</span></div>
   <div class="turn-runtime-item turn-runtime-item-wide"><span class="k">설명</span><span class="v">{lifecycle_help}</span></div>
-  <div class="turn-runtime-item runtime-detail"><span class="k">상태</span><span class="v {room_class}">{room}</span></div>
+  <div class="turn-runtime-item runtime-detail"><span class="k">상태</span><span class="v {workspace_class}">{workspace}</span></div>
   <div class="turn-runtime-item"><span class="k">턴</span><span class="v">{turn}</span></div>
   <div class="turn-runtime-item"><span class="k">페이즈</span><span class="v">{phase}</span></div>
   <div class="turn-runtime-item runtime-detail"><span class="k">입력</span><span class="v {input_class}">{input}</span></div>
@@ -1906,8 +1907,8 @@ pub fn update_turn_runtime_dom(
 </div>
 "#,
             lifecycle_help = html_escape(lifecycle.help_text()),
-            room_class = room_class,
-            room = html_escape(room_status_label(lifecycle)),
+            workspace_class = workspace_class,
+            workspace = html_escape(workspace_status_label(lifecycle)),
             turn = turn,
             phase = html_escape(&pretty_phase(&phase)),
             input_class = input_class,

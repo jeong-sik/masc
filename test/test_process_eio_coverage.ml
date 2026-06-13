@@ -1,6 +1,6 @@
 open Alcotest
 
-module M = Masc_mcp
+module M = Masc
 
 let contains haystack needle =
   let len_h = String.length haystack and len_n = String.length needle in
@@ -236,6 +236,183 @@ let test_run_argv_with_status_includes_stderr_on_failure () =
   check bool "stderr surfaced in output" true
     (contains output "stderr-only")
 
+let test_run_argv_with_status_split_streaming_invokes_callbacks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun s -> stdout_chunks := s :: !stdout_chunks)
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [ "/bin/sh"
+      ; "-c"
+      ; "printf 'stdout-chunk\\n'; printf 'stderr-chunk\\n' >&2"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "streaming exit code" 0 code;
+  check string "streaming stdout captured" "stdout-chunk\n" stdout;
+  check string "streaming stderr captured" "stderr-chunk\n" stderr;
+  check bool "streaming stdout callback invoked" true (List.length !stdout_chunks > 0);
+  check bool "streaming stderr callback invoked" true (List.length !stderr_chunks > 0)
+
+let test_run_argv_pipeline_streaming_timeout_preserves_stderr () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_pipeline_with_status_split
+      ~timeout_sec:0.5
+      ~on_stdout_chunk:(fun _ -> ())
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [
+        {
+          Process_eio.argv =
+            [ "/bin/sh"; "-c"; "printf 'pipeline-timeout-stderr\\n' >&2; sleep 5" ];
+          env = None;
+          cwd = None;
+        };
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "pipeline timeout exit code" 124 code;
+  check string "pipeline timeout stdout" "" stdout;
+  check bool
+    "pipeline timeout stderr preserves streamed data"
+    true
+    (contains stderr "pipeline-timeout-stderr");
+  check bool
+    "pipeline timeout stderr avoids synthetic timeout when data streamed"
+    false
+    (contains stderr "process_eio_error");
+  check bool
+    "pipeline timeout stderr callback invoked"
+    true
+    (contains (String.concat "" (List.rev !stderr_chunks)) "pipeline-timeout-stderr")
+
+let test_run_argv_with_status_split_streaming_fallback_invokes_callbacks () =
+  Process_eio.reset_for_testing ();
+  let stdout_chunks = ref [] in
+  let stderr_chunks = ref [] in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun s -> stdout_chunks := s :: !stdout_chunks)
+      ~on_stderr_chunk:(fun s -> stderr_chunks := s :: !stderr_chunks)
+      [ "/bin/sh"
+      ; "-c"
+      ; "printf 'fallback-stdout\\n'; printf 'fallback-stderr\\n' >&2"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "streaming fallback exit code" 0 code;
+  check string "streaming fallback stdout captured" "fallback-stdout\n" stdout;
+  check string "streaming fallback stderr captured" "fallback-stderr\n" stderr;
+  check string
+    "streaming fallback stdout callback"
+    "fallback-stdout\n"
+    (String.concat "" (List.rev !stdout_chunks));
+  check string
+    "streaming fallback stderr callback"
+    "fallback-stderr\n"
+    (String.concat "" (List.rev !stderr_chunks))
+
+let test_run_argv_with_stdin_and_status_split_fallback_callback_exception_continues
+    () =
+  Process_eio.reset_for_testing ();
+  let stdout_callback_calls = Atomic.make 0 in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_stdin_and_status_split
+      ~on_stdout_chunk:(fun _ ->
+        Atomic.incr stdout_callback_calls;
+        failwith "intentional fallback callback failure")
+      ~on_stderr_chunk:(fun _ -> ())
+      ~stdin_content:"stdin-fallback-captured\n"
+      [ "/bin/cat" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "stdin fallback callback exception exit code" 0 code;
+  check string
+    "stdin fallback callback exception stdout captured"
+    "stdin-fallback-captured\n"
+    stdout;
+  check string "stdin fallback callback exception stderr captured" "" stderr;
+  check bool
+    "stdin fallback callback exception callback invoked"
+    true
+    (Atomic.get stdout_callback_calls > 0)
+
+let test_run_argv_with_status_split_streaming_callback_exception_continues () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let stdout_callback_calls = Atomic.make 0 in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun _ ->
+        Atomic.incr stdout_callback_calls;
+        failwith "intentional callback failure")
+      ~on_stderr_chunk:(fun _ -> ())
+      [ "/bin/sh"; "-c"; "printf 'still-captured\\n'" ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "callback exception streaming exit code" 0 code;
+  check string "callback exception stdout captured" "still-captured\n" stdout;
+  check string "callback exception stderr captured" "" stderr;
+  check bool
+    "callback exception callback invoked"
+    true
+    (Atomic.get stdout_callback_calls > 0)
+
+let test_run_argv_with_status_split_streaming_callback_cancelled_propagates () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let cancelled =
+    try
+      ignore
+        (Process_eio.run_argv_with_status_split_streaming
+           ~on_stdout_chunk:(fun _ ->
+             raise (Eio.Cancel.Cancelled (Failure "intentional cancellation")))
+           ~on_stderr_chunk:(fun _ -> ())
+           [ "/bin/sh"; "-c"; "printf 'cancel-me\\n'" ]);
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "callback cancellation propagates" true cancelled
+
+let test_run_argv_with_status_split_streaming_multiple_chunks () =
+  Eio_main.run @@ fun env ->
+  let proc_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
+  let cwd_default = Eio.Stdenv.fs env in
+  Process_eio.init ~cwd_default ~proc_mgr ~clock;
+  let chunk_count = Atomic.make 0 in
+  let status, stdout, _stderr =
+    Process_eio.run_argv_with_status_split_streaming
+      ~on_stdout_chunk:(fun _ -> Atomic.incr chunk_count)
+      ~on_stderr_chunk:(fun _ -> ())
+      [ "/bin/sh"
+      ; "-c"
+      ; "i=0; while [ $i -lt 500 ]; do printf '%s' 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; i=$((i+1)); done; printf '\\n'"
+      ]
+  in
+  let code = match status with Unix.WEXITED c -> c | _ -> 1 in
+  check int "multi-chunk exit code" 0 code;
+  check int "multi-chunk stdout length" 25001 (String.length stdout);
+  check bool "multi-chunk received more than one chunk" true (Atomic.get chunk_count > 1)
+
 let test_reset_for_testing_clears_runtime () =
   Eio_main.run @@ fun env ->
   let proc_mgr = Eio.Stdenv.process_mgr env in
@@ -291,6 +468,30 @@ let () =
              test_run_argv_with_status_cwd_override;
            test_case "run_argv_with_status-includes-stderr-on-failure" `Quick
              test_run_argv_with_status_includes_stderr_on_failure;
+           test_case "run_argv_with_status_split_streaming-invokes-callbacks" `Quick
+             test_run_argv_with_status_split_streaming_invokes_callbacks;
+           test_case
+             "run_argv_pipeline_with_status_split-timeout-preserves-stderr"
+             `Quick
+             test_run_argv_pipeline_streaming_timeout_preserves_stderr;
+           test_case
+             "run_argv_with_status_split_streaming-fallback-invokes-callbacks"
+             `Quick
+             test_run_argv_with_status_split_streaming_fallback_invokes_callbacks;
+           test_case
+             "run_argv_with_stdin_and_status_split-fallback-callback-exception-continues"
+             `Quick
+             test_run_argv_with_stdin_and_status_split_fallback_callback_exception_continues;
+           test_case
+             "run_argv_with_status_split_streaming-callback-exception-continues"
+             `Quick
+             test_run_argv_with_status_split_streaming_callback_exception_continues;
+           test_case
+             "run_argv_with_status_split_streaming-callback-cancelled-propagates"
+             `Quick
+             test_run_argv_with_status_split_streaming_callback_cancelled_propagates;
+           test_case "run_argv_with_status_split_streaming-multiple-chunks" `Quick
+             test_run_argv_with_status_split_streaming_multiple_chunks;
            test_case "reset_for_testing-clears-runtime" `Quick
              test_reset_for_testing_clears_runtime;
          ] );

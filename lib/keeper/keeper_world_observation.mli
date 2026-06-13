@@ -1,6 +1,6 @@
 (** Keeper_world_observation — Structured world state for keeper cycles.
 
-    Extracts and normalizes observation signals from room state, keeper meta,
+    Extracts and normalizes observation signals from workspace state, keeper meta,
     and context so the unified prompt builder and turn runner can consume
     a single coherent snapshot instead of re-reading scattered sources.
 
@@ -40,11 +40,6 @@ type world_observation = {
       global/all keeper is explicitly allowed to observe in the flattened
       namespace. *)
 
-  message_cursor_updates : (string * int) list;
-  (** Deterministic message cursor watermarks collected during observation.
-      These are applied to keeper meta before the next turn to avoid
-      reprocessing the same broadcast stream. *)
-
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
 
@@ -57,11 +52,8 @@ type world_observation = {
   context_ratio : float;
   (** Current context window utilization [0.0, 1.0]. *)
 
-  economic_pressure : Agent_economy.pressure_mode;
-  (** Agent economy mode: Normal, Frugal, or Hustle. *)
-
   unclaimed_task_count : int;
-  (** Number of unclaimed tasks in the room backlog. *)
+  (** Number of unclaimed tasks in the workspace backlog. *)
 
   claimable_task_count : int;
   (** Number of unclaimed tasks this keeper can claim with its current tool
@@ -69,10 +61,10 @@ type world_observation = {
 
   provider_capacity_blocked_task_count : int;
   (** Number of otherwise-claimable tasks currently held back by provider
-      capacity/cooldown when no fail-open cascade is available. *)
+      capacity/cooldown when no fail-open runtime is available. *)
 
   failed_task_count : int;
-  (** Number of failed/cancelled tasks in the room backlog. *)
+  (** Number of failed/cancelled tasks in the workspace backlog. *)
 
   pending_verification_count : int;
   (** Number of tasks awaiting cross-agent verification. *)
@@ -82,11 +74,14 @@ type world_observation = {
       autonomous attempt. Lets task-triggered wakeups bypass cooldown once
       so newly added work is not delayed behind the previous turn's timer. *)
 
-  active_agent_count : int;
-  (** Number of agents currently active in the room. *)
+  running_keeper_fiber_count : int;
+  (** Number of live keeper fibers for this workspace base path. *)
 
-  last_turn_budget : (int * int) option;
-  (** Previous generation's turn usage as [(used, total)], if available. *)
+  connected_surfaces : Gate_surface.surface_presence list;
+  (** Connector surfaces attached to this keeper (RFC-0223 P2).
+      Recomputed from binding stores + connector liveness on every
+      observation; the dashboard entry is always present. Presence
+      only — no conversation content, no counts. *)
 }
 
 type keeper_cycle_channel =
@@ -175,108 +170,105 @@ type board_signal_match = {
 val collect_board_events :
   base_path:string ->
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val collect_board_events_without_advancing_cursor :
   base_path:string ->
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   pending_board_event list * int * int
 
 val board_signal_match :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
-  signal:Board_dispatch.keeper_board_signal ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  signal:Board_dispatch.board_signal ->
   board_signal_match
 
 val board_signal_wake_reason :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
-  signal:Board_dispatch.keeper_board_signal ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  signal:Board_dispatch.board_signal ->
   string option
 
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. Returns [None] for non-board stimuli. *)
 val pending_board_event_of_stimulus :
   continuity_summary:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
   pending_board_event option
 
 (** Read the best available continuity summary for a keeper.
     Recovery order is progress log -> checkpoint snapshot -> meta summary. *)
 val read_continuity_summary :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string
 
-(** Build a world observation from room state and keeper metadata.
+(** Build a world observation from workspace state and keeper metadata.
 
-    Reads room backlog, agent list, checkpoint context, economy state,
+    Reads workspace backlog, agent list, checkpoint context, economy state,
     and recent board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
     @param pending_board_events Pre-collected board event summaries for this
       heartbeat, if already fetched during triage
-    @param config Coord configuration for I/O operations
+    @param config Workspace configuration for I/O operations
     @param meta Current keeper metadata *)
 val observe :
-  allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
 (** Build the observation used by direct [masc_keeper_msg] turns.
 
-    This intentionally reads durable room/task state, including pending
+    This intentionally reads durable workspace/task state, including pending
     verification counts, while suppressing transient board/message events and
     cursor updates. Direct operator messages should not advance autonomous
-    cursors, inherit unrelated room chatter, or synthesize scheduled
+    cursors, inherit unrelated workspace chatter, or synthesize scheduled
     scheduled timer signals, but they must still see the durable work
     signals that drive tool-use contracts. *)
 val observe_direct_keeper_msg :
-  allowed_tool_names:string list option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
 (** Non-mutating probe for the smart-heartbeat gate.
 
-    Returns [true] when durable room state already contains work that should
+    Returns [true] when durable workspace state already contains work that should
     force a keeper cycle even if the adaptive heartbeat would otherwise
     [Skip_idle]. Unlike {!observe}, this helper does not advance board or
     message cursors. *)
 val durable_signal_present :
-  allowed_tool_names:string list option ->
   pending_board_events:pending_board_event list option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   bool
 
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
 
-val apply_message_cursor_updates :
-  Keeper_types.keeper_meta ->
-  (string * int) list ->
-  Keeper_types.keeper_meta
-
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
-    additional period, down to a configurable floor. *)
+    additional period, down to a configurable floor.
+
+    When [board_health_score] is [Some f] (0.0 = worst, 1.0 = best),
+    the effective cooldown is multiplied by a health-derived factor:
+    unhealthy boards (<0.3) get 2x cooldown (less polling), healthy
+    boards (>0.7) get 0.5x cooldown (more polling). *)
 val effective_scheduled_autonomous_cooldown :
   base_cooldown:int -> since_last:int ->
-  ?consecutive_noop_count:int -> unit -> int
+  ?consecutive_noop_count:int -> ?board_health_score:float -> unit -> int
 
-val provider_cooldown_remaining_sec_for_cascade :
-  cascade_name:Cascade_name.t -> int option
+val provider_cooldown_remaining_sec_for_runtime :
+  keeper_name:string -> runtime_id:string -> int option
 
 val provider_capacity_blocked_task_count :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta ->
+    (keeper_name:string -> runtime_id:string -> int option) ->
+  meta:Keeper_meta_contract.keeper_meta ->
   claimable_task_count:int ->
   unit ->
   int
@@ -294,13 +286,20 @@ val should_inject_entropic_oscillation :
 
 val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+    (keeper_name:string -> runtime_id:string -> int option) ->
+  ?reactive_wake:bool ->
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
+(** [reactive_wake] (default [false]) marks evaluations triggered by an external
+    broadcast wakeup rather than the keeper's own cadence timer. When set, a
+    GLOBAL task backlog alone does not drive a turn — this prevents the
+    all-keeper stampede on each task release/add. Per-keeper Reactive triggers
+    and time-based liveness reasons are unaffected. *)
 
 val unified_turn_decision :
   ?provider_cooldown_remaining_sec:
-    (cascade_name:Cascade_name.t -> int option) ->
-  meta:Keeper_types.keeper_meta -> world_observation -> keeper_cycle_decision
+    (keeper_name:string -> runtime_id:string -> int option) ->
+  ?reactive_wake:bool ->
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 
 val should_run_keeper_cycle :
-  meta:Keeper_types.keeper_meta -> world_observation -> bool
+  meta:Keeper_meta_contract.keeper_meta -> world_observation -> bool

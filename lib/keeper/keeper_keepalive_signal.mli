@@ -1,11 +1,109 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
-(** Optional gRPC client + env — WORM Atomic: set at server bootstrap
-    when [MASC_AGENT_TRANSPORT=grpc]. *)
-val grpc_client_ref : Masc_grpc_client.t option Atomic.t
-val grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t
+type grpc_heartbeat_starter_fn = {
+  f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
+}
 
-val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
+val grpc_heartbeat_starter : ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option
+
+val register_grpc_heartbeat_starter : grpc_heartbeat_starter_fn -> unit
+
+val record_wake_payload_callback :
+  (keeper_name:string ->
+   trace_id:string ->
+   turn_index:int ->
+   model_id:string ->
+   context_window:int ->
+   approx_body_bytes:int ->
+   system_prompt_bytes:int ->
+   tool_defs_bytes:int ->
+   messages_bytes:int ->
+   message_count:int ->
+   role_counts:(string * int) list ->
+   tool_count:int ->
+   has_compact_happened:bool ->
+   unit) ref
+
+val register_record_wake_payload :
+  (keeper_name:string ->
+   trace_id:string ->
+   turn_index:int ->
+   model_id:string ->
+   context_window:int ->
+   approx_body_bytes:int ->
+   system_prompt_bytes:int ->
+   tool_defs_bytes:int ->
+   messages_bytes:int ->
+   message_count:int ->
+   role_counts:(string * int) list ->
+   tool_count:int ->
+   has_compact_happened:bool ->
+   unit) ->
+  unit
+
+val record_tool_skipped_callback :
+  (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ref
+
+val register_record_tool_skipped :
+  (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ->
+  unit
+
+val record_execute_output_callback :
+  (keeper_name:string ->
+   task_id:string option ->
+   stdout:string ->
+   stderr:string ->
+   status:Yojson.Safe.t ->
+   streamed:bool ->
+   unit)
+    ref
+
+val register_record_execute_output :
+  (keeper_name:string ->
+   task_id:string option ->
+   stdout:string ->
+   stderr:string ->
+   status:Yojson.Safe.t ->
+   streamed:bool ->
+   unit) ->
+  unit
+
+val record_execute_stream_chunk_callback :
+  (keeper_name:string ->
+   stream:[ `Stdout | `Stderr ] ->
+   string ->
+   unit)
+    ref
+
+val register_record_execute_stream_chunk :
+  (keeper_name:string ->
+   stream:[ `Stdout | `Stderr ] ->
+   string ->
+   unit) ->
+  unit
+
+val record_execute_stream_start_callback :
+  (keeper_name:string -> task_id:string option -> unit) ref
+
+val register_record_execute_stream_start :
+  (keeper_name:string -> task_id:string option -> unit) ->
+  unit
+
+val record_execute_stream_end_callback :
+  (keeper_name:string ->
+   task_id:string option ->
+   status:Yojson.Safe.t ->
+   unit)
+    ref
+
+val register_record_execute_stream_end :
+  (keeper_name:string ->
+   task_id:string option ->
+   status:Yojson.Safe.t ->
+   unit) ->
+  unit
 
 (** FSM guard identity helpers (Cycle 43).
     Wrapped by [Keeper_fsm_guard_runtime.wrap_unit] at call sites. *)
@@ -70,7 +168,7 @@ val select_board_wakeup_candidates :
   ('a * string) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
-  config:Coord.config -> Board_dispatch.keeper_board_signal -> unit
+  config:Workspace.config -> Board_dispatch.board_signal -> unit
 
 (** Per-stage timing accumulator for Phase 0 profiling. *)
 type stage_timing = {

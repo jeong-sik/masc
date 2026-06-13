@@ -13,45 +13,12 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let has_raw key = List.mem_assoc key doc in
-  let tool_access_key key = k ("tool_access." ^ key) in
   let tool_access_defaults_result =
-    let kind_key = tool_access_key "kind" in
-    let preset_key = tool_access_key "preset" in
-    let also_allow_key = tool_access_key "also_allow" in
-    let tools_key = tool_access_key "tools" in
-    match Keeper_toml_loader.toml_string_opt doc kind_key with
-    | None
-      when has_raw preset_key || has_raw also_allow_key || has_raw tools_key ->
-        Error
-          "keeper.tool_access.kind is required when keeper.tool_access.* keys are present"
-    | None -> Ok (None, None, None)
-    | Some "preset" -> (
-        match Keeper_toml_loader.toml_string_opt doc preset_key with
-        | None ->
-            Error
-              "keeper.tool_access.preset is required when keeper.tool_access.kind = \"preset\""
-        | Some raw -> (
-            match normalize_tool_preset_raw raw with
-            | Some normalized ->
-                Ok
-                  ( Some normalized,
-                    normalize_name_list_opt
-                      (Keeper_toml_loader.toml_string_list doc also_allow_key),
-                    Some "toml" )
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid keeper.tool_access.preset '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_tool_preset_raw_strings))))
-    | Some "custom" ->
-        Error
-          "keeper.tool_access.kind=\"custom\" cannot be used in keeper TOML defaults yet; use masc_keeper_up tool_access for runtime custom policies"
-    | Some raw ->
-        Error
-          (Printf.sprintf
-             "invalid keeper.tool_access.kind '%s' (allowed: preset)"
-             raw)
+    let key = k "tool_access" in
+    if has_raw key then
+      let tools = Keeper_toml_loader.toml_string_list doc key in
+      Ok (Some (normalize_name_list tools))
+    else Ok None
   in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
@@ -60,7 +27,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       (k "per_provider_timeout")
   in
   let removed_present =
-    ("also_allow" :: removed_keeper_input_key_names)
+    removed_keeper_input_key_names
     |> List.map k
     |> List.filter (fun key -> List.mem_assoc key doc)
   in
@@ -79,26 +46,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | Some raw when not (validate_name raw) ->
             Error (Printf.sprintf "invalid persona_name '%s'" raw)
         | _ -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "repo_cli_identity" with
-        | Some raw when not (validate_name raw) ->
-            Error (Printf.sprintf "invalid repo_cli_identity '%s'" raw)
-        | _ -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "git_identity_mode" with
-        | Some raw -> (
-            match normalize_git_identity_mode_opt (Some raw) with
-            | Some _ -> Ok ()
-            | None ->
-                Error
-                  (Printf.sprintf
-                     "invalid git_identity_mode '%s' (allowed: keeper_alias, repo_cli_identity)"
-                     raw))
-        | None -> Ok ())
   in
   let result =
     Result.bind result (fun () ->
@@ -141,56 +88,26 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      raw))
         | None -> Ok ())
   in
-  let result =
-    Result.bind result (fun () ->
-        match str "cascade_name" with
-        | None -> Ok ()
-        | Some raw ->
-            let raw_normalized = String.trim raw |> String.lowercase_ascii in
-            let normalized =
-              Keeper_cascade_profile.normalize_declared_name raw
-              |> String.lowercase_ascii
-            in
-            if List.mem raw_normalized reserved_cascade_names
-               || List.mem normalized reserved_cascade_names
-            then Ok ()
-            else
-              match Keeper_cascade_profile.catalog_names_for_validation () with
-              | Ok catalog ->
-                  let all_valid =
-                    List.sort_uniq String.compare
-                      (reserved_cascade_names @ catalog)
-                  in
-                  if not (List.mem normalized all_valid) then
-                    Error
-                      (Printf.sprintf
-                         "invalid cascade_name '%s' (known: %s)"
-                         raw
-                         (String.concat ", " all_valid))
-                  else if Keeper_cascade_profile.is_system_only_cascade normalized
-                  then
-                    let assignable =
-                      Keeper_cascade_profile.keeper_catalog_names ()
-                    in
-                    let assignable_hint =
-                      if assignable = [] then "(none)"
-                      else String.concat ", " assignable
-                    in
-                    Error
-                      (Printf.sprintf
-                         "cascade_name '%s' is system-only \
-                          (keeper_assignable=false); keepers must \
-                          reference an assignable cascade. \
-                          Assignable: %s"
-                         raw assignable_hint)
-                  else Ok ()
-              | Error fallback_error ->
-                  Error
-                    (Printf.sprintf
-                       "invalid cascade_name '%s' (reserved: %s; %s)"
-                       raw
-                       (String.concat ", " reserved_cascade_names)
-                       fallback_error))
+  (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
+     selection.  keeper→runtime assignment is the sole responsibility of
+     runtime.toml [[runtime.assignments]] (keyed by keeper name), resolved via
+     {!Runtime.runtime_id_for_keeper}.  Both the legacy [keeper.model] and the
+     (now removed) [keeper.runtime_id] keys are rejected at load — fail loud
+     rather than silently discard, pointing the operator at the new SSOT.
+     BREAKING: a keeper TOML still carrying [runtime_id] fails to load; migrate
+     its value to runtime.toml [[runtime.assignments]]. *)
+  let runtime_assignment_result =
+    let present key =
+      match str key with
+      | None -> false
+      | Some raw -> String.trim raw <> ""
+    in
+    match present "model", present "runtime_id" with
+    | true, _ | _, true ->
+      Error
+        "keeper.model / keeper.runtime_id are removed. Assign the keeper's \
+         runtime in runtime.toml [[runtime.assignments]] (keyed by keeper name)."
+    | false, false -> Ok ()
   in
   let result =
     Result.bind result (fun () ->
@@ -206,10 +123,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         | _ -> Ok ())
   in
   let result =
+    Result.bind result (fun () -> runtime_assignment_result)
+  in
+  let result =
     Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
-    (fun (tool_preset, tool_also_allow, tool_preset_source) ->
+    (fun tool_access ->
       {
         id = None;
         manifest_path = None;
@@ -233,7 +153,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         proactive_enabled = bool_ "proactive_enabled";
         proactive_idle_sec = int_ "proactive_idle_sec";
         proactive_cooldown_sec = int_ "proactive_cooldown_sec";
-        room_signal_prompt_enabled = bool_ "room_signal_prompt_enabled";
         shards =
           (match strs "shards" with
            | [] -> None
@@ -246,12 +165,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        repo_cli_identity = str "repo_cli_identity";
-        git_identity_mode =
-          normalize_git_identity_mode_opt (str "git_identity_mode");
-        tool_preset;
-        tool_preset_source;
-        tool_also_allow;
+        tool_access;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
@@ -266,8 +180,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         max_turns_per_call_scheduled_autonomous =
           int_ "max_turns_per_call_scheduled_autonomous";
         social_model = normalize_social_model_opt (str "social_model");
-        cascade_name = normalize_cascade_name_opt (str "cascade_name");
-        models = None;
         oas_env = extract_oas_env_from_doc doc;
         unknown_toml_keys = [];
       })
@@ -292,18 +204,12 @@ let parsed_field_key_names =
   ; "proactive_enabled"
   ; "proactive_idle_sec"
   ; "proactive_cooldown_sec"
-  ; "room_signal_prompt_enabled"
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "repo_cli_identity"
-  ; "git_identity_mode"
-  ; "tool_access.kind"
-  ; "tool_access.preset"
-  ; "tool_access.also_allow"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -313,7 +219,6 @@ let parsed_field_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "cascade_name"
   ]
 
 (** Canonical TOML key names used by [detect_unknown_keeper_toml_keys].
@@ -341,18 +246,12 @@ let canonical_keeper_toml_key_names =
   ; "proactive_enabled"
   ; "proactive_idle_sec"
   ; "proactive_cooldown_sec"
-  ; "room_signal_prompt_enabled"
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "repo_cli_identity"
-  ; "git_identity_mode"
-  ; "tool_access.kind"
-  ; "tool_access.preset"
-  ; "tool_access.also_allow"
-  ; "tool_access.tools"
+  ; "tool_access"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "telemetry_feedback_enabled"
@@ -362,7 +261,6 @@ let canonical_keeper_toml_key_names =
   ; "max_turns_per_call"
   ; "max_turns_per_call_scheduled_autonomous"
   ; "social_model"
-  ; "cascade_name"
   ]
 
 let loader_level_keeper_toml_key_names = [ "base" ]
@@ -434,8 +332,8 @@ let warn_unknown_keeper_toml_keys ~path (doc : Keeper_toml_loader.toml_doc) =
   | unknown ->
     let unknown = normalize_unknown_keeper_toml_keys unknown in
     if warn_unknown_keeper_toml_keys_once ~path unknown then begin
-      Prometheus.inc_counter
-        Prometheus.metric_config_unknown_keys_ignored
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_config_unknown_keys_ignored
         ~labels:[("file_path", path)]
         ~delta:(float_of_int (List.length unknown))
         ();
@@ -484,28 +382,12 @@ let merge_keeper_profile_defaults
     proactive_idle_sec = prefer overlay.proactive_idle_sec base.proactive_idle_sec;
     proactive_cooldown_sec =
       prefer overlay.proactive_cooldown_sec base.proactive_cooldown_sec;
-    room_signal_prompt_enabled =
-      prefer overlay.room_signal_prompt_enabled base.room_signal_prompt_enabled;
     shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    repo_cli_identity = prefer overlay.repo_cli_identity base.repo_cli_identity;
-    git_identity_mode =
-      prefer overlay.git_identity_mode base.git_identity_mode;
-    tool_preset = prefer overlay.tool_preset base.tool_preset;
-    tool_preset_source =
-      (match overlay.tool_preset_source with
-       | Some _ as source -> source
-       | None ->
-         match overlay.tool_preset with
-       | Some _ -> Some "toml"
-       | None ->
-           match base.tool_preset with
-           | Some _ -> Some "persona"
-           | None -> None);
-    tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
+    tool_access = prefer overlay.tool_access base.tool_access;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
     telemetry_feedback_enabled =
@@ -517,8 +399,6 @@ let merge_keeper_profile_defaults
     per_provider_timeout;
     always_approve = prefer overlay.always_approve base.always_approve;
     social_model = prefer overlay.social_model base.social_model;
-    cascade_name = prefer overlay.cascade_name base.cascade_name;
-    models = None;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous

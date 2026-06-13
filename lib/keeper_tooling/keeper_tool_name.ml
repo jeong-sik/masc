@@ -1,0 +1,257 @@
+(* Keeper-owned MCP tool-name vocabulary.
+
+   This lives outside the central [Tool_name] module so the tool dispatch
+   substrate stays keeper-agnostic: the substrate routes
+   opaque tool names and the keeper subsystem owns the typed vocabulary of its
+   own tools. Dependency direction is keeper -> tool, never the reverse.
+
+   The SSOT is on the keeper side of the Tool/Keeper boundary. *)
+
+type t =
+  | Execute
+  | Board_comment
+  | Board_comment_vote
+  | Board_curation_read
+  | Board_curation_submit
+  | Board_post_get
+  | Board_list
+  | Board_post
+  | Board_search
+  | Board_stats
+  | Board_sub_board_create
+  | Board_sub_board_delete
+  | Board_sub_board_get
+  | Board_sub_board_list
+  | Board_sub_board_update
+  | Board_vote
+  | Broadcast
+  | Context_status
+  | Fs_edit
+  | Fs_write
+  | Fs_read
+  | Ide_annotate
+  | Handoff
+  | Library_read
+  | Library_search
+  | Memory_search
+  | Memory_write
+  | Search_files
+  | Stay_silent
+  | Surface_read
+  | Surface_post
+  | Person_note_set
+  | Task_claim
+  | Task_create
+  | Task_done
+  | Task_force_done
+  | Task_force_release
+  | Tasks_audit
+  | Tasks_list
+  | Time_now
+  | Tool_search
+  | Tools_list
+  | Voice_agent
+  | Voice_listen
+  | Voice_session_end
+  | Voice_session_start
+  | Voice_sessions
+  | Voice_speak
+
+let to_string = function
+  | Execute -> "tool_execute"
+  | Board_comment -> "keeper_board_comment"
+  | Board_comment_vote -> "keeper_board_comment_vote"
+  | Board_curation_read -> "keeper_board_curation_read"
+  | Board_curation_submit -> "keeper_board_curation_submit"
+  | Board_post_get -> "keeper_board_post_get"
+  | Board_list -> "keeper_board_list"
+  | Board_post -> "keeper_board_post"
+  | Board_search -> "keeper_board_search"
+  | Board_stats -> "keeper_board_stats"
+  | Board_sub_board_create -> "keeper_board_sub_board_create"
+  | Board_sub_board_delete -> "keeper_board_sub_board_delete"
+  | Board_sub_board_get -> "keeper_board_sub_board_get"
+  | Board_sub_board_list -> "keeper_board_sub_board_list"
+  | Board_sub_board_update -> "keeper_board_sub_board_update"
+  | Board_vote -> "keeper_board_vote"
+  | Broadcast -> "keeper_broadcast"
+  | Context_status -> "keeper_context_status"
+  | Fs_edit -> "tool_edit_file"
+  | Fs_write -> "tool_write_file"
+  | Fs_read -> "tool_read_file"
+  | Ide_annotate -> "keeper_ide_annotate"
+  | Handoff -> "keeper_handoff"
+  | Library_read -> "keeper_library_read"
+  | Library_search -> "keeper_library_search"
+  | Memory_search -> "keeper_memory_search"
+  | Memory_write -> "keeper_memory_write"
+  | Search_files -> "tool_search_files"
+  | Stay_silent -> "keeper_stay_silent"
+  | Surface_read -> "keeper_surface_read"
+  | Surface_post -> "keeper_surface_post"
+  | Person_note_set -> "keeper_person_note_set"
+  | Task_claim -> "keeper_task_claim"
+  | Task_create -> "keeper_task_create"
+  | Task_done -> "keeper_task_done"
+  | Task_force_done -> "keeper_task_force_done"
+  | Task_force_release -> "keeper_task_force_release"
+  | Tasks_audit -> "keeper_tasks_audit"
+  | Tasks_list -> "keeper_tasks_list"
+  | Time_now -> "keeper_time_now"
+  | Tool_search -> "keeper_tool_search"
+  | Tools_list -> "keeper_tools_list"
+  | Voice_agent -> "keeper_voice_agent"
+  | Voice_listen -> "keeper_voice_listen"
+  | Voice_session_end -> "keeper_voice_session_end"
+  | Voice_session_start -> "keeper_voice_session_start"
+  | Voice_sessions -> "keeper_voice_sessions"
+  | Voice_speak -> "keeper_voice_speak"
+;;
+
+let of_string = function
+  | "tool_execute" -> Some Execute
+  | "keeper_board_comment" -> Some Board_comment
+  | "keeper_board_comment_vote" -> Some Board_comment_vote
+  | "keeper_board_curation_read" -> Some Board_curation_read
+  | "keeper_board_curation_submit" -> Some Board_curation_submit
+  | "keeper_board_post_get" -> Some Board_post_get
+  | "keeper_board_list" -> Some Board_list
+  | "keeper_board_post" -> Some Board_post
+  | "keeper_board_search" -> Some Board_search
+  | "keeper_board_stats" -> Some Board_stats
+  | "keeper_board_vote" -> Some Board_vote
+  | "keeper_board_sub_board_create" -> Some Board_sub_board_create
+  | "keeper_board_sub_board_delete" -> Some Board_sub_board_delete
+  | "keeper_board_sub_board_get" -> Some Board_sub_board_get
+  | "keeper_board_sub_board_list" -> Some Board_sub_board_list
+  | "keeper_board_sub_board_update" -> Some Board_sub_board_update
+  | "keeper_broadcast" -> Some Broadcast
+  | "keeper_context_status" -> Some Context_status
+  | "tool_edit_file" -> Some Fs_edit
+  | "tool_write_file" -> Some Fs_write
+  | "tool_read_file" -> Some Fs_read
+  | "keeper_ide_annotate" -> Some Ide_annotate
+  | "keeper_handoff" -> Some Handoff
+  | "keeper_library_read" -> Some Library_read
+  | "keeper_library_search" -> Some Library_search
+  | "keeper_memory_search" -> Some Memory_search
+  | "keeper_memory_write" -> Some Memory_write
+  | "tool_search_files" -> Some Search_files
+  | "keeper_stay_silent" -> Some Stay_silent
+  | "keeper_surface_read" -> Some Surface_read
+  | "keeper_surface_post" -> Some Surface_post
+  | "keeper_person_note_set" -> Some Person_note_set
+  | "keeper_task_claim" -> Some Task_claim
+  | "keeper_task_create" -> Some Task_create
+  | "keeper_task_done" -> Some Task_done
+  | "keeper_task_force_done" -> Some Task_force_done
+  | "keeper_task_force_release" -> Some Task_force_release
+  | "keeper_tasks_audit" -> Some Tasks_audit
+  | "keeper_tasks_list" -> Some Tasks_list
+  | "keeper_time_now" -> Some Time_now
+  | "keeper_tool_search" -> Some Tool_search
+  | "keeper_tools_list" -> Some Tools_list
+  | "keeper_voice_agent" -> Some Voice_agent
+  | "keeper_voice_listen" -> Some Voice_listen
+  | "keeper_voice_session_end" -> Some Voice_session_end
+  | "keeper_voice_session_start" -> Some Voice_session_start
+  | "keeper_voice_sessions" -> Some Voice_sessions
+  | "keeper_voice_speak" -> Some Voice_speak
+  | _ -> None
+;;
+
+let pp fmt t = Format.pp_print_string fmt (to_string t)
+;;
+
+
+let public_mcp_non_descriptor_names =
+  [ "masc_start"
+  ; "masc_broadcast"
+  ; "masc_messages"
+  ; "masc_keeper_sandbox_status"
+  ; "masc_keeper_create_from_persona"
+  ; "masc_persona_list"
+  ; "masc_runtime_verify"
+  ; "masc_runtime_ollama_probe"
+  ]
+;;
+
+let is_keeper_board_tool = function
+  | Board_comment
+  | Board_comment_vote
+  | Board_curation_read
+  | Board_curation_submit
+  | Board_post_get
+  | Board_list
+  | Board_post
+  | Board_search
+  | Board_stats
+  | Board_sub_board_create
+  | Board_sub_board_delete
+  | Board_sub_board_get
+  | Board_sub_board_list
+  | Board_sub_board_update
+  | Board_vote -> true
+  | Execute
+  | Broadcast
+  | Context_status
+  | Fs_edit
+  | Fs_write
+  | Fs_read
+  | Ide_annotate
+  | Handoff
+  | Library_read
+  | Library_search
+  | Memory_search
+  | Memory_write
+  | Search_files
+  | Stay_silent
+  | Surface_read
+  | Surface_post
+  | Person_note_set
+  | Task_claim
+  | Task_create
+  | Task_done
+  | Task_force_done
+  | Task_force_release
+  | Tasks_audit
+  | Tasks_list
+  | Time_now
+  | Tool_search
+  | Tools_list
+  | Voice_agent
+  | Voice_listen
+  | Voice_session_end
+  | Voice_session_start
+  | Voice_sessions
+  | Voice_speak -> false
+;;
+
+let is_board_surface_name name =
+  match of_string name with
+  | Some tool -> is_keeper_board_tool tool
+  | None -> String.starts_with ~prefix:"masc_board_" name
+;;
+
+let strip_mcp_masc_prefix name =
+  if String.starts_with ~prefix:"mcp__masc__" name
+  then String.sub name 11 (String.length name - 11)
+  else name
+;;
+
+let is_board_write_surface_name name =
+  let name = strip_mcp_masc_prefix name in
+  match of_string name with
+  | Some Board_comment
+  | Some Board_curation_submit
+  | Some Board_post
+  | Some Board_vote -> true
+  | Some _ | None ->
+    List.mem
+      name
+      [ "masc_board_comment"
+      ; "masc_board_curation_submit"
+      ; "masc_board_post"
+      ; "masc_board_vote"
+      ]
+;;

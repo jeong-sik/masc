@@ -58,7 +58,7 @@ let test_exact_match_load_ok () =
     write_cred ~base ~agent_name:"keeper-sangsu-agent"
       ~token_hash:"abc123";
     match
-      Masc_mcp.Auth.load_credential_of base
+      Masc.Auth.load_credential_of base
         ~ctx_agent_name:"keeper-sangsu-agent"
         ~resolved_credential_stem:"keeper-sangsu-agent"
     with
@@ -67,24 +67,24 @@ let test_exact_match_load_ok () =
         print_endline "PASS: exact match -> Ok cred"
     | Error e ->
         Printf.printf "FAIL: expected Ok, got Error %s\n"
-          (Masc_mcp.Auth.show_load_credential_error e);
+          (Masc.Auth.show_load_credential_error e);
         exit 1)
 
 let test_exact_match_missing_returns_credential_missing () =
   with_temp_base (fun base ->
     (* No cred file written *)
     match
-      Masc_mcp.Auth.load_credential_of base
+      Masc.Auth.load_credential_of base
         ~ctx_agent_name:"keeper-ghost-agent"
         ~resolved_credential_stem:"keeper-ghost-agent"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_missing, got Ok";
         exit 1
-    | Error (Masc_mcp.Auth.Credential_missing { ctx_agent_name }) ->
+    | Error (Masc.Auth.Credential_missing { ctx_agent_name }) ->
         assert (ctx_agent_name = "keeper-ghost-agent");
         print_endline "PASS: missing file -> Credential_missing"
-    | Error (Masc_mcp.Auth.Credential_mismatch _) ->
+    | Error (Masc.Auth.Credential_mismatch _) ->
         print_endline "FAIL: expected Credential_missing, got Credential_mismatch";
         exit 1)
 
@@ -96,18 +96,18 @@ let test_mismatch_rejects_even_when_resolved_stem_exists () =
     write_cred ~base ~agent_name:"keeper-sangsu-agent"
       ~token_hash:"canonical-token";
     match
-      Masc_mcp.Auth.load_credential_of base
+      Masc.Auth.load_credential_of base
         ~ctx_agent_name:"keeper-sangsu-agent"
         ~resolved_credential_stem:"sangsu"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_mismatch, got Ok (silent fallback)";
         exit 1
-    | Error (Masc_mcp.Auth.Credential_missing _) ->
+    | Error (Masc.Auth.Credential_missing _) ->
         print_endline "FAIL: expected Credential_mismatch, got Credential_missing";
         exit 1
     | Error
-        (Masc_mcp.Auth.Credential_mismatch
+        (Masc.Auth.Credential_mismatch
            { ctx_agent_name; resolved_credential_stem }) ->
         assert (ctx_agent_name = "keeper-sangsu-agent");
         assert (resolved_credential_stem = "sangsu");
@@ -117,18 +117,18 @@ let test_mismatch_rejects_even_when_resolved_stem_exists () =
 let test_mismatch_rejects_even_when_neither_exists () =
   with_temp_base (fun base ->
     match
-      Masc_mcp.Auth.load_credential_of base
+      Masc.Auth.load_credential_of base
         ~ctx_agent_name:"keeper-a-agent"
         ~resolved_credential_stem:"b"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_mismatch";
         exit 1
-    | Error (Masc_mcp.Auth.Credential_missing _) ->
+    | Error (Masc.Auth.Credential_missing _) ->
         print_endline "FAIL: ctx<>stem must take mismatch branch even when nothing exists";
         exit 1
     | Error
-        (Masc_mcp.Auth.Credential_mismatch
+        (Masc.Auth.Credential_mismatch
            { ctx_agent_name; resolved_credential_stem }) ->
         assert (ctx_agent_name = "keeper-a-agent");
         assert (resolved_credential_stem = "b");

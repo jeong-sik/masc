@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Graphql_api = Masc_mcp.Graphql_api
+module Graphql_api = Masc.Graphql_api
 
 (* ============================================================
    Constants Tests

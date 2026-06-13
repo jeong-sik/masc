@@ -21,15 +21,80 @@ import {
 import { normalizeStopCause } from './lib/stop-cause'
 import { contextThresholds } from './config/context-thresholds'
 import { normalizeKeeperDiagnostic } from './keeper-state'
-import type { CascadeRef } from './types'
+import type { RuntimeRef } from './types'
 
-/** Normalize a raw cascade_ref JSON object into a typed CascadeRef. */
-function normalizeCascadeRef(raw: unknown): CascadeRef | null {
+/** Normalize a raw runtime_ref JSON object into a typed RuntimeRef. */
+function normalizeRuntimeRef(raw: unknown): RuntimeRef | null {
   if (!isRecord(raw)) return null
   const group = asString(raw.group)
   if (!group) return null
   const item = asString(raw.item) ?? null
   return { group, item }
+}
+
+function normalizeKeeperLiveActivitySource(raw: unknown): Keeper['last_activity_source'] {
+  const source = asString(raw)?.trim()
+  switch (source) {
+    case 'keeper_meta':
+    case 'tool_call':
+    case 'approval_pending':
+      return source
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperLiveActivity(raw: unknown): Keeper['live_activity'] {
+  if (!isRecord(raw)) return null
+  return {
+    source: normalizeKeeperLiveActivitySource(raw.source),
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    tool: asString(raw.tool) ?? null,
+    turn: asNumber(raw.turn) ?? null,
+    keeper_turn_id: asNumber(raw.keeper_turn_id) ?? null,
+  }
+}
+
+function normalizeKeeperCurrentGate(raw: unknown): Keeper['current_gate'] {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind) ?? null
+  if (!kind) return null
+  return {
+    kind,
+    source: asString(raw.source) ?? null,
+    id: asString(raw.id) ?? null,
+    tool: asString(raw.tool) ?? null,
+    risk: asString(raw.risk) ?? null,
+    turn_id: asNumber(raw.turn_id) ?? null,
+    at: toIsoTimestamp(raw.at) ?? asString(raw.at) ?? null,
+    age_s: asNumber(raw.age_s) ?? null,
+    disposition: asString(raw.disposition) ?? null,
+    disposition_reason: asString(raw.disposition_reason) ?? null,
+  }
+}
+
+function normalizeKeeperTrustSeverity(raw: unknown): KeeperTrustLatestEvent['severity'] | null {
+  const severity = asString(raw)?.trim().toLowerCase()
+  switch (severity) {
+    case 'ok':
+    case 'warn':
+    case 'bad':
+      return severity
+    default:
+      return null
+  }
+}
+
+function normalizeKeeperSandboxProfile(raw: unknown): Keeper['sandbox_profile'] {
+  const profile = asString(raw)?.trim().toLowerCase()
+  switch (profile) {
+    case 'local':
+    case 'docker':
+      return profile
+    default:
+      return null
+  }
 }
 
 /** Maps lowercase backend phase strings (`keeper_state_machine.ml:phase_to_string`)
@@ -146,12 +211,10 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
   return 'offline'
 }
 
-// Closed set of strings that `keeperDisplayStatus` is allowed to emit
-// when an offline keeper is rendered. The first 8 are dashboard-classified
-// labels; the last 5 are backend FSM phase names that leak through
-// untranslated. Kept as a `const` set so adding a new value at the
-// `KeeperLifecycleState` union type forces a parallel update here
-// (and forces tsc to fail at consumers if drift occurs).
+// Closed set of display strings that `keeperDisplayStatus` may emit
+// when an offline keeper is rendered. Kept as a `const` set so adding
+// a new value at the `KeeperLifecycleState` union type forces a
+// parallel update here.
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
@@ -177,13 +240,8 @@ export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // (Offline/Stopped/Dead/Crashed/Zombie) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
   if (isKeeperOffline(keeper)) {
-    // Replaces an `as KeeperLifecycleState` cast that lied to the type
-    // system when `keeperDisplayStatus` returned a backend FSM name
-    // (`'paused'` / `'crashed'` / `'dead'` / `'zombie'` / `'unknown'`)
-    // outside the original 8-tag union. The union has now been widened
-    // to include those 5 names; `toKeeperLifecycleState` enforces the
-    // boundary at runtime so a future drift surfaces as `'idle'`
-    // instead of a silent type-system lie.
+    // Keep offline-detail labels on a typed display axis. Unknown future
+    // wire values fall back to idle instead of silently expanding UI state.
     return toKeeperLifecycleState(keeperDisplayStatus(keeper)) ?? 'idle'
   }
 
@@ -260,7 +318,7 @@ function normalizeKeeperTrustLatestEvent(raw: unknown): KeeperTrustLatestEvent |
   const ts = asString(raw.ts)
   const title = asString(raw.title)
   const summary = asString(raw.summary)
-  const severity = asString(raw.severity)
+  const severity = normalizeKeeperTrustSeverity(raw.severity)
   if (!kind || !ts || !title || !summary || !severity) return null
   return {
     kind,
@@ -283,7 +341,7 @@ export function normalizeKeeperTrustTerminalReason(raw: unknown): KeeperTrustTer
   return {
     code,
     source: asString(raw.source) ?? null,
-    severity: asString(raw.severity) ?? null,
+    severity: normalizeKeeperTrustSeverity(raw.severity),
     summary: asString(raw.summary) ?? null,
     next_action: asString(raw.next_action) ?? null,
   }
@@ -321,25 +379,12 @@ export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
       : null,
     execution_summary: isRecord(executionRaw)
       ? {
-          tool_contract_result: asString(executionRaw.tool_contract_result) ?? null,
-          runtime_proof_status: asString(executionRaw.runtime_proof_status) ?? null,
-          required_tools: asStringArray(executionRaw.required_tools) ?? [],
-          missing_required_tools:
-            asStringArray(executionRaw.missing_required_tools) ?? [],
-          requested_tools: asStringArray(executionRaw.requested_tools) ?? [],
-          tools_used: asStringArray(executionRaw.tools_used) ?? [],
-          unexpected_tools: asStringArray(executionRaw.unexpected_tools) ?? [],
-          requested_tool_count:
-            asNumber(executionRaw.requested_tool_count) ?? null,
-          tools_used_count: asNumber(executionRaw.tools_used_count) ?? null,
-          unexpected_tool_count:
-            asNumber(executionRaw.unexpected_tool_count) ?? null,
           provider_attempt_count:
             asNumber(executionRaw.provider_attempt_count) ?? null,
           provider_fallback_applied:
             asBoolean(executionRaw.provider_fallback_applied) ?? null,
           provider_selected_model: asString(executionRaw.provider_selected_model) ?? null,
-          cascade_outcome: asString(executionRaw.cascade_outcome) ?? null,
+          runtime_outcome: asString(executionRaw.runtime_outcome) ?? null,
           sandbox_summary: asString(executionRaw.sandbox_summary) ?? null,
           sandbox_root: asString(executionRaw.sandbox_root) ?? null,
           mutation_guard_summary:
@@ -460,8 +505,8 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         ttfrc_ms: asNumber(rawTel.ttfrc_ms) ?? null,
         prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
-      const cascadeObj = isRecord(item.cascade) ? item.cascade : null
-      const fallbackEvents = cascadeObj && Array.isArray(cascadeObj.fallback_events) ? cascadeObj.fallback_events : []
+      const runtimeObj = isRecord(item.runtime) ? item.runtime : null
+      const fallbackEvents = runtimeObj && Array.isArray(runtimeObj.fallback_events) ? runtimeObj.fallback_events : []
       const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
@@ -488,13 +533,13 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         total_tokens: totalTokens,
         wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
-        cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
-        cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
-        cascade_selected_model: null,
-        cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
-        cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
-        fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
-        fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
+        runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
+        runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
+        runtime_selected_model: null,
+        runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
+        runtime_strategy: runtimeObj && typeof runtimeObj.strategy === 'string' ? runtimeObj.strategy : null,
+        fallback_applied: runtimeObj ? runtimeObj.fallback_applied === true : false,
+        fallback_hops: runtimeObj ? (asNumber(runtimeObj.fallback_hops) ?? 0) : 0,
         fallback_from: null,
         fallback_to: null,
         fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
@@ -630,6 +675,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         // can render the keeper as "stage not known yet" rather than
         // routing an arbitrary backend string through a lying type.
         pipeline_stage: toPipelineStage(asString(row.pipeline_stage)) ?? 'unknown',
+        pipeline_stage_detail: asString(row.pipeline_stage_detail) ?? null,
+        lifecycle_phase:
+          toKeeperPhase(asString(row.lifecycle_phase))
+          ?? toKeeperPhase(asString(row.phase)),
         phase: toKeeperPhase(asString(row.phase)),
         paused: asBoolean(row.paused),
         registered:
@@ -647,14 +696,11 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used: undefined,
         last_model_used_label: null,
         next_model_hint: null,
-        cascade_name: asString(row.cascade_name) ?? null,
-        cascade_ref: normalizeCascadeRef(row.cascade_ref),
-        cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
-        selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
+        runtime_id: asString(row.runtime_id) ?? null,
+        runtime_ref: normalizeRuntimeRef(row.runtime_ref),
+        runtime_canonical: asString(row.runtime_canonical) ?? asString(row.selected_runtime_canonical) ?? null,
+        selected_runtime_canonical: asString(row.selected_runtime_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
-        presence_keepalive:
-          typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,
-        presence_keepalive_sec: asNumber(row.presence_keepalive_sec),
         keepalive_running:
           typeof row.keepalive_running === 'boolean' ? row.keepalive_running : undefined,
         proactive_enabled:
@@ -687,10 +733,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               long: asString(row.goal_horizons.long) ?? null,
             }
           : null,
-        sandbox_profile: asString(row.sandbox_profile) ?? null,
+        sandbox_profile: normalizeKeeperSandboxProfile(row.sandbox_profile),
         sandbox_target: asString(row.sandbox_target) ?? null,
         sandbox_last_error: asString(row.sandbox_last_error) ?? null,
-        effective_sandbox_image: asString(row.effective_sandbox_image) ?? null,
         blocked_task_count: asNumber(row.blocked_task_count) ?? null,
         goal_progress: isRecord(row.goal_progress)
           ? {
@@ -732,6 +777,10 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_proactive_ago_s: asNumber(row.last_proactive_ago_s),
         last_proactive_reason: asString(row.last_proactive_reason) ?? null,
         last_activity_ago_s: asNumber(row.last_activity_ago_s),
+        last_activity_at: toIsoTimestamp(row.last_activity_at) ?? asString(row.last_activity_at) ?? null,
+        last_activity_source: normalizeKeeperLiveActivitySource(row.last_activity_source),
+        live_activity: normalizeKeeperLiveActivity(row.live_activity),
+        current_gate: normalizeKeeperCurrentGate(row.current_gate),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
         social_model: null,
         configured_social_model: null,

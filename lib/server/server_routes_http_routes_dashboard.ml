@@ -9,7 +9,15 @@ open Server_dashboard_http
 open Server_routes_http_common
 open Server_routes_http_keeper_stream
 
+module Runtime_config_file = Runtime
+
 include Server_routes_http_routes_dashboard_setup
+
+let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
+let realtime_cache_ttl_s = Server_dashboard_http_core_cache.realtime_cache_ttl_s
+let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 
 let dashboard_error_json ?ok message =
   let fields = [ ("error", `String message) ] in
@@ -30,7 +38,248 @@ let respond_dashboard_ok ?request reqd =
     (`Assoc [ ("ok", `Bool true) ])
     reqd
 
-let rec add_routes ~sw ~clock router =
+let execute_output_heartbeat_s = 15.0
+
+let handle_execute_output_stream ~sw ~clock request reqd =
+  with_public_read
+    (fun _state req inner_reqd ->
+       let path = Http.Request.path req in
+       let keeper =
+         match
+           Server_utils.extract_path_param
+             ~prefix:"/api/dashboard/execute-output/"
+             path
+         with
+         | Some value -> Some value
+         | None ->
+           Server_utils.extract_path_param
+             ~prefix:"/api/v1/dashboard/execute-output/"
+             path
+       in
+       match keeper with
+       | None ->
+         respond_dashboard_error
+           ~status:`Bad_request
+           ~request:req
+           inner_reqd
+           "keeper path parameter is required"
+       | Some keeper ->
+         let keeper_name = Uri.pct_decode keeper |> String.trim in
+         let origin = get_origin req in
+         let headers =
+           Httpun.Headers.of_list
+             ([ "content-type", "text/event-stream"
+              ; "cache-control", "no-cache"
+              ; "connection", "keep-alive"
+              ; "x-accel-buffering", "no"
+              ]
+              @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let closed = ref false in
+         let close_stream () =
+           if not !closed
+           then (
+             closed := true;
+             try Httpun.Body.Writer.close writer with
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output stream close failed: %s"
+                 (Printexc.to_string exn))
+         in
+         let write_string data =
+           if !closed
+           then false
+           else (
+             try
+               Httpun.Body.Writer.write_string writer data;
+               true
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Dashboard.warn
+                 "execute output stream write failed: %s"
+                 (Printexc.to_string exn);
+               close_stream ();
+               false)
+         in
+         let write_json json =
+           write_string (Dashboard_execute_output.sse_frame json)
+         in
+         match Dashboard_execute_output.subscribe ~keeper_name with
+         | None ->
+           (* fire-and-forget: best-effort terminal event before closing stream. *)
+           ignore (write_json (Dashboard_execute_output.event_json ~keeper_name));
+           close_stream ()
+         | Some subscriber ->
+           let wrote_initial =
+             write_string "retry: 1500\n\n"
+             && write_json (Dashboard_execute_output.event_json ~keeper_name)
+           in
+           if not wrote_initial
+           then Dashboard_execute_output.unsubscribe subscriber
+           else
+             Eio.Fiber.fork ~sw (fun () ->
+               Eio.Switch.run (fun stream_sw ->
+                 Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
+                   [
+                     (fun () -> Dashboard_execute_output.unsubscribe subscriber);
+                     close_stream;
+                   ];
+                 let rec loop () =
+                   if not !closed
+                   then (
+                     match
+                       Eio.Time.with_timeout clock execute_output_heartbeat_s (fun () ->
+                         Ok (Dashboard_execute_output.take_event subscriber))
+                     with
+                     | Ok event ->
+                       if
+                         write_json
+                           (Dashboard_execute_output.stream_event_json event)
+                       then loop ()
+                     | Error `Timeout ->
+                       if write_string ": heartbeat\n\n" then loop ())
+                 in
+                 try loop () with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.Dashboard.warn
+                     "execute output stream loop failed: %s"
+                     (Printexc.to_string exn);
+                   close_stream ())))
+    request
+    reqd
+
+let runtime_config_raw_json ~path ~source_text ~reloaded =
+  `Assoc
+    [ ("ok", `Bool true)
+    ; ("path", `String path)
+    ; ("file_name", `String "runtime.toml")
+    ; ("source_text", `String source_text)
+    ; ("reloaded", `Bool reloaded)
+    ]
+
+let parse_runtime_config_raw_body body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc _ as json ->
+      (match Json_util.assoc_member_opt "source_text" json with
+       | Some (`String source_text) -> Ok source_text
+       | Some _ -> Error "source_text must be a string"
+       | None -> Error "source_text required")
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
+let runtime_config_path_error_status message =
+  if String.equal message "runtime config path not found"
+  then `Not_found
+  else `Internal_server_error
+
+(* ── Git helpers for worktree status ── *)
+
+let git_run ~cwd args =
+  let argv = "git" :: "-C" :: cwd :: "--no-optional-locks" :: args in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  try
+    let (status, out) =
+      Masc_exec.Exec_gate.run_argv_with_status
+        ~actor:(Masc_exec.Agent_id.of_string "system/dashboard_api")
+        ~raw_source
+        ~summary:"dashboard api git command"
+        ~timeout_sec:5.0
+        argv
+    in
+    match status with
+    | Unix.WEXITED 0 -> Some (String.trim out)
+    | _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | _ -> None
+;;
+
+type worktree_info =
+  { path : string
+  ; head : string
+  ; branch : string option
+  }
+
+let parse_worktree_list out =
+  let lines = String.split_on_char '\n' out in
+  let rec collect acc current = function
+    | [] -> List.rev (Option.to_list current @ acc)
+    | line :: rest ->
+      if String.starts_with ~prefix:"worktree " line
+      then (
+        let path = String.sub line 9 (String.length line - 9) in
+        collect acc (Some { path; head = ""; branch = None }) rest)
+      else if String.starts_with ~prefix:"HEAD " line
+      then (
+        let head = String.sub line 5 (String.length line - 5) in
+        collect acc (Option.map (fun w -> { w with head }) current) rest)
+      else if String.starts_with ~prefix:"branch " line
+      then (
+        let branch = String.sub line 7 (String.length line - 7) in
+        let branch_name =
+          if String.starts_with ~prefix:"refs/heads/" branch
+          then String.sub branch 11 (String.length branch - 11)
+          else branch
+        in
+        collect acc (Option.map (fun w -> { w with branch = Some branch_name }) current) rest)
+      else if String.trim line = ""
+      then collect (Option.to_list current @ acc) None rest
+      else collect acc current rest
+  in
+  collect [] None lines
+;;
+
+let git_status_counts ~cwd =
+  match git_run ~cwd [ "status"; "--porcelain" ] with
+  | None -> 0, 0
+  | Some out ->
+    let lines = String.split_on_char '\n' out in
+    let changed = ref 0 in
+    let staged = ref 0 in
+    List.iter
+      (fun line ->
+         if line = ""
+         then ()
+         else if String.length line >= 2
+         then (
+           let first = line.[0] in
+           let second = line.[1] in
+           if first <> ' ' && first <> '?' then incr staged;
+           if second <> ' ' then incr changed;
+           if first = '?' && second = '?'
+           then (
+             decr staged;
+             incr changed)))
+      lines;
+    !changed, !staged
+;;
+
+let worktree_info_to_json ~base_path w =
+  let changed_count, staged_count = git_status_counts ~cwd:w.path in
+  let keeper_attached =
+    match w.branch with
+    | Some b -> String.contains b '/'
+    | None -> false
+  in
+  `Assoc
+    [ "worktree_path", `String w.path
+    ; "branch", `String (Option.value ~default:"" w.branch)
+    ; "changed_count", `Int changed_count
+    ; "staged_count", `Int staged_count
+    ; "head_sha", `String w.head
+    ; "pr_number", `Null
+    ; "pr_state", `Null
+    ; "keeper_attached", `Bool keeper_attached
+    ]
+;;
+
+let add_routes ~sw ~clock router =
   router
   |> Http.Router.post "/api/v1/broadcast" (fun request reqd ->
        (* POST /api/v1/broadcast - HTTP API for external tools like autocov *)
@@ -48,6 +297,12 @@ let rec add_routes ~sw ~clock router =
            handle_broadcast state agent_name reqd body_str
          )
        ) request reqd)
+  |> Http.Router.prefix_get
+       "/api/dashboard/execute-output/"
+       (handle_execute_output_stream ~sw ~clock)
+  |> Http.Router.prefix_get
+       "/api/v1/dashboard/execute-output/"
+       (handle_execute_output_stream ~sw ~clock)
 
   (* Batch dashboard endpoint: single request replaces 4 separate API calls *)
   |> Http.Router.get "/api/v1/dashboard" (fun request reqd ->
@@ -72,7 +327,7 @@ let rec add_routes ~sw ~clock router =
          let json =
            Server_dashboard_snapshot_select.select_shell_json
              ?clock:state.Mcp_server.clock ~request:req
-             ~timing ~light state.Mcp_server.room_config
+             ~timing ~light state.Mcp_server.workspace_config
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
@@ -84,13 +339,13 @@ let rec add_routes ~sw ~clock router =
          in
          let cache_key =
            Printf.sprintf "nudges:%s:%d"
-             state.Mcp_server.room_config.base_path limit
+             state.Mcp_server.workspace_config.base_path limit
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_operator_nudges.json
-                 ~config:state.Mcp_server.room_config ~limit ()))
+                 ~config:state.Mcp_server.workspace_config ~limit ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -98,19 +353,26 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let json =
            Dashboard_goal_loop.status_json
-             ~base_path:state.Mcp_server.room_config.base_path ()
+             ~base_path:state.Mcp_server.workspace_config.base_path ()
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/branches" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = Dashboard_branches.json ~config:state.Mcp_server.room_config in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         (* /branches spawns `git -C <repo> branch` via Exec_gate. Cache +
+            offload (respond_cached_read) so a parallel dashboard burst
+            collapses to one git spawn per realtime TTL and the spawn runs on
+            an Executor_pool domain instead of blocking the main HTTP domain. *)
+         let cache_key =
+           Printf.sprintf "branches:%s"
+             state.Mcp_server.workspace_config.base_path
+         in
+         respond_cached_read ~request:req ~reqd ~cache_key
+           ~ttl:realtime_cache_ttl_s (fun () ->
+             Dashboard_branches.json ~config:state.Mcp_server.workspace_config)
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/rooms" (fun request reqd ->
-       with_public_read handle_dashboard_rooms request reqd)
-  |> Http.Router.get "/api/v1/rooms" (fun request reqd ->
-       with_public_read handle_dashboard_rooms request reqd)
+  |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
+       with_public_read handle_dashboard_workspace request reqd)
   (* Dev-only shared bearer for the dashboard UI. Served exclusively when the
      server binds to loopback and strict-auth env overrides are disabled, so
      that a LAN deployment never hands out a token over the wire. The token is
@@ -123,7 +385,7 @@ let rec add_routes ~sw ~clock router =
            "dev-token endpoint disabled (non-loopback bind or strict auth)"
        else
          with_public_read (fun state req reqd ->
-           let base_path = state.Mcp_server.room_config.base_path in
+           let base_path = state.Mcp_server.workspace_config.base_path in
            let raw_result = ensure_dashboard_dev_token base_path in
            begin
              match raw_result with
@@ -141,11 +403,49 @@ let rec add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+  |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           match Runtime_config_file.load_config_text () with
+           | Ok (path, source_text) ->
+             Http.Response.json_value ~compress:true ~request:req
+               (runtime_config_raw_json ~path ~source_text ~reloaded:false)
+               reqd
+           | Error msg ->
+             respond_dashboard_error
+               ~status:(runtime_config_path_error_status msg)
+               ~request:req reqd msg)
+         request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/raw" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun _state _agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_config_raw_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok source_text ->
+               (match Runtime_config_file.save_config_text source_text with
+                | Error msg ->
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () ->
+                  (match Runtime_config_file.load_config_text () with
+                   | Ok (path, saved_text) ->
+                     Http.Response.json_value ~compress:true ~request:req
+                       (runtime_config_raw_json
+                          ~path
+                          ~source_text:saved_text
+                          ~reloaded:true)
+                       reqd
+                   | Error msg ->
+                     respond_dashboard_error
+                       ~status:(runtime_config_path_error_status msg)
+                       ~request:req reqd msg)))
+         ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and
      timeout-circuit-open counts so operators can correlate slow endpoints
-     (Server-Timing header) with cache contention without scraping
-     /metrics.  Read-only; no env tuning side-effect. *)
+     (Server-Timing header) with cache contention without external telemetry.
+     Read-only; no env tuning side-effect. *)
   |> Http.Router.get "/api/v1/dashboard/cache-stats" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_cache.stats () in
@@ -189,7 +489,7 @@ let rec add_routes ~sw ~clock router =
              Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq ()
            in
            let json =
-             dashboard_logs_json ~config:state.Mcp_server.room_config ~limit
+             dashboard_logs_json ~config:state.Mcp_server.workspace_config ~limit
                ~level_filter ~applied_level ~min_level ~module_filter ~since_seq entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
@@ -198,7 +498,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "provider_logs" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Provider_logs.dashboard_provider_logs_json ()))
          in
@@ -214,7 +514,7 @@ let rec add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            let fallback_agent =
              dashboard_actor_for_request
-               ~base_path:state.Mcp_server.room_config.base_path request
+               ~base_path:state.Mcp_server.workspace_config.base_path request
            in
            let report_result =
              try
@@ -226,7 +526,7 @@ let rec add_routes ~sw ~clock router =
            match report_result with
            | Ok report ->
                Dashboard_tool_host_events.record ?fs:state.Mcp_server.fs
-                 state.Mcp_server.room_config
+                 state.Mcp_server.workspace_config
                  report;
                respond_dashboard_ok ~request:req reqd
            | Error message ->
@@ -234,7 +534,7 @@ let rec add_routes ~sw ~clock router =
                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
                  reqd)
        ) request reqd)
-  (* RFC-0049 — surface/section open counters. Aggregate Prometheus
+  (* RFC-0049 — surface/section open counters. Aggregate Otel_metric_store
      counters only; the request body is discarded after increment. *)
   |> Http.Router.post "/api/v1/dashboard/nav-event" (fun request reqd ->
        with_public_read (fun _state req reqd ->
@@ -259,7 +559,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "config_introspect" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Env_config_introspect.to_json ()))
          in
@@ -269,9 +569,9 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun _state req reqd ->
          let cache_key = "excuse_patterns" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               let patterns = Anti_rationalization.load_excuse_patterns () in
+               let patterns = Task.Anti_rationalization.load_excuse_patterns () in
                let json_items =
                  List.map
                    (fun (pat, reason) -> `List [ `String pat; `String reason ])
@@ -287,12 +587,12 @@ let rec add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let json = Yojson.Safe.from_string body_str in
-               match Anti_rationalization.parse_excuse_patterns_json json with
+               match Task.Anti_rationalization.parse_excuse_patterns_json json with
                | Error msg ->
                  Http.Response.json_value ~status:`Bad_request ~request:req
                    (`Assoc [("ok", `Bool false); ("error", `String msg)]) reqd
                | Ok patterns ->
-                 (match Anti_rationalization.save_excuse_patterns patterns with
+                 (match Task.Anti_rationalization.save_excuse_patterns patterns with
                  | Ok () ->
                      respond_dashboard_ok ~request:req reqd
                  | Error msg ->
@@ -348,7 +648,7 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/board" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           dashboard_memory_http_json ~config:state.Mcp_server.room_config req
+           dashboard_memory_http_json ~config:state.Mcp_server.workspace_config req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -363,13 +663,13 @@ let rec add_routes ~sw ~clock router =
          dashboard_memory_subsystems_include_entries request
        in
        let handler state req reqd =
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.workspace_config in
          let cache_key =
            Printf.sprintf "memory_subsystems:%s:%b"
              config.base_path include_memory_entries
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_memory_subsystems_http_json ~config
                  ~include_memory_entries req))
@@ -381,49 +681,9 @@ let rec add_routes ~sw ~clock router =
            (fun state _agent_name req reqd -> handler state req reqd)
            request reqd
        else with_public_read handler request reqd)
-  |> Http.Router.get "/api/v1/dashboard/doctor" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let self_bin = dashboard_doctor_self_bin () in
-         (* /api/v1/dashboard/doctor previously fork-exec'd the server
-            binary on every request and drained its JSON stdout
-            synchronously on the Eio main domain.  Both costs (process
-            spawn and the doctor scan itself) blocked every other HTTP
-            fiber sharing the domain.  Cache the response per self_bin
-            with stale-while-revalidate, and run the spawn on a worker
-            domain via [Domain_pool_ref]. *)
-         let cache_key = "dashboard.doctor:" ^ self_bin in
-         let payload =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
-               try
-                 let buf, _status =
-                   With_process.with_process_args_in
-                     self_bin
-                     [| self_bin; "doctor"; "all"; "--json" |]
-                     (With_process.drain_to_buffer ~chunk:4096)
-                 in
-                 (* Parse so the cache stores a structured value rather than
-                    a raw string; serialised back below. *)
-                 try Yojson.Safe.from_string (Buffer.contents buf) with
-                 | Yojson.Json_error _ ->
-                   Yojson.Safe.from_string
-                     (dashboard_doctor_degraded_json ~self_bin
-                        ~exn:(Failure "doctor returned invalid JSON"))
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Yojson.Safe.from_string
-                   (dashboard_doctor_degraded_json ~self_bin ~exn)))
-         in
-         Http.Response.json_value
-           ~compress:true
-           ~request:req
-           payload
-           reqd
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/governance" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.workspace_config.base_path in
          let json = dashboard_governance_http_json req ~base_path in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -435,7 +695,7 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           dashboard_proof_http_json ~config:state.Mcp_server.room_config req
+           dashboard_proof_http_json ~config:state.Mcp_server.workspace_config req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -444,7 +704,7 @@ let rec add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let base_path = state.Mcp_server.room_config.base_path in
+             let base_path = state.Mcp_server.workspace_config.base_path in
              match dashboard_governance_approval_resolve_http_json ~base_path ~args with
              | Ok json ->
                  respond_json_value_with_cors request reqd json
@@ -461,7 +721,7 @@ let rec add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let base_path = state.Mcp_server.room_config.base_path in
+             let base_path = state.Mcp_server.workspace_config.base_path in
              match
                dashboard_governance_approval_rule_delete_http_json ~base_path ~args
              with
@@ -483,10 +743,10 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let cache_key =
            Printf.sprintf "operator_snapshot:%s"
-             state.Mcp_server.room_config.base_path
+             state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:realtime_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                operator_snapshot_http_json ~state ~sw ~clock req))
          in
@@ -533,12 +793,12 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let cache_key =
            Printf.sprintf "planning:%s"
-             state.Mcp_server.room_config.base_path
+             state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_planning_http_json ~config:state.Mcp_server.room_config))
+               dashboard_planning_http_json ~config:state.Mcp_server.workspace_config))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -557,12 +817,12 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let cache_key =
            Printf.sprintf "goals_tree:%s"
-             state.Mcp_server.room_config.base_path
+             state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_goals_tree_http_json ~config:state.Mcp_server.room_config))
+               dashboard_goals_tree_http_json ~config:state.Mcp_server.workspace_config))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -579,13 +839,13 @@ let rec add_routes ~sw ~clock router =
          else
            let cache_key =
              Printf.sprintf "goal_detail:%s:%s"
-               state.Mcp_server.room_config.base_path goal_id
+               state.Mcp_server.workspace_config.base_path goal_id
            in
            let json =
-             Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
                Domain_pool_ref.submit_io_or_inline (fun () ->
                  dashboard_goal_detail_http_json
-                   ~config:state.Mcp_server.room_config ~goal_id))
+                   ~config:state.Mcp_server.workspace_config ~goal_id))
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -593,25 +853,25 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          handle_dashboard_task_history state req reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/mission" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
-           Printf.sprintf "mission:%s" state.Mcp_server.room_config.base_path
+           Printf.sprintf "briefing:%s" state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_mission_http_json ~state ~sw ~clock req))
+               dashboard_briefing_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/session" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
-           Printf.sprintf "session:%s" state.Mcp_server.room_config.base_path
+           Printf.sprintf "session:%s" state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_session_http_json ~state ~sw ~clock req))
          in
@@ -630,21 +890,21 @@ let rec add_routes ~sw ~clock router =
                ~timing
                ?actor:
                  (dashboard_actor_for_request
-                    ~base_path:state.Mcp_server.room_config.base_path request)
-               state.Mcp_server.room_config
+                    ~base_path:state.Mcp_server.workspace_config.base_path request)
+               state.Mcp_server.workspace_config
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
+  |> Http.Router.get "/api/v1/dashboard/briefing/sections" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let cache_key =
            Printf.sprintf "mission_briefing:%s"
-             state.Mcp_server.room_config.base_path
+             state.Mcp_server.workspace_config.base_path
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               dashboard_mission_briefing_http_json ~state ~sw ~clock req))
+               dashboard_briefing_sections_http_json ~state ~sw ~clock req))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -656,7 +916,7 @@ let rec add_routes ~sw ~clock router =
              (Option.value ~default:"-" surface_id)
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_surface_readiness.json ?surface_id ()))
          in
@@ -691,7 +951,7 @@ let rec add_routes ~sw ~clock router =
             6× longer TTL still serves near-live data; under 30s window the
             poll just hit the previous compute and never wait 30s again. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:config_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_http_tool_quality.aggregate ~n ?window_hours ()))
          in
@@ -699,13 +959,6 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-feature-proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let n =
-           let raw = match Server_utils.query_param req "n" with
-             | Some s -> int_of_string_opt s |> Option.value ~default:5000
-             | None -> 5000
-           in
-           max 1 (min 50000 raw)
-         in
          let window_hours =
            match Server_utils.query_param req "window_hours" with
            | Some s ->
@@ -715,31 +968,19 @@ let rec add_routes ~sw ~clock router =
               | Some _ | None -> None)
            | None -> None
          in
-         let success_threshold_pct =
-           match Server_utils.query_param req "success_threshold_pct" with
-           | Some s ->
-             (match float_of_string_opt s with
-              | Some value when Float.is_finite value ->
-                Some (max 0.0 (min 100.0 value))
-              | Some _ | None -> None)
-           | None -> None
-         in
-         let config = state.Mcp_server.room_config in
+         let config = state.Mcp_server.workspace_config in
          let cache_key =
-           Printf.sprintf "keeper_feature_proof:%s:%d:%s:%s"
-             config.base_path n
+           Printf.sprintf "keeper_feature_proof:%s:%s"
+             config.base_path
              (match window_hours with
               | Some w -> Printf.sprintf "%.2f" w
               | None -> "-")
-             (match success_threshold_pct with
-              | Some p -> Printf.sprintf "%.2f" p
-              | None -> "-")
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_keeper_feature_proof.json
-                 ~config ~n ?window_hours ?success_threshold_pct ()))
+                 ~config ?window_hours ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -747,7 +988,7 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let cache_key = "transport_health" in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:live_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                dashboard_transport_health_http_json ~state))
          in
@@ -755,7 +996,7 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/perf" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_perf_http_json state.Mcp_server.room_config in
+         let json = dashboard_perf_http_json state.Mcp_server.workspace_config in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/harness-health" (fun _request reqd ->
@@ -764,14 +1005,14 @@ let rec add_routes ~sw ~clock router =
          let until = Server_utils.query_param req "until" in
          let cache_key =
            Printf.sprintf "harness_health:%s:%s:%s"
-             state.Mcp_server.room_config.base_path
+             state.Mcp_server.workspace_config.base_path
              (Option.value ~default:"-" since)
              (Option.value ~default:"-" until)
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
-               Dashboard_harness_health.json ~config:state.Mcp_server.room_config
+               Dashboard_harness_health.json ~config:state.Mcp_server.workspace_config
                  ?since ?until ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
@@ -784,7 +1025,7 @@ let rec add_routes ~sw ~clock router =
             profile, cold or near-expiry). 10s TTL means every 11th poll
             eats 3.5s; 60s collapses to 1/60 polls. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:60.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:feature_health_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_feature_health.json ()))
          in
@@ -793,7 +1034,7 @@ let rec add_routes ~sw ~clock router =
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
   |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.workspace_config.base_path in
          let agent_name = Server_utils.query_param req "agent_name" in
          let limit =
            Server_utils.int_query_param req "limit" ~default:10
@@ -806,7 +1047,7 @@ let rec add_routes ~sw ~clock router =
              limit
          in
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
          match agent_name with
            | Some name when String.trim name <> "" ->
@@ -860,7 +1101,7 @@ let rec add_routes ~sw ~clock router =
             for cold start. *)
          let json =
            Server_dashboard_snapshot_select.select_telemetry_summary_json
-             ~timing state.Mcp_server.room_config
+             ~timing state.Mcp_server.workspace_config
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
@@ -905,6 +1146,18 @@ let rec add_routes ~sw ~clock router =
                  (keeper_chat_stream_error_json message)
          )
        ) request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/keepers/chat/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_result"
+         (fun state _req reqd ->
+           handle_keeper_chat_request_result state request reqd)
+         request reqd)
+
+  |> Http.Router.prefix_post "/api/v1/keepers/chat/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
+         (fun state _req reqd ->
+           handle_keeper_chat_request_cancel state request reqd)
+         request reqd)
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
@@ -982,91 +1235,29 @@ let rec add_routes ~sw ~clock router =
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes
-  |> add_keeper_cascade_routes
-
-and add_keeper_cascade_routes router =
-  router
-  (* ── Keeper cascade config API ──────────────────────────────── *)
-
-  |> Http.Router.get "/api/v1/keeper/cascades" (fun request reqd ->
-         with_public_read (fun _state _req reqd ->
-         let gate = cascade_profile_gate () in
-         Http.Response.json_value ~request:request
-           (`Assoc [
-             ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
-             ( "invalid_profiles",
-               `List
-                 (List.map
-                    (fun (name, errors) ->
-                      `Assoc
-                        [
-                          ("name", `String name);
-                          ("errors", `List (List.map (fun err -> `String err) errors));
-                        ])
-                    gate.invalid_profiles) );
-           ]) reqd
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/keeper/cascade" (fun request reqd ->
-       with_tool_auth
-         ~tool_name:(Tool_name.Masc.to_string Tool_name.Masc.Status)
-         (fun state req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-           match Yojson.Safe.from_string body_str with
-           | exception Yojson.Json_error _ ->
-             respond_dashboard_error ~request:req ~ok:false reqd "invalid JSON body"
-           | json ->
-             let keeper_name = Safe_ops.json_string_opt "keeper" json in
-             let cascade_name = Safe_ops.json_string_opt "cascade_name" json in
-             match keeper_name, cascade_name with
-             | None, _ | _, None ->
-               respond_dashboard_error ~request:req ~ok:false reqd
-                 "requires {\"keeper\":\"...\",\"cascade_name\":\"...\"}"
-             | Some name, Some cascade ->
-               let known = available_cascade_profiles () in
-               let invalid = invalid_cascade_assignment_profiles () in
-               (match List.assoc_opt cascade invalid with
-                | Some reasons ->
-                  respond_dashboard_error ~status:`Conflict ~request:req
-                    ~ok:false reqd
-                    (Printf.sprintf
-                       "cascade %s is invalid in active cascade.toml: %s"
-                       cascade
-                       (String.concat " | " reasons))
-                | None ->
-               if not (List.mem cascade known) then
-                 respond_dashboard_error ~request:req ~ok:false reqd
-                   (Printf.sprintf "unknown cascade %s. Available: %s"
-                      cascade (String.concat ", " known))
-               else
-               match Config_dir_resolver.keeper_toml_path_opt name with
-               | None ->
-                 respond_dashboard_error ~status:`Not_found ~request:req
-                   ~ok:false reqd
-                   (Printf.sprintf "no TOML config for keeper %s" name)
-               | Some toml_path ->
-                 match Keeper_toml_loader.update_keeper_toml_field
-                         ~path:toml_path ~key:"cascade_name" ~value:cascade with
-                 | Error e ->
-                   respond_dashboard_error ~status:`Internal_server_error
-                     ~request:req ~ok:false reqd e
-                 | Ok () ->
-                   let config = state.Mcp_server.room_config in
-                    (match sync_keeper_cascade_meta ~config ~name
-                            ~cascade_name:cascade with
-                    | Error e ->
-                      respond_dashboard_error ~status:`Internal_server_error
-                        ~request:req ~ok:false reqd e
-                    | Ok live_meta_synced ->
-                      Http.Response.json_value ~request:req
-                        (`Assoc
-                           [
-                             ("ok", `Bool true);
-                             ("keeper", `String name);
-                             ("cascade_name", `String cascade);
-                             ("source", `String "toml");
-                             ("live_meta_synced", `Bool live_meta_synced);
-                           ])
-                        reqd))
-         )
-       ) request reqd)
+  |> Http.Router.get "/api/dashboard/worktree-status" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+            let base_path = state.Mcp_server.workspace_config.base_path in
+            let worktrees =
+              match git_run ~cwd:base_path [ "worktree"; "list"; "--porcelain" ] with
+              | None -> []
+              | Some out -> parse_worktree_list out
+            in
+            let json_entries = List.map (worktree_info_to_json ~base_path) worktrees in
+            let body_lines =
+              List.map
+                (fun json -> Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json))
+                json_entries
+              |> String.concat ""
+            in
+            let headers =
+              Httpun.Headers.of_list
+                [ "content-type", "text/event-stream"
+                ; "cache-control", "no-cache"
+                ]
+            in
+            let response = Httpun.Response.create ~headers `OK in
+            Httpun.Reqd.respond_with_string reqd response body_lines)
+         request
+         reqd)

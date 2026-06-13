@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
 let last_substring_index haystack needle =
@@ -177,7 +177,7 @@ let test_compute_context_ratio_does_not_infer_provider_budget () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("cascade_name", `String "primary");
+            ("runtime_id", `String "primary");
           ])
     with
     | Ok meta -> meta
@@ -211,10 +211,10 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
-      let keeper_ctx : _ Tool_keeper.context =
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "owner";
@@ -239,7 +239,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -261,7 +261,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
             };
         }
       in
-      (match Keeper_types.write_meta config updated_meta with
+      (match Keeper_meta_store.write_meta config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
@@ -354,9 +354,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See: this fixture only needs an initialized room for digest reads. *)
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      (* See: this fixture only needs an initialized workspace for digest reads. *)
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let meta =
         match
           Masc_test_deps.meta_of_json_fixture
@@ -367,7 +367,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("trace_id", `String "trace-paused-runtime-trust");
                 ("goal", `String "Expose paused keeper failure in summary");
                 ("short_goal", `String "Expose paused keeper failure in summary");
-                ("cascade_name", `String "tier-group.primary");
+                ("runtime_id", `String "runtime.primary");
               ])
         with
         | Ok meta ->
@@ -379,14 +379,15 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 meta.runtime with
                 last_blocker =
                   Some
-                    (Keeper_types.blocker_info_of_class
-                       ~detail:"Completion contract [require_tool_use] violated: actionable keeper signal was present, but the model called no keeper tools"
-                       Keeper_types.Completion_contract_violation);
+                    (Keeper_meta_contract.blocker_info_of_class
+                      ~detail:
+                         "Completion contract [tool_contract] violated: no ToolUse block"
+                       Keeper_meta_contract.Completion_contract_violation);
               };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_types.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       Dated_jsonl.append
@@ -400,20 +401,15 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("turn_count", `Int 12);
             ("outcome", `String "error");
             ( "terminal_reason_code",
-              `String "completion_contract_violation:require_tool_use" );
+              `String "completion_contract_violation:tool_contract" );
             ("operator_disposition", `String "pause_human");
             ( "operator_disposition_reason",
-              `String "tool_required_unsatisfied" );
-            ( "tool_contract_result",
-              `String "missing_required_tool_use" );
+              `String "unmapped_runtime_state" );
             ("tools_used", `List []);
             ( "tool_surface",
               `Assoc
                 [
-                  ("tool_requirement", `String "required");
-                  ("required_tools", `List [ `String "tool_execute" ]);
-                  ("missing_required_tools", `List [ `String "tool_execute" ]);
-                  ("visible_tool_count", `Int 8);
+                  ("turn_lane", `String "tool_optional");
                 ] );
             ( "sandbox",
               `Assoc
@@ -422,7 +418,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   ("sandbox_root", `String base_dir);
                   ("network_mode", `String "inherit");
                 ] );
-            ( "cascade",
+            ( "runtime",
               `Assoc
                 [
                   ("name", `String "primary");
@@ -455,10 +451,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
       Alcotest.(check string) "operator reason preserved"
-        "tool_required_unsatisfied"
+        "unmapped_runtime_state"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "completion_contract_violation:require_tool_use"
+        "completion_contract_violation:tool_contract"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string);
       Operator_control.invalidate_snapshot_cache ();
@@ -483,7 +479,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full paused pipeline" "paused"
         (full_keeper |> member "pipeline_stage" |> to_string))
 
-let test_digest_room_includes_keeper_runtime_attention () =
+let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -496,9 +492,9 @@ let test_digest_room_includes_keeper_runtime_attention () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
-      let keeper_ctx : _ Tool_keeper.context =
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator")); (* See: fixture init. *)
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "operator";
@@ -522,7 +518,7 @@ let test_digest_room_includes_keeper_runtime_attention () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -536,13 +532,13 @@ let test_digest_room_includes_keeper_runtime_attention () =
               meta.runtime with
               last_blocker =
                 Some
-                  (Keeper_types.blocker_info_of_class
+                  (Keeper_meta_contract.blocker_info_of_class
                      ~detail:"Completion contract requires a keeper tool call"
-                     Keeper_types.Completion_contract_violation);
+                     Keeper_meta_contract.Completion_contract_violation);
             };
         }
       in
-      (match Keeper_types.write_meta config meta with
+      (match Keeper_meta_store.write_meta config meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
       let digest =
@@ -601,9 +597,9 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      let keeper_ctx : _ Tool_keeper.context =
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "operator";
@@ -627,7 +623,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -644,10 +640,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             ("outcome", `String "ok");
             ("operator_disposition", `String "pass");
             ("operator_disposition_reason", `String "healthy");
-            ("tool_contract_result", `String "satisfied");
-            ("tools_used", `List [ `String "keeper_status" ]);
-            ("requested_tools", `List [ `String "keeper_status" ]);
-            ( "cascade",
+            ( "runtime",
               `Assoc
                 [
                   ("name", `String "primary");
@@ -683,13 +676,13 @@ let test_snapshot_has_expected_sections () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
-      ignore (Coord.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
-      ignore (Coord.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      ignore (Workspace.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
+      ignore (Workspace.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
-      let root = Yojson.Safe.Util.member "root" json in
+      let root = Yojson.Safe.Util.member "workspace" json in
       Alcotest.(check bool) "root block present" true
         (root <> `Null);
       Alcotest.(check bool) "root initialized" true
@@ -726,9 +719,11 @@ let test_snapshot_has_expected_sections () =
       let admission = Yojson.Safe.Util.member "admission_queue" json in
       Alcotest.(check bool) "admission queue present" true
         (admission <> `Null);
-      Alcotest.(check string) "admission mode" "passthrough"
-        Yojson.Safe.Util.(admission |> member "mode" |> to_string);
-      Alcotest.(check string) "admission throttle owner" "oas_cascade"
+      Alcotest.(check bool) "admission throttle is not reported as mode field" true
+        (match Yojson.Safe.Util.member "mode" admission with
+         | `Null -> true
+         | _ -> false);
+      Alcotest.(check string) "admission throttle owner" "oas_runtime"
         Yojson.Safe.Util.(admission |> member "throttle_owner" |> to_string);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
@@ -743,8 +738,8 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
       let ctx = operator_ctx env sw config "owner" in
       let request_namespace_pause actor =
         match
@@ -753,7 +748,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
               [
                 ("actor", `String actor);
                 ("action_type", `String "namespace_pause");
-                ("target_type", `String "root");
+                ("target_type", `String "workspace");
               ])
         with
         | Ok _ -> ()
@@ -784,13 +779,6 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "namespace_pause")
            confirm_required_actions);
-      let retired_identity_login_prepare = "repo_cli_identity_" ^ "login_prepare" in
-      Alcotest.(check bool) "root repo CLI identity login prepare removed" false
-        (List.exists
-           (fun row ->
-             Yojson.Safe.Util.(row |> member "action_type" |> to_string)
-             = retired_identity_login_prepare)
-           confirm_required_actions);
       Alcotest.(check bool) "keeper recover listed" true
         (List.exists
            (fun row ->
@@ -816,9 +804,9 @@ let test_snapshot_summary_view_excludes_retired_command_plane () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_messages:false
@@ -842,9 +830,9 @@ let test_snapshot_lightweight_summary_omits_heavy_activity () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       let json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:true
@@ -880,10 +868,10 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
-      let keeper_ctx : _ Tool_keeper.context =
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "owner";
@@ -928,7 +916,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             ("tools_used", `List []);
           ]);
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -991,10 +979,10 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       Eio_guard.disable ();
       cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
-      let keeper_ctx : _ Tool_keeper.context =
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config;
           agent_name = "owner";
@@ -1038,7 +1026,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             ])
       done;
       let meta =
-        match Keeper_types.read_meta config keeper_name with
+        match Keeper_meta_store.read_meta config keeper_name with
         | Ok (Some meta) -> meta
         | Ok None -> Alcotest.fail "expected keeper meta"
         | Error err -> Alcotest.fail err
@@ -1095,9 +1083,9 @@ let test_snapshot_waiters_share_inflight_result () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1172,9 +1160,9 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Operator_control.invalidate_snapshot_cache ();
       let ctx = operator_ctx env sw config "owner" in
       ignore (Operator_control.snapshot_json ctx);
@@ -1221,9 +1209,9 @@ let test_snapshot_waiter_returns_stale_inflight_result () =
       Alcotest.(check bool) "stale waiter does not replace owner" true
         still_computing)
 
-(* test_orchestra_room_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
+(* test_orchestra_workspace_core_shape removed (CP purge: Command_plane_orchestra deleted) *)
 
-let test_digest_room_exposes_pending_confirm_attention () =
+let test_digest_workspace_exposes_pending_confirm_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1231,8 +1219,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
         Operator_control.action_json ctx
@@ -1240,7 +1228,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
             [
               ("actor", `String "operator");
                ("action_type", `String "namespace_pause");
-               ("target_type", `String "root");
+               ("target_type", `String "workspace");
             ])
       in
       (match action_json with Ok _ -> () | Error err -> Alcotest.fail err);
@@ -1249,7 +1237,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
-      Alcotest.(check string) "target_type" "root"
+      Alcotest.(check string) "target_type" "workspace"
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
@@ -1269,8 +1257,8 @@ let test_digest_room_exposes_pending_confirm_attention () =
                Yojson.Safe.Util.(item |> member "provenance" |> to_string))
            attention_items);
       (* command_* attention items only appear when microarch signals
-         are warn/bad; in a fresh room they are absent *)
-      Alcotest.(check bool) "no command attention in fresh room" true
+         are warn/bad; in a fresh workspace they are absent *)
+      Alcotest.(check bool) "no command attention in fresh workspace" true
         (not
            (List.exists
               (fun item ->
@@ -1279,7 +1267,7 @@ let test_digest_room_exposes_pending_confirm_attention () =
                   Yojson.Safe.Util.(item |> member "kind" |> to_string))
               attention_items)))
 
-let test_digest_room_includes_tool_host_failure_attention () =
+let test_digest_workspace_includes_tool_host_failure_attention () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -1287,9 +1275,9 @@ let test_digest_room_includes_tool_host_failure_attention () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "owner"));
-      ignore (Coord.join config ~agent_name:"owner" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "owner"));
+      ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       Dashboard_tool_host_events.record ~fs:() config
         {
           Dashboard_tool_host_events.agent_name = "agent_code";

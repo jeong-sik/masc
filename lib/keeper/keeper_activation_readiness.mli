@@ -18,9 +18,9 @@ type t =
   ; autonomous_activation : autonomous_activation
   }
 
-val of_meta : Keeper_types.keeper_meta -> t
+val of_meta : Keeper_meta_contract.keeper_meta -> t
 
-val ready_for_unclaimed_backlog : Keeper_types.keeper_meta -> bool
+val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
 
 val autonomous_check_value : autonomous_activation -> string
 

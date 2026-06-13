@@ -19,7 +19,7 @@ type case = {
 let persistence_surface = "governance_cases_snapshot"
 
 let observe_drop ~reason =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 let report_drop ~reason ~path ~detail =
@@ -47,9 +47,9 @@ let parse_case ~path (json : Yojson.Safe.t) : case option =
     let status = Safe_ops.json_string ~default:"" "status" json in
     let risk_class = Safe_ops.json_string ~default:"" "risk_class" json in
     let created_at =
-      match json |> Yojson.Safe.Util.member "created_at" with
-      | `Float f -> f
-      | `Int i -> float_of_int i
+      match Json_util.assoc_member_opt "created_at" json with
+      | Some (`Float f) -> f
+      | Some (`Int i) -> float_of_int i
       | _ -> 0.0
     in
     Some { id; title; status; risk_class; created_at }

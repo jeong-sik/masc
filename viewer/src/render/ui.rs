@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::audio::AudioSettings;
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::state::{WorkspaceState, TurnProgressState};
 
 /// Marker component for UI entities spawned by the TRPG viewer.
 #[derive(Component)]
@@ -575,10 +575,10 @@ pub fn handle_menu_item_clicks(
             }
             MenuAction::DumpState => {
                 log::info!(
-                    "State dump | room={} status={} turn={} phase={} current_actor={} next_actor={} auto_save={} fps={} debug={}",
-                    runtime.room_state.id,
-                    runtime.room_state.status,
-                    runtime.room_state.turn,
+                    "State dump | workspace={} status={} turn={} phase={} current_actor={} next_actor={} auto_save={} fps={} debug={}",
+                    runtime.workspace_state.id,
+                    runtime.workspace_state.status,
+                    runtime.workspace_state.turn,
                     runtime.progress.phase,
                     runtime.progress.current_actor,
                     runtime.progress.next_actor,
@@ -613,7 +613,7 @@ pub struct MenuActionRuntime<'w, 's> {
     pub ui_state: ResMut<'w, UiState>,
     pub primary_window: Query<'w, 's, &'static mut Window, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
-    pub room_state: Res<'w, RoomState>,
+    pub workspace_state: Res<'w, WorkspaceState>,
     pub progress: Res<'w, TurnProgressState>,
 }
 

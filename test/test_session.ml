@@ -2,7 +2,7 @@
 
 open Alcotest
 
-module Session = Masc_mcp.Session
+module Session = Masc.Session
 
 (* Initialize RNG for crypto *)
 let () = Mirage_crypto_rng_unix.use_default ()

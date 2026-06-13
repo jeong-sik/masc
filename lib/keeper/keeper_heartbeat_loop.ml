@@ -6,6 +6,9 @@
    Extracted from keeper_keepalive.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 open Keeper_keepalive_signal
@@ -35,18 +38,6 @@ let emit_in_turn_liveness_pulse =
 let with_in_turn_liveness_pulse =
   Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse
 
-type semaphore_wait_observation_kind = Observations.semaphore_wait_observation_kind =
-  | Semaphore_wait_pending
-  | Semaphore_wait_timeout
-
-let semaphore_wait_observation_reasons =
-  Observations.semaphore_wait_observation_reasons
-;;
-
-let record_semaphore_wait_observation =
-  Observations.record_semaphore_wait_observation
-;;
-
 (* Event-Layer stimulus intake extracted to [Keeper_heartbeat_stimulus_intake]
    (godfile decomp). Type + entry point are re-exported as transparent
    aliases so callers (incl. .mli consumers) stay byte-identical. *)
@@ -68,39 +59,25 @@ let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat
 let consume_board_stimulus_batch = Stimulus_intake.consume_board_stimulus_batch
 let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
-type cascade_backpressure_decision = Observations.cascade_backpressure_decision =
-  | Cascade_admitted
-  | Cascade_backpressured of {
-      cascade_name : string;
+(* Keepalive scheduling decision (record + decide function) extracted to
+   [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)
+type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
+  | Runtime_admitted
+  | Runtime_backpressured of {
+      runtime_id : string;
       reason : string;
     }
 
-let cascade_backpressure_observation_reasons =
-  Observations.cascade_backpressure_observation_reasons
-;;
-
-let cascade_backpressure_decision =
-  Observations.cascade_backpressure_decision
-;;
-
-(* Keepalive scheduling decision (record + decide function) extracted to
-   [Keeper_heartbeat_loop_scheduling] (godfile decomp). The record type is
-   re-exported transparently so the .mli signature stays byte-identical. *)
 type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
   requested_should_run_turn : bool;
-  cascade_backpressure : cascade_backpressure_decision;
+  runtime_backpressure : runtime_backpressure_decision;
   should_run_turn : bool;
   verdict_reasons : string list;
-  admission_reasons : string list;
   channel : string;
 }
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
-
-let record_cascade_backpressure_observation =
-  Observations.record_cascade_backpressure_observation
-;;
 
 let provider_timeout_observation_reasons =
   Observations.provider_timeout_observation_reasons
@@ -109,6 +86,14 @@ let provider_timeout_observation_reasons =
 let record_provider_timeout_observation =
   Observations.record_provider_timeout_observation
 ;;
+
+let record_runtime_backpressure_observation =
+  Observations.record_runtime_backpressure_observation
+;;
+
+(* #10008 fm3: canonical metric name for proactive-scheduler skip
+   reasons. Labels: [("keeper", <name>); ("reason", <skip_reason>)]. *)
+let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
 
 let clear_provider_timeout_failure_reason =
   Observations.clear_provider_timeout_failure_reason
@@ -132,28 +117,16 @@ let provider_timeout_metric_outcome =
   Observations.provider_timeout_metric_outcome
 ;;
 
-let persist_message_cursor_updates = Keeper_heartbeat_loop_persist_cursor.persist_message_cursor_updates
+(** Run keeper cycle with holder diagnostics. *)
+let run_keeper_cycle = Keeper_heartbeat_loop_cycle.run_keeper_cycle
 
-(** Run keeper cycle with semaphore slot control. *)
-let run_keeper_cycle_with_slot = Keeper_heartbeat_loop_cycle_with_slot.run_keeper_cycle_with_slot
-
-let semaphore_wait_timeout_blocker_class =
-  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_blocker_class
-;;
-
-let semaphore_wait_timeout_diagnostics =
-  Keeper_heartbeat_loop_semaphore_timeout.semaphore_wait_timeout_diagnostics
-;;
-
-let handle_semaphore_wait_timeout =
-  Keeper_heartbeat_loop_semaphore_timeout.handle_semaphore_wait_timeout
-;;
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
+      ~(reactive_wake : bool)
       ~(shared_context : Agent_sdk.Context.t)
   : keeper_meta
   =
@@ -166,37 +139,30 @@ let run_keepalive_unified_turn
       in
       let pending_board_events = event_intake.pending_board_events in
       let obs =
-        let allowed_tool_names =
-          Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage
-        in
         Keeper_world_observation.observe
-          ~allowed_tool_names:(Some allowed_tool_names)
           ~pending_board_events:(Some pending_board_events)
           ~config:ctx.config
           ~meta:meta_after_triage
       in
       let scheduling =
-        decide_keepalive_scheduling ~stop ~meta:meta_after_triage obs
+        decide_keepalive_scheduling
+          ~reactive_wake
+          ~stop
+          ~meta:meta_after_triage
+          obs
       in
       let turn_decision = scheduling.turn_decision in
       (* Manual reconcile blocker check removed — keepers no longer get
          stuck behind sticky blockers. Failed turns record evidence via
          Keeper_registry; recovery is autonomous (next turn's observation)
          or operator-driven (board/keeper_chat), not blocker-driven. *)
-      let cascade_backpressure = scheduling.cascade_backpressure in
+      let runtime_backpressure = scheduling.runtime_backpressure in
       let should_run_turn = scheduling.should_run_turn in
-      let meta_after_cursor_persist =
-        persist_message_cursor_updates
-          ~config:ctx.config
-          meta_after_triage
-          obs.message_cursor_updates
-      in
       let format_opt_int = function
         | Some value -> string_of_int value
         | None -> "-"
       in
       let verdict_strs = scheduling.verdict_reasons in
-      let admission_reason_strs = scheduling.admission_reasons in
       let channel_str = scheduling.channel in
       if not should_run_turn
       then (
@@ -212,33 +178,29 @@ let run_keepalive_unified_turn
            is visible fleet-wide. *)
         List.iter
           (fun reason_str ->
-             Prometheus.inc_counter
-               Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+             Otel_metric_store.inc_counter proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
-          admission_reason_strs;
-        (* #10940 follow-up — Prometheus counters aggregate skip reasons
-           across time, but operators need to see *which* reasons were
-           live just before a stale-watchdog [idle_stale=true]
-           termination.  Stamping the registry on every skip lets
-           [Keeper_stale_watchdog] surface the most recent reasons in
-           the kill warn line, distinguishing deliberate-skip dead
-           paths from genuinely stuck fibers. *)
-        (match cascade_backpressure with
-         | Cascade_admitted ->
+          verdict_strs;
+        (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
+           across time, but operators need recent skip verdict context
+           when diagnosing idle/quiet keepers. Stamping the registry on
+           every skip preserves that local context. *)
+        (match runtime_backpressure with
+         | Runtime_admitted ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_after_triage.name
-             ~reasons:admission_reason_strs
-         | Cascade_backpressured { cascade_name; reason } ->
-           record_cascade_backpressure_observation
+             ~reasons:verdict_strs
+         | Runtime_backpressured { runtime_id; reason } ->
+           record_runtime_backpressure_observation
              ~base_path:ctx.config.base_path
              ~keeper_name:meta_after_triage.name
              ~reason;
            Log.Keeper.info
-             "keepalive turn backpressured for %s: cascade=%s reason=%s requested=[%s]"
+             "keepalive turn backpressured for %s: runtime=%s reason=%s requested=[%s]"
              meta_after_triage.name
-             cascade_name
+             runtime_id
              reason
              (String.concat "," verdict_strs));
         let paused_info =
@@ -249,13 +211,13 @@ let run_keepalive_unified_turn
               | Some info ->
                 let trimmed = String.trim info.detail in
                 if String.equal trimmed ""
-                then Keeper_types.blocker_class_to_string info.klass
+                then Keeper_meta_contract.blocker_class_to_string info.klass
                 else trimmed
               | None -> "unknown"
             in
             let paused_since_sec =
               match
-                Coord_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
+                Workspace_resilience.Time.parse_iso8601_opt meta_after_triage.updated_at
               with
               | Some ts -> int_of_float (max 0.0 (Time_compat.now () -. ts))
               | None -> -1
@@ -264,8 +226,8 @@ let run_keepalive_unified_turn
           else ""
         in
         let log_not_scheduled =
-          match cascade_backpressure, turn_decision.verdict with
-          | Cascade_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
+          match runtime_backpressure, turn_decision.verdict with
+          | Runtime_admitted, Keeper_world_observation.Skip _ -> Log.Keeper.debug
           | _ -> Log.Keeper.info
         in
         log_not_scheduled
@@ -274,7 +236,7 @@ let run_keepalive_unified_turn
           meta_after_triage.name
           turn_decision.should_run
           channel_str
-          (String.concat "," admission_reason_strs)
+          (String.concat "," verdict_strs)
           obs.idle_seconds
           (Keeper_keepalive_signal.format_since_last_scheduled_autonomous
              turn_decision.since_last_scheduled_autonomous)
@@ -333,14 +295,14 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           ~keeper_name:meta_after_triage.name);
       if Atomic.get stop
-      then meta_after_cursor_persist
+      then meta_after_triage
       else if should_run_turn && Keeper_fd_pressure.active ()
       then (
         Log.Keeper.debug
           "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_fd_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn && Keeper_disk_pressure.active ()
       then (
         Log.Keeper.debug
@@ -348,7 +310,7 @@ let run_keepalive_unified_turn
            (remaining=%.0fs)"
           meta_after_triage.name
           (Keeper_disk_pressure.remaining_sec ());
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
@@ -359,59 +321,34 @@ let run_keepalive_unified_turn
         Log.Keeper.debug
           "%s: skipping turn because projected FD budget is exhausted before pressure"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if
         should_run_turn
         && not
              (Keeper_disk_pressure.admit_turn
-                ~masc_root:(Coord.masc_root_dir ctx.config)
+                ~masc_root:(Workspace.masc_root_dir ctx.config)
                 ())
       then (
         Log.Keeper.debug
           "%s: skipping turn because disk free-space budget is below fleet floor"
           meta_after_triage.name;
-        meta_after_cursor_persist)
+        meta_after_triage)
       else if should_run_turn
       then (
-        (* Admission wait happens before [mark_turn_started], so the stale
-           watchdog would otherwise see an idle keeper while the fiber is
-           legitimately blocked behind turn-capacity backpressure. *)
-        record_semaphore_wait_observation
-          ~base_path:ctx.config.base_path
-          ~keeper_name:meta_after_triage.name
-          ~channel:turn_decision.channel
-          ~kind:Semaphore_wait_pending
-          ();
-        let selected_item_opt = None in
-        match
-          Keeper_turn_slot.with_keeper_turn_slot_control
-            ~cascade_profile:(cascade_name_of_meta meta_after_triage)
-            ~keeper_name:meta_after_triage.name
-            ~channel:turn_decision.channel
-            (fun ~semaphore_wait_ms ~slot_control ->
-               run_keeper_cycle_with_slot
-                 ~ctx
-                 ~meta_after_cursor_persist
-                 ~stop
-                 ~obs
-                 ~turn_decision
-                 ~shared_context
-                 ~semaphore_wait_ms
-                 ~slot_control
-                 ?selected_item:selected_item_opt
-                 ())
-        with
-        | Ok meta -> meta
-        | Error (`Semaphore_wait_timeout timeout) ->
-          handle_semaphore_wait_timeout ~ctx ~meta_after_triage ~turn_decision timeout)
-      else if obs.message_cursor_updates <> []
-      then meta_after_cursor_persist
+        run_keeper_cycle
+          ~ctx
+          ~meta_after_triage
+          ~stop
+          ~obs
+          ~turn_decision
+          ~shared_context
+          ())
       else meta_after_triage
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CycleExceptions)
         ~labels:[ "keeper", meta_after_triage.name ]
         ();
@@ -454,7 +391,7 @@ let visible_consumer_count = Keeper_heartbeat_visibility_gate.visible_consumer_c
 let visibility_gate_decision = Keeper_heartbeat_visibility_gate.visibility_gate_decision
 
 let run_smart_heartbeat_gate
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
@@ -463,6 +400,7 @@ let run_smart_heartbeat_gate
       ~(smart_hb_config : Keeper_heartbeat_smart.config)
       ~(last_successful_heartbeat_ts : float ref)
       ~(last_heartbeat_cycle_ts : float ref)
+      ~(wake_source : Keeper_keepalive_signal.sleep_outcome ref)
   : bool
   =
   let smart_hb_decision =
@@ -490,23 +428,19 @@ let run_smart_heartbeat_gate
        in
        if not (Keeper_event_queue.is_empty queue)
        then (
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string EventQueueOverride)
            ~labels:[ "keeper", meta_current.name; "reason", "event_queue" ]
            ();
          true)
        else (
-         let allowed_tool_names =
-           Keeper_tool_policy.keeper_allowed_tool_names meta_current
-         in
          if
            Keeper_world_observation.durable_signal_present
-             ~allowed_tool_names:(Some allowed_tool_names)
              ~pending_board_events:None
              ~config
              ~meta:meta_current
          then (
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string EventQueueOverride)
              ~labels:[ "keeper", meta_current.name; "reason", "durable_state" ]
              ();
@@ -554,8 +488,8 @@ let run_smart_heartbeat_gate
       in
       (match gated with
        | Keeper_heartbeat_smart.Skip_idle _ ->
-         Prometheus.inc_counter
-           Keeper_heartbeat_snapshot.proactive_skip_reason_metric
+         Otel_metric_store.inc_counter
+           proactive_skip_reason_metric
            ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
            ();
          Log.Keeper.debug
@@ -595,15 +529,21 @@ let run_smart_heartbeat_gate
             [should_emit] does not immediately re-classify as Skip_idle,
             and let the cycle proceed (presence/board/turn dispatch).
             Spec: KeeperHeartbeat.tla HeartbeatTick — turn_state must
-            transition to "running". Prometheus counter is the operator-
+            transition to "running". Otel_metric_store counter is the operator-
             visible positive signal for the #12271 fix path. *)
          Log.Keeper.info "smart heartbeat: idle wake — cycle resumed (post=consumed)";
          last_heartbeat_cycle_ts := Time_compat.now ();
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string SkipIdleWakeResumed)
            ~labels:[ "keeper", meta_current.name ]
            ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
+      (* Carry the idle-backoff sleep result forward so the turn evaluator can
+         tell a broadcast-driven [Woken] from this keeper's own cadence
+         [Timeout]. Only the real sleep (Skip_idle) writes here; Emit/Skip_busy
+         synthesize [Timeout] without sleeping and must NOT clobber the prior
+         inter-cycle wake source used by active keepers. *)
+      wake_source := outcome;
       outcome
     | Keeper_heartbeat_smart.Emit ->
       last_heartbeat_cycle_ts := Time_compat.now ();
@@ -683,10 +623,10 @@ let run_heartbeat_loop
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
   (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Coord.heartbeat success after turn. *)
+     Updated ONLY on Workspace.heartbeat success after turn. *)
   let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Governance_registry.keeper_work_as_hb_enabled in
-  let max_silence () =
+  let _max_silence () =
     Runtime_params.get Governance_registry.keeper_work_as_hb_max_silence_sec
   in
   (* Phase 2: smart heartbeat — adaptive scheduling via Keeper_heartbeat_smart *)
@@ -707,6 +647,12 @@ let run_heartbeat_loop
      no operator has modified it.  Initialized to 0.0 so the first
      cycle always reads. *)
   let last_meta_mtime = ref 0.0 in
+  (* Wake-source carry (thundering-herd fix). Records whether the most recent
+     sleep ended via an external broadcast wakeup ([Woken]) or this keeper's own
+     cadence timer ([Timeout]). Read at turn dispatch so a broadcast-driven early
+     wake does not let the GLOBAL task backlog drive a turn on every keeper at
+     once. Single-fiber owned, like the other loop-local refs above. *)
+  let last_wake_source = ref Keeper_keepalive_signal.Timeout in
   let rec loop () =
     if Atomic.get stop
     then ()
@@ -761,17 +707,15 @@ let run_heartbeat_loop
           ~smart_hb_config
           ~last_successful_heartbeat_ts
           ~last_heartbeat_cycle_ts
+          ~wake_source:last_wake_source
       then (
-        (* Phase 1: skip presence sync when recent room heartbeat proves freshness *)
+        (* Phase 1: sync presence and emit heartbeat metric *)
         let meta_current =
           sync_keeper_presence
             ~ctx
             ~meta_current
-            ~t_presence_start
             ~consecutive_failures
             ~last_successful_heartbeat_ts
-            ~work_as_hb
-            ~max_silence
         in
         (* RFC-0002: fiber crash on heartbeat threshold breach *)
         if
@@ -820,6 +764,15 @@ let run_heartbeat_loop
              pre/post guards mirror the spec's [turn_state] transition
              "running" -> "idle". *)
           turn_running := true;
+          (* [Woken] => this cycle was triggered by an external broadcast, not
+             the keeper's own cadence; suppress global-backlog-driven turns to
+             avoid the all-keeper stampede. *)
+          let reactive_wake =
+            match !last_wake_source with
+            | Keeper_keepalive_signal.Woken -> true
+            | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
+              false
+          in
           let r =
             run_keepalive_unified_turn
               ~ctx
@@ -827,6 +780,7 @@ let run_heartbeat_loop
               ~pending_board_events
               ~stop
               ~proactive_warmup_elapsed
+              ~reactive_wake
               ~shared_context
           in
           Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
@@ -862,7 +816,7 @@ let run_heartbeat_loop
             (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
           raise Keeper_registry.Keeper_fiber_crash);
         (* Phase 1: work-as-heartbeat — renew point (b).
-                 After turn, call Coord.heartbeat to prove room I/O health.
+                 After turn, call Workspace.heartbeat to prove workspace I/O health.
                  On success: refresh freshness lease + reset consecutive_failures.
                  On failure: leave timestamp unchanged → presence sync resumes next cycle. *)
         refresh_work_as_heartbeat
@@ -906,13 +860,16 @@ let run_heartbeat_loop
         let jitter =
           base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
         in
-        ignore
-          (Keeper_keepalive_signal.interruptible_sleep
-             ~clock:ctx.clock
-             ~stop
-             ~wakeup
-             (base +. jitter)
-           : Keeper_keepalive_signal.sleep_outcome));
+        (* Carry the inter-cycle sleep result into the next iteration so the
+           turn evaluator can distinguish a broadcast wakeup ([Woken]) from this
+           keeper's own cadence ([Timeout]). For active keepers this is the only
+           sleep, so it is the dominant wake-source signal. *)
+        last_wake_source :=
+          Keeper_keepalive_signal.interruptible_sleep
+            ~clock:ctx.clock
+            ~stop
+            ~wakeup
+            (base +. jitter));
       if Atomic.get stop then () else loop ())
   in
   loop ()

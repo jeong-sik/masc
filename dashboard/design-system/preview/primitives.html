@@ -128,7 +128,7 @@
           <div class="kv-row"><span class="k">KEEPER</span><span class="v">nick0cave</span></div>
           <div class="kv-row"><span class="k">TASK</span><span class="v">t-9f2a</span></div>
           <div class="kv-row"><span class="k">GOAL</span><span class="v">goal-merge-blockers</span></div>
-          <div class="kv-row"><span class="k">CASCADE</span><span class="v">provider-b @step=2 · 1.24s</span></div>
+          <div class="kv-row"><span class="k">RUNTIME</span><span class="v">runtime-slot-b @step=2 · 1.24s</span></div>
           <div class="kv-row"><span class="k">DIFF</span><span class="v">+18 −4 · keeper.ts</span></div>
         </div>
       </div>
@@ -175,7 +175,7 @@
     <div class="seg">
       <div class="meta"><span class="n">sep-v · sep-h</span>Hairline dividers. 1px, warm gray.</div>
       <div class="demo col">
-        <div class="row-demo" style="color: var(--color-fg-secondary)">v0.42.1<span class="sep-v"></span>BUILD 2604<span class="sep-v"></span>16:32:45Z<span class="sep-v"></span>provider-a</div>
+        <div class="row-demo" style="color: var(--color-fg-secondary)">v0.42.1<span class="sep-v"></span>BUILD 2604<span class="sep-v"></span>16:32:45Z<span class="sep-v"></span>runtime-slot-a</div>
         <div style="width:320px"><span class="sep-h" style="display:block"></span></div>
       </div>
     </div>
@@ -185,7 +185,7 @@
       <div class="meta"><span class="n">tk</span>Inline code/token highlight in flowing text.</div>
       <div class="demo col">
         <div style="color: var(--color-fg-secondary); font-size: var(--fs-13); line-height: 1.6; max-width: 560px">
-          cascade hit on <span class="tk is-brass">provider-b</span> @step=2 for task <span class="tk">t-9f2a</span> — diff <span class="tk">+18 −4</span> in <span class="tk">keeper.ts</span>. Suite <span class="tk is-err">suite-merge-blockers</span> reports 3 FAIL / 47 PASS.
+          runtime hit on <span class="tk is-brass">runtime-slot-b</span> @step=2 for task <span class="tk">t-9f2a</span> — diff <span class="tk">+18 −4</span> in <span class="tk">keeper.ts</span>. Suite <span class="tk is-err">suite-merge-blockers</span> reports 3 FAIL / 47 PASS.
         </div>
       </div>
     </div>
@@ -322,15 +322,15 @@
       </div>
       <div class="demo col">
         <div class="uic-mark">
-          <h1>cascade hit</h1>
-          <h2>step 2 — provider-b</h2>
+          <h1>runtime hit</h1>
+          <h2>step 2 — runtime-slot-b</h2>
           <h3>diff summary</h3>
-          <p>Provider <code>provider-b</code> resolved at <code>step=2</code> with latency 1.24s.</p>
+          <p>Provider <code>runtime-slot-b</code> resolved at <code>step=2</code> with latency 1.24s.</p>
           <pre><code>masc_status() → claim → done</code></pre>
           <blockquote>Total budget remaining: 47%.</blockquote>
           <ul><li>tests: 47 PASS</li><li>flake: 1 retry</li></ul>
           <hr />
-          <p>see <a href="#">cascade log</a> for the per-attempt trace.</p>
+          <p>see <a href="#">runtime log</a> for the per-attempt trace.</p>
         </div>
       </div>
     </div>
@@ -435,7 +435,7 @@
         <span class="code">&lt;a href="…"&gt;link&lt;/a&gt;</span>
       </div>
       <div class="demo">
-        <a class="uic-link" href="#">cascade log</a>
+        <a class="uic-link" href="#">runtime log</a>
         <span style="width:8px"></span>
         <a class="uic-link" href="#">keeper.ts</a>
         <span style="width:8px"></span>

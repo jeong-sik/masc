@@ -25,12 +25,12 @@
 
     Precedence is fixed (top-down) so a missing-usage call on a
     pricing-known model still labels [missing_usage], not
-    [oas_cost_unreported] — the upstream gate is the more
+    [oas_cost_unreported] — the upstream signal is the more
     actionable failure mode. *)
 
 open Alcotest
 
-module H = Masc_mcp.Keeper_hooks_oas
+module H = Masc.Keeper_hooks_oas
 
 let check_source ~msg ~usage_missing ~usage_trusted ~runtime_unmetered
     ~cost_usd expected =
@@ -104,7 +104,7 @@ let test_preview_runtime_without_oas_cost_is_unreported () =
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
 let counter_for source =
-  Masc_mcp.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     H.cost_emit_source_metric
     ~labels:[ ("source", source) ]
     ()

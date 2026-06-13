@@ -1,10 +1,11 @@
 /* global React */
-// CrewPlane.jsx — Phase C-2: persona-aware fleet view
+// CrewPlane.jsx — Phase C-2: synthetic fleet view
 // ─────────────────────────────────────────────────────────────────────
 // Two layouts: SOLO (1 keeper computer) and SWARM (2x2 grid w/ pagination).
 // Roster on the left lists all 14 keepers as persona cards.
 // Stage on the right is the keeper's "computer" — header + action stream + memory.
-// All data sourced from window.MASC_CREW (real .masc dump, redacted).
+// All data comes from window.MASC_CREW. Repository previews intentionally do
+// not ship .masc dumps, keeper prompts, runtime profiles, or decision logs.
 
 const { useState: cpUseState, useMemo: cpUseMemo, useEffect: cpUseEffect } = React;
 
@@ -89,7 +90,7 @@ function RosterCard({ k, active, onSelect, onPick, picked }) {
         <span className={`cp-dot st-${st}`} title={st} />
       </div>
       <div className="cp-rc-meta">
-        <span className="cp-chip">{k.cascade}</span>
+        <span className="cp-chip">{k.runtime}</span>
         {k.current_task && <span className="cp-chip">⊙ {k.current_task}</span>}
         <span className="cp-chip cost">{fmtCost(k.total_cost_usd)}</span>
       </div>
@@ -193,7 +194,7 @@ function KeeperStage({ id, compact = false }) {
         </div>
         {!compact && (
           <div className="cp-sh-meta">
-            <div><b>cascade</b> {k.cascade}</div>
+            <div><b>runtime</b> {k.runtime}</div>
             <div><b>sandbox</b> {k.sandbox} · {k.network}</div>
             <div><b>turns</b> {k.total_turns} · <b>cost</b> {fmtCost(k.total_cost_usd)}</div>
             <div><b>last seen</b> {timeAgo(k.last_seen)}</div>
@@ -252,7 +253,7 @@ function KeeperStage({ id, compact = false }) {
               <div><b>agent</b> {k.agent_name}</div>
               <div><b>capabilities</b> {(k.capabilities||[]).join(", ") || "—"}</div>
               <div><b>mention</b> {(k.mention_targets||[]).join(", ") || "—"}</div>
-              <div><b>rooms</b> {(k.joined_rooms||[]).join(", ") || "—"}</div>
+              <div><b>workspaces</b> {(k.joined_workspaces||[]).join(", ") || "—"}</div>
               <div><b>last model</b> {k.last_model || "—"}</div>
               <div><b>autonomous</b> {k.autonomous_turns} turns / {k.autonomous_actions} actions</div>
             </section>
@@ -314,8 +315,8 @@ function CrewPlane({ branch, keepers: selKeepers }) {
   if (!C.keepers.length) {
     return (
       <div className="plane">
-        <div className="plane-hdr"><span className="ti">Crew</span><span className="sub">· data-crew.js missing</span></div>
-        <div style={{padding:24, color:"var(--ink-2)"}}>No MASC_CREW data found. Run the import script.</div>
+        <div className="plane-hdr"><span className="ti">Crew</span><span className="sub">· no repository seed</span></div>
+        <div style={{padding:24, color:"var(--ink-2)"}}>Crew seed data is intentionally omitted from repository previews.</div>
       </div>
     );
   }

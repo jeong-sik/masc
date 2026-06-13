@@ -106,7 +106,7 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 
 `test/dune`은 다음 구조로 테스트를 구성한다:
 
-1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc_mcp alcotest ...)` 의존으로 묶음
+1. **Pure synchronous tests** (최대 묶음, `(tests ...)` 블록): 44개 테스트를 단일 `(libraries masc alcotest ...)` 의존으로 묶음
 2. **Eio-dependent tests** (개별 `(test ...)` 블록): Eio.Mutex, Session.with_lock 등을 사용하는 테스트는 `eio eio_main` 의존으로 개별 빌드
 3. **OAS bridge tests**: `agent_sdk` 의존
 4. **Script tests**: CI/harness 스크립트의 동작을 검증하는 테스트 (`test_ci_hardening_source.ml`, `test_ci_run_tests_script.ml`)
@@ -120,19 +120,21 @@ rg -n '^\((test|tests|executable)\b|^\s+\((name|names|modules)\b' test/dune test
 Keeper tool call의 사전/사후 실행 게이트. Swiss Cheese Model (다중 방어층).
 
 ```
-Tool call -> Cost budget check
-          -> Destructive pattern detection
+Tool call -> Destructive pattern detection
           -> Tool allowlist check
           -> Entropy check (동일 도구 N회 연속 호출)
           -> [모두 Pass] -> 실행 허용
           -> [하나라도 Reject] -> 실행 차단
 ```
 
+Current-source overlay: `max_cost_usd` is advisory telemetry only and is not a
+pre-execution gate.
+
 **gate_config 기본값**:
 
 | 파라미터 | 기본값 | 설명 |
 |---------|--------|------|
-| `max_cost_usd` | 0 | 세션 비용 한도 (`0`이면 비활성) |
+| `max_cost_usd` | 0 | Advisory cost threshold. Cost never gates execution. |
 | `max_tool_calls_per_turn` | 10 | 턴당 도구 호출 상한 |
 | `entropy_threshold` | 3 | 동일 도구 연속 호출 임계값 |
 | `destructive_check_enabled` | true | 파괴적 명령 탐지 |
@@ -216,7 +218,7 @@ proposed_action -> verifier_core: risk_level 분류 (Safe/Moderate/Dangerous)
 
 ### 5.6 Keeper Contract (RETIRED)
 
-`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: room-targeting enum legacy variant)을 제공했고, single-room 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
+`lib/keeper/keeper_contract.ml`는 keeper 정책/런타임 enum의 typed 표현(예: workspace-targeting enum legacy variant)을 제공했고, single-workspace 통합 과정에서 해당 타입이 제거됐다 (`grep -rn 'type .*scope' lib/keeper` 기준 legacy scope enum hit 없음).
 
 Keeper 관련 enum의 현재 typed boundary는 05-keeper-agent 스펙의 §2 module table을 따른다.
 
@@ -254,7 +256,7 @@ scripts/dune-local.sh build ./test/test_sse_storm_e2e.exe
 | Contract | 파일 | 검증 대상 |
 |----------|------|----------|
 | Streamable HTTP | `streamable_http_contract.sh` | MCP Streamable HTTP transport 프로토콜 |
-| Golden Path | `golden_path_1_contract.sh` | Room join -> task add -> claim -> transition 기본 경로 |
+| Golden Path | `golden_path_1_contract.sh` | Workspace join -> task add -> claim -> transition 기본 경로 |
 
 Contract harness는 hermetic bootstrap으로 실행된다. 사전 서버 실행을 요구하지 않는다.
 
@@ -287,7 +289,7 @@ bisect-ppx-report html --coverage-path _coverage
 | 라이브러리 | 용도 |
 |-----------|------|
 | `alcotest` | 테스트 프레임워크 (assertion, test case 구조화) |
-| `masc_mcp` | 서버 라이브러리 |
+| `masc` | 서버 라이브러리 |
 | `agent_sdk` | OAS 에이전트 SDK |
 | `eio`, `eio_main` | Eio 동시성 (Mutex, 스케줄러) |
 | `yojson` | JSON 직렬화/역직렬화 |
@@ -305,7 +307,7 @@ bisect-ppx-report html --coverage-path _coverage
 - **INV-T4**: `trajectory.tool_call_entry`의 `gate_decision`이 `Reject`이면 `result`는 반드시 `None`이다.
 - **INV-T5**: `anti_fake` penalty 패턴에 매칭되는 테스트 파일은 `quality_tier`에서 경고 또는 위험으로 분류된다.
 - **INV-T6**: Contract harness는 외부 서버에 의존하지 않는다. Hermetic bootstrap 경로만 사용한다.
-- **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd`를 초과하면 `trajectory_outcome`은 `CostExceeded`이다.
+- **INV-T7**: `eval_harness` 시나리오의 `max_cost_usd` 초과는 telemetry/warning only이다. Cost만으로 `trajectory_outcome`을 `CostExceeded`, `Gated`, `Failed`, 또는 `Timeout`으로 바꾸면 안 된다.
 
 ---
 

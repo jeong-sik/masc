@@ -26,7 +26,7 @@
 |---------|----------|
 | `cockpit` | none; hidden surface |
 | `overview` | none |
-| `monitoring` | `runtime`, `cascade-config`, `agents`, `fleet-health`, `doctor`, `transport-health`, `feature-health`, `observatory`, `cognition`; hidden diagnostics: `journey` |
+| `monitoring` | `runtime`, `runtime-config`, `agents`, `fleet-health`, `diagnostics`, `transport-health`, `feature-health`, `observatory`, `cognition`; hidden diagnostics: `journey` |
 | `command` | `operations` |
 | `connectors` | `connector-status` |
 | `workspace` | `board`, `sub-boards`, `moderation`, `planning`, `repositories`, `verification` |
@@ -97,8 +97,8 @@ led to the current route table.
 | agent-detail-state.ts:133 | monitoring/agents | | back navigation |
 | agent-profile.ts:320,362 | monitoring/agents | agent (line 362) | |
 | board-utils.ts:24 | monitoring/agents | agent | |
-| prometheus-metrics.ts:171 | monitoring/agents | keeper | |
-| **prometheus-metrics.ts:181** | **lab/tool-quality** | tool | **⚠️ SILENT MISROUTE** (동일) |
+| otel-metrics.ts:171 | monitoring/agents | keeper | |
+| **otel-metrics.ts:181** | **lab/tool-quality** | tool | **⚠️ SILENT MISROUTE** (동일) |
 | goals/planning.ts:163 | monitoring/agents | keeper | |
 | goals/planning.ts:279 | workspace/goals | | |
 | command-palette.ts:91 | command/governance | | |
@@ -120,7 +120,7 @@ led to the current route table.
 ## Silent Misroutes (즉시 수정 필요)
 
 1. `overview.ts:476`: `linkTab="lab" linkParams=${{ section: 'tool-quality' }}` — lab surface에는 tool-quality section 없음
-2. `prometheus-metrics.ts:181`: `navigate('lab', { section: 'tool-quality', tool: v })` — 동일 문제
+2. `otel-metrics.ts:181`: `navigate('lab', { section: 'tool-quality', tool: v })` — 동일 문제
 
 현재 `normalizeRouteParams`는 invalid section을 탭 기본값으로 silent fallback → misroute가 가시적 에러 없이 `lab/tools`로 이동.
 

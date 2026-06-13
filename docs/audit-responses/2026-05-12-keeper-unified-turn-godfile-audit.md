@@ -19,7 +19,7 @@
 | `mli` 공개 `val` | **30** | `rg -c "^val " lib/keeper/keeper_unified_turn.mli` |
 | 최상위 `type` | 1 (`turn_tool_event_tracker`, line 128) | `rg "^type " lib/keeper/keeper_unified_turn.ml` |
 | `let rec` | 0 | `rg "^let rec " lib/keeper/keeper_unified_turn.ml` |
-| `include` 라인 | 3 (lines 13–15) | `keeper_turn_helpers`, `keeper_turn_liveness`, `keeper_turn_cascade_budget` |
+| `include` 라인 | 3 (lines 13–15) | `keeper_turn_helpers`, `keeper_turn_liveness`, `keeper_turn_runtime_budget` |
 
 `mli`(30 val) > `.ml`(13 let)인 이유는 line 13–15의 `include`로 이미 분할된 helper 모듈 3개를 *재노출*하기 때문이다. 즉 30개 공개 API 중 17개는 helper 모듈이 본체이며, `keeper_unified_turn.ml` 자체에 정의된 공개 함수는 13개에 한정된다.
 
@@ -27,7 +27,7 @@
 (* lib/keeper/keeper_unified_turn.ml:13-15 *)
 include Keeper_turn_helpers           (* 395 LOC *)
 include Keeper_turn_liveness          (* 248 LOC *)
-include Keeper_turn_cascade_budget    (* 952 LOC *)
+include Keeper_turn_runtime_budget    (* 952 LOC *)
 ```
 
 ### 커밋 빈도 (cohort)
@@ -43,12 +43,12 @@ include Keeper_turn_cascade_budget    (* 952 LOC *)
 `git log --oneline -200 -- lib/keeper/keeper_unified_turn.ml` 상위 9건:
 
 1. `b5a3bb8e3` feat(telemetry): 4 single-variant *_site sums for keeper_unified_turn (4 sites) (#14851)
-2. `ea896ec45` feat(telemetry): Turn_cleanup + Write_meta_cycle + Cascade_sync extend (5 sites) (#14836)
+2. `ea896ec45` feat(telemetry): Turn_cleanup + Write_meta_cycle + Runtime_sync extend (5 sites) (#14836)
 3. `95ee74e06` feat(telemetry): typed phase variant for oas_execution_errors metric (#14737)
 4. `cddab45e7` refactor(keeper): remove is_ollama_cfg variant match (RFC-0058 Phase 5.6 leak 1/4) (#14691)
 5. `8486a142b` refactor(keeper): typed receipt.outcome — string → outcome_kind (polymorphic variant) (#14661)
 6. `6dd3e16c8` refactor(keeper): typed degraded_retry.fallback_reason — closed sum type (#14660)
-7. `a5b84ce22` refactor(keeper): typed cascade_rotation_attempt.outcome — string → closed sum type (#14657)
+7. `a5b84ce22` refactor(keeper): typed runtime_rotation_attempt.outcome — string → closed sum type (#14657)
 8. `850614564` refactor(keeper): typed slot_release_at_phase — closed sum type w/ [@@deriving tla] (#14656)
 9. `f97b088f3` fix(keeper): replace rollover substring match with typed blocker_class (#14613)
 
@@ -73,7 +73,7 @@ include Keeper_turn_cascade_budget    (* 952 LOC *)
 
 | 단계 | line | 코드 주석 (원문) |
 |------|------|------|
-| 0. Phase gate + cascade routing | 291 | "Phase gate + state-aware cascade routing" |
+| 0. Phase gate + runtime routing | 291 | "Phase gate + state-aware runtime routing" |
 | 2. Build unified prompt | 728 | "Build unified prompt — diversity entropy recorded" |
 | 4. Build turn prompt callback | 753 | "Build turn prompt callback: use our unified system prompt" |
 | 5. Run via OAS Agent.run() | 776 | "Run via OAS Agent.run() with transient-error retry" |
@@ -90,7 +90,7 @@ include Keeper_turn_cascade_budget    (* 952 LOC *)
 `run_keeper_cycle` 내부에서 closure로 캡처되어 단계 간 공유되는 `ref`/mutable 상태:
 
 - `cycle_completed = ref false` (line 290) — 함수 진입부에 선언, 최종부 line 3032에서 `:= true` 후 `post_turn_complete_task ~cycle_completed` 콜백에 전달. spec navigation 주석(line 252–289)이 이 ref를 TLA+ `TurnComplete` action에 매핑한다.
-- `cascade_rotation_attempts := attempt :: !cascade_rotation_attempts` — 내부 `record_cascade_rotation_attempt` (line 953) 헬퍼가 closure로 캡처. cascade-rotation telemetry 누적용.
+- `runtime_rotation_attempts := attempt :: !runtime_rotation_attempts` — 내부 `record_runtime_rotation_attempt` (line 953) 헬퍼가 closure로 캡처. runtime-rotation telemetry 누적용.
 - `tracker : turn_tool_event_tracker` — line 134에서 생성, OAS event_bus subscriber에 전달되어 ToolCalled/ToolCompleted 이벤트로 mutation. 같은 turn 동안 partial commit 추적.
 
 closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태* — 외부 모듈로 끌어내면 인터페이스가 invasive해진다.
@@ -110,7 +110,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 
 `run_unified_turn` (line 3037 alias)은 코드에서 호출 0건 (rg evidence: 1 hit, `Keeper_unified_turn.run_unified_turn\b`, 그것도 test doc 주석). 즉, alias는 *역사적 호환*만 유지하고 있다.
 
-`include`된 helper 모듈의 API는 `module UT = Masc_mcp.Keeper_unified_turn` 별칭으로 `test/test_keeper_unified.ml` (12334 LOC)에서 **123회** 사용된다 (rg evidence: `UT\.` 123 hits in test/test_keeper_unified.ml). 즉 `.mli`의 30개 val은 *대부분 테스트 진입점*이고, production caller는 `run_keeper_cycle` 1개에 수렴한다.
+`include`된 helper 모듈의 API는 `module UT = Masc.Keeper_unified_turn` 별칭으로 `test/test_keeper_unified.ml` (12334 LOC)에서 **123회** 사용된다 (rg evidence: `UT\.` 123 hits in test/test_keeper_unified.ml). 즉 `.mli`의 30개 val은 *대부분 테스트 진입점*이고, production caller는 `run_keeper_cycle` 1개에 수렴한다.
 
 ### `mli`에 있지만 production caller 0인 (테스트 전용) 함수 — cross-check 결과
 
@@ -124,7 +124,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 | `attempt_watchdog_timeout_sec` | 0 | 2 (test_keeper_unified.ml:7909, 7928) |
 | `summarize_turn_event_bus` | 0 | 2 (test_keeper_unified.ml:6705, 11899) |
 | `create_turn_tool_event_tracker` | 0 | 3 (test_keeper_unified.ml:7320, 7362, 7396) |
-| `next_fail_open_cascade_for_turn` | 0 | (테스트만) |
+| `next_fail_open_runtime_for_turn` | 0 | (테스트만) |
 | `should_auto_pause_required_tool_contract_violation` | 0 | (테스트만) |
 | `record_streaming_cancelled_observation` | 0 | (테스트만) |
 | `bounded_oas_timeout_for_turn_budget` | 0 | (테스트만) |
@@ -133,8 +133,8 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 
 ### 응집도 평가
 
-- **Cohesive**: A(error classification), B(tool-event tracker)는 각각 한 가지 개념을 다룬다. include로 끌어온 helper 3종 (helpers/liveness/cascade_budget)은 이미 cohesive하게 분할됨.
-- **Coincidental collocation**: `run_keeper_cycle` 자체는 *8단계 파이프라인을 한 함수로 펼친 결과*. 단계 간 공유 상태는 `cycle_completed`, `tracker`, `cascade_rotation_attempts` 정도이지만, *제어 흐름* 자체가 깊은 `match … with | Ok _ -> match … | Error e -> …` 중첩(예: line 982 `Cancel-safe cleanup`, line 1142 `external cancellation that escapes the…`, line 1518 `Budget gate: check whether there is enough wall-clock`)으로 응집되어 있어 함수 단위 추출 비용이 크다.
+- **Cohesive**: A(error classification), B(tool-event tracker)는 각각 한 가지 개념을 다룬다. include로 끌어온 helper 3종 (helpers/liveness/runtime_budget)은 이미 cohesive하게 분할됨.
+- **Coincidental collocation**: `run_keeper_cycle` 자체는 *8단계 파이프라인을 한 함수로 펼친 결과*. 단계 간 공유 상태는 `cycle_completed`, `tracker`, `runtime_rotation_attempts` 정도이지만, *제어 흐름* 자체가 깊은 `match … with | Ok _ -> match … | Error e -> …` 중첩(예: line 982 `Cancel-safe cleanup`, line 1142 `external cancellation that escapes the…`, line 1518 `Budget gate: check whether there is enough wall-clock`)으로 응집되어 있어 함수 단위 추출 비용이 크다.
 
 요약: **파일 단위 응집은 OK, 함수 단위 응집은 깨졌다**. 분할 대상은 *파일이 아니라 `run_keeper_cycle` 함수의 단계*다.
 
@@ -150,7 +150,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 **Tradeoff**:
 - ➕ 파일당 LOC 감소: 2800 / 110 / 130. CI 임계(300/500줄) 통과는 *Group B/C만* 통과, runner는 여전히 godfile.
 - ➖ runner 파일 = `run_keeper_cycle` 단일 함수 → 파일이 함수 자체가 됨. 분할 이득 미미.
-- ➖ `include Keeper_turn_helpers/liveness/cascade_budget`가 runner로 따라가야 함 (or 도로 별 모듈로 노출). mli 30 val을 재배치하는 비용.
+- ➖ `include Keeper_turn_helpers/liveness/runtime_budget`가 runner로 따라가야 함 (or 도로 별 모듈로 노출). mli 30 val을 재배치하는 비용.
 - ➖ TLA+ spec 8개 파일이 `keeper_unified_turn.ml`을 line 번호와 함께 인용 중 (line 318, 1640 등). 분할 시 spec 주석 mass-update 필요.
 
 **점수**: 표면 LOC는 줄지만 **실제 godfile (단일 함수 2800 LOC)는 그대로**. cosmetic.
@@ -159,7 +159,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 
 후보:
 - `keeper_unified_turn__internal.ml` (또는 `keeper_turn_runner_helpers.ml`) — `run_keeper_cycle` *내부에서만* 사용되는 closed helper들을 함수 외부로 끌어올린다.
-- 1차 후보: `record_cascade_rotation_attempt` (line 953, 내부 `let`). closure ref `cascade_rotation_attempts`를 명시 인자로 받도록 변환하면 깔끔히 분리됨.
+- 1차 후보: `record_runtime_rotation_attempt` (line 953, 내부 `let`). closure ref `runtime_rotation_attempts`를 명시 인자로 받도록 변환하면 깔끔히 분리됨.
 - 2차 후보: line 728 prompt build 블록, line 776–950 retry-loop entry 블록 — closure 의존이 무거워 invasive.
 
 **Tradeoff**:
@@ -212,7 +212,7 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 | `KeeperPostTurnOrchestration.tla` | 2 |
 | `KeeperReactionLiveness.tla` | 2 |
 | `KeeperTaskAcquisition.tla` | 1 |
-| `KeeperCascadeRouting.tla` | 1 |
+| `KeeperRuntimeRouting.tla` | 1 |
 | `KeeperTurnSlot.tla` | 1 |
 | `KeeperCoreTriad.tla` | 1 |
 
@@ -227,17 +227,17 @@ closure로 캡처되는 ref들은 *같은 turn 사이클 동안의 누적 상태
 
 ## §5 Next-step PR sketch (분할 진행 시)
 
-권고: **가장 작은 분리 가능 단위인 `record_cascade_rotation_attempt`를 closure ref(`cascade_rotation_attempts`) 명시 인자로 변환 후 toplevel `let`로 hoist**.
+권고: **가장 작은 분리 가능 단위인 `record_runtime_rotation_attempt`를 closure ref(`runtime_rotation_attempts`) 명시 인자로 변환 후 toplevel `let`로 hoist**.
 
 근거:
 - 현재 위치: `lib/keeper/keeper_unified_turn.ml:953` (run_keeper_cycle 내부 `let`).
-- closure 의존: `cascade_rotation_attempts : Keeper_execution_receipt.cascade_rotation_attempt list ref` (line 953 `cascade_rotation_attempts := attempt :: !cascade_rotation_attempts`).
-- 명시 인자화: `~cascade_rotation_attempts:Keeper_execution_receipt.cascade_rotation_attempt list ref` 추가만으로 closed.
+- closure 의존: `runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list ref` (line 953 `runtime_rotation_attempts := attempt :: !runtime_rotation_attempts`).
+- 명시 인자화: `~runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list ref` 추가만으로 closed.
 - 다른 closure 의존 0 (확인: `now_iso`, `Keeper_execution_receipt.*`, `sdk_error_kind`는 모두 module-level 함수).
 
 **최소 PR 형태** (감사 단계에서는 *수행 금지*):
-1. `record_cascade_rotation_attempt`를 file-toplevel `let`로 hoist (private — `.mli`에 노출하지 않음).
-2. `cascade_rotation_attempts` ref를 호출 시 명시 인자로 패스.
+1. `record_runtime_rotation_attempt`를 file-toplevel `let`로 hoist (private — `.mli`에 노출하지 않음).
+2. `runtime_rotation_attempts` ref를 호출 시 명시 인자로 패스.
 3. `dune build --root . @check` 통과 + 기존 test green 확인 후 Draft PR.
 4. mli/외부 API 변화 0 → caller 마이그레이션 0 → revert risk 최소.
 
@@ -275,5 +275,5 @@ rg "keeper_unified_turn" specs/keeper-state-machine/ -c
 # include된 헬퍼 LOC
 wc -l lib/keeper/keeper_turn_helpers.ml \
       lib/keeper/keeper_turn_liveness.ml \
-      lib/keeper/keeper_turn_cascade_budget.ml
+      lib/keeper/keeper_turn_runtime_budget.ml
 ```

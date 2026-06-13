@@ -1,12 +1,13 @@
 (** Coverage tests for Tool_control *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.self_init ()
 
 let parse_json s =
   try Yojson.Safe.from_string s
-  with Yojson.Json_error err -> failwith ("invalid json: " ^ err)
+  with Yojson.Json_error err ->
+    failwith ("invalid json: " ^ err ^ "; raw=" ^ s)
 
 let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
   let meta =
@@ -23,7 +24,7 @@ let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
     | Ok meta -> { meta with paused }
     | Error err -> failwith ("meta fixture failed: " ^ err)
   in
-  match Keeper_types.write_meta ctx.config meta with
+  match Keeper_meta_store.write_meta ctx.config meta with
   | Ok () -> ()
   | Error err -> failwith ("meta write failed: " ^ err)
 
@@ -58,8 +59,11 @@ let test_counter = ref 0
 
 let with_ctx ?(initialize = true) f =
   Fun.protect
-    ~finally:Fs_compat.clear_fs
+    ~finally:(fun () ->
+      Workspace.invalidate_initialized_cache ();
+      Fs_compat.clear_fs ())
     (fun () ->
+      Workspace.invalidate_initialized_cache ();
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       incr test_counter;
@@ -70,8 +74,8 @@ let with_ctx ?(initialize = true) f =
              !test_counter)
       in
       Unix.mkdir tmp 0o755;
-      let config = Coord.default_config tmp in
-      if initialize then ignore (Coord.init config ~agent_name:(Some "test-agent"));
+      let config = Workspace.default_config tmp in
+      if initialize then ignore (Workspace.init config ~agent_name:(Some "test-agent"));
       f { Tool_control.config; agent_name = "test-agent" })
 
 let () =
@@ -131,7 +135,7 @@ let () =
       | None -> failwith "dispatch returned None")
 
 let () =
-  test "dispatch_pause_status_surfaces_keeper_pause_when_room_running" (fun () ->
+  test "dispatch_pause_status_surfaces_keeper_pause_when_workspace_running" (fun () ->
       with_ctx @@ fun ctx ->
       seed_keeper_meta ctx "paused-keeper" ~paused:true;
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
@@ -156,7 +160,7 @@ let () =
       with_ctx @@ fun ctx ->
       match
         Tool_control.dispatch ctx ~name:"masc_pause_status"
-          ~args:(`Assoc [ ("namespace_id", `String "focus-room") ])
+          ~args:(`Assoc [ ("namespace_id", `String "focus-workspace") ])
       with
       | Some result ->
           assert (Tool_result.is_success result);
@@ -167,7 +171,7 @@ let () =
       | None -> failwith "dispatch returned None")
 
 let () =
-  test "dispatch_pause_status_uninitialized_room_is_safe" (fun () ->
+  test "dispatch_pause_status_uninitialized_workspace_is_safe" (fun () ->
       with_ctx ~initialize:false @@ fun ctx ->
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->

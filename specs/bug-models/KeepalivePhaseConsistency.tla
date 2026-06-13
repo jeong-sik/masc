@@ -2,13 +2,13 @@
 \* Bug Model: Keepalive fiber must not dispatch turns while the keeper
 \* is in a non-dispatchable phase (Dead/Stopped/Compacting/HandingOff).
 \*
-\* Background (blog: Anthropic "Multi-Agent Coordination Patterns",
+\* Background (blog: Anthropic "Multi-Agent Workspace Patterns",
 \* Shared State pattern): A keepalive fiber running alongside the
 \* FSM can react to a stale phase snapshot and dispatch a turn
 \* after the phase has transitioned to a terminal/suspended state.
 \* This is the reactive-loop risk the blog warns about.
 \*
-\* masc-mcp reference: lib/keeper/keeper_keepalive.ml (~1819 lines)
+\* masc reference: lib/keeper/keeper_keepalive.ml (~1819 lines)
 \* dispatches turns via OAS. The keeper_state_machine.ml phase is
 \* observed, but without explicit gating on every dispatch site, a
 \* ghost dispatch under Compacting/HandingOff becomes possible.

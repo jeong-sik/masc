@@ -1,6 +1,6 @@
 (* test/test_keeper_proactive_skip_counter.ml
 
-   #10008 failure mode 3: pin the canonical Prometheus metric
+   #10008 failure mode 3: pin the canonical Otel_metric_store metric
    name for the proactive-scheduler skip-reason counter and
    spot-check that the [skip_reason_to_string] vocabulary
    matches the labels the counter will carry.
@@ -16,14 +16,14 @@
       string label the counter consumes.  Adding a new reason
       without updating dashboards becomes a test failure. *)
 
-module KK = Masc_mcp.Keeper_keepalive
-module KW = Masc_mcp.Keeper_world_observation
+module KM = Keeper_metrics
+module KW = Masc.Keeper_world_observation
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "proactive skip counter canonical name"
     "masc_keeper_proactive_skip_total"
-    KK.proactive_skip_reason_metric
+    KM.(to_string ProactiveSkip)
 
 (* [verdict_reasons_to_strings] is the actual producer of the
    [reason] label at the emit site.  Pin each concrete variant's

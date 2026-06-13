@@ -9,7 +9,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROTO_DIR="${REPO_ROOT}/proto"
-TARGET_ML="${REPO_ROOT}/lib/grpc/masc_grpc_server.ml"
+TARGET_ML="${REPO_ROOT}/lib/server/masc_grpc_server.ml"
 
 check_protoc() {
   if ! command -v protoc &>/dev/null; then
@@ -27,7 +27,7 @@ gen_descriptor_b64() {
   protoc \
     --descriptor_set_out="${tmp_bin}" \
     --proto_path="${PROTO_DIR}" \
-    "${proto_file}" 2>&1
+    "${proto_file}"
   # protoc --descriptor_set_out produces a FileDescriptorSet wrapper.
   # Strip the outer wrapper to get raw FileDescriptorProto.
   # FileDescriptorSet = tag(0x0a) + varint(length) + FileDescriptorProto
@@ -47,19 +47,19 @@ sys.stdout.buffer.write(data[i:])
 
 do_generate() {
   check_protoc
-  echo "--- masc_coordination.proto ---"
-  gen_descriptor_b64 "${PROTO_DIR}/masc_coordination.proto"
+  echo "--- masc_workspace.proto ---"
+  gen_descriptor_b64 "masc_workspace.proto"
   echo ""
   echo ""
   echo "--- grpc_health_v1.proto ---"
-  gen_descriptor_b64 "${PROTO_DIR}/grpc_health_v1.proto"
+  gen_descriptor_b64 "grpc_health_v1.proto"
   echo ""
 }
 
 do_check() {
   check_protoc
   local masc_gen
-  masc_gen="$(gen_descriptor_b64 "${PROTO_DIR}/masc_coordination.proto")"
+  masc_gen="$(gen_descriptor_b64 "masc_workspace.proto")"
 
   # Extract current masc descriptor from OCaml source.
   # The descriptor is split across multiple lines with ^ concatenation.
@@ -72,10 +72,10 @@ do_check() {
   )"
 
   if [ "${masc_gen}" = "${masc_current}" ]; then
-    echo "OK: masc_coordination descriptor matches proto source."
+    echo "OK: masc_workspace collaboration descriptor matches proto source."
     exit 0
   else
-    echo "DRIFT: masc_coordination descriptor does not match proto source." >&2
+    echo "DRIFT: masc_workspace collaboration descriptor does not match proto source." >&2
     echo "" >&2
     echo "Generated (first 80 chars): ${masc_gen:0:80}..." >&2
     echo "Current   (first 80 chars): ${masc_current:0:80}..." >&2

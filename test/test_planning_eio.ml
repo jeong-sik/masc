@@ -1,7 +1,8 @@
 (** test_planning_eio.ml - Tests for Planning_eio module (OCaml 5.x Pure Sync) *)
 
 open Alcotest
-open Masc_mcp
+open Masc
+module Planning_eio = Masc.Task.Planning_eio
 
 let temp_dir = ref ""
 
@@ -26,18 +27,18 @@ let teardown () =
     (try rm_rf !temp_dir with _ -> ())
   end
 
-let make_config () : Coord.config =
-  Coord.default_config !temp_dir
+let make_config () : Workspace.config =
+  Workspace.default_config !temp_dir
 
 let current_task_path config =
-  Filename.concat (Coord_utils.masc_dir config) "current_task"
+  Filename.concat (Workspace_utils.masc_dir config) "current_task"
 
 let ensure_masc_dir config =
-  let dir = Coord_utils.masc_dir config in
+  let dir = Workspace_utils.masc_dir config in
   if not (Sys.file_exists dir) then Unix.mkdir dir 0o755
 
 let trash_dir config =
-  Filename.concat (Coord_utils.masc_dir config) "_trash"
+  Filename.concat (Workspace_utils.masc_dir config) "_trash"
 
 let has_current_task_quarantine config =
   if not (Sys.file_exists (trash_dir config)) then false

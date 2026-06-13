@@ -6,7 +6,7 @@ include Operator_control_action
 let json_of_dispatch_output body =
   try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 
-let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
+let tool_keeper_ctx (ctx : 'a context) : _ Keeper_tool_surface.context =
   {
     config = ctx.config;
     agent_name = ctx.agent_name;
@@ -17,14 +17,14 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
   }
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
-  match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
+  match Keeper_tool_surface.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
   | Some result when Tool_result.is_success result ->
     Ok (json_of_dispatch_output (Tool_result.message result))
   | Some result -> Error (Tool_result.message result)
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
 let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
-  match Keeper_types.read_meta_resolved ctx.config name with
+  match Keeper_meta_store.read_effective_meta_resolved ctx.config name with
   | Error err -> Error err
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
@@ -55,14 +55,10 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
              ~now_ts)
 
 let keeper_diagnostic_health_state json =
-  match U.member "health_state" json with
-  | `String value -> Some (String.lowercase_ascii value)
-  | _ -> None
+  Json_util.get_string json "health_state" |> Option.map String.lowercase_ascii
 
 let keeper_diagnostic_recoverable json =
-  match U.member "recoverable" json with
-  | `Bool value -> value
-  | _ -> false
+  Json_util.get_bool json "recoverable" |> Option.value ~default:false
 
 let keeper_recovery_outcome after_diagnostic =
   match keeper_diagnostic_health_state after_diagnostic with
@@ -80,45 +76,45 @@ let keeper_recovery_outcome after_diagnostic =
 
 (** {1 Domain-specific action handlers} *)
 
-let room_action_result request result =
+let workspace_action_result request result =
   Ok (`Assoc [
     ("tool_name", `String (delegated_tool_for request.action_type));
     ("result", result);
   ])
 
-let execute_room_action (ctx : 'a context) (request : action_request) =
+let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
   | "broadcast" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "workspace" request in
       let* message =
         match get_string_opt request.payload "message" with
         | Some value -> Ok value
         | None -> Error "payload.message is required"
       in
-      let result = Coord.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      room_action_result request (`String result)
+      let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
+      workspace_action_result request (`String result)
   | "namespace_pause" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "workspace" request in
       let reason =
         get_string request.payload "reason" "Paused by operator control plane"
       in
-      Coord.pause ctx.config ~by:request.actor ~reason;
-      room_action_result request
+      Workspace.pause ctx.config ~by:request.actor ~reason;
+      workspace_action_result request
         (`Assoc [ ("paused", `Bool true); ("reason", `String reason) ])
   | "namespace_resume" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "workspace" request in
       let status =
-        match Coord.resume ctx.config ~by:request.actor with
+        match Workspace.resume ctx.config ~by:request.actor with
         | `Resumed -> "resumed"
         | `Already_running -> "already_running"
       in
-      room_action_result request (`Assoc [ ("status", `String status) ])
+      workspace_action_result request (`Assoc [ ("status", `String status) ])
   | "social_sweep" ->
-      room_action_result request
+      workspace_action_result request
         (`Assoc [("status", `String "removed");
                  ("reason", `String "Social runtime removed. Keepers discover board events via proactive turns.")])
   | "task_inject" ->
-      let* () = validate_target_type "root" request in
+      let* () = validate_target_type "workspace" request in
       let* title =
         match get_string_opt request.payload "title" with
         | Some value -> Ok value
@@ -132,11 +128,11 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
          has no [goal_id] today; guard is a no-op for orphan tasks but
          wired so a future goal-aware payload inherits the cap. *)
       let result =
-        Coord.add_task
-          ~reject_if:(Coord_task_capacity.rejection_for_add_task ?goal_id:None)
+        Workspace.add_task
+          ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
           ctx.config ~title ~priority ~description
       in
-      room_action_result request (`String result)
+      workspace_action_result request (`String result)
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 (* Issue #8394: removed [execute_team_action] — team session execution
@@ -185,9 +181,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       in
       let* before_diagnostic = keeper_diagnostic_for_name ctx ~name:resolved_name in
       let recoverable =
-        match U.member "recoverable" before_diagnostic with
-        | `Bool value -> value
-        | _ -> false
+        Json_util.get_bool before_diagnostic "recoverable" |> Option.value ~default:false
       in
       if not recoverable then
         Ok
@@ -223,10 +217,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                 `Assoc
                   [
                     ("recovered", `Bool recovered);
-                    ( "skipped_reason",
-                      match skipped_reason with
-                      | Some reason -> `String reason
-                      | None -> `Null );
+                    ( "skipped_reason", Json_util.string_opt_to_json skipped_reason );
                     ("before", before_diagnostic);
                     ("after", after_diagnostic);
                     ("down", down_result);
@@ -242,22 +233,16 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         | None -> Error "payload.message is required"
       in
       let* () =
-        match request.payload |> U.member "models" with
-        | `Null -> Ok ()
-        | _ ->
-            Error
-              "legacy keeper model args removed for masc_keeper_msg: models. Use cascade_name; concrete provider/model identity is OAS-owned."
+        Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_msg"
+          request.payload
       in
       let direct_reply =
-        match request.payload |> U.member "direct_reply" with
-        | `Bool value -> value
-        | _ -> false
+        Json_util.get_bool request.payload "direct_reply" |> Option.value ~default:false
       in
       let timeout_sec =
-        match request.payload |> U.member "timeout_sec" with
-        | `Int value when value > 0 -> Some value
-        | `Float value when value > 0.0 -> Some (int_of_float (Float.ceil value))
-        | _ -> None
+        Json_util.get_float request.payload "timeout_sec"
+        |> Option.map (fun f -> int_of_float (Float.ceil f))
+        |> (fun o -> match o with Some n when n > 0 -> Some n | _ -> None)
       in
       let args =
         `Assoc
@@ -271,7 +256,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
            | Some value -> [ ("timeout_sec", `Int value) ]
            | None -> [])
       in
-      let keeper_ctx : _ Tool_keeper.context =
+      let keeper_ctx : _ Keeper_tool_surface.context =
         {
           config = ctx.config;
           agent_name = ctx.agent_name;
@@ -282,7 +267,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
         }
       in
       let* body =
-        match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
+        match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
         | Some result when Tool_result.is_success result -> Ok (Tool_result.message result)
         | Some result -> Error (Tool_result.message result)
         | None -> Error "masc_keeper_msg dispatch unavailable"
@@ -300,7 +285,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" ->
-      execute_room_action ctx request
+      execute_workspace_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
@@ -335,7 +320,7 @@ let action_json ?actor_hint (ctx : _ context) args :
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
-    let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
+    let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
     let preview = preview_of_action request in
     let entry =

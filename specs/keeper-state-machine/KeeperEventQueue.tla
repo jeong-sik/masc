@@ -76,7 +76,7 @@ vars == << queue_size, enqueued_total, dequeued_total, smart_decision >>
 
 \* Class C (NAME COLLISION rename) — DecisionSet identifier in the
 \* cross-spec family refers to keeper-turn decision_stage projection
-\* (KTC/KCAF/KDP/KCascadeLifecycle/KCompositeLifecycle). KEQ's own
+\* (KTC/KCAF/KDP/KRuntimeLifecycle/KCompositeLifecycle). KEQ's own
 \* decision vocabulary is Heartbeat_smart.should_emit output (see header
 \* §"Runtime entities modelled"), unrelated to that family. Renamed to
 \* SmartHeartbeatDecisionSet to clarify the boundary.

@@ -1,6 +1,6 @@
 open Alcotest
 
-module Policy = Masc_mcp.Keeper_failure_policy
+module Policy = Keeper_failure_policy
 
 let check_lifecycle label expected actual =
   check string label expected (Policy.lifecycle_effect_to_label actual)
@@ -165,8 +165,7 @@ let test_only_liveness_failures_allow_keeper_death () =
   let non_liveness_failures =
     [
       Policy.Transient_provider_failure;
-      Policy.Cascade_exhausted { retryable = false };
-      Policy.Required_tool_contract_violation;
+      Policy.Runtime_exhausted { retryable = false };
       Policy.Stale_turn { progress_seen = true };
       Policy.Stale_termination_storm { count = 6 };
       Policy.Ambiguous_partial_commit;

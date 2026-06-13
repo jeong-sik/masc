@@ -1,7 +1,7 @@
 // Provider logs schema — schema-at-boundary for
 // `GET /api/v1/dashboard/provider-logs` and `/provider-logs/tail`.
 //
-// Paths come from cascade.toml only. The tail endpoint never accepts an
+// Paths come from runtime.toml only. The tail endpoint never accepts an
 // arbitrary path from the browser.
 
 import {
@@ -29,7 +29,7 @@ const ProviderLogCatalogEntrySchema = object({
   resolved_path: optional(nullable(string())),
   default_lines: optional(nullable(number())),
   max_bytes: optional(nullable(number())),
-  cascade_config_path: optional(string()),
+  runtime_config_path: optional(string()),
 })
 
 const ProviderLogsCatalogResponseSchema = object({

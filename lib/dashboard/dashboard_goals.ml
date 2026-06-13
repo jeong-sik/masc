@@ -1,7 +1,6 @@
 (** Dashboard Goals — goal tree with explicit task linkage, health badges,
     and goal-first detail evidence. *)
 
-open Yojson.Safe.Util
 
 
 
@@ -15,24 +14,19 @@ include Dashboard_goals_types
 let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
   let labels = [ ("goal_id", goal.id) ] in
   let measured, pct =
-    match attainment |> member "attainment_pct" |> to_int_option with
+    match Json_util.get_int attainment "attainment_pct" with
     | Some pct -> (1.0, float_of_int pct)
     | None -> (0.0, 0.0)
   in
-  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_pct
+  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_pct
     ~help:goal_attainment_pct_help ~labels ();
-  Prometheus.set_gauge Prometheus.metric_goal_attainment_pct ~labels pct;
-  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_measured
+  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_pct ~labels pct;
+  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_measured
     ~help:goal_attainment_measured_help ~labels ();
-  Prometheus.set_gauge Prometheus.metric_goal_attainment_measured ~labels
+  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_measured ~labels
     measured
 
-
-
-
-
-
-let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta) =
+let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | exn ->
       let error = Printexc.to_string exn in
@@ -52,7 +46,7 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta
 
 
 
-let build_forest ~(config : Coord.config) ~goals ~tasks =
+let build_forest ~(config : Workspace.config) ~goals ~tasks =
   let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
   let is_root (goal : Goal_store.goal) =
     match goal.parent_goal_id with
@@ -60,9 +54,9 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
     | Some parent_id -> not (List.mem parent_id goal_ids)
   in
   let keeper_metas =
-    Keeper_types.keeper_names config
+    Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
-           match Keeper_types.read_meta config keeper_name with
+           match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
   in
@@ -73,9 +67,10 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
   in
   let latest_receipts =
     keeper_metas
-    |> List.map (fun (meta : Keeper_types.keeper_meta) -> meta.name)
+    |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.name)
     |> Keeper_execution_receipt.latest_json_by_keeper config
   in
+  let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
   let context =
     {
       now_ts = Time_compat.now ();
@@ -85,9 +80,10 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
       latest_receipts;
       latest_runtime_trusts =
         keeper_metas
-        |> List.map (fun (meta : Keeper_types.keeper_meta) ->
+        |> List.map (fun (meta : Keeper_meta_contract.keeper_meta) ->
                ( meta.name,
                  keeper_runtime_trust_snapshot_json ~config ~meta ));
+      goal_task_index;
     }
   in
   goals
@@ -96,7 +92,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
 
 
 
-let build_goal_verification_projection ~(config : Coord.config) goals =
+let build_goal_verification_projection ~(config : Workspace.config) goals =
   let requests =
     Goal_verification.read_state config |> fun (state : Goal_verification.state) ->
     state.requests
@@ -109,7 +105,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
   in
   let goal_events =
     let path = Goal_verification.events_path config in
-    if Coord.path_exists config path then
+    if Workspace.path_exists config path then
       Fs_compat.load_jsonl path
     else
       []
@@ -139,7 +135,7 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     requests;
   List.iter
     (fun json ->
-      match json |> member "goal_id" |> to_string_option with
+      match Json_util.get_string json "goal_id" with
       | Some goal_id ->
           let existing =
             Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
@@ -154,6 +150,24 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
     (fun goal_id ->
       Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
+
+let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
+  let goals = Goal_store.list_goals config () in
+  let tasks = Workspace.get_tasks_safe config in
+  let ( _effective_policy_for_goal,
+        _open_request_for_goal,
+        _latest_request_for_goal,
+        _events_for_goal ) =
+    build_goal_verification_projection ~config goals
+  in
+  let forest = build_forest ~config ~goals ~tasks in
+  let all_nodes = flatten_tree [] forest in
+  List.iter
+    (fun (node : tree_node) ->
+      let goal = node.goal in
+      let attainment = goal_attainment_to_json goal node in
+      observe_goal_attainment_metrics goal attainment)
+    all_nodes
 
 let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
     ?(open_request_for_goal = fun _ -> None)
@@ -198,18 +212,12 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("badges", `List (List.map (fun badge -> `String badge) node.badges));
       ("status_reason", `String node.status_reason);
       ("priority", `Int goal.priority);
-      ("metric",
-       match goal.metric with Some metric -> `String metric | None -> `Null);
-      ("target_value",
-       match goal.target_value with Some value -> `String value | None -> `Null);
+      ("metric", Json_util.string_opt_to_json goal.metric);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
       ( "require_completion_approval",
         `Bool goal.Goal_store.require_completion_approval );
-      ("due_date",
-       match goal.due_date with Some due_date -> `String due_date | None -> `Null);
-      ("parent_goal_id",
-       match goal.parent_goal_id with
-       | Some parent_goal_id -> `String parent_goal_id
-       | None -> `Null);
+      ("due_date", Json_util.string_opt_to_json goal.due_date);
+      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
       ("attainment", attainment);
@@ -284,10 +292,10 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
 
 
 
-let goal_detail_json ~(config : Coord.config) ~goal_id :
+let goal_detail_json ~(config : Workspace.config) ~goal_id :
     (Yojson.Safe.t, string) result =
   let goals = Goal_store.list_goals config () in
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,
@@ -300,9 +308,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
   | Some node ->
       let keeper_details =
-        Keeper_types.keeper_names config
+        Keeper_meta_store.keeper_names config
         |> List.filter_map (fun keeper_name ->
-               match Keeper_types.read_meta config keeper_name with
+               match Keeper_meta_store.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
                    let latest_receipt =
                      List.assoc_opt meta.name
@@ -357,9 +365,9 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
                 (build_goal_timeline node keeper_details approvals goal_events) );
           ])
 
-let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
+let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   let ( effective_policy_for_goal,
         open_request_for_goal,
         latest_request_for_goal,

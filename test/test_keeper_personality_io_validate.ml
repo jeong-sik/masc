@@ -6,7 +6,7 @@
     검증" — write raw, soft-warn at boundary). *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let make ?(will = "") ?(needs = "") ?(desires = "") ?(instructions = "") () :
     Keeper_personality_io.raw_personality =

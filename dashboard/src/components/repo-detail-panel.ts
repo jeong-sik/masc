@@ -78,7 +78,6 @@ export async function loadRepoDetail(id: string): Promise<void> {
       status: normalizeRepoStatus(typeof r.status === 'string' ? r.status : undefined),
       auto_sync: r.auto_sync === true,
       sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
-      credential_id: typeof r.credential_id === 'string' ? r.credential_id : null,
       created_at: typeof r.created_at === 'string' || typeof r.created_at === 'number' ? r.created_at : null,
       updated_at: typeof r.updated_at === 'string' || typeof r.updated_at === 'number' ? r.updated_at : null,
     } as Repository

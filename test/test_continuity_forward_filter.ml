@@ -30,9 +30,16 @@ Next plan: use keeper_task_claim after checking live policy
 Constraints: tool surface: masc_* only; no keeper_* tools visible
 OpenQuestions: why did the previous turn see stale tools?|}
 
+let stale_goal_cap_summary =
+  {|Goal: maintain keeper context
+Next plan: claim task-952 directly after checking tasks
+Next: use keeper_task_claim with task-952
+Constraints: current goal cap 4/3 means 새 작업 못 받음; active_goal_ids stale
+OpenQuestions: is goal capacity really full?|}
+
 let test_strips_backward () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   Alcotest.(check bool) "Done removed"
     false (String.length filtered >= 5 && Astring.String.is_infix ~affix:"Done:" filtered);
@@ -43,7 +50,7 @@ let test_strips_backward () =
 
 let test_keeps_forward () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   Alcotest.(check bool) "Goal kept"
     true (Astring.String.is_infix ~affix:"Goal:" filtered);
@@ -58,14 +65,14 @@ let test_keeps_forward () =
 
 let test_empty_input () =
   Alcotest.(check string) "empty stays empty"
-    "" (Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary "");
+    "" (Masc.Keeper_memory_policy.filter_forward_looking_summary "");
   Alcotest.(check string) "all-backward becomes empty"
-    "" (Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    "" (Masc.Keeper_memory_policy.filter_forward_looking_summary
           "Done: work\nDecisions: choice\nProgress: 50%")
 
 let test_preserves_line_order () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary full_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
   in
   let lines = String.split_on_char '\n' filtered in
   (* Goal comes before Next plan which comes before Next in the original. *)
@@ -87,7 +94,7 @@ let test_preserves_line_order () =
 
 let test_drops_inert_idle_directives () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
       inert_idle_summary
   in
   Alcotest.(check bool) "idle next plan removed"
@@ -101,7 +108,7 @@ let test_drops_inert_idle_directives () =
 
 let test_drops_stale_tool_surface_claims () =
   let filtered =
-    Masc_mcp.Keeper_memory_policy.filter_forward_looking_summary
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
       stale_tool_surface_summary
   in
   Alcotest.(check bool) "stale masc-only claim removed"
@@ -112,6 +119,18 @@ let test_drops_stale_tool_surface_claims () =
     true (Astring.String.is_infix ~affix:"Goal:" filtered);
   Alcotest.(check bool) "live-policy action still kept"
     true (Astring.String.is_infix ~affix:"keeper_task_claim" filtered)
+
+let test_drops_stale_goal_capacity_claims () =
+  let filtered =
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
+      stale_goal_cap_summary
+  in
+  Alcotest.(check bool) "stale goal cap removed"
+    false (Astring.String.is_infix ~affix:"goal cap" filtered);
+  Alcotest.(check bool) "stale active_goal_ids removed"
+    false (Astring.String.is_infix ~affix:"active_goal_ids" filtered);
+  Alcotest.(check bool) "live task-specific action kept"
+    true (Astring.String.is_infix ~affix:"task-952" filtered)
 
 let () =
   Alcotest.run "continuity forward filter"
@@ -128,5 +147,7 @@ let () =
             test_drops_inert_idle_directives;
           Alcotest.test_case "drops stale tool surface claims" `Quick
             test_drops_stale_tool_surface_claims;
+          Alcotest.test_case "drops stale goal-cap claims" `Quick
+            test_drops_stale_goal_capacity_claims;
         ] );
     ]

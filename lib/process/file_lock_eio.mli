@@ -10,7 +10,7 @@
       the flock the caller yields and retries.
 
     Distributed backend paths (non-local keys in
-    [room_utils_ops.ml]) are not affected. *)
+    [workspace_utils_ops.ml]) are not affected. *)
 
 (** {1 Tuning constants} *)
 
@@ -95,10 +95,10 @@ val with_lock :
     final outcome (0 = succeeded on the first attempt).  [elapsed_s]
     is the wall-clock time spent in the retry loop excluding [openfile].
 
-    Default no-op.  Wired at startup ([lib/coord.ml]) to a Prometheus
+    Default no-op.  Wired at startup ([lib/workspace.ml]) to a Otel_metric_store
     counter ([masc_file_lock_retries_total]) and histogram
     ([masc_file_lock_acquire_seconds]) so contention storms surface in
-    metrics.  [masc_process] cannot depend on [Prometheus] (sub-library
+    metrics.  [masc_process] cannot depend on [Otel_metric_store] (sub-library
     boundary), so emission goes through this Atomic ref. *)
 val on_lock_attempt_fn :
   (caller:string -> retries:int -> elapsed_s:float -> outcome:string -> unit)
@@ -108,9 +108,9 @@ val on_lock_attempt_fn :
     The lock table is shared by [prune_stale_entries] and [get_entry];
     high fiber contention (many fibers traversing the table for
     different paths) drives retry rate, the precise contention signal
-    that was previously invisible. Wired at startup ([lib/coord.ml]) to
-    a no-label Prometheus counter ([masc_file_lock_table_cas_retries]).
-    [masc_process] cannot depend on [Prometheus] (sub-library
+    that was previously invisible. Wired at startup ([lib/workspace.ml]) to
+    a no-label Otel_metric_store counter ([masc_file_lock_table_cas_retries]).
+    [masc_process] cannot depend on [Otel_metric_store] (sub-library
     boundary), so emission goes through this Atomic ref. *)
 val on_cas_retry_fn : (unit -> unit) Atomic.t
 

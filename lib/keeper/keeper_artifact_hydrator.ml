@@ -28,7 +28,8 @@ let try_hydrate ~store ~sha256 ~marker =
 let hydrate_block ~store ~remaining
     (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =
   match block with
-  | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
+  | Agent_sdk.Types.ToolResult
+      { tool_use_id; content; is_error; json; content_blocks } ->
       if !remaining = 0 then block
       else
         (match Tool_output.decode_from_oas content with
@@ -37,7 +38,7 @@ let hydrate_block ~store ~remaining
               | Some bytes ->
                   decr remaining;
                   Agent_sdk.Types.ToolResult
-                    { tool_use_id; content = bytes; is_error; json }
+                    { tool_use_id; content = bytes; is_error; json; content_blocks }
               | None -> block)
          | Tool_output.Inline _ -> block)
   | _ -> block

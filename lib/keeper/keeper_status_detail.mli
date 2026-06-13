@@ -9,7 +9,7 @@
     [latest_metrics_json], [model_observability_json], the
     [resolve_status_target] dispatch helpers, etc.) stay private. *)
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 (** Sort order for tail-window projections (metrics / trajectory). *)
 type tail_order =
@@ -45,8 +45,8 @@ val invalidate_status_cache_all : unit -> unit
     when the keeper's [updated_at] + args hash is unchanged;
     otherwise rebuilds the snapshot and refreshes the cache. *)
 val handle_keeper_status :
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
 val handle_keeper_status_config :
-  config:Coord.config -> agent_name:string -> Yojson.Safe.t -> tool_result
+  config:Workspace.config -> agent_name:string -> Yojson.Safe.t -> tool_result

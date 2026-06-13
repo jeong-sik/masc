@@ -1,9 +1,11 @@
 (include_subdirs no)
+
 (library
  (name masc_eio_context)
- (public_name masc_mcp.masc_eio_context)
+ (public_name masc.masc_eio_context)
  (wrapped false)
  (modules eio_context)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib.
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries eio eio.unix uri ca-certs tls tls-eio domain-name))

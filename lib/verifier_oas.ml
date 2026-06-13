@@ -92,17 +92,17 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
           ~start_time
           (sprintf "Invalid verdict format: %s" msg)
     in
-    let cascade_name =
-      Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Verifier
+    let runtime_id =
+      Runtime.get_default_runtime_id ()
     in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools
-        ~cascade_name
+        ~runtime_id
         ~goal:prompt
         ~masc_tools:[ Core.report_verdict_schema ]
         ~dispatch
-        ~max_turns:1
-        ~temperature:Llm_provider.Constants.Inference_profile.deterministic.temperature
+        
+        ~temperature:Runtime_provider_defaults.deterministic_temperature
         ~max_tokens:200
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -297,7 +297,7 @@ let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
     - Both enabled -> AllowList (stricter; deny is redundant)
     - Neither -> AllowAll
 
-    Dynamic runtime checks (cost budget, entropy, destructive patterns)
+    Dynamic runtime checks (cost telemetry, entropy, destructive patterns)
     remain in Eval_gate. OAS Guardrails handles static pre-filtering;
     Eval_gate handles stateful per-call checks. Together they form
     defense-in-depth.

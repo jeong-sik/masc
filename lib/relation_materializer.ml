@@ -42,7 +42,7 @@ let build_batch_mutation ~agent ~peers ~context =
 let record_collaborations_async ~tag ~context ~agent ~peers =
   let do_batch () =
     let mutation = build_batch_mutation ~agent ~peers ~context in
-    match Graphql_client.mutate ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Graphql ()) ~mutation () with
+    match Graphql_client.mutate ~mutation () with
     | Ok _ -> ()
     | Error msg -> log_err tag msg
   in
@@ -59,22 +59,22 @@ let record_collaborations_async ~tag ~context ~agent ~peers =
 
 (** {1 Collaboration — agent leave} *)
 
-(** When an agent leaves a room, record [COLLABORATED_WITH] edges
+(** When an agent session ends, record [COLLABORATED_WITH] edges
     between the departing agent and every other active agent.
     Runs asynchronously — returns immediately.
     20 peers = 1 HTTP request (alias batching). *)
-let on_agent_leave ~leaving_agent ~active_agents =
+let on_agent_session_ended ~leaving_agent ~active_agents =
   let peers = List.filter (fun name -> name <> leaving_agent) active_agents in
   if peers <> [] then
     record_collaborations_async
       ~tag:"collab"
-      ~context:(Printf.sprintf "co-present in MASC room at %s" (Masc_domain.now_iso ()))
+      ~context:(Printf.sprintf "co-present in MASC workspace at %s" (Masc_domain.now_iso ()))
       ~agent:leaving_agent ~peers
 
 (** {1 Task completion} *)
 
 (** When a task is completed, record collaboration between the
-    assignee and all active agents in the room.
+    assignee and all active agents.
     20 peers = 1 HTTP request (alias batching). *)
 let on_task_done ~assignee ~active_agents =
   let peers = List.filter (fun name -> name <> assignee) active_agents in

@@ -2,7 +2,7 @@
     MCP session helpers.
 
     Extracted from [mcp_server_eio.ml] to reduce file size and
-    enable reuse from {!Tool_inline_dispatch} without
+    enable reuse from {!Mcp_tool_runtime} without
     re-introducing the dependency cycle the split was designed
     to break. {!Mcp_server_eio} re-exports the two record types
     via [type t = Mcp_server_eio_governance.t = { … }] and
@@ -55,7 +55,7 @@ val governance_defaults : string -> governance_config
     Every other level (including ["development"], the implicit
     fallback) leaves both flags [false]. *)
 
-val load_governance : Coord.config -> governance_config
+val load_governance : Workspace.config -> governance_config
 (** Read [governance.json] under [config]'s [.masc/] root. When
     the file is absent, returns
     [governance_defaults "development"]. Per-field fallback to
@@ -64,7 +64,7 @@ val load_governance : Coord.config -> governance_config
     [false] defaults. *)
 
 val save_governance :
-  Coord.config -> governance_config -> unit
+  Workspace.config -> governance_config -> unit
 (** Persist [g] to [governance.json] under [config]'s [.masc/]
     root. The [updated_at] field is appended (current
     [Masc_domain.now_iso ()]) when the encoder produces an [`Assoc].
@@ -95,7 +95,7 @@ val mcp_session_of_json :
     via [Result.to_option] because callers always treat decode
     failure as "skip this row"). *)
 
-val load_mcp_sessions : Coord.config -> mcp_session_record list
+val load_mcp_sessions : Workspace.config -> mcp_session_record list
 (** Read [mcp-sessions.json] under [config]'s [.masc/] root.
     Returns [[]] when the file is absent or when the top-level
     JSON is not a [`List]. Individual rows that fail to decode
@@ -103,7 +103,7 @@ val load_mcp_sessions : Coord.config -> mcp_session_record list
     list across schema migrations. *)
 
 val save_mcp_sessions :
-  Coord.config -> mcp_session_record list -> unit
+  Workspace.config -> mcp_session_record list -> unit
 (** Persist [sessions] as a [`List] to [mcp-sessions.json] under
     [config]'s [.masc/] root. Creates the [.masc/] directory if
     absent. *)

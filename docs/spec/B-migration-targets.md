@@ -17,12 +17,12 @@
 | MCP tool schemas | ~371 | 일반적 MCP 서버: 5-15개 |
 | .mli files | 144 | 761개 중 19% |
 | Test files | 319 | test/ 하위 |
-| Sub-libraries | 11 | backend, bridge, core, dated_jsonl, eio_context, fs_compat, masc_log, process, room, time_compat, types |
+| Sub-libraries | 11 | backend, bridge, core, dated_jsonl, eio_context, fs_compat, masc_log, process, workspace, time_compat, types |
 | Flat lib/ .ml files | 294 | Sub-library에 속하지 않은 파일 |
 | Environment variables | 50+ | 설정 파일 없이 env var만으로 운영 |
 | Dashboard | Preact + HTM SPA | Vite 빌드, assets/dashboard/ |
 | Transport | HTTP/1.1 (default), h2c (opt-in), WebSocket, WebRTC (experimental) | Multi-protocol |
-| OAS integration | v0.87.0 delegation | Cascade, Memory, Swarm 일부 |
+| OAS integration | v0.87.0 delegation | Runtime, Memory, Swarm 일부 |
 | Board backend | filesystem/JSONL | PostgreSQL runtime backend is not a target |
 
 ### 시스템 구성 비율 (LOC 기준, ARCHITECTURE-COMPLEXITY-ANALYSIS 발췌)
@@ -37,7 +37,7 @@
 | **Total tool code** | **47** | **~34.7K** | -- |
 
 Core 기능(Tier 1)은 전체 tool 코드의 4%에 불과하다.
-Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 coordination과 무관하다.
+Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 workspace collaboration과 무관하다.
 
 ---
 
@@ -47,7 +47,7 @@ Tier 4 (Experimental/Game)가 32%를 차지하며, 이 코드는 coordination과
 
 | File | Lines | Problem |
 |------|-------|---------|
-| `tool_trpg.ml` | 1,934 | Coordination과 무관. 별도 패키지 대상 |
+| `tool_trpg.ml` | 1,934 | Workspace과 무관. 별도 패키지 대상 |
 | `tool_protocol_game_view.ml` | 1,674 | TRPG와 동일 |
 | `tool_mdal.ml` | 1,092 | Metric loop 단독 모듈. 분리 가능 |
 | `tool_risc.ml` | 1,070 | 실험 잔재 |
@@ -66,8 +66,8 @@ Sub-library 추출 비율: 12/~300 = 4%.
 
 ### 2.4 Circular Dependencies
 
-`masc_mcp.ml` wrapper module이 모든 sub-library를 re-export하는 facade.
-새 모듈 추가 시 masc_mcp.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-mcp-module-conflict-hotspot).
+`masc.ml` wrapper module이 모든 sub-library를 re-export하는 facade.
+새 모듈 추가 시 masc.ml + lib/dune에서 additive conflict이 항상 발생한다 (memory: masc-module-conflict-hotspot).
 
 ### 2.5 Configuration Sprawl
 
@@ -145,9 +145,9 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 | Team | 범위 | 핵심 모듈 | 예상 LOC |
 |------|------|----------|---------|
 | **Foundation** | Types, Base, Config, Log | types/, core/, masc_log/, env_config | ~15K |
-| **Room** | Room lifecycle, Task, Heartbeat, Board | room/, tool_room, tool_task, tool_heartbeat, board | ~20K |
+| **Workspace** | Workspace lifecycle, Task, Heartbeat, Board | workspace/, tool_workspace, tool_task, tool_heartbeat, board | ~20K |
 | **Keeper** | Keeper runtime, Memory, Succession | keeper/, tool_keeper, agent_memory | ~25K |
-| **Chain** | Cascade, OAS bridge, Swarm engine | cascade, oas_worker, chain, spawn | ~30K |
+| **Chain** | Runtime, OAS bridge, Swarm engine | runtime, oas_worker, chain, spawn | ~30K |
 | **Server** | HTTP, MCP protocol, Transport, Auth | mcp_server_eio, transport, tool_auth | ~20K |
 | **Dashboard** | Preact SPA, SSE bridge, API routes | dashboard/, web_dashboard | ~15K |
 | **OAS Bridge** | OAS integration facade, Provider registry | oas_*, provider_registry | ~10K |
@@ -155,13 +155,13 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 ### 추출 순서 (8-Phase, 3-4주 예상)
 
 1. Foundation (types, base, log) -- 의존 없는 leaf
-2. Room (room lifecycle)
+2. Workspace (workspace lifecycle)
 3. Keeper (keeper runtime)
-4. Chain (cascade, spawn)
+4. Chain (runtime, spawn)
 5. Server (transport, protocol)
 6. Dashboard (frontend build pipeline 분리)
 7. OAS Bridge (facade 정리)
-8. Cleanup (masc_mcp.ml facade 축소, dead re-export 제거)
+8. Cleanup (masc.ml facade 축소, dead re-export 제거)
 
 ---
 
@@ -172,14 +172,14 @@ Source: memory/masc-org-design-7teams.md (2026-03-21)
 ```
 lib/backend/     lib/bridge/      lib/core/       lib/dated_jsonl/
 lib/eio_context/ lib/fs_compat/   lib/masc_log/   lib/process/
-lib/room/        lib/time_compat/ lib/types/
+lib/workspace/        lib/time_compat/ lib/types/
 ```
 
 ### 즉시 추출 대상 (Phase 2 from ARCHITECTURE-COMPLEXITY)
 
 | 새 패키지 | 포함 모듈 | Lines | 근거 |
 |-----------|----------|-------|------|
-| `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Coordination과 완전 무관 |
+| `masc-games` | tool_trpg, tool_protocol_game_view, trpg_*.ml | 3,600+ | Workspace과 완전 무관 |
 | `masc-experiments` | tool_risc, tool_experiment | TBD | 실험 잔재, optional로 전환 |
 
 ### 구조 분할 대상
@@ -187,14 +187,14 @@ lib/room/        lib/time_compat/ lib/types/
 | 대상 | 현재 | 목표 | 설계 상태 |
 |------|------|------|----------|
 | lib/ flat files | 294개 | Sub-library 기반 조직 | 7-Team Design으로 매핑 완료 |
-| masc_mcp.ml facade | 전체 re-export | Team별 facade | drift 문제 해소 필요 |
+| masc.ml facade | 전체 re-export | Team별 facade | drift 문제 해소 필요 |
 
 ### .mli 추가 우선순위
 
 | Module | Priority | 근거 |
 |--------|----------|------|
-| room.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
-| cascade.ml | High | OAS bridge의 핵심 계약 |
+| workspace.ml | High | Core lifecycle, 다른 모든 모듈이 의존 |
+| runtime.ml | High | OAS bridge의 핵심 계약 |
 | keeper_autonomy.ml | High | Keeper 자율 실행 계약 |
 | spawn.ml | Medium | 61 references, Swarm 핵심 |
 
@@ -207,7 +207,7 @@ lib/room/        lib/time_compat/ lib/types/
 | Issue | Count | Source |
 |-------|-------|--------|
 | Duplicate/trivial coverage files | 32 | ROADMAP |
-| Hollow test files (빈 테스트) | 4 | void, voice_stream, backend_eio, room_portal |
+| Hollow test files (빈 테스트) | 4 | void, voice_stream, backend_eio, workspace_portal |
 | Total test files | 319 | test/ 하위 |
 
 ### 32 Duplicate Coverage Files
@@ -222,7 +222,7 @@ test/ 디렉토리에 `*_coverage.ml` 파일이 32개 존재하며, 상당수가
 1. `test_void.ml`
 2. `test_voice_stream.ml`
 3. `test_backend_eio.ml`
-4. `test_room_portal.ml`
+4. `test_workspace_portal.ml`
 
 ---
 
@@ -232,7 +232,7 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 
 | Gap | 현재 상태 | 필요한 spec |
 |-----|----------|-------------|
-| **Memory system** | 없음 (design draft removed 2026-04-17) | Memory tier 계약 (OAS 5-tier 포함) |
+| **Memory system** | `12-memory-systems.md` + `Masc.Memory.t` facade | MASC-owned memory bank / institution / procedural 계약 |
 | **TRPG subsystem** | 7개 docs, 미통합 | 분리 패키지 후 자체 spec |
 | **Transport protocol detail** | TRANSPORT-VERIFICATION-CHECKLIST (401 lines) | 09-server-transport.md에 부분 포함, WebRTC/WS 미상세 |
 | **Keeper Autonomy identity** | docs/archive/keeper-autonomy-identity-v2/ (3 files) | 구현 후 spec 추가 |
@@ -249,8 +249,8 @@ docs/spec/ 체계에서 아직 다루지 않는 영역.
 00-glossary.md              -- 용어집
 01-system-overview.md       -- 시스템 개요
 02-types-and-invariants.md  -- 타입과 불변식
-03-room-coordination.md     -- Room 조율
-04-chain-engine.md          -- Chain/Cascade 엔진
+03-workspace-state collaboration.md     -- Workspace 조율
+04-chain-engine.md          -- Chain/Runtime 엔진
 05-keeper-agent.md          -- Keeper 에이전트
 06-command-plane.md         -- Command Plane
 09-server-transport.md      -- 서버/전송

@@ -1,0 +1,516 @@
+(** Runtime = Provider + Model + Spec(binding).
+
+    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
+    간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
+    으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
+
+    타입은 자립 모듈 {!Runtime_schema} 소유 (삭제된 [Runtime_declarative_types]
+    대체). parse 는 {!Runtime_toml}, hot-path materialize 는 {!Runtime_adapter}
+    가 담당한다 — 셋 다 [Runtime_*] 코드 의존 0. *)
+
+open Runtime_schema
+
+type t =
+  { id : string
+    (** binding key ["provider.model"], 예 ["runpod_mtp.qwen-runpod"] *)
+  ; provider : provider
+  ; model : model_spec
+  ; binding : binding
+  ; provider_config : Llm_provider.Provider_config.t
+    (** load 시점에 materialize 된 hot-path provider config. 소비자는
+        routing 없이 이걸 곧장 LLM dispatch 로 넘긴다. *)
+  }
+
+(* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
+   인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
+let id_of_binding (b : binding) : string = binding_key b
+
+(** binding 을 Runtime 으로 변환. provider/model resolve 또는 provider_config
+    materialize 가 실패하면 [None] (fail-closed — partial-boot 없음, 해당
+    binding 은 가용 Runtime 목록에서 제외). *)
+let of_binding (cfg : config) (b : binding) : t option =
+  match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
+  | Some provider, Some model ->
+    (match Runtime_adapter.binding_to_provider_config cfg b with
+     | Ok provider_config ->
+       Some { id = id_of_binding b; provider; model; binding = b; provider_config }
+     | Error _ -> None)
+  | _ -> None
+;;
+
+(** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
+
+    fail-fast: [\[runtime\] default] 가 없거나 그 id 가 목록에 없으면 [Error].
+    silent fallback 일절 없음 (runtime→Runtime 비전: TOML 에 default 없으면
+    프로그램 실행 불가). *)
+(* RFC keeper→runtime assignment validation: every [[runtime.assignments]]
+   target must resolve to a configured runtime. An unknown id is an operator
+   error rejected at load (mirrors [runtime].default validation), NOT a silent
+   fallback to the default — that would mask a typo'd assignment
+   (Unknown→Permissive anti-pattern). A keeper *absent* from the table is the
+   intended designed fallback to the default and is handled at lookup time, not
+   here. *)
+let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
+    (assignments : (string * string) list) : (unit, string) result =
+  let runtime_exists id =
+    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  in
+  match
+    List.find_opt (fun (_, runtime_id) -> not (runtime_exists runtime_id)) assignments
+  with
+  | None -> Ok ()
+  | Some (keeper_name, runtime_id) ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime.assignments].%s = %S not found among %d runtimes"
+         config_path
+         keeper_name
+         runtime_id
+         (List.length runtimes))
+;;
+
+let materialize_config ~(config_path : string) (cfg : config)
+  : (t list * t * (string * string) list, string) result
+  =
+  let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
+  let assignments = cfg.keeper_assignments in
+  match cfg.default_runtime_id with
+  | None ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime].default is required (no default runtime configured; \
+          silent fallback removed)"
+         config_path)
+  | Some did ->
+    (match List.find_opt (fun (r : t) -> String.equal r.id did) runtimes with
+     | None ->
+       Error
+         (Printf.sprintf
+            "%s: [runtime].default = %S not found among %d runtimes"
+            config_path
+            did
+            (List.length runtimes))
+     | Some rt ->
+       (match validate_keeper_assignments ~config_path runtimes assignments with
+        | Error _ as e -> e
+        | Ok () -> Ok (runtimes, rt, assignments)))
+;;
+
+let load_list ~(config_path : string)
+  : (t list * t * (string * string) list, string) result
+  =
+  match Runtime_toml.parse_file config_path with
+  | Error errs ->
+    Error
+      (Printf.sprintf
+         "runtime config parse failed (%s): %d error(s)"
+         config_path
+         (List.length errs))
+  | Ok cfg -> materialize_config ~config_path cfg
+
+(* ---- Lazy default runtime singleton ---- *)
+
+let default_runtime_ref : t option ref = ref None
+let runtimes_ref : t list ref = ref []
+
+(* keeper name → runtime id ["provider.model"], from [[runtime.assignments]].
+   Populated by [init_default]; read by [runtime_id_for_keeper]. Validated at
+   load (every target resolves to a runtime), so a hit here is always a
+   configured runtime. *)
+let keeper_assignments_ref : (string * string) list ref = ref []
+
+let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
+
+let init_default ~config_path =
+  match load_list ~config_path with
+  | Ok (runtimes, rt, assignments) ->
+    runtimes_ref := runtimes;
+    default_runtime_ref := Some rt;
+    keeper_assignments_ref := assignments;
+    Ok ()
+  | Error _ as e -> e
+
+let get_default_runtime () = !default_runtime_ref
+let get_runtimes () = !runtimes_ref
+let get_runtime_ids () = runtime_ids !runtimes_ref
+
+(* RFC persona⊥{model,runtime}: keeper→runtime assignment is sourced from
+   [[runtime.assignments]] (runtime.toml SSOT), NOT from persona JSON or keeper
+   TOML. [None] = no explicit assignment; the caller falls back to
+   {!get_default_runtime_id}. The returned id is opaque (masc never parses it;
+   only the OAS adapter resolves it to provider/model/spec). Reads
+   [keeper_assignments_ref], never a module-level eager binding. *)
+let runtime_id_for_keeper (keeper_name : string) : string option =
+  List.assoc_opt keeper_name !keeper_assignments_ref
+;;
+
+(* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
+   keeper turn driver dispatches to the *requested* runtime (a keeper's persona
+   [model] selection or the default) instead of unconditionally the default; an
+   unknown id returns [None] so the driver fails fast (no silent substitution —
+   RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
+let get_runtime_by_id (id : string) : t option =
+  List.find_opt (fun (rt : t) -> String.equal rt.id id) !runtimes_ref
+;;
+
+let max_context_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt -> Some rt.model.max_context
+  | None -> None
+;;
+
+let thinking_support_of_runtime_id (id : string) : bool option =
+  match get_runtime_by_id id with
+  | Some rt -> Some rt.model.thinking_support
+  | None -> None
+;;
+
+let preserve_thinking_of_runtime_id (id : string) : bool option =
+  match get_runtime_by_id id with
+  | Some rt when rt.model.preserve_thinking -> Some true
+  | Some _ -> None
+  | None -> None
+;;
+
+(* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
+   condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
+   조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).
+   불변식: [init_default] 가 startup 에서 성공해야 한다(아니면 startup abort).
+   NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
+   [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
+let get_default_runtime_id () =
+  match !default_runtime_ref with
+  | Some rt -> rt.id
+  | None ->
+    failwith
+      "Runtime.get_default_runtime_id: default runtime not initialized; \
+       Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
+;;
+
+let config_path () : string option =
+  Config_dir_resolver.log_warnings ~context:"Runtime" ();
+  let resolution = Config_dir_resolver.resolve () in
+  match resolution.config_root.source with
+  | Env | Local_masc ->
+      let path =
+        Filename.concat resolution.config_root.path
+          Config_dir_resolver.runtime_toml_filename
+      in
+      if Sys.file_exists path then Some path else None
+  | Invalid_env | Missing -> None
+;;
+
+let runtime_config_path_result ?runtime_config_path () =
+  match runtime_config_path with
+  | Some path -> Ok path
+  | None ->
+    (match config_path () with
+     | Some path -> Ok path
+     | None -> Error "runtime config path not found")
+;;
+
+let load_config_text ?runtime_config_path () =
+  match runtime_config_path_result ?runtime_config_path () with
+  | Error _ as e -> e
+  | Ok path ->
+    (try Ok (path, Fs_compat.load_file path) with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "failed to read runtime config %s: %s"
+            path
+            (Printexc.to_string exn)))
+;;
+
+let contains_newline s =
+  String.exists (function
+    | '\n' | '\r' -> true
+    | _ -> false)
+    s
+;;
+
+let toml_escape_string s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+;;
+
+let assignment_line ~keeper_name ~runtime_id =
+  Printf.sprintf
+    "\"%s\" = \"%s\""
+    (toml_escape_string keeper_name)
+    (toml_escape_string runtime_id)
+;;
+
+let split_lines content =
+  if String.equal content "" then [], false
+  else (
+    let len = String.length content in
+    let trailing_newline = Char.equal content.[len - 1] '\n' in
+    let parts = String.split_on_char '\n' content in
+    let lines =
+      if trailing_newline
+      then (
+        match List.rev parts with
+        | "" :: rest -> List.rev rest
+        | _ -> parts)
+      else parts
+    in
+    lines, trailing_newline)
+;;
+
+let join_lines lines ~trailing_newline =
+  match lines with
+  | [] -> if trailing_newline then "\n" else ""
+  | _ ->
+    let body = String.concat "\n" lines in
+    if trailing_newline then body ^ "\n" else body
+;;
+
+let strip_toml_comment line =
+  match String.index_opt line '#' with
+  | None -> line
+  | Some index -> String.sub line 0 index
+;;
+
+let is_toml_table_header line =
+  let s = line |> strip_toml_comment |> String.trim in
+  let len = String.length s in
+  len >= 2 && Char.equal s.[0] '[' && Char.equal s.[len - 1] ']'
+;;
+
+let is_runtime_assignments_header line =
+  String.equal (line |> strip_toml_comment |> String.trim) "[runtime.assignments]"
+;;
+
+let rec split_at n xs =
+  if n <= 0 then [], xs
+  else
+    match xs with
+    | [] -> [], []
+    | x :: rest ->
+      let before, after = split_at (n - 1) rest in
+      x :: before, after
+;;
+
+let find_index pred xs =
+  let rec loop index = function
+    | [] -> None
+    | x :: rest -> if pred x then Some index else loop (index + 1) rest
+  in
+  loop 0 xs
+;;
+
+let parse_quoted_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '"') then None
+  else
+    let buf = Buffer.create len in
+    let rec loop index =
+      if index >= len then None
+      else
+        match raw.[index] with
+        | '"' -> Some (Buffer.contents buf)
+        | '\\' when index + 1 < len ->
+          let escaped =
+            match raw.[index + 1] with
+            | '"' -> '"'
+            | '\\' -> '\\'
+            | 'n' -> '\n'
+            | 'r' -> '\r'
+            | 't' -> '\t'
+            | c -> c
+          in
+          Buffer.add_char buf escaped;
+          loop (index + 2)
+        | c ->
+          Buffer.add_char buf c;
+          loop (index + 1)
+    in
+    loop 1
+;;
+
+let parse_literal_key raw =
+  let len = String.length raw in
+  if len < 2 || not (Char.equal raw.[0] '\'') then None
+  else
+    match String.index_from_opt raw 1 '\'' with
+    | None -> None
+    | Some end_index -> Some (String.sub raw 1 (end_index - 1))
+;;
+
+let assignment_key_of_line line =
+  let trimmed = String.trim line in
+  if String.equal trimmed "" || Char.equal trimmed.[0] '#'
+  then None
+  else
+    match String.index_opt trimmed '=' with
+    | None -> None
+    | Some eq_index ->
+      let key_part = String.sub trimmed 0 eq_index |> String.trim in
+      if String.equal key_part ""
+      then None
+      else if Char.equal key_part.[0] '"'
+      then parse_quoted_key key_part
+      else if Char.equal key_part.[0] '\''
+      then parse_literal_key key_part
+      else Some key_part
+;;
+
+let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
+  let line = assignment_line ~keeper_name ~runtime_id in
+  let rec loop acc = function
+    | [] -> List.rev_append acc [ line ]
+    | existing :: rest ->
+      (match assignment_key_of_line existing with
+       | Some key when String.equal key keeper_name ->
+         List.rev_append acc (line :: rest)
+       | _ -> loop (existing :: acc) rest)
+  in
+  loop [] section_lines
+;;
+
+let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
+  let section =
+    [ "[runtime.assignments]"; assignment_line ~keeper_name ~runtime_id ]
+  in
+  match List.rev lines with
+  | [] -> section
+  | last :: _ when String.equal (String.trim last) "" -> lines @ section
+  | _ -> lines @ ("" :: section)
+;;
+
+let update_runtime_assignment_text content ~keeper_name ~runtime_id =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index is_runtime_assignments_header lines with
+    | None -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> append_runtime_assignments_section lines ~keeper_name ~runtime_id
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next_header_index -> split_at next_header_index after_header
+         in
+         before
+         @ (header
+            :: replace_or_append_assignment
+                 section_lines
+                 ~keeper_name
+                 ~runtime_id)
+         @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let runtime_parse_errors_to_string errs =
+  errs
+  |> List.map (fun (err : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" err.path err.message)
+  |> String.concat "; "
+;;
+
+let validate_runtime_config_text ~config_path content =
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    Error
+      (Printf.sprintf
+         "runtime config parse failed (%s): %s"
+         config_path
+         (runtime_parse_errors_to_string errs))
+  | Ok cfg ->
+    (match materialize_config ~config_path cfg with
+     | Ok _ -> Ok ()
+     | Error _ as e -> e)
+;;
+
+let save_config_text ?runtime_config_path content =
+  match runtime_config_path_result ?runtime_config_path () with
+  | Error _ as e -> e
+  | Ok path ->
+    (match validate_runtime_config_text ~config_path:path content with
+     | Error _ as e -> e
+     | Ok () ->
+       (match Fs_compat.save_file_atomic path content with
+        | Error _ as e -> e
+        | Ok () ->
+          (match init_default ~config_path:path with
+           | Ok () -> Ok ()
+           | Error msg -> Error ("runtime config saved but reload failed: " ^ msg))))
+;;
+
+let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+  let keeper_name = String.trim keeper_name in
+  let runtime_id = String.trim runtime_id in
+  if String.equal keeper_name ""
+  then Error "keeper_name must not be empty"
+  else if String.equal runtime_id ""
+  then Error "runtime_id must not be empty"
+  else if contains_newline keeper_name
+  then Error "keeper_name must not contain newlines"
+  else if contains_newline runtime_id
+  then Error "runtime_id must not contain newlines"
+  else
+    match runtime_config_path_result ?runtime_config_path () with
+    | Error _ as e -> e
+    | Ok path ->
+      let content_result =
+        try Ok (Fs_compat.load_file path) with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Error
+            (Printf.sprintf
+               "failed to read runtime config %s: %s"
+               path
+               (Printexc.to_string exn))
+      in
+      (match content_result with
+       | Error _ as e -> e
+       | Ok content ->
+         let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
+         (match validate_runtime_config_text ~config_path:path next with
+          | Error _ as e -> e
+          | Ok () ->
+            (match Fs_compat.save_file_atomic path next with
+             | Error _ as e -> e
+             | Ok () ->
+               (match init_default ~config_path:path with
+                | Ok () -> Ok ()
+                | Error msg ->
+                  Error ("runtime config saved but reload failed: " ^ msg)))))
+;;
+
+(* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]
+   scanned model labels across a runtime's candidates and folded the max. Under
+   single-binding every keeper uses the default runtime, so the context budget
+   is that runtime's [model.max_context]. Falls back to
+   [Runtime_constants.fallback_context_window] when the default is not yet
+   initialized (config-less test binaries). *)
+let default_max_context () : int =
+  match get_default_runtime () with
+  | Some rt -> rt.model.max_context
+  | None -> Runtime_constants.fallback_context_window
+;;
+
+(* RFC-0206 single-binding: the deleted
+   [Runtime_runtime.default_local_model_label_and_id] scanned configured/available
+   labels and returned the model-id substring. Under single-binding the model
+   name sent to the runtime endpoint is the default runtime's [model.api_name].
+   Falls back to ["auto"] before {!init_default} runs. *)
+let default_model_api_name () : string =
+  match get_default_runtime () with
+  | Some rt -> rt.model.api_name
+  | None -> "auto"
+;;

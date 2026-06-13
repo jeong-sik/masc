@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  deriveCorpusBlocker,
   normalizeGoalLoopStatus,
   normalizeGoalLoopStatusLevel,
   verifyEvidenceLabel,
@@ -28,7 +27,6 @@ function criticalPayload() {
             expected_findings_total: 206,
             itemized_findings_total: 19,
             missing_itemized_findings: 187,
-            strict_row_corpus_validated: false,
           },
         },
       },
@@ -70,18 +68,6 @@ describe('goal-loop-status contract', () => {
     expect(normalizeGoalLoopStatusLevel('startup-fixture-failure')).toBe('critical')
     expect(normalizeGoalLoopStatusLevel('missing')).toBe('warning')
     expect(normalizeGoalLoopStatusLevel('post-act-live')).toBe('ok')
-  })
-
-  it('derives the strict corpus blocker from audit catalog completeness', () => {
-    const status = normalizeGoalLoopStatus(criticalPayload())
-    const blocker = deriveCorpusBlocker(status)
-
-    expect(blocker?.id).toBe('strict_row_level_catalog_complete')
-    expect(blocker?.status).toBe('BLOCKED')
-    expect(blocker?.expectedFindingsTotal).toBe(206)
-    expect(blocker?.itemizedFindingsTotal).toBe(19)
-    expect(blocker?.missingItemizedFindings).toBe(187)
-    expect(blocker?.strictRowCorpusValidated).toBe(false)
   })
 
   it('distinguishes startup fixture failure from post-ACT live evidence', () => {

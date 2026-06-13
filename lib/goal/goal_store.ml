@@ -128,10 +128,9 @@ and goal_to_yojson (goal : goal) =
       ("id", `String goal.id);
       ("horizon", horizon_to_yojson goal.horizon);
       ("title", `String goal.title);
-      ("metric", match goal.metric with Some value -> `String value | None -> `Null);
-      ( "target_value",
-        match goal.target_value with Some value -> `String value | None -> `Null );
-      ("due_date", match goal.due_date with Some value -> `String value | None -> `Null);
+      ("metric", Json_util.string_opt_to_json goal.metric);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
+      ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
       ("status", goal_status_to_yojson goal.status);
       ("phase", Goal_phase.to_yojson goal.phase);
@@ -140,26 +139,19 @@ and goal_to_yojson (goal : goal) =
         | Some policy -> Goal_verification.goal_verifier_policy_to_yojson policy
         | None -> `Null );
       ("require_completion_approval", `Bool goal.require_completion_approval);
-      ( "active_verification_request_id",
-        match goal.active_verification_request_id with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "parent_goal_id",
-        match goal.parent_goal_id with Some value -> `String value | None -> `Null );
-      ( "last_review_note",
-        match goal.last_review_note with Some value -> `String value | None -> `Null );
-      ( "last_review_at",
-        match goal.last_review_at with Some value -> `String value | None -> `Null );
+      ("active_verification_request_id", Json_util.string_opt_to_json goal.active_verification_request_id);
+      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
+      ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
+      ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
 
 and state_of_yojson = function
   | `Assoc _ as json ->
-      let open Yojson.Safe.Util in
       begin
-        match member "version" json, member "updated_at" json, member "goals" json with
-        | `Int version, `String updated_at, `List goals_json ->
+        match Json_util.assoc_member_opt "version" json, Json_util.assoc_member_opt "updated_at" json, Json_util.assoc_member_opt "goals" json with
+        | Some (`Int version), Some (`String updated_at), Some (`List goals_json) ->
             let rec collect acc = function
               | [] -> Ok (List.rev acc)
               | row :: rest -> (
@@ -177,39 +169,38 @@ and state_of_yojson = function
 
 and goal_of_yojson = function
   | `Assoc _ as json ->
-      let open Yojson.Safe.Util in
       begin
-        match member "id" json, horizon_of_yojson (member "horizon" json), member "title" json with
-        | `String id, Ok horizon, `String title ->
+        match Json_util.assoc_member_opt "id" json, horizon_of_yojson (Option.value ~default:`Null (Json_util.assoc_member_opt "horizon" json)), Json_util.assoc_member_opt "title" json with
+        | Some (`String id), Ok horizon, Some (`String title) ->
             let legacy_status =
-              match member "status" json with
-              | `Null -> Ok Active
-              | status_json -> goal_status_of_yojson status_json
+              match Json_util.assoc_member_opt "status" json with
+              | None | Some `Null -> Ok Active
+              | Some status_json -> goal_status_of_yojson status_json
             in
             let phase =
-              match member "phase" json with
-              | `Null -> (
+              match Json_util.assoc_member_opt "phase" json with
+              | None | Some `Null -> (
                   match legacy_status with
                   | Ok status -> Ok (phase_of_goal_status status)
                   | Error msg -> Error msg)
-              | phase_json -> Goal_phase.of_yojson phase_json
+              | Some phase_json -> Goal_phase.of_yojson phase_json
             in
             let verifier_policy =
-              match member "verifier_policy" json with
-              | `Null -> Ok None
-              | policy_json ->
+              match Json_util.assoc_member_opt "verifier_policy" json with
+              | None | Some `Null -> Ok None
+              | Some policy_json ->
                   Result.map
                     Option.some
                     (Goal_verification.goal_verifier_policy_of_yojson policy_json)
             in
             let created_at =
-              match member "created_at" json with
-              | `String value -> Ok value
+              match Json_util.assoc_member_opt "created_at" json with
+              | Some (`String value) -> Ok value
               | _ -> Error "goal_of_yojson: created_at missing"
             in
             let updated_at =
-              match member "updated_at" json with
-              | `String value -> Ok value
+              match Json_util.assoc_member_opt "updated_at" json with
+              | Some (`String value) -> Ok value
               | _ -> Error "goal_of_yojson: updated_at missing"
             in
             begin
@@ -221,25 +212,25 @@ and goal_of_yojson = function
                          id;
                          horizon;
                          title;
-                         metric = member "metric" json |> to_string_option;
-                         target_value = member "target_value" json |> to_string_option;
-                         due_date = member "due_date" json |> to_string_option;
+                         metric = Json_util.get_string json "metric" ;
+                         target_value = Json_util.get_string json "target_value" ;
+                         due_date = Json_util.get_string json "due_date" ;
                          priority =
-                           (match member "priority" json with
-                           | `Int value -> clamp_priority value
+                           (match Json_util.assoc_member_opt "priority" json with
+                           | Some (`Int value) -> clamp_priority value
                            | _ -> 3);
                          status = goal_status_of_phase phase;
                          phase;
                          verifier_policy;
                          require_completion_approval =
-                           (match member "require_completion_approval" json with
-                           | `Bool value -> value
+                           (match Json_util.assoc_member_opt "require_completion_approval" json with
+                           | Some (`Bool value) -> value
                            | _ -> false);
                          active_verification_request_id =
-                           member "active_verification_request_id" json |> to_string_option;
-                         parent_goal_id = member "parent_goal_id" json |> to_string_option;
-                         last_review_note = member "last_review_note" json |> to_string_option;
-                         last_review_at = member "last_review_at" json |> to_string_option;
+                           Json_util.get_string json "active_verification_request_id" ;
+                         parent_goal_id = Json_util.get_string json "parent_goal_id" ;
+                         last_review_note = Json_util.get_string json "last_review_note" ;
+                         last_review_at = Json_util.get_string json "last_review_at" ;
                          created_at;
                          updated_at;
                        })
@@ -355,17 +346,20 @@ let parse_refresh_mode s =
   | _ -> None
 
 let goals_path config =
-  Filename.concat (Coord.masc_dir config) "goals.json"
+  Filename.concat (Workspace_utils.masc_dir config) "goals.json"
+
+let goals_recovery_path config =
+  goals_path config ^ ".last-good"
 
 let snapshots_dir config =
-  Filename.concat (Coord.masc_dir config) "goals_snapshots"
+  Filename.concat (Workspace_utils.masc_dir config) "goals_snapshots"
 
 let scheduler_state_path config =
-  Filename.concat (Coord.masc_dir config) "goals_scheduler_state.json"
+  Filename.concat (Workspace_utils.masc_dir config) "goals_scheduler_state.json"
 
 let ensure_dirs config =
-  Coord.mkdir_p (Coord.masc_dir config);
-  Coord.mkdir_p (snapshots_dir config)
+  Workspace_utils.mkdir_p (Workspace_utils.masc_dir config);
+  Workspace_utils.mkdir_p (snapshots_dir config)
 
 let default_state () =
   { version = 1; updated_at = Masc_domain.now_iso (); goals = [] }
@@ -373,16 +367,71 @@ let default_state () =
 let read_state config =
   ensure_dirs config;
   let path = goals_path config in
-  if Coord.path_exists config path then
-    match state_of_yojson (Coord.read_json config path) with
-    | Ok state -> { state with goals = List.map normalize_goal state.goals }
-    | Error _ -> default_state ()
+  if Workspace_utils.path_exists config path then
+    match Workspace_utils.read_json_result config path with
+    | Ok json ->
+        (match state_of_yojson json with
+         | Ok state -> { state with goals = List.map normalize_goal state.goals }
+         | Error primary_msg ->
+             let recovery = goals_recovery_path config in
+             if Workspace_utils.path_exists config recovery then
+               match Workspace_utils.read_json_result config recovery with
+               | Ok recovery_json ->
+                   (match state_of_yojson recovery_json with
+                    | Ok state ->
+                        Log.Misc.warn
+                          "goal_store: primary goals.json corrupt (%s), recovered from %s"
+                          primary_msg recovery;
+                        { state with goals = List.map normalize_goal state.goals }
+                    | Error recovery_msg ->
+                        Log.Misc.error
+                          "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
+                          primary_msg recovery_msg;
+                        default_state ())
+               | Error recovery_read_msg ->
+                   Log.Misc.warn
+                     "goal_store: goals.json corrupt (%s), recovery read failed: %s"
+                     primary_msg recovery_read_msg;
+                   default_state ()
+             else
+               (Log.Misc.warn
+                  "goal_store: goals.json corrupt (%s), no .last-good available"
+                  primary_msg;
+                default_state ()))
+    | Error primary_msg ->
+        let recovery = goals_recovery_path config in
+        if Workspace_utils.path_exists config recovery then
+          match Workspace_utils.read_json_result config recovery with
+          | Ok recovery_json ->
+              (match state_of_yojson recovery_json with
+               | Ok state ->
+                   Log.Misc.warn
+                     "goal_store: primary goals.json unreadable (%s), recovered from %s"
+                     primary_msg recovery;
+                   { state with goals = List.map normalize_goal state.goals }
+               | Error recovery_msg ->
+                   Log.Misc.error
+                     "goal_store: primary unreadable (%s), recovery corrupt (%s)"
+                     primary_msg recovery_msg;
+                   default_state ())
+          | Error recovery_msg ->
+              Log.Misc.error
+                "goal_store: primary unreadable (%s), recovery unreadable (%s)"
+                primary_msg recovery_msg;
+              default_state ()
+        else
+          (Log.Misc.warn
+             "goal_store: goals.json unreadable (%s), no .last-good available"
+             primary_msg;
+           default_state ())
   else
     default_state ()
 
 let write_state config state =
   ensure_dirs config;
-  Coord.write_json config (goals_path config) (state_to_yojson state)
+  let json = state_to_yojson state in
+  Workspace_utils.write_json config (goals_path config) json;
+  Workspace_utils.write_json config (goals_recovery_path config) json
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
@@ -399,7 +448,7 @@ let replace_goal goals updated =
 
 let update_state config f =
   let lock_path = goals_path config in
-  Coord.with_file_lock config lock_path (fun () ->
+  Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
       write_state config next_state;
@@ -410,7 +459,7 @@ let get_goal config ~goal_id =
 
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
-  Coord.with_file_lock config lock_path (fun () ->
+  Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       match find_goal state.goals goal_id with
       | None -> Error "goal not found"
@@ -480,6 +529,36 @@ let list_goals config ?horizon ?status ?phase () =
          | Some phase -> goal.phase = phase)
   |> sort_goals
 
+let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
+  (* Cannot be own parent *)
+  if String.equal goal_id parent_goal_id then
+    Error "goal cannot be its own parent"
+  else
+    (* Parent must exist *)
+    match find_goal goals parent_goal_id with
+    | None -> Error (Printf.sprintf "parent goal %s not found" parent_goal_id)
+    | Some _ ->
+      (* Walk ancestor chain to detect cycles *)
+      let rec walk visited current_id =
+        if String.equal current_id goal_id then
+          true (* cycle detected *)
+        else
+          match find_goal goals current_id with
+          | None -> false (* orphan parent, already checked above *)
+          | Some g ->
+            match g.parent_goal_id with
+            | None -> false
+            | Some pid ->
+              if List.mem pid visited then
+                false (* existing cycle in ancestors, don't add to it *)
+              else
+                walk (pid :: visited) pid
+      in
+      if walk [parent_goal_id] parent_goal_id then
+        Error "parent_goal_id would create a cycle"
+      else
+        Ok ()
+
 let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     ?priority ?status ?phase ?parent_goal_id ?verifier_policy
     ?require_completion_approval () =
@@ -500,6 +579,34 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
     | Ok default_phase ->
         let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
+        (* Validate parent_goal_id before acquiring the write lock *)
+        let parent_validation =
+          let current_goals = (read_state config).goals in
+          match find_goal current_goals resolved_id with
+          | Some existing ->
+              (* Existing goal: validate only if parent is being changed *)
+              (match parent_goal_id with
+               | Some new_pid ->
+                   (match existing.parent_goal_id with
+                    | Some old_pid when String.equal old_pid new_pid ->
+                        Ok () (* no change, skip validation *)
+                    | _ ->
+                        validate_parent_goal_id current_goals
+                          ~goal_id:resolved_id
+                          ~parent_goal_id:new_pid)
+               | None -> Ok ())
+          | None ->
+              (* New goal: validate any provided parent_goal_id *)
+              (match parent_goal_id with
+               | Some pid ->
+                   validate_parent_goal_id current_goals
+                     ~goal_id:resolved_id
+                     ~parent_goal_id:pid
+               | None -> Ok ())
+        in
+        (match parent_validation with
+         | Error msg -> Error msg
+         | Ok () ->
         let was_created = ref false in
         let state =
           update_state config (fun state ->
@@ -588,7 +695,7 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
         | Some goal ->
             Ok (goal, if !was_created then `created else `updated)
         | None ->
-            Error "failed to save goal"
+            Error "failed to save goal")
 
 let compute_rollup goals =
   let count predicate =
@@ -620,7 +727,7 @@ let snapshot config ~mode =
   let path =
     Filename.concat (snapshots_dir config) (snapshot_id ^ ".json")
   in
-  Coord.write_json config path (snapshot_to_yojson snapshot);
+  Workspace_utils.write_json config path (snapshot_to_yojson snapshot);
   snapshot
 
 let parse_yyyy_mm_dd s =
@@ -713,4 +820,4 @@ let active_goals config =
   list_goals config ~status:Active ()
 
 let has_scheduler_state config =
-  Coord.path_exists config (scheduler_state_path config)
+  Workspace_utils.path_exists config (scheduler_state_path config)

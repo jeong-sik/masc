@@ -5,7 +5,7 @@
 //   GET /api/v1/verification/requests?task_id=&limit=
 //   POST /api/v1/verification/resolve
 //
-// Pattern mirrors CascadeConfigPanel: managed async resource + manual
+// Pattern mirrors RuntimeConfigPanel: managed async resource + manual
 // refresh + 15s auto-tick. Row expansion uses <details> so we avoid
 // component-local state plumbing for a read-only table. Pending rows
 // expose approve/reject action buttons that call the resolve endpoint;
@@ -29,6 +29,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
 import { relativeTime } from '../lib/format-time'
 import { errorToString } from '../lib/format-string'
+import { isSubmitEnter } from '../lib/keyboard'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
@@ -264,7 +265,7 @@ function RowActions({
             reason: (e.target as HTMLInputElement).value,
           })}
           onKeyDown=${(e: KeyboardEvent) => {
-            if (e.key === 'Enter' && canSubmit) {
+            if (isSubmitEnter(e) && canSubmit) {
               void submitResolve(row, 'reject', reason.trim(), refresh)
             } else if (e.key === 'Escape') {
               setRowAction(requestId, { kind: 'idle' })

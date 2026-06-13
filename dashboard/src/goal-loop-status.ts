@@ -1,4 +1,4 @@
-import { asBoolean, asInt, asString, isRecord } from './components/common/normalize'
+import { asBoolean, asString, isRecord } from './components/common/normalize'
 
 export const GOAL_LOOP_PHASES = ['observe', 'orient', 'decide', 'act', 'verify'] as const
 
@@ -34,16 +34,6 @@ export interface GoalLoopStatusResponse {
   systemHealthSignals: Record<string, unknown>
   dashboardSource: GoalLoopDashboardSource
   knownBlockers: GoalLoopKnownBlocker[]
-}
-
-export interface GoalLoopCorpusBlocker {
-  id: string
-  status: string
-  issue: string | null
-  expectedFindingsTotal: number | null
-  itemizedFindingsTotal: number | null
-  missingItemizedFindings: number | null
-  strictRowCorpusValidated: boolean | null
 }
 
 export type VerifyEvidenceState =
@@ -112,7 +102,7 @@ export function normalizeGoalLoopStatus(raw: unknown): GoalLoopStatusResponse {
   ) as Record<GoalLoopPhaseName, GoalLoopPhase>
 
   return {
-    schemaVersion: asInt(root.schema_version) ?? 1,
+    schemaVersion: Number.isInteger(root.schema_version) ? root.schema_version as number : 1,
     generatedAt: asString(root.generated_at) ?? null,
     loopIteration: asString(root.loop_iteration, 'unknown'),
     overallStatus: normalizeGoalLoopStatusLevel(root.overall_status),
@@ -163,42 +153,6 @@ export function phaseSummaryValue(
 export function auditCatalogSummary(status: GoalLoopStatusResponse): Record<string, unknown> | null {
   const catalog = status.phases.orient.summary.audit_catalog
   return isRecord(catalog) ? catalog : null
-}
-
-export function deriveCorpusBlocker(status: GoalLoopStatusResponse): GoalLoopCorpusBlocker | null {
-  const catalog = auditCatalogSummary(status)
-  if (catalog) {
-    const catalogStatus = asString(catalog.status, 'unknown')
-    const missing = asInt(catalog.missing_itemized_findings) ?? null
-    const strictValidated = asBoolean(catalog.strict_row_corpus_validated) ?? null
-    const blocked =
-      catalogStatus !== 'COMPLETE'
-      || (missing !== null && missing > 0)
-      || strictValidated === false
-    if (blocked) {
-      return {
-        id: 'strict_row_level_catalog_complete',
-        status: 'BLOCKED',
-        issue: '#13265',
-        expectedFindingsTotal: asInt(catalog.expected_findings_total) ?? null,
-        itemizedFindingsTotal: asInt(catalog.itemized_findings_total) ?? null,
-        missingItemizedFindings: missing,
-        strictRowCorpusValidated: strictValidated,
-      }
-    }
-  }
-
-  const blocker = status.knownBlockers.find(item => item.id === 'strict_row_level_catalog_complete')
-  if (!blocker) return null
-  return {
-    id: blocker.id,
-    status: blocker.status,
-    issue: blocker.issue,
-    expectedFindingsTotal: null,
-    itemizedFindingsTotal: null,
-    missingItemizedFindings: null,
-    strictRowCorpusValidated: null,
-  }
 }
 
 export function verifyEvidenceState(status: GoalLoopStatusResponse): VerifyEvidenceState {

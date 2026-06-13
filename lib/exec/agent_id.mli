@@ -6,7 +6,7 @@
     fail-closed (defaults apply). *)
 
 type t =
-  [ `Coord_git
+  [ `Workspace_git
   | `System_sandbox
   | `System_notify
   | `Voice_bridge
@@ -18,8 +18,7 @@ type t =
   | `System_worker_container_types
   | `System_worker_runtime_docker
   | `System_spawn
-  | `System_auto_responder
-  | `Coord_identity
+  | `Workspace_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
   | `Tool_execute

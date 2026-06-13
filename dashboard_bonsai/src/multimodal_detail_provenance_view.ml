@@ -83,7 +83,7 @@ let node_h = 32
 let h_gap = 16
 let v_gap = 56
 
-(** Compute the x-coordinate (top-left of the node) for the [i]-th
+(** Compute the x-position (top-left of the node) for the [i]-th
     node in a row of [n] nodes, given the diagram canvas width
     [canvas_w]. The row is centered. *)
 let row_x ~canvas_w ~n ~i =

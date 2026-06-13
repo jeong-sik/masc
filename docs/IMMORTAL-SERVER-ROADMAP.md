@@ -2,7 +2,6 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - lib/supervisor.ml
   - lib/keeper/keeper_keepalive.ml
   - lib/keeper/keeper_supervisor.ml
 ---
@@ -46,7 +45,7 @@ code_refs:
      [workers]          [workers]         [workers]
 ```
 
-**구현 파일**: `lib/supervisor.ml`
+**구현 파일**: `lib/supervisor.ml` — 구현됐으나 production 배선 없이 fan-in zero로 남아 #20798에서 삭제됨. 아래 스케치는 재구현 시 설계 참고용.
 ```ocaml
 type restart_strategy = 
   | OneForOne      (* 하나 죽으면 그것만 재시작 *)

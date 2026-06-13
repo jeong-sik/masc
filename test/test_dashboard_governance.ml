@@ -2,9 +2,10 @@ module Types = Masc_domain
 
 (** Dashboard governance regression tests. *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
+open Printf
 
 let test_dir () =
   let tmp = Filename.temp_file "masc_dashboard_governance" "" in
@@ -69,10 +70,10 @@ let test_empty_governance_structure () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -125,7 +126,7 @@ let test_empty_governance_structure () =
 
 let governance_fallback_count metric_name =
   int_of_float
-    (Lib.Prometheus.metric_value_or_zero
+    (Lib.Otel_metric_store.metric_value_or_zero
        metric_name
        ~labels:[("judge", "governance")]
        ())
@@ -137,22 +138,22 @@ let test_dashboard_surfaces_lenient_fallback_metrics () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let before_unparseable =
         governance_fallback_count
-          Lib.Prometheus.metric_governance_judge_unparseable
+          Lib.Otel_metric_store.metric_governance_judge_unparseable
       in
       let before_fallback =
         governance_fallback_count
-          Lib.Prometheus.metric_governance_lenient_json_fallback_hit
+          Lib.Otel_metric_store.metric_governance_lenient_json_fallback_hit
       in
       ignore
-        (Lib.Judge_diagnostics.record_lenient_fallback
+        (Judge_diagnostics.record_lenient_fallback
            ~judge_label:"Governance"
            "not-json");
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
           ~offset:0 ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -190,7 +191,7 @@ let test_runtime_status_and_judgments_are_live () =
             ("generated_at", `String generated_at);
             ("expires_at", `String expires_at);
             ("model_used", `String "llama:qwen3.5");
-            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+            ("keeper_name", `String Dashboard_governance_judge.keeper_name);
             ( "recommended_action",
               `Assoc
                 [
@@ -209,8 +210,8 @@ let test_runtime_status_and_judgments_are_live () =
           ]
       in
       write_legacy_judgment ~base_path:dir legacy_judgment;
-      let st = Lib.Dashboard_governance_judge.get_state dir in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      let st = Dashboard_governance_judge.get_state dir in
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.judge_online <- true;
         st.generated_at <- Some generated_at;
         st.generated_at_unix <- Some now;
@@ -219,7 +220,7 @@ let test_runtime_status_and_judgments_are_live () =
         st.model_used <- Some "llama:qwen3.5";
         st.last_error <- None);
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -251,7 +252,7 @@ let test_empty_judgment_disk_scan_uses_cooldown () =
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
       let json0 =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -271,19 +272,19 @@ let test_empty_judgment_disk_scan_uses_cooldown () =
             ("generated_at", `String generated_at);
             ("expires_at", `String expires_at);
             ("model_used", `String "llama:test");
-            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+            ("keeper_name", `String Dashboard_governance_judge.keeper_name);
           ]);
       let json1 =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       check int "cooldown suppresses immediate reload" 0
         (json1 |> member "judgments" |> to_list |> List.length);
-      let st = Lib.Dashboard_governance_judge.get_state dir in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      let st = Dashboard_governance_judge.get_state dir in
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.last_disk_load_unix <- Some (Unix.gettimeofday () -. 31.0));
       let json2 =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       check int "reload resumes after cooldown" 1
@@ -296,12 +297,12 @@ let test_runtime_timestamps_fallback_to_unix_values () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let expires_at_unix = now +. 600.0 in
       let generated_at = iso8601_of_unix now in
       let expires_at = iso8601_of_unix expires_at_unix in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.judge_online <- true;
         st.generated_at <- None;
         st.generated_at_unix <- Some now;
@@ -310,7 +311,7 @@ let test_runtime_timestamps_fallback_to_unix_values () =
         st.model_used <- Some "llama:qwen3.5";
         st.last_error <- None);
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -330,18 +331,65 @@ let test_dashboard_surfaces_compute_telemetry () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
-        st.compute_in_flight <- 2;
-        st.last_compute_duration_sec <- Some 12.5;
-        st.last_compute_timeout_sec <- Some 45.0;
-        st.last_compute_outcome <- Some "error";
-        st.last_compute_reason <- Some "timeout");
+      (* The in-flight state is governed by the typed state
+         machine ([mark_compute_start] / [mark_compute_finish])
+         and is exercised through that API, not by mutating a
+         removed counter field.  Terminal-cycle telemetry is
+         recorded by [mark_compute_finish] and the test's last
+         finish call seeds it with the values the dashboard
+         assertion expects. *)
+      (* Idle → 0 *)
+      check int "idle state projects to 0 in-flight" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* Idle → In_flight : 1, with monotonic cycle_id *)
+      let first_cycle = Dashboard_governance_judge.mark_compute_start st in
+      check int "after start, in-flight = 1" 1
+        (Dashboard_governance_judge.read_in_flight st);
+      (* A second start before finish: routine log + replace;
+         still 1 in-flight, but cycle_id advanced.  This is
+         the typed invariant the previous int counter could
+         not preserve. *)
+      let second_cycle = Dashboard_governance_judge.mark_compute_start st in
+      check bool "second start advances cycle_id" true
+        (second_cycle > first_cycle);
+      check int "after second start (no finish), in-flight = 1" 1
+        (Dashboard_governance_judge.read_in_flight st);
+      let started_at = Unix.gettimeofday () in
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"ok" ~reason:"");
+      check int "after finish, in-flight = 0" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* finish is idempotent: a stray finish on Idle is a
+         routine log + no-op, still 0. *)
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"ok" ~reason:"");
+      check int "stray finish is a no-op (Idle → 0)" 0
+        (Dashboard_governance_judge.read_in_flight st);
+      (* Seed terminal-cycle telemetry with the values the
+         runtime/JSON assertions check, while leaving the
+         state in Idle so the dashboard reads 0 in-flight
+         with last-outcome=error / last-reason=timeout.  The
+         per-cycle budget field [last_compute_timeout_sec]
+         is not written by [mark_compute_finish] (the
+         governance judge no longer carries a per-cycle
+         budget) and is seeded directly here to keep the
+         surface-render assertion honest. *)
+      let started_at = now -. 12.5 in
+      ignore
+        (Dashboard_governance_judge.mark_compute_finish st ~cycle_id:second_cycle ~started_at
+           ~outcome:"error" ~reason:"timeout");
+
+      Dashboard_governance_judge.with_lock st (fun () ->
+        st.last_compute_timeout_sec <- Some 45.0);
+
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
-      check int "runtime exposes compute in-flight" 2
+      check int "runtime exposes compute in-flight" 0
         status.compute_in_flight;
       check (option string) "runtime exposes compute outcome" (Some "error")
         status.last_compute_outcome;
@@ -358,12 +406,12 @@ let test_dashboard_surfaces_compute_telemetry () =
            timeout_sec
        | None -> fail "expected timeout budget");
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
           ~offset:0 ~status_filter:None
       in
       let open Yojson.Safe.Util in
       let judge = json |> member "judge" in
-      check int "dashboard exposes compute in-flight" 2
+      check int "dashboard exposes compute in-flight" 0
         (judge |> member "compute_in_flight" |> to_int);
       check (float 0.001) "dashboard exposes compute duration" 12.5
         (judge |> member "last_compute_duration_sec" |> to_float);
@@ -394,14 +442,14 @@ let test_parse_governance_response_requires_guardrail_state () =
         ])
   in
   match
-    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+    Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+  | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names guardrail_state" true
         (string_contains reason "missing guardrail_state")
-  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
       fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing guardrail_state must fail closed"
 
@@ -432,9 +480,9 @@ let test_parse_governance_response_preserves_guardrail_state () =
         ])
   in
   match
-    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+    Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
   | Error _ -> fail "valid guardrail_state should parse"
   | Ok [ judgment ] ->
@@ -474,42 +522,42 @@ let test_parse_governance_response_requires_guardrail_fields () =
         ])
   in
   match
-    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+    Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+  | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names missing field" true
         (string_contains reason "missing guardrail_state.pending_confirm_token")
-  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
       fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "incomplete guardrail_state must fail closed"
 
 let test_parse_governance_response_requires_items_array () =
   let raw = "{\"judgments\": []}" in
   match
-    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+    Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+  | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names items array" true
         (string_contains reason "items array")
-  | Error (Lib.Dashboard_governance_judge.Lenient_fallback _) ->
+  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
       fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing items array must fail closed"
 
 let test_parse_governance_response_rejects_unparseable_recovered_block () =
   let raw = "prefix {\"items\": [} suffix" in
   match
-    Lib.Dashboard_governance_judge.parse_governance_response_for_testing
+    Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
-      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"provider_k:test"
+      ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Lib.Dashboard_governance_judge.Lenient_fallback recovered) ->
+  | Error (Dashboard_governance_judge.Lenient_fallback recovered) ->
       check bool "fallback keeps recovered fragment" true
         (string_contains recovered "items")
-  | Error (Lib.Dashboard_governance_judge.Structural_error reason) ->
+  | Error (Dashboard_governance_judge.Structural_error reason) ->
       fail ("expected lenient fallback, got structural error: " ^ reason)
   | Ok _ -> fail "unparseable recovered JSON must stay lenient fallback"
 
@@ -520,23 +568,23 @@ let test_refresh_failure_keeps_fresh_cache_online () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let generated_at = iso8601_of_unix now in
       let expires_at = iso8601_of_unix (now +. 300.0) in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- true;
         st.generated_at <- Some generated_at;
         st.generated_at_unix <- Some now;
         st.expires_at <- Some expires_at;
         st.expires_at_unix <- Some (now +. 300.0);
-        st.model_used <- Some "provider_k:test";
+        st.model_used <- Some "glm:test";
         st.last_error <- None;
-        Lib.Dashboard_governance_judge.mark_refresh_failure
+        Dashboard_governance_judge.mark_refresh_failure
           ~now_ts:now st ~message:"Execution timed out after 60.0s");
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
       check bool "judge remains online while cache fresh" true
         status.judge_online;
@@ -559,17 +607,17 @@ let test_refresh_failure_marks_expired_cache_offline () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- true;
         st.expires_at_unix <- Some (now -. 1.0);
         st.last_error <- None;
-        Lib.Dashboard_governance_judge.mark_refresh_failure
+        Dashboard_governance_judge.mark_refresh_failure
           ~now_ts:now st ~message:"Execution timed out after 60.0s");
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
       check bool "judge goes offline when cache expired" false
         status.judge_online;
@@ -589,11 +637,11 @@ let test_refresh_failure_sets_timeout_backoff () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let next_compute_after =
-        Lib.Dashboard_governance_judge.with_lock st (fun () ->
-          Lib.Dashboard_governance_judge.mark_refresh_failure
+        Dashboard_governance_judge.with_lock st (fun () ->
+          Dashboard_governance_judge.mark_refresh_failure
             ~now_ts:now st ~message:"Execution timed out after 45.0s";
           st.next_compute_after_unix)
       in
@@ -610,12 +658,12 @@ let test_refresh_failure_clears_timeout_backoff_for_non_timeout () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let next_compute_after =
-        Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        Dashboard_governance_judge.with_lock st (fun () ->
           st.next_compute_after_unix <- Some (now +. 60.0);
-          Lib.Dashboard_governance_judge.mark_refresh_failure
+          Dashboard_governance_judge.mark_refresh_failure
             ~now_ts:now st
             ~message:"Governance judge returned invalid JSON: malformed";
           st.next_compute_after_unix)
@@ -630,20 +678,20 @@ let test_refresh_failure_marks_judge_output_invalid () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let message =
         "Governance judge returned structurally invalid response \
          (item agent_health:dreamer missing guardrail_state)"
       in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- false;
         st.last_error <- None;
-        Lib.Dashboard_governance_judge.mark_refresh_failure
+        Dashboard_governance_judge.mark_refresh_failure
           ~now_ts:now st ~message);
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
       check string "runtime status is offline" "offline" status.status;
       check (option string) "degraded_reason is judge_output_invalid"
@@ -658,17 +706,17 @@ let test_refresh_failure_marks_invalid_json_as_judge_output_invalid () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let message = "Governance judge returned invalid JSON: malformed items" in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- false;
         st.last_error <- None;
-        Lib.Dashboard_governance_judge.mark_refresh_failure
+        Dashboard_governance_judge.mark_refresh_failure
           ~now_ts:now st ~message);
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
       check string "runtime status is offline" "offline" status.status;
       check (option string) "degraded_reason is judge_output_invalid"
@@ -683,12 +731,12 @@ let test_refresh_once_skips_fresh_cached_result () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
       let generated_at = iso8601_of_unix now in
       let expires_at_unix = now +. 600.0 in
       let expires_at = iso8601_of_unix expires_at_unix in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- true;
         st.judge_online <- true;
         st.runtime_status <- "refreshing";
@@ -696,11 +744,11 @@ let test_refresh_once_skips_fresh_cached_result () =
         st.generated_at_unix <- Some now;
         st.expires_at <- Some expires_at;
         st.expires_at_unix <- Some expires_at_unix;
-        st.model_used <- Some "provider_k:cached";
+        st.model_used <- Some "glm:cached";
         st.last_error <- None);
       let build_called = ref false in
       Eio.Switch.run @@ fun sw ->
-      Lib.Dashboard_governance_judge.refresh_once ~sw
+      Dashboard_governance_judge.refresh_once ~sw
         ~net:(Eio.Stdenv.net env)
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
@@ -717,7 +765,7 @@ let test_refresh_once_skips_fresh_cached_result () =
           `Assoc []);
       check bool "fresh cached result skips build_facts" false !build_called;
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at
+        Dashboard_governance_judge.runtime_status_at
           ~now_ts:(Unix.gettimeofday ()) dir
       in
       check bool "judge remains online" true status.judge_online;
@@ -732,9 +780,9 @@ let test_refresh_once_skips_timeout_backoff () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- false;
         st.judge_online <- false;
         st.runtime_status <- "offline";
@@ -743,7 +791,7 @@ let test_refresh_once_skips_timeout_backoff () =
         st.next_compute_after_unix <- Some (now +. 3600.0));
       let build_called = ref false in
       Eio.Switch.run @@ fun sw ->
-      Lib.Dashboard_governance_judge.refresh_once ~sw
+      Dashboard_governance_judge.refresh_once ~sw
         ~net:(Eio.Stdenv.net env)
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
@@ -760,7 +808,7 @@ let test_refresh_once_skips_timeout_backoff () =
           `Assoc []);
       check bool "timeout backoff skips build_facts" false !build_called;
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at
+        Dashboard_governance_judge.runtime_status_at
           ~now_ts:(Unix.gettimeofday ()) dir
       in
       check (option string) "last timeout remains visible"
@@ -773,9 +821,9 @@ let test_backoff_runtime_status_is_structured () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.refreshing <- false;
         st.judge_online <- false;
         st.runtime_status <- "backoff";
@@ -783,7 +831,7 @@ let test_backoff_runtime_status_is_structured () =
         st.expires_at_unix <- Some (now +. 300.0);
         st.last_error <- Some "Backoff: local slots saturated");
       let status =
-        Lib.Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
+        Dashboard_governance_judge.runtime_status_at ~now_ts:now dir
       in
       check bool "backoff is not reported online" false status.judge_online;
       check string "runtime status is backoff" "backoff" status.status;
@@ -799,14 +847,14 @@ let test_governance_monitoring_uses_live_runtime () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let st = Dashboard_governance_judge.get_state dir in
       let now = Unix.gettimeofday () in
-      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+      Dashboard_governance_judge.with_lock st (fun () ->
         st.judge_online <- true;
         st.generated_at_unix <- Some now;
         st.expires_at_unix <- Some (now +. 300.0));
       let (json, ok) =
-        Lib.Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
+        Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
           ~base_path:dir
       in
       let open Yojson.Safe.Util in
@@ -845,10 +893,10 @@ let test_pending_ruling_reflects_disk_truth () =
       Fun.protect
         ~finally:(fun () -> close_out_noerr oc)
         (fun () -> output_string oc (Yojson.Safe.to_string case_json));
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
           ~offset:0 ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -863,7 +911,7 @@ let test_pending_ruling_reflects_disk_truth () =
        | other ->
          failf "expected float age, got %s" (Yojson.Safe.to_string other));
       let (monitoring, ok) =
-        Lib.Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
+        Dashboard_http_monitoring.governance_monitoring_json ~now_ts:now
           ~base_path:dir
       in
       check bool "monitoring call succeeds" true ok;
@@ -893,10 +941,10 @@ let test_governance_dir_created_before_read () =
       (* read_recent on empty dir returns [] — dashboard_json should still work *)
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -910,8 +958,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
     (fun () ->
       Eio_main.run @@ fun env ->
       with_test_fs env @@ fun () ->
-      let config = Coord_utils.default_config dir in
-      ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+      let config = Workspace_utils.default_config dir in
+      ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       Eio.Switch.run @@ fun sw ->
       let decision_result = ref None in
       Eio.Fiber.fork ~sw (fun () ->
@@ -927,7 +975,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
         decision_result := Some decision);
       Eio.Fiber.yield ();
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -983,7 +1031,7 @@ let test_recommended_action_tool_is_canonicalized () =
             ("generated_at", `String generated_at);
             ("expires_at", `String expires_at);
             ("model_used", `String "llama:test");
-            ("keeper_name", `String Lib.Dashboard_governance_judge.keeper_name);
+            ("keeper_name", `String Dashboard_governance_judge.keeper_name);
             ( "recommended_action",
               `Assoc
                 [
@@ -995,7 +1043,7 @@ let test_recommended_action_tool_is_canonicalized () =
                 ] );
           ]);
       let json =
-        Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
+        Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
           ~status_filter:None
       in
       let open Yojson.Safe.Util in
@@ -1038,7 +1086,7 @@ let test_approval_queue_surfaces_action_key_and_sandbox_target () =
           Eio_main.run @@ fun env ->
           with_test_fs env @@ fun () ->
           let json =
-            Lib.Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
+            Dashboard_governance.dashboard_json ~base_path:dir ~limit:20
               ~offset:0 ~status_filter:None
           in
           let open Yojson.Safe.Util in

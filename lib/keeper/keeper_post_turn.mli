@@ -9,16 +9,21 @@
     turn. Memory bank append, episode flush, and Hebbian learning
     are recorded elsewhere:
     - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
-    - hebbian: task lifecycle in [Coord_task]
+    - hebbian: task lifecycle in [Workspace_task]
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
 (** Outcome of the compaction step. [applied] iff a compaction
     strategy actually ran; [trigger] is the gate label that fired
-    ([ratio]/[messages]/[tokens]/[tool_heavy]). *)
+    ([ratio]/[messages]/[tokens]). *)
 type compaction_event =
   { attempted : bool
   ; applied : bool
+  ; started_dispatched : bool
+        (** [true] when [on_compaction_started] completed without raising,
+            meaning the FSM is at [Compaction_compacting].  [false] when
+            the callback failed or was never called (recovery path), so
+            the FSM is still at [Compaction_accumulating]. *)
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
@@ -30,7 +35,7 @@ type compaction_event =
 (** Combined post-turn outcome — compaction + rollover + continuity
     summary update + per-turn context metrics. *)
 type post_turn_lifecycle =
-  { updated_meta : Keeper_types.keeper_meta
+  { updated_meta : Keeper_meta_contract.keeper_meta
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
@@ -72,10 +77,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   on_compaction_started:(unit -> unit) ->
   on_handoff_started:(unit -> unit) ->
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_blocker_info:Keeper_types.blocker_info option ->
+  current_turn_blocker_info:Keeper_meta_contract.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 (** Apply the keeper post-turn lifecycle with explicit resilience handles.
@@ -107,10 +112,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
     retry: zero compaction gates so the next compaction always
     fires. *)
 val forced_overflow_retry_meta :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   turn_generation:int ->
   now_ts:float ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 (** Reload the canonical OAS checkpoint and apply forced
     compaction so the turn can retry from a smaller context.
@@ -119,7 +124,7 @@ val forced_overflow_retry_meta :
     failed. *)
 val recover_latest_checkpoint_for_overflow_retry :
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option

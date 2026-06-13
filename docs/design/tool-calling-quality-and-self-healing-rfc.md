@@ -1,16 +1,16 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-06-05
 code_refs:
   - lib/keeper/keeper_composite_observer.ml
-  - lib/keeper/keeper_measurement.ml
+  - lib/keeper_metrics/keeper_measurement.ml
 ---
 
 # Tool Calling Quality and Self-Healing RFC
 
 **Status**: Internal-runtime scope implemented in local worktrees; benchmark/program work remains partially unimplemented
 **Date**: 2026-04-03
-**Scope**: `masc-mcp` + `oas` + local benchmark harness
+**Scope**: `masc` + `oas` + local benchmark harness
 **One sentence**: tool calling 품질을 `first-pass selection`에서 `bounded convergence under validation pressure`로 재정의하고, public MCP와 internal OAS 자율 경로의 경계를 유지한 채 self-healing helper와 공통 benchmark contract를 도입한다.
 
 ## Related Documents
@@ -35,12 +35,12 @@ code_refs:
 Runtime scope has moved since the original draft.
 
 - `oas` now has a generic internal helper `Tool_retry_policy` and uses it in both the generic agent tool loop and `Structured.extract_with_retry`.
-- `masc-mcp` now opts in to that helper only on internal OAS-backed autonomous paths:
+- `masc` now opts in to that helper only on internal OAS-backed autonomous paths:
   - keeper turn path
   - proactive keeper generation path
   - OAS worker builder path
   - local worker resume path
-- `masc-mcp` public MCP path remains one-shot and deterministic. No model-facing retry loop was added there.
+- `masc` public MCP path remains one-shot and deterministic. No model-facing retry loop was added there.
 - Benchmark runner abstraction, MLX harness lane, and the broader program phases below are still proposal-level unless explicitly marked otherwise.
 
 ## 1. Problem Statement
@@ -56,7 +56,7 @@ Runtime scope has moved since the original draft.
 
 - benchmark가 raw selection, BM25 selection, oracle self-heal upper-bound로 흩어져 있다
 - `samchon`식 recovery가 OAS 안에 부분적으로 존재하지만 generic helper로 표면화돼 있지 않다
-- `masc-mcp` public MCP path에 retry를 넣어야 하는지에 대한 경계가 문서화돼 있지 않다
+- `masc` public MCP path에 retry를 넣어야 하는지에 대한 경계가 문서화돼 있지 않다
 - MLX 실험은 필요하지만 현재 harness가 `Provider-D-compatible endpoint` 전제라 바로 붙일 수 없다
 - 최신 모델 추가가 ad hoc하게 일어나고, artifact schema와 acceptance gate가 고정돼 있지 않다
 
@@ -96,10 +96,10 @@ Runtime scope has moved since the original draft.
 
 `samchon` parity는 여전히 surface별로 다르지만, internal runtime scope에서는 helper boundary가 이제 명시적이다.
 
-- `masc-mcp` public MCP path:
+- `masc` public MCP path:
   - deterministic validation 있음
   - model-facing retry loop 없음
-- `masc-mcp` internal keeper/OAS path:
+- `masc` internal keeper/OAS path:
   - validation 있음
   - bounded same-run correction 가능
   - OAS `Tool_retry_policy.default_internal`로 opt-in
@@ -232,8 +232,8 @@ Phase-1 표준 매트릭스는 여섯 개로 고정한다.
 
 - `gguf/gemma4-e4b-it-q4`
 - `gguf/gemma4-e2b-it-q8`
-- `gguf/provider-l-cascade-2-30b-a3b-q4km`
-- `mlx/provider-l-cascade-2-30b-a3b-4bit`
+- `gguf/provider-l-runtime-2-30b-a3b-q4km`
+- `mlx/provider-l-runtime-2-30b-a3b-4bit`
 - `mlx/qwen3-coder-next-4bit`
 - `mlx/lfm2.5-1.2b-thinking-6bit`
 
@@ -280,7 +280,7 @@ adoption target:
 
 ### 7.2 MASC adoption boundary
 
-`masc-mcp`에서는 다음 경계만 허용한다.
+`masc`에서는 다음 경계만 허용한다.
 
 - internal OAS-backed autonomous path: retry policy 사용 가능
 - public MCP path: retry policy 금지, current deterministic validation 유지
@@ -446,7 +446,7 @@ Status: pending
 Phase 3:
 
 - OAS `tool_retry_policy`
-- internal-path-only integration in `masc-mcp`
+- internal-path-only integration in `masc`
 
 Status: completed in local worktrees on 2026-04-04
 

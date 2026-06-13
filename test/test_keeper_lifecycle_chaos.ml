@@ -10,9 +10,9 @@
 
 open Alcotest
 
-module R = Masc_mcp.Keeper_registry
-module KSM = Masc_mcp.Keeper_state_machine
-module Keeper_types = Masc_mcp.Keeper_types
+module R = Masc.Keeper_registry
+module KSM = Keeper_state_machine
+module Keeper_types = Keeper_types
 
 let bp = "/tmp/test-chaos"
 
@@ -87,7 +87,7 @@ let restart_keeper name ~attempt =
   let tr = dispatch name KSM.Fiber_started in
   check phase_t "running" KSM.Running tr.new_phase
 
-let test_heartbeat_failure_cascade () =
+let test_heartbeat_failure_runtime () =
   setup "hb-fail";
   (* In the FSM, any heartbeat failure makes the keeper unhealthy immediately.
      max_allowed is carried for keepalive/supervisor policy and audit context. *)
@@ -233,7 +233,7 @@ let test_fleet_chaos () =
   restart_keeper "fleet-b" ~attempt:1;
   check int "2 running" 2 (R.count_running ~base_path:bp ())
 
-let test_turn_failure_cascade () =
+let test_turn_failure_runtime () =
   setup "turn-fail";
 
   (* Turn failures follow the same unhealthy-immediately rule as heartbeat failures. *)
@@ -247,7 +247,7 @@ let test_turn_failure_cascade () =
 let () =
   run "Keeper lifecycle chaos"
     [ ( "heartbeat"
-      , [ eio_test "failure cascade → crash" test_heartbeat_failure_cascade ] )
+      , [ eio_test "failure runtime → crash" test_heartbeat_failure_runtime ] )
     ; ( "supervisor"
       , [ eio_test "restart cycle" test_supervisor_restart_cycle ] )
     ; ( "terminal"
@@ -261,5 +261,5 @@ let () =
       , [ eio_test "6-phase interleaved faults" test_full_chaos_sequence
         ; eio_test "fleet: 4 keepers independent faults" test_fleet_chaos ] )
     ; ( "turn_failures"
-      , [ eio_test "turn failure cascade → recovery" test_turn_failure_cascade ] )
+      , [ eio_test "turn failure runtime → recovery" test_turn_failure_runtime ] )
     ]

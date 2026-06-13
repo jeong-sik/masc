@@ -37,13 +37,13 @@ type deterministic_reason =
   | Cwd_not_directory
       (** cwd argument resolves but is not a directory. *)
   | Policy_blocked
-      (** governance / preset policy rejected the call. *)
+      (** governance / candidate policy rejected the call. *)
   | Write_operation_gated
       (** write-capable Execute is required before retrying the same operation. *)
   | Completion_contract_violation
-      (** keeper completion contract (e.g. require_tool_use) failed. *)
-  | Structured_tool_required
-      (** Raw shell rejected because a structured visible tool/native workflow is required. *)
+      (** keeper completion contract failed. *)
+  | Structured_tool_payload
+      (** Raw shell rejected because a structured allowed tool/native workflow should carry the payload. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a
           separate counter in [Keeper_tools_oas]. It is considered
@@ -55,6 +55,12 @@ type deterministic_reason =
           classification plus process status; the deterministic
           classifier intentionally does not re-parse stderr/output to
           split missing refs from command usage. *)
+  | Path_not_found
+      (** A typed Execute path argument does not exist on the local
+          filesystem. Emitted by pre-dispatch validation for [Safe]
+          risk commands (ls, cat, find, rg, etc.) where path
+          non-existence is a predictable pre-condition failure.
+          The LLM should probe the parent directory before retrying. *)
 
 type classification_source =
   | Deterministic_retry_marker
@@ -70,7 +76,7 @@ type classification =
   }
 
 (** Classify a raw tool-result JSON payload (as returned by
-    [Agent_tool_dispatch_runtime]) into a [deterministic_reason] only when the
+    [Keeper_tool_dispatch_runtime]) into a [deterministic_reason] only when the
     payload carries an explicit typed marker: [deterministic_retry],
     deterministic workflow-rejection fields, a typed path-check
     reason. Returns
@@ -80,8 +86,10 @@ type classification =
 
     There is no [error] string fallback and no [_ ->] catch-all that
     admits new prefixes silently. Producers that know same-argument
-    retry cannot succeed, including typed shell producers handling git
-    process failures, must emit [deterministic_retry_fields]. *)
+    retry cannot succeed must emit [deterministic_retry_fields]. Plain
+    git process failures intentionally stay outside this deterministic
+    surface so sandbox/worktree recovery can adapt with different refs,
+    paths, or branch names. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 val classify_with_source : Yojson.Safe.t -> classification option

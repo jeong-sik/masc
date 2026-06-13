@@ -9,7 +9,7 @@ import {
   operatorActionLog,
   operatorDigestError,
   operatorError,
-  operatorRoomDigest,
+  operatorWorkspaceDigest,
   operatorSnapshot,
 } from '../../operator-store'
 import {
@@ -18,9 +18,7 @@ import {
   workflowTargetLabel,
 } from '../../workflow-context'
 import type { OperatorActionLogEntry, OperatorReviewDecision } from '../../types'
-import { QuickIntervene } from './quick-intervene'
-import { KeeperUtilitiesPanel } from './keeper-utilities'
-import { KeeperActionPanel } from '../keeper-action-panel'
+import { ComposerV2 } from '../board/composer-v2'
 import {
   actionTypeLabel,
   formatMessageContent,
@@ -102,7 +100,7 @@ function prettyTargetLabel(label?: string | null): string {
 }
 
 function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
-  const reviews = (operatorRoomDigest.value?.recent_reviews ?? []).map((item: OperatorReviewDecision) => ({
+  const reviews = (operatorWorkspaceDigest.value?.recent_reviews ?? []).map((item: OperatorReviewDecision) => ({
     key: `review:${item.item_id}:${item.at}`,
     kind: 'review' as const,
     at: item.at,
@@ -234,9 +232,7 @@ export function Ops() {
       <${FlowControlPanel} />
       <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="Operations controls">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
-          <${QuickIntervene} />
-          <${KeeperActionPanel} />
-          <${KeeperUtilitiesPanel} />
+          <${ComposerV2} workspaceId="ops" />
         </div>
 
         <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">

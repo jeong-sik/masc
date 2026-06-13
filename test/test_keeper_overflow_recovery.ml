@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module SM = Masc_mcp.Keeper_state_machine
+module SM = Keeper_state_machine
 
 (** Conditions for a healthy Running keeper. *)
 let running_conds : SM.conditions =

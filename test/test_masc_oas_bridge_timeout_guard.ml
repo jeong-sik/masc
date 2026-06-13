@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let expected_invalid_timeout timeout_s =
   Invalid_argument
@@ -59,7 +59,7 @@ let with_env name value f =
 ;;
 
 let check_run_with_caller_uses_fallback_for_invalid_env ~name raw_value =
-  let caller = Env_config_oas_bridge.Auto_responder in
+  let caller = Env_config_oas_bridge.Anti_rationalization in
   let env_name = Env_config_oas_bridge.per_caller_env_var ~caller in
   with_env env_name raw_value (fun () ->
     let called = ref false in

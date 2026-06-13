@@ -7,18 +7,7 @@
     to use [Keeper_unified_turn.<name>] unchanged. *)
 
 val turn_event_bus_manifest_decision :
-  Keeper_turn_cascade_budget.turn_event_bus_summary -> Yojson.Safe.t
-
-val should_auto_pause_required_tool_contract_violation :
-  paused:bool ->
-  consecutive_failures:int ->
-  Agent_sdk.Error.sdk_error ->
-  bool
-
-val sdk_error_of_retry_slot_reacquire_timeout :
-  keeper_name:string ->
-  Keeper_turn_slot.semaphore_wait_timeout ->
-  Agent_sdk.Error.sdk_error
+  Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 
 (** [registry_failure_reason_of_terminal_reason terminal ~raw_error]
     maps a [Keeper_turn_terminal.t] disposition to the corresponding
@@ -74,12 +63,18 @@ val record_turn_tool_events :
 (** Record the observation for a streaming turn cancelled externally.
     Reads the fiber_stop flag from [Keeper_registry], emits FSM
     transitions, and writes a terminal observation via
-    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation]. *)
+    [Keeper_turn_helpers.record_pre_dispatch_terminal_observation].
+
+    [cancel_reason] overrides the inferred reason when provided:
+      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
+      - ["supervisor_stop"] — supervisor requested stop
+      - ["external_cancel"] — external fiber cancellation (default) *)
 val record_streaming_cancelled_observation :
-  config:Coord.config ->
-  run_meta:Keeper_types.keeper_meta ->
+  ?cancel_reason:string ->
+  config:Workspace.config ->
+  run_meta:Keeper_meta_contract.keeper_meta ->
   run_generation:int ->
-  cascade_name:Cascade_name.t ->
+  runtime_id:string ->
   keeper_turn_id:int ->
   unit ->
   unit

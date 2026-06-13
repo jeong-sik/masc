@@ -6,6 +6,8 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type runtime_blocker_surface = {
   blocker_class : string;
@@ -22,11 +24,9 @@ val runtime_blocker_surface_of_typed_class :
 val runtime_blocker_surface_of_failure_reason :
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
-val is_cascade_exhausted_blocker_class : string -> bool
-val is_no_tool_capable_provider_blocker_class : string -> bool
-val is_completion_contract_blocker_class : string -> bool
+val is_runtime_exhausted_blocker_class : string -> bool
 val is_provider_runtime_blocker_class : string -> bool
-val is_stale_watchdog_blocker_class : string -> bool
+val is_stale_turn_timeout_blocker_class : string -> bool
 val is_fiber_unresolved_blocker_class : string -> bool
 
 val runtime_blocker_surface_class : blocker_class -> blocker_class

@@ -3,7 +3,7 @@
 **Status**: Draft v3 (post-review, 7 rounds)
 **Date**: 2026-03-29
 **Scope**: MASC Keeper Checkpoint Continuity / GC / Naming
-**Issues**: #3626 (zombie GC), #3627 (perpetual naming), #3630 (memory dead code)
+**Issues**: #3626 (zombie GC), #3627 (runtime directory naming), #3630 (memory dead code)
 **One sentence**: keeper가 이전 대화를 기억 못하는 원인을 OAS checkpoint 경로 진단으로 확정하고, 진단 중 발견된 filesystem 부채(dead code, naming, GC)를 정리한다.
 
 ## Related Documents
@@ -28,7 +28,7 @@
 
 ## Problem Statement
 
-masc-mcp filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견했다. 대표 증상: 23개 keeper가 37턴 이상 대화했지만 "아까 뭐라고?"에 "기억하지 못합니다"로 응답.
+masc filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견했다. 대표 증상: 23개 keeper가 37턴 이상 대화했지만 "아까 뭐라고?"에 "기억하지 못합니다"로 응답.
 
 **원인은 미확정이다.** 진단 중 7개 gap(G1-G7)을 발견했으나, 이들이 증상의 직접 원인인지는 런타임 재현으로 확인해야 한다.
 
@@ -48,7 +48,7 @@ masc-mcp filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견
 |------|--------------------------|----------|-----|
 | H1: OAS checkpoint 미저장 | `keeper_agent_run.ml:221` → `keeper_checkpoint_store.ml:128` (`save_oas_checkpoint`) | `Keeper_checkpoint_store.load_oas` 반환값 확인 (source of truth). raw 파일 경로는 `Fs_compat`/`Agent_sdk.Checkpoint_store` 경유 여부에 따라 다르므로 구현 세부사항으로만 참조. | OAS checkpoint build/save 수정 |
 | H2: OAS checkpoint messages 비어있음 | `keeper_checkpoint_store.ml:150` (`load_oas_checkpoint`) → `keeper_context_runtime.ml:242` (restore) → `keeper_context_runtime.ml:61` (역직렬화) | load_oas 결과의 messages 배열 확인 | OAS checkpoint 직렬화/역직렬화 수정 |
-| H3: LLM이 context를 무시 | model quality | 동일 `run_turn` 경로에서 모델/max_context/temperature/max_tokens 4개 값을 명시적으로 고정한 비교. `cascade_name` 변경은 4개 값을 모두 재resolve하므로, cascade swap 시 각 값을 동일하게 오버라이드. **`masc_keeper_msg` 사용자 도구로는 수행 불가 — 내부 harness/테스트 경로로 수행.** | 모델 교체 또는 prompt 강화 |
+| H3: LLM이 context를 무시 | model quality | 동일 `run_turn` 경로에서 모델/max_context/temperature/max_tokens 4개 값을 명시적으로 고정한 비교. `runtime_id` 변경은 4개 값을 모두 재resolve하므로, runtime swap 시 각 값을 동일하게 오버라이드. **`masc_keeper_msg` 사용자 도구로는 수행 불가 — 내부 harness/테스트 경로로 수행.** | 모델 교체 또는 prompt 강화 |
 | H4: prompt assembly 문제 | `keeper_agent_run.ml:147-200` | debug log: `initial_messages` 길이 + 첫/마지막 메시지 + `turn_system_prompt` 길이/hash | prompt assembly 수정 |
 
 **OAS `<trace_id>.json` is the only checkpoint recovery source.** Legacy `ckpt-*.json` files are not counted, deleted, pruned, or read by keeper recovery surfaces.
@@ -131,10 +131,10 @@ Phase 1 결과에 따라 결정. 미리 설계하지 않는다.
 
 ### 수정 범위
 
-- `set_room`/`join` 시 해당 room에서 `cleanup_zombies` 1회 호출
-  - 구현 위치: `tool_inline_dispatch_room.ml:185` (set_room), `:226` (join)
-  - **주의**: `set_room` 핸들러는 중간에 `state.Mcp_server.room_config`를 교체. `cleanup_zombies` 호출은 **새로 resolve된 config**로. 교체 전 `ctx.config`로 호출하면 이전 room에서 GC 실행.
-- multi-room gap 증명 필요: gap이 없으면 "set_room 시 1회 cleanup" 연결만으로 종결.
+- `set_workspace`/`join` 시 해당 workspace에서 `cleanup_zombies` 1회 호출
+  - 구현 위치: `mcp_tool_runtime_workspace.ml:185` (set_workspace), `:226` (join)
+  - **주의**: `set_workspace` 핸들러는 중간에 `state.Mcp_server.workspace_config`를 교체. `cleanup_zombies` 호출은 **새로 resolve된 config**로. 교체 전 `ctx.config`로 호출하면 이전 workspace에서 GC 실행.
+- multi-workspace gap 증명 필요: gap이 없으면 "set_workspace 시 1회 cleanup" 연결만으로 종결.
 
 ## Phase 4: Naming Cleanup
 
@@ -147,7 +147,7 @@ Source files (functional 변경): 9 files, 19 occurrences + TUI.
 | `server_runtime_bootstrap.ml:156,172,173,178` | dir creation, prune |
 | `keeper_types_profile.ml:501,508` | `keeper_dir` return |
 | `keeper_types_support.ml:23,24,28` | path helpers |
-| `room_gc.ml:295` | orphan cleanup |
+| `workspace_gc.ml:295` | orphan cleanup |
 | `tool_housekeep.ml:18,21,171` | path classification |
 | `keeper_schema.ml` | API descriptions |
 | `bin/masc_tui.ml:990+` | TUI display |
@@ -155,12 +155,11 @@ Source files (functional 변경): 9 files, 19 occurrences + TUI.
 
 Documentation: 13 files, 26 occurrences.
 
-### Directory Rename
+### Canonical Runtime Directories
 
 ```
-.masc/perpetual/          → .masc/traces/
-.masc/keepers/  → .masc/keepers/
-.masc/resident-keepers/   → .masc/keepers/ (병합 후 삭제)
+.masc/traces/
+.masc/keepers/
 ```
 
 ### Migration: 재귀 merge + file-level quarantine
@@ -212,6 +211,6 @@ migrate_recursive old_dir new_dir:
 ```
 Phase 1 (OAS checkpoint 진단 — GATE, debug log 2개만 코드 변경)
   → Phase 2 (진단 결과에 따른 fix)
-    → Phase 3 (GC: set_room/join 시 cleanup 연결)
+    → Phase 3 (GC: set_workspace/join 시 cleanup 연결)
       → Phase 4 (naming: full inventory + 재귀 migration)
 ```

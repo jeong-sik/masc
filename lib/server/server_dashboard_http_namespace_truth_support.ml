@@ -20,7 +20,7 @@ let pending_confirm_summary_empty_json =
 let last_good_pending_confirm_summary : Yojson.Safe.t Atomic.t =
   Atomic.make pending_confirm_summary_empty_json
 
-let pending_confirm_summary_cached (config : Coord.config) =
+let pending_confirm_summary_cached (config : Workspace.config) =
   let key = Printf.sprintf "pending_confirm_summary:%s" config.base_path in
   let fallback = Atomic.get last_good_pending_confirm_summary in
   let compute () =
@@ -46,19 +46,19 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     `Assoc
       [
         ("label", `String "운영 권고");
-        ("reason", Yojson.Safe.Util.member "reason" top_action);
+        ("reason", Option.value ~default:`Null (Json_util.assoc_member_opt "reason" top_action));
         ("source", `String "operator");
         ("provenance", `String provenance);
         ("target_kind", `String "action");
-        ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+        ("target_id", Option.value ~default:`Null (Json_util.assoc_member_opt "target_id" top_action));
         ("suggested_tab", `String "intervene");
         ("suggested_surface", `Null);
         ( "suggested_params",
           `Assoc
             [
-              ("action_type", Yojson.Safe.Util.member "action_type" top_action);
-              ("target_type", Yojson.Safe.Util.member "target_type" top_action);
-              ("target_id", Yojson.Safe.Util.member "target_id" top_action);
+              ("action_type", Option.value ~default:`Null (Json_util.assoc_member_opt "action_type" top_action));
+              ("target_type", Option.value ~default:`Null (Json_util.assoc_member_opt "target_type" top_action));
+              ("target_id", Option.value ~default:`Null (Json_util.assoc_member_opt "target_id" top_action));
             ] );
       ]
   in
@@ -67,7 +67,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
     let target_id = json_string_field_opt "target_id" top_item in
   let source, target_kind, suggested_tab, suggested_surface, suggested_params =
       match target_type with
-      | Some "room_meta_cognition" | Some "namespace_meta_cognition" ->
+      | Some "workspace_meta_cognition" | Some "namespace_meta_cognition" ->
           ( "meta_cognition",
             "meta_cognition",
             "overview",
@@ -94,15 +94,9 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
         ("source", `String source);
         ("provenance", `String provenance);
         ("target_kind", `String target_kind);
-        ( "target_id",
-          match target_id with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "target_id", Json_util.string_opt_to_json target_id );
         ("suggested_tab", `String suggested_tab);
-        ( "suggested_surface",
-          match suggested_surface with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "suggested_surface", Json_util.string_opt_to_json suggested_surface );
         ("suggested_params", suggested_params);
       ]
   in
@@ -147,15 +141,9 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
         ("source", `String "execution");
         ("provenance", `String "derived");
         ("target_kind", `String "queue");
-        ( "target_id",
-          match target_id with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "target_id", Json_util.string_opt_to_json target_id );
         ("suggested_tab", `String suggested_tab);
-        ( "suggested_surface",
-          match suggested_surface with
-          | Some value -> `String value
-          | None -> `Null );
+        ( "suggested_surface", Json_util.string_opt_to_json suggested_surface );
         ("suggested_params", suggested_params);
       ]
   in
@@ -188,7 +176,7 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
                     "derived" )
                 else if runtime_count = 0 then
                   ( "등록된 런타임이 없습니다. 활동이 시작되면 여기에 포커스가 나타납니다.",
-                    "No agents or keepers joined yet; namespace is idle.",
+                    "No agents or keepers bound yet; namespace is idle.",
                     "namespace",
                     "fallback" )
                 else
@@ -210,14 +198,13 @@ let dashboard_namespace_truth_focus_json ~initialized ~runtime_count
                   ("suggested_params", `Assoc []);
                 ]))
 
-let take_n n lst =
-  if List.length lst <= n then lst else List.filteri (fun i _ -> i < n) lst
+let take_n = List.take
 
 let severity_of_meta_salience = function
   | Meta_cognition.Operator_tension -> "bad"
   | Meta_cognition.Contested_belief
   | Meta_cognition.Operator_desire
-  | Meta_cognition.Stagnant_room -> "warn"
+  | Meta_cognition.Stagnant_workspace -> "warn"
   | Meta_cognition.Stable -> "info"
 
 let derived_meta_attention_item ~meta_cognition_json
@@ -246,7 +233,7 @@ let derived_meta_attention_item ~meta_cognition_json
                  ] );
            ])
 
-let derived_operator_digest_json (config : Coord.config) _execution_json
+let derived_operator_digest_json (config : Workspace.config) _execution_json
     meta_cognition_json meta_interpretation =
   let meta_attention =
     Option.bind meta_interpretation
@@ -287,14 +274,14 @@ let derived_operator_digest_json (config : Coord.config) _execution_json
     ]
 
 let execution_top_queue execution_json =
-  match Yojson.Safe.Util.member "execution_queue" execution_json with
-  | `List (head :: _) -> head
+  match Json_util.assoc_member_opt "execution_queue" execution_json with
+  | Some (`List (head :: _)) -> head
   | _ -> `Null
 
 let execution_summary_json execution_json =
   let execution_queue =
-    match Yojson.Safe.Util.member "execution_queue" execution_json with
-    | `List items -> items
+    match Json_util.assoc_member_opt "execution_queue" execution_json with
+    | Some (`List items) -> items
     | _ -> []
   in
   let execution_operation_briefs =
@@ -309,8 +296,8 @@ let execution_summary_json execution_json =
   let execution_keepers = json_list_field "keepers" execution_json |> take_n 20 in
   let has_text key json = json_string_field_opt key json |> Option.is_some in
   let existing = json_assoc_field "summary" execution_json in
-  match Yojson.Safe.Util.member "blocked_sessions" existing with
-  | `Int _ | `Intlit _ -> existing
+  match Json_util.assoc_member_opt "blocked_sessions" existing with
+  | Some (`Int _ | `Intlit _) -> existing
   | _ ->
       `Assoc
         [
@@ -376,11 +363,11 @@ let namespace_truth_aliases =
 let namespace_truth_aliases_json () =
   `List (List.map (fun alias -> `String alias) namespace_truth_aliases)
 
-let namespace_truth_retention_json ~(config : Coord.config) =
+let namespace_truth_retention_json ~(config : Workspace.config) =
   `Assoc
     [
       ("scope", `String "dashboard_namespace_truth");
-      ("coordination_root", `String config.base_path);
+      ("workspace_root", `String config.base_path);
       ("workspace_path", `String config.workspace_path);
       ("shell_input", `String "/api/v1/dashboard/shell");
       ("execution_input", `String "/api/v1/dashboard/execution");
@@ -389,7 +376,7 @@ let namespace_truth_retention_json ~(config : Coord.config) =
         `String "proactive_execution_cache_last_good_shell_fallback" );
     ]
 
-let namespace_truth_metadata_fields ~(config : Coord.config) ~generated_at =
+let namespace_truth_metadata_fields ~(config : Workspace.config) ~generated_at =
   [
     ("dashboard_surface", `String namespace_truth_dashboard_surface);
     ("dashboard_aliases", namespace_truth_aliases_json ());
@@ -398,7 +385,7 @@ let namespace_truth_metadata_fields ~(config : Coord.config) ~generated_at =
     ("generated_at_iso", `String generated_at);
   ]
 
-let compose_namespace_truth_initializing ~(config : Coord.config) ~message =
+let compose_namespace_truth_initializing ~(config : Workspace.config) ~message =
   let generated_at = Masc_domain.now_iso () in
   `Assoc
     (namespace_truth_metadata_fields ~config ~generated_at
@@ -475,22 +462,10 @@ let attention_event_json
       ("kind", `String kind);
       ("summary", `String summary);
       ("requires_decision", `Bool requires_decision);
-      ( "keeper_name",
-        match keeper_name with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "target_type",
-        match target_type with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "target_id",
-        match target_id with
-        | Some value -> `String value
-        | None -> `Null );
-      ( "recommended_action",
-        match recommended_action with
-        | Some value -> `String value
-        | None -> `Null );
+      ( "keeper_name", Json_util.string_opt_to_json keeper_name );
+      ( "target_type", Json_util.string_opt_to_json target_type );
+      ( "target_id", Json_util.string_opt_to_json target_id );
+      ( "recommended_action", Json_util.string_opt_to_json recommended_action );
       ("provenance", `String provenance);
     ]
 
@@ -713,7 +688,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
         ~key:"operational_clarity"
         ~label:"Operational Clarity"
         ~status:operational_clarity_status
-        ~ok_message:"The control room has recent audit anchors and no open attention backlog."
+        ~ok_message:"The control workspace has recent audit anchors and no open attention backlog."
         ~reasons:operational_clarity_reasons
         ~metrics:
           [
@@ -795,7 +770,7 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
            | Some blocker ->
                let severity =
                  match blocker with
-                 | "cascade_exhausted" | "completion_contract_violation" -> "bad"
+                 | "runtime_exhausted" | "completion_contract_violation" -> "bad"
                  | _ -> "warn"
                in
                Some
@@ -834,15 +809,15 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       ],
     `List (take_n 10 (base_events @ keeper_events)) )
 
-let json_int_value_opt = function
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
 let runtime_count_authority_json ~runtime_count ~shell_counts
     ~configured_keepers =
   let live_keepers = json_int_field "keepers" shell_counts ~default:0 in
-  let configured_keepers_count = json_int_value_opt configured_keepers in
+  let configured_keepers_count =
+    match configured_keepers with
+    | `Int v -> Some v
+    | `Intlit s -> int_of_string_opt s
+    | _ -> None
+  in
   let configured_minus_live =
     Option.map
       (fun configured -> max 0 (configured - live_keepers))
@@ -858,8 +833,8 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
       ("shell_arbitration_allowed", `Bool false);
       ("live_total_runtimes", `Int runtime_count);
       ("live_keepers", `Int live_keepers);
-      ("configured_keepers", json_int_opt configured_keepers_count);
-      ("configured_minus_live_keepers", json_int_opt configured_minus_live);
+      ("configured_keepers", Json_util.int_opt_to_json configured_keepers_count);
+      ("configured_minus_live_keepers", Json_util.int_opt_to_json configured_minus_live);
       ( "count_roles",
         `Assoc
           [
@@ -870,7 +845,7 @@ let runtime_count_authority_json ~runtime_count ~shell_counts
           ] );
     ]
 
-let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
+let compose_namespace_truth_snapshot ~(config : Workspace.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let generated_at = Masc_domain.now_iso () in
   let meta_cognition_summary = json_assoc_field "meta_cognition" shell_json in
@@ -899,7 +874,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
   let command_summary = namespace_truth_command_summary_json command_summary_json in
   let shell_counts = json_assoc_field "counts" shell_json in
   let configured_keepers =
-    Yojson.Safe.Util.member "configured_keepers" shell_json
+    Option.value ~default:`Null (Json_util.assoc_member_opt "configured_keepers" shell_json)
   in
   let runtime_count =
     json_int_field "total_runtimes" shell_counts
@@ -927,7 +902,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
     (namespace_truth_metadata_fields ~config ~generated_at
      @ [
          ("generated_at", `String generated_at);
-        ("root", namespace_block);
+        ("workspace", namespace_block);
         ( "execution",
         `Assoc
           [
@@ -951,7 +926,7 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
       ( "operator",
         `Assoc
           [
-            ("health", Yojson.Safe.Util.member "health" operator_digest_json);
+            ("health", Option.value ~default:`Null (Json_util.assoc_member_opt "health" operator_digest_json));
             ("attention_summary", json_assoc_field "attention_summary" operator_digest_json);
             ( "recommendation_summary",
               json_assoc_field "recommendation_summary" operator_digest_json );

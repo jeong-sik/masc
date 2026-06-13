@@ -2,10 +2,13 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
+  fetchDashboardRuntimeProbe,
   fetchRuntimeModelMetrics,
   fetchRuntimeProviders,
+  type DashboardRuntimeProbeResponse,
   type DashboardRuntimeModelMetric,
   type DashboardRuntimeModelMetricsResponse,
+  type DashboardRuntimeProviderProbe,
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
 } from '../api/dashboard'
@@ -21,7 +24,7 @@ import { Table, type TableColumn } from './common/table'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { formatCost, formatNumber, formatPct1 } from '../lib/format-number'
-import { MISSING_DATA_DASH } from '../lib/format-string'
+import { errorToString, MISSING_DATA_DASH } from '../lib/format-string'
 import { formatTimeHms } from '../lib/format-time'
 
 /**
@@ -72,6 +75,8 @@ function sortModelMetricsByUrgency(
 interface RuntimeData {
   providers: DashboardRuntimeProvidersResponse | null
   metrics: DashboardRuntimeModelMetricsResponse | null
+  probe: DashboardRuntimeProbeResponse | null
+  probeError: string | null
 }
 
 const COVERAGE_PRIORITY: Record<string, number> = {
@@ -105,18 +110,26 @@ const COVERAGE_STAGE_LABELS: Record<string, string> = {
   unknown: 'unknown stage',
 }
 
-async function loadRuntimeData(resource: ManagedAsyncResource<RuntimeData>, windowMinutes: number) {
+async function loadRuntimeData(
+  resource: ManagedAsyncResource<RuntimeData>,
+  windowMinutes: number,
+  forceProbe = false,
+) {
   await resource.load(async (signal) => {
-    const [providers, metrics] = await Promise.all([
+    const probeResult = fetchDashboardRuntimeProbe(forceProbe, { signal })
+      .then(probe => ({ probe, probeError: null }))
+      .catch(error => ({ probe: null, probeError: errorToString(error) }))
+    const [providers, metrics, probe] = await Promise.all([
       fetchRuntimeProviders({ signal }),
       fetchRuntimeModelMetrics(windowMinutes, 5, { signal }),
+      probeResult,
     ])
-    return { providers, metrics }
+    return { providers, metrics, probe: probe.probe, probeError: probe.probeError }
   })
 }
 
 // Current-reachability axis: does the provider respond right now?
-// Orthogonal to cascade-config-panel.ts:providerTone which scores historical
+// Orthogonal to runtime-config-panel.ts:providerTone which scores historical
 // performance (success_rate, cooldown). Both signals can be shown together
 // without being duplicates.
 function runtimeProviderTone(provider: DashboardRuntimeProviderSnapshot): string {
@@ -141,6 +154,77 @@ function runtimeStatusLabel(provider: DashboardRuntimeProviderSnapshot): string 
   if (provider.available === true) return 'available'
   if (provider.available === false) return 'unavailable'
   return provider.discovery?.healthy === false ? 'degraded' : 'unknown'
+}
+
+function providerProbeKey(probe: DashboardRuntimeProviderProbe): string | null {
+  return probe.runtime_id ?? null
+}
+
+function providerRuntimeKey(provider: DashboardRuntimeProviderSnapshot): string {
+  return provider.runtime_id ?? provider.provider
+}
+
+function runtimeProbeTone(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  if (!probe) return 'neutral'
+  if (probe.reachable === true) return 'ok'
+  if (probe.status === 'skipped_cli') return 'neutral'
+  if (probe.status === 'missing_auth' || probe.status === 'auth_failed') return 'bad'
+  if (probe.status === 'network_error' || probe.status === 'server_error') return 'bad'
+  if (probe.reachable === false) return 'bad'
+  return 'warn'
+}
+
+function runtimeProbeLabel(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  if (!probe) return 'not probed'
+  switch (probe.status) {
+    case 'reachable':
+      return 'reachable'
+    case 'missing_auth':
+      return 'missing auth'
+    case 'auth_failed':
+      return 'auth failed'
+    case 'network_error':
+      return 'network error'
+    case 'server_error':
+      return 'server error'
+    case 'endpoint_not_found':
+      return 'not found'
+    case 'skipped_cli':
+      return 'cli skipped'
+    case 'invalid_endpoint':
+      return 'bad endpoint'
+    default:
+      return probe.status ?? 'unknown'
+  }
+}
+
+function runtimeProbeAuthLabel(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  if (probe?.credential_required !== true) return 'none'
+  return probe.auth_present === true ? 'present' : 'missing'
+}
+
+function runtimeProbeSummaryText(probe: DashboardRuntimeProbeResponse | null): string {
+  const summary = probe?.probe?.summary
+  if (!summary) return 'live probe 없음'
+  return `Reachable ${summary.reachable ?? 0} · Failed ${summary.failed ?? 0} · Skipped ${summary.skipped ?? 0}`
+}
+
+function providerProbeMap(probe: DashboardRuntimeProbeResponse | null): Map<string, DashboardRuntimeProviderProbe> {
+  const map = new Map<string, DashboardRuntimeProviderProbe>()
+  for (const item of probe?.probe?.providers ?? []) {
+    const key = providerProbeKey(item)
+    if (key) map.set(key, item)
+  }
+  return map
+}
+
+function fmtProbeLatency(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  if (!probe || probe.latency_ms == null) return MISSING_DATA_DASH
+  return `${formatNumber(probe.latency_ms, 1)} ms`
+}
+
+function fmtProbeHttpStatus(probe: DashboardRuntimeProviderProbe | null | undefined): string {
+  return probe?.http_status == null ? MISSING_DATA_DASH : String(probe.http_status)
 }
 
 function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
@@ -356,7 +440,7 @@ export function RuntimeMonitor() {
   const expandedModel = useSignal<string | null>(null)
   const modelSearch = useSignal('')
 
-  const load = () => loadRuntimeData(resource, windowMinutes.value)
+  const load = (forceProbe = false) => loadRuntimeData(resource, windowMinutes.value, forceProbe)
 
   useEffect(() => {
     void loadRuntimeData(resource, windowMinutes.value)
@@ -368,6 +452,9 @@ export function RuntimeMonitor() {
   const current = resource.state.value
   const providers = current.data?.providers ?? null
   const metrics = current.data?.metrics ?? null
+  const probe = current.data?.probe ?? null
+  const probeError = current.data?.probeError ?? null
+  const providerProbes = providerProbeMap(probe)
 
   return html`
     <div class="flex flex-col gap-4">
@@ -388,7 +475,7 @@ export function RuntimeMonitor() {
           variant="ghost"
           size="sm"
           ariaLabel="runtime snapshot 새로고침"
-          onClick=${() => void load()}
+          onClick=${() => void load(true)}
         >새로고침<//>
         ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>
@@ -402,36 +489,62 @@ export function RuntimeMonitor() {
         : null}
 
       <${SectionCard} label="런타임 상태">
-        <div class="grid grid-cols-2 gap-3 mb-4">
+        ${probeError
+          ? html`<div class="mb-3 rounded-[var(--r-1)] border border-[var(--status-warn)] bg-[var(--status-warn)]/5 px-3 py-2 text-xs text-[var(--status-warn)]">
+              live probe 실패 · ${probeError}
+            </div>`
+          : null}
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
           <${StatTile}
             label="런타임"
-            value=${String(providers?.summary?.providers ?? providers?.providers.length ?? 0)}
-            delta=${{ direction: 'flat', text: providers?.updated_at ?? 'updated_at 없음' }}
+            value=${String(providers?.summary?.runtimes ?? providers?.providers.length ?? 0)}
+            delta=${{ direction: 'flat', text: `Providers ${providers?.summary?.providers ?? 0} · ${providers?.updated_at ?? 'updated_at 없음'}` }}
           />
           <${StatTile}
             label="로컬 런타임"
             value=${String(providers?.summary?.local_models ?? 0)}
             delta=${{ direction: 'flat', text: `Cloud ${providers?.summary?.cloud_models ?? 0} · CLI ${providers?.summary?.cli_models ?? 0}` }}
           />
+          <${StatTile}
+            label="Live reachability"
+            value=${String(probe?.probe?.summary?.reachable ?? 0)}
+            delta=${{ direction: probe?.probe?.summary?.failed ? 'down' : 'flat', text: runtimeProbeSummaryText(probe) }}
+          />
         </div>
         <div class="flex flex-col gap-3">
           ${(providers?.providers ?? []).length > 0
-            ? providers?.providers.map(provider => html`
+            ? providers?.providers.map(provider => {
+                const liveProbe = providerProbes.get(providerRuntimeKey(provider)) ?? null
+                return html`
                 <article class="p-4 rounded-[var(--r-1)] border border-card-border bg-card/40 backdrop-blur-sm shadow-[var(--shadow-1)] flex flex-col gap-2">
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
-                      <strong class="text-sm text-text-strong">${provider.provider}</strong>
-                      <span class="text-xs text-text-muted">${provider.runtime_kind ?? '(unknown runtime_kind)'}</span>
+                      <strong class="text-sm text-text-strong">${provider.runtime_id ?? provider.provider}</strong>
+                      <span class="text-xs text-text-muted">${provider.provider_id ?? '(unknown provider)'}</span>
                     </div>
-                    <${StatusChip}
-                      label=${runtimeStatusLabel(provider)}
-                      tone=${runtimeProviderTone(provider)}
-                    />
+                    <div class="flex items-center gap-2 flex-wrap justify-end">
+                      <${StatusChip} tone=${runtimeProviderTone(provider)}>${runtimeStatusLabel(provider)}<//>
+                      <${StatusChip} tone=${runtimeProbeTone(liveProbe)} uppercase=${false}>live ${runtimeProbeLabel(liveProbe)}<//>
+                    </div>
                   </div>
                   <div class="grid grid-cols-2 gap-3 text-xs text-text-body">
-                    <div>catalog entries · ${formatNumber(provider.model_count ?? provider.models.length)}</div>
-                    <div>single-run · ${provider.supports_single_agent_run ? 'yes' : 'no'}</div>
+                    <div>model · ${provider.model_api_name ?? provider.model_id ?? '-'}</div>
+                    <div>default · ${provider.is_default_runtime ? 'yes' : 'no'}</div>
+                    <div>transport · ${provider.runtime_kind ?? provider.transport ?? '-'}</div>
+                    <div>ctx · ${formatNumber(provider.max_context)}</div>
+                    <div>http · ${fmtProbeHttpStatus(liveProbe)}</div>
+                    <div>latency · ${fmtProbeLatency(liveProbe)}</div>
+                    <div>models · ${formatNumber(liveProbe?.model_count)}</div>
+                    <div>auth · ${runtimeProbeAuthLabel(liveProbe)}</div>
                   </div>
+                  ${liveProbe?.probe_url || provider.endpoint_url
+                    ? html`<div class="truncate text-2xs text-text-muted" title=${liveProbe?.probe_url ?? provider.endpoint_url ?? ''}>
+                        probe · ${liveProbe?.probe_url ?? provider.endpoint_url}
+                      </div>`
+                    : null}
+                  ${liveProbe?.error
+                    ? html`<div class="text-2xs text-[var(--status-bad)]">${liveProbe.error}</div>`
+                    : null}
                   ${provider.discovery
                     ? html`<div class="grid grid-cols-2 gap-3 text-xs text-text-body pt-2 border-t border-card-border/50">
                         <div>discovery · ${provider.discovery.healthy ? 'healthy' : 'degraded'}</div>
@@ -440,7 +553,7 @@ export function RuntimeMonitor() {
                       </div>`
                     : null}
                 </article>
-              `)
+              `})
             : html`<${EmptyState} message="runtime snapshot이 없습니다." compact />`}
         </div>
       <//>

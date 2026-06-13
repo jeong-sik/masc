@@ -5,5 +5,4 @@
 val compact_preview : max_chars:int -> string -> string * bool
 
 val compact_receipt_error_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_cascade_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_tool_surface_json : Yojson.Safe.t -> Yojson.Safe.t
+val compact_receipt_runtime_json : Yojson.Safe.t -> Yojson.Safe.t

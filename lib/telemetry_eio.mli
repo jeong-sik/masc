@@ -22,7 +22,7 @@
     non-positive values disable the matching bound. The byte cap prunes oldest
     completed day-files while preserving the current day-file. *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Events} *)
 
@@ -34,8 +34,8 @@ val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
 type event =
-  | Agent_joined of { agent_id : string; capabilities : string list }
-  | Agent_left of { agent_id : string; reason : string }
+  | Agent_session_bound of { agent_id : string; capabilities : string list }
+  | Agent_unbound of { agent_id : string; reason : string }
   | Task_started of { task_id : string; agent_id : string }
   | Task_completed of {
       task_id : string;
@@ -70,7 +70,6 @@ type event =
   | Tool_assigned of {
       agent_id : string;
       profile : string;
-      preset : string option; [@default None]
       tool_count : int;
       assignment_id : string;
     }
@@ -154,7 +153,7 @@ val calculate_error_rate : event_record list -> float
 
 (** {1 Convenience emitters} *)
 
-val track_agent_joined :
+val track_agent_session_bound :
   ?fs:'a ->
   config ->
   agent_id:string ->
@@ -162,7 +161,7 @@ val track_agent_joined :
   unit ->
   unit
 
-val track_agent_left :
+val track_agent_unbound :
   ?fs:'a -> config -> agent_id:string -> reason:string -> unit
 
 val track_task_started :
@@ -179,8 +178,8 @@ val track_task_completed :
 (* track_handoff intentionally not exposed: 0 production callers as
    of #10358 (c2) audit. The Handoff_triggered variant remains in
    [event] above for wire-schema compatibility but no public emitter
-   exists. Add a new emitter only when masc-mcp introduces a real
-   cascade-routing handoff concept. *)
+   exists. Add a new emitter only when masc introduces a real
+   runtime-routing handoff concept. *)
 
 val track_error :
   ?fs:'a ->
@@ -217,7 +216,6 @@ val track_tool_assigned :
   config ->
   agent_id:string ->
   profile:string ->
-  ?preset:string ->
   tool_count:int ->
   assignment_id:string ->
   unit ->

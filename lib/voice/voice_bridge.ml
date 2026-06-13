@@ -28,9 +28,8 @@ let transcribe_audio ~audio_file ?language_code () =
     | endpoint :: rest ->
       (match transcribe_via_http_stt endpoint ~audio_file ~model with
        | Ok json ->
-         let open Yojson.Safe.Util in
          let text =
-           match json |> member "text" |> to_string_option with
+           match Json_util.get_string json "text" with
            | Some t -> t
            | None -> Yojson.Safe.to_string json
          in
@@ -38,7 +37,7 @@ let transcribe_audio ~audio_file ?language_code () =
            match language_code with
            | Some lc -> lc
            | None ->
-             (match json |> member "language_code" |> to_string_option with
+             (match Json_util.get_string json "language_code" with
               | Some lc -> lc
               | None -> "unknown")
          in
@@ -73,20 +72,19 @@ let public_config_json () =
 ;;
 
 let tts_preview_bytes_from_request_json json =
-  let open Yojson.Safe.Util in
   let text =
-    match json |> member "text" |> to_string_option with
+    match Json_util.get_string json "text" with
     | Some value when String.trim value <> "" -> String.trim value
     | _ ->
-      (match json |> member "input" |> to_string_option with
+      (match Json_util.get_string json "input" with
        | Some value when String.trim value <> "" -> String.trim value
        | _ -> raise (Yojson.Json_error "missing or empty text/input field"))
   in
   let voice =
-    match json |> member "voice" |> to_string_option with
+    match Json_util.get_string json "voice" with
     | Some value when String.trim value <> "" -> String.trim value
     | _ ->
-      (match json |> member "voice_id" |> to_string_option with
+      (match Json_util.get_string json "voice_id" with
        | Some value when String.trim value <> "" -> String.trim value
        | _ ->
          (match load_voice_config () with
@@ -94,10 +92,10 @@ let tts_preview_bytes_from_request_json json =
           | Error _ -> "Sarah"))
   in
   let model =
-    match json |> member "model" |> to_string_option with
+    match Json_util.get_string json "model" with
     | Some value when String.trim value <> "" -> String.trim value
     | _ ->
-      (match json |> member "voice_model" |> to_string_option with
+      (match Json_util.get_string json "voice_model" with
        | Some value when String.trim value <> "" -> String.trim value
        | _ ->
          (match load_voice_config () with
@@ -105,9 +103,7 @@ let tts_preview_bytes_from_request_json json =
           | Error _ -> "eleven_multilingual_v2"))
   in
   let provider =
-    json
-    |> member "provider"
-    |> to_string_option
+    Json_util.get_string json "provider"
     |> Option.map String.trim
     |> function
     | Some value when value <> "" -> Some value
@@ -296,25 +292,27 @@ let single_voice_mcp_call ~net:_ ~uri ~headers_list ~body_str =
 
 (** Extract result from MCP response *)
 let extract_mcp_result json =
-  let open Yojson.Safe.Util in
   try
-    let result = json |> member "result" in
-    if result = `Null
+    let result = json |> Json_util.assoc_member_opt "result" in
+    if result = None
     then (
-      let error = json |> member "error" |> member "message" |> to_string_option in
+      let error = (match Json_util.assoc_member_opt "error" json with
+        | Some err -> (match Json_util.assoc_member_opt "message" err with
+          | Some (`String s) -> Some s | _ -> None)
+        | None -> None) in
       Error (Option.value error ~default:"Unknown error"))
     else (
       (* Get content from result *)
-      let content = result |> member "content" |> to_list in
+      let content = (match Option.bind result (fun r -> Json_util.assoc_member_opt "content" r) with Some (`List l) -> l | _ -> []) in
       match content with
       | [] -> Ok (`Assoc [])
       | first :: _ ->
-        let text = first |> member "text" |> to_string_option in
+        let text = Json_util.get_string first "text" in
         (match text with
          | Some t ->
            (try Ok (Yojson.Safe.from_string t) with
             | Yojson.Json_error _ -> Ok (`String t))
-         | None -> Ok result))
+         | None -> Ok (Option.value ~default:`Null result)))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printf.sprintf "Parse error: %s" (Printexc.to_string e))
@@ -410,6 +408,25 @@ let attempt_tts_endpoint
                          (String.sub message 0 (min 50 (String.length message))) )
                    ; "local_playback_status", `String local_playback_status
                    ; "local_playback_reason", `String reason
+                   ])
+               endpoint)
+        | `Opened handoff_seconds ->
+          Ok
+            (append_provider_metadata
+               (`Assoc
+                   [ "status", `String "spoken"
+                   ; "agent_id", `String agent_id
+                   ; "voice", `String voice
+                   ; "audio_file", `String audio_file
+                   ; "audio_size", `Int file_size
+                   ; ( "message_preview"
+                     , `String
+                         (String.sub message 0 (min 50 (String.length message))) )
+                   ; "local_playback_status", `String "opened"
+                   ; "local_playback_reason"
+                     , `String
+                         "blocking local players failed; handed audio file to macOS open"
+                   ; "open_handoff_seconds", `Float handoff_seconds
                    ])
                endpoint)
         | `Played played_seconds ->
@@ -566,9 +583,8 @@ let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
     call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args
   with
   | Ok (`Assoc fields as data) ->
-    let open Yojson.Safe.Util in
     let session_id =
-      data |> member "session_id" |> to_string_option |> Option.value ~default:"unknown"
+      Json_util.get_string data "session_id" |> Option.value ~default:"unknown"
     in
     Ok
       (`Assoc
@@ -716,11 +732,8 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
     call_session_tool ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args
   with
   | Ok (`Assoc fields as data) ->
-    let open Yojson.Safe.Util in
     let conference_id =
-      data
-      |> member "conference_id"
-      |> to_string_option
+      Json_util.get_string data "conference_id"
       |> Option.value ~default:"unknown"
     in
     Ok

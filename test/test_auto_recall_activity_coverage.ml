@@ -4,7 +4,7 @@ module Types = Masc_domain
     Also covers filesystem-backed activity_feed read-path regressions. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ============================================================
    1. Auto_recall — estimate_tokens
@@ -292,8 +292,8 @@ let str_contains haystack needle =
 
 let test_recent_activity_skips_malformed_jsonl_lines () =
   with_temp_dir "activity-feed-jsonl" @@ fun base_path ->
-  let config = Coord.default_config base_path in
-  let masc_dir = Coord.masc_dir config in
+  let config = Workspace.default_config base_path in
+  let masc_dir = Workspace.masc_dir config in
   Fs_compat.mkdir_p masc_dir;
   let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
   write_file board_posts_path
@@ -320,8 +320,8 @@ let test_recent_activity_skips_malformed_jsonl_lines () =
 
 let test_recent_activity_accepts_iso_string_created_at_for_board_posts () =
   with_temp_dir "activity-feed-jsonl-iso" @@ fun base_path ->
-  let config = Coord.default_config base_path in
-  let masc_dir = Coord.masc_dir config in
+  let config = Workspace.default_config base_path in
+  let masc_dir = Workspace.masc_dir config in
   Fs_compat.mkdir_p masc_dir;
   let board_posts_path = Filename.concat masc_dir "board_posts.jsonl" in
   let iso_created_at = "2026-04-22T13:01:48Z" in
@@ -352,8 +352,8 @@ let test_recent_activity_accepts_iso_string_created_at_for_board_posts () =
 
 let test_recent_activity_skips_bad_task_file () =
   with_temp_dir "activity-feed-task" @@ fun base_path ->
-  let config = Coord.default_config base_path in
-  let masc_dir = Coord.masc_dir config in
+  let config = Workspace.default_config base_path in
+  let masc_dir = Workspace.masc_dir config in
   let tasks_dir = Filename.concat masc_dir "tasks" in
   Fs_compat.mkdir_p tasks_dir;
   write_file (Filename.concat tasks_dir "good.json")
@@ -377,8 +377,8 @@ let test_recent_activity_skips_bad_task_file () =
 
 let test_recent_activity_falls_back_from_bad_task_timestamp () =
   with_temp_dir "activity-feed-ts" @@ fun base_path ->
-  let config = Coord.default_config base_path in
-  let masc_dir = Coord.masc_dir config in
+  let config = Workspace.default_config base_path in
+  let masc_dir = Workspace.masc_dir config in
   let tasks_dir = Filename.concat masc_dir "tasks" in
   Fs_compat.mkdir_p tasks_dir;
   write_file (Filename.concat tasks_dir "task.json")
@@ -401,8 +401,8 @@ let test_recent_activity_falls_back_from_bad_task_timestamp () =
 
 let test_recent_activity_ignores_backlog_json_without_timestamp_warning () =
   with_temp_dir "activity-feed-backlog" @@ fun base_path ->
-  let config = Coord.default_config base_path in
-  let masc_dir = Coord.masc_dir config in
+  let config = Workspace.default_config base_path in
+  let masc_dir = Workspace.masc_dir config in
   let tasks_dir = Filename.concat masc_dir "tasks" in
   Fs_compat.mkdir_p tasks_dir;
   write_file (Filename.concat tasks_dir "backlog.json")

@@ -13,7 +13,7 @@
     Each test uses a unique env-var name so cases are independent
     when run in parallel. *)
 
-open Masc_mcp
+open Masc
 module C = Env_config_core
 
 let with_env name value f =

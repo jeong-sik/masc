@@ -113,7 +113,7 @@ let graphql_playground_html ~nonce =
       </svg>
       <div class="text">Loading <strong>GraphQL Playground</strong></div>
     </div>
-    <div id="root"></div>
+    <div id="workspace"></div>
     <script nonce="|};
     nonce;
     {|">
@@ -122,7 +122,7 @@ let graphql_playground_html ~nonce =
         if (loading) {
           loading.classList.add("fadeOut");
         }
-        var root = document.getElementById("root");
+        var root = document.getElementById("workspace");
         if (!root) {
           return;
         }
@@ -280,7 +280,7 @@ let serve_dashboard_static name request reqd =
 
 (** Dashboard Bonsai island (Jane Street Bonsai + js_of_ocaml).
     Coexists with the Preact SPA under [/dashboard/b/*] until the migration is
-    complete. See planning/agent_llm_a-plans/masc-mcp-eventual-parrot.md. *)
+    complete. See planning/agent_llm_a-plans/masc-eventual-parrot.md. *)
 let bonsai_asset_root () =
   Filename.concat (assets_root ()) "dashboard_bonsai"
 
@@ -313,7 +313,7 @@ let bonsai_index_html () =
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>masc-mcp · Bonsai</title>
+<title>masc · Bonsai</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
@@ -361,13 +361,6 @@ let serve_bonsai_index _request reqd =
     This endpoint must stay scoped to the live server [base_path]; returning
     static fixture rows here makes Bonsai look like an SSOT while showing a
     different keeper universe than the operator dashboard. *)
-let iso8601_utc_now () =
-  let open Unix in
-  let t = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-    t.tm_hour t.tm_min t.tm_sec
-
 let bonsai_keeper_status_of_phase phase =
   let module K = Masc_dashboard_api_types.Keepers in
   let open Keeper_state_machine in
@@ -378,7 +371,7 @@ let bonsai_keeper_status_of_phase phase =
       Warn
   | Offline | Stopped | Crashed | Dead | Zombie -> Dead
 
-let bonsai_ctx_pct (meta : Keeper_types.keeper_meta) =
+let bonsai_ctx_pct (meta : Keeper_meta_contract.keeper_meta) =
   match meta.max_context_override with
   | Some max_tokens when max_tokens > 0 && meta.runtime.usage.last_total_tokens > 0 ->
       let pct =
@@ -438,8 +431,8 @@ let keepers_summary_from_registry ~base_path
   K.{
     keepers;
     cycle;
-    room = Some (Filename.basename base_path);
-    generated_at = iso8601_utc_now ();
+    workspace = Some (Filename.basename base_path);
+    generated_at = Masc_domain.now_iso ();
   }
 
 let bonsai_api_keepers_summary request reqd =
@@ -452,7 +445,7 @@ let bonsai_api_keepers_summary request reqd =
         (`Assoc [ ("error", `String "server state not initialized") ])
   | Some state ->
       let resp =
-        keepers_summary_from_registry ~base_path:state.room_config.base_path
+        keepers_summary_from_registry ~base_path:state.workspace_config.base_path
       in
       respond_public_read_json_value request reqd
         (Masc_dashboard_api_types.Keepers.response_to_yojson resp)
@@ -523,7 +516,7 @@ let handle_post_graphql request reqd =
         respond_json_with_cors ~status:`Internal_server_error request reqd
           (server_state_error_json message)
     | Ok state ->
-        let response = Graphql_api.handle_request ~config:state.room_config body_str in
+        let response = Graphql_api.handle_request ~config:state.workspace_config body_str in
         let status = http_status_of_graphql response.status in
         let headers = Httpun.Headers.of_list (
           ("content-length", string_of_int (String.length response.body))

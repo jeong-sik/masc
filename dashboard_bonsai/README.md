@@ -1,6 +1,6 @@
 # dashboard_bonsai
 
-Jane Street **Bonsai** (OCaml + js_of_ocaml) 기반 masc-mcp 대시보드 island.
+Jane Street **Bonsai** (OCaml + js_of_ocaml) 기반 masc 대시보드 island.
 기존 Preact 대시보드(`../dashboard/`)와 URL prefix로 공존 — 점진 이전(lift-and-shift) 중.
 
 - **Preact**: `/dashboard/*` (기존)
@@ -116,7 +116,7 @@ dashboard_bonsai/
 
 ## Phase 계획
 
-`~/me/planning/claude-plans/masc-mcp-eventual-parrot.md` 참조. 요약:
+`~/me/planning/claude-plans/masc-eventual-parrot.md` 참조. 요약:
 
 - **Phase 0**: foundation (hello world, SSE helper 스파이크) — 완료
 - **Phase 1**: shared types + logs island — 진행 중 (3s polling 동작 중)

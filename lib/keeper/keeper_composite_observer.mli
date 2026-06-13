@@ -1,21 +1,21 @@
 (** Keeper Composite Lifecycle Observer — pure projection.
 
     Projects a [Keeper_registry.registry_entry] into a composite snapshot
-    spanning Decision / Cascade / Memory / Compaction sub-FSMs as
+    spanning Decision / Runtime / Memory / Compaction sub-FSMs as
     specified in RFC-0003 and
     [specs/keeper-state-machine/KeeperCompositeLifecycle.tla].
 
     Contract:
     - Pure read. No mutation, no I/O, no event emission.
     - Never calls [Keeper_state_machine.apply_event],
-      [Keeper_cascade_routing.select_cascade], or any routine that would
+      [Keeper_runtime_routing.select_runtime], or any routine that would
       shift keeper lifecycle state.
     - Does not read provider names, token counts, or context bytes —
       those belong to OAS (see [feedback_masc-oas-layer-boundary]).
 
     Current scope: all projected sub-FSM live states are written directly
     into [Keeper_registry.registry_entry]. The observer no longer infers
-    decision/cascade/compaction state from coarse parent conditions.
+    decision/runtime/compaction state from coarse parent conditions.
 
     @since RFC-0003 — Composite observer v0. *)
 
@@ -38,14 +38,9 @@ type decision_stage = Keeper_registry.decision_stage =
 
 val all_decision_stages : Keeper_registry.packed_decision_stage list
 
-type cascade_state = Keeper_registry.cascade_state =
-  | Cascade_idle
-  | Cascade_selecting
-  | Cascade_trying
-  | Cascade_done
-  | Cascade_exhausted
+type runtime_state = string
 
-val all_cascade_states : Keeper_registry.packed_cascade_state list
+val all_runtime_states : runtime_state list
 
 type compaction_stage = Keeper_registry.compaction_stage =
   | Compaction_accumulating
@@ -61,11 +56,11 @@ type tla_action =
   | Action_measurement_broadcast
   | Action_decide_guard
   | Action_select_tool_policy
-  | Action_start_cascade_selection
-  | Action_select_cascade
+  | Action_start_runtime_selection
+  | Action_select_runtime
   | Action_gate_rejected
-  | Action_cascade_done
-  | Action_cascade_exhausted
+  | Action_runtime_done
+  | Action_runtime_exhausted
   | Action_finish_turn
   | Action_start_compaction
   | Action_finish_compaction
@@ -79,7 +74,7 @@ val all_tla_actions : tla_action list
 (** Named TLA invariants mirrored as OCaml variants. *)
 type invariant_key =
   | Invariant_phase_turn_alignment
-  | Invariant_no_cascade_before_measurement
+  | Invariant_no_runtime_before_measurement
   | Invariant_compaction_atomicity
   | Invariant_event_priority_monotone
   | Invariant_phase_derivation_agreement
@@ -92,7 +87,7 @@ val all_invariant_keys : invariant_key list
     that the dashboard should surface to the operator. *)
 type invariants_check = {
   phase_turn_alignment : bool;
-  no_cascade_before_measurement : bool;
+  no_runtime_before_measurement : bool;
   compaction_atomicity : bool;
   event_priority_monotone : bool;
   phase_derivation_agreement : bool;
@@ -127,11 +122,11 @@ val check_phase_turn_alignment : Keeper_state_machine.phase -> Keeper_registry.p
     [(kmc_compaction = compacting) <=> (phase = Compacting)]. *)
 val check_compaction_atomicity : Keeper_state_machine.phase -> Keeper_registry.packed_compaction_stage -> bool
 
-(** Mirror of TLA+ I2 [NoCascadeBeforeMeasurement]
-    (KeeperCompositeLifecycle.tla:361): cascade selection past [idle]
+(** Mirror of TLA+ I2 [NoRuntimeBeforeMeasurement]
+    (KeeperCompositeLifecycle.tla:361): runtime selection past [idle]
     requires a captured measurement. *)
-val check_no_cascade_before_measurement :
-  cascade_state:Keeper_registry.packed_cascade_state -> measurement_captured:bool -> bool
+val check_no_runtime_before_measurement :
+  runtime_state:runtime_state -> measurement_captured:bool -> bool
 
 val check_phase_derivation_agreement :
   Keeper_registry.registry_entry -> bool
@@ -162,7 +157,7 @@ type last_outcome = {
   turn_id : int;
   ended_at : float;
   decision_stage : Keeper_registry.packed_decision_stage;
-  cascade_state : Keeper_registry.packed_cascade_state;
+  runtime_state : runtime_state;
   selected_model : string option;
 }
 
@@ -207,7 +202,7 @@ type snapshot = {
           [specs/keeper-state-machine/KeeperStateMachine.tla] exactly. *)
   ktc_turn_phase : Keeper_registry.packed_turn_phase;
   kdp_decision : Keeper_registry.packed_decision_stage;
-  kcl_cascade_state : Keeper_registry.packed_cascade_state;
+  kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
   kcb_state : Keeper_failure_circuit_breaker.display_state;
       (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
@@ -299,9 +294,9 @@ val turn_phase_of_string : string -> turn_phase option
 val decision_stage_to_string : Keeper_registry.packed_decision_stage -> string
 val decision_stage_of_string : string -> decision_stage option
 
-(** Stringify [cascade_state]. Mirrors KeeperCascadeLifecycle.tla. *)
-val cascade_state_to_string : Keeper_registry.packed_cascade_state -> string
-val cascade_state_of_string : string -> cascade_state option
+(** Stringify the runtime-state compatibility field. *)
+val runtime_state_to_string : runtime_state -> string
+val runtime_state_of_string : string -> runtime_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : Keeper_registry.packed_compaction_stage -> string

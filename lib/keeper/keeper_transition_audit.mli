@@ -1,53 +1,18 @@
 (** Keeper Transition Audit — Structured audit trail (RFC-0002).
 
-    Records every decision point for observability and replay. *)
+    Records every decision point for observability and replay.
 
-(** A single transition decision record. *)
-type transition_record = {
-  snapshot : Keeper_measurement.measurement_snapshot option;
-  events_fired : Keeper_state_machine.event list;
-  selected_event : Keeper_state_machine.event;
-  prev_phase : Keeper_state_machine.phase;
-  new_phase : Keeper_state_machine.phase;
-  transition_outcome : string;
-  wall_clock_at_decision : float;
-}
+    All type definitions ([transition_record], [operator_signal],
+    [completed_turn_outcome], [completed_turn_record],
+    [turn_fsm_transition_record]) and their pure converters live in
+    {!Keeper_transition_audit_types}.  Re-exported here so callers can
+    continue using [Keeper_transition_audit.transition_record] etc.
+    without reaching into the types submodule. *)
 
-(** Serialize a transition record for JSONL storage. *)
-val to_json : transition_record -> Yojson.Safe.t
-
-(** Historical keeper-turn outcome buckets for dashboard outcomes rollups.
-    This stays separate from [transition_record] because a keeper turn can be
-    [Turn_succeeded] at the state-machine layer while still ending in a
-    [gate_rejected] decision_stage at the turn observer layer. *)
-type completed_turn_outcome =
-  | Turn_substantive
-  | Turn_failed
-  | Turn_gate_rejected
-
-type completed_turn_record = {
-  turn_id : int;
-  started_at : float;
-  ended_at : float;
-  outcome : completed_turn_outcome;
-}
-
-(** Append-only WAL row for RFC-0072 keeper turn FSM transitions.  This
-    records turn-internal state movement before the final execution receipt
-    exists, so restart forensics do not have to rely on stderr/log scraping. *)
-type turn_fsm_transition_record = {
-  turn_fsm_turn_id : int;
-  turn_fsm_prev_state : string;
-  turn_fsm_new_state : string;
-  turn_fsm_action : string;
-  turn_fsm_stop_signaled_before : bool option;
-  turn_fsm_stop_signaled_after : bool option;
-  turn_fsm_wall_clock_at : float;
-}
-
-(** Serialize a turn FSM transition WAL row. *)
-val turn_fsm_transition_to_json :
-  turn_fsm_transition_record -> Yojson.Safe.t
+(** {1 SSOT Types} *)
+include module type of struct
+  include Keeper_transition_audit_types
+end
 
 (** {1 In-memory Ring Buffer} *)
 
@@ -76,8 +41,40 @@ val record_turn_fsm_transition :
 val recent_completed_turns :
   keeper_name:string -> limit:int -> completed_turn_record list
 
+(** {1 Async Forensics Append}
+
+    The in-memory rings above are the authoritative live trail; the
+    dated-JSONL default store is restart forensics. Recorders therefore
+    never write the store inline on the keeper fiber once
+    [start_flush_fiber] has run — they enqueue, and the flush fiber
+    drains every 0.5 s. Before [start_flush_fiber] (tests, non-server
+    embedders) recording appends synchronously, preserving the previous
+    behavior. *)
+
+(** Start the background drain fiber on [sw] and switch recorders to
+    enqueue mode. Registers a shutdown hook that flushes the remaining
+    queue. Call once from server bootstrap. *)
+val start_flush_fiber : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
+
+(** Drain all queued forensics records to the default store now.
+    Returns the number of records written. Store-backed readers call
+    this before reading; safe from any fiber. *)
+val flush_pending : unit -> int
+
+(** Forensics records queued for the async drain fiber. A rising depth
+    means the drain fiber is starved or the store append is parked
+    (#20677 failure mode). *)
+val queue_depth : unit -> int
+
 module For_testing : sig
   val reset_state : unit -> unit
   val clear_completed_turn_ring : keeper_name:string -> unit
   val observe_append_failure : site:string -> exn -> unit
+  val queued_count : unit -> int
+  val dropped_count : unit -> int
+
+  (** Toggle enqueue mode without spawning the drain fiber, so tests can
+      exercise the queue deterministically. [reset_state] sets it back to
+      false (synchronous appends). *)
+  val set_async_append_active : bool -> unit
 end

@@ -9,14 +9,13 @@
 //   4. Keeper strip    — top three keepers by recent heartbeat
 
 import { html } from 'htm/preact'
-import { useMemo } from 'preact/hooks'
+import { useEffect, useMemo } from 'preact/hooks'
 import { SectionCard } from '../common/card'
 import { StatTile } from '../common/stat-tile'
 import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import type { KpiCellKind } from '../kpi-shared'
 import { KpiStripIsland } from '../kpi-strip-island'
-import { LifelineBar } from '../lifeline-bar'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers, messages, boardPosts } from '../../store'
@@ -31,6 +30,14 @@ import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperPaused } from '../../lib/keeper-predicates'
+import { isAgentOffline } from '../../lib/agent-status'
+import { get } from '../../api/core'
+import { createAsyncResource, type AsyncResource } from '../../lib/async-state'
+import {
+  normalizeSurfaceReadinessPayload,
+  summarizeSurfaceReadiness,
+  type SurfaceReadinessEntry,
+} from '../surface-readiness-panel'
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -53,7 +60,7 @@ export interface TaskAlert {
 /** Derive a list of failing / offline agent alerts from the live agent list. */
 export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
   return agentList
-    .filter(a => a.status === 'offline' || a.status === 'inactive')
+    .filter(a => isAgentOffline(a))
     .map(a => ({
       name: a.name,
       display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
@@ -541,34 +548,25 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   }
 
   return html`
-    <${SectionCard} label="Fleet Lifeline" data-testid="overview-keepers">
-      <div class="space-y-4">
-        ${activeKeepers.slice(0, 1).map(
-          k => html`
-            <${LifelineBar}
-              label=${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}
-            />
-          `,
+    <${SectionCard} label="Active Keepers" data-testid="overview-keepers">
+      <ul class="flex flex-wrap gap-x-6 gap-y-2">
+        ${activeKeepers.map(
+          k => {
+            const displayStatus = keeperDisplayStatus(k)
+            return html`
+            <li key=${k.name} class="flex items-center gap-2">
+              <div class="min-w-0">
+                <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
+                ${k.last_heartbeat !== undefined
+                  ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
+                  : null}
+              </div>
+              <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
+            </li>
+            `
+          },
         )}
-        <ul class="flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--color-border-default)] pt-4">
-          ${activeKeepers.slice(1).map(
-            k => {
-              const displayStatus = keeperDisplayStatus(k)
-              return html`
-              <li key=${k.name} class="flex items-center gap-2">
-                <div class="min-w-0">
-                  <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
-                  ${k.last_heartbeat !== undefined
-                    ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
-                    : null}
-                </div>
-                <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
-              </li>
-              `
-            },
-          )}
-        </ul>
-      </div>
+      </ul>
     <//>
   `
 }
@@ -577,6 +575,40 @@ export function pickActiveSession(snap: DashboardMissionResponse | null): Dashbo
   if (snap === null) return null
   const running = snap.sessions.find(s => s.status === 'running' || s.status === 'active' || s.status === 'busy')
   return running ?? snap.sessions[0] ?? null
+}
+
+// ─── Surface Readiness Summary ───────────────────────────────────────────────
+
+const surfaceReadinessResource: AsyncResource<SurfaceReadinessEntry[]> = createAsyncResource()
+
+function loadSurfaceReadiness(): Promise<void> {
+  return surfaceReadinessResource.load(async () => {
+    const raw = await get<unknown>('/api/v1/dashboard/surface-readiness')
+    const data = normalizeSurfaceReadinessPayload(raw)
+    return data.surfaces
+  })
+}
+
+function SurfaceReadinessSummary() {
+  useEffect(() => { void loadSurfaceReadiness() }, [])
+
+  const state = surfaceReadinessResource.state.value
+  if (state.status !== 'loaded') return null
+
+  const summary = summarizeSurfaceReadiness(state.data)
+  return html`
+    <${SectionCard} label="Surface Readiness" data-testid="overview-surface-readiness">
+      <${KpiStripIsland}
+        ariaLabel="Surface readiness summary"
+        cols=${3}
+        cells=${[
+          { variant: 'stacked', label: 'Main', value: String(summary.main), testId: 'sr-main' },
+          { variant: 'stacked', label: 'Total', value: String(summary.total), testId: 'sr-total' },
+          { variant: 'stacked', label: 'Gaps', value: String(summary.gaps), kind: summary.gaps > 0 ? 'warn' : 'ok', testId: 'sr-gaps' },
+        ]}
+      />
+    <//>
+  `
 }
 
 // ─── Root ────────────────────────────────────────────────────────────────────
@@ -601,6 +633,7 @@ export function Overview() {
   return html`
     <div class="flex flex-col gap-8">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
+      <${SurfaceReadinessSummary} />
       <${FleetTicker} events=${tickerEvents} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />

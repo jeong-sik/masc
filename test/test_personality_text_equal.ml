@@ -17,7 +17,7 @@
    3. Identity, empty-string, and all-whitespace cases behave
       sensibly. *)
 
-module KR = Masc_mcp.Keeper_runtime
+module KR = Masc.Keeper_runtime
 
 let test_trailing_newline_drift_is_equal () =
   (* The exact shape from the #10061 evidence: state blob has one

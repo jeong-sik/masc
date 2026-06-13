@@ -1,7 +1,6 @@
 (** Degradation — tiered capability levels for resilience.
 
-    Cycle 27 / Tier A11 (partial — degradation only; speculative
-    in companion module {!Speculative}).
+    Cycle 27 / Tier A11 (degradation capability lattice).
 
     {1 What this module is}
 

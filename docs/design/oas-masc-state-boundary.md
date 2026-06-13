@@ -4,8 +4,8 @@ Issue: #1736
 
 > Status: historical audit + migration backlog
 >
-> Boundary contract SSOT lives in `/home/runner/work/masc-mcp/masc-mcp/docs/OAS-MASC-BOUNDARY.md`.
-> Implementation status / open ledger lives in `/home/runner/work/masc-mcp/masc-mcp/docs/spec/13-oas-integration.md`.
+> Boundary contract SSOT lives in `/home/runner/work/masc/masc/docs/OAS-MASC-BOUNDARY.md`.
+> Implementation status / open ledger lives in `/home/runner/work/masc/masc/docs/spec/13-oas-integration.md`.
 
 ## Related
 
@@ -18,15 +18,15 @@ Issue: #1736
 ## Principle
 
 OAS manages **agent state** — the lifecycle of an individual agent or collaboration session.
-MASC manages **domain state** — the coordination domain: rooms, tasks, governance, board posts, keeper profiles.
+MASC manages **domain state** — the workspace collaboration domain: workspaces, tasks, governance, board posts, keeper profiles.
 
 The boundary is the **tool call**: an agent (managed by OAS) invokes a domain tool (managed by MASC), which mutates domain state and returns a result. The agent incorporates that result into its own state. Neither side reaches into the other's storage.
 
 ```
                     tool call
   OAS Agent State ───────────> MASC Domain State
-  (turns, messages,            (rooms, tasks, votes,
-   memory, context,             governance, board,
+  (turns, messages,            (workspaces, tasks, votes,
+   context, checkpoint,         governance, board,
    checkpoint, usage)           keeper profiles)
 ```
 
@@ -41,26 +41,26 @@ State that describes an agent's runtime, cognitive context, and operational life
 | Token usage | `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` | **MASC** (`keeper_meta.runtime`, partial split) | OAS `Session.t` or `Usage_tracker` |
 | Context window | `token_count`, `max_tokens`, `importance_scores` | **MASC** (`keeper_context_runtime` / `working_context`) | OAS `Context.t` |
 | Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_context_runtime`) | OAS `Checkpoint` |
-| Memory (5-tier) | `long_term`, `episodic`, `procedural`, `working`, `scratchpad` | **Bridge** (`memory_oas_bridge`) | OAS `Memory.t` (already the target) |
+| Memory | keeper memory bank, institution, procedural records | **MASC** (`Masc.Memory.t`, `Keeper_memory_*`) | MASC |
 | Context reduction | `PruneToolOutputs`, `MergeContiguous`, `DropLowImportance`, `SummarizeOld` | **MASC** (`context_compact_oas`) | OAS `Context_reducer` |
-| Model selection | `last_model_used`, derived `active_model`, `cascade_name` | **MASC** (`keeper_meta`) | OAS `Cascade_config` |
+| Model selection | `last_model_used`, derived `active_model`, `runtime_id` | **MASC** (`keeper_meta`) | OAS `Runtime_config` |
 | System prompt | `system_prompt`, `build_turn_prompt` | **MASC** (`keeper_prompt`, `keeper_agent_run`) | OAS `Agent.config` |
 | Collaboration phase | `phase`, `participants`, `artifacts`, `contributions` | **OAS** (`Collaboration.t`) | OAS (correct) |
 | Session lifecycle | `session_id`, `created_at`, `updated_at` | **OAS** (`Session.t`) | OAS (correct) |
 
 ## 2. Domain State (belongs in MASC)
 
-State that describes the coordination domain — not how an agent thinks, but what it does within the MASC system.
+State that describes the workspace collaboration domain — not how an agent thinks, but what it does within the MASC system.
 
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
-| Room membership | `joined_room_ids`, `last_seen_seq_by_room`, agents.json | MASC | MASC (single-room canonical state) |
+| Message cursor | `last_seen_message_seq`, agents.json | MASC | MASC (single-feed canonical state) |
 | Task claims | task files, `assignee`, `status` | MASC | MASC (correct) |
 | Board posts | `board_posts`, `board_comments`, `board_votes` | MASC | MASC (correct) |
 | Governance | petitions, cases, rulings, execution orders | MASC (`governance_v2`) | MASC (correct) |
-| Room votes | vote proposals, vote casts | MASC (`room_vote`) | MASC (correct) |
+| Workspace votes | vote proposals, vote casts | MASC (`workspace_vote`) | MASC (correct) |
 | Agent economy | token economy, reputation | MASC (`agent_economy`, `agent_reputation`) | MASC (correct) |
-| Broadcasts | room event log, SSE events | MASC | MASC (correct) |
+| Broadcasts | workspace event log, SSE events | MASC | MASC (correct) |
 | Institution rules | institution.json, norms | MASC (`institution_eio`) | MASC (correct) |
 
 ## 3. Current Boundary Violations
@@ -88,15 +88,15 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 - `total_turns`, `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` — cumulative usage stats
 - `last_turn_ts`, `last_model_used`, `last_input_tokens`, `last_output_tokens`, `last_total_tokens`, `last_latency_ms` — per-turn metrics
 - `compaction_count`, `last_compaction_ts`, `last_compaction_before_tokens`, `last_compaction_after_tokens` — context management stats
-- `last_model_used`, `cascade_name`, derived `active_model` — model selection state
+- `last_model_used`, `runtime_id`, derived `active_model` — model selection state
 - `trace_id`, `trace_history` — session tracing
 - `generation` — checkpoint generation counter
 - `context_budget` — context window budget ratio
 
 **Domain state fields in keeper_meta (correct placement):**
-- `mention_targets`, `proactive_*` — operational coordination policy
-- `joined_room_ids`, `last_seen_seq_by_room` — room membership state under the single-room canonical model
-- `autonomy_level`, `active_goal_ids` — coordination state
+- `mention_targets`, `proactive_*` — operational workspace collaboration policy
+- `last_seen_message_seq` — single-feed read cursor
+- `autonomy_level`, `active_goal_ids` — workspace collaboration state
 
 **Impact**: Every keeper turn reads the full keeper record, updates agent-runtime fields, and writes it back. This couples domain persistence (MASC JSONL/PG) with agent-runtime state that OAS should own.
 
@@ -145,27 +145,23 @@ type vote = {
 
 This is a governance/domain concept that leaked into the OAS wire protocol. OAS `Collaboration.t` already replaced this with generic `contribution`, but `Runtime.session` still carries the legacy field.
 
-**Impact**: OAS carries governance vocabulary. MASC has its own separate `room_vote.ml` with `VotePending | VoteApproved | VoteRejected | VoteTied`. Two vote systems, neither connected.
+**Impact**: OAS carries governance vocabulary. MASC has its own separate `workspace_vote.ml` with `VotePending | VoteApproved | VoteRejected | VoteTied`. Two vote systems, neither connected.
 
-### V6: `Memory_oas_bridge` seeds MASC domain knowledge into OAS Memory
+### V6 (Resolved): retired memory bridge
 
-`memory_oas_bridge.ml` bridges MASC-specific memory systems (institution, procedural memory, episodes) into OAS `Memory.t`:
-- `seed_institution` — loads MASC institution rules into OAS Long_term tier
-- `seed_procedures` — loads MASC procedural memory into OAS Long_term tier
-- `seed_episodes` — loads MASC institution episodes into OAS Episodic tier
+The memory bridge was removed. MASC memory is no longer seeded into OAS and no
+OAS memory object is created for keeper turns.
 
-The bridge direction is correct (MASC domain -> OAS agent memory), but the bridge code lives in MASC rather than being a callback/hook that MASC registers with OAS. OAS `Memory.t` `long_term_backend` callback is the right mechanism, partially used for PG storage but not for institution/procedural seeding.
-
-**Impact**: MASC must know OAS `Memory.t` internals to seed correctly. If OAS changes Memory tier semantics, MASC bridge breaks.
+**Impact**: Resolved. Runtime memory storage is MASC-owned through
+`Masc.Memory.t` and `Keeper_memory_*`.
 
 ### V7 (Open): `keeper_agent_run.ml` orchestrates OAS agent lifecycle from MASC
 
 `keeper_agent_run.ml` builds the full OAS agent lifecycle:
 1. Loads checkpoint via MASC's `keeper_context_runtime`
 2. Builds system prompt via MASC's `keeper_prompt`
-3. Creates OAS Memory via `Memory_oas_bridge`
-4. Constructs OAS `Context_reducer`
-5. Calls `Keeper_turn_driver.run_named`
+3. Constructs OAS `Context_reducer`
+4. Calls `Keeper_turn_driver.run_named`
 
 This is the primary integration point and is architecturally correct as a bridge module. The violation is that steps 1-4 use MASC-specific wrappers rather than OAS-native primitives. The `keeper_working_context` wrapper (V2) forces checkpoint loading through MASC rather than OAS.
 
@@ -260,21 +256,11 @@ The retired petition bridge no longer creates decorative `Collaboration.t` recor
 
 In OAS, complete the `Runtime.session` -> `Collaboration.t` migration:
 - Remove `votes : vote list` from `Runtime.session`
-- Governance voting stays in MASC `room_vote.ml` / `Governance_v2`
-- OAS `Collaboration.t` uses generic `contribution` for agent coordination signals
+- Governance voting stays in MASC `workspace_vote.ml` / `Governance_v2`
+- OAS `Collaboration.t` uses generic `contribution` for agent workspace collaboration signals
 
 **Effort**: Medium. OAS-side change. Wire protocol change requires version bump.
 **Risk**: Medium — breaking change for any consumer reading `Runtime.session.votes`.
-
-### Phase 6: Formalize the bridge as hooks/callbacks
-
-Replace `Memory_oas_bridge.seed_*` imperative calls with OAS hook registration:
-- OAS `Hooks.on_session_start` callback for memory seeding
-- MASC registers a hook that loads institution/procedural memory when an agent session starts
-- OAS owns the lifecycle, MASC provides domain data on request
-
-**Effort**: Medium.
-**Risk**: Low — behavioral change is minimal.
 
 ## Phase Priority
 
@@ -285,13 +271,12 @@ Replace `Memory_oas_bridge.seed_*` imperative calls with OAS hook registration:
 | P5: Remove Runtime.session.votes | High | No | Medium |
 | P2: Eliminate working_context wrapper | Medium | Yes (enables P3) | Medium-High |
 | P3: Remove MASC markers | Medium | No | Low-Medium |
-| P6: Formalize bridge as hooks | Medium | No | Medium |
 
 ## Invariants (post-migration)
 
 1. MASC never reads or writes `Agent_sdk.Context.t` directly — it interacts through tool call results only
-2. OAS never reads MASC domain files (`.masc/`, governance, board) — it receives domain data through registered hooks/callbacks
+2. OAS never reads MASC domain files (`.masc/`, governance, board)
 3. `keeper_meta` contains only domain profile fields — runtime stats live in OAS
 4. Checkpoint format is OAS-native — MASC does not define its own serialization
-5. `Collaboration.t` is used for actual multi-agent coordination, not as decoration for domain operations
+5. `Collaboration.t` is used for actual multi-agent workspace collaboration, not as decoration for domain operations
 6. `Runtime.session` does not contain governance vocabulary (votes, petitions, rulings)

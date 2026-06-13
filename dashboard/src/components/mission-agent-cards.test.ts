@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../types'
 import {
   keeperDisplayStatus,
+  isKeeperAutoRecoverPause,
   keeperRuntimeBlockerLabel,
   keeperRecentActionLabel,
   keeperRecentHeartbeatLabel,
@@ -57,6 +58,38 @@ describe('mission keeper runtime helpers', () => {
     expect(keeperRuntimeHint(keeper)).toBe('일시정지됨')
   })
 
+  it('labels timeout pauses as auto-retry wait instead of operator pause', () => {
+    const keeper = {
+      name: 'timeout-paused',
+      status: 'paused',
+      paused: true,
+      keepalive_running: false,
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'turn_timeout',
+    } as Keeper
+
+    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '자동 재시도 대기 · 턴 실행 시간이 제한 시간을 초과했습니다.',
+    )
+  })
+
+  it('labels TLS handshake provider-runtime pauses as auto-retry wait', () => {
+    const keeper = {
+      name: 'tls-paused',
+      status: 'paused',
+      paused: true,
+      runtime_blocker_class: 'provider_runtime_error',
+      runtime_blocker_summary:
+        'Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+    } as Keeper
+
+    expect(isKeeperAutoRecoverPause(keeper)).toBe(true)
+    expect(keeperRuntimeHint(keeper)).toBe(
+      '자동 재시도 대기 · Provider runtime catch-all (internal_unhandled_exception): TLS alert from peer: handshake failure',
+    )
+  })
+
   it('prefers structured runtime blocker hints over paused/blocker text', () => {
     const keeper = {
       name: 'uranium666',
@@ -92,14 +125,13 @@ describe('mission keeper runtime helpers', () => {
   })
 
   it('labels backend runtime blocker classes used by keeper_status_bridge', () => {
-    expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 Provider 없음')
+    expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
     expect(keeperRuntimeBlockerLabel('stale_turn_timeout')).toBe('오래된 턴 만료')
     expect(keeperRuntimeBlockerLabel('stale_termination_storm')).toBe('Stale 종료 폭주')
     expect(keeperRuntimeBlockerLabel('heartbeat_failures')).toBe('하트비트 실패')
     expect(keeperRuntimeBlockerLabel('turn_failures')).toBe('턴 실패 반복')
-    expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('Provider 런타임 오류')
-    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe('필수 도구 미충족')
+    expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe('런타임 호출 오류')
     expect(keeperRuntimeBlockerLabel('exception')).toBe('런타임 예외')
     expect(keeperRuntimeBlockerLabel('stale_fleet_batch')).toBe('Fleet stale 배치')
   })
@@ -108,12 +140,12 @@ describe('mission keeper runtime helpers', () => {
     const keeper = {
       name: 'tool-less',
       status: 'idle',
-      runtime_blocker_class: 'no_tool_capable_provider',
-      runtime_blocker_summary: 'no_tool_capable_provider',
+      runtime_blocker_class: 'runtime_exhausted',
+      runtime_blocker_summary: 'runtime_exhausted',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.',
+      '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.',
     )
   })
 
@@ -140,7 +172,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.',
+      '일시정지 원인 · 여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.',
     )
   })
 

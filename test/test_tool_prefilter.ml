@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Unit tests for Tool_prefilter — TF-IDF cosine similarity. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Fixtures                                                         *)
@@ -25,9 +25,9 @@ let essential_tools = [
     "Stop a periodic heartbeat started by masc_heartbeat_start.";
   make_schema "masc_broadcast"
     "Send a message visible to ALL agents via SSE push.";
-  make_schema "masc_join"
+  make_schema "masc_bind"
     "Join the MASC namespace to collaborate with other AI agents.";
-  make_schema "masc_leave"
+  make_schema "masc_unbind"
     "Leave the MASC namespace and mark yourself as offline.";
   make_schema "masc_status"
     "Get current namespace status: active agents, task queue, recent broadcasts.";
@@ -35,14 +35,13 @@ let essential_tools = [
     "Render the MASC dashboard summarizing namespaces, agents, and tasks.";
   make_schema "masc_agents"
     "Get detailed status of all agents: current tasks, capabilities.";
-  make_schema "masc_who"
-    "List all agents currently in the room with their capabilities.";
+  make_schema "masc_agents"
+    "List all agents currently in the workspace with their capabilities.";
   make_schema "masc_tasks"
     "List tasks in backlog with their status and assignee.";
   make_schema "masc_add_task"
     "Add a new task to the backlog for agents to claim.";
-  make_schema "masc_claim_next"
-    "Claim the highest priority unclaimed task.";
+
   make_schema "masc_plan_init"
     "Initialize a planning context for a task.";
   make_schema "masc_plan_get"
@@ -107,8 +106,8 @@ let test_broadcast_in_top3 () =
 let test_join_in_top3 () =
   let result = Tool_prefilter.filter
     ~tools:essential_tools ~query:"join the namespace" ~k:3 in
-  check bool "masc_join in top-3" true
-    (has_tool "masc_join" result)
+  check bool "masc_bind in top-3" true
+    (has_tool "masc_bind" result)
 
 let test_add_task_in_top3 () =
   let result = Tool_prefilter.filter
@@ -132,11 +131,6 @@ let test_synonym_dashboard () =
   check bool "synonym: dashboard via 'activity overview'" true
     (has_tool "masc_dashboard" result)
 
-let test_synonym_claim_next () =
-  let result = Tool_prefilter.filter
-    ~tools:essential_tools ~query:"give me work to do" ~k:3 in
-  check bool "synonym: claim_next via 'give me work'" true
-    (has_tool "masc_claim_next" result)
 
 (* ================================================================ *)
 (* Tests: new tool family synonym retrieval                         *)
@@ -154,10 +148,10 @@ let test_synonym_code_read () =
   check bool "synonym: tool_read_file via 'read source'" true
     (has_tool "tool_read_file" result)
 
-let test_synonym_worktree_create () =
+let test_synonym_worktree_prepare () =
   let result = Tool_prefilter.filter
     ~tools:extended_tools ~query:"create a new worktree" ~k:3 in
-  check bool "synonym: tool_execute via 'create worktree'" true
+  check bool "synonym: tool_execute via worktree preparation request" true
     (has_tool "tool_execute" result)
 
 let test_synonym_web_search () =
@@ -257,10 +251,9 @@ let () =
         [
           test_case "broadcast via synonym" `Quick test_synonym_broadcast;
           test_case "dashboard via synonym" `Quick test_synonym_dashboard;
-          test_case "claim_next via synonym" `Quick test_synonym_claim_next;
           test_case "code_search via synonym" `Quick test_synonym_code_search;
           test_case "code_read via synonym" `Quick test_synonym_code_read;
-          test_case "worktree_create via synonym" `Quick test_synonym_worktree_create;
+          test_case "worktree preparation via synonym" `Quick test_synonym_worktree_prepare;
           test_case "web_search via synonym" `Quick test_synonym_web_search;
         ] );
       ( "zero_result",

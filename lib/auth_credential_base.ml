@@ -23,7 +23,7 @@ let sha256_hash input = Digestif.SHA256.(digest_string input |> to_hex)
 
 let auth_dir config = Common.auth_dir_from_base_path ~base_path:config
 let agents_dir config = Common.agents_dir_from_base_path ~base_path:config
-let room_secret_file config = Filename.concat (auth_dir config) "room_secret.hash"
+let workspace_secret_file config = Filename.concat (auth_dir config) "workspace_secret.hash"
 let auth_config_file config = Filename.concat (auth_dir config) "config.json"
 let initial_admin_file config = Filename.concat (auth_dir config) "initial_admin"
 
@@ -258,7 +258,7 @@ let load_credential_from_path config agent_name path : agent_credential option =
     cover every dynamically generated nickname in that family
     (e.g. [adversary-fair-tapir]).
 
-    Without this fallback, Coord.join's nickname output caused a
+    Without this fallback, Workspace.bind_session's nickname output caused a
     chronic "No credential found for <type>-<adj>-<animal>" noise band
     at ~0.3/min on the live fleet (2026-04-20). *)
 let load_credential_from_path_raw config agent_name path : agent_credential option =
@@ -588,6 +588,7 @@ let build_token_index (creds : agent_credential list)
   let idx = Hashtbl.create (max 8 (List.length creds)) in
   List.iter
     (fun (cred : agent_credential) ->
+       (* DET-OK: missing bucket means this is the first credential for the token. *)
        let prev =
          Hashtbl.find_opt idx cred.token |> Option.value ~default:[]
        in
@@ -626,13 +627,13 @@ let credential_token_index config
   in
   match cached with
   | Some by_token ->
-    Prometheus.inc_counter
-      Prometheus.metric_auth_credential_index_cache_hits
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_auth_credential_index_cache_hits
       ();
     by_token
   | None ->
-    Prometheus.inc_counter
-      Prometheus.metric_auth_credential_index_cache_misses
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_auth_credential_index_cache_misses
       ();
     let creds = list_credentials config in
     let by_token = build_token_index creds in
@@ -681,6 +682,7 @@ let group_credentials_by_token config : (string * agent_credential list) list =
   let by_token : (string, agent_credential list) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (cred : agent_credential) ->
+       (* DET-OK: missing bucket means this is the first credential for the token. *)
        let prev = Hashtbl.find_opt by_token cred.token |> Option.value ~default:[] in
        Hashtbl.replace by_token cred.token (cred :: prev))
     creds;

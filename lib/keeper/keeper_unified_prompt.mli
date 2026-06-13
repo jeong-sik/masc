@@ -20,7 +20,7 @@ val state_block_instruction_text : string
     @param meta Keeper metadata (identity, soul, goals, instructions)
     @param observation Current world snapshot *)
 val build_prompt :
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   base_path:string ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   observation:Keeper_world_observation.world_observation ->

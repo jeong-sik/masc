@@ -1,6 +1,9 @@
 (** Keeper_registry — SSOT for keeper state. Atomic.t + persistent StringMap; no mutex needed in single-domain Eio. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 (** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
 include Keeper_registry_types
@@ -40,13 +43,13 @@ let update_entry ~base_path name f =
     match StringMap.find_opt key current with
     | None ->
       let count, breached = Orphan_drops.record ~base_path name in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RegistryUpdateDropped)
         ~labels:[ "name", name ]
         ();
       if breached
       then (
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string RegistryOrphanThresholdBreached)
           ~labels:[ "name", name ]
           ();
@@ -105,7 +108,7 @@ let register_with_state
   let key = registry_key ~base_path name in
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string LifecycleDispatchRejections)
        ~labels:[ "keeper", name; "event", "register_overwrite_running" ]
        ();
@@ -306,7 +309,7 @@ let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
 ;;
 
-(* Cascade-attempt cluster (cascade_attempt_merge / meta_for_cascade_attempt / record_cascade_attempt / cascade_attempt_suffix / last_cascade_attempt / cascade_attempt_freshness_threshold_sec / enrich... *)
+(* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
   let key = registry_key ~base_path name in
@@ -389,7 +392,6 @@ let mark_turn_started ~base_path name =
       ; last_progress_kind = Some "turn_started"
       ; turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_undecided
-      ; cascade_state = Packed Cascade_idle
       ; measurement = None
       ; measurement_bind_count = 0
       ; selected_model = None
@@ -419,7 +421,6 @@ let mark_sdk_turn_started ~base_path name =
     | Some obs ->
       if
         obs.turn_phase = Packed Turn_prompting
-        && obs.cascade_state = Packed Cascade_idle
         && obs.decision_stage = Packed Decision_undecided
       then e
       else (
@@ -427,7 +428,6 @@ let mark_sdk_turn_started ~base_path name =
         let new_obs =
           { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
             turn_phase = Packed Turn_prompting
-          ; cascade_state = Packed Cascade_idle
           ; decision_stage = Packed Decision_undecided
           }
         in
@@ -457,9 +457,7 @@ let mark_turn_measurement ~base_path name =
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-(* RFC-0072 Phase 3 + Phase 5: collapse 25-pair matrix onto [resolve_cascade_transition] (PR #14903) and raise the typed [Cascade_transition_violation] (Phase 5) on the 7 forbidden pairs instead of a ... *)
-(* FSM transition validators (validate_cascade_transition / validate_turn_phase_transition) moved to Keeper_registry_fsm_validators. *)
-let validate_cascade_transition = Keeper_registry_fsm_validators.cascade_transition
+(* FSM transition validators moved to Keeper_registry_fsm_validators. *)
 let validate_turn_phase_transition = Keeper_registry_fsm_validators.turn_phase_transition
 
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
@@ -479,105 +477,46 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state) =
-(* RFC-0072 Phase 2: dispatch via [resolve_cascade_transition] (PR #14903) instead of the standalone [validate_cascade_transition].  Behavior deltas vs the pre-RFC-0072 path:  - Idempotent self-loop (... *)
+let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      let new_turn_phase = turn_phase_of_cascade_state cascade_state in
-      match resolve_cascade_transition ~from:obs.cascade_state ~target:cascade_state with
-      | Resolved_idempotent -> obs
-      | Resolved_transition _ ->
-        validate_turn_phase_transition ~from:obs.turn_phase ~to_:new_turn_phase;
+      match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+      | Resolved_turn_idempotent -> obs
+      | Resolved_turn_transition _ ->
         changed := true;
-        { (stamp_turn_progress ~now ~event_kind:"cascade_state" obs) with
-          cascade_state
-        ; turn_phase = new_turn_phase
+        { (stamp_turn_progress ~now ~event_kind obs) with
+          turn_phase
         }
-      | Resolved_violation violation ->
+      | Resolved_turn_violation violation ->
         Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"cascade_transition"
+          ~action:"turn_phase_transition"
           ~stage:"guard"
           (fun () ->
-             raise_cascade_transition_violation
-               ~where:"set_turn_cascade_state"
-               ~from:obs.cascade_state
-               ~to_:cascade_state
+             raise_turn_phase_transition_violation
+               ~where:event_kind
+               ~from:obs.turn_phase
+               ~to_:turn_phase
                ~violation);
         obs));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-let mark_turn_cascade_exhausted ~base_path name =
-  let set_cascade_state cascade_state =
-    set_turn_cascade_state
-      ~base_path
-      name
-      (Packed cascade_state : packed_cascade_state)
-  in
-  match get ~base_path name with
-  | None | Some { current_turn_observation = None; _ } -> ()
-  | Some { current_turn_observation = Some obs; _ } ->
-    (match obs.cascade_state with
-     | Packed Cascade_idle ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_selecting;
-       set_cascade_state Cascade_trying;
-       set_cascade_state Cascade_exhausted
-     | Packed Cascade_selecting ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_trying;
-       set_cascade_state Cascade_exhausted
-     | Packed Cascade_trying -> set_cascade_state Cascade_exhausted
-     | Packed Cascade_exhausted -> set_cascade_state Cascade_exhausted
-     | Packed Cascade_done ->
-	       Log.Keeper.warn
-	         "registry: ignoring cascade exhaustion after Cascade_done name=%s \
-	          base_path=%s"
-	         name
-         base_path)
+let mark_turn_runtime_exhausted ~base_path name =
+  set_turn_decision_stage ~base_path name Decision_active_tool_policy_selected;
+  set_turn_phase_direct
+    ~base_path
+    name
+    ~event_kind:"runtime_exhausted"
+    (Packed Turn_exhausted)
 ;;
 
-let mark_turn_cascade_done ~base_path name =
-  let set_cascade_state cascade_state =
-    set_turn_cascade_state
-      ~base_path
-      name
-      (Packed cascade_state : packed_cascade_state)
-  in
-  match get ~base_path name with
-  | None | Some { current_turn_observation = None; _ } -> ()
-  | Some { current_turn_observation = Some obs; _ } ->
-    (match obs.cascade_state with
-     | Packed Cascade_idle ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_selecting;
-       set_cascade_state Cascade_trying;
-       set_cascade_state Cascade_done
-     | Packed Cascade_selecting ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_trying;
-       set_cascade_state Cascade_done
-     | Packed Cascade_trying -> set_cascade_state Cascade_done
-     | Packed Cascade_done -> set_cascade_state Cascade_done
-     | Packed Cascade_exhausted ->
-       Log.Keeper.warn
-         "registry: ignoring cascade completion after Cascade_exhausted name=%s \
-          base_path=%s"
-         name
-         base_path)
+let mark_turn_runtime_done ~base_path name =
+  set_turn_decision_stage ~base_path name Decision_active_tool_policy_selected;
+  set_turn_phase_direct
+    ~base_path
+    name
+    ~event_kind:"runtime_done"
+    (Packed Turn_finalizing)
 ;;
-

@@ -5,11 +5,11 @@
 lib/build_identity.ml:68  # argv_subsystem
 lib/chronicle_ingest.ml:33  # argv_subsystem
 lib/chronicle_validate.ml:35  # argv_subsystem
-lib/coord/coord_git.ml:18  # argv_coord
-lib/coord/coord_git.ml:38  # argv_coord
-lib/coord/coord_identity.ml:22  # argv_coord
-lib/coord/playground_repo_cache.ml:18  # argv_coord
-lib/dashboard/dashboard_branches.ml:27  # argv_coord
+lib/workspace/workspace_git.ml:18  # argv_workspace
+lib/workspace/workspace_git.ml:38  # argv_workspace
+lib/workspace/workspace_identity.ml:22  # argv_workspace
+lib/workspace/playground_repo_cache.ml:18  # argv_workspace
+lib/dashboard/dashboard_branches.ml:27  # argv_workspace
 lib/exec/command_gate/shell_command_gate.ml:414  # parser_primary
 lib/exec/exec_dispatch.ml:174  # argv_dispatch
 lib/exec/exec_dispatch.ml:183  # argv_dispatch
@@ -21,10 +21,7 @@ lib/graphql_client.ml:87  # argv_subsystem
 lib/keeper/keeper_alerting.ml:311  # argv_keeper
 lib/keeper/keeper_alerting.ml:361  # argv_keeper
 lib/keeper/keeper_alerting.ml:453  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:122  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:145  # argv_keeper
-lib/keeper/keeper_docker_client_real.ml:183  # argv_keeper
-lib/keeper/keeper_repo_readiness.ml:24  # argv_keeper
+lib/playground_repo_readiness.ml:26  # argv_subsystem
 lib/keeper/keeper_sandbox_control.ml:217  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:318  # argv_keeper
 lib/keeper/keeper_sandbox_docker.ml:233  # argv_keeper
@@ -40,7 +37,7 @@ lib/keeper/keeper_turn_sandbox_runtime.ml:226  # argv_keeper
 lib/local/worker_container_types.ml:233  # argv_dispatch
 lib/notify.ml:27  # argv_subsystem
 lib/notify.ml:46  # argv_subsystem
-lib/repo_manager/repo_git.ml:52  # argv_coord
+lib/repo_manager/repo_git.ml:52  # argv_workspace
 lib/server/server_dashboard_http_runtime_info.ml:130  # argv_dispatch
 lib/server/server_dashboard_http_runtime_info.ml:280  # argv_dispatch
 lib/server/server_routes_http_routes_sidecar.ml:594  # argv_dispatch
@@ -52,7 +49,7 @@ lib/tool_local_runtime_core.ml:119  # argv_dispatch
 lib/tool_local_runtime_core.ml:181  # argv_dispatch
 lib/tool_local_runtime_http.ml:113  # argv_dispatch
 lib/tool_local_runtime_http.ml:63  # argv_dispatch
-lib/voice/voice_bridge_core.ml:225  # argv_subsystem
-lib/voice/voice_bridge_transport.ml:59  # argv_subsystem
+lib/voice_bridge_core/voice_bridge_core.ml:225  # argv_subsystem
+lib/voice_bridge_core/voice_bridge_transport.ml:59  # argv_subsystem
 lib/worker_runtime_docker.ml:76  # argv_subsystem
 lib/worker_runtime_docker.ml:85  # argv_subsystem

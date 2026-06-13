@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_agent_observation)
+ (public_name masc.agent_observation)
+ (wrapped false)
+ (modules agent_observation)
+ (libraries yojson))

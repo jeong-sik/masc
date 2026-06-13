@@ -4,11 +4,11 @@
     Standalone module (no upward [include]).
     {!Dashboard_http_keeper_detail} does
     [include Dashboard_http_keeper_metrics] to make the 7
-    cascade-visible entries available in the keeper-detail JSON
+    runtime-visible entries available in the keeper-detail JSON
     builder.
 
     Internal: 14 helpers stay private — token / similarity / text
-    helpers ([utf8_safe_prefix_bytes], [truncate_text],
+    helpers ([String_util.utf8_prefix], [truncate_text],
     [contains_ci], 2 normalize regexes,
     [normalize_similarity_text], [token_set_of_text],
     [jaccard_similarity_text], [take_last]),
@@ -16,7 +16,7 @@
     helpers ([keeper_metrics_24h_json],
     [keeper_history_summary_json]). *)
 
-(** {1 Model name normalization (cascade-visible)} *)
+(** {1 Model name normalization (runtime-visible)} *)
 
 val normalize_model_name : string -> string
 (** [normalize_model_name s] trims whitespace and strips the
@@ -24,7 +24,7 @@ val normalize_model_name : string -> string
     aggregator to dedupe model labels (e.g. ["agent_llm_a-sonnet"] vs
     ["agent_llm_a-sonnet:latest"]). *)
 
-(** {1 Per-keeper window statistics (cascade-visible)} *)
+(** {1 Per-keeper window statistics (runtime-visible)} *)
 
 type keeper_gen_window_stats = {
   mutable turns : int;
@@ -45,7 +45,7 @@ type keeper_gen_window_stats = {
 }
 (** Per-keeper rolling-window statistics record.  All counters
     are mutable for in-place increment as the aggregator scans
-    keeper events.  Concrete record because cascade consumer
+    keeper events.  Concrete record because runtime consumer
     ({!Dashboard_http_keeper_detail}) reads / writes fields
     directly. *)
 
@@ -62,7 +62,7 @@ val count_table_incr :
     [models] / [tools] counters inside
     {!keeper_gen_window_stats}. *)
 
-(** {1 Preview similarity (cascade-visible)} *)
+(** {1 Preview similarity (runtime-visible)} *)
 
 val proactive_preview_similarity_stats :
   ?window:int ->
@@ -79,7 +79,7 @@ val proactive_preview_similarity_stats :
     (default 0.90).  Used to detect "keeper repeats itself" loops
     in proactive output. *)
 
-(** {1 Top-count rendering (cascade-visible)} *)
+(** {1 Top-count rendering (runtime-visible)} *)
 
 val top_counts_json :
   ?limit:int ->
@@ -98,14 +98,14 @@ val top_count_name_and_count :
     for the highest-count entry, [None] when [tbl] is empty.
     Convenience for the "primary model / tool" badge. *)
 
-(** {1 Metrics-row classification (cascade-visible)} *)
+(** {1 Metrics-row classification (runtime-visible)} *)
 
 val metrics_row_has_context_snapshot : Yojson.Safe.t -> bool
 (** [metrics_row_has_context_snapshot row] is true when [row] carries
     turn/heartbeat context fields used by context health panels. Sparse
     [tool_event] rows intentionally do not qualify. *)
 
-(** {1 24h-window aggregation (cascade-visible)} *)
+(** {1 24h-window aggregation (runtime-visible)} *)
 
 val keeper_metrics_24h_json :
   metrics_lines:string list ->

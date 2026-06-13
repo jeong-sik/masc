@@ -29,7 +29,6 @@ export const COMPOSITE_FSM_TLA_SPEC_PATHS = [
   'specs/keeper-state-machine/KeeperStateMachine.tla',
   'specs/keeper-state-machine/KeeperTurnCycle.tla',
   'specs/keeper-state-machine/KeeperDecisionPipeline.tla',
-  'specs/keeper-state-machine/KeeperCascadeLifecycle.tla',
   'specs/keeper-state-machine/KeeperCompactionLifecycle.tla',
   'specs/keeper-state-machine/KeeperCircuitBreaker.tla',
 ] as const
@@ -84,8 +83,8 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kdp_guard_ok --> kdp_tool_policy["tool_policy_selected"]
   end
 
-  %% ─ KCL (Cascade lifecycle, 5 states) ───────────────────
-  subgraph KCL ["Cascade · KCL"]
+  %% ─ KCL (Runtime lifecycle, 5 states) ───────────────────
+  subgraph KCL ["Runtime · KCL"]
     direction LR
     kcl_idle["idle"] --> kcl_selecting["selecting"]
     kcl_selecting --> kcl_trying["trying"]

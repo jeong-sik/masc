@@ -17,7 +17,7 @@ type outcome =
 
 (** Connector error-kind labels. Closed set mirroring the in-module
     producer surface: validation / keeper / dispatch_unavailable /
-    internal, plus [Ek_none] as the sentinel used by [Success] and
+    internal, plus [Ek_none] as the marker used by [Success] and
     [Duplicate] outcomes (previously the empty-string [Error_kind ""]).
 
     JSON/status surfaces render via [error_kind_to_string]; wire output
@@ -54,7 +54,7 @@ type channel_stats = {
   last_success_ts : float;
   last_error_ts : float;
   last_keeper : string;
-  last_room_id : string;
+  last_workspace_id : string;
   last_error : string;
   last_error_kind : error_kind;
   last_outcome : string;
@@ -62,13 +62,13 @@ type channel_stats = {
   timed_count : int;
   max_duration_ms : int;
   slow_count : int;
-  room_count : int;
+  workspace_count : int;
 }
 
-(** Per-room binding snapshot (channel room -> keeper). *)
+(** Per-workspace binding snapshot (channel workspace -> keeper). *)
 type binding_stats = {
   channel : string;
-  room_id : string;
+  workspace_id : string;
   keeper : string;
   message_count : int;
   success_count : int;
@@ -90,7 +90,7 @@ type gate_event = {
   seq : int;
   timestamp : float;
   channel : string;
-  room_id : string;
+  workspace_id : string;
   keeper : string;
   outcome : string;
   error_kind : error_kind;
@@ -103,7 +103,7 @@ val max_recent_events : int
 
 val record_attempt :
   channel:string ->
-  room_id:string ->
+  workspace_id:string ->
   keeper:string ->
   duration_ms:int ->
   outcome ->
@@ -114,7 +114,7 @@ val record_attempt :
 
 val record_internal_error_exn :
   channel:string ->
-  room_id:string ->
+  workspace_id:string ->
   keeper:string ->
   duration_ms:int ->
   exn ->
@@ -131,7 +131,7 @@ val snapshot_json : unit -> Yojson.Safe.t
 val events_json :
   ?channel:string ->
   ?keeper:string ->
-  ?room_id:string ->
+  ?workspace_id:string ->
   limit:int ->
   unit ->
   Yojson.Safe.t

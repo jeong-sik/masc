@@ -37,7 +37,7 @@ let oas_env_key_is_allowed suffix =
    Closes the silent-drop gap noted in
    .tmp/memory-compacting-analysis.html (oas_env allowlist drop). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string OasEnvKeyRejections)
     ~help:
       "Total keeper.oas_env.<X> entries rejected by the allowlist \
@@ -60,7 +60,7 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
         if oas_env_key_is_allowed suffix then
           Option.map (fun sv -> suffix, sv) (string_of_toml_value_for_env v)
         else (
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string OasEnvKeyRejections)
             ();
           Log.Keeper.warn
@@ -126,10 +126,10 @@ let effective_oas_env pairs =
     then pairs @ [ "OAS_GEMINI_APPROVAL_MODE", "plan" ]
     else pairs
   in
-  (* Enable Provider_f CLI MCP by default: when not explicitly disabled and
+  (* Enable Gemini CLI MCP by default: when not explicitly disabled and
      no operator override exists, inject the "masc" server name so the
-     Provider_f CLI transport's --allowed-mcp-server-names flag allows the
-     MASC MCP server instead of the __oas_no_mcp__ sentinel. *)
+     Gemini CLI transport's --allowed-mcp-server-names flag allows the
+     MASC MCP server instead of the __oas_no_mcp__ marker. *)
   if
     (not gemini_mcp_disabled)
     && not (oas_env_has_non_empty "OAS_GEMINI_ALLOWED_MCP" pairs)

@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** Dashboard Labels unit tests *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 (* ===== Agent Status Translation ===== *)
 
@@ -19,7 +19,7 @@ let make_timestamp_pair seconds_ago =
   in
   (* Use parse_iso_timestamp for now to ensure consistent timezone handling *)
   let now =
-    match Lib.Dashboard_labels.parse_iso_timestamp now_iso with
+    match Dashboard_labels.parse_iso_timestamp now_iso with
     | Some t -> t
     | None -> base
   in
@@ -61,7 +61,7 @@ let with_dashboard_label_thresholds ?quiet ?stuck f =
 let test_working_agent () =
   let (now, recent_iso) = make_timestamp_pair 60.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active recent_iso
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Active recent_iso
   in
   Alcotest.(check string) "active+recent = working" "working" result
 
@@ -69,7 +69,7 @@ let test_quiet_threshold_override () =
   with_dashboard_label_thresholds ~quiet:30.0 ~stuck:900.0 @@ fun () ->
   let (now, quiet_iso) = make_timestamp_pair 60.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active quiet_iso
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Active quiet_iso
   in
   Alcotest.(check bool) "override surfaces quiet warning" true
     (try
@@ -80,7 +80,7 @@ let test_quiet_threshold_override () =
 let test_stuck_agent () =
   let (now, old_iso) = make_timestamp_pair 1200.0 in (* 20 minutes ago *)
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Active old_iso
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Active old_iso
   in
   Alcotest.(check bool) "stuck agent contains STUCK" true
     (try
@@ -92,7 +92,7 @@ let test_stuck_threshold_override () =
   with_dashboard_label_thresholds ~quiet:300.0 ~stuck:60.0 @@ fun () ->
   let (now, stuck_iso) = make_timestamp_pair 120.0 in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Busy stuck_iso
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Busy stuck_iso
   in
   Alcotest.(check bool) "override surfaces stuck warning" true
     (try
@@ -103,7 +103,7 @@ let test_stuck_threshold_override () =
 let test_parse_iso_timestamp_matches_canonical_utc () =
   let ts = "2026-04-08T12:38:15Z" in
   match
-    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Dashboard_labels.parse_iso_timestamp ts,
     Masc_domain.parse_iso8601_opt ts
   with
   | Some actual, Some expected ->
@@ -114,7 +114,7 @@ let test_parse_iso_timestamp_matches_canonical_utc () =
 let test_parse_iso_timestamp_fractional_utc_normalizes () =
   let ts = "2026-04-08T12:38:15.123Z" in
   match
-    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Dashboard_labels.parse_iso_timestamp ts,
     Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
@@ -127,7 +127,7 @@ let test_parse_iso_timestamp_fractional_utc_normalizes () =
 let test_parse_iso_timestamp_offset_matches_utc () =
   let ts = "2026-04-08T21:38:15+09:00" in
   match
-    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Dashboard_labels.parse_iso_timestamp ts,
     Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
@@ -138,7 +138,7 @@ let test_parse_iso_timestamp_offset_matches_utc () =
 let test_parse_iso_timestamp_fractional_offset_matches_utc () =
   let ts = "2026-04-08T21:38:15.250+09:00" in
   match
-    Lib.Dashboard_labels.parse_iso_timestamp ts,
+    Dashboard_labels.parse_iso_timestamp ts,
     Masc_domain.parse_iso8601_opt "2026-04-08T12:38:15Z"
   with
   | Some actual, Some expected ->
@@ -150,7 +150,7 @@ let test_parse_iso_timestamp_fractional_offset_matches_utc () =
 
 let test_parse_iso_timestamp_local_without_timezone_is_supported () =
   let ts = "2026-04-08T12:38:15.125" in
-  match Lib.Dashboard_labels.parse_iso_timestamp ts with
+  match Dashboard_labels.parse_iso_timestamp ts with
   | Some actual ->
       let tm =
         {
@@ -173,20 +173,20 @@ let test_parse_iso_timestamp_local_without_timezone_is_supported () =
 
 let test_parse_iso_timestamp_empty_rejected () =
   Alcotest.(check (option (float 0.001))) "empty timestamps are rejected" None
-    (Lib.Dashboard_labels.parse_iso_timestamp "")
+    (Dashboard_labels.parse_iso_timestamp "")
 
 let test_parse_iso_timestamp_garbage_rejected () =
   Alcotest.(check (option (float 0.001))) "garbage timestamps are rejected" None
-    (Lib.Dashboard_labels.parse_iso_timestamp "garbage")
+    (Dashboard_labels.parse_iso_timestamp "garbage")
 
 let test_parse_iso_timestamp_partial_rejected () =
   Alcotest.(check (option (float 0.001))) "partial timestamps are rejected" None
-    (Lib.Dashboard_labels.parse_iso_timestamp "2026-04-08")
+    (Dashboard_labels.parse_iso_timestamp "2026-04-08")
 
 let test_idle_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Listening
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Listening
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "listening = idle" "idle" result
@@ -194,7 +194,7 @@ let test_idle_agent () =
 let test_offline_agent () =
   let now = Unix.gettimeofday () in
   let result =
-    Lib.Dashboard_labels.translate_agent_status ~now Masc_domain.Inactive
+    Dashboard_labels.translate_agent_status ~now Masc_domain.Inactive
       "2026-01-01T00:00:00Z"
   in
   Alcotest.(check string) "inactive = offline" "offline" result
@@ -211,14 +211,14 @@ let test_classify_inactive_is_offline () =
       status = Masc_domain.Inactive;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = "2026-01-01T00:00:00Z";
       meta = None;
     }
   in
-  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  let group = Dashboard_labels.classify_agent ~now agent in
   Alcotest.(check bool) "inactive = Offline, not Idle" true
-    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Offline)
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Offline)
 
 let test_classify_listening_is_idle () =
   let now = Unix.gettimeofday () in
@@ -230,14 +230,14 @@ let test_classify_listening_is_idle () =
       status = Masc_domain.Listening;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = "2026-01-01T00:00:00Z";
       meta = None;
     }
   in
-  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  let group = Dashboard_labels.classify_agent ~now agent in
   Alcotest.(check bool) "listening = Idle" true
-    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Idle)
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Idle)
 
 let test_classify_uses_stuck_threshold_override () =
   with_dashboard_label_thresholds ~stuck:60.0 @@ fun () ->
@@ -250,26 +250,26 @@ let test_classify_uses_stuck_threshold_override () =
       status = Masc_domain.Active;
       capabilities = [];
       current_task = None;
-      joined_at = "2026-01-01T00:00:00Z";
+      session_bound_at = "2026-01-01T00:00:00Z";
       last_seen = stuck_iso;
       meta = None;
     }
   in
-  let group = Lib.Dashboard_labels.classify_agent ~now agent in
+  let group = Dashboard_labels.classify_agent ~now agent in
   Alcotest.(check bool) "active can classify as Stuck via override" true
-    (Lib.Dashboard_labels.equal_agent_group group Lib.Dashboard_labels.Stuck)
+    (Dashboard_labels.equal_agent_group group Dashboard_labels.Stuck)
 
 (* ===== Attention Items ===== *)
 
 let test_attention_empty () =
   let now = Unix.gettimeofday () in
   let items =
-    Lib.Dashboard_attention.collect ~now []
+    Dashboard_attention.collect ~now []
   in
   Alcotest.(check int) "no items" 0 (List.length items)
 
 let test_attention_compact_empty () =
-  let result = Lib.Dashboard_attention.compact_summary [] in
+  let result = Dashboard_attention.compact_summary [] in
   Alcotest.(check string) "no action" "No action needed" result
 
 (* ===== Test Suite ===== *)

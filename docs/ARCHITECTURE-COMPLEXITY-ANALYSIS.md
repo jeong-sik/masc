@@ -6,14 +6,14 @@ code_refs:
   - bin/
 ---
 
-# MASC-MCP Architecture Complexity Analysis
+# MASC Architecture Complexity Analysis
 
 Date: 2026-03-16
 Version: 2.93.0
 
 ## Executive Summary
 
-masc-mcp grew from a multi-agent coordination MCP server into a 34K-line system with
+masc grew from a multi-agent workspace collaboration MCP server into a 34K-line system with
 85 tool modules, 72 dispatch entries, and 371 MCP tools. A typical MCP server exposes
 5-15 tools. This analysis identifies what is essential, what is experimental residue,
 and proposes a phased reduction plan.
@@ -39,7 +39,7 @@ MASC's minimum viable feature set. join -> claim -> work -> done.
 | Module | Lines | Role |
 |--------|-------|------|
 | tool_agent | 290 | Agent registration/profiles |
-| tool_room | 291 | Room join/leave/broadcast |
+| tool_workspace | 291 | Workspace join/leave/broadcast |
 | tool_task | 418 | Task CRUD + claim/done |
 | tool_heartbeat | ~119 | Liveness tracking |
 | tool_dispatch | ~200 | Generic fallback router |
@@ -53,7 +53,7 @@ Modules that deliver real value in daily operation.
 | tool_operator | 856 | dispatch/assign/rebalance | High |
 | retired command-plane tools | removed | former command-plane truth layer | Removed |
 | tool_keeper | 624 | persistent agent runtime | High |
-| tool_perpetual | 643 | autonomous agent loops | Medium |
+| tool_continuous | 643 | autonomous agent loops | Medium |
 | tool_plan | 186 | planning context | High |
 | repo isolation helpers | 40 | git isolation | High |
 | tool_board/misc | ~770 | bulletin board | Medium |
@@ -65,7 +65,7 @@ Modules that deliver real value in daily operation.
 
 ### Tier 3: Extensions (12 modules, ~8K lines)
 
-Useful but not core to coordination.
+Useful but not core to workspace collaboration.
 
 | Module | Lines | Role | Status |
 |--------|-------|------|--------|
@@ -82,7 +82,7 @@ Useful but not core to coordination.
 
 ### Tier 4: Experimental/Game (18 modules, ~11K lines, 32% of total)
 
-Not related to core coordination. Candidates for separation or removal.
+Not related to core workspace collaboration. Candidates for separation or removal.
 
 | Module | Lines | Role | Verdict |
 |--------|-------|------|---------|
@@ -105,16 +105,16 @@ Not related to core coordination. Candidates for separation or removal.
 ## Legacy Loop Cleanup
 
 Older cleanup, patrol, and ecosystem-control loops should not shape current architecture decisions.
-They have been retired from the active runtime surface, so the current complexity discussion should stay centered on room, keeper, command-plane, and operator layers.
+They have been retired from the active runtime surface, so the current complexity discussion should stay centered on workspace, keeper, command-plane, and operator layers.
 
-## Perpetual Keepers Problem
+## Continuous Keepers Problem
 
 ### Before cleanup (Phase 1 complete)
 
 | Path | Size before | Size after | Action |
 |------|------------|------------|--------|
 | keepers/*.metrics.jsonl | 25MB | 0 (deleted) | Stale idle heartbeat logs |
-| perpetual/trace-17716*,17724* | 1.2MB | 0 (deleted) | Ended experiment traces |
+| continuous/trace-17716*,17724* | 1.2MB | 0 (deleted) | Ended experiment traces |
 | **Total .masc/** | **63MB** | **36MB** | **27MB freed** |
 
 ### Root cause
@@ -156,7 +156,7 @@ types (leaf) <- parse <- spawn <- handlers <- tool_team_session (entry)
 
 1. **Features accumulate, never removed** — feature flags OFF = "done"
 2. **Experiments land in lib/ directly** — no plugin/package boundary
-3. **TRPG/games cohabitate with coordination** — unrelated concerns in one binary
+3. **TRPG/games cohabitate with workspace collaboration** — unrelated concerns in one binary
 4. **No metrics retention** — logs grow without bound (fixed in this PR)
 
 ## Phased Reduction Plan

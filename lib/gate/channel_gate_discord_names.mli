@@ -13,6 +13,7 @@ type name_map = {
   guild_names : (string * string) list;
   channel_names : (string * string) list;
   channel_to_guild : (string * string) list;
+  channel_to_parent : (string * string) list;
   updated_at : string;
 }
 
@@ -23,12 +24,6 @@ val default_names_path : string
 (** [configured_write_path env_name ~default] — env override
     resolved against [Env_config_core.base_path ()] when relative. *)
 val configured_write_path : string -> default:string -> string
-
-(** [configured_read_path env_name ~default ~legacy] — env override,
-    else [default]. [legacy] is ignored; retained only for existing direct
-    callers that already pass a legacy path. *)
-val configured_read_path :
-  string -> default:string -> legacy:string -> string
 
 (** Default write path (env [MASC_DISCORD_NAMES_PATH] →
     {!default_names_path}). *)
@@ -57,4 +52,10 @@ val to_json : name_map -> Yojson.Safe.t
     [channel_to_guild] map from {!read}. [None] when [channel_id]
     is empty/whitespace or unknown. *)
 val resolve_guild_id_for_channel :
+  channel_id:string -> string option
+
+(** Return the parent channel id for a Discord thread/channel, using
+    the cached [channel_to_parent] map from {!read}. [None] when
+    [channel_id] is empty/whitespace or unknown. *)
+val resolve_parent_channel_id_for_channel :
   channel_id:string -> string option

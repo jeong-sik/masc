@@ -1,7 +1,7 @@
 (** Approval_policy_typed — GADT-based policy decision.
 
     Thin wrapper around [Approval_policy.decide]: the GADT gives us a
-    total capability extractor, but the rule cascade (destructive-git
+    total capability extractor, but the rule runtime (destructive-git
     check, write-escape check, trust-level dispatch) is intentionally
     reused without duplication. *)
 

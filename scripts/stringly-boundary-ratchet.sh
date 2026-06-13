@@ -10,7 +10,7 @@
 #   - raw_error_kind_string_signatures: `error_kind : string` / `?error_kind:string`
 #
 # Descriptive metrics:
-#   - raw_cascade_name_string_signatures
+#   - raw_runtime_id_string_signatures
 #   - raw_status_string_signatures
 #
 # Usage:
@@ -48,7 +48,7 @@ METRICS=(
 )
 
 DESCRIPTIVE_METRICS=(
-  "raw_cascade_name_string_signatures|cascade_name|Remaining cascade_name:string signatures; descriptive while C-T7.2 continues."
+  "raw_runtime_id_string_signatures|runtime_id|Remaining runtime_id:string signatures; descriptive while C-T7.2 continues."
   "raw_status_string_signatures|status|Remaining status:string signatures; descriptive until a scoped status sweep starts."
 )
 
@@ -124,22 +124,22 @@ print_counts() {
 }
 
 regenerate() {
-  local decision error_kind cascade_name status
+  local decision error_kind runtime_id status
   decision=$(current_value raw_decision_string_signatures)
   error_kind=$(current_value raw_error_kind_string_signatures)
-  cascade_name=$(current_value raw_cascade_name_string_signatures)
+  runtime_id=$(current_value raw_runtime_id_string_signatures)
   status=$(current_value raw_status_string_signatures)
-  python3 - "$BASELINE_FILE" "$decision" "$error_kind" "$cascade_name" "$status" <<'PYEOF'
+  python3 - "$BASELINE_FILE" "$decision" "$error_kind" "$runtime_id" "$status" <<'PYEOF'
 import json, sys
 baseline_file = sys.argv[1]
-decision, error_kind, cascade_name, status = map(int, sys.argv[2:])
+decision, error_kind, runtime_id, status = map(int, sys.argv[2:])
 data = {
     "_comment": "Stringly boundary baseline. Regenerate with scripts/stringly-boundary-ratchet.sh --regenerate.",
     "_metrics": "See scripts/stringly-boundary-ratchet.sh METRICS / DESCRIPTIVE_METRICS arrays.",
     "_issue": "#11926",
     "raw_decision_string_signatures": decision,
     "raw_error_kind_string_signatures": error_kind,
-    "raw_cascade_name_string_signatures": cascade_name,
+    "raw_runtime_id_string_signatures": runtime_id,
     "raw_status_string_signatures": status,
 }
 with open(baseline_file, "w") as f:

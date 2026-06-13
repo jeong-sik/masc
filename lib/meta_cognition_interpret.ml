@@ -10,7 +10,7 @@ open Meta_cognition_types
 
 let operator_actionability = function
   | Some ("operator" | "operator_or_platform" | "operator_or_scheduler"
-         | "room_or_operator") -> true
+         | "workspace_or_operator") -> true
   | _ -> false
 
 let evidence_refs_of_belief (belief : belief_summary) =
@@ -29,7 +29,7 @@ let evidence_refs_of_salience (summary : summary_input) = function
       match summary.top_desire with
       | Some desire -> desire.evidence_refs
       | None -> [])
-  | Stagnant_room -> (
+  | Stagnant_workspace -> (
       match summary.top_tension, summary.dominant_belief, summary.top_desire with
       | Some tension, _, _ when tension.evidence_refs <> [] -> tension.evidence_refs
       | _, Some belief, _ when evidence_refs_of_belief belief <> [] ->
@@ -50,12 +50,12 @@ let reason_of_salience (summary : summary_input) = function
   | Operator_desire -> (
       match Option.bind summary.top_desire (fun desire -> desire.desired_state) with
       | Some desired_state ->
-          Printf.sprintf "room이 운영자 액션을 원합니다: %s" desired_state
-      | None -> "room-level desire가 운영자 액션을 요청합니다.")
-  | Stagnant_room ->
-      Printf.sprintf "room stagnation이 %.0f%%로 높습니다. 메타인지 snapshot을 확인하세요."
+          Printf.sprintf "workspace이 운영자 액션을 원합니다: %s" desired_state
+      | None -> "workspace-level desire가 운영자 액션을 요청합니다.")
+  | Stagnant_workspace ->
+      Printf.sprintf "workspace stagnation이 %.0f%%로 높습니다. 메타인지 snapshot을 확인하세요."
         (summary.stagnation_score *. 100.0)
-  | Stable -> "room-level signal is currently stable."
+  | Stable -> "workspace-level signal is currently stable."
 
 let target_id_of_salience (summary : summary_input) = function
   | Contested_belief ->
@@ -64,7 +64,7 @@ let target_id_of_salience (summary : summary_input) = function
       Option.bind summary.top_tension (fun tension -> tension.id)
   | Operator_desire ->
       Option.bind summary.top_desire (fun desire -> desire.id)
-  | Stagnant_room | Stable -> None
+  | Stagnant_workspace | Stable -> None
 
 let interpret (summary : summary_input) =
   let signals =
@@ -78,7 +78,7 @@ let interpret (summary : summary_input) =
         match summary.top_desire with
         | Some desire -> operator_actionability desire.actionability
         | None -> false );
-      (Stagnant_room, summary.stagnation_score >= 0.65);
+      (Stagnant_workspace, summary.stagnation_score >= 0.65);
     ]
     |> List.filter_map (fun (salience, active) -> if active then Some salience else None)
   in
@@ -110,10 +110,7 @@ let interpretation_to_json interpretation =
       ("primary_salience", `String (salience_to_string interpretation.primary_salience));
       ("secondary_saliences", salience_list_to_json interpretation.secondary_saliences);
       ("reason", `String interpretation.reason);
-      ( "target_id",
-        match interpretation.target_id with
-        | Some value -> `String value
-        | None -> `Null );
+      ( "target_id", Json_util.string_opt_to_json interpretation.target_id );
       ("evidence_refs", `List (List.map (fun ref_id -> `String ref_id) interpretation.evidence_refs));
     ]
 

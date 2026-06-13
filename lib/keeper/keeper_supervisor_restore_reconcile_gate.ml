@@ -14,6 +14,8 @@
     [Reconcile_gate_rejected], and leaves the keeper paused. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 module Startup_helpers = Keeper_supervisor_startup_helpers
 module Resume_reconcile_gate = Keeper_supervisor_resume_reconcile_gate
 
@@ -70,7 +72,7 @@ let restore_reconcile_continue_gate
             "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
             meta.name
             reason;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string SupervisorCleanupFailures)
             ~labels:
               [ "keeper", meta.name

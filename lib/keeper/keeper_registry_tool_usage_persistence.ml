@@ -48,12 +48,37 @@ let flush ~base_path name =
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ToolUsageFlushFailures)
          ~labels:[ "keeper", name ]
          ();
        Log.Keeper.error "flush_tool_usage %s: %s" name (Printexc.to_string exn))
 ;;
+
+(* ── Batched flush ────────────────────────────────────────────────
+   Instead of flushing to disk on every tool call, accumulate dirty
+   keeper names in a set and flush them periodically (every 5s).
+   The background flush fiber in server_runtime_bootstrap.ml calls
+   [flush_all_dirty] on the interval. *)
+
+let dirty_keepers : (string * string, unit) Hashtbl.t = Hashtbl.create 16
+let dirty_mu = Stdlib.Mutex.create ()
+
+(** Mark a keeper as needing a flush. Called on every tool use instead
+    of [flush], avoiding disk I/O in the hot path. *)
+let mark_dirty ~base_path name =
+  Stdlib.Mutex.protect dirty_mu (fun () ->
+    Hashtbl.replace dirty_keepers (base_path, name) ())
+
+(** Flush all keepers in the dirty set. Called by the background fiber. *)
+let flush_all_dirty () =
+  let snapshot =
+    Stdlib.Mutex.protect dirty_mu (fun () ->
+      let items = Hashtbl.fold (fun k () acc -> k :: acc) dirty_keepers [] in
+      Hashtbl.reset dirty_keepers;
+      items)
+  in
+  List.iter (fun (base_path, name) -> flush ~base_path name) snapshot
 
 let restore ~base_path name =
   let path = tool_usage_path ~base_path name in
@@ -99,7 +124,7 @@ let restore ~base_path name =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string CheckpointFailures)
            ~labels:[ "keeper", name; "site", "restore_tool_usage" ]
            ();

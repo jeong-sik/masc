@@ -4,6 +4,7 @@
     stays in [Keeper_meta_json] so canonical-key derivation can
     use the public facade without creating a cycle. *)
 
+
 open Keeper_types_profile
 open Keeper_meta_contract
 
@@ -11,6 +12,7 @@ open Keeper_meta_contract
 type parsed_keeper_identity =
   { pk_name : string
   ; pk_agent_name : string
+  ; pk_persona : string option
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string
@@ -18,8 +20,6 @@ type parsed_keeper_identity =
   ; pk_mid_goal : string
   ; pk_long_goal : string
   ; pk_social_model : string
-  ; pk_cascade_name : string
-  ; pk_cascade_ref : Cascade_ref.cascade_ref option
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -32,18 +32,14 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : tool_access
+  ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
-  ; pp_room_signal_prompt_enabled : bool
-  ; pp_joined_room_ids : string list
-  ; pp_last_seen_seq_by_room : (string * int) list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }
 

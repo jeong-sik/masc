@@ -1,6 +1,8 @@
 (** In-turn liveness pulse helpers for the keeper heartbeat loop. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
 

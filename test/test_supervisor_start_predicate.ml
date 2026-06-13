@@ -12,7 +12,7 @@
    Note on test isolation: [Keeper_runtime.has_boot_entries] reads
    keeper TOML profiles via [Config_dir_resolver.keepers_dir ()],
    which is the active resolved config root independent of the
-   [Coord.config.base_path].  So in every test environment with an
+   [Workspace.config.base_path].  So in every test environment with an
    active operator profile present,
    [bootable_keeper_names] returns non-empty.  The tests below
    exploit that — they verify the post-fix path
@@ -21,10 +21,13 @@
 
 open Alcotest
 
-module Coord = Masc_mcp.Coord
-module KR = Masc_mcp.Keeper_runtime
-module KT = Masc_mcp.Keeper_types
-module Reg = Masc_mcp.Keeper_registry
+module Workspace = Masc.Workspace
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module KR = Masc.Keeper_runtime
+module KT = Keeper_types
+module Reg = Masc.Keeper_registry
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -82,9 +85,10 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
       ; ("goal", `String "test")
       ; ("sandbox_profile", `String "local")
       ; ("network_mode", `String "inherit")
+      ; ("tool_access", `List [])
       ]
   in
-  match KT.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Error err -> fail ("meta_of_json failed: " ^ err)
   | Ok meta ->
     { meta with
@@ -94,7 +98,7 @@ let make_meta ?(paused = false) ?auto_resume_after_sec ?updated_at name =
     }
 
 let write_meta_exn config meta =
-  match KT.write_meta config meta with
+  match Keeper_meta_store.write_meta config meta with
   | Ok () -> ()
   | Error err -> fail ("write_meta failed: " ^ err)
 
@@ -107,17 +111,17 @@ let with_temp_masc_dir ?(keeper_names = [ "operator" ]) f =
          (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
   in
   Unix.mkdir base 0o755;
-  let config = Coord.default_config base in
-  let config_root = Filename.concat (Coord.masc_root_dir config) "config" in
+  let config = Workspace.default_config base in
+  let config_root = Filename.concat (Workspace.masc_root_dir config) "config" in
   let original_config_dir = Sys.getenv_opt "MASC_CONFIG_DIR" in
   mkdir_p config_root;
   List.iter (fun name -> write_keeper_toml config_root ~name) keeper_names;
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Config_dir_resolver.reset ();
-  ignore (Coord.init config ~agent_name:None);
+  ignore (Workspace.init config ~agent_name:None);
   Fun.protect
     ~finally:(fun () ->
-      ignore (Coord.reset config);
+      ignore (Workspace.reset config);
       Reg.clear ();
       KR.reset_test_state base;
       restore_env "MASC_CONFIG_DIR" original_config_dir;
@@ -206,11 +210,11 @@ let test_operator_paused_only_does_not_start_sweep () =
     check bool "operator pause alone does not start sweep" false
       (KR.should_start_supervisor_sweep ~config ~stats))
 
-let test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep () =
+let test_turn_timeout_pause_without_explicit_policy_starts_sweep () =
   with_temp_masc_dir ~keeper_names:[ "timeout-due" ] (fun config ->
     let now = Unix.time () in
     let timeout_blocker =
-      KT.blocker_info_of_class ~detail:"turn_timeout" KT.Turn_timeout
+      Keeper_meta_contract.blocker_info_of_class ~detail:"turn_timeout" Keeper_meta_contract.Turn_timeout
     in
     let meta =
       { (make_meta
@@ -230,9 +234,10 @@ let test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep () =
     in
     check bool "timeout-paused keeper is not bootable yet" false
       (List.mem "timeout-due" (KR.bootable_keeper_names config));
-    check (list string) "timeout pause is not auto-recoverable" []
+    check (list string) "legacy timeout pause is auto-recoverable"
+      [ "timeout-due" ]
       (KR.auto_recoverable_paused_keeper_names ~now config);
-    check bool "timeout pause alone does not start supervisor sweep" false
+    check bool "legacy timeout pause starts supervisor sweep" true
       (KR.should_start_supervisor_sweep ~config ~stats))
 
 let () =
@@ -248,7 +253,7 @@ let () =
         test_due_auto_recoverable_paused_keeper_starts_sweep;
       test_case "operator-paused keeper alone does not start sweep" `Quick
         test_operator_paused_only_does_not_start_sweep;
-      test_case "timeout pause without explicit policy does not start sweep" `Quick
-        test_turn_timeout_pause_without_explicit_policy_does_not_start_sweep;
+      test_case "timeout pause without explicit policy starts sweep" `Quick
+        test_turn_timeout_pause_without_explicit_policy_starts_sweep;
     ];
   ]

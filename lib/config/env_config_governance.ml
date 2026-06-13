@@ -122,8 +122,10 @@ module Operator = struct
   (** Operator judge interval, clamped to >= 15s. Default: 60. *)
   let judge_interval_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_INTERVAL_SEC")
 
-  (** Coord TTL for operator judge cleanup, clamped to >= 15s. Default: 60. *)
-  let room_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_ROOM_TTL_SEC")
+  (** Workspace TTL for operator judge cleanup, clamped to >= 15s. Default: 60.
+      @category Timeouts
+      @ops_class operator *)
+  let workspace_ttl_sec = max 15 (get_int ~default:60 "MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC")
 
   (** Session TTL for operator judge cleanup, clamped to >= 30s. Default: 300. *)
   let session_ttl_sec = max 30 (get_int ~default:300 "MASC_OPERATOR_JUDGE_SESSION_TTL_SEC")
@@ -155,9 +157,9 @@ end
 (** {1 Model Routing Defaults} *)
 
 module Model_defaults = struct
-  (** Default cascade label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
-  let default_cascade_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
+  (** Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
+  let default_runtime_opt () =
+    Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
 
   (** Default provider name. *)
   let default_provider_opt () =
@@ -167,11 +169,11 @@ module Model_defaults = struct
   let default_model_opt () =
     Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
 
-  (** Routing cascade for team session routing. Defaults to the logical
-      [routes.routing] key; runtime callers normalize it through the cascade
+  (** Routing runtime for team session routing. Defaults to the logical
+      [routes.routing] key; runtime callers normalize it through the runtime
       route table. *)
-  let routing_cascade () =
-    match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
+  let routing_runtime () =
+    match Sys.getenv_opt "MASC_ROUTING_RUNTIME" |> trim_opt with
     | Some s -> s
     | None -> "routing"
 

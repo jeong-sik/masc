@@ -73,7 +73,6 @@ let test_sandbox_write_joins_with_worktree_read () =
       ; local_path = sandbox_root
       ; aliases = []
       ; default_branch = "main"
-      ; credential_id = "default"
       ; keepers = []
       ; status = Active
       ; auto_sync = false
@@ -96,14 +95,14 @@ let test_sandbox_write_joins_with_worktree_read () =
     (* 3. resolve_partition_for_write at a sandbox path. *)
     let sandbox_file = Filename.concat sandbox_root "lib/foo.ml" in
     let sandbox_partition, sandbox_rel =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:sandbox_file
     in
     let worktree_file = Filename.concat workspace_root "lib/foo.ml" in
     let worktree_partition, worktree_rel =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:worktree_file
@@ -116,13 +115,11 @@ let test_sandbox_write_joins_with_worktree_read () =
        failf
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
-          | Ide_paths.Legacy -> "Legacy"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan")
+          | Ide_paths.Orphan -> "Orphan"
+          | Ide_paths.By_url s -> "By_url " ^ s)
          (match worktree_partition with
-          | Ide_paths.Legacy -> "Legacy"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan"));
+          | Ide_paths.Orphan -> "Orphan"
+          | Ide_paths.By_url s -> "By_url " ^ s));
     (* 5. rel_path is the repo-relative remainder in both cases. *)
     check string "sandbox rel_path stripped" "lib/foo.ml" sandbox_rel;
     check string "worktree rel_path stripped" "lib/foo.ml" worktree_rel)
@@ -132,7 +129,7 @@ let test_unregistered_path_lands_in_orphan () =
   with_temp_base_dir (fun base_dir ->
     let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
     let partition, original =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:elsewhere
@@ -154,7 +151,6 @@ let test_blank_url_lands_in_orphan () =
       ; local_path = local
       ; aliases = []
       ; default_branch = "main"
-      ; credential_id = "default"
       ; keepers = []
       ; status = Active
       ; auto_sync = false
@@ -168,7 +164,7 @@ let test_blank_url_lands_in_orphan () =
      | Error msg -> failf "save_all: %s" msg);
     let file = Filename.concat local "lib/foo.ml" in
     let partition, _ =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:file
@@ -198,7 +194,6 @@ let test_sandbox_playground_path_joins_with_worktree () =
       ; local_path = worktree
       ; aliases = []
       ; default_branch = "main"
-      ; credential_id = "default"
       ; keepers = []
       ; status = Active
       ; auto_sync = false
@@ -217,13 +212,13 @@ let test_sandbox_playground_path_joins_with_worktree () =
     in
     let worktree_file = Filename.concat worktree "lib/foo.ml" in
     let sandbox_partition, sandbox_rel =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:sandbox_file
     in
     let worktree_partition, worktree_rel =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:worktree_file
@@ -235,13 +230,11 @@ let test_sandbox_playground_path_joins_with_worktree () =
        failf
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
-          | Ide_paths.Legacy -> "Legacy"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan")
+          | Ide_paths.Orphan -> "Orphan"
+          | Ide_paths.By_url s -> "By_url " ^ s)
          (match worktree_partition with
-          | Ide_paths.Legacy -> "Legacy"
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.Orphan -> "Orphan"));
+          | Ide_paths.Orphan -> "Orphan"
+          | Ide_paths.By_url s -> "By_url " ^ s));
     check string "sandbox rel stripped to repo-relative" "lib/foo.ml" sandbox_rel;
     check string "worktree rel stripped" "lib/foo.ml" worktree_rel)
 ;;
@@ -257,7 +250,6 @@ let test_docker_playground_path_also_resolves () =
       ; local_path = worktree
       ; aliases = []
       ; default_branch = "main"
-      ; credential_id = "default"
       ; keepers = []
       ; status = Active
       ; auto_sync = false
@@ -275,7 +267,7 @@ let test_docker_playground_path_also_resolves () =
         ".masc/playground/docker/tech_glutton/repos/masc/lib/foo.ml"
     in
     let partition, rel =
-      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
+      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:docker_file

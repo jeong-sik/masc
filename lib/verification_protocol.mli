@@ -25,7 +25,7 @@
 (** {1 Submit phase} *)
 
 val create_submit_request :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -39,8 +39,16 @@ val create_submit_request :
     board persistence fails or the task does not satisfy the
     contract gap pre-check. *)
 
+val delete_verification_request :
+  config:Workspace.config ->
+  verification_id:string ->
+  (unit, string) result
+(** RFC-0221 §3.1 compensation: remove the verification record for
+    [verification_id] when its task_status commit did not land, so the two
+    stores never disagree. A missing record is success (idempotent). *)
+
 val notify_submit_for_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -54,7 +62,7 @@ val notify_submit_for_verification :
     from the persisted request output. *)
 
 val on_submit_for_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task:Masc_domain.task ->
   assignee:string ->
   verification_id:string ->
@@ -68,7 +76,7 @@ val on_submit_for_verification :
 (** {1 Approve verdict} *)
 
 val record_approve_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task_id:string ->
   verifier:string ->
   verification_id:string ->
@@ -92,7 +100,7 @@ val notify_approve_verification :
 (** {1 Reject verdict} *)
 
 val record_reject_verification :
-  config:Coord.config ->
+  config:Workspace.config ->
   task_id:string ->
   verifier:string ->
   verification_id:string ->
@@ -114,7 +122,7 @@ val notify_reject_verification :
 
 (** {1 Timeout sweep} *)
 
-val check_timeouts : config:Coord.config -> unit
+val check_timeouts : config:Workspace.config -> unit
 (** [check_timeouts ~config] scans pending verifications and
     emits operator-visible timeout events for any past their TTL. No-op when
     [Env_config_runtime.Verification.fsm_enabled ()] is [false]

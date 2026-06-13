@@ -112,6 +112,19 @@ vi.mock('mermaid', () => ({
   },
 }))
 
+// Block real network requests in tests. Tests that intentionally need
+// fetch must install an explicit mock (vi.fn() or msw).
+vi.stubGlobal(
+  'fetch',
+  vi.fn((input: RequestInfo | URL, _init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString()
+    throw new Error(
+      `Real network request blocked in tests: ${url}\n` +
+        `If this test intentionally uses fetch, mock it with vi.fn() or msw.`
+    )
+  })
+)
+
 // Mock ninja-keys Web Component to avoid Happy DOM parsing errors
 vi.mock('ninja-keys', () => {
   if (!customElements.get('ninja-keys')) {

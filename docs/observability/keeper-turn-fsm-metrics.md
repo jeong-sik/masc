@@ -1,10 +1,11 @@
 ---
 status: reference
-last_verified: 2026-04-28
+last_verified: 2026-06-05
 code_refs:
   - lib/keeper/keeper_turn_fsm.ml
   - lib/keeper/keeper_unified_turn.ml
-  - lib/prometheus.ml
+  - lib/keeper_metrics/keeper_metrics.ml
+  - lib/otel_metric_store/otel_metric_store_core.ml
   - bin/masc_trace.ml
 ---
 
@@ -22,8 +23,8 @@ After Step 4 every dispatched turn produces a chain like:
 
 ```
 [fsm:transition] - -> phase_gating
-[fsm:transition] phase_gating -> cascade_routing
-[fsm:transition] cascade_routing -> awaiting_provider
+[fsm:transition] phase_gating -> runtime_routing
+[fsm:transition] runtime_routing -> awaiting_provider
 [fsm:transition] awaiting_provider -> streaming
 [fsm:transition] streaming -> completing
 [fsm:transition] completing -> done
@@ -37,14 +38,14 @@ Bumped exactly once per `Keeper_turn_fsm.emit_transition` call.
 
 | Label | Values |
 |-------|--------|
-| `from` | `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, plus `-` when no `?prev` was supplied |
-| `to` | one of `turn_state_label` outputs: `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, `done`, `failed:<reason>`, `cancelled:<reason>` |
+| `from` | `idle`, `phase_gating`, `runtime_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, plus `-` when no `?prev` was supplied |
+| `to` | one of `turn_state_label` outputs: `idle`, `phase_gating`, `runtime_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, `done`, `failed:<reason>`, `cancelled:<reason>` |
 | `keeper` | keeper name (e.g. `nick0cave`, `alice`) |
 
 `failed:` reasons (`failure_reason_label`):
-- `cascade_unavailable` — ollama saturation, more generally cascade had no resolvable provider
+- `runtime_unavailable` — ollama saturation, more generally runtime had no resolvable provider
 - `provider_error` — sdk error from a CLI subprocess or HTTP call (Step 4f redirect)
-- `tool_contract_violation`
+- `completion_contract_violation`
 - `receipt_lost` — Step 3 (RISKY) will surface this once enabled
 - `turn_livelock_blocked` — Step 4f variant; livelock guard rejected the turn pre-dispatch
 - `runtime_error` — typed catch-all for operational failures that don't fit the above
@@ -62,11 +63,11 @@ Bumped exactly once per `Keeper_turn_fsm.emit_transition` call.
 
 ### Distinct from `masc_keeper_fsm_edge_transitions_total`
 
-The older counter encodes **cross sub-FSM** edges (`ksm_to_kcl_routing`, `kmc_to_ksm_compact_completed`, etc.) used by `docs/keeper-fsm-graph.dot`. It is a different abstraction level — sub-FSM coupling vs. typed turn-state ADT. Both counters live alongside; PromQL filters should pick the one whose vocabulary matches the question.
+The older counter encodes **cross sub-FSM** edges (`ksm_to_kcl_routing`, `kmc_to_ksm_compact_completed`, etc.) used by `docs/keeper-fsm-graph.dot`. It is a different abstraction level — sub-FSM coupling vs. typed turn-state ADT. Both counters live alongside; backend query filters should pick the one whose vocabulary matches the question.
 
-## PromQL examples
+## Backend Query Examples
 
-```promql
+```text
 # Phase-gate skip rate per keeper (5m window).
 rate(masc_keeper_turn_fsm_transitions_total{
   from="phase_gating", to="done"
@@ -96,7 +97,7 @@ Format:
 
 Emitted via `Log.Keeper.info` with the `keeper_name` and `turn_id` structured fields wired in Step 0a (#11154 / #11156 / #11159). A missing `?prev` renders as `-`.
 
-The line text is stable and pinned by the `test_keeper_turn_fsm_emit` sentinel — a label rename or signature drift fails the build.
+The line text is stable and pinned by the `test_keeper_turn_fsm_emit` marker — a label rename or signature drift fails the build.
 
 `emit_transition` also classifies every `(prev, next)` pair against the
 runtime image of `KeeperTurnFSM.tla` `Next`. An edge outside the contract
@@ -110,7 +111,7 @@ counter-only mode.
 
 ```
 $ masc-trace ~/me alice 42
-2026-04-28T... [receipt 04-28.jsonl] cascade=keeper-default outcome=skipped reason=...
+2026-04-28T... [receipt 04-28.jsonl] runtime=keeper-default outcome=skipped reason=...
 2026-04-28T... [fsm] alice: [fsm:transition] - -> phase_gating
 2026-04-28T... [fsm] alice: [fsm:transition] phase_gating -> done
 1777248791.071 [tool keeper_tasks_list] ok duration_ms=372
@@ -131,11 +132,11 @@ Source-of-truth cross-reference (after Step 4 caller adoption):
 | `Phase_gating → Phase_gating` (SupervisorRequestsStop at entry) | `keeper_unified_turn.ml:116` | fix |
 | `Phase_gating → Cancelled supervisor_stop` (HonorStopSignal at entry) | `keeper_unified_turn.ml:133` | fix |
 | `Phase_gating → Done` (phase skip) | `keeper_unified_turn.ml:161` | #11269 |
-| `Phase_gating → Cascade_routing` | `keeper_unified_turn.ml:169` | #11347 |
-| `Cascade_routing → Failed cascade_unavailable` (ollama) | `keeper_unified_turn.ml:298` | #11269 |
-| `Cascade_routing → Failed provider_error` (cascade build) | `keeper_unified_turn.ml:395` | #11340 (variant) + #11269 (site) |
-| `Cascade_routing → Awaiting_provider` | `keeper_unified_turn.ml:449` | #11347 |
-| `Cascade_routing → Failed turn_livelock_blocked` | `keeper_unified_turn.ml:441` | #11340 |
+| `Phase_gating → Runtime_routing` | `keeper_unified_turn.ml:169` | #11347 |
+| `Runtime_routing → Failed runtime_unavailable` (ollama) | `keeper_unified_turn.ml:298` | #11269 |
+| `Runtime_routing → Failed provider_error` (runtime build) | `keeper_unified_turn.ml:395` | #11340 (variant) + #11269 (site) |
+| `Runtime_routing → Awaiting_provider` | `keeper_unified_turn.ml:449` | #11347 |
+| `Runtime_routing → Failed turn_livelock_blocked` | `keeper_unified_turn.ml:441` | #11340 |
 | `Awaiting_provider → Streaming` | `keeper_unified_turn.ml:803` (pre-`run_turn`) | #11358 |
 | `Streaming → Streaming` (SupervisorRequestsStop in Eio.Cancel handler) | `keeper_unified_turn.ml:867` | fix |
 | `Streaming → Failed provider_error` (retry exhausted) | `keeper_unified_turn.ml:1446` | #11363 |
@@ -148,7 +149,7 @@ Pending edges (require `keeper_agent_run.ml run_turn` adoption — volume risk):
 
 Pending RISKY edges (require feature-flag / dual-emit infrastructure):
 - `Completing → Failed receipt_lost` (Step 3 — receipt authoritative)
-- `Streaming → Failed tool_contract_violation` (Step 6b-2 — typed classifier replacing string match)
+- `Streaming → Failed completion_contract_violation` (Step 6b-2 — typed classifier replacing string match)
 
 ## See also
 
@@ -156,4 +157,4 @@ Pending RISKY edges (require feature-flag / dual-emit infrastructure):
 - `docs/keeper-fsm-graph.dot` — cross sub-FSM edges (different metric)
 - `lib/keeper/keeper_turn_fsm.mli` — ADT + `emit_transition` signature
 - `specs/keeper-turn-fsm/KeeperTurnFSM.tla` — TLA+ spec (turn_state abstraction level)
-- `planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-hashed-pretzel.md` — parent plan, Phase 4 onward
+- `planning/claude-plans/me-workspace-yousleepwhen-masc-hashed-pretzel.md` — parent plan, Phase 4 onward

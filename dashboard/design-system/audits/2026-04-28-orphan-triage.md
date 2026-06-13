@@ -12,7 +12,7 @@ Phase 0 brief: *"7 of 19 files are orphans (no `import` reference in any .ts/.ts
 | **dead** | 0 | — |
 | **zombie** | 0 | — |
 
-**Phase 0 false negative root cause**: the orphan check used `rg -g '!*.css'`, which excluded `.css` files from the search and therefore missed the `@import` cascade through `dashboard/src/styles/global.css`. All 7 files are imported into `global.css`, which is itself imported by `dashboard/src/main.ts:1` (`import './styles/global.css'`). They reach the runtime through one indirection — they are not orphans.
+**Phase 0 false negative root cause**: the orphan check used `rg -g '!*.css'`, which excluded `.css` files from the search and therefore missed the `@import` runtime through `dashboard/src/styles/global.css`. All 7 files are imported into `global.css`, which is itself imported by `dashboard/src/main.ts:1` (`import './styles/global.css'`). They reach the runtime through one indirection — they are not orphans.
 
 Recommendation: proceed with all 7 workstreams as planned, but Phase 1 supervisor should treat the Phase 0 orphan column as invalid and re-derive liveness from `global.css @import` chain.
 
@@ -20,8 +20,8 @@ Recommendation: proceed with all 7 workstreams as planned, but Phase 1 superviso
 
 For each candidate file:
 
-1. `rg -l "<basename>\.css"` across `.ts/.tsx/.js/.jsx/.html/.css/.toml/.json/.ml` — direct + cascade imports.
-2. `rg "@import.*<basename>" dashboard/src/` — cascade specifically.
+1. `rg -l "<basename>\.css"` across `.ts/.tsx/.js/.jsx/.html/.css/.toml/.json/.ml` — direct + runtime imports.
+2. `rg "@import.*<basename>" dashboard/src/` — runtime specifically.
 3. `rg -c "<distinctive-class>" dashboard/src/components/ dashboard/src/pages/` — at least one usage in TSX/TS code.
 4. `git log --oneline -5 -- <file>` — recency check (60d threshold for stale).
 
@@ -37,7 +37,7 @@ For each candidate file:
 | `responsive.css` | 81 | `global.css` (@import), `variables.css`, self | `@media` rules — no className grep needed (tag/state selectors) | `44f2109186` (#8421) | **live** | W13 dispatch as planned (responsive is media-query orchestration, preview must include viewport variants) |
 | `a11y.css` | 99 | `global.css` (@import), `keyframes.css`, `focusable.ts`, `motion.ts` | imported as comment cross-reference in `focusable.ts`, `motion.ts`; `prefers-reduced-motion`/`focus-visible` rules | `f9b7ce3465` 2026-04 (#11224) | **live** | W14 dispatch as planned |
 
-## Evidence — global.css cascade
+## Evidence — global.css runtime
 
 ```
 $ rg "^@import" dashboard/src/styles/global.css
@@ -67,7 +67,7 @@ $ rg "global\.css" dashboard/src/main.ts
 dashboard/src/main.ts:1:import './styles/global.css'
 ```
 
-Cascade: `main.ts → global.css → {chat, pipeline, live-monitor, keeper-detail, pixel-avatar, responsive, a11y}.css`. Every one of the 7 reaches runtime.
+Runtime: `main.ts → global.css → {chat, pipeline, live-monitor, keeper-detail, pixel-avatar, responsive, a11y}.css`. Every one of the 7 reaches runtime.
 
 Tailwind v4 `@utility` syntax: 5 of 7 files (chat, pipeline, live-monitor, keeper-detail, pixel-avatar) declare Tailwind v4 `@utility` blocks. A `^\.` selector grep returns 0 hits for those, which can also mislead a naive "no selectors → dead" heuristic. The utilities are referenced by class name in TSX, not by traditional `.foo` rules.
 

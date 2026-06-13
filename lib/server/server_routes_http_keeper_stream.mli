@@ -47,12 +47,13 @@ type keeper_chat_stream_request = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
+  attachments : Keeper_chat_store.attachment list;
 }
 (** Parsed payload of a keeper chat-stream HTTP request.
     [timeout_sec] is clamped to [\[5, 300\]] when
     present.  [channel] / [channel_user_id] /
-    [channel_user_name] / [channel_room_id] are all
+    [channel_user_name] / [channel_workspace_id] are all
     required together when any connector context is
     supplied; otherwise they are accepted as empty. *)
 
@@ -65,13 +66,27 @@ val parse_keeper_chat_stream_request :
     [Error reason] on JSON shape mismatches, missing
     [name] / [message], partial connector context, or
     presence of legacy keeper model args removed by the
-    cascade rewrite. *)
+    runtime rewrite. *)
 
 (** {1 Error envelope} *)
 
 val keeper_chat_stream_error_json : string -> Yojson.Safe.t
 (** [{ "error": { "message": "…" } }] envelope for
     parse / handler errors. *)
+
+(** {1 Queue request handlers} *)
+
+val handle_keeper_chat_request_result :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/chat/requests/<request_id>].
+    Reads the async keeper message request state directly from
+    {!Keeper_msg_async} without requiring an MCP session. *)
+
+val handle_keeper_chat_request_cancel :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/chat/requests/<request_id>/cancel].
+    Cancels a live async keeper message request when it is still
+    cancellable. *)
 
 (** {1 SSE handler} *)
 
@@ -91,3 +106,24 @@ val handle_keeper_chat_stream :
     on switch release; surfaces handler exceptions
     through the SSE stream rather than the HTTP envelope
     once the headers have flushed. *)
+
+(** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
+
+val process_single_turn :
+  state:Mcp_server.server_state ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  sw:Eio.Switch.t ->
+  auth_token:string option ->
+  thread_id:string ->
+  closed:bool ref ->
+  payload:keeper_chat_stream_request ->
+  run_id:string ->
+  message_id:string ->
+  agent_name:string ->
+  events:Keeper_chat_events.keeper_chat_event Eio.Stream.t ->
+  unit
+(** Execute a single keeper turn, publishing events to the provided
+    event stream.  [closed] is a mutable flag that suppresses worker
+    event pushes when set to [true] (used by the SSE adapter when the
+    HTTP stream is closed).  [auth_token] is [None] for queue-consumer
+    turns where no HTTP request is available. *)

@@ -46,7 +46,7 @@ let http_auth_bind_is_loopback () =
 
 let strict_http_auth_error endpoint =
   Printf.sprintf
-    "%s requires room auth enabled with require_token=true when server is \
+    "%s requires workspace auth enabled with require_token=true when server is \
      bound to a non-loopback host or MASC_HTTP_BASE_URL points to a public address."
     endpoint
 
@@ -147,7 +147,10 @@ let resolve_agent_name_for_auth_raw ~base_path request ~token :
        | None ->
            Error
              (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                "Internal keeper auth requires x-masc-keeper-name header.")))
+                { reason = Missing_token
+                ; message = "Internal keeper auth requires x-masc-keeper-name header."
+                })))
+
   | Some t -> (
       match Auth.resolve_agent_from_token base_path ~token:t with
       | Ok agent_name -> Ok (Some agent_name)
@@ -229,7 +232,7 @@ let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
   if not auth_config.Masc_domain.enabled then
     Error
-      "/mcp/operator requires room auth enabled with require_token=true."
+      "/mcp/operator requires workspace auth enabled with require_token=true."
   else if not auth_config.require_token then
     Error "/mcp/operator requires bearer token auth (require_token=true)."
   else
@@ -273,16 +276,35 @@ let sanitize_dashboard_actor_name raw =
 
 (* Consolidates the two prior [silent:dashboard_actor_fallback] warn sites
    (Ok None / Error err arms in [dashboard_actor_for_request]) onto a single
-   helper. The message rendering and prometheus labels are owned by
+   helper. The message rendering and otel_metric_store labels are owned by
    [Auth_error_kind] so the contract is round-tripped through a typed
-   record rather than two parallel inline format strings. *)
+   record rather than two parallel inline format strings.
+
+   Log dedup: a stale dashboard token triggers this path on *every* HTTP
+   request the browser makes.  Without a cooldown, 140+ identical WARN
+   lines/day accumulate for the same token hash prefix.  The Otel_metric_store
+   counter is always incremented (metrics remain accurate); the log line
+   is emitted at most once per [warn_cooldown_sec] per token prefix. *)
+let warn_cooldown_sec = 300.0
+
+let stale_token_warn_log : (string, float) Hashtbl.t = Hashtbl.create 16
+
 let record_dashboard_actor_fallback
     (fb : Auth_error_kind.dashboard_actor_fallback) =
-  Log.Auth.warn "%s"
-    (Auth_error_kind.dashboard_actor_fallback_log_message fb);
-  Prometheus.inc_counter
-    Prometheus.metric_silent_dashboard_actor_fallback
-    ~labels:(Auth_error_kind.dashboard_actor_fallback_prometheus_labels fb)
+  let now = Time_compat.now () in
+  let should_log =
+    match Hashtbl.find_opt stale_token_warn_log fb.token_hash_prefix with
+    | Some last_ts -> now -. last_ts >= warn_cooldown_sec
+    | None -> true
+  in
+  if should_log then begin
+    Hashtbl.replace stale_token_warn_log fb.token_hash_prefix now;
+    Log.Auth.warn "%s"
+      (Auth_error_kind.dashboard_actor_fallback_log_message fb)
+  end;
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_silent_dashboard_actor_fallback
+    ~labels:(Auth_error_kind.dashboard_actor_fallback_metric_labels fb)
     ()
 
 let dashboard_actor_for_request ~base_path request =
@@ -312,7 +334,7 @@ let dashboard_actor_for_request ~base_path request =
              flow through [Auth_error_kind.dashboard_actor_fallback], giving
              callers a typed handle on *why* the fallback fired. The
              string emitted by [dashboard_actor_fallback_log_message] is
-             byte-equivalent to the prior inline format so prometheus log
+             byte-equivalent to the prior inline format so otel_metric_store log
              alerts keyed on the literal prefix continue to fire.
              Reference: Reverse Engineering Design Map §개선 #2. *)
           let fb : Auth_error_kind.dashboard_actor_fallback =
@@ -407,10 +429,9 @@ let host_port_of_request request =
           host_header (Printexc.to_string exn);
         None)
 
-(* Evaluated at module init time (eager). MASC_ALLOW_ANONYMOUS_MUTATIONS
-   must be set before the module is loaded. This is safe because the
-   server process sets all env vars at startup before any module init. *)
-let allow_anonymous_mutations =
+(* Re-reads the env var on each call so MASC_ALLOW_ANONYMOUS_MUTATIONS
+   can be toggled without restarting the server process. *)
+let allow_anonymous_mutations () =
   match Sys.getenv_opt "MASC_ALLOW_ANONYMOUS_MUTATIONS" with
   | Some ("1" | "true") -> true
   | _ -> false
@@ -441,15 +462,36 @@ let is_allowlisted_loopback_dev_origin origin =
       |> List.exists (fun allowed -> allowed = candidate)
   | _ -> false
 
+(* Browsers omit Origin for same-origin requests per the Fetch spec, but
+   always include Referer.  If the Referer's host:port matches the
+   request's Host header, the request is same-origin and trusted. *)
+let is_same_server_referer referer request =
+  match host_port_scheme_of_origin referer, host_port_of_request request with
+  | Some (ref_host, ref_port, scheme), Some (req_host, req_port)
+    when String.equal
+           (normalize_loopback_host ref_host)
+           (normalize_loopback_host req_host) ->
+    let default = default_port_of_scheme scheme in
+    let norm p = match p with Some _ -> p | None -> default in
+    norm ref_port = norm req_port
+  | _ -> false
+
 let ensure_same_origin_browser_request request :
     (unit, Masc_domain.masc_error) result =
   match Httpun.Headers.get request.Httpun.Request.headers "origin" with
   | None ->
-    if allow_anonymous_mutations then Ok ()
-    else
-      Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-        "Authentication required: provide a bearer token or Origin header. \
-         Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."))
+    (* Same-origin browser requests don't send Origin.  Check Referer
+       as a fallback — browsers always include it even for same-origin. *)
+    (match Httpun.Headers.get request.Httpun.Request.headers "referer" with
+     | Some referer when is_same_server_referer referer request -> Ok ()
+     | _ ->
+       if allow_anonymous_mutations () then Ok ()
+       else
+         Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           { reason = Missing_token
+           ; message = "Authentication required: provide a bearer token or Origin header. \
+                        Set MASC_ALLOW_ANONYMOUS_MUTATIONS=true for local development."
+           })))
   | Some origin -> (
       match host_port_scheme_of_origin origin, host_port_of_request request with
       | Some (origin_host, origin_port, scheme),
@@ -516,11 +558,7 @@ let http_status_of_auth_error = function
       | Masc_domain.Task_error.NotClaimed _
       | Masc_domain.Task_error.InvalidState _
       | Masc_domain.Task_error.InvalidId _) -> `Bad_request
-  | Masc_domain.Agent
-      (Masc_domain.Agent_error.NotJoined _
-      | Masc_domain.Agent_error.AlreadyJoined _
-      | Masc_domain.Agent_error.InvalidName _) -> `Bad_request
-  | Masc_domain.Portal _ -> `Bad_request
+  | Masc_domain.Agent (Masc_domain.Agent_error.InvalidName _) -> `Bad_request
   | Masc_domain.System _ -> `Bad_request
   | Masc_domain.RateLimitExceeded _ -> `Too_many_requests
   | Masc_domain.CacheError _ -> `Internal_server_error
@@ -734,7 +772,8 @@ let authorize_permission_request ~base_path ~permission request :
   let auth_cfg = Auth.load_auth_config base_path in
   let token = auth_token_from_request request in
   match ensure_strict_http_token_auth ~endpoint:"HTTP read access" auth_cfg with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+      { reason = Generic; message = msg }))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -746,7 +785,9 @@ let authorize_permission_request ~base_path ~permission request :
           then
             Error
               (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
+                 { reason = Missing_token
+                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
+                 }))
           else
             Auth.check_permission base_path ~agent_name ~token ~permission)
 
@@ -766,7 +807,8 @@ let authorize_tool_request ~base_path ~tool_name request :
       (match ensure_strict_http_token_auth
                ~endpoint:("HTTP tool access for " ^ tool_name) auth_cfg
        with
-  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg))
+  | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+      { reason = Generic; message = msg }))
   | Ok auth_cfg -> (
       match resolve_agent_name_for_auth ~base_path request ~token with
       | Error err -> Error err
@@ -778,7 +820,9 @@ let authorize_tool_request ~base_path ~tool_name request :
           then
             Error
               (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-                 "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"))
+                 { reason = Missing_token
+                 ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)"
+                 }))
           else
             Auth.authorize_tool_v2 base_path ~agent_name ~token ~tool_name))
 
@@ -788,17 +832,23 @@ let authorize_token_bound_permission_request ~base_path ~permission request :
   if not auth_cfg.enabled then
     Error
       (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         "HTTP mutation requires room auth enabled with require_token=true."))
+         { reason = Missing_token
+         ; message = "HTTP mutation requires workspace auth enabled with require_token=true."
+         }))
   else if not auth_cfg.require_token then
     Error
       (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-         "HTTP mutation requires bearer token auth (require_token=true)."))
+         { reason = Missing_token
+         ; message = "HTTP mutation requires bearer token auth (require_token=true)."
+         }))
   else
     match auth_token_from_request request with
     | None ->
         Error
           (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
-             "Authentication required. Use 'Authorization: Bearer <token>' header."))
+             { reason = Missing_token
+             ; message = "Authentication required. Use 'Authorization: Bearer <token>' header."
+             }))
     | Some token -> (
         match Auth.find_credential_by_token base_path ~token with
         | Error err -> Error err
@@ -836,7 +886,7 @@ and with_read_auth handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_read_request ~base_path request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -848,7 +898,7 @@ and with_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_permission_request ~base_path ~permission request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -860,7 +910,7 @@ and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_tool_request ~base_path ~tool_name request with
       | Ok () ->
           (match check_agent_rate_limit request reqd with
@@ -872,7 +922,7 @@ and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
   | None -> Http_server_eio.Response.json {|{"error":"not initialized"}|} reqd
   | Some state ->
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match authorize_token_bound_permission_request ~base_path ~permission request with
       | Ok agent_name ->
           (match check_agent_rate_limit request reqd with

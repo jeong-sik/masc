@@ -8,18 +8,20 @@ let append_entry ~keeper_name ~failure_label (acc : Trajectory.accumulator) entr
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.error
-      "keeper:%s %s persist failed: %s"
-      keeper_name
+    Log.Keeper.error ~keeper_name:keeper_name
+      "%s persist failed: %s"
       failure_label
       (Printexc.to_string exn);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ThinkingPersistFailures)
       ~labels:[ "keeper", keeper_name ]
       ()
 ;;
 
-let persist_response_content ~keeper_name ~trajectory_acc content =
+(* [turn] is the per-turn index from the OAS [after_turn] hook
+   ([Hooks.AfterTurn { turn; _ }]), NOT [acc.turn]: this is invoked once per
+   turn so every turn's reasoning is stamped with its own turn number. *)
+let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
   match trajectory_acc with
   | None -> ()
   | Some acc ->
@@ -31,7 +33,7 @@ let persist_response_content ~keeper_name ~trajectory_acc content =
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
-            ; turn = acc.Trajectory.turn
+            ; turn
             ; content
             ; content_length = String.length content
             ; redacted = false
@@ -42,7 +44,7 @@ let persist_response_content ~keeper_name ~trajectory_acc content =
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
-            ; turn = acc.Trajectory.turn
+            ; turn
             ; content = "[redacted]"
             ; content_length = 0
             ; redacted = true

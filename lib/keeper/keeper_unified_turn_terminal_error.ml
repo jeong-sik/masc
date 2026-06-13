@@ -1,35 +1,35 @@
 module EC = Keeper_error_classify
 
-let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
-  if EC.is_cascade_exhausted_error err
+let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
+  if EC.is_runtime_exhausted_error err
   then (
-    Keeper_registry.mark_turn_cascade_exhausted
-      ~base_path:config.Coord.base_path
+    Keeper_registry.mark_turn_runtime_exhausted
+      ~base_path:config.Workspace.base_path
       keeper_name;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string FsmEdgeTransitions)
       ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
       ();
     Log.Keeper.warn
-      "%s: all cascades exhausted (terminal) — last_err=%s attempt=%d \
-       attempted_cascades=[%s]"
+      "%s: all runtimes exhausted (terminal) — last_err=%s attempt=%d \
+       attempted_runtimes=[%s]"
       keeper_name
       (Agent_sdk.Error.to_string err)
       attempt
-      (String.concat ", " attempted_cascades);
-    Prometheus.inc_counter
+      (String.concat ", " attempted_runtimes);
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
-        ; "phase", Keeper_oas_execution_error_phase.(to_label Cascade_exhausted)
+        ; "phase", Keeper_oas_execution_error_phase.(to_label Runtime_exhausted)
         ]
       ())
   else (
     Keeper_registry.set_turn_phase
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name

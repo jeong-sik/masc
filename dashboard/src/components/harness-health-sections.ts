@@ -31,7 +31,7 @@ function ItemTitle({ children, class: cx }: { children: unknown; class?: string 
  * Pure filter for recent verdict rows.
  *
  * Case-insensitive substring match on `task_title`, `task_id`, `agent_name`,
- * `gate`, `evaluator_cascade`, and `verdict` so operators can locate a
+ * `gate`, `evaluator_runtime`, and `verdict` so operators can locate a
  * verdict by any visible identifier.
  *
  * Empty/whitespace query returns the input reference unchanged so
@@ -50,7 +50,7 @@ export function filterVerdicts(
     if (item.task_id && item.task_id.toLowerCase().includes(needle)) return true
     if (item.agent_name && item.agent_name.toLowerCase().includes(needle)) return true
     if (item.gate && item.gate.toLowerCase().includes(needle)) return true
-    if (item.evaluator_cascade && item.evaluator_cascade.toLowerCase().includes(needle)) return true
+    if (item.evaluator_runtime && item.evaluator_runtime.toLowerCase().includes(needle)) return true
     if (item.verdict && item.verdict.toLowerCase().includes(needle)) return true
     return false
   })
@@ -372,7 +372,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
           type="search"
           class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
-          placeholder="task / agent / gate / cascade 필터"
+          placeholder="task / agent / gate / runtime 필터"
           ariaLabel="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
         />
@@ -385,7 +385,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
               <div>
                 <${ItemTitle}>${item.task_title || item.task_id}</${ItemTitle}>
                 <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
-                  ${item.agent_name || '(unknown agent)'} · ${item.gate || '(unknown gate)'} · ${item.evaluator_cascade || '(unknown cascade)'} · ${formatTimestampKo(item.timestamp)}
+                  ${item.agent_name || '(unknown agent)'} · ${item.gate || '(unknown gate)'} · ${item.evaluator_runtime || '(unknown runtime)'} · ${formatTimestampKo(item.timestamp)}
                 </div>
               </div>
               <${StatusDot} size="md" class=${verdictTone(item.verdict)} />

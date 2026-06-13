@@ -10,7 +10,7 @@ open Alcotest
     so the assertion is direct: top-level [let dispatch = ...] and
     [let dispatch_structured = ...] must not exist in tool_dispatch.ml. *)
 
-let file = "lib/tool_dispatch.ml"
+let file = "lib/tool/tool_dispatch.ml"
 
 let test_no_dispatch_top_level_binding () =
   let n = Ast_grep.count_value_bindings ~module_path:file ~name:"dispatch" in
@@ -33,11 +33,11 @@ let test_guarded_dispatch_binding_present () =
 let test_guarded_dispatch_callers_intact () =
   let n =
     Ast_grep.count_calls
-      ~module_path:"lib/keeper/agent_tool_remote_mcp_runtime.ml"
+      ~module_path:"lib/keeper/keeper_tool_registered_runtime.ml"
       ~callee:"Tool_dispatch.guarded_dispatch"
   in
   if n < 1
-  then failf "agent_tool_remote_mcp_runtime.ml must call guarded_dispatch ≥ 1; got %d" n
+  then failf "keeper_tool_registered_runtime.ml must call guarded_dispatch ≥ 1; got %d" n
 ;;
 
 let () =

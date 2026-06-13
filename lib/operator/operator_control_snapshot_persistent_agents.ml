@@ -9,7 +9,7 @@
       operator snapshot schema (lossless filter — values are forwarded
       through `field_or_null`, no field synthesis).
     - When [keeper_rows] is absent, walks
-      [Keeper_types.persistent_agent_names config] (or the explicit
+      [Keeper_meta_store.persistent_agent_names config] (or the explicit
       [?keeper_names]), reads each keeper meta, asks
       [Dashboard_cache.get_or_compute] for a 2s-cached
       [Keeper_status_runtime.parse_agent_status] view, and assembles the
@@ -18,7 +18,6 @@
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
 
-module U = Yojson.Safe.Util
 include Operator_control_context_snapshot
 
 let persistent_agents_json ?keeper_names ?keeper_rows config =
@@ -57,10 +56,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "active_model", field_or_null "active_model"
                  ; "active_model_label", field_or_null "active_model_label"
                  ; "last_model_used_label", field_or_null "last_model_used_label"
-                 ; "cascade_name", field_or_null "cascade_name"
-                 ; "cascade_canonical", field_or_null "cascade_canonical"
-                 ; ( "selected_cascade_canonical"
-                   , field_or_null "selected_cascade_canonical" )
+                 ; "runtime_id", field_or_null "runtime_id"
+                 ; "runtime_canonical", field_or_null "runtime_canonical"
+                 ; ( "selected_runtime_canonical"
+                   , field_or_null "selected_runtime_canonical" )
                  ; "primary_model", field_or_null "primary_model"
                  ; "next_model_hint", field_or_null "next_model_hint"
                  ; "active_goal_ids", field_or_null "active_goal_ids"
@@ -78,31 +77,30 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
+        | None -> Keeper_meta_store.persistent_agent_names config
       in
       rows_from_keeper_rows names rows
     | None ->
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_types.persistent_agent_names config
+        | None -> Keeper_meta_store.persistent_agent_names config
       in
+      let agent_status_cache_ttl_s = 2.0 in
       List.filter_map
         (fun name ->
-           match Keeper_types.read_meta config name with
+           match Keeper_meta_store.read_meta config name with
            | Error _ | Ok None -> None
            | Ok (Some meta) ->
              let agent_json =
                let cache_key = "kas:" ^ meta.agent_name in
-               Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+               Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
                  Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name)
              in
              let agent_status =
                match agent_json with
                | `Assoc _ ->
-                 (match agent_json |> U.member "status" with
-                  | `String status -> status
-                  | _ -> "unknown")
+                 Json_util.get_string agent_json "status" |> Option.value ~default:"unknown"
                | _ -> "unknown"
              in
              let context_snapshot = keeper_context_snapshot_of_meta config meta in

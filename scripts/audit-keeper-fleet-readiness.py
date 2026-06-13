@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
-This is intentionally read-only. It separates configuration readiness
-(Docker, repo CLI identity, repo-mutation-capable preset) from durable evidence
-(recent turns, board actions, persisted PR references) so operators do not
-mistake a configured capability for proof that every keeper already used it.
+This is intentionally read-only. It separates static sandbox/runtime
+configuration from durable evidence (recent turns, board actions, persisted PR
+references) so operators do not mistake a configured capability for proof that
+every keeper already used it.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ import os
 import re
 import sys
 import time
-from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -25,7 +24,6 @@ from typing import Any
 import tomllib
 
 
-PR_CAPABLE_PRESETS = {"research", "delivery", "full"}
 BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
@@ -36,6 +34,7 @@ BOARD_TOOLS = {
 }
 WEB_SEARCH_TOOLS = {
     "masc_web_search",
+    "WebSearch",
     "SearchWeb",
 }
 PRODUCT_DOMAIN_MARKERS = {
@@ -62,7 +61,6 @@ PR_CREATED_NUMBER_RE = re.compile(
     r"(?:draft\s+)?PR\s*#([0-9]+)\b",
     re.IGNORECASE,
 )
-GH_HOSTS_USER_RE = re.compile(r"^\s*user:\s*['\"]?([^'\"\s#]+)")
 ERROR_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
@@ -79,12 +77,7 @@ class KeeperAudit:
     runtime_path: str | None
     sandbox_profile: str | None
     network_mode: str | None
-    tool_preset: str | None
-    repo_cli_identity: str | None
-    github_account_login: str | None
-    git_identity_mode: str | None
-    credential_dir: str | None
-    credential_dir_exists: bool
+    tool_access: list[str] | None
     last_turn_ts: float | None
     last_turn_age_hours: float | None
     recent_action: bool
@@ -93,7 +86,6 @@ class KeeperAudit:
     product_action: bool
     design_action: bool
     pr_created_evidence: bool
-    pr_url_evidence: bool
     provider_turn_evidence: bool
     checkpoint_evidence: bool
     history_evidence: bool
@@ -121,11 +113,6 @@ class PrCreationEvidence:
     @property
     def created(self) -> bool:
         return bool(self.refs)
-
-    @property
-    def url_present(self) -> bool:
-        return any(ref.startswith("https://github.com/") for ref in self.refs)
-
 
 @dataclass
 class PersistentWorkEvidence:
@@ -182,19 +169,6 @@ def load_toml(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: expected TOML object")
     return data
-
-
-def read_github_account_login(gh_config_dir: Path | None) -> str | None:
-    if gh_config_dir is None:
-        return None
-    hosts_path = gh_config_dir / "hosts.yml"
-    if not hosts_path.is_file():
-        return None
-    for line in hosts_path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = GH_HOSTS_USER_RE.match(line)
-        if match:
-            return match.group(1).strip()
-    return None
 
 
 def merge_dicts(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -289,23 +263,41 @@ def jsonl_has_object(path: Path) -> bool:
     return False
 
 
-def tool_preset_from_config(config: dict[str, Any]) -> str | None:
-    tool_access = config.get("tool_access")
-    if isinstance(tool_access, dict):
-        preset = tool_access.get("preset")
-        if isinstance(preset, str) and preset:
-            return preset
-    preset = config.get("tool_preset")
-    return preset if isinstance(preset, str) and preset else None
+def string_list_value(value: Any) -> list[str] | None:
+    if not isinstance(value, list):
+        return None
+    tools: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        item = item.strip()
+        if item:
+            tools.append(item)
+    return tools
 
 
-def tool_preset_from_runtime(runtime: dict[str, Any]) -> str | None:
-    tool_access = runtime.get("tool_access")
-    if isinstance(tool_access, dict):
-        preset = tool_access.get("preset")
-        if isinstance(preset, str) and preset:
-            return preset
-    return string_field(runtime, "tool_preset")
+def tool_access_from_config(
+    config: dict[str, Any],
+) -> tuple[list[str] | None, list[str]]:
+    raw = config.get("tool_access")
+    if raw is None:
+        return None, []
+    tools = string_list_value(raw)
+    if tools is None:
+        return None, ["tool_access_config_invalid"]
+    return tools, []
+
+
+def tool_access_from_runtime(
+    runtime: dict[str, Any],
+) -> tuple[list[str] | None, list[str]]:
+    raw = runtime.get("tool_access")
+    if raw is None:
+        return None, []
+    tools = string_list_value(raw)
+    if tools is None:
+        return None, ["tool_access_runtime_invalid"]
+    return tools, []
 
 
 def tools_from_decision(row: dict[str, Any]) -> list[str]:
@@ -315,11 +307,6 @@ def tools_from_decision(row: dict[str, Any]) -> list[str]:
         tools.append(tool)
     for key in ("tools_used",):
         values = row.get(key)
-        if isinstance(values, list):
-            tools.extend(v for v in values if isinstance(v, str))
-    contract = row.get("tool_contract")
-    if isinstance(contract, dict):
-        values = contract.get("tools_used")
         if isinstance(values, list):
             tools.extend(v for v in values if isinstance(v, str))
     calls = row.get("tool_calls")
@@ -375,11 +362,11 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
     if isinstance(output, str):
         texts.append(output)
     elif isinstance(output, dict):
-        for key in ("output", "pr_url", "pull_request_url", "url", "html_url"):
+        for key in ("output", "url", "html_url"):
             texts.append(text_field(output, key))
         result = output.get("result")
         if isinstance(result, dict):
-            for key in ("pr_url", "pull_request_url", "url", "html_url"):
+            for key in ("url", "html_url"):
                 texts.append(text_field(result, key))
             for key in ("pr_number", "number"):
                 value = result.get(key)
@@ -393,7 +380,7 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
                 texts.append(f"PR#{value}")
             elif isinstance(value, str) and value.strip().isdigit():
                 texts.append(f"PR#{value.strip()}")
-    for key in ("pr_url", "pull_request_url", "url", "html_url"):
+    for key in ("url", "html_url"):
         texts.append(text_field(row, key))
     for key in ("pr_number", "number"):
         value = row.get(key)
@@ -403,7 +390,7 @@ def pr_ref_texts_from_structured_output(row: dict[str, Any]) -> list[str]:
             texts.append(f"PR#{value.strip()}")
     route_evidence = dict_field(row, "route_evidence")
     if route_evidence is not None:
-        for key in ("pr_url", "pull_request_url", "url", "html_url"):
+        for key in ("url", "html_url"):
             texts.append(text_field(route_evidence, key))
         for key in ("pr_number", "number"):
             value = route_evidence.get(key)
@@ -1055,12 +1042,10 @@ def audit_keeper(
     require_product_evidence: bool,
     require_design_evidence: bool,
     require_pr_created_evidence: bool,
-    require_pr_url_evidence: bool,
     require_provider_turn_evidence: bool,
     require_checkpoint_evidence: bool,
     require_history_evidence: bool,
-    require_tool_call_log_evidence: bool,
-    forbidden_repo_cli_identities: set[str] | None = None,
+    tool_call_log_evidence_required: bool,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -1079,45 +1064,20 @@ def audit_keeper(
     network_mode = string_field(runtime, "network_mode") or string_field(
         config, "network_mode"
     )
-    tool_preset = tool_preset_from_runtime(runtime) or tool_preset_from_config(config)
-    repo_cli_identity = string_field(runtime, "repo_cli_identity") or string_field(
-        config, "repo_cli_identity"
+    config_tool_access, config_tool_access_failures = tool_access_from_config(config)
+    runtime_tool_access, runtime_tool_access_failures = tool_access_from_runtime(
+        runtime
     )
-    git_identity_mode = string_field(runtime, "git_identity_mode") or string_field(
-        config, "git_identity_mode"
+    tool_access = (
+        runtime_tool_access if runtime_tool_access is not None else config_tool_access
     )
 
     if sandbox_profile != "docker":
         failures.append("sandbox_not_docker")
     if network_mode != "inherit":
         failures.append("network_not_inherit")
-    if tool_preset not in PR_CAPABLE_PRESETS:
-        failures.append("preset_not_pr_capable")
-    if not repo_cli_identity:
-        failures.append("repo_cli_identity_missing")
-    elif forbidden_repo_cli_identities and repo_cli_identity in forbidden_repo_cli_identities:
-        failures.append(f"repo_cli_identity_forbidden_{repo_cli_identity}")
-    if git_identity_mode != "repo_cli_identity":
-        failures.append("git_identity_mode_not_repo_cli_identity")
-
-    credential_dir: Path | None = None
-    credential_dir_exists = False
-    github_account_login: str | None = None
-    if repo_cli_identity:
-        credential_dir = (
-            base_path / ".masc" / "repo-cli-identities" / repo_cli_identity / "gh"
-        )
-        credential_dir_exists = credential_dir.is_dir()
-        if not credential_dir_exists:
-            failures.append("github_credential_dir_missing")
-        else:
-            github_account_login = read_github_account_login(credential_dir)
-            if (
-                forbidden_repo_cli_identities
-                and github_account_login in forbidden_repo_cli_identities
-                and github_account_login != repo_cli_identity
-            ):
-                failures.append(f"github_account_forbidden_{github_account_login}")
+    failures.extend(config_tool_access_failures)
+    failures.extend(runtime_tool_access_failures)
 
     evidence_ts, tools = scan_keeper_evidence(
         base_path,
@@ -1173,7 +1133,6 @@ def audit_keeper(
     product_action = bool(product_evidence)
     design_action = bool(design_evidence)
     pr_created_evidence = pr_creation_evidence.created
-    pr_url_evidence = pr_creation_evidence.url_present
     provider_turn_evidence = persistent_work_evidence.provider_turn
     checkpoint_evidence = persistent_work_evidence.checkpoint
     history_evidence = persistent_work_evidence.history
@@ -1190,17 +1149,13 @@ def audit_keeper(
         failures.append("pr_created_evidence_missing")
     elif not pr_created_evidence:
         warnings.append("pr_created_evidence_missing")
-    if require_pr_url_evidence and not pr_url_evidence:
-        failures.append("pr_url_evidence_missing")
-    elif pr_created_evidence and not pr_url_evidence:
-        warnings.append("pr_url_evidence_missing")
     if require_provider_turn_evidence and not provider_turn_evidence:
         failures.append("provider_turn_evidence_missing")
     if require_checkpoint_evidence and not checkpoint_evidence:
         failures.append("checkpoint_evidence_missing")
     if require_history_evidence and not history_evidence:
         failures.append("history_evidence_missing")
-    if require_tool_call_log_evidence and not tool_call_log_evidence:
+    if tool_call_log_evidence_required and not tool_call_log_evidence:
         failures.append("tool_call_log_evidence_missing")
 
     return KeeperAudit(
@@ -1209,12 +1164,7 @@ def audit_keeper(
         runtime_path=str(runtime_path) if runtime_path.exists() else None,
         sandbox_profile=sandbox_profile,
         network_mode=network_mode,
-        tool_preset=tool_preset,
-        repo_cli_identity=repo_cli_identity,
-        github_account_login=github_account_login,
-        git_identity_mode=git_identity_mode,
-        credential_dir=str(credential_dir) if credential_dir else None,
-        credential_dir_exists=credential_dir_exists,
+        tool_access=tool_access,
         last_turn_ts=last_turn_ts,
         last_turn_age_hours=last_turn_age_hours,
         recent_action=recent_action,
@@ -1223,7 +1173,6 @@ def audit_keeper(
         product_action=product_action,
         design_action=design_action,
         pr_created_evidence=pr_created_evidence,
-        pr_url_evidence=pr_url_evidence,
         provider_turn_evidence=provider_turn_evidence,
         checkpoint_evidence=checkpoint_evidence,
         history_evidence=history_evidence,
@@ -1268,7 +1217,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_product_evidence=args.require_product_evidence,
             require_design_evidence=args.require_design_evidence,
             require_pr_created_evidence=args.require_pr_created_evidence,
-            require_pr_url_evidence=args.require_pr_url_evidence,
             require_provider_turn_evidence=(
                 args.require_provider_turn_evidence
                 or args.require_persistent_work_evidence
@@ -1280,11 +1228,10 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             require_history_evidence=(
                 args.require_history_evidence or args.require_persistent_work_evidence
             ),
-            require_tool_call_log_evidence=(
-                args.require_tool_call_log_evidence
+            tool_call_log_evidence_required=(
+                args.tool_call_log_evidence_required
                 or args.require_persistent_work_evidence
             ),
-            forbidden_repo_cli_identities=set(args.forbid_repo_cli_identity or []),
         )
         for path in config_paths
     ]
@@ -1294,12 +1241,6 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         fleet_failures.append(
             f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
         )
-    repo_cli_identity_counts = Counter(
-        keeper.repo_cli_identity for keeper in keepers if keeper.repo_cli_identity
-    )
-    github_account_counts = Counter(
-        keeper.github_account_login for keeper in keepers if keeper.github_account_login
-    )
     failed_keepers = [keeper for keeper in keepers if keeper.failures]
     ok = not fleet_failures and not failed_keepers
     return {
@@ -1309,20 +1250,16 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "expected_keepers": args.expected_keepers,
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
-        "repo_cli_identity_counts": dict(sorted(repo_cli_identity_counts.items())),
-        "github_account_counts": dict(sorted(github_account_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
             "require_web_search_evidence": args.require_web_search_evidence,
             "require_product_evidence": args.require_product_evidence,
             "require_design_evidence": args.require_design_evidence,
-            "forbid_repo_cli_identity": args.forbid_repo_cli_identity or [],
             "require_pr_created_evidence": args.require_pr_created_evidence,
-            "require_pr_url_evidence": args.require_pr_url_evidence,
             "require_provider_turn_evidence": args.require_provider_turn_evidence,
             "require_checkpoint_evidence": args.require_checkpoint_evidence,
             "require_history_evidence": args.require_history_evidence,
-            "require_tool_call_log_evidence": args.require_tool_call_log_evidence,
+            "tool_call_log_evidence_required": args.tool_call_log_evidence_required,
             "require_persistent_work_evidence": args.require_persistent_work_evidence,
         },
         "fleet_failures": fleet_failures,
@@ -1350,22 +1287,25 @@ def print_text(report: dict[str, Any]) -> None:
         marker = "OK" if not failures else "FAIL"
         age = keeper["last_turn_age_hours"]
         age_label = "unknown" if age is None else f"{age:.2f}h"
+        tool_access_label = (
+            "default"
+            if keeper["tool_access"] is None
+            else str(len(keeper["tool_access"]))
+        )
         print(
-            "- {name}: {marker} preset={preset} sandbox={sandbox}/{network} "
-            "gh={github} recent={recent} age={age} board={board} "
+            "- {name}: {marker} tool_access={tool_access} "
+            "sandbox={sandbox}/{network} "
+            "recent={recent} age={age} board={board} "
             "web_search={web_search} "
-            "gh_account={github_account} "
             "product={product} design={design} "
-            "pr_created={pr_created} pr_url={pr_url} "
+            "pr_created={pr_created} "
             "provider_turn={provider_turn} checkpoint={checkpoint} "
             "history={history} tool_call_log={tool_call_log}".format(
                 name=keeper["name"],
                 marker=marker,
-                preset=keeper["tool_preset"],
+                tool_access=tool_access_label,
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
-                github=keeper["repo_cli_identity"],
-                github_account=keeper["github_account_login"],
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
                 board=str(keeper["board_action"]).lower(),
@@ -1373,7 +1313,6 @@ def print_text(report: dict[str, Any]) -> None:
                 product=str(keeper["product_action"]).lower(),
                 design=str(keeper["design_action"]).lower(),
                 pr_created=str(keeper["pr_created_evidence"]).lower(),
-                pr_url=str(keeper["pr_url_evidence"]).lower(),
                 provider_turn=str(keeper["provider_turn_evidence"]).lower(),
                 checkpoint=str(keeper["checkpoint_evidence"]).lower(),
                 history=str(keeper["history_evidence"]).lower(),
@@ -1413,16 +1352,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--max-silence-hours", type=float, default=2400.0)
     parser.add_argument(
-        "--forbid-github-identity",
-        action="append",
-        default=[],
-        metavar="IDENTITY",
-        help=(
-            "Fail keepers using this repo CLI identity. Repeat for multiple "
-            "operator or unsafe identity names."
-        ),
-    )
-    parser.add_argument(
         "--no-require-board-evidence",
         action="store_false",
         dest="require_board_evidence",
@@ -1432,7 +1361,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-web-search-evidence",
         action="store_true",
         help=(
-            "Fail unless each keeper has successful masc_web_search/SearchWeb "
+            "Fail unless each keeper has successful masc_web_search/WebSearch/SearchWeb "
             "evidence from decision or global tool-call logs."
         ),
     )
@@ -1456,11 +1385,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-pr-created-evidence",
         action="store_true",
         help="Fail unless each keeper has structured successful PR creation evidence.",
-    )
-    parser.add_argument(
-        "--require-pr-url-evidence",
-        action="store_true",
-        help="Fail unless each keeper has a structured GitHub pull request URL.",
     )
     parser.add_argument(
         "--require-provider-turn-evidence",
@@ -1493,8 +1417,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--require-tool-call-log-evidence",
+        "--tool-call-log-evidence-required",
         action="store_true",
+        dest="tool_call_log_evidence_required",
         help=(
             "Fail unless each keeper has a turn_finished manifest row whose "
             "linked tool-call log contains a matching row."

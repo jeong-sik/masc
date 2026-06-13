@@ -22,7 +22,7 @@ module Turn_state = struct
   type t =
     | Idle
     | Phase_gating
-    | Cascade_routing
+    | Runtime_routing
     | Done
   [@@deriving tla]
 end
@@ -68,7 +68,7 @@ let test_turn_state_to_tla_symbol () =
   assert (Turn_state.to_tla_symbol Turn_state.Idle = "idle");
   assert (Turn_state.to_tla_symbol Turn_state.Phase_gating = "phase_gating");
   assert (
-    Turn_state.to_tla_symbol Turn_state.Cascade_routing = "cascade_routing");
+    Turn_state.to_tla_symbol Turn_state.Runtime_routing = "runtime_routing");
   assert (Turn_state.to_tla_symbol Turn_state.Done = "done")
 
 let test_turn_state_all_states () =
@@ -77,7 +77,7 @@ let test_turn_state_all_states () =
     = [
         Turn_state.Idle;
         Turn_state.Phase_gating;
-        Turn_state.Cascade_routing;
+        Turn_state.Runtime_routing;
         Turn_state.Done;
       ])
 

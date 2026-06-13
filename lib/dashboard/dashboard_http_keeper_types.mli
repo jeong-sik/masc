@@ -15,15 +15,15 @@ val runtime_warning_ctx_ratio : float
 (** Dashboard health scoring thresholds, sourced from
     [Env_config_keeper.DashboardHealth]. *)
 
-val live_keeper_cascade_name_result :
-  string -> (Cascade_name.t, [ `Unresolved of string ]) result
-(** Resolve a raw cascade name to its live (post-rotation) identifier.
+val live_keeper_runtime_id_result :
+  string -> (string, [ `Unresolved of string ]) result
+(** Resolve a raw runtime id to its live (post-rotation) identifier.
     Returns [Error (`Unresolved raw)] when the input cannot be resolved
     to any catalog member; the caller is expected to surface the
     unresolved input directly (e.g. as JSON [null] on the canonical
     field) rather than fall back to a silent default.
 
-    The legacy [live_keeper_cascade_name : string -> string] facade was
+    The legacy [live_keeper_runtime_id : string -> string] facade was
     removed in the RFC-0149 §3.3 sunset closeout.
 
     @since RFC-0149 Phase 1 *)
@@ -58,8 +58,6 @@ val last_latency_ms_json : int -> Yojson.Safe.t
 
     Used by dashboard renderers and execution-trust health computations. *)
 
-val json_string_list_member : string -> Yojson.Safe.t -> string list
-val json_string_member_opt : string -> Yojson.Safe.t -> string option
 val terminal_reason_code_of_decision_json :
   Yojson.Safe.t -> string option
 

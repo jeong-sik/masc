@@ -1,29 +1,29 @@
-# RFC-0038 — Opaque Identifier Types for Provider, Cascade, Model
+# RFC-0038 — Opaque Identifier Types for Provider, Runtime, Model
 
 - **Status**: Draft
 - **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-07
-- **Related**: RFC-0024 (ollama cascade integration), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
+- **Related**: RFC-0024 (ollama runtime integration), RFC-0027 (capability-typed runtime), RFC-0032 (env knob unification), RFC-0037 (local-first enablement boundary)
 - **Files referenced**:
   `lib/provider_adapter.ml:152-167` (legacy provider-name constants),
-  `lib/cascade/cascade_config.ml:277` (provider name match),
+  `lib/runtime/runtime_config.ml:277` (provider name match),
   `lib/keeper/keeper_status_detail.ml:199` (provider name match),
-  `lib/keeper/keeper_cascade_profile.ml:14-22` (cascade variant SSOT),
-  `lib/cascade/cascade_routes.ml:65-94` (route_specs literal list)
+  `lib/keeper/keeper_runtime_profile.ml:14-22` (runtime variant SSOT),
+  `lib/runtime/runtime_routes.ml:65-94` (route_specs literal list)
 
 ## 1. Problem
 
-Provider names, cascade names, and model identifiers appear in source
+Provider names, runtime names, and model identifiers appear in source
 code as **bare string literals** scattered across modules:
 
 | Identifier kind | SSOT location | Example drift sites | Drift count (`rg "<name>"` lib) |
 |-----------------|---------------|---------------------|---------------------------------|
-| Provider name (e.g. "ollama") | legacy `Provider_adapter` provider-name constant | `keeper_status_detail.ml:199`, `cascade_config.ml:277`, `server_routes_http_routes_cascade.ml:16` | 20+ across 14 files |
-| Cascade name (e.g. "primary") | `Keeper_cascade_profile.t` variant | `cascade_routes.ml:65-94`, `cascade_config_loader.ml`, `cascade_routes.mli` | 5 files |
-| Model id (e.g. "qwen3-coder:30b") | `cascade.toml` (data) | scattered string equality checks across cascade resolvers, telemetry tags |  highly variable |
+| Provider name (e.g. "ollama") | legacy `Provider_adapter` provider-name constant | `keeper_status_detail.ml:199`, `runtime_config.ml:277`, `server_routes_http_routes_runtime.ml:16` | 20+ across 14 files |
+| Runtime name (e.g. "primary") | `Keeper_runtime_profile.t` variant | `runtime_routes.ml:65-94`, `runtime_config_loader.ml`, `runtime_routes.mli` | 5 files |
+| Model id (e.g. "qwen3-coder:30b") | `runtime.toml` (data) | scattered string equality checks across runtime resolvers, telemetry tags |  highly variable |
 
 These identifiers are **external to the codebase** — they come from
-provider catalogs, cascade configurations, and external model registries
+provider catalogs, runtime configurations, and external model registries
 that change independently of the source code. Embedding them as string
 literals creates three problems:
 
@@ -31,7 +31,7 @@ literals creates three problems:
    files that re-write `"ollama"` directly. A rename of the canonical
    name (e.g. `"ollama"` → `"ollama-local"`) breaks the unmigrated
    sites silently — unit tests pass, runtime fails.
-2. **No type-safety**: nothing prevents `String.equal cascade_name
+2. **No type-safety**: nothing prevents `String.equal runtime_id
    provider_name` — comparing across kinds. The compiler treats both
    as `string` and the bug surfaces only in production.
 3. **No audit trail**: `rg '"ollama"' lib` produces 20+ hits and you
@@ -48,7 +48,7 @@ rename, harder to reason about boundaries.
 Make the **kind of an identifier explicit in the type system**, and
 move the canonical string to a single place per kind. After this RFC,
 the compiler should reject a comparison between `Provider_id.t` and
-`Cascade_id.t`, and there should be exactly one place in the codebase
+`Runtime_id.t`, and there should be exactly one place in the codebase
 that says `"ollama"` (the registry).
 
 ## 3. Non-Goals
@@ -58,7 +58,7 @@ that says `"ollama"` (the registry).
   established that registration is a compile-time event; this RFC
   doesn't change that. What we do is enforce *use sites* to go
   through the registry rather than re-spelling.
-- **Not** touching `cascade.toml` — operators still see provider
+- **Not** touching `runtime.toml` — operators still see provider
   names as strings in their config files.
 - **Not** an SDK boundary refactor — the agent_sdk layer keeps its
   current types.
@@ -92,8 +92,8 @@ val custom : t
 (* ... one per legacy provider-name constant *)
 ```
 
-Identical pattern for `Cascade_id` (canonical names from
-`Keeper_cascade_profile`) and `Model_id` (free-form, but tagged so
+Identical pattern for `Runtime_id` (canonical names from
+`Keeper_runtime_profile`) and `Model_id` (free-form, but tagged so
 it cannot accidentally substitute for `Provider_id`).
 
 ### 4.2 Migration strategy
@@ -111,8 +111,8 @@ sites only**, not data structures, in three phases:
 - All call sites that imported legacy constants get an automatic compile error and must update — desirable, this is how we find the migration surface.
 - Estimate: ~80-150 LOC of mechanical updates spread across ~15 files.
 
-**Phase C — Cascade_id and Model_id**:
-- Same phantom-type pattern applied to cascade and model identifiers.
+**Phase C — Runtime_id and Model_id**:
+- Same phantom-type pattern applied to runtime and model identifiers.
 - This is the larger refactor and requires its own RFC review.
 
 ### 4.3 What stays a string
@@ -121,8 +121,8 @@ Some `"ollama"` literals in the codebase are *not* provider names —
 they are stable telemetry/dashboard category labels. Example:
 
 ```ocaml
-(* lib/dashboard_cascade.ml:826 *)
-if Masc_network_defaults.is_cli_sentinel_url url then "cli"
+(* lib/dashboard_runtime.ml:826 *)
+if Masc_network_defaults.is_cli_transport_url url then "cli"
 else if Masc_network_defaults.is_ollama_url url then "ollama"   (* ← category tag *)
 else "other"
 ```
@@ -151,7 +151,7 @@ type provider_id = Ollama | Agent-LLM-A | Glm | ...
 Variants are *closed*. RFC-0024 established that adding a provider
 requires editing `direct_adapters`. A variant would force every
 exhaustive `match` site to update — for some boundaries that's
-desirable (cascade routing), for others it's noise (telemetry, log
+desirable (runtime routing), for others it's noise (telemetry, log
 formatting). The phantom-typed `private string` alias gives
 type-safety without forcing exhaustiveness.
 
@@ -161,7 +161,7 @@ type-safety without forcing exhaustiveness.
 |-------|-------|-----|--------|
 | A | route through the legacy provider-name SSOT (no new module) | ~30 | DONE — companion PR #14111 |
 | B | introduce `Provider_id.t = private string`, migrate call sites | ~150 | OPEN — needs separate sign-off |
-| C | `Cascade_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
+| C | `Runtime_id.t`, `Model_id.t` + migration | ~300 | DEFERRED — needs review of Phase B outcome |
 
 Phase A ships immediately to remove the most acute drift. Phase B is
 the actual type-safety win and requires a separate review because it
@@ -174,7 +174,7 @@ legacy provider-name constants (fixable by mechanical rename).
 |-------|--------|----------------|
 | C1 (Phase A) | `rg '"ollama"' lib --no-filename \| wc -l` decreases | from 20+ to ≤4 (telemetry/dashboard category labels remaining, intentionally decoupled) |
 | C2 (Phase B) | `Provider_id.t` opaque — `rg "Provider_id\.t = string"` returns 0 outside `provider_id.ml` | yes |
-| C3 (Phase B) | `(p : Provider_id.t) = (c : Cascade_id.t)` is a compile error | yes |
+| C3 (Phase B) | `(p : Provider_id.t) = (c : Runtime_id.t)` is a compile error | yes |
 | C4 (Phase A+B) | Adding a new provider requires touching only `direct_adapters` and `Provider_id.t` exposure list | manual code review |
 
 ## 7. Risks and Tradeoffs

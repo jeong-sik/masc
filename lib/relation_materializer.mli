@@ -9,16 +9,16 @@
 
     Internal helpers ([log_err], [build_batch_mutation],
     [record_collaborations_async]) are hidden — callers consume
-    only the two lifecycle hooks below, which {!Coord_hooks} wires
-    in via [Atomic.set] in [Coord]'s init.
+    only the two lifecycle hooks below, which {!Workspace_hooks} wires
+    in via [Atomic.set] in [Workspace]'s init.
 
     @since 2.112.0 *)
 
-val on_agent_leave :
+val on_agent_session_ended :
   leaving_agent:string ->
   active_agents:string list ->
   unit
-(** When an agent leaves a MASC room, record [COLLABORATED_WITH]
+(** When an agent session ends, record [COLLABORATED_WITH]
     edges between [leaving_agent] and every other member of
     [active_agents] (the leaver itself is filtered out). No-op
     when no peers remain. *)

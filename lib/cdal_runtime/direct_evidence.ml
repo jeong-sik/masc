@@ -105,9 +105,7 @@ let tool_contracts_to_json tools =
        (fun (tool : Tool.t) ->
           let descriptor = Tool.descriptor tool in
           let kind =
-            match Option.bind descriptor (fun d -> d.kind) with
-            | Some value -> `String value
-            | None -> `Null
+            Json_util.string_opt_to_json (Option.bind descriptor (fun d -> d.kind))
           in
           let shell =
             match Option.bind descriptor (fun d -> d.shell) with
@@ -125,9 +123,7 @@ let tool_contracts_to_json tools =
             |> Option.value ~default:[]
           in
           let mutation_class =
-            match Option.bind descriptor (fun d -> d.mutation_class) with
-            | Some value -> `String value
-            | None -> `Null
+            Json_util.string_opt_to_json (Option.bind descriptor (fun d -> d.mutation_class))
           in
           `Assoc
             [ "name", `String tool.schema.name

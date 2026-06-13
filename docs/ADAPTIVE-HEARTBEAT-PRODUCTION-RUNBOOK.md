@@ -2,7 +2,7 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
   - lib/keeper/keeper_heartbeat_smart.ml
 ---
@@ -25,7 +25,7 @@ code_refs:
 ## Scope
 
 - 포함: `work-as-heartbeat`, `self-preservation`, `Crashed/Dead` keeper state
-- 제외: gRPC heartbeat, phi-accrual, cascade scheduler
+- 제외: gRPC heartbeat, phi-accrual, runtime scheduler
 
 기본 transport posture:
 
@@ -109,7 +109,7 @@ Stop immediately if:
 
 - any `Dead` keeper resurrects without operator action
 - reconcile relaunches a registered keeper
-- failed `Room.heartbeat_in_room` is followed by freshness skip
+- failed `Workspace.heartbeat_in_workspace` is followed by freshness skip
 - unplanned self-preservation triggers
 
 ## Stage 2: Expanded Cohort Soak
@@ -207,7 +207,7 @@ If recovery ownership remains unsafe after soft rollback, redeploy the previous 
 
 ### Freshness/Heartbeat Drift
 
-- if turn success is visible but room heartbeat is failing, verify `last_successful_heartbeat_age_sec` is aging
+- if turn success is visible but workspace heartbeat is failing, verify `last_successful_heartbeat_age_sec` is aging
 - if freshness skip still fires in that condition, rollback immediately
 
 ## Production Blockers

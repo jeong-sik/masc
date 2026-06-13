@@ -13,7 +13,7 @@ pushed the branch, and opened a draft PR — all without human intervention.
 ## Task
 
 - **Task ID**: task-441
-- **Title**: Lifecycle proof: create draft PR with keeper artifact in masc-mcp
+- **Title**: Lifecycle proof: create draft PR with keeper artifact in masc
 - **Priority**: P2
 - **Goal**: goal-keeper-pr-lifecycle-64-20260519
 

@@ -6,7 +6,7 @@ let make_message ?(content = "hello") ?(keeper_name = "luna")
     Channel_gate.channel = "discord";
     channel_user_id;
     channel_user_name = "user";
-    channel_room_id = "room-1";
+    channel_workspace_id = "workspace-1";
     keeper_name;
     content;
     idempotency_key;
@@ -65,6 +65,10 @@ let test_validate_allows_key_after_cleanup () =
   match Channel_gate.validate message with
   | Ok () -> ()
   | Error _ -> fail "cleanup should evict expired idempotency key"
+
+let test_dedup_ttl_covers_discord_resume_replays () =
+  check bool "default ttl spans long gateway resume/replay windows" true
+    (Channel_gate.dedup_ttl_sec () >= 3600.0)
 
 let test_failed_validation_does_not_consume_idempotency_key () =
   reset_dedup ();
@@ -126,7 +130,7 @@ let test_inbound_of_json_normalizes_channel_label () =
       ("channel", `String "  DisCord  ");
       ("channel_user_id", `String "user-1");
       ("channel_user_name", `String "user");
-      ("channel_room_id", `String "room-1");
+      ("channel_workspace_id", `String "workspace-1");
       ("keeper_name", `String "luna");
       ("content", `String "hello");
       ("idempotency_key", `String (unique_key "json"));
@@ -140,7 +144,7 @@ let test_inbound_of_json_normalizes_channel_label () =
 (* ── Mock dispatch for handle_inbound tests ──────────────────── *)
 
 let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
   Gate_protocol.Reply {
     content = "mock reply";
     structured = None;
@@ -148,11 +152,11 @@ let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
   }
 
 let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
   Gate_protocol.Keeper_error_result "mock keeper error"
 
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
-    ~channel_room_id:_ ~keeper_name:_ ~content:_ =
+    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
   Gate_protocol.Unavailable_result
 
 let test_handle_inbound_success () =
@@ -195,10 +199,12 @@ let test_handle_inbound_validation_blocks_dispatch () =
 let test_handle_inbound_passes_channel_context_to_dispatch () =
   reset_dedup ();
   let seen = ref None in
-  let dispatch ~channel ~channel_user_id ~channel_user_name ~channel_room_id
-      ~keeper_name:_ ~content:_ =
+  let dispatch ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+      ~keeper_name:_ ~metadata ~content:_ =
     seen :=
-      Some (channel, channel_user_id, channel_user_name, channel_room_id);
+      Some
+        (channel, channel_user_id, channel_user_name, channel_workspace_id,
+         metadata);
     Gate_protocol.Reply {
       content = "ok";
       structured = None;
@@ -209,18 +215,50 @@ let test_handle_inbound_passes_channel_context_to_dispatch () =
     {
       (make_message ~idempotency_key:(unique_key "dispatch-context") ()) with
       channel_user_name = "Alice";
-      channel_room_id = "thread-7";
+      channel_workspace_id = "thread-7";
+      metadata = [ ("discord.guild_id", "guild-1") ];
     }
   in
   match Channel_gate.handle_inbound ~dispatch msg with
   | Ok _ -> (
       match !seen with
-      | Some (channel, user_id, user_name, room_id) ->
+      | Some (channel, user_id, user_name, workspace_id, metadata) ->
           check string "channel" "discord" channel;
           check string "user id" "user-1" user_id;
           check string "user name" "Alice" user_name;
-          check string "room id" "thread-7" room_id
+          check string "workspace id" "thread-7" workspace_id;
+          check string "metadata" "guild-1"
+            (List.assoc "discord.guild_id" metadata)
       | None -> fail "dispatch should receive connector context" )
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
+let test_handle_inbound_passes_metadata_to_dispatch () =
+  reset_dedup ();
+  let seen = ref None in
+  let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+      ~channel_workspace_id:_ ~keeper_name:_ ~metadata ~content:_ =
+    seen := Some metadata;
+    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+  in
+  let msg =
+    {
+      (make_message ~idempotency_key:(unique_key "dispatch-metadata") ()) with
+      metadata =
+        [
+          ("conversation_id", "discord:guild-1:channel:thread-7");
+          ("external_message_id", "msg-7");
+        ];
+    }
+  in
+  match Channel_gate.handle_inbound ~dispatch msg with
+  | Ok _ -> (
+      match !seen with
+      | Some metadata ->
+          check string "conversation id" "discord:guild-1:channel:thread-7"
+            (List.assoc "conversation_id" metadata);
+          check string "external message id" "msg-7"
+            (List.assoc "external_message_id" metadata)
+      | None -> fail "dispatch should receive metadata")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
 let () =
@@ -238,6 +276,8 @@ let () =
             test_validate_rejects_duplicate_message;
           test_case "allows key after cleanup" `Quick
             test_validate_allows_key_after_cleanup;
+          test_case "dedup ttl covers discord resume replays" `Quick
+            test_dedup_ttl_covers_discord_resume_replays;
           test_case "failed validation does not consume key" `Quick
             test_failed_validation_does_not_consume_idempotency_key;
           test_case "serializes duplicate race under eio" `Quick
@@ -253,6 +293,8 @@ let () =
             test_handle_inbound_success;
           test_case "passes channel context to dispatch" `Quick
             test_handle_inbound_passes_channel_context_to_dispatch;
+          test_case "passes metadata to dispatch" `Quick
+            test_handle_inbound_passes_metadata_to_dispatch;
           test_case "returns keeper error" `Quick
             test_handle_inbound_keeper_error;
           test_case "returns unavailable" `Quick

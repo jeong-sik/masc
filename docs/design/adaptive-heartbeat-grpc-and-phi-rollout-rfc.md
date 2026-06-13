@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_heartbeat_smart.ml
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
 ---
 
@@ -34,7 +34,7 @@ code_refs:
 
 - gRPC heartbeat를 기존 adaptive heartbeat safety model과 충돌 없이 production에 올리는 조건을 정의한다.
 - phi-accrual을 바로 enforcement 하지 않고 shadow mode, advisory mode, enforcement candidate를 분리한다.
-- local room heartbeat와 gRPC heartbeat의 ownership boundary를 문서로 고정한다.
+- local workspace heartbeat와 gRPC heartbeat의 ownership boundary를 문서로 고정한다.
 
 ## 2. Current State
 
@@ -53,26 +53,26 @@ code_refs:
 
 다음은 gRPC/Phi follow-up에서도 깨지면 안 되는 invariant다.
 
-- room-level freshness lease의 SSOT는 여전히 successful `Room.heartbeat_in_room` 이다.
+- workspace-level freshness lease의 SSOT는 여전히 successful `Workspace.heartbeat_in_workspace` 이다.
 - gRPC ack 성공은 `last_successful_heartbeat_ts` 를 갱신하지 않는다.
-- gRPC ack 성공은 room presence `consecutive_failures` 를 reset하지 않는다.
+- gRPC ack 성공은 workspace presence `consecutive_failures` 를 reset하지 않는다.
 - `Crashed`, `Dead`, restart budget, self-preservation ownership은 supervisor/local keepalive path가 가진다.
 - gRPC heartbeat loss만으로 keeper를 `Crashed` 나 `Dead` 로 전이하지 않는다. 첫 production rollout에서는 advisory only 다.
 
 ### 3.2 Non-Goals
 
-- local room heartbeat를 gRPC heartbeat로 대체하지 않는다.
+- local workspace heartbeat를 gRPC heartbeat로 대체하지 않는다.
 - phi-accrual을 첫 rollout부터 restart gate로 쓰지 않는다.
-- gRPC ack latency를 room/filesystem health proxy로 쓰지 않는다.
-- cascade scheduler rollout을 이 문서에서 다루지 않는다.
+- gRPC ack latency를 workspace/filesystem health proxy로 쓰지 않는다.
+- runtime scheduler rollout을 이 문서에서 다루지 않는다.
 
 ## 4. Why Canonical Path Must Land First
 
-gRPC heartbeat는 transport-layer signal이고, canonical adaptive heartbeat가 다루는 주 문제는 room/filesystem presence ownership이다.
+gRPC heartbeat는 transport-layer signal이고, canonical adaptive heartbeat가 다루는 주 문제는 workspace/filesystem presence ownership이다.
 
 이 순서를 뒤집으면 다음 혼합이 생긴다.
 
-- room I/O 장애가 gRPC ack success로 가려질 수 있다
+- workspace I/O 장애가 gRPC ack success로 가려질 수 있다
 - network jitter가 local keeper restart pressure로 잘못 번역될 수 있다
 - phi false positive가 supervisor recovery와 섞여 root cause가 흐려진다
 
@@ -104,7 +104,7 @@ Rules:
 
 - 서버는 `MASC_GRPC_ENABLED=1`
 - 대상 keeper cohort만 `MASC_AGENT_TRANSPORT=grpc`
-- room heartbeat는 계속 켜 둔다
+- workspace heartbeat는 계속 켜 둔다
 - gRPC heartbeat loss는 operator warning만 만들고 recovery ownership에는 관여하지 않는다
 
 Required evidence:
@@ -198,7 +198,7 @@ Promotion gate:
 
 이 단계는 **이 RFC의 승인 범위를 넘는다**.
 
-phi가 restart, suppression, or keeper state transition에 관여하려면 별도 enforcement RFC가 필요하다. 현재 follow-up 문서는 [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md) 를 canonical source로 본다. 그 RFC 없이는 production에서 advisory-only를 넘지 않는다.
+phi가 restart, suppression, or keeper state transition에 관여하려면 별도 enforcement RFC가 필요하다. 현재 follow-up 문서는 [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md) 를 canonical source로 본다. 그 RFC 없이는 production에서 advisory-only를 넘지 않는다.
 
 ## 6. Runtime Contract
 
@@ -232,9 +232,9 @@ Before any gRPC/Phi promotion:
 
 - `transport-health` and keeper health surfaces must agree on whether gRPC is connected
 - read-path revalidation must still pass with gRPC enabled
-- continuity validation must still prove room presence continuity
-- a disconnected gRPC stream must not refresh room freshness lease
-- a disconnected gRPC stream must not reset local room heartbeat failure streak
+- continuity validation must still prove workspace presence continuity
+- a disconnected gRPC stream must not refresh workspace freshness lease
+- a disconnected gRPC stream must not reset local workspace heartbeat failure streak
 
 Before phi advisory:
 
@@ -244,20 +244,20 @@ Before phi advisory:
 
 Before phi enforcement:
 
-- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 `phi_enforced` scenario가 pass 해야 한다
+- [adaptive-heartbeat-safety-harness-spec.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-safety-harness-spec.md) 의 `phi_enforced` scenario가 pass 해야 한다
 
 ## 8. Alerts and Ownership
 
 Alert policy:
 
-- `warn`: repeated gRPC reconnect loop without room heartbeat failure
+- `warn`: repeated gRPC reconnect loop without workspace heartbeat failure
 - `warn`: phi threshold crossing in advisory mode
-- `critical`: gRPC/Phi path changes canonical safety counters or hides local room failures
+- `critical`: gRPC/Phi path changes canonical safety counters or hides local workspace failures
 
 Ownership split:
 
 - transport owner: gRPC stream health, latency, reconnects
-- keeper runtime owner: room freshness lease, state machine, restart ownership
+- keeper runtime owner: workspace freshness lease, state machine, restart ownership
 - rollout owner: stage G0-G4 promotion decision
 
 ## 9. Exit Criteria
@@ -265,7 +265,7 @@ Ownership split:
 This RFC is satisfied only when:
 
 - canonical adaptive heartbeat production rollout is already complete
-- gRPC heartbeat is visible in operator surfaces without becoming the room-health SSOT
+- gRPC heartbeat is visible in operator surfaces without becoming the workspace-health SSOT
 - phi runs in shadow mode for 14 days with analyzable evidence
 - advisory-only rollout completes without canonical safety counter regressions
 - no document or implementation claims phi enforcement is production-ready without a separate RFC

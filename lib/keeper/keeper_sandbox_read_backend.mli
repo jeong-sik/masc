@@ -14,7 +14,7 @@
     should go through the sandbox backend. Encapsulates the
     [sandbox_profile=docker] policy so callers do not have to repeat
     it. *)
-val should_route_read : meta:Keeper_types.keeper_meta -> bool
+val should_route_read : meta:Keeper_meta_contract.keeper_meta -> bool
 
 (** [container_path_of_host ~config ~meta ~host_path] maps a
     host-side absolute playground path to its in-container
@@ -22,8 +22,8 @@ val should_route_read : meta:Keeper_types.keeper_meta -> bool
     keeper's playground bundle (programmer error — caller should have
     run the containment check first). *)
 val container_path_of_host :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   host_path:string ->
   (string, string) result
 
@@ -35,8 +35,8 @@ val container_path_of_host :
     the input not being inside the playground. *)
 val read_file :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   host_path:string ->
   max_bytes:int ->
   timeout_sec:float ->
@@ -63,8 +63,8 @@ val read_file :
 val run_command_with_status :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   command_argv:string list ->
   max_bytes:int ->
   timeout_sec:float ->
@@ -78,8 +78,8 @@ val run_command_with_status :
 val run_command :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
   ?ok_exit_codes:int list ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   command_argv:string list ->
   max_bytes:int ->
   timeout_sec:float ->

@@ -37,11 +37,11 @@ function _useTrayPop() {
 function _statusCounts(D) {
   const evs = (D && D.events) || [];
   let fails = 0;
-  let cascades = 0;
+  let runtimes = 0;
   for (const e of evs) {
     if (!e) continue;
     if (e.kind === "fail") fails++;
-    else if (e.kind === "cascade") cascades++;
+    else if (e.kind === "runtime") runtimes++;
   }
   const keepers = (D && D.keepers) || [];
   let active = 0;
@@ -53,7 +53,7 @@ function _statusCounts(D) {
   }
   return {
     fails,
-    cascades,
+    runtimes,
     evCount: evs.length,
     lastEvent: evs.length > 0 ? evs[evs.length - 1] : null,
     keepersTotal: keepers.length,
@@ -67,7 +67,7 @@ function _statusCounts(D) {
 // count rather than a fabricated TPS number.
 function _kpiSpotlight(counts) {
   if (counts.fails >= 3) return { l: "fails", v: counts.fails, t: "err", u: "", urgent: true };
-  if (counts.cascades >= 2) return { l: "cascade", v: counts.cascades, t: "info", u: "" };
+  if (counts.runtimes >= 2) return { l: "runtime", v: counts.runtimes, t: "info", u: "" };
   return { l: "events", v: counts.evCount, t: "brass", u: "" };
 }
 
@@ -127,7 +127,7 @@ function StatusTray() {
               <div className="st-list-h">recent activity</div>
               {(D.events || []).slice(-12).reverse().map((e, i) => (
                 <div className="st-list-row" key={i}>
-                  <span className={"st-dot k-" + (e.kind === "fail" ? "err" : e.kind === "cascade" ? "info" : "ok")}></span>
+                  <span className={"st-dot k-" + (e.kind === "fail" ? "err" : e.kind === "runtime" ? "info" : "ok")}></span>
                   <span className="st-list-keeper">{e.keeper || "system"}</span>
                   <span className="st-list-kind">{e.kind}</span>
                   <span className="st-list-msg">{e.summary || e.msg || ""}</span>

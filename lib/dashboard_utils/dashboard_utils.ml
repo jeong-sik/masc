@@ -1,9 +1,3 @@
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
 let parse_iso_opt = function
   | Some raw when String.trim raw <> "" -> (
       try Some (Masc_domain.parse_iso8601 raw) with Failure _ -> None)
@@ -11,22 +5,9 @@ let parse_iso_opt = function
 
 let first_some a b = match a with Some _ as v -> v | None -> b
 
-let string_contains ~needle haystack =
-  let n = String.length needle in
-  let h = String.length haystack in
-  if n = 0 then true
-  else if n > h then false
-  else
-    let rec loop i =
-      if i > h - n then false
-      else String.sub haystack i n = needle || loop (i + 1)
-    in
-    loop 0
+let string_contains = String_util.string_contains_substring
 
-let string_contains_ci ~needle haystack =
-  string_contains
-    ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains_ci = String_util.string_contains_substring_ci
 
 
 module String_set = Set_util.StringSet
@@ -49,25 +30,10 @@ let string_list_of_json json =
              | _ -> None)
   | _ -> []
 
-let json_string_option value =
-  match value with
-  | Some text ->
-      let trimmed = String.trim text in
-      if trimmed <> "" then `String trimmed else `Null
-  | None -> `Null
-
-let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
   | _ -> `Null
-
-let int_field ?(default = 0) key json =
-  match member_assoc key json with
-  | `Int v -> v
-  | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
-  | `Float v -> int_of_float v
-  | _ -> default
 
 let string_field ?(default = "") key json =
   match member_assoc key json with
@@ -92,23 +58,55 @@ let status_rank = function
   | "idle" -> 1
   | _ -> 0
 
+let unknown_status_label = "unknown"
+
 let rec take n items =
   if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
 
-let compact_text ?(max_len = 160) raw =
-  let normalized =
-    String.trim raw
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun v -> v <> "")
-    |> String.concat " "
-    |> String.trim
-  in
-  if normalized = "" then ""
-  else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"\xe2\x80\xa6" normalized |> String_util.to_string
+let compact_text = String_util.compact_text
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii
+
+(** {1 Session JSON accessors}
+
+    Canonical accessors for the nested session payload structure.
+    A session JSON may carry its detail inside a ["status"] sub-object
+    (when the status field is itself an [`Assoc]) or directly at the
+    top level.  [session_payload_json] normalises this. *)
+
+let session_payload_json session_json =
+  match member_assoc "status" session_json with
+  | `Assoc _ as payload -> payload
+  | _ -> session_json
+
+let session_meta_json session_json =
+  session_payload_json session_json |> member_assoc "session"
+
+let session_summary_json session_json =
+  session_payload_json session_json |> member_assoc "summary"
+
+let session_team_health_json session_json =
+  session_payload_json session_json |> member_assoc "team_health"
+
+let session_communication_json session_json =
+  session_payload_json session_json |> member_assoc "communication_metrics"
+
+let session_status_opt session_json =
+  let summary = session_summary_json session_json in
+  let meta = session_meta_json session_json in
+  match String_util.trim_to_option (string_field "status" summary) with
+  | Some _ as value -> value
+  | None -> (
+      match String_util.trim_to_option (string_field "status" meta) with
+      | Some _ as value -> value
+      | None -> String_util.trim_to_option (string_field "status" session_json))
+
+let session_recent_events session_json =
+  list_field "recent_events" session_json
+
+let event_detail_json event_json =
+  member_assoc "detail" event_json
 
 (** Health severity level — ordered from worst to best.
     Parsed from dashboard/operator JSON at the call site via
@@ -139,7 +137,7 @@ let string_of_health_level = function
   | HL_warn -> "warn"
   | HL_degraded -> "degraded"
   | HL_ok -> "ok"
-  | HL_unknown -> "unknown"
+  | HL_unknown -> unknown_status_label
 
 let severity_rank_of_health_level = function
   | HL_critical | HL_bad | HL_risk -> 2
@@ -150,7 +148,7 @@ let severity_rank_of_health_level = function
     The variant makes the different terminal sets visible:
     - [is_session_terminal]: Completed | Cancelled | Failed | Stopped
     - [is_session_blocked]: Failed | Cancelled | Interrupted
-    - dashboard_mission terminal: Completed | Interrupted | Cancelled | Expired *)
+    - dashboard_briefing terminal: Completed | Interrupted | Cancelled | Expired *)
 type session_lifecycle =
   | SL_active
   | SL_running
@@ -186,7 +184,7 @@ let string_of_session_lifecycle = function
   | SL_stopped -> "stopped"
   | SL_interrupted -> "interrupted"
   | SL_expired -> "expired"
-  | SL_unknown -> "unknown"
+  | SL_unknown -> unknown_status_label
 
 (** Status/health classification predicates — single source of truth.
     Used across dashboard, briefing, and operator modules. *)

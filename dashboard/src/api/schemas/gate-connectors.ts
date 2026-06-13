@@ -202,6 +202,14 @@ const GateConnectorInfoRawSchema = object({
   connected: fallback(boolean(), false),
   stale: fallback(boolean(), false),
   stale_after_sec: fallback(number(), 0),
+  // In-process gateway machine state (RFC-0203 / #20813): disconnected /
+  // awaiting_hello / identifying / resuming / connected /
+  // reconnect_pending / failed. Sidecar connectors don't emit it —
+  // empty means "not advertised".
+  gateway_state: fallback(string(), ''),
+  // 'in_process_gateway' for connectors whose status comes from the
+  // typed gateway state machine; empty for sidecar status files.
+  status_source: fallback(string(), ''),
   error: fallback(string(), ''),
   status_path: fallback(string(), ''),
   binding_store_path: fallback(string(), ''),
@@ -239,6 +247,8 @@ export interface GateConnectorInfo {
   connected: boolean
   stale: boolean
   stale_after_sec: number
+  gateway_state: string
+  status_source: string
   error: string
   status_path: string
   binding_store_path: string
@@ -335,6 +345,8 @@ function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
     connected: outer.output.connected,
     stale: outer.output.stale,
     stale_after_sec: outer.output.stale_after_sec,
+    gateway_state: outer.output.gateway_state,
+    status_source: outer.output.status_source,
     error: outer.output.error,
     status_path: outer.output.status_path,
     binding_store_path: outer.output.binding_store_path,
@@ -377,6 +389,7 @@ const GateConnectorsOuterSchema = object({
   connectors: optional(unknown()),
   total: fallback(number(), 0),
   active_count: fallback(number(), 0),
+  discord_trigger_policy: fallback(string(), 'unknown'),
   // Empty string is treated as drift — matches prior decoder's
   // `if (!generatedAt) return null` guard. A connectors payload
   // without a timestamp is not a useful one; the null-returning
@@ -388,6 +401,7 @@ export interface GateConnectorsData {
   connectors: GateConnectorInfo[]
   total: number
   active_count: number
+  discord_trigger_policy: string
   generated_at: string
 }
 
@@ -413,6 +427,7 @@ export function parseGateConnectorsData(data: unknown): GateConnectorsData {
     connectors,
     total: outer.total,
     active_count: outer.active_count,
+    discord_trigger_policy: outer.discord_trigger_policy,
     generated_at: outer.generated_at,
   }
 }

@@ -44,7 +44,7 @@ const KeeperCompositeTurnPhaseSchema = string()
 
 const KeeperCompositeDecisionStageSchema = string()
 
-const KeeperCompositeCascadeStateSchema = string()
+const KeeperCompositeRuntimeStateSchema = string()
 
 const KeeperCompositeCompactionStageSchema = string()
 
@@ -72,7 +72,7 @@ const KeeperCompositeMeasurementSchema = object({
 
 const KeeperCompositeInvariantsSchema = object({
   phase_turn_alignment: boolean(),
-  no_cascade_before_measurement: boolean(),
+  no_runtime_before_measurement: boolean(),
   compaction_atomicity: boolean(),
   event_priority_monotone: boolean(),
   phase_derivation_agreement: boolean(),
@@ -118,7 +118,7 @@ const KeeperLastOutcomeSchema = object({
   turn_id: number(),
   ended_at: number(),
   decision_stage: KeeperCompositeDecisionStageSchema,
-  cascade_state: KeeperCompositeCascadeStateSchema,
+  runtime_state: KeeperCompositeRuntimeStateSchema,
   selected_model: nullable(string()),
 })
 
@@ -138,9 +138,6 @@ const KeeperCompositeExecutionSchema = object({
   operator_disposition_reason: nullable(string()),
   model_used: nullable(string()),
   stop_reason: nullable(string()),
-  tool_contract_result: nullable(string()),
-  unexpected_tools: optional(array(string())),
-  unexpected_tool_count: optional(number()),
   duration_ms: nullable(number()),
   error: nullable(
     object({
@@ -149,7 +146,7 @@ const KeeperCompositeExecutionSchema = object({
       message_truncated: boolean(),
     }),
   ),
-  cascade: nullable(
+  runtime: nullable(
     object({
       name: nullable(string()),
       selected_model: nullable(string()),
@@ -157,22 +154,8 @@ const KeeperCompositeExecutionSchema = object({
       fallback_applied: nullable(boolean()),
       outcome: nullable(string()),
       degraded_retry_applied: nullable(boolean()),
-      degraded_retry_cascade: nullable(string()),
+      degraded_retry_runtime: nullable(string()),
       fallback_reason: nullable(string()),
-    }),
-  ),
-  tool_surface: nullable(
-    object({
-      tool_requirement: nullable(string()),
-      turn_lane: optional(nullable(string())),
-      tool_surface_class: optional(nullable(string())),
-      visible_tool_count: optional(nullable(number())),
-      tool_gate_enabled: nullable(boolean()),
-      tool_surface_fallback_used: optional(nullable(boolean())),
-      missing_required_tools: array(string()),
-      required_tools: array(string()),
-      unexpected_tools: optional(array(string())),
-      unexpected_tool_count: optional(number()),
     }),
   ),
   claim_scope: optional(unknown()),
@@ -192,6 +175,25 @@ const KeeperRuntimeAttentionSchema = object({
   stale_execution_receipt: optional(boolean()),
   live_turn_started_at: optional(nullable(number())),
   live_turn_last_progress_at: optional(nullable(number())),
+})
+
+const KeeperSecretFileMountSchema = object({
+  host_path: string(),
+  container_path: string(),
+})
+
+const KeeperSecretProjectionSchema = object({
+  status: string(),
+  configured: boolean(),
+  root: string(),
+  source: string(),
+  env_count: number(),
+  file_count: number(),
+  env_names: fallback(array(string()), []),
+  file_mounts: fallback(array(KeeperSecretFileMountSchema), []),
+  values_validated: boolean(),
+  error: nullable(string()),
+  next_action: string(),
 })
 
 const OperatorRecommendedActionSchema = object({
@@ -227,7 +229,7 @@ export const KeeperCompositeSnapshotSchema = object({
   collapsed_from: optional(nullable(string())),
   turn_phase: KeeperCompositeTurnPhaseSchema,
   decision: object({ stage: KeeperCompositeDecisionStageSchema }),
-  cascade: object({ state: KeeperCompositeCascadeStateSchema }),
+  runtime: object({ state: KeeperCompositeRuntimeStateSchema }),
   compaction: object({ stage: KeeperCompositeCompactionStageSchema }),
   // `circuit_breaker` is `optional` during the Phase 2 → Phase 3
   // rollout window: pinned backends that have not yet picked up
@@ -251,6 +253,7 @@ export const KeeperCompositeSnapshotSchema = object({
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
   runtime_attention: optional(KeeperRuntimeAttentionSchema),
+  secret_projection: optional(KeeperSecretProjectionSchema),
   recommended_actions: fallback(array(OperatorRecommendedActionSchema), []),
   /** @deprecated kept only for old backend experiments; new payloads use `execution`. */
   latest_receipt: optional(unknown()),
@@ -264,10 +267,12 @@ export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRow
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
+export type KeeperSecretProjection = InferOutput<typeof KeeperSecretProjectionSchema>
+export type KeeperSecretFileMount = InferOutput<typeof KeeperSecretFileMountSchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>
 export type KeeperCompositeTurnPhase = InferOutput<typeof KeeperCompositeTurnPhaseSchema>
 export type KeeperCompositeDecisionStage = InferOutput<typeof KeeperCompositeDecisionStageSchema>
-export type KeeperCompositeCascadeState = InferOutput<typeof KeeperCompositeCascadeStateSchema>
+export type KeeperCompositeRuntimeState = InferOutput<typeof KeeperCompositeRuntimeStateSchema>
 export type KeeperCompositeCompactionStage = InferOutput<typeof KeeperCompositeCompactionStageSchema>
 
 export class CompositeSchemaDriftError extends SchemaDriftError {
@@ -289,7 +294,7 @@ export function parseKeeperCompositeSnapshot(data: unknown): KeeperCompositeSnap
 //
 // Each poll bumps the masc_keeper_invariant_violations_total counter
 // for any violating keeper (documented poll-triggered behaviour,
-// docs/observability/cascade-metrics.md §masc_keeper_invariant_violations_total).
+// docs/observability/runtime-metrics.md §masc_keeper_invariant_violations_total).
 
 export const FleetCompositeSnapshotSchema = object({
   generated_at: number(),

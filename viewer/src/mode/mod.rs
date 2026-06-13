@@ -62,24 +62,24 @@ impl Default for ViewLayoutPrefs {
 pub enum ViewerMode {
     /// Mode selection screen. No SSE connection, no game state.
     #[default]
-    Lobby,
+    Home,
 
     /// D&D 5e game session viewer (그림란드 연대기).
     /// Data source:
     /// - default: MASC `/api/v1/trpg/stream` JSON polling
-    /// - optional: legacy TRPG Engine `/rooms/:id/stream` SSE
+    /// - optional: legacy TRPG Engine `/workspaces/:id/stream` SSE
     Trpg,
 
     /// Experiment visualization — Sankey diagrams, network graphs, A/B metrics.
-    /// SSE: MASC `/sse?room=experiment`
+    /// SSE: MASC `/sse?workspace=experiment`
     Experiment,
 
     /// System monitor — keeper metrics, agent health, heartbeat dashboard.
-    /// SSE: MASC `/sse?room=monitor`
+    /// SSE: MASC `/sse?workspace=monitor`
     Monitor,
 
     /// Social board feed — agent posts, comments, reactions.
-    /// SSE: MASC `/sse?room=social`
+    /// SSE: MASC `/sse?workspace=social`
     Social,
 }
 
@@ -89,7 +89,7 @@ impl ViewerMode {
     /// Used by `poll_mode_transition` (wasm32 only).
     pub fn display_name(&self) -> &'static str {
         match self {
-            Self::Lobby => "MASC Viewer",
+            Self::Home => "MASC Viewer",
             Self::Trpg => "그림란드 연대기",
             Self::Experiment => "Experiment Lab",
             Self::Monitor => "System Monitor",
@@ -98,7 +98,7 @@ impl ViewerMode {
     }
 
     /// DOM panel element ID for MASC mode panels.
-    /// Returns `None` for Lobby and Trpg (they use different layout).
+    /// Returns `None` for Home and Trpg (they use different layout).
     pub fn panel_id(&self) -> Option<&'static str> {
         match self {
             Self::Monitor => Some("monitor-panel"),
@@ -122,7 +122,7 @@ impl ViewerMode {
     /// Used by `poll_mode_transition` (wasm32 only).
     pub fn css_class(&self) -> &'static str {
         match self {
-            Self::Lobby => "mode-lobby",
+            Self::Home => "mode-home",
             Self::Trpg => "mode-trpg",
             Self::Experiment => "mode-experiment",
             Self::Monitor => "mode-monitor",
@@ -146,7 +146,7 @@ impl ViewerMode {
 #[cfg(target_arch = "wasm32")]
 fn mode_storage_value(mode: ViewerMode) -> &'static str {
     match mode {
-        ViewerMode::Lobby => "lobby",
+        ViewerMode::Home => "home",
         ViewerMode::Trpg => "trpg",
         ViewerMode::Experiment => "experiment",
         ViewerMode::Monitor => "monitor",
@@ -157,7 +157,7 @@ fn mode_storage_value(mode: ViewerMode) -> &'static str {
 #[cfg(target_arch = "wasm32")]
 fn parse_mode_storage_value(raw: &str) -> Option<ViewerMode> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "lobby" => Some(ViewerMode::Lobby),
+        "home" => Some(ViewerMode::Home),
         "trpg" => Some(ViewerMode::Trpg),
         "experiment" => Some(ViewerMode::Experiment),
         "monitor" => Some(ViewerMode::Monitor),
@@ -211,7 +211,7 @@ fn initial_mode_from_url_or_storage() -> Option<ViewerMode> {
     mode_from_query()
         .or_else(load_last_mode)
         .and_then(|mode| match mode {
-            ViewerMode::Lobby => None,
+            ViewerMode::Home => None,
             other => Some(other),
         })
 }
@@ -224,8 +224,8 @@ fn sync_url_for_mode(mode: ViewerMode) {
     let mode_value = mode_storage_value(mode);
     let mut params = vec![format!("mode={}", mode_value)];
     if mode == ViewerMode::Trpg {
-        let room_id = crate::config::current_room_id();
-        params.push(format!("room={}", room_id));
+        let workspace_id = crate::config::current_workspace_id();
+        params.push(format!("workspace={}", workspace_id));
     }
     let query = format!("?{}", params.join("&"));
     let _ = history.replace_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some(&query));
@@ -293,8 +293,8 @@ impl Plugin for ModePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<ViewerMode>()
             .init_resource::<ModeTransitionBuffer>()
-            .add_systems(OnEnter(ViewerMode::Lobby), on_enter_lobby)
-            .add_systems(OnExit(ViewerMode::Lobby), on_exit_lobby)
+            .add_systems(OnEnter(ViewerMode::Home), on_enter_home)
+            .add_systems(OnExit(ViewerMode::Home), on_exit_home)
             .add_systems(OnEnter(ViewerMode::Trpg), enter_trpg)
             .add_systems(OnExit(ViewerMode::Trpg), exit_trpg)
             .add_systems(OnEnter(ViewerMode::Monitor), enter_masc_panel)
@@ -312,10 +312,10 @@ impl Plugin for ModePlugin {
     }
 }
 
-// ─── Lobby Enter/Exit ────────────────────────
+// ─── Home Enter/Exit ────────────────────────
 
-/// Startup logic when entering Lobby mode: show lobby UI, bind click listeners.
-fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
+/// Startup logic when entering Home mode: show home UI, bind click listeners.
+fn on_enter_home(buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
@@ -323,19 +323,17 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
         };
 
         clear_trpg_dom(&doc);
-        let lobby_room = crate::config::current_room_id();
-        crate::config::set_current_room_id(&lobby_room);
-        // Show lobby UI, hide dashboard
+        // Show home UI, hide dashboard
         if let Some(body) = doc.body() {
-            body.set_class_name("mode-lobby");
+            body.set_class_name("mode-home");
         }
-        set_element_display(&doc, "lobby-screen", "flex");
+        set_element_display(&doc, "home-screen", "flex");
         set_element_display(&doc, "dashboard", "none");
 
         // Bind mode card clicks
         bind_mode_cards(&doc, &buffer.pending);
 
-        // Bind back-to-lobby button
+        // Bind back-to-home button
         bind_back_button(&doc, &buffer.pending);
         bind_debug_controls(&doc);
         bind_new_game_controls(&doc);
@@ -349,7 +347,7 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
         }
 
         // Restore the last active mode once at startup so refresh returns to
-        // the game view instead of forcing lobby re-entry.
+        // the game view instead of forcing home re-entry.
         if let Some(body) = doc.body() {
             let restored_once = body
                 .get_attribute("data-mode-restored")
@@ -370,15 +368,15 @@ fn on_enter_lobby(buffer: Res<ModeTransitionBuffer>) {
     let _ = &buffer;
 }
 
-/// Cleanup when leaving Lobby mode (entering a visualization mode).
-fn on_exit_lobby() {
+/// Cleanup when leaving Home mode (entering a visualization mode).
+fn on_exit_home() {
     #[cfg(target_arch = "wasm32")]
     {
         let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
             return;
         };
 
-        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "home-screen", "none");
         set_element_display(&doc, "dashboard", "grid");
     }
 }
@@ -391,60 +389,63 @@ fn enter_trpg() {
         };
 
         set_element_display(&doc, "dashboard", "grid");
-        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "home-screen", "none");
         set_element_display(&doc, "new-game-panel", "none");
         clear_trpg_dom(&doc);
         bind_debug_controls(&doc);
         bind_view_options(&doc);
         bind_new_game_controls(&doc);
-        let room = crate::config::current_room_id();
-        set_current_room_id(&doc, &room);
-        bind_room_controls(&doc);
+        let workspace = crate::config::current_workspace_id();
+        set_current_workspace_id(&doc, &workspace);
+        bind_workspace_controls(&doc);
         bind_auto_round_toggle(&doc);
         bind_session_pause_controls(&doc);
         crate::game::round_runner::set_auto_round_running(auto_round_enabled_from_dom(&doc));
 
-        if let Some(pill) = doc.get_element_by_id("room-status") {
-            pill.set_text_content(Some(&format!("현재 게임: {} · 목록 불러오는 중...", room)));
+        if let Some(pill) = doc.get_element_by_id("workspace-status") {
+            pill.set_text_content(Some(&format!(
+                "현재 게임: {} · 목록 불러오는 중...",
+                workspace
+            )));
         }
-        let doc_for_rooms = doc.clone();
+        let doc_for_workspaces = doc.clone();
         wasm_bindgen_futures::spawn_local(async move {
-            match refresh_rooms_from_server(&doc_for_rooms).await {
-                Ok(rooms) => {
-                    let room_now = crate::config::current_room_id();
-                    let ended_count = rooms
+            match refresh_workspaces_from_server(&doc_for_workspaces).await {
+                Ok(workspaces) => {
+                    let workspace_now = crate::config::current_workspace_id();
+                    let ended_count = workspaces
                         .iter()
                         .filter(|row| {
                             TrpgLifecycleState::from_status(&row.status)
                                 == TrpgLifecycleState::Ended
                         })
                         .count();
-                    let current_is_ended = rooms
+                    let current_is_ended = workspaces
                         .iter()
-                        .find(|row| row.id.eq_ignore_ascii_case(&room_now))
+                        .find(|row| row.id.eq_ignore_ascii_case(&workspace_now))
                         .map(|row| {
                             TrpgLifecycleState::from_status(&row.status)
                                 == TrpgLifecycleState::Ended
                         })
                         .unwrap_or(false);
-                    let visible_count =
-                        rooms.len().saturating_sub(ended_count) + usize::from(current_is_ended);
-                    if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
+                    let visible_count = workspaces.len().saturating_sub(ended_count)
+                        + usize::from(current_is_ended);
+                    if let Some(pill) = doc_for_workspaces.get_element_by_id("workspace-status") {
                         pill.set_text_content(Some(&format!(
                             "현재 게임: {} · 표시 {} / 전체 {}",
-                            room_now,
+                            workspace_now,
                             visible_count,
-                            rooms.len()
+                            workspaces.len()
                         )));
                     }
                 }
                 Err(e) => {
-                    log::warn!("room 목록 로딩 실패: {}", e);
-                    let room_now = crate::config::current_room_id();
-                    if let Some(pill) = doc_for_rooms.get_element_by_id("room-status") {
+                    log::warn!("workspace 목록 로딩 실패: {}", e);
+                    let workspace_now = crate::config::current_workspace_id();
+                    if let Some(pill) = doc_for_workspaces.get_element_by_id("workspace-status") {
                         pill.set_text_content(Some(&format!(
                             "현재 게임: {} · 목록 실패",
-                            room_now
+                            workspace_now
                         )));
                     }
                 }
@@ -526,12 +527,12 @@ fn summarize_session_control_payload(raw: &str) -> String {
         }
 
         let ok = value.get("ok").and_then(Value::as_bool);
-        let room_id = value
-            .get("room_id")
+        let workspace_id = value
+            .get("workspace_id")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|v| !v.is_empty())
-            .map(|v| format!("room {v}"));
+            .map(|v| format!("workspace {v}"));
         let phase = value
             .get("phase")
             .and_then(Value::as_str)
@@ -548,8 +549,8 @@ fn summarize_session_control_payload(raw: &str) -> String {
             .map(|rows| format!("actors {}", rows.len()));
 
         let mut parts = Vec::new();
-        if let Some(room) = room_id {
-            parts.push(room);
+        if let Some(workspace) = workspace_id {
+            parts.push(workspace);
         }
         if let Some(phase) = phase {
             parts.push(phase);
@@ -740,11 +741,11 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_pause.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let room_id = crate::config::current_room_id();
+                    let workspace_id = crate::config::current_workspace_id();
                     match post_tool_action(
                         "masc_pause",
                         json!({
-                            "room_id": room_id,
+                            "workspace_id": workspace_id,
                             "reason": "viewer trpg manual pause"
                         }),
                     )
@@ -765,7 +766,7 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                             set_session_control_status(&doc_async, &status, "status-warn");
                             let doc_for_refresh = doc_async.clone();
                             wasm_bindgen_futures::spawn_local(async move {
-                                let _ = refresh_rooms_from_server(&doc_for_refresh).await;
+                                let _ = refresh_workspaces_from_server(&doc_for_refresh).await;
                             });
                         }
                         Err(err) => {
@@ -796,8 +797,10 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 
                 let doc_async = doc_for_resume.clone();
                 wasm_bindgen_futures::spawn_local(async move {
-                    let room_id = crate::config::current_room_id();
-                    match post_tool_action("masc_resume", json!({ "room_id": room_id })).await {
+                    let workspace_id = crate::config::current_workspace_id();
+                    match post_tool_action("masc_resume", json!({ "workspace_id": workspace_id }))
+                        .await
+                    {
                         Ok(raw) => {
                             let detail = summarize_session_control_payload(&raw);
                             let status = if detail.is_empty() {
@@ -808,7 +811,7 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
                             set_session_control_status(&doc_async, &status, "status-ok");
                             let doc_for_refresh = doc_async.clone();
                             wasm_bindgen_futures::spawn_local(async move {
-                                let _ = refresh_rooms_from_server(&doc_for_refresh).await;
+                                let _ = refresh_workspaces_from_server(&doc_for_refresh).await;
                             });
                         }
                         Err(err) => {
@@ -831,8 +834,8 @@ fn bind_session_pause_controls(doc: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn sync_session_pause_buttons(doc: &web_sys::Document, room_status: &str) {
-    let lifecycle = TrpgLifecycleState::from_status(room_status);
+fn sync_session_pause_buttons(doc: &web_sys::Document, workspace_status: &str) {
+    let lifecycle = TrpgLifecycleState::from_status(workspace_status);
     let (pause_disabled, resume_disabled, title, status_text, status_tone) = match lifecycle {
         TrpgLifecycleState::Running => (
             false,
@@ -841,11 +844,11 @@ fn sync_session_pause_buttons(doc: &web_sys::Document, room_status: &str) {
             "세션 진행 중입니다.",
             "status-ok",
         ),
-        TrpgLifecycleState::Lobby => (
+        TrpgLifecycleState::Idle => (
             false,
             true,
-            "세션이 로비 상태입니다. 필요 시 멈춤 가능합니다.",
-            "세션 시작 전 로비 상태입니다. 새 게임에서 시작하세요.",
+            "세션이 대기 상태입니다. 필요 시 멈춤 가능합니다.",
+            "세션 시작 전 대기 상태입니다. 새 게임에서 시작하세요.",
             "status-info",
         ),
         TrpgLifecycleState::Stopped => (
@@ -1011,7 +1014,7 @@ fn poll_mode_transition(
 /// Each click writes the target ViewerMode into the shared buffer.
 #[cfg(target_arch = "wasm32")]
 fn bind_mode_cards(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMode>>>) {
-    // Guard: only bind once to prevent closure accumulation on repeated lobby entries
+    // Guard: only bind once to prevent closure accumulation on repeated home entries
     if let Some(container) = doc.get_element_by_id("mode-cards") {
         if container.get_attribute("data-bound").as_deref() == Some("1") {
             return;
@@ -1050,10 +1053,10 @@ fn bind_mode_cards(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMod
     }
 }
 
-/// Binds the `#back-to-lobby` button to transition back to Lobby.
+/// Binds the `#back-to-home` button to transition back to Home.
 #[cfg(target_arch = "wasm32")]
 fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMode>>>) {
-    let Some(btn) = doc.get_element_by_id("back-to-lobby") else {
+    let Some(btn) = doc.get_element_by_id("back-to-home") else {
         return;
     };
     // Guard: only bind once
@@ -1065,7 +1068,7 @@ fn bind_back_button(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMo
     let buf = pending.clone();
     let cb = Closure::wrap(Box::new(move || {
         if let Ok(mut guard) = buf.lock() {
-            *guard = Some(ViewerMode::Lobby);
+            *guard = Some(ViewerMode::Home);
         }
     }) as Box<dyn FnMut()>);
 
@@ -1375,7 +1378,7 @@ fn bind_dedup_status_toggle(doc: &web_sys::Document) {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn generate_room_id() -> String {
+pub(super) fn generate_workspace_id() -> String {
     let millis = js_sys::Date::now() as i64;
     let rand = (js_sys::Math::random() * 1000.0).floor() as i64;
     format!("adventure-{}-{:03}", millis, rand)
@@ -1403,10 +1406,7 @@ pub(super) fn set_new_game_preflight_status(doc: &web_sys::Document, message: &s
 }
 
 #[cfg(target_arch = "wasm32")]
-fn set_new_game_preflight_rows(
-    doc: &web_sys::Document,
-    rows: &[transport_classify::PreflightRow],
-) {
+fn set_new_game_preflight_rows(doc: &web_sys::Document, rows: &[transport_classify::PreflightRow]) {
     if let Some(el) = doc.get_element_by_id("new-game-preflight") {
         let html = rows
             .iter()
@@ -1440,21 +1440,21 @@ fn set_new_game_preflight_rows(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn set_current_room_id(doc: &web_sys::Document, room_id: &str) {
-    crate::config::set_current_room_id(room_id);
-    let room = crate::config::current_room_id();
+pub(super) fn set_current_workspace_id(doc: &web_sys::Document, workspace_id: &str) {
+    crate::config::set_current_workspace_id(workspace_id);
+    let workspace = crate::config::current_workspace_id();
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-        let _ = dashboard.set_attribute("data-room-id", &room);
+        let _ = dashboard.set_attribute("data-workspace-id", &workspace);
     }
-    remember_recent_room(&room);
-    sync_room_controls(doc, &room);
+    remember_recent_workspace(&workspace);
+    sync_workspace_controls(doc, &workspace);
     refresh_trpg_ops_snapshots(doc);
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
     if let Some(dashboard) = doc.get_element_by_id("dashboard") {
-        let _ = dashboard.remove_attribute("data-focus-room");
+        let _ = dashboard.remove_attribute("data-focus-workspace");
         let _ = dashboard.remove_attribute("data-focus-turn");
         let _ = dashboard.remove_attribute("data-focus-kind");
     }
@@ -1489,10 +1489,14 @@ pub(super) fn clear_trpg_dom(doc: &web_sys::Document) {
         el.set_inner_html("<div class=\"trpg-summary-empty\">허용된 액션을 계산 중입니다.</div>");
     }
     if let Some(el) = doc.get_element_by_id("trpg-timeline-summary") {
-        el.set_inner_html("<div class=\"trpg-summary-empty\">타임라인 요약을 불러오는 중입니다.</div>");
+        el.set_inner_html(
+            "<div class=\"trpg-summary-empty\">타임라인 요약을 불러오는 중입니다.</div>",
+        );
     }
     if let Some(el) = doc.get_element_by_id("trpg-timeline-events") {
-        el.set_inner_html("<div class=\"trpg-summary-empty\">최근 이벤트를 불러오는 중입니다.</div>");
+        el.set_inner_html(
+            "<div class=\"trpg-summary-empty\">최근 이벤트를 불러오는 중입니다.</div>",
+        );
     }
     if let Some(el) = doc.get_element_by_id("turn-num") {
         el.set_text_content(Some("1"));
@@ -1748,11 +1752,11 @@ mod mcp_rpc;
 use mcp_rpc::{mcp_tool_call, parse_embedded_tool_payload};
 
 #[cfg(target_arch = "wasm32")]
-mod room_hub;
+mod workspace_hub;
 #[cfg(target_arch = "wasm32")]
-use room_hub::{
-    bind_room_controls, candidate_room_ids, load_known_rooms, refresh_rooms_from_server,
-    remember_recent_room, sync_room_controls,
+use workspace_hub::{
+    bind_workspace_controls, candidate_workspace_ids, load_known_workspaces,
+    refresh_workspaces_from_server, remember_recent_workspace, sync_workspace_controls,
 };
 
 #[path = "../../../archive/trpg/viewer/trpg_controls.rs"]
@@ -1760,7 +1764,7 @@ use room_hub::{
 mod trpg_controls;
 #[cfg(target_arch = "wasm32")]
 use trpg_controls::{
-    actor_admin_room_id, actor_admin_set_status, bind_new_game_controls,
+    actor_admin_set_status, actor_admin_workspace_id, bind_new_game_controls,
     refresh_actor_admin_list, refresh_trpg_ops_snapshots,
 };
 
@@ -1856,25 +1860,25 @@ async fn seed_monitor_snapshot(doc: web_sys::Document) -> Result<(), String> {
     };
     set_element_text(&doc, "monitor-agent-list", &keepers_text);
 
-    let current_room = crate::config::current_room_id();
-    let tracked_rooms = candidate_room_ids();
-    let known_room_count = load_known_rooms().len();
-    let room_count = tracked_rooms.len();
+    let current_workspace = crate::config::current_workspace_id();
+    let tracked_workspaces = candidate_workspace_ids();
+    let known_workspace_count = load_known_workspaces().len();
+    let workspace_count = tracked_workspaces.len();
     set_element_text(
         &doc,
         "monitor-task-list",
         &format!(
-            "현재 room: {}\n추적 room: {}개 (known {}개)",
-            current_room, room_count, known_room_count
+            "현재 workspace: {}\n추적 workspace: {}개 (known {}개)",
+            current_workspace, workspace_count, known_workspace_count
         ),
     );
     set_or_prepend_line(
         &doc,
         "monitor-events",
         &format!(
-            "[snapshot] current room {} / tracked rooms {}개 / keeper {}명 초기 상태 로드",
-            current_room,
-            room_count, keeper_count
+            "[snapshot] current workspace {} / tracked workspaces {}개 / keeper {}명 초기 상태 로드",
+            current_workspace,
+            workspace_count, keeper_count
         ),
         &["Waiting for events...", "No events yet"],
         50,
@@ -2021,7 +2025,7 @@ fn sync_masc_panel_connection_status(
 // ─── Generic MASC Panel Enter/Exit ───────────
 
 /// Generic enter handler for MASC mode panels (Monitor, Social, Experiment).
-/// Shows the mode's panel, hides lobby and dashboard, binds back navigation.
+/// Shows the mode's panel, hides home and dashboard, binds back navigation.
 fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuffer>) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -2034,7 +2038,7 @@ fn enter_masc_panel(mode: Res<State<ViewerMode>>, buffer: Res<ModeTransitionBuff
         };
 
         set_panel_active(&doc, panel_id, true);
-        set_element_display(&doc, "lobby-screen", "none");
+        set_element_display(&doc, "home-screen", "none");
         set_element_display(&doc, "dashboard", "none");
 
         bind_back_buttons(&doc, &buffer.pending);
@@ -2061,7 +2065,7 @@ fn exit_masc_panel() {
 // ─── DOM Helpers ─────────────────────────────
 
 /// Helper to set display style on a DOM element by ID.
-/// Used for lobby-screen (flex) and dashboard (grid/none) which don't use CSS transitions.
+/// Used for home-screen (flex) and dashboard (grid/none) which don't use CSS transitions.
 #[cfg(target_arch = "wasm32")]
 pub(super) fn set_element_display(doc: &web_sys::Document, id: &str, display: &str) {
     if let Some(el) = doc.get_element_by_id(id) {
@@ -2093,7 +2097,7 @@ fn set_panel_active(doc: &web_sys::Document, id: &str, active: bool) {
     }
 }
 
-/// Binds all `.back-btn[data-back]` buttons to transition back to Lobby.
+/// Binds all `.back-btn[data-back]` buttons to transition back to Home.
 #[cfg(target_arch = "wasm32")]
 fn bind_back_buttons(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerMode>>>) {
     let Ok(buttons) = doc.query_selector_all("[data-back]") else {
@@ -2114,7 +2118,7 @@ fn bind_back_buttons(doc: &web_sys::Document, pending: &Arc<Mutex<Option<ViewerM
         let buf = pending.clone();
         let cb = Closure::wrap(Box::new(move |_: web_sys::Event| {
             if let Ok(mut guard) = buf.lock() {
-                *guard = Some(ViewerMode::Lobby);
+                *guard = Some(ViewerMode::Home);
             }
         }) as Box<dyn FnMut(web_sys::Event)>);
 
@@ -2138,7 +2142,7 @@ mod tests {
 
     #[test]
     fn panel_id_returns_none_for_non_panel_modes() {
-        assert_eq!(ViewerMode::Lobby.panel_id(), None);
+        assert_eq!(ViewerMode::Home.panel_id(), None);
         assert_eq!(ViewerMode::Trpg.panel_id(), None);
     }
 

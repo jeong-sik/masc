@@ -7,14 +7,14 @@
       exit status of a command that already ran?"} (post-exec hint).
 
     Inspired by agent_llm_a-code's [interpretCommandResult] in
-    [src/utils/Shell.ts]. The OpenAI Codex harness blog posts
-    ("harness-engineering", "unlocking-the-agent_code-harness") frame this
-    as turning raw OS return codes into typed markers the agent loop
-    can reason over without string scraping.
+    [src/utils/Shell.ts]. The agent harness literature
+    ("harness-engineering" et al.) frames this as turning raw OS return
+    codes into typed markers the agent loop can reason over without
+    string scraping.
 
     Rollout: additive JSON field. Gated by [MASC_BASH_SEMANTIC_EXIT]
     env flag during the bake-in window (see
-    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-mcp-graceful-panda.md]
+    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-graceful-panda.md]
     Phase 1). *)
 
 type t =
@@ -23,12 +23,20 @@ type t =
   | `Timeout of float
   | `Signaled of int
   | `Git_not_a_repo
+  | `Git_unknown_revision
   | `Oom_killed
   | `Policy_denied of string
   | `Tool_missing of string
   | `Permission_denied of string ]
 (** Polymorphic variant so downstream modules can narrow the set in
-    their own match arms without introducing a module dependency. *)
+    their own match arms without introducing a module dependency.
+
+    [`Git_not_a_repo] and [`Git_unknown_revision] both stem from git
+    exit 128 but carry opposite self-correction: the former means the
+    cwd is not a repository (change cwd / clone); the latter means the
+    cwd IS a valid repository but the requested ref/path is unknown or
+    ambiguous (fix the ref, e.g. [origin/<ref>] or [--] separation).
+    They are split by inspecting git's stderr diagnostic. *)
 
 val interpret :
   argv:string list ->
@@ -54,7 +62,8 @@ val interpret_cmd :
     for tool-name heuristics; OOM detection scans the merged output.
 
     Heuristics (ported from agent_llm_a-code [interpretCommandResult]):
-    - exit 128 on [git …]  -> [`Git_not_a_repo]
+    - exit 128 on [git …]  -> [`Git_unknown_revision] when stderr names
+      an unknown revision / ambiguous argument, else [`Git_not_a_repo]
     - exit 127             -> [`Tool_missing]
     - exit 126             -> [`Permission_denied]
     - SIGKILL w/ OOM token -> [`Oom_killed]

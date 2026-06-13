@@ -6,25 +6,23 @@
     type-heavy contract from JSON parsing
     ({!Keeper_meta_json}) and store I/O.
 
-    Re-exports {!Keeper_meta_tool_access} via [include] for the
-    [tool_preset] / [tool_access] ADT — callers can reach those
-    via either {!Keeper_types.tool_preset} or
-    {!Keeper_meta_contract.tool_preset} interchangeably (type
-    identity preserved through the cascade).
-
     Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
     only by JSON parsing), \[map_compaction_rt] /
     \[map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
-    {!map_runtime} / {!map_usage}), \[keeper_legacy_model_arg_names]
-    (data table consumed by the legacy-arg rejector in
-    {!Keeper_types}).  All consumed only via the include
-    cascade or the JSON pipeline. *)
+    {!map_runtime} / {!map_usage}).  All consumed only via the runtime
+    contract or the JSON pipeline. *)
 
-(** {1 Tool-access cascade re-export} *)
+(** {1 Tool-access persisted-meta helpers} *)
 
-include module type of Keeper_meta_tool_access
+(** Trim, drop blanks, dedupe (preserve first-seen order). *)
+val normalize_tool_names : string list -> string list
+
+(** Parse [tool_access] from persisted meta JSON. Canonical form is a JSON
+    array of tool names. *)
+val tool_access_of_meta_json :
+  Yojson.Safe.t -> (string list, string) result
 
 (** {1 Policy types} *)
 
@@ -42,18 +40,6 @@ type compaction_policy = {
         {!Keeper_config.default_keep_recent_tool_results} (2);
         loader clamps to
         [[0, Keeper_config.keep_recent_tool_results_max]]. *)
-  tool_heavy_msg_threshold : int;
-    (** Per-keeper message-count floor for the tool-heavy compaction
-        gate.  Default
-        {!Keeper_config.default_tool_heavy_msg_threshold} (40);
-        preserves the prior global module constant in
-        {!Keeper_compact_policy}.  Wiring into [decide_compaction]
-        is deferred to PR-B; PR-A only widens the type. *)
-  tool_heavy_ratio_floor : float;
-    (** Per-keeper context-ratio floor for the tool-heavy compaction
-        gate.  Default
-        {!Keeper_config.default_tool_heavy_ratio_floor} (0.15);
-        preserves prior global behavior.  Wired by PR-B. *)
 }
 
 type proactive_policy = {
@@ -122,7 +108,6 @@ type usage_metrics = {
   total_tokens : int;
   total_cost_usd : float;
   last_turn_ts : float;
-  last_model_used : string;
   last_input_tokens : int;
   last_output_tokens : int;
   last_total_tokens : int;
@@ -131,14 +116,14 @@ type usage_metrics = {
 
 (** {1 Blocker classification} *)
 
-type cascade_exhaustion_reason =
+type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
       (** RFC-0142 PR-2: typed surface for hostname-resolution failure.
           Closes the dominant Other_detail share (50% live on 5/21,
           "failed to resolve hostname: ...") by mapping the existing
           [Llm_provider.Http_client.network_error_kind.Dns_failure] kind
-          directly to a typed cascade reason instead of routing through
+          directly to a typed runtime reason instead of routing through
           the substring SSOT. *)
   | No_providers_available
   | All_providers_failed
@@ -149,20 +134,23 @@ type cascade_exhaustion_reason =
           ceiling ([max_execution_time_s]). Distinct from transport-level
           provider timeouts. This variant is accepted only from typed
           envelopes; free-form messages stay [Other_detail]. *)
+  | Capacity_exhausted
+      (** Typed surface for capacity-induced runtime exhaustion.
+          Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
+          through to [Other_detail message], losing auto-recovery eligibility
+          and triggering the harsher failure policy. *)
   | Other_detail of string
 
 type blocker_class =
-  | Cascade_exhausted of cascade_exhaustion_reason
+  | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
-  | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
@@ -173,7 +161,6 @@ type blocker_class =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
@@ -183,10 +170,17 @@ val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
     dashboards parse these for keeper supervisor alerting. *)
 
-val cascade_exhaustion_summary :
-  cascade_exhaustion_reason -> string
+val runtime_exhaustion_summary :
+  runtime_exhaustion_reason -> string
 (** Human-readable one-sentence summary per reason variant.
     Used in keeper supervisor logs + dashboard tooltips. *)
+
+val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
+(** Total typed retryability per reason variant. Transient/connectivity
+    reasons and bounded-cycle/turn/capacity exhaustion are retryable;
+    [Other_detail] (unknown free-text) is not. Replaces a string-prefix
+    reparse with a [_ -> false] catch-all that mis-biased transient faults
+    to terminal. *)
 
 val blocker_class_continue_gate : blocker_class -> bool
 (** [blocker_class_continue_gate b] is [true] iff the supervisor
@@ -196,21 +190,21 @@ val blocker_class_continue_gate : blocker_class -> bool
     other blocker terminates the keeper.  Pinned at the
     contract seam — drift changes keeper recovery semantics. *)
 
-val cascade_exhaustion_reason_to_json :
-  cascade_exhaustion_reason -> Yojson.Safe.t
+val runtime_exhaustion_reason_to_json :
+  runtime_exhaustion_reason -> Yojson.Safe.t
 
-val cascade_exhaustion_reason_of_json :
-  Yojson.Safe.t -> cascade_exhaustion_reason option
+val runtime_exhaustion_reason_of_json :
+  Yojson.Safe.t -> runtime_exhaustion_reason option
 
 val blocker_class_of_serialized_string :
   string -> blocker_class option
 (** [blocker_class_of_serialized_string label] is the inverse
-    of {!blocker_class_to_string}.  [Cascade_exhausted _]
-    maps from the bare ["cascade_exhausted"] string to
-    [Cascade_exhausted (Other_detail "cascade_exhausted")] —
+    of {!blocker_class_to_string}.  [Runtime_exhausted _]
+    maps from the bare ["runtime_exhausted"] string to
+    [Runtime_exhausted (Other_detail "runtime_exhausted")] —
     the reason payload is not round-trippable through this
     function alone (callers needing the reason use
-    {!cascade_exhaustion_reason_of_json}).  Used by
+    {!runtime_exhaustion_reason_of_json}).  Used by
     {!Keeper_meta_json_parse} to decode persisted blocker
     state. *)
 
@@ -221,7 +215,7 @@ type blocker_info = {
   detail : string;
 }
 (** Authoritative blocker representation: a typed [blocker_class]
-    paired with optional free-form [detail] (UI / Prometheus label).
+    paired with optional free-form [detail] (UI / Otel_metric_store label).
     Replaces the deprecated split blocker fields, so substring
     classification is no longer load-bearing for persisted keeper_meta.
     When there is no
@@ -233,8 +227,8 @@ val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
     for [klass].  [detail] defaults to [""]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
-(** Round-trippable JSON encoding.  [Cascade_exhausted reason] uses
-    a structured object so the inner [cascade_exhaustion_reason] is
+(** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
+    a structured object so the inner [runtime_exhaustion_reason] is
     preserved across read/write cycles. *)
 
 val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
@@ -242,23 +236,23 @@ val blocker_info_of_json : Yojson.Safe.t -> blocker_info option
     Returns [None] for [`Null] or any value whose [klass] field is
     absent / not recognisable. *)
 
-(** {1 Cascade attempt provenance} *)
+(** {1 Runtime attempt provenance} *)
 
-type cascade_attempt_record = {
+type runtime_attempt_record = {
   provider_id : string;
   http_status : int option;
   outcome : [ `Success | `Failure of string ];
   timestamp : float;
 }
-(** Last observed provider attempt for a keeper-managed cascade turn.
+(** Last observed provider attempt for a keeper-managed runtime turn.
     Persisted in [agent_runtime_state] so supervisor-only terminal
     outcomes can still surface provider/HTTP context. *)
 
-val cascade_attempt_record_to_json :
-  cascade_attempt_record -> Yojson.Safe.t
+val runtime_attempt_record_to_json :
+  runtime_attempt_record -> Yojson.Safe.t
 
-val cascade_attempt_record_of_json :
-  Yojson.Safe.t -> cascade_attempt_record option
+val runtime_attempt_record_of_json :
+  Yojson.Safe.t -> runtime_attempt_record option
 
 (** {1 Tool call summary for continuity} *)
 
@@ -291,9 +285,11 @@ type agent_runtime_state = {
   last_active_desire : string;
   last_current_intention : string;
   last_blocker : blocker_info option;
-  last_cascade_attempt : cascade_attempt_record option;
+  last_runtime_attempt : runtime_attempt_record option;
   last_need : string;
   last_turn_tool_calls : tool_call_summary list;
+  last_seen_message_seq : int;
+  (** Highest message seq this keeper has scanned for direct mentions. *)
 }
 
 (** {1 Keeper meta record} *)
@@ -303,13 +299,12 @@ type keeper_meta = {
   id : Ids.Keeper_id.t option;
   name : string;
   agent_name : string;
+  persona : string option;
   goal : string;
   short_goal : string;
   mid_goal : string;
   long_goal : string;
   social_model : string;
-  models : string list;
-  cascade_ref : Cascade_ref.cascade_ref option;
   will : string;
   needs : string;
   desires : string;
@@ -319,13 +314,9 @@ type keeper_meta = {
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   allowed_paths : string list;
-  tool_access : tool_access;
-  tool_preset_source : string option;
+  tool_access : string list;
   tool_denylist : string list;
   mention_targets : string list;
-  room_signal_prompt_enabled : bool;
-  joined_room_ids : string list;
-  last_seen_seq_by_room : (string * int) list;
   proactive : proactive_policy;
   compaction : compaction_policy;
   auto_handoff : bool;
@@ -352,7 +343,6 @@ type keeper_meta = {
           trajectory accumulator for per-task cost tracking. *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_s : float option;
   always_approve : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
@@ -362,26 +352,28 @@ type keeper_meta = {
   meta_version : int;
 }
 
-(** {1 Cascade name derivation} *)
+(** Overlay TOML/persona defaults onto persisted runtime meta for
+    status-facing reads. Persisted runtime JSON intentionally omits
+    TOML-owned fields such as [sandbox_profile], [network_mode], and
+    [tool_access]. *)
+val effective_meta_result : keeper_meta -> (keeper_meta, string) result
 
-val cascade_name_of_meta : keeper_meta -> string
-(** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
+(** Pure variant for callers that already loaded profile defaults. *)
+val effective_meta_of_profile_defaults :
+  Keeper_types_profile.keeper_profile_defaults ->
+  keeper_meta ->
+  (keeper_meta, string) result
 
-    Resolution order:
-    1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
-    2. Otherwise return the current keeper default route. *)
+val missing_required_sandbox_profile_error :
+  keeper_name:string ->
+  Keeper_types_profile.keeper_profile_defaults ->
+  string
+(** Error text shared by effective-meta reconcile and keeper-up parsing when a
+    declarative keeper profile omits the required [sandbox_profile]. *)
 
-val set_cascade_name : string -> keeper_meta -> keeper_meta
-(** [set_cascade_name name m] returns a meta where [cascade_ref] is pinned
-    to [name]. The cascade_ref takes the
-    form [{ group = name; item = None }] so the group's traversal
-    strategy decides item selection at routing time.
-
-    Use this helper for every write that intends to change the keeper's
-    cascade routing target. For record-literal initialization (full
-    keeper_meta construction) callers must still set [cascade_ref]
-    explicitly; this helper applies only to update-style writes
-    ([{ m with ... }]). *)
+val runtime_id_of_meta : keeper_meta -> string
+(** Runtime id selected for keeper dispatch. Uses the keeper profile [model]
+    when present; otherwise falls back to the configured default runtime id. *)
 
 (** {1 Outcome <-> string} *)
 
@@ -441,20 +433,21 @@ val map_proactive_rt :
   keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
 
-(** {1 Legacy model-arg sentinel list} *)
+(** {1 Removed model-arg marker list} *)
 
-val keeper_legacy_model_arg_names : string list
-(** Names of legacy keeper-creation tool arguments that have
-    been retired in favour of the [cascade_name] field
+val removed_keeper_model_arg_names : string list
+(** Names of removed keeper-creation tool arguments that have
+    been retired because runtime/provider/model selection is not part
+    of the keeper contract
     (["models"], ["allowed_models"], ["active_model"]).
-    Consumed by {!reject_legacy_model_args} which
+    Consumed by {!reject_removed_model_args} which
     surfaces operator-readable rejection messages instead of
-    silently ignoring deprecated args.  Pinned data table —
-    drift would either re-accept retired args silently or
+    silently ignoring removed args.  Pinned data table —
+    drift would either re-accept removed args silently or
     reject newly added args by mistake. *)
 
-val reject_legacy_model_args :
+val reject_removed_model_args :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 (** Reject retired keeper model-selection input fields at tool/API boundaries.
-    Model and provider identity is resolved from [cascade_name] and the cascade
-    catalog, not per-call keeper arguments. *)
+    Model and provider identity is resolved from the default Runtime binding,
+    not per-call keeper arguments. *)

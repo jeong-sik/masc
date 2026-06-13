@@ -26,6 +26,18 @@ let test_supported_protocol_versions () =
   check bool "current version included" true
     (List.mem "2025-11-25" Mcp_transport_protocol.supported_protocol_versions)
 
+let test_supported_protocol_versions_includes_2026_stateless () =
+  check bool "2026 stateless version included" true
+    (List.mem "2026-07-28"
+       Mcp_transport_protocol.supported_protocol_versions);
+  check bool "draft alias included" true
+    (List.mem "DRAFT-2026-v1"
+       Mcp_transport_protocol.supported_protocol_versions);
+  check bool "2026 is stateless" true
+    (Mcp_transport_protocol.is_stateless_protocol_version "2026-07-28");
+  check bool "draft alias is stateless" true
+    (Mcp_transport_protocol.is_stateless_protocol_version "DRAFT-2026-v1")
+
 let test_protocol_version_from_params_none () =
   check string "none falls back to default" "2025-11-25"
     (Mcp_transport_protocol.protocol_version_from_params None)
@@ -55,6 +67,14 @@ let test_protocol_version_from_body_missing_jsonrpc () =
   check (option string) "missing jsonrpc rejected" None
     (Mcp_transport_protocol.protocol_version_from_body
        {|{"method":"initialize","params":{"protocolVersion":"2025-06-18"}}|})
+
+let test_protocol_version_from_request_meta_body () =
+  check (option string) "request meta version" (Some "2026-07-28")
+    (Mcp_transport_protocol.protocol_version_from_request_meta_body
+       {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}|});
+  check bool "body uses stateless protocol" true
+    (Mcp_transport_protocol.body_uses_stateless_protocol
+       {|{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}|})
 
 (* ============================================================
    accepts_json Tests (new: delegates to SDK with wildcard support)
@@ -196,6 +216,8 @@ let () =
       test_case "json_content_type" `Quick test_json_content_type;
       test_case "default_protocol_version" `Quick test_default_protocol_version;
       test_case "supported_protocol_versions" `Quick test_supported_protocol_versions;
+      test_case "supported_protocol_versions includes 2026 stateless" `Quick
+        test_supported_protocol_versions_includes_2026_stateless;
     ];
     "protocol_versions", [
       test_case "from_params none" `Quick test_protocol_version_from_params_none;
@@ -207,6 +229,8 @@ let () =
         test_protocol_version_from_body_non_initialize;
       test_case "from_body missing jsonrpc" `Quick
         test_protocol_version_from_body_missing_jsonrpc;
+      test_case "from_request_meta_body" `Quick
+        test_protocol_version_from_request_meta_body;
     ];
     "accepts_json", [
       test_case "none" `Quick test_accepts_json_none;

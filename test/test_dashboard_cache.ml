@@ -3,7 +3,7 @@
     These tests run inside [Eio_main.run] so that [Eio.Mutex] and
     [Eio.Condition] are fully operational. *)
 
-open Masc_mcp
+open Masc
 
 module Dashboard_projection_cache = Dashboard_projection_cache
 
@@ -175,7 +175,7 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
 
 let test_projection_snapshot_cache_reuses_actor_key () =
   Dashboard_cache.invalidate_all ();
-  let config = Coord.default_config "/tmp/projection-cache-room" in
+  let config = Workspace.default_config "/tmp/projection-cache-workspace" in
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
@@ -194,7 +194,7 @@ let test_projection_snapshot_cache_reuses_actor_key () =
 
 let test_projection_digest_cache_separates_actors () =
   Dashboard_cache.invalidate_all ();
-  let config = Coord.default_config "/tmp/projection-cache-room-actors" in
+  let config = Workspace.default_config "/tmp/projection-cache-workspace-actors" in
   let counter = ref 0 in
   let compute actor_name =
     incr counter;
@@ -225,33 +225,33 @@ let test_invalidate_prefix () =
   let proof_counter = ref 0 in
   let mission_counter = ref 0 in
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr mission_counter;
          `Int !mission_counter));
-  Dashboard_cache.invalidate_prefix "proof:room-a:default:";
+  Dashboard_cache.invalidate_prefix "proof:workspace-a:default:";
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "proof:room-a:default:two" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "proof:workspace-a:default:two" ~ttl:5.0
        (fun () ->
          incr proof_counter;
          `Int !proof_counter));
   ignore
-    (Dashboard_cache.get_or_compute "mission:room-a:default:one" ~ttl:5.0
+    (Dashboard_cache.get_or_compute "mission:workspace-a:default:one" ~ttl:5.0
        (fun () ->
          incr mission_counter;
          `Int !mission_counter));
@@ -304,7 +304,7 @@ let test_stats_detail_surface () =
 
 let test_stats_handles_empty_table () =
   (* [invalidate_all] only clears the entry table; hit/miss counters are
-     cumulative monotonic (Prometheus convention). So after other tests in
+     cumulative monotonic (Otel_metric_store convention). So after other tests in
      the same harness, hit_ratio is non-zero — we assert it is still in
      [0,1] and that the entries surface itself is empty.  This is the
      invariant operators actually care about (no NaN, no negative). *)
@@ -388,7 +388,7 @@ let test_invalidate_all_wakes_waiters () =
     the cache.  The caller receives the stale value immediately, and the
     background fiber's Compute_timeout exception triggers the restore path.
     A subsequent cache lookup must return the stale value, not timeout-error
-    JSON.  (Regression test for Codex review P2 on PR #1314.) *)
+    JSON.  (Regression test for review P2 on PR #1314.) *)
 let test_stale_preserved_on_timeout ~clock ~sw () =
   Dashboard_cache.invalidate_all ();
   Eio_context.set_switch sw;
@@ -598,6 +598,32 @@ let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
+let test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch ~sw () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  Runtime.clear_git_rev_parse_short_cache_for_tests ();
+  with_temp_dir "runtime-git-cache-domain" (fun dir ->
+      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
+        ~refreshed_at:(Time_compat.now () -. 120.0);
+      let probes = Atomic.make 0 in
+      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+          Atomic.incr probes;
+          Some "new");
+      Fun.protect
+        ~finally:(fun () ->
+          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
+          Runtime.clear_git_rev_parse_short_cache_for_tests ())
+        (fun () ->
+          Eio_context.set_switch sw;
+          let worker =
+            Domain.spawn (fun () -> Runtime.git_rev_parse_short dir)
+          in
+          Alcotest.(check (option string))
+            "worker-domain stale hit returns cached value"
+            (Some "old") (Domain.join worker);
+          Alcotest.(check int)
+            "worker-domain refresh is not forked through root switch"
+            0 (Atomic.get probes)))
+
 let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
   let module Runtime = Server_dashboard_http_runtime_info in
   let old_status =
@@ -709,6 +735,9 @@ let () =
           test_case "stampede protection" `Quick test_stampede;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
+          test_case "runtime git cache worker-domain stale hit" `Quick
+            (test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch
+               ~sw);
           test_case "runtime git upstream cache stale-first refresh" `Quick
             (test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git probe disables optional locks" `Quick

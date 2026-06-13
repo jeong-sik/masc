@@ -105,11 +105,29 @@ function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null 
   }
 }
 
+function normalizeOperatorReviewDecisionValue(raw: unknown): OperatorReviewDecision['decision'] | null {
+  const decision = asString(raw)?.trim().toLowerCase()
+  return decision === 'resolved' || decision === 'deferred' ? decision : null
+}
+
+function normalizeOperatorDigestTargetType(raw: unknown): OperatorDigest['target_type'] {
+  const targetType = asString(raw)?.trim().toLowerCase()
+  switch (targetType) {
+    case 'root':
+    case 'namespace':
+    case 'workspace':
+    case 'keeper':
+      return targetType
+    default:
+      return 'root'
+  }
+}
+
 function normalizeReviewDecision(raw: unknown): OperatorReviewDecision | null {
   if (!isRecord(raw)) return null
   const itemId = asString(raw.item_id)
   const fingerprint = asString(raw.fingerprint)
-  const decision = asString(raw.decision)
+  const decision = normalizeOperatorReviewDecisionValue(raw.decision)
   const actor = asString(raw.actor)
   const reason = asString(raw.reason)
   const at = asString(raw.at)
@@ -156,7 +174,7 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
   const root = isRecord(raw) ? raw : {}
   return {
     trace_id: asString(root.trace_id),
-    target_type: asString(root.target_type) ?? 'root',
+    target_type: normalizeOperatorDigestTargetType(root.target_type),
     target_id: asString(root.target_id) ?? null,
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,
@@ -214,7 +232,7 @@ function normalizeSession(raw: unknown): OperatorSessionSnapshot | null {
     team_health: isRecord(raw.team_health) ? raw.team_health : isRecord(statusBlock?.team_health) ? statusBlock.team_health : undefined,
     communication_metrics: isRecord(raw.communication_metrics) ? raw.communication_metrics : isRecord(statusBlock?.communication_metrics) ? statusBlock.communication_metrics : undefined,
     orchestration_state: isRecord(raw.orchestration_state) ? raw.orchestration_state : isRecord(statusBlock?.orchestration_state) ? statusBlock.orchestration_state : undefined,
-    cascade_metrics: isRecord(raw.cascade_metrics) ? raw.cascade_metrics : isRecord(statusBlock?.cascade_metrics) ? statusBlock.cascade_metrics : undefined,
+    runtime_metrics: isRecord(raw.runtime_metrics) ? raw.runtime_metrics : isRecord(statusBlock?.runtime_metrics) ? statusBlock.runtime_metrics : undefined,
     report_paths: reportPaths,
     session,
     recent_events: recentEvents,

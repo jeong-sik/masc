@@ -9,10 +9,10 @@ code_refs:
 
 # Release Evidence
 
-> Current package version: v0.19.31
-> Updated: 2026-04-16
+> Current package version: v0.19.41
+> Updated: 2026-06-12
 
-`masc-mcp`를 production-ready라고 부를 때는 말보다 증거가 먼저여야 한다.  
+`masc`를 production-ready라고 부를 때는 말보다 증거가 먼저여야 한다.  
 기본 증거 형식은 release-evidence bundle이며, 최소한 아래 항목이 함께 있어야 한다.
 
 ## Required Bundle
@@ -20,8 +20,8 @@ code_refs:
 - artifact install smoke: release-shaped binary를 설치 경로에서 직접 실행해 `--version`이 맞는지 확인
 - local boot + `/health`: isolated base path에서 서버 부팅 후 health payload 저장
 - MCP handshake: `initialize` + `tools/list` raw capture 저장
-- repo coordination read path: `masc_status` raw capture 저장
-- dashboard read paths: `/api/v1/dashboard/mission`, `/api/v1/dashboard/namespace-truth` raw capture 저장
+- repo workspace collaboration read path: `masc_status` raw capture 저장
+- dashboard read paths: `/api/v1/dashboard/briefing`, `/api/v1/dashboard/namespace-truth` raw capture 저장
 - quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, OAS pin/boundary gate 결과를 함께 첨부
 - raw evidence: headers/body/json 정규화본 + `server.log`
 

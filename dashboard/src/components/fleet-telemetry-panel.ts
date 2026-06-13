@@ -43,6 +43,7 @@ import {
   formatActivitySignal,
   formatLatency,
   formatPercent,
+  isOfflineDiagnosticHealthState,
   pressureClass,
   sourceCountClass,
   sourceDetail,
@@ -60,7 +61,7 @@ import {
 /**
  * Pure filter for fleet rows.
  *
- * Case-insensitive substring match on keeper identity, runtime/cascade
+ * Case-insensitive substring match on keeper identity, runtime/runtime
  * attempt labels, and runtime blocker.
  *
  * Empty/whitespace query returns the input reference unchanged (no
@@ -77,7 +78,7 @@ function filterFleetRows(
   return rows.filter(row => {
     if (row.name.toLowerCase().includes(needle)) return true
     if (row.model && row.model.toLowerCase().includes(needle)) return true
-    if (row.cascade_label && row.cascade_label.toLowerCase().includes(needle)) return true
+    if (row.runtime_label && row.runtime_label.toLowerCase().includes(needle)) return true
     if (row.provider_label && row.provider_label.toLowerCase().includes(needle)) return true
     if (row.fallback_label && row.fallback_label.toLowerCase().includes(needle)) return true
     if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
@@ -230,7 +231,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
   `
 }
 
-function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
+function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
   const truth = state.namespace_truth
   const readiness = truth?.readiness ?? null
   const attentionEvents = truth?.attention_events ?? []
@@ -241,7 +242,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
   if (!truth || !readiness) {
     return html`
       <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
-        Control room readiness is unavailable for this refresh.
+        Control workspace readiness is unavailable for this refresh.
       </div>
     `
   }
@@ -369,7 +370,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
     model === 'runtime' ? 'runtime lane' : model
   const runtimeModelTitle = (model: string): string =>
     model === 'runtime'
-      ? 'provider/model identity is redacted; use cascade and attempts details below'
+      ? 'provider/model identity is redacted; use runtime and attempts details below'
       : model
 
   return html`
@@ -406,7 +407,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                   : null
               )
             const rowHintClass =
-              diagnosticState === 'offline' || diagnosticState === 'dead'
+              isOfflineDiagnosticHealthState(diagnosticState)
                 ? 'text-[var(--bad-light)]'
                 : 'text-[var(--color-status-warn)]'
             return html`
@@ -438,7 +439,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.sandbox_profile
                       ? 'rounded-[var(--r-1)] bg-[var(--color-bg-hover)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-disabled)]'
                       : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
-                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
+                    title=${row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
@@ -501,8 +502,8 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 >
                   ${runtimeModelLabel(row.model)}
                 </div>
-                ${row.cascade_label
-                  ? html`<div class="max-w-56 truncate" title=${row.cascade_label}>cascade ${row.cascade_label}</div>`
+                ${row.runtime_label
+                  ? html`<div class="max-w-56 truncate" title=${row.runtime_label}>runtime ${row.runtime_label}</div>`
                   : null}
                 ${row.provider_label
                   ? html`<div class="max-w-56 truncate" title=${row.provider_label}>attempts ${row.provider_label}</div>`
@@ -707,7 +708,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
+        warnings.push(`Control workspace 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)
@@ -870,7 +871,7 @@ export function FleetTelemetryPanel() {
 
       <div>
         <${Eyebrow} tone="disabled" class="mb-1">함대 통제실</${Eyebrow}>
-        <${ControlRoomPanel} state=${value} />
+        <${ControlWorkspacePanel} state=${value} />
       </div>
 
       <div>

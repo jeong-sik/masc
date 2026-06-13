@@ -1,4 +1,4 @@
-(** #9777: regression tests for [Tool_board.detect_truncated_markdown_with_reason].
+(** #9777: regression tests for [Board_tool.detect_truncated_markdown_with_reason].
 
     Each case names the truncation pattern under test and asserts both
     that detection fires and that the FIRST signal returned is the
@@ -6,18 +6,18 @@
     level (fence > inline tick > double-asterisk > unfinished link/image). *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let signal_eq a b =
-  Tool_board.truncation_signal_to_string a
-  = Tool_board.truncation_signal_to_string b
+  Board_tool.truncation_signal_to_string a
+  = Board_tool.truncation_signal_to_string b
 
 let signal_pp ppf s =
-  Format.fprintf ppf "%s" (Tool_board.truncation_signal_to_string s)
+  Format.fprintf ppf "%s" (Board_tool.truncation_signal_to_string s)
 
 let signal_t = testable signal_pp signal_eq
 
-let detect = Tool_board.detect_truncated_markdown_with_reason
+let detect = Board_tool.detect_truncated_markdown_with_reason
 
 (* ---- Negative cases (should NOT trigger detection) ----------------- *)
 
@@ -52,32 +52,32 @@ let test_paren_in_prose_not_unfinished_link () =
 
 let test_odd_fence_triggers () =
   check (option signal_t) "unclosed code fence"
-    (Some Tool_board.Odd_fence)
+    (Some Board_tool.Odd_fence)
     (detect "Here is code:\n```python\nprint('hello')")
 
 let test_odd_inline_tick_triggers () =
   check (option signal_t) "trailing lone backtick"
-    (Some Tool_board.Odd_inline_tick)
+    (Some Board_tool.Odd_inline_tick)
     (detect "Use the `read function")
 
 let test_odd_double_asterisk_triggers () =
   check (option signal_t) "unclosed bold"
-    (Some Tool_board.Odd_double_asterisk)
+    (Some Board_tool.Odd_double_asterisk)
     (detect "This is **important and never closed")
 
 let test_odd_double_asterisk_outside_inline_code_triggers () =
   check (option signal_t) "unclosed bold after inline glob"
-    (Some Tool_board.Odd_double_asterisk)
+    (Some Board_tool.Odd_double_asterisk)
     (detect "Run `ls **/*.ml`, then write **summary")
 
 let test_unfinished_link_triggers () =
   check (option signal_t) "trailing [text]( with no )"
-    (Some Tool_board.Unfinished_link)
+    (Some Board_tool.Unfinished_link)
     (detect "See the docs at [reference](https://example.com/path")
 
 let test_unfinished_image_triggers () =
   check (option signal_t) "trailing ![alt]( with no )"
-    (Some Tool_board.Unfinished_image)
+    (Some Board_tool.Unfinished_image)
     (detect "Diagram: ![overview](http://example.com/img.png")
 
 (* ---- Priority order: fence wins over later signals ----------------- *)
@@ -86,7 +86,7 @@ let test_fence_priority_over_link () =
   (* Both an unclosed fence AND an unfinished link present — fence wins. *)
   let s = "```\ntext\nlink: [foo](http://x" in
   check (option signal_t) "fence has higher priority"
-    (Some Tool_board.Odd_fence) (detect s)
+    (Some Board_tool.Odd_fence) (detect s)
 
 let () =
   run "board truncation detection (#9777)"

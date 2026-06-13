@@ -19,6 +19,13 @@ type stale_kill_class =
 val progress_kind_label : string option -> string
 val stale_kill_class_to_string :
   Keeper_registry_types_kill_class.stale_kill_class -> string
+(** Issue #18901: Cause carried inside [Fiber_unresolved] so the emit
+    site is forced to distinguish graceful shutdown races from real
+    missed-resolution bugs. *)
+type fiber_drop_cause =
+  | Graceful_shutdown
+  | Cancelled_by_parent
+  | Unexpected
 type failure_reason =
     Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
@@ -28,11 +35,11 @@ type failure_reason =
   | Provider_timeout_loop of { count : int; }
   | Provider_runtime_error of { code : string; detail : string;
       provider_id : string option; http_status : int option;
-      cascade_name : string option;
+      runtime_id : string option;
+      reason : Keeper_meta_contract.runtime_exhaustion_reason option;
     }
-  | Tool_required_unsatisfied of { code : string; detail : string; }
   | Ambiguous_partial_commit of ambiguous_partial_commit
-  | Fiber_unresolved
+  | Fiber_unresolved of fiber_drop_cause
   | Exception of string
   | Turn_overflow_pause
   | Turn_livelock_pause
@@ -41,6 +48,6 @@ val ambiguous_partial_commit_kind_to_string :
   string
 val failure_reason_to_string : failure_reason -> string
 val failure_reason_cohort_key : failure_reason option -> string
-val stale_watchdog_failure_reason :
+val stale_kill_failure_reason :
   prior:failure_reason option ->
   kill_class:stale_kill_class -> failure_reason option

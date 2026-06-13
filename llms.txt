@@ -1,6 +1,6 @@
-# MASC-MCP LLM Front Door
+# MASC LLM Front Door
 
-`masc-mcp` has many tools. Do not start from the full surface.
+`masc` has many tools. Do not start from the full surface.
 
 ## Primary paths
 

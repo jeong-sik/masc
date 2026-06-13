@@ -68,7 +68,7 @@ type tree_node = {
 (** {1 Forest builder} *)
 
 val build_forest :
-  config:Coord.config ->
+  config:Workspace.config ->
   goals:Goal_store.goal list ->
   tasks:Masc_domain.task list ->
   tree_node list
@@ -100,16 +100,23 @@ val tree_node_to_json :
 (** {1 Dashboard envelope} *)
 
 val dashboard_goals_tree_json :
-  config:Coord.config -> Yojson.Safe.t
+  config:Workspace.config -> Yojson.Safe.t
 (** Returns the full goals dashboard envelope: forest +
     rolled-up summary + verification projection.  Used
     by the [/api/dashboard/goals/tree] route and the
     regression test. *)
 
+val emit_all_goal_attainment_metrics :
+  config:Workspace.config -> unit
+(** Recomputes the goal forest and emits OTLP gauge metrics
+    ([masc_goal_attainment_pct] + [masc_goal_attainment_measured])
+    for every goal.  Safe to call from the background snapshot
+    refresh loop. *)
+
 (** {1 Per-goal detail} *)
 
 val goal_detail_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   goal_id:string ->
   (Yojson.Safe.t, string) result
 (** Returns the per-goal detail envelope for [goal_id].

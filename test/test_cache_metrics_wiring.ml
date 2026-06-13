@@ -7,20 +7,20 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 (* ── Helpers ──────────────────────────────────────────── *)
 
 (** Read counter value, defaulting to 0.0 *)
 let counter_value name =
-  Prometheus.metric_value_or_zero name ()
+  Otel_metric_store.metric_value_or_zero name ()
 
 (* ── Provider prefix cache counter tests ──────────────── *)
 
 let test_prefix_cache_creation_counter () =
   let before = counter_value
     "masc_provider_prefix_cache_creation_tokens_total" in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     "masc_provider_prefix_cache_creation_tokens_total"
     ~delta:1500.0 ();
   let after = counter_value
@@ -32,7 +32,7 @@ let test_prefix_cache_creation_counter () =
 let test_prefix_cache_read_counter () =
   let before = counter_value
     "masc_provider_prefix_cache_read_tokens_total" in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     "masc_provider_prefix_cache_read_tokens_total"
     ~delta:3200.0 ();
   let after = counter_value
@@ -52,11 +52,11 @@ let test_prefix_cache_zero_no_increment () =
   let cc = 0 in
   let cr = 0 in
   if cc > 0 then
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       "masc_provider_prefix_cache_creation_tokens_total"
       ~delta:(Float.of_int cc) ();
   if cr > 0 then
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       "masc_provider_prefix_cache_read_tokens_total"
       ~delta:(Float.of_int cr) ();
   let after_creation = counter_value
@@ -77,7 +77,7 @@ let test_response_cache_counters_registered () =
 
 let test_response_cache_increment () =
   let before = counter_value "masc_inference_cache_hits_total" in
-  Prometheus.inc_counter "masc_inference_cache_hits_total" ();
+  Otel_metric_store.inc_counter "masc_inference_cache_hits_total" ();
   let after = counter_value "masc_inference_cache_hits_total" in
   check (float 0.1) "response cache hit counter incremented"
     1.0 (after -. before)
@@ -88,7 +88,7 @@ let test_two_layer_independence () =
   (* Incrementing response cache should not affect provider prefix cache *)
   let prefix_before = counter_value
     "masc_provider_prefix_cache_read_tokens_total" in
-  Prometheus.inc_counter "masc_inference_cache_hits_total" ();
+  Otel_metric_store.inc_counter "masc_inference_cache_hits_total" ();
   let prefix_after = counter_value
     "masc_provider_prefix_cache_read_tokens_total" in
   check (float 0.1) "prefix cache unaffected by response cache"
@@ -96,7 +96,7 @@ let test_two_layer_independence () =
   (* Incrementing provider prefix cache should not affect response cache *)
   let response_before = counter_value
     "masc_inference_cache_hits_total" in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     "masc_provider_prefix_cache_read_tokens_total"
     ~delta:100.0 ();
   let response_after = counter_value
@@ -104,17 +104,16 @@ let test_two_layer_independence () =
   check (float 0.1) "response cache unaffected by prefix cache"
     response_before response_after
 
-(* ── Prometheus export format test ────────────────────── *)
+(* ── Metric registry test ─────────────────────────────── *)
 
-let test_cache_metrics_in_export () =
-  let text = Prometheus.to_prometheus_text () in
-  let has needle =
-    try ignore (Str.search_forward (Str.regexp_string needle) text 0); true
-    with Not_found -> false
+let test_cache_metrics_in_registry () =
+  let has name =
+    Otel_metric_store.snapshot ()
+    |> List.exists (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
   in
-  check bool "export has prefix creation metric" true
+  check bool "registry has prefix creation metric" true
     (has "masc_provider_prefix_cache_creation_tokens_total");
-  check bool "export has prefix read metric" true
+  check bool "registry has prefix read metric" true
     (has "masc_provider_prefix_cache_read_tokens_total")
 
 (* ── Suite ────────────────────────────────────────────── *)
@@ -143,9 +142,9 @@ let () =
           test_case "layers are independent" `Quick
             test_two_layer_independence;
         ] );
-      ( "prometheus_export",
+      ( "metric_registry",
         [
-          test_case "cache metrics in export text" `Quick
-            test_cache_metrics_in_export;
+          test_case "cache metrics in registry" `Quick
+            test_cache_metrics_in_registry;
         ] );
     ]

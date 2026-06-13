@@ -14,7 +14,7 @@ implementation_prs: []
 # RFC-0178 — Types Sub-library Extraction with `_intf.ml` mli-only Surface
 
 Status: Draft · Scaffold (Sprint 2 entry, see related work)
-Author: jeong-sik (with Claude Opus 4.7 via masc-mcp ocaml-bestpractice plan PR me#1175)
+Author: jeong-sik (with Claude Opus 4.7 via masc ocaml-bestpractice plan PR me#1175)
 Date: 2026-05-26
 Supersedes: —
 Related: RFC-0056 (Incremental Sub-Library Extraction — inherits G1-G5 gate machinery), RFC-0085 (Keeper Namespace Promotion — naming convention precedent), RFC-0005 (Typed Capability Substrate — caller-pattern alignment), RFC-0003 (Keeper Composite Lifecycle — sub-FSM module type targets)
@@ -39,9 +39,9 @@ Measured 2026-05-26:
 
 ### 1.2 Coupling hypothesis
 
-`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, cascade-side, OAS-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
+`types_core.ml` aggregates types across at least 5 domains observed in source: keeper-side, runtime-side, OAS-side, shell-side, dashboard-side. Today every caller imports the entire 1,067-LoC module to use a single domain's types. This:
 
-1. Inflates compile fan-out for unrelated changes (touching one keeper type recompiles cascade callers).
+1. Inflates compile fan-out for unrelated changes (touching one keeper type recompiles runtime callers).
 2. Defeats the cycle-avoidance property `_intf.ml` would provide — when two sub-libraries each need the same type, only direct embedding works (or duplication).
 3. Makes Sprint 2 functor-driven design (P1-4 of the plan) infeasible: functor parameters need narrow module-type surfaces, but `types_core.ml` has no such surfaces.
 
@@ -76,9 +76,9 @@ Empirical inventory from `lib/types/types_core.ml` (1,086 LoC at HEAD `4759453d3
 |--:|---|---|---:|---|---|
 | 0 | Utility (timestamp) | 1-40 | ~40 | `now_iso`, `parse_iso8601_opt` (values, not types) | `types_time` (or absorb into shared util) |
 | 1 | **Agent** | 42-220 | ~180 | `agent_status`, `agent_meta`, `agent` | `types_agent_intf` |
-| 2 | **Room** | 232-249 | ~17 | `room_info`, `room_registry` | `types_room_intf` |
+| 2 | **Workspace** | 232-249 | ~17 | `workspace_info`, `workspace_registry` | `types_workspace_intf` |
 | 3 | **Task** (largest) | 250-650 | ~400 | 13 types: `task_action`, `task_status`, `worktree_info`, `task_execution_links`, `task_contract`, `task_reclaim_policy`, `task_handoff_context`, `task`, `task_reclaim_gate`, `task_claim_readiness`, `task_claim_block`, `task_claim_decision`, `task_claim_next_action` | `types_task_intf` |
-| 4 | **Message** | 756-788 | ~32 | `message`, `room_state` | `types_message_intf` |
+| 4 | **Message** | 756-788 | ~32 | `message`, `workspace_state` | `types_message_intf` |
 | 5 | **Tempo** | 789-860 | ~71 | `tempo_mode`, `tempo_config` | `types_tempo_intf` |
 | 6 | **Backlog** | 861-901 | ~40 | `backlog` | `types_backlog_intf` |
 | 7 | **A2A / Portal** | 902-1031 | ~130 | `a2a_task_status`, `portal_state`, `a2a_task`, `portal` | `types_a2a_intf` |
@@ -88,7 +88,7 @@ Empirical inventory from `lib/types/types_core.ml` (1,086 LoC at HEAD `4759453d3
 ### 3.2 Observations from inventory
 
 - **Task domain dominates** (~400 LoC, 42% of typed surface). It is the obvious last candidate for Phase 0 PoC due to internal coupling among 13 types.
-- **3 small leaves are immediate Phase 0 candidates** (Room 17 LoC, Backlog 40 LoC, Tempo 71 LoC). Tempo is most attractive because it has the cleanest internal structure (`tempo_mode` + `tempo_config`) and no obvious cross-domain reference (verify in §3.3).
+- **3 small leaves are immediate Phase 0 candidates** (Workspace 17 LoC, Backlog 40 LoC, Tempo 71 LoC). Tempo is most attractive because it has the cleanest internal structure (`tempo_mode` + `tempo_config`) and no obvious cross-domain reference (verify in §3.3).
 - **Utility (timestamp) is values, not types**. Distinct treatment — likely lives in a shared `lib/util_time/` not a typed-SSOT sub-library.
 - **MCP surface** (sse_session, tool_result) belongs to the protocol boundary — may overlap with `lib/mcp_protocol/` (external pinned dep, see dune-project). Phase 0 should *avoid* this domain until cross-package contract is clarified.
 
@@ -99,7 +99,7 @@ Tentative ranking by *expected risk × signal*:
 | Candidate | Risk | Signal | Notes |
 |---|---|---|---|
 | Tempo (~71 LoC, 2 types) | Low | Medium | Self-contained 2-type cluster; good "shape proof" for the pattern. |
-| Room (~17 LoC, 2 types) | Very low | Low | Too small; outcome trivially positive, low generalization. |
+| Workspace (~17 LoC, 2 types) | Very low | Low | Too small; outcome trivially positive, low generalization. |
 | Backlog (~40 LoC, 1 type) | Low | Low | Single type; doesn't exercise multi-type `_intf.ml` benefit. |
 | Agent (~180 LoC, 3 types) | Medium | High | Mid-size cluster; exercises pattern at meaningful scale. |
 
@@ -143,8 +143,8 @@ All 7 checks pass → Override conditions not invoked.
 ## 7. Open questions for review
 
 1. Should `_intf.ml` files live under `lib/types_<domain>/intf.ml` (clean dir) or `lib/types_<domain>/types_<domain>_intf.ml` (long but unambiguous)?
-2. Are `ppx_deriving` derivers (`show`, `eq`) part of the typed-SSOT surface or per-consumer? RFC-0058 `cascade_decl` precedent suggests per-sub-library.
-3. Does Phase 0 PoC pick the smallest domain (keeper-sub-FSM, ~150 LoC est.) or the highest-coupling domain (cascade)? Smallest = lower risk; highest-coupling = highest signal.
+2. Are `ppx_deriving` derivers (`show`, `eq`) part of the typed-SSOT surface or per-consumer? RFC-0058 `runtime_decl` precedent suggests per-sub-library.
+3. Does Phase 0 PoC pick the smallest domain (keeper-sub-FSM, ~150 LoC est.) or the highest-coupling domain (runtime)? Smallest = lower risk; highest-coupling = highest signal.
 
 ## 8. Iteration log
 

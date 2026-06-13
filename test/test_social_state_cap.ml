@@ -5,14 +5,14 @@
     previous_state carried across turns by BDI speech v1 cannot grow
     monotonically when speech_act=Stay_silent preserves state. *)
 
-module T = Masc_mcp.Keeper_social_model_types
+module T = Keeper_social_model_types
 
 let long n = String.make n 'x'
 
 let base : T.social_state =
   {
     social_model = "bdi_speech_v1";
-    belief_summary = "quiet_room";
+    belief_summary = "quiet_workspace";
     active_desire = None;
     current_intention = None;
     blocker = None;
@@ -23,7 +23,7 @@ let base : T.social_state =
 
 let test_short_unchanged () =
   let c = T.cap_social_state base in
-  Alcotest.(check string) "belief_summary unchanged" "quiet_room" c.belief_summary;
+  Alcotest.(check string) "belief_summary unchanged" "quiet_workspace" c.belief_summary;
   Alcotest.(check (option string)) "blocker stays None" None c.blocker
 
 let test_belief_capped () =

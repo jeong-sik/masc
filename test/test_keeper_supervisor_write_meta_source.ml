@@ -14,7 +14,7 @@
           again by refactors.
 
     Structural (source grep) rather than behavioural because the call
-    site is inside [supervise_keepalive], which requires a full Coord /
+    site is inside [supervise_keepalive], which requires a full Workspace /
     Keeper_registry fixture to exercise; the risk we guard against is
     exactly that someone collapses the handler back to [ignore] during
     cleanup.

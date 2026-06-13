@@ -1,19 +1,8 @@
-module U = Yojson.Safe.Util
+type 'a context = 'a Tool_operator.context
 
-type 'a context = {
-  config : Coord.config;
-  agent_name : string;
-  sw : Eio.Switch.t;
-  clock : 'a Eio.Time.clock;
-  proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
-  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
-  mcp_session_id : string option;
-}
-
-let string_option_to_json = Json_util.option_to_yojson (fun value -> `String value)
 
 let operator_dir config =
-  Filename.concat (Coord.masc_dir config) "operator"
+  Filename.concat (Workspace.masc_dir config) "operator"
 
 let pending_confirms_path config =
   Filename.concat (operator_dir config) "pending_confirms.json"
@@ -37,18 +26,18 @@ let normalized_actor ~context_actor = function
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
-let operator_judge_runtime_json (config : Coord.config) =
+let operator_judge_runtime_json (config : Workspace.config) =
   let runtime = Dashboard_operator_judge.runtime_status config.base_path in
   `Assoc
     [
       ("enabled", `Bool runtime.enabled);
       ("judge_online", `Bool runtime.judge_online);
       ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", string_option_to_json runtime.generated_at);
-      ("expires_at", string_option_to_json runtime.expires_at);
+      ("generated_at", Json_util.string_option_to_yojson runtime.generated_at);
+      ("expires_at", Json_util.string_option_to_yojson runtime.expires_at);
       ("model_used", `Null);
       ("keeper_name", `String runtime.keeper_name);
-      ("last_error", string_option_to_json runtime.last_error);
+      ("last_error", Json_util.string_option_to_yojson runtime.last_error);
     ]
 
 type pending_confirm = {
@@ -90,7 +79,7 @@ let preview_of_pending_confirm (entry : pending_confirm) =
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_option_to_yojson entry.target_id);
       ("payload", entry.payload);
     ]
 
@@ -103,34 +92,34 @@ let pending_confirm_to_yojson (entry : pending_confirm) =
       ("actor", `String entry.actor);
       ("action_type", `String entry.action_type);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_option_to_yojson entry.target_id);
       ("payload", entry.payload);
       ("delegated_tool", `String entry.delegated_tool);
       ("created_at", `String entry.created_at);
-      ("expires_at", string_option_to_json entry.expires_at);
+      ("expires_at", Json_util.string_option_to_yojson entry.expires_at);
       ("preview", preview_of_pending_confirm entry);
     ]
 
 let pending_confirm_of_yojson json =
   try
-    let token = json |> U.member "token" |> U.to_string in
+    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
     let trace_id =
-      match json |> U.member "trace_id" |> U.to_string_option with
+      match Json_util.get_string json "trace_id" with
       | Some value -> value
       | None -> trace_id "opc"
     in
-    let actor = json |> U.member "actor" |> U.to_string in
-    let action_type = json |> U.member "action_type" |> U.to_string in
-    let target_type = json |> U.member "target_type" |> U.to_string in
-    let target_id = json |> U.member "target_id" |> U.to_string_option in
+    let actor = Json_util.get_string_with_default json ~key:"actor" ~default:"" in
+    let action_type = Json_util.get_string_with_default json ~key:"action_type" ~default:"" in
+    let target_type = Json_util.get_string_with_default json ~key:"target_type" ~default:"" in
+    let target_id = Json_util.get_string json "target_id" in
     let payload =
-      match json |> U.member "payload" with
-      | `Assoc _ as payload -> payload
-      | _ -> `Assoc []
+      match Json_util.get_object json "payload" with
+      | Some payload -> payload
+      | None -> `Assoc []
     in
-    let delegated_tool = json |> U.member "delegated_tool" |> U.to_string in
-    let created_at = json |> U.member "created_at" |> U.to_string in
-    let expires_at = json |> U.member "expires_at" |> U.to_string_option in
+    let delegated_tool = Json_util.get_string_with_default json ~key:"delegated_tool" ~default:"" in
+    let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
+    let expires_at = Json_util.get_string json "expires_at" in
     Ok
       {
         token;
@@ -144,10 +133,10 @@ let pending_confirm_of_yojson json =
         created_at;
         expires_at;
       }
-  with U.Type_error (msg, _) | Failure msg -> Error msg
+  with Failure msg -> Error msg
 
 let raw_pending_confirms config : pending_confirm list =
-  match Coord_utils.read_json_opt config (pending_confirms_path config) with
+  match Workspace_utils.read_json_opt config (pending_confirms_path config) with
   | None -> []
   | Some (`List entries) ->
       List.filter_map
@@ -159,7 +148,7 @@ let raw_pending_confirms config : pending_confirm list =
   | Some _ -> []
 
 let write_pending_confirms config (entries : pending_confirm list) =
-  Coord_utils.write_json config (pending_confirms_path config)
+  Workspace_utils.write_json config (pending_confirms_path config)
     (`List (List.map pending_confirm_to_yojson entries))
 
 let pending_confirm_expired (entry : pending_confirm) =
@@ -240,19 +229,19 @@ let pending_confirms_json ?actor config =
 let available_actions : available_action list =
   [
     make_available_action ~action_type:"broadcast" ~tool_name:"masc_broadcast"
-      ~target_type:"root"
+      ~target_type:"workspace"
       ~description:"Namespace-wide operator broadcast.";
     make_available_action ~action_type:"namespace_pause" ~tool_name:"masc_pause"
-      ~target_type:"root"
+      ~target_type:"workspace"
       ~description:"Pause namespace automation and spawning.";
     make_available_action ~action_type:"namespace_resume" ~tool_name:"masc_resume"
-      ~target_type:"root"
+      ~target_type:"workspace"
       ~description:"Resume a paused namespace.";
     make_available_action ~action_type:"social_sweep" ~tool_name:"social_sweep"
-      ~target_type:"root"
+      ~target_type:"workspace"
       ~description:"Run one immediate social sweep across keepers.";
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
-      ~target_type:"root"
+      ~target_type:"workspace"
       ~description:"Inject a backlog task into the namespace.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
@@ -292,7 +281,7 @@ let pending_confirm_summary_json_of_scope scope =
   in
   `Assoc
     [
-      ("actor_filter", string_option_to_json scope.actor_filter);
+      ("actor_filter", Json_util.string_option_to_yojson scope.actor_filter);
       ("filter_active", `Bool (Option.is_some scope.actor_filter));
       ("visible_count", `Int (List.length scope.visible_entries));
       ("total_count", `Int (List.length scope.all_entries));

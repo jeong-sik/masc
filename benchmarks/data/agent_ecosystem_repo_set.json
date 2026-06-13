@@ -77,7 +77,7 @@
     "adoption_bucket": "bridge_or_fork",
     "ocaml_status": "community_missing_prod_features",
     "eio_strategy": "native",
-    "why_it_matters": "Closest OCaml MCP implementation to a reusable substrate outside the current masc-mcp codebase.",
+    "why_it_matters": "Closest OCaml MCP implementation to a reusable substrate outside the current masc codebase.",
     "key_capabilities": [
       "core protocol types",
       "high-level SDK",
@@ -157,7 +157,7 @@
       "https://opam.ocaml.org/packages/anthropic/"
     ],
     "last_verified_at": "2026-03-27T11:35:45+09:00",
-    "notes": "Promising but low-adoption. Treat as fork-ready if it becomes critical to masc-mcp."
+    "notes": "Promising but low-adoption. Treat as fork-ready if it becomes critical to masc."
   },
   {
     "repo_id": "Nymphium/openai-ocaml",
@@ -303,7 +303,7 @@
     "adoption_bucket": "adopt_now",
     "ocaml_status": "usable_but_thin",
     "eio_strategy": "native",
-    "why_it_matters": "Best current OCaml OTel option for adding spans, metrics, and logs around masc-mcp control-plane flows.",
+    "why_it_matters": "Best current OCaml OTel option for adding spans, metrics, and logs around masc control-plane flows.",
     "key_capabilities": [
       "traces metrics logs",
       "ambient context support",
@@ -326,7 +326,7 @@
     "adoption_bucket": "adopt_now",
     "ocaml_status": "ocaml_core_stable",
     "eio_strategy": "native",
-    "why_it_matters": "Direct-style multicore IO runtime is the foundation that masc-mcp should keep building on.",
+    "why_it_matters": "Direct-style multicore IO runtime is the foundation that masc should keep building on.",
     "key_capabilities": [
       "effect-based IO",
       "fibers and switches",
@@ -439,7 +439,7 @@
     "adoption_bucket": "adopt_now",
     "ocaml_status": "usable_but_thin",
     "eio_strategy": "not_applicable",
-    "why_it_matters": "Provides core OpenAPI document modeling that can unify OAS and benchmark schema work in masc-mcp.",
+    "why_it_matters": "Provides core OpenAPI document modeling that can unify OAS and benchmark schema work in masc.",
     "key_capabilities": [
       "OpenAPI document types",
       "JSON Schema-backed docs",
@@ -496,7 +496,7 @@
       "https://opam.ocaml.org/packages/ocaml-protoc-plugin/"
     ],
     "last_verified_at": "2026-03-27T11:35:45+09:00",
-    "notes": "Already aligned with masc-mcp's existing protobuf-heavy stack."
+    "notes": "Already aligned with masc's existing protobuf-heavy stack."
   },
   {
     "repo_id": "hyperium/tonic",
@@ -530,7 +530,7 @@
     "adoption_bucket": "reference_bar",
     "ocaml_status": "reference_non_ocaml",
     "eio_strategy": "reference_only",
-    "why_it_matters": "Reference bar for checkpoint/replay/retry/backoff workflow primitives that masc-mcp should internalize.",
+    "why_it_matters": "Reference bar for checkpoint/replay/retry/backoff workflow primitives that masc should internalize.",
     "key_capabilities": [
       "durable workflows",
       "checkpoint and replay",

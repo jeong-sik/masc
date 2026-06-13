@@ -9,18 +9,18 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.19.31
-> Latest changelog entry: v0.19.31 (2026-05-26)
-> Latest published GitHub release: v0.19.27 (2026-05-20)
-> Updated: 2026-05-24
+> Current package version: v0.19.43
+> Latest changelog entry: v0.19.43 (2026-06-12)
+> Latest published GitHub release: v0.19.41 (2026-06-12)
+> Updated: 2026-06-12
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
-Execution companion for capsule-only coordination hardening:
+Execution companion for capsule-only workspace collaboration hardening:
 [design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)
 
 ## Product Promise
 
-`masc-mcp` is a repo-local MCP server for coordinating multiple coding agents inside one repository.
+`masc` is a repo-local MCP server for alignment multiple coding agents inside one repository.
 
 Primary user:
 
@@ -28,7 +28,7 @@ Primary user:
 
 Promise stack:
 
-1. Repo coordination
+1. Repo workspace collaboration
 2. Keeper runtime and supervised delivery
 3. Dashboard and operator visibility
 
@@ -38,8 +38,8 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired su
 
 | Capability | Current status | Promise level | Evidence | Main gap | Next action |
 |-----------|----------------|---------------|----------|----------|-------------|
-| Room and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
-| Worktree and collision control | Done | Front door | README, room/tool coverage, live usage | onboarding clarity | keep in front-door docs |
+| Workspace and task hygiene | Done | Front door | `docs/spec/C-implementation-status.md`, `README.md` | docs were too spread out | keep as default entry path |
+| Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
 | Keeper continuity | Not done for product promise | Advanced | `docs/design/keeper-continuity-product-rfc.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | checkpoint truth and bounded contract are not productized yet | ship as bounded same-trace continuity with explicit runbook |
 | Dashboard core read models | Working | Supporting | — | transport truth and config visibility gaps | harden read truth and config introspection |
@@ -76,7 +76,7 @@ Canonical label set:
 | Group | Labels |
 |------|--------|
 | Type | `type:bug`, `type:friction`, `type:feature`, `type:architecture`, `type:docs` |
-| Area | `area:coordination`, `area:supervised-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
+| Area | `area:workspace collaboration`, `area:supervised-execution`, `area:dashboard`, `area:operator`, `area:transport`, `area:config`, `area:ci`, `area:docs`, `area:experimental` |
 | Target | `target:now`, `target:next`, `target:later` |
 | Gates | `release-blocker`, `product-gap` |
 | Root cause | `root-cause:SSOT`, `root-cause:TEL`, `root-cause:BND`, `root-cause:SIL`, `root-cause:VAR`, `root-cause:STR`, `root-cause:DET` |
@@ -117,7 +117,7 @@ Every PR should include:
 
 Each PR should link at least one issue and state which promise it affects:
 
-- `repo coordination`
+- `repo workspace collaboration`
 - `supervised delivery`
 - `ops visibility`
 - `none/internal`
@@ -128,13 +128,13 @@ Each PR should link at least one issue and state which promise it affects:
 - `0.y.z` releases stabilize the current promise only
 - `1.0.0` stays reserved until the front-door promise is trustworthy without release-truth caveats
 - do not tag with open `release-blocker`
-- do not tag if version truth is broken across `dune-project`, `masc_mcp.opam`, `ROADMAP.md`, and `CHANGELOG.md`
+- do not tag if version truth is broken across `dune-project`, `masc.opam`, `ROADMAP.md`, and `CHANGELOG.md`
 
 ## 6-8 Week Tracks
 
 ### Track A. Product truth and onboarding
 
-- rewrite the README around repo coordination first
+- rewrite the README around repo workspace collaboration first
 - keep advanced delivery paths visible but clearly secondary
 - align roadmap, changelog, and product review
 - replace stale or ambiguous “what is this product?” prose with one consistent promise
@@ -176,14 +176,14 @@ Keep visible, but defer:
 - broad Eio architecture cleanup
 - cluster mode and other speculative scaling stories
 
-## Provider-K Role
+## GLM Role
 
-Provider-K is part of the operating model, not the core product promise.
+GLM is part of the operating model, not the core product promise.
 
-Use direct `sb provider-k-text` for:
+Use direct `sb glm-text` for:
 
 - cross-model PR review
 - skeptical review of product docs and roadmap text
 - release-note and spec ambiguity checks
 
-Do not describe `sb provider-k-cascade` results as proof that direct Provider-K itself worked. That path is a multi-model chain, not a pure Provider-K call.
+Do not describe `sb glm-cascade --simple` results as proof that direct GLM itself worked. That path is a multi-model chain, not a pure GLM call.

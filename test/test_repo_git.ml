@@ -93,7 +93,6 @@ let sample_repo ~url local_path =
     local_path;
     aliases = [];
     default_branch = "main";
-    credential_id = "default";
     keepers = [];
     status = Active;
     auto_sync = false;
@@ -102,26 +101,13 @@ let sample_repo ~url local_path =
     updated_at = Int64.zero;
   }
 
-let sample_credential () =
-  {
-    id = "default";
-    cred_type = Local;
-    username = "test";
-    gh_config_dir = None;
-    ssh_key_path = None;
-    gpg_key_id = None;
-    state = Unmaterialized;
-    token_sha256_prefix = None;
-  }
-
 let test_clone_ok () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
       init_local_repo source;
       let dest = Filename.concat tmp "dest" in
       let repo = sample_repo ~url:source dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
+      match Repo_git.clone ~repository:repo with
       | Ok () ->
           Alcotest.(check bool) "dest exists" true (Sys.file_exists dest);
           Alcotest.(check bool) "dest/.git exists" true
@@ -132,8 +118,7 @@ let test_clone_bad_url () =
   with_temp_dir (fun tmp ->
       let dest = Filename.concat tmp "dest" in
       let repo = sample_repo ~url:"/nonexistent/path/to/repo" dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
+      match Repo_git.clone ~repository:repo with
       | Ok () -> Alcotest.fail "expected clone to fail"
       | Error _ -> ())
 
@@ -143,8 +128,7 @@ let test_get_branches () =
       init_local_repo source;
       let dest = Filename.concat tmp "dest" in
       let repo = sample_repo ~url:source dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
+      match Repo_git.clone ~repository:repo with
       | Error e -> Alcotest.fail ("clone failed: " ^ e)
       | Ok () -> (
           match Repo_git.get_branches ~repository:repo with
@@ -158,11 +142,10 @@ let test_fetch () =
       init_local_repo source;
       let dest = Filename.concat tmp "dest" in
       let repo = sample_repo ~url:source dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
+      match Repo_git.clone ~repository:repo with
       | Error e -> Alcotest.fail ("clone failed: " ^ e)
       | Ok () -> (
-          match Repo_git.fetch ~repository:repo ~credential:cred with
+          match Repo_git.fetch ~repository:repo with
           | Error e -> Alcotest.fail ("fetch failed: " ^ e)
           | Ok remotes ->
               Alcotest.(check bool) "has origin/main" true
@@ -174,8 +157,7 @@ let test_get_recent_commits () =
       init_local_repo source;
       let dest = Filename.concat tmp "dest" in
       let repo = sample_repo ~url:source dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
+      match Repo_git.clone ~repository:repo with
       | Error e -> Alcotest.fail ("clone failed: " ^ e)
       | Ok () -> (
           match Repo_git.get_recent_commits ~repository:repo ~branch:"main" ~limit:5 with

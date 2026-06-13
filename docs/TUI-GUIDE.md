@@ -32,11 +32,11 @@ If the server is using a different base path, pass `--base <path>` or export
 
 ### Dashboard Mode (default)
 
-Shows room status: agents, tasks, events, messages. Refreshes every 2 seconds.
+Shows workspace status: agents, tasks, events, messages. Refreshes every 2 seconds.
 
 ```
 MASC Dashboard (v2.128.0)
-Room: default | Agents: 5 | Tasks: 3
+Workspace: default | Agents: 5 | Tasks: 3
 
   Agent          Status    Task
   local-alpha    busy      Validate swarm coverage

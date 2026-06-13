@@ -17,26 +17,26 @@ let provider_attempts_summary_json (scan : runtime_manifest_scan) : Yojson.Safe.
   let terminal = scan.provider_terminal_row in
   let terminal_decision_string key =
     Option.bind terminal (fun row ->
-      json_string_member_opt key row.Keeper_runtime_manifest.decision)
+      Json_util.get_string row.Keeper_runtime_manifest.decision key)
   in
   `Assoc
     [ "started_count", `Int scan.provider_started_count
     ; "finished_count", `Int scan.provider_finished_count
     ; ( "terminal_status"
-      , json_string_opt
+      , Json_util.string_opt_to_json
           (Option.map (fun row -> row.Keeper_runtime_manifest.status) terminal) )
-    ; "terminal_model_source", json_string_opt (terminal_decision_string "model_source")
+    ; "terminal_model_source", Json_util.string_opt_to_json (terminal_decision_string "model_source")
     ; ( "terminal_resolved_model_source"
-      , json_string_opt (terminal_decision_string "resolved_model_source") )
+      , Json_util.string_opt_to_json (terminal_decision_string "resolved_model_source") )
     ; ( "terminal_capability_source"
-      , json_string_opt (terminal_decision_string "capability_source") )
+      , Json_util.string_opt_to_json (terminal_decision_string "capability_source") )
     ; ( "terminal_fallback_authority"
-      , json_string_opt (terminal_decision_string "fallback_authority") )
-    ; ( "terminal_provider_source_cascade"
-      , json_string_opt (terminal_decision_string "provider_source_cascade") )
-    ; "terminal_error", json_string_opt (terminal_decision_string "error")
+      , Json_util.string_opt_to_json (terminal_decision_string "fallback_authority") )
+    ; ( "terminal_provider_source_runtime"
+      , Json_util.string_opt_to_json (terminal_decision_string "provider_source_runtime") )
+    ; "terminal_error", Json_util.string_opt_to_json (terminal_decision_string "error")
     ; ( "terminal_exception_kind"
-      , json_string_opt (terminal_decision_string "exception_kind") )
+      , Json_util.string_opt_to_json (terminal_decision_string "exception_kind") )
     ; "attempts", `List (List.map provider_attempt_row_json attempt_rows)
     ]
 ;;
@@ -52,17 +52,14 @@ let turn_identity_summary_json
   in
   let receipt_turn_counts =
     receipts
-    |> List.filter_map (json_int_member_opt "turn_count")
+    |> List.filter_map (fun json -> Json_util.get_int json "turn_count")
     |> Scan_summary.unique_ints
   in
   `Assoc
-    [ ( "requested_keeper_turn_id"
-      , match turn_id with
-        | Some value -> `Int value
-        | None -> `Null )
+    [ ( "requested_keeper_turn_id", Json_util.int_opt_to_json turn_id )
     ; "manifest_keeper_turn_ids", Scan_summary.json_int_list manifest_keeper_turn_ids
     ; "receipt_turn_counts", Scan_summary.json_int_list receipt_turn_counts
-    ; "max_oas_turn_count", Scan_summary.json_int_opt scan.max_oas_turn_count
+    ; "max_oas_turn_count", Json_util.int_opt_to_json scan.max_oas_turn_count
     ; ( "provider_lane_resolved_count"
       , `Int
           (runtime_manifest_scan_event_count
@@ -88,16 +85,6 @@ let turn_identity_summary_json
           (runtime_manifest_scan_event_count
              scan
              Keeper_runtime_manifest.Event_bus_correlated) )
-    ; ( "memory_injected_count"
-      , `Int
-          (runtime_manifest_scan_event_count
-             scan
-             Keeper_runtime_manifest.Memory_injected) )
-    ; ( "memory_flushed_count"
-      , `Int
-          (runtime_manifest_scan_event_count
-             scan
-             Keeper_runtime_manifest.Memory_flushed) )
     ; ( "receipt_appended_count"
       , `Int
           (runtime_manifest_scan_event_count

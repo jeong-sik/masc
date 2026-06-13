@@ -3,7 +3,7 @@
 #
 # sw-dev §Magic Number 금지: "같은 리터럴이 2곳 이상 등장하면 반드시
 # named constant로 교체". The 2026-05-19 audit
-# (memory/masc-mcp-code-smell-report-2026-05-19.html Hotspot #2)
+# (memory/masc-code-smell-report-2026-05-19.html Hotspot #2)
 # called out the worst offenders (32602 ×30 in one file; 3600 ×15;
 # 1000 ×14; 1024 ×11) but did not provide a measurement tool that
 # survives code drift.

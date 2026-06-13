@@ -1,21 +1,21 @@
 ---
-title: masc create CLI / API for Keeper, Cascade, Persona
+title: masc create CLI / API for Keeper, Runtime, Persona
 rfc: 0030
 status: Withdrawn
 created: 2026-05-05
 withdrawn_date: 2026-05-21
-withdrawn_reason: "Authoring CLI never implemented. masc-mcp uses MCP tools + dashboard for entity creation instead. Different entry point pattern adopted. Archived for history."
+withdrawn_reason: "Authoring CLI never implemented. masc uses MCP tools + dashboard for entity creation instead. Different entry point pattern adopted. Archived for history."
 ---
 
-# RFC-0030 — `masc create` CLI / API for Keeper, Cascade, Persona
+# RFC-0030 — `masc create` CLI / API for Keeper, Runtime, Persona
 
 - **Status**: Draft
 - **Author**: yousleepwhen (vincent)
 - **Created**: 2026-05-05
 - **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §2-1, §2-2
-- **Related**: RFC-0027 (typed cascade), RFC-0019 (keeper credential unification),
-  RFC-0008 (credential provider), `lib/keeper/keeper_persona_authoring.ml`,
-  `lib/cascade/cascade_config.ml`
+- **Related**: RFC-0027 (typed runtime), RFC-0019 (keeper credential unification),
+  RFC-0008 (credential provider), `lib/keeper/keeper_persona.ml`,
+  `lib/runtime/runtime_config.ml`
 
 ## 1. Problem
 
@@ -25,7 +25,7 @@ restart**:
 | Asset | File | Restart required? | Validator |
 |-------|------|-------------------|-----------|
 | Keeper persona | `config/keepers/<name>.toml` | Yes (autoboot rescan) | TOML parse + `keeper_meta_json_parse.ml` |
-| Cascade profile | `config/cascade.toml` | Yes (cascade reload) | `cascade_toml_materializer.ml` |
+| Runtime profile | `config/runtime.toml` | Yes (runtime reload) | `runtime_toml_materializer.ml` |
 | Credential | `config/keepers/<name>.toml` + post-boot issuance | Partial | `credential_provider.ml` |
 
 Operator pain points:
@@ -36,7 +36,7 @@ Operator pain points:
    only when a specific code path triggers parse.
 3. **No auto-registration.** Adding a keeper means: edit TOML, restart,
    wait for autoboot, watch credential issuance, watch first turn,
-   verify dashboard shows the new keeper, verify cascade routing picks
+   verify dashboard shows the new keeper, verify runtime routing picks
    it up. Each step has its own failure mode.
 4. **No deletion.** "Removing" a keeper is "edit TOML, archive the
    file". Credentials don't auto-revoke; the dashboard keeps a stale
@@ -52,10 +52,10 @@ ceremony.
 Three operator-facing surfaces, in increasing complexity:
 
 - **2.1** `masc create persona`: TOML stub + schema validation + post-create
-  registration (no credential / cascade impact).
-- **2.2** `masc create cascade`: profile add/activate/list/delete with
+  registration (no credential / runtime impact).
+- **2.2** `masc create runtime`: profile add/activate/list/delete with
   runtime reload, no server restart.
-- **2.3** `masc create keeper`: persona + credential issuance + cascade
+- **2.3** `masc create keeper`: persona + credential issuance + runtime
   routing entry + dashboard register, single command, atomic.
 
 Each surface is independently shippable. Order matters — 2.3 depends on
@@ -84,15 +84,15 @@ masc create persona \
   --tier <primary|retired_fast_profile|tier_small|...> \
   --tools <preset|comma-list> \
   [--work-source <unclaimed_tasks|...>] \
-  [--git-identity-mode <repo_cli_identity|keeper_alias>] \
+  [--git-identity-mode <retired_credential_config|keeper_alias>] \
   [--dry-run]
 ```
 
 Implementation:
 
 - New module `lib/keeper/keeper_persona_create.ml` that owns the
-  TOML-write side. `keeper_persona_authoring.ml` already parses /
-  validates; this RFC adds the *generative* counterpart.
+  TOML-write side. `keeper_persona.ml` owns the current persona schema/save
+  tool path; this RFC adds the *generative* counterpart.
 - `--dry-run` writes nothing, prints the rendered TOML + the validation
   result to stdout. No filesystem effect.
 - Validation runs the same pipeline as autoboot (`keeper_meta_json_parse`
@@ -107,10 +107,10 @@ API counterpart (MCP tool): `masc_persona_create` with the same params
 as named record fields. Returns `{ name; toml_path; validated: true }`
 or the validation error.
 
-### 4.2 Cascade create surface
+### 4.2 Runtime create surface
 
 ```
-masc create cascade \
+masc create runtime \
   --name <string> \
   --models <comma-list> \
   --strategy <latency_first|cheap_first|...> \
@@ -119,28 +119,28 @@ masc create cascade \
   [--temperature <float>] \
   [--dry-run]
 
-masc cascade activate <name>      # runtime reload
-masc cascade list
-masc cascade delete <name>
+masc runtime activate <name>      # runtime reload
+masc runtime list
+masc runtime delete <name>
 ```
 
 Implementation:
 
-- `lib/cascade/cascade_authoring.ml` — wraps `cascade_toml_materializer`
+- `lib/runtime/runtime_authoring.ml` — wraps `runtime_toml_materializer`
   in a generative API.
-- `cascade activate` calls into the existing reload path (RFC-0027
+- `runtime activate` calls into the existing reload path (RFC-0027
   PR-9b dual-track resolver, #13097). The dual-track is the
   preconditions for runtime reload — without it, this command does
   nothing safe.
-- `cascade delete` refuses if any keeper TOML references the profile.
-  The check uses `keeper_persona_authoring`'s reverse index (added in
-  the same PR).
+- `runtime delete` refuses if any keeper TOML references the profile.
+  The retired authoring reverse index no longer exists; reviving this withdrawn
+  command would need a fresh current-code check.
 
-This surface has the largest risk: cascade routing is hot-path.
+This surface has the largest risk: runtime routing is hot-path.
 Mitigation:
 
 - `--dry-run` prints the rendered profile + the diff against current
-  `cascade.toml`.
+  `runtime.toml`.
 - `activate` is gated on a `--confirm` flag for non-`--dry-run`
   invocations; the operator must read the diff before applying.
 - Memory cross-ref: `feedback_keeper_starvation_capacity_vs_turn_duration_mismatch`
@@ -156,7 +156,7 @@ masc create keeper \
   --persona <persona-name | --inline persona-flags...> \
   --tier <...> \
   [--no-credential]   # for testing / staging
-  [--cascade-route]   # opt-in; default off — most keepers route via tier
+  [--runtime-route]   # opt-in; default off — most keepers route via tier
   [--dry-run]
 ```
 
@@ -165,7 +165,7 @@ Atomic sequence (in this order, each step idempotent):
 1. Persona create (if `--inline`) or lookup (if `--persona <name>`).
 2. Credential issue via `credential_provider.materialise` — RFC-0019
    pathway. New keeper gets a fresh credential. Failure aborts.
-3. Cascade route entry (if `--cascade-route` set; default off — most
+3. Runtime route entry (if `--runtime-route` set; default off — most
    keepers route via tier).
 4. Autoboot rescan trigger via internal MCP tool `masc_autoboot_rescan`
    (added in this RFC).
@@ -182,12 +182,12 @@ All three surfaces call into a common `Authoring_validate` module that
 runs:
 
 - TOML parse (delegate to existing `keeper_meta_json_parse` /
-  `cascade_toml_materializer`).
-- Cross-reference checks (persona's tool preset exists; cascade's
+  `runtime_toml_materializer`).
+- Cross-reference checks (persona's tool access exists; runtime's
   fallback profile exists; keeper's persona exists).
-- Capability checks (persona's `git_identity_mode` is one of the two
-  enum variants; tier exists in cascade).
-- Conflict checks (no two keepers with same name; no two cascade
+- Capability checks (persona's `retired_git_author_config` is one of the two
+  enum variants; tier exists in runtime).
+- Conflict checks (no two keepers with same name; no two runtime
   profiles with same name).
 
 The validation result is a `Result.t` with field-level errors. CLI
@@ -206,15 +206,15 @@ prints them grouped by field; MCP tool returns the structured form.
 - `test_persona_create_idempotent_on_retry`: same name twice with same
   fields → no error, no duplicate file.
 
-### 5.2 PR-2.2 (cascade create + activate)
+### 5.2 PR-2.2 (runtime create + activate)
 
-- `test_cascade_create_dry_run_diff`: compare rendered TOML against
+- `test_runtime_create_dry_run_diff`: compare rendered TOML against
   fixture.
-- `test_cascade_activate_triggers_reload`: stub the reload path;
+- `test_runtime_activate_triggers_reload`: stub the reload path;
   assert the resolver picks up the new profile.
-- `test_cascade_delete_refuses_when_referenced`: keeper TOML references
+- `test_runtime_delete_refuses_when_referenced`: keeper TOML references
   profile → delete fails with referenced-by list.
-- `test_cascade_capacity_shrink_rejected_without_flag`: lowering
+- `test_runtime_capacity_shrink_rejected_without_flag`: lowering
   capacity below current keeper count without
   `--allow-capacity-shrink` errors.
 
@@ -223,14 +223,14 @@ prints them grouped by field; MCP tool returns the structured form.
 - `test_keeper_create_atomic_rollback`: stub credential failure →
   assert persona TOML deleted.
 - `test_keeper_create_first_heartbeat_within_timeout`: integration
-  test against a fixture cascade.
+  test against a fixture runtime.
 - `test_keeper_create_idempotent_on_existing_name`: same name twice →
   reports already-exists, no overwrite.
 
 ## 6. Performance
 
 - Persona create: file write, no hot path. Sub-millisecond.
-- Cascade activate: triggers RFC-0027's dual-track reload. Per-cascade
+- Runtime activate: triggers RFC-0027's dual-track reload. Per-runtime
   resolver swap is atomic; observed latency in PR-9b's tests is sub-
   10ms.
 - Keeper create: dominated by step 5 (heartbeat wait). 30s timeout is
@@ -245,7 +245,7 @@ The three surfaces ship as separate PRs:
 
 - **PR-2.1** (persona create CLI + MCP tool) — ships first, no
   cross-cutting changes.
-- **PR-2.2** (cascade create / activate / list / delete) — depends on
+- **PR-2.2** (runtime create / activate / list / delete) — depends on
   RFC-0027 PR-9b (dual-track resolver, #13097) being merged. Block on
   that merge.
 - **PR-2.3** (keeper create end-to-end) — depends on PR-2.1 + PR-2.2.
@@ -263,8 +263,8 @@ Deprecation: hand-editing remains supported indefinitely. The CLI is
   full sangsu-style block). Held off because the templates would
   duplicate `base.toml` defaults — the override block is already small
   enough.
-- **Should `cascade activate` be gated by a TLA+ liveness check?**
-  RFC-0022 (cascade attempt liveness) defines the model; runtime
+- **Should `runtime activate` be gated by a TLA+ liveness check?**
+  RFC-0022 (runtime attempt liveness) defines the model; runtime
   enforcement could refuse activation if the new profile would violate
   the spec. Held off — TLA+ checks are CI gates, not runtime checks.
 - **Should the MCP tool surface be exposed to keepers themselves?**

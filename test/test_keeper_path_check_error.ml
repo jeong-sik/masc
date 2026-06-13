@@ -5,7 +5,7 @@
     the typed variant and any downstream consumer that matched on
     those bytes (e.g. dashboard tool-quality prefix rules). *)
 
-open Masc_mcp.Keeper_path_check_error
+open Keeper_path_check_error
 
 let test_path_outside_whitelist_keeper_command () =
   let msg =

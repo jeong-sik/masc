@@ -72,7 +72,7 @@ let evidence_session_id_of_worker_run = function
   | _ -> None
 
 let session_min_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Session_min
+  Tool_catalog_surfaces.session_min_surface_tools
 
 let worker_meta_allowed_fields =
   [
@@ -88,6 +88,7 @@ let worker_meta_allowed_fields =
     "effective_model";
     "checkpoint_path";
     "turn_log_path";
+    "mcp_client_session_started_at";
     "last_run_at";
   ]
 
@@ -128,57 +129,57 @@ let worker_meta_to_yojson (meta : worker_container_meta) =
       ("effective_model", `String meta.effective_model);
       ("checkpoint_path", `String meta.checkpoint_path);
       ("turn_log_path", `String meta.turn_log_path);
+      ( "mcp_client_session_started_at",
+        Option.fold ~none:`Null ~some:(fun ts -> `Float ts)
+          meta.mcp_client_session_started_at );
       ( "last_run_at",
         Option.fold ~none:`Null ~some:(fun ts -> `Float ts) meta.last_run_at );
     ]
 
 let worker_meta_of_yojson json =
-  let open Yojson.Safe.Util in
   match json with
   | `Assoc fields -> (
       match validate_worker_meta_fields fields with
       | Error _ as err -> err
       | Ok () -> (
-          match json |> member "worker_name" |> to_string_option with
+          match Json_util.get_string json "worker_name" with
           | None -> Error "worker meta missing worker_name"
           | Some worker_name -> (
-              match Worker_execution_backend.of_yojson (json |> member "runtime_backend") with
+              match Worker_execution_backend.of_yojson (Json_util.assoc_member_opt "runtime_backend" json |> Option.value ~default:`Null) with
               | Error _ as err -> err
               | Ok runtime_backend ->
                   Ok
                     {
                       version =
-                        json |> member "version" |> to_int_option
+                        Json_util.get_int json "version"
                         |> Option.value ~default:worker_container_version;
                       worker_name;
                       mcp_session_id =
-                        json |> member "mcp_session_id" |> to_string_option
+                        Json_util.get_string json "mcp_session_id"
                         |> Option.value ~default:(stable_worker_session_id worker_name);
                       workspace_path =
-                        json |> member "workspace_path" |> to_string_option
+                        Json_util.get_string json "workspace_path"
                         |> Option.value ~default:"";
-                      role = json |> member "role" |> to_string_option;
+                      role = Json_util.get_string json "role";
                       selection_note =
-                        json |> member "selection_note" |> to_string_option;
+                        Json_util.get_string json "selection_note";
                       runtime_backend;
                       thinking_enabled =
-                        json |> member "thinking_enabled" |> to_bool_option;
+                        Json_util.get_bool json "thinking_enabled";
                       timeout_seconds =
-                        json |> member "timeout_seconds" |> to_int_option;
+                        Json_util.get_int json "timeout_seconds";
                       effective_model =
-                        json |> member "effective_model" |> to_string_option
+                        Json_util.get_string json "effective_model"
                         |> Option.value ~default:"";
                       checkpoint_path =
-                        json |> member "checkpoint_path" |> to_string_option
+                        Json_util.get_string json "checkpoint_path"
                         |> Option.value ~default:"";
                       turn_log_path =
-                        json |> member "turn_log_path" |> to_string_option
+                        Json_util.get_string json "turn_log_path"
                         |> Option.value ~default:"";
-                      last_run_at = json |> member "last_run_at" |> to_float_option;
-                      (* RFC-0084 host-config-cleanup-H — JSON I/O
-                         round-trip deferred; always [None] until a
-                         follow-up cleanup adds the schema. *)
-                      disclosure_strategy = None;
+                      mcp_client_session_started_at =
+                        Json_util.get_float json "mcp_client_session_started_at";
+                      last_run_at = Json_util.get_float json "last_run_at";
                     })))
   | _ -> Error "worker meta must be a JSON object"
 
@@ -330,56 +331,11 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                }))
     listed_schemas
 
-let local_worker_failure_class_of_error_kind = function
-  | Worker_dev_tools.Path_blocked -> Tool_result.Policy_rejection
-  | Worker_dev_tools.Command_blocked -> Tool_result.Workflow_rejection
-  | Worker_dev_tools.File_read_error
-  | Worker_dev_tools.File_write_error
-  | Worker_dev_tools.Shell_error ->
-    Tool_result.Runtime_failure
-
-let build_local_shell_tools ~room_config ~worker_name ~workdir =
-  match Process_eio.get_proc_mgr (), Process_eio.get_clock () with
-  | Ok proc_mgr, Ok clock -> (
-      (* #10358: forward error_kind / error_message from Worker_dev_tools
-         observers to the Telemetry_eio.track_tool_called row so the
-         ledger no longer carries blank-error failures from the local
-         worker tool path. *)
-      let on_exec ~tool_name ~success ~duration_ms
-          ?error_kind ?error_message () =
-        (match room_config, Fs_compat.get_fs_opt () with
-        | Some config, Some fs -> (
-            try
-              let kind =
-                Option.map
-                  (fun kind ->
-                    kind
-                    |> Worker_dev_tools.tool_exec_error_kind_to_string
-                    |> Telemetry_eio.error_kind_of_string)
-                  error_kind
-              in
-              let failure_class =
-                Option.map local_worker_failure_class_of_error_kind error_kind
-              in
-              Telemetry_eio.track_tool_called ~fs config ~tool_name ~success
-                ~duration_ms ~agent_id:worker_name
-                ?failure_class ?error_kind:kind ?error_message ()
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.LocalWorker.warn "telemetry error for %s/%s: %s"
-                worker_name tool_name (Printexc.to_string exn))
-        | Some _, None | None, Some _ | None, None -> ());
-        ()
-      in
-      Ok
-        (Worker_dev_tools.make_tools ~proc_mgr ~clock ~workdir
-           ~on_exec ()))
-  | Error e, _ | _, Error e -> Error e
-
 (** Convert a model label to an OAS Provider.config.
     Returns Error when the label cannot be parsed. *)
 let oas_provider_of_label (label : string) :
     (Agent_sdk.Provider.config, string) result =
-  match Cascade_config.parse_model_string label with
+  match Runtime_model_string.parse_model_string label with
   | Some pc -> Ok (Agent_sdk.Provider.config_of_provider_config pc)
   | None ->
     let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
@@ -390,7 +346,7 @@ let oas_provider_of_label (label : string) :
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
     (Agent_sdk.Provider.config * string, string) result =
-  match Cascade_config.parse_model_string label with
+  match Runtime_model_string.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
   | Some pc ->
     Ok
@@ -419,8 +375,8 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
       worker_checkpoint_path ~base_path ~worker_name;
     turn_log_path =
       worker_turn_log_path ~base_path ~worker_name;
+    mcp_client_session_started_at = None;
     last_run_at = None;
-    disclosure_strategy = None;
   }
 
 let append_worker_completion_log ~base_path ~worker_name
@@ -457,7 +413,6 @@ let append_worker_completion_log ~base_path ~worker_name
 let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     ?(guardrails : Agent_sdk.Guardrails.t option)
-    ?(tool_retry_policy : Agent_sdk.Tool_retry_policy.t option)
     () =
   let config =
     {
@@ -467,9 +422,9 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       system_prompt = Some system_prompt;
       max_tokens = Some (local_worker_max_tokens ());
       max_turns;
-      temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature;
-      top_p = Some Cascade_worker_defaults.top_p;
-      top_k = Some Cascade_worker_defaults.top_k;
+      temperature = Some Runtime_provider_defaults.worker_default_temperature;
+      top_p = Some 0.95;
+      top_k = Some 40;
       (* min_p is effectively disabled (0.0) and some cloud providers
          reject the field itself even when the value is a no-op. *)
       min_p = None;
@@ -483,7 +438,7 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
     | None ->
         { Agent_sdk.Guardrails.tool_filter =
             Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some Cascade_worker_defaults.max_tool_calls_per_turn;
+          max_tool_calls_per_turn = Some 30;
         }
   in
   let options =
@@ -493,7 +448,6 @@ let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
       hooks;
       guardrails = effective_guardrails;
       raw_trace = Some raw_trace;
-      tool_retry_policy;
       periodic_callbacks;
     }
   in
@@ -518,7 +472,7 @@ let materialize_direct_evidence ~base_path ~worker_name
       in
       let options =
         {
-          Masc_mcp_cdal_runtime.Direct_evidence.session_root =
+          Masc_cdal_runtime.Direct_evidence.session_root =
             Some (oas_trace_session_root ~base_path);
           session_id;
           goal = prompt;
@@ -535,7 +489,7 @@ let materialize_direct_evidence ~base_path ~worker_name
           workdir = Some workspace_path;
         }
       in
-      match Masc_mcp_cdal_runtime.Direct_evidence.persist ~agent ~raw_trace ~options () with
+      match Masc_cdal_runtime.Direct_evidence.persist ~agent ~raw_trace ~options () with
       | Ok _ -> ()
       | Error err ->
           Log.LocalWorker.error

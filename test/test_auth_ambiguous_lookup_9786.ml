@@ -62,17 +62,17 @@ let write_cred ~base ~agent_name ~token_hash =
   close_out oc
 
 let counter_for ~first_match =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_auth_credential_ambiguous_lookup
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
     ~labels:[ ("first_match", first_match) ]
     ()
 
 let ambiguous_lookup_total () =
-  Masc_mcp.Prometheus.metric_total
-    Masc_mcp.Prometheus.metric_auth_credential_ambiguous_lookup
+  Masc.Otel_metric_store.metric_total
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
 
 let first_match_for_hash ~base ~token_hash =
-  Masc_mcp.Auth.list_credentials base
+  Masc.Auth.list_credentials base
   |> List.find (fun (cred : Masc_domain.agent_credential) ->
        String.equal cred.token token_hash)
   |> fun cred -> cred.agent_name
@@ -81,17 +81,17 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "canonical metric name"
     "masc_auth_credential_ambiguous_lookup_total"
-    Masc_mcp.Prometheus.metric_auth_credential_ambiguous_lookup
+    Masc.Otel_metric_store.metric_auth_credential_ambiguous_lookup
 
 let test_single_match_no_counter () =
   with_temp_base (fun base ->
     let raw_token = "single_match_raw_token_9786" in
-    let hash = Masc_mcp.Auth.sha256_hash raw_token in
+    let hash = Masc.Auth.sha256_hash raw_token in
     write_cred ~base ~agent_name:"keeper-only" ~token_hash:hash;
     let before = counter_for ~first_match:"keeper-only" in
     let before_total = ambiguous_lookup_total () in
     let _ =
-      Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
+      Masc.Auth.find_credential_by_token base ~token:raw_token
     in
     Alcotest.(check (float 0.0001))
       "no counter on single match"
@@ -105,7 +105,7 @@ let test_single_match_no_counter () =
 let test_duplicate_hash_increments_counter () =
   with_temp_base (fun base ->
     let raw_token = "duplicate_raw_token_9786" in
-    let hash = Masc_mcp.Auth.sha256_hash raw_token in
+    let hash = Masc.Auth.sha256_hash raw_token in
     (* Two credentials hashing to the same token, matching the
        2026-04-23 audit shape (agent_code-mcp-client + keeper-name). *)
     write_cred ~base ~agent_name:"alpha-keeper" ~token_hash:hash;
@@ -120,7 +120,7 @@ let test_duplicate_hash_increments_counter () =
     let before_first = counter_for ~first_match in
     let before_other = counter_for ~first_match:other_match in
     let result =
-      Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
+      Masc.Auth.find_credential_by_token base ~token:raw_token
     in
     (match result with
      | Ok cred ->
@@ -142,14 +142,14 @@ let test_duplicate_hash_increments_counter () =
 let test_repeated_lookups_accumulate () =
   with_temp_base (fun base ->
     let raw_token = "repeat_raw_token_9786" in
-    let hash = Masc_mcp.Auth.sha256_hash raw_token in
+    let hash = Masc.Auth.sha256_hash raw_token in
     write_cred ~base ~agent_name:"repeat-a" ~token_hash:hash;
     write_cred ~base ~agent_name:"repeat-b" ~token_hash:hash;
     let first_match = first_match_for_hash ~base ~token_hash:hash in
     let before = counter_for ~first_match in
     for _ = 1 to 3 do
       let _ =
-        Masc_mcp.Auth.find_credential_by_token base ~token:raw_token
+        Masc.Auth.find_credential_by_token base ~token:raw_token
       in
       ()
     done;

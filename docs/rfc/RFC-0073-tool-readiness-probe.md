@@ -3,11 +3,11 @@ rfc: "0073"
 title: "Tool Readiness Probe — Typed Precondition + Runtime Gap Disclosure"
 status: Implemented
 created: 2026-05-14
-updated: 2026-05-22
+updated: 2026-06-02
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0005", "0019", "0057", "0062", "0074", "0075", "0076"]
+related: ["0005", "0057", "0062", "0075", "0076"]
 implementation_prs: [15064]
 ---
 
@@ -15,12 +15,11 @@ implementation_prs: [15064]
 
 ## 1. Context
 
-`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` (lib/keeper/agent_tool_dispatch_runtime.ml:281-575) 의 5-gate dispatch 는 Stage 3 에서 policy allowlist 통과를 확인한다. 그러나 Stage 4 의 sandbox/credential precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` (server_dashboard_http_keeper_api.ml:112-128) 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
+`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` 의 dispatch 는 policy allowlist 통과를 확인한다. 그러나 sandbox precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
 
 대표 케이스 (sangsu keeper, descriptor-projected tool set):
 - `keeper_fs_*`, `tool_execute*`, `SearchFiles` — `turn_sandbox_factory=None` 시 error (lines 430-456)
-- `tool_execute` git 하위 명령 — `turn_sandbox_factory_git` 추가 필요 (line 445)
-- credentialed typed `gh` execution — GitHub credential 미바인딩 시 fail (lines 480-497)
+- `tool_execute` git/gh 하위 명령 — 일반 turn sandbox factory만 사용한다.
 
 ## 2. Problem
 
@@ -45,15 +44,8 @@ type sandbox_kind =
   | Git_sandbox
   | No_sandbox_required
 
-type credential_kind =
-  | Github_token
-  | Slack_token
-  | Web_search_key
-  | No_credential_required
-
 type readiness_precondition = {
   sandbox: sandbox_kind list;        (* AND-list. 모두 충족 필요. *)
-  credentials: credential_kind list;
   config_keys: string list;          (* cdal config 의 키 존재 여부 *)
 }
 
@@ -63,7 +55,6 @@ type readiness_state =
 
 and readiness_reason =
   | Sandbox_missing of sandbox_kind
-  | Credential_missing of credential_kind
   | Config_invalid of string
   (* Empirically discovered (2026-05-14 fleet-tool-allocation-proof probe) — see §3.4 *)
   | Lane_unavailable of {
@@ -88,7 +79,7 @@ val probe :
 
 ### 3.2 Runtime Probe 통합 지점
 
-`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 의 `computed_tool_surface` 산출 직후 한 번 호출. 결과를 `agent_setup.readiness_snapshot` 필드에 보관 (신규 필드, 옵셔널).
+`Keeper_run_tools.prepare_agent_setup`의 schema-filter 산출 직후 한 번 호출. 결과를 `agent_setup.readiness_snapshot` 필드에 보관 (신규 필드, 옵셔널).
 
 ### 3.3 Dashboard API 응답 확장
 
@@ -104,8 +95,8 @@ val probe :
     "blocked": [
       { "tool": "tool_execute",
         "state": "Blocked",
-        "reason_kind": "Credential_missing",
-        "reason_detail": "Github_token not bound to keeper context" }
+        "reason_kind": "Sandbox_missing",
+        "reason_detail": "Bash sandbox not bound to keeper context" }
     ]
   }
 }
@@ -119,14 +110,14 @@ val probe :
 
 | variant | Trigger | Evidence ref |
 |---|---|---|
-| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=tier-group.provider-k-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `tool_execute` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
-| `Tool_naming_inconsistency` | tech_glutton keeper 의 cascade 가 lane=runtime_mcp 가 아니라 *local Agent-LLM-A SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 CLI-Tool-A 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
+| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 runtime=runtime.provider-k-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `tool_execute` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
+| `Tool_naming_inconsistency` | tech_glutton keeper 의 runtime 가 lane=runtime_mcp 가 아니라 *local Agent-LLM-A SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 CLI-Tool-A 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
 | `Verifier_blocked_no_open_request` | verifier keeper 가 *자율적으로* 발견. goal phase=executing 에서 `active_verification_request_id=null` 이면 verifier 가 reject 조차 vote 불가 — `conflict: goal has no active verification request`. RFC-0074 의 paused-blocked variant 와 *직교*. | board `p-38c3289abd46b765bee74ca765c9c2ea` (verifier 가 직접 post) |
 
 이 variant 들은 *RFC body 변경 자체가 그것의 acceptance test*: probe 가 실패하면서 variant 가 *드러났고*, 그 발견이 본문에 정식화되며, 이후 구현이 *컴파일러로 강제* 된다. 이는 RFC-0073 의 *probe-driven discovery* 패턴이 자기 자신을 검증한 첫 사례.
 
 추가 가능한 후속 variant (직접 probe 없이도 fleet inference 로 예측):
-- `Persona_profile_missing of string` — cascade 시작 자체 실패 (missing persona JSON), masc-improver / nick0cave / qa-king / janitor 의 audit 결과.
+- `Persona_profile_missing of string` — runtime 시작 자체 실패 (missing persona JSON), masc-improver / nick0cave / qa-king / janitor 의 audit 결과.
 - `Registry_not_present` — keeper toml + persona 는 있으나 runtime registry 에 등록 안 됨 (autoboot 비활성 또는 boot 자체 실패), audit 결과 16/18 keeper 가 해당.
 
 ## 4. Code Changes
@@ -166,7 +157,6 @@ val probe :
 ## 8. Related RFCs
 
 - RFC-0005 Typed Capability Substrate — sandbox 추상의 base layer
-- RFC-0019 Keeper Credential Unification — credential SSOT
 - RFC-0057 Tool Descriptor Codegen — 장기적으로 `[@@deriving tool]` PPX 로 precondition 도 자동 생성 가능
 - RFC-0062 Typed `Tool_result.t` — error channel 의 typed reason 과 통합
 - RFC-0074 Sandbox & Credential Auto-provision — Blocked 도구의 실행 보장 (이 RFC 가 *진단*, 0074 가 *치료*)

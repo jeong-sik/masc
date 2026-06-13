@@ -2,13 +2,22 @@
 
    Pins the canonical metric name + label shape for the
    per-agent breakout, and verifies that
-   [record_fsm_drift_with_agent] emits to BOTH the existing
+   [Workspace_hooks.fsm_drift_observer_fn] emits to BOTH the existing
    variant-only counter and the new per-agent counter without
    double-counting either side. *)
 
+let () = Masc.Workspace_metric_hooks.install ()
+
+let fsm_drift_metric = "masc_task_fsm_drift_total"
+let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
+
+let record_fsm_drift_with_agent ~variant ~force ~agent_name =
+  (Atomic.get Workspace_hooks.fsm_drift_observer_fn) ~variant ~force ~agent_name
+;;
+
 let counter_for_per_agent ~variant ~agent_name ~force =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Coord.fsm_drift_per_agent_metric
+  Masc.Otel_metric_store.metric_value_or_zero
+    fsm_drift_per_agent_metric
     ~labels:[
       ("variant", variant);
       ("agent_name", agent_name);
@@ -17,8 +26,8 @@ let counter_for_per_agent ~variant ~agent_name ~force =
     ()
 
 let counter_for_variant ~variant ~force =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Coord.fsm_drift_metric
+  Masc.Otel_metric_store.metric_value_or_zero
+    fsm_drift_metric
     ~labels:[
       ("variant", variant);
       ("force", if force then "true" else "false");
@@ -26,23 +35,29 @@ let counter_for_variant ~variant ~force =
     ()
 
 let test_metric_name_stable () =
-  Alcotest.(check string)
-    "per-agent canonical name"
-    "masc_task_fsm_drift_per_agent_total"
-    Masc_mcp.Coord.fsm_drift_per_agent_metric
+  let metric =
+    Masc.Otel_metric_store.snapshot ()
+    |> List.find_opt (fun (m : Masc.Otel_metric_store.metric) ->
+      String.equal m.name fsm_drift_per_agent_metric && m.labels = [])
+  in
+  Alcotest.(check bool)
+    "per-agent registered as counter"
+    true
+    (match metric with
+     | Some m -> m.metric_type = Masc.Otel_metric_store.Counter
+     | None -> false)
 
 let test_emits_both_counters () =
   let variant =
-    Coord_task.drift_variant_label
-      Coord_task_lifecycle.Claimed_to_done_skip
+    Workspace_task.drift_variant_label
+      Workspace_task_lifecycle.Claimed_to_done_skip
   in
   let agent = "kaboo-test-agent" in
   let before_variant = counter_for_variant ~variant ~force:false in
   let before_per_agent =
     counter_for_per_agent ~variant ~agent_name:agent ~force:false
   in
-  Masc_mcp.Coord.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "variant counter +1"
     (before_variant +. 1.0)
@@ -55,16 +70,15 @@ let test_emits_both_counters () =
 let test_per_agent_isolation () =
   (* Different agents must land in different series. *)
   let variant =
-    Coord_task.drift_variant_label
-      Coord_task_lifecycle.Claimed_to_done_skip
+    Workspace_task.drift_variant_label
+      Workspace_task_lifecycle.Claimed_to_done_skip
   in
   let agent_a = "alpha-test-agent" in
   let agent_b = "beta-test-agent" in
   let before_a =
     counter_for_per_agent ~variant ~agent_name:agent_a ~force:false
   in
-  Masc_mcp.Coord.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent_b;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent_b;
   Alcotest.(check (float 0.0001))
     "agent_a counter unchanged when agent_b drifts"
     before_a
@@ -74,15 +88,14 @@ let test_force_label_isolation () =
   (* force=true and force=false land in different series within
      the same agent. *)
   let variant =
-    Coord_task.drift_variant_label
-      Coord_task_lifecycle.Claimed_to_done_skip
+    Workspace_task.drift_variant_label
+      Workspace_task_lifecycle.Claimed_to_done_skip
   in
   let agent = "force-isolation-agent" in
   let before_true =
     counter_for_per_agent ~variant ~agent_name:agent ~force:true
   in
-  Masc_mcp.Coord.record_fsm_drift_with_agent
-    ~variant ~force:false ~agent_name:agent;
+  record_fsm_drift_with_agent ~variant ~force:false ~agent_name:agent;
   Alcotest.(check (float 0.0001))
     "force=true counter unchanged when force=false event lands"
     before_true

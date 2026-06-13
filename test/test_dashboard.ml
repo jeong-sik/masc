@@ -1,6 +1,6 @@
 (** Dashboard Tests using Alcotest *)
 
-module Lib = Masc_mcp
+module Lib = Masc
 
 (** Helper to check if str contains substring *)
 let contains str substr =
@@ -42,71 +42,42 @@ let with_config_dir config_root f =
       Config_dir_resolver.reset ();
       f ())
 
-let setup_room config =
-  (* Use Coord.init to properly initialize MASC *)
-  ignore (Lib.Coord.init config ~agent_name:(Some "test-agent"))
-
-let test_raw_cascade_config_exposes_editable_source () =
-  let dir = test_dir () in
-  let source_text = "comment = \"dashboard-visible-sentinel\"\n" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
-    (fun () ->
-      write_file (Filename.concat dir "cascade.toml") source_text;
-      with_config_dir dir @@ fun () ->
-      let open Yojson.Safe.Util in
-      let json = Lib.Dashboard_cascade.raw_config_json () in
-      Alcotest.(check bool)
-        "source editable"
-        true
-        (json |> member "source_editable" |> to_bool);
-      Alcotest.(check string)
-        "source text"
-        source_text
-        (json |> member "source_text" |> to_string);
-      Alcotest.(check bool)
-        "raw JSON materialized from source"
-        true
-        (contains (json |> member "raw_json" |> to_string) "dashboard-visible-sentinel");
-      match json |> member "materialization_error" with
-      | `Null -> ()
-      | other ->
-        Alcotest.failf
-          "unexpected materialization_error: %s"
-          (Yojson.Safe.to_string other))
+let setup_workspace config =
+  (* Use Workspace.init to properly initialize MASC *)
+  ignore (Lib.Workspace.init config ~agent_name:(Some "test-agent"))
 
 (* ===== format_section Tests ===== *)
 
 let test_format_section () =
-  let section = Lib.Dashboard.{
+  let section = Dashboard.{
     title = "Test Section";
     content = ["Item 1"; "Item 2"; "Item 3"];
     empty_msg = "(empty)";
   } in
-  let output = Lib.Dashboard.format_section section in
+  let output = Dashboard.format_section section in
   Alcotest.(check bool) "has content" true (String.length output > 0);
   Alcotest.(check bool) "contains Item 1" true (contains output "Item 1");
   Alcotest.(check bool) "contains Item 2" true (contains output "Item 2")
 
 let test_format_section_empty () =
-  let section = Lib.Dashboard.{
+  let section = Dashboard.{
     title = "Empty Section";
     content = [];
     empty_msg = "(nothing here)";
   } in
-  let output = Lib.Dashboard.format_section section in
+  let output = Dashboard.format_section section in
   Alcotest.(check bool) "has empty message" true (contains output "(nothing here)")
 
 (* ===== parse_iso_timestamp Tests ===== *)
 
 let test_parse_timestamp_valid () =
   let valid_ts = "2026-01-09T12:30:45Z" in
-  let result = Lib.Dashboard.parse_iso_timestamp valid_ts in
+  let result = Dashboard.parse_iso_timestamp valid_ts in
   Alcotest.(check bool) "valid timestamp parses" true (Option.is_some result)
 
 let test_parse_timestamp_invalid () =
   let invalid_ts = "not-a-timestamp" in
-  let result = Lib.Dashboard.parse_iso_timestamp invalid_ts in
+  let result = Dashboard.parse_iso_timestamp invalid_ts in
   Alcotest.(check bool) "invalid timestamp returns None" true (Option.is_none result)
 
 (* ===== generate Tests ===== *)
@@ -115,9 +86,9 @@ let test_generate_compact () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let output = Lib.Dashboard.generate_compact config in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let output = Dashboard.generate_compact config in
   Alcotest.(check bool) "contains MASC" true (contains output "MASC");
   Alcotest.(check bool) "contains ATTENTION" true (contains output "ATTENTION:");
   Alcotest.(check bool) "contains AGENTS" true (contains output "AGENTS:");
@@ -128,9 +99,9 @@ let test_generate_full () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let output = Lib.Dashboard.generate config in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let output = Dashboard.generate config in
   Alcotest.(check bool) "contains MASC Dashboard" true (contains output "MASC Dashboard");
   Alcotest.(check bool) "contains Attention section" true (contains output "Attention Required");
   Alcotest.(check bool) "contains Agents section" true (contains output "Agents");
@@ -143,9 +114,9 @@ let test_agents_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let section = Lib.Dashboard.agents_section (Unix.gettimeofday ()) [] in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let section = Dashboard.agents_section (Unix.gettimeofday ()) [] in
   Alcotest.(check string) "title" "Agents" section.title;
   Alcotest.(check string) "empty_msg" "(no agents)" section.empty_msg;
   cleanup_dir dir
@@ -154,9 +125,9 @@ let test_tasks_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let section = Lib.Dashboard.tasks_section [] in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let section = Dashboard.tasks_section [] in
   Alcotest.(check string) "title" "Tasks" section.title;
   Alcotest.(check string) "empty_msg" "(no tasks)" section.empty_msg;
   cleanup_dir dir
@@ -165,9 +136,9 @@ let test_messages_section_empty () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let section = Lib.Dashboard.messages_section [] in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let section = Dashboard.messages_section [] in
   Alcotest.(check string) "title" "Recent Messages" section.title;
   Alcotest.(check string) "empty_msg" "(no messages)" section.empty_msg;
   cleanup_dir dir
@@ -180,10 +151,7 @@ let make_test_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ( "tool_access",
-            Lib.Keeper_types.tool_access_to_json
-              (Lib.Keeper_types.Preset
-                 { preset = Lib.Keeper_types.Minimal; also_allow = [] }) );
+          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta
@@ -192,7 +160,7 @@ let make_test_meta name =
 let test_keepers_section_empty () =
   let now = Unix.gettimeofday () in
   Lib.Keeper_registry.clear ();
-  let section = Lib.Dashboard.keepers_section now in
+  let section = Dashboard.keepers_section now in
   Alcotest.(check string) "title" "Keepers" section.title;
   Alcotest.(check string) "empty_msg" "(no keepers registered)" section.empty_msg;
   Alcotest.(check int) "no content" 0 (List.length section.content)
@@ -206,7 +174,7 @@ let test_keepers_section_with_entry () =
     (Lib.Keeper_registry.register ~base_path:dir "alpha"
        (make_test_meta "alpha"));
   let now = Unix.gettimeofday () in
-  let section = Lib.Dashboard.keepers_section now in
+  let section = Dashboard.keepers_section now in
   Alcotest.(check string) "title" "Keepers" section.title;
   Alcotest.(check bool) "has content" true (List.length section.content > 0);
   let line = List.hd section.content in
@@ -220,9 +188,9 @@ let test_generate_full_contains_keepers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let output = Lib.Dashboard.generate config in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let output = Dashboard.generate config in
   Alcotest.(check bool) "contains Keepers section" true (contains output "Keepers");
   cleanup_dir dir
 
@@ -230,9 +198,9 @@ let test_generate_compact_contains_keepers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let output = Lib.Dashboard.generate_compact config in
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  let output = Dashboard.generate_compact config in
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");
   cleanup_dir dir
 
@@ -240,13 +208,13 @@ let test_generate_compact_surfaces_board_cap_without_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  Lib.Prometheus.inc_counter
-    Lib.Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
+  let config = Workspace_utils.default_config dir in
+  setup_workspace config;
+  Lib.Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
     ~labels:[("kind", "task")]
     ();
-  let output = Lib.Dashboard.generate_compact config in
+  let output = Dashboard.generate_compact config in
   Alcotest.(check bool)
     "contains board cap diagnostic"
     true
@@ -264,7 +232,7 @@ let test_keepers_section_dead_phase () =
   let now_mark = Unix.gettimeofday () in
   Lib.Keeper_registry.mark_dead ~base_path:dir "delta" ~at:now_mark;
   let now = Unix.gettimeofday () in
-  let section = Lib.Dashboard.keepers_section now in
+  let section = Dashboard.keepers_section now in
   Alcotest.(check int) "one entry" 1 (List.length section.content);
   let line = List.hd section.content in
   Alcotest.(check bool) "contains delta" true (contains line "delta");
@@ -286,7 +254,7 @@ let test_keepers_section_with_error_truncated () =
   in
   Lib.Keeper_registry_error_recording.record ~base_path:dir "echo" long_err;
   let now = Unix.gettimeofday () in
-  let section = Lib.Dashboard.keepers_section now in
+  let section = Dashboard.keepers_section now in
   let line = List.hd section.content in
   Alcotest.(check bool) "contains err= marker" true (contains line "err=");
   Alcotest.(check bool) "contains truncation ellipsis" true (contains line "...");
@@ -318,9 +286,6 @@ let section_tests = [
   "agents section empty", `Quick, test_agents_section_empty;
   "tasks section empty", `Quick, test_tasks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
-  ( "raw cascade config exposes editable source",
-    `Quick,
-    test_raw_cascade_config_exposes_editable_source );
 ]
 
 let keepers_tests = [

@@ -2,7 +2,7 @@
     Verifies Tool_args structured field_error responses. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let check_field_error msg (e : Tool_args.field_error) ~field ~constraint_s =
   check string (msg ^ " field") field e.field;

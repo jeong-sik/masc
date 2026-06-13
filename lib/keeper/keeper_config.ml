@@ -15,45 +15,13 @@ let two_days_seconds_int = Masc_time_constants.day_int * 2
     naming the "1 day" intent at the call site. *)
 let one_day_seconds_int = Masc_time_constants.day_int
 
-(** Default cascade name for keeper turns. Resolved through the live
-    [Cascade_catalog_runtime] snapshot so the answer reflects the
-    currently-installed catalog rather than module-init state. Falls
-    back to [Cascade_routes.cascade_name_for_use Keeper_turn] (canonical
-    route path) when the snapshot is not yet available, which matches
-    pre-RFC-0066 behavior during early boot.
-
-    RFC-0066 Phase 1: was a string value evaluated at module init,
-    freezing to the static fallback when the catalog was empty at
-    init time. See issue #14624. *)
-let default_cascade_name () =
-  match Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" () with
-  | Ok name -> Cascade_name.to_string name
-  | Error _ ->
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Keeper_turn
-
-
-(** Cascade name for recovery turns when keeper is in Failing phase.
-    Two-profile deployments no longer maintain a separate local recovery lane;
-    recovery reuses the canonical keeper cascade. *)
-let phase_recovery_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Phase_recovery
-
-(** Cascade name for buffer operations (compacting, handing off). *)
-let phase_buffer_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Phase_buffer
-
-let phase_routing_cascade_names =
-  [ phase_buffer_cascade_name; phase_recovery_cascade_name ]
-  |> List.sort_uniq String.compare
-;;
-
-(** Cascade name for turns that must use a tool-capable provider lane. *)
-let tool_required_cascade_name =
-  Keeper_cascade_profile.cascade_name_for_use
-    Keeper_cascade_profile.Tool_required
+(* runtime→Runtime 숙청: per-phase runtime name 구분 제거. runtime 세계의
+   phase_recovery / phase_buffer / tool_action / routing 은 서로 다른 route
+   였으나, Runtime 모델에서는 모든 phase 가 동일한 default Runtime 을 쓴다 —
+   넷 다 default_runtime_id () 으로 수렴하는 죽은 구분이었다. 단일 함수로
+   collapse 하고, eager 모듈-레벨 baking(module-init 시점 미초기화 싱글톤 읽기)
+   도 함께 제거한다. *)
+let default_runtime_id () = Runtime.get_default_runtime_id ()
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward
@@ -117,7 +85,7 @@ let keeper_status_fast_default () : bool =
 (* #11111: was 0.5, which fired ContextOverflowImminent at half-window
    on every keeper turn (18 events / 2d, all in 0.50–0.55 band).
    OAS pipeline applies a hard floor of 0.9 when this is unset; we
-   stay just below that so compaction has room to run before the
+   stay just below that so compaction has workspace to run before the
    upstream guard triggers. *)
 let keeper_compact_ratio_rp =
   _rp_float ~key:"keeper.compaction.ratio"
@@ -255,79 +223,6 @@ let normalize_continuity_compaction_cooldown_sec (v : int) : int =
     Preserves prior hardcoded behavior in [keeper_compact_policy.ml]. *)
 let default_keep_recent_tool_results = 2
 
-(** Default message-count floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [keeper_compact_policy.ml].
-    Per-keeper override lives at [compaction_policy.tool_heavy_msg_threshold];
-    wired into [decide_compaction] by PR-B.
-
-    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD]
-    sets the global default that personas without an explicit value inherit.
-    Valid range [1, 10_000]; out-of-range or unparseable values warn and fall
-    back to the built-in default 40 (parse-correctness, not silent coercion —
-    mirrors [emergency_compact_ratio_threshold] in
-    [Keeper_compact_policy]). Read once at module init; restart required. *)
-let default_tool_heavy_msg_threshold : int =
-  let env_var = "MASC_KEEPER_TOOL_HEAVY_MSG_THRESHOLD" in
-  let default_value = 40 in
-  let min_valid = 1 in
-  let max_valid = 10_000 in
-  match Sys.getenv_opt env_var with
-  | None -> default_value
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | None ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%S is not a parseable int; falling back to default \
-          %d"
-         env_var raw default_value;
-       default_value
-     | Some parsed when parsed < min_valid || parsed > max_valid ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%d out of range [%d, %d]; falling back to default \
-          %d"
-         env_var parsed min_valid max_valid default_value;
-       default_value
-     | Some parsed -> parsed)
-
-(** Default context-ratio floor for the tool-heavy compaction gate.
-    Mirrors the prior global constant in [keeper_compact_policy.ml].
-    Per-keeper override lives at [compaction_policy.tool_heavy_ratio_floor];
-    wired into [decide_compaction] by PR-B.
-
-    Operator override (PR-C, this commit): [MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR]
-    sets the global default that personas without an explicit value inherit.
-    Valid range [0.0, 1.0); out-of-range, non-finite, or unparseable values
-    warn and fall back to the built-in default 0.15 (parse-correctness;
-    mirrors [emergency_compact_ratio_threshold]). Read once at module init. *)
-let default_tool_heavy_ratio_floor : float =
-  let env_var = "MASC_KEEPER_TOOL_HEAVY_RATIO_FLOOR" in
-  let default_value = 0.15 in
-  let min_valid = 0.0 in
-  let max_valid = 1.0 in
-  match Sys.getenv_opt env_var with
-  | None -> default_value
-  | Some raw ->
-    (match Float.of_string_opt (String.trim raw) with
-     | None ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%S is not a parseable float; falling back to \
-          default %.2f"
-         env_var raw default_value;
-       default_value
-     | Some parsed when not (Float.is_finite parsed) ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%s parsed to non-finite %f; falling back to \
-          default %.2f"
-         env_var raw parsed default_value;
-       default_value
-     | Some parsed when parsed < min_valid || parsed >= max_valid ->
-       Log.Keeper.warn
-         "[keeper_config] %s=%f out of range [%.2f, %.2f); falling back to \
-          default %.2f"
-         env_var parsed min_valid max_valid default_value;
-       default_value
-     | Some parsed -> parsed)
-
 (** Hard upper bound for operator-supplied [keep_recent_tool_results].
     Values above this likely indicate operator typos (e.g. 5000); we
     log a warn and clamp back to the safe default so a typo does not
@@ -442,46 +337,9 @@ let keeper_batch_limit_rp =
 let keeper_batch_limit () : int =
   Runtime_params.get keeper_batch_limit_rp
 
-let keeper_board_debounce_window_sec_rp =
-  _rp_float ~key:"keeper.board.debounce_window_sec"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_BOARD_DEBOUNCE_SEC"
-                          ~default:2.0 ~min_v:0.0 ~max_v:30.0)
-    ~min_v:0.0 ~max_v:30.0
-    ~description:"Time window to coalesce board signals into one turn (seconds)" ()
-let keeper_board_debounce_window_sec () : float =
-  Runtime_params.get keeper_board_debounce_window_sec_rp
 
-let keeper_tool_cost_max_usd_rp =
-  _rp_float ~key:"keeper.turn.tool_cost_max_usd"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_TOOL_COST_MAX_USD"
-                          ~default:0.0 ~min_v:0.0 ~max_v:50.0)
-    ~min_v:0.0 ~max_v:50.0
-    ~description:"Per-tool cost ceiling (USD, 0=disabled)" ()
-let keeper_tool_cost_max_usd () : float option =
-  match Runtime_params.get keeper_tool_cost_max_usd_rp with
-  | v when Float.compare v 0.0 <= 0 -> None
-  | v -> Some v
 
-let keeper_max_tools_per_turn_rp =
-  _rp_int ~key:"keeper.turn.max_tools_per_turn"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_MAX_TOOLS_PER_TURN"
-                          ~default:40 ~min_v:5 ~max_v:200)
-    ~min_v:5 ~max_v:200
-    ~description:"Max tools visible per turn (progressive disclosure cap)" ()
-let keeper_max_tools_per_turn () : int =
-  Runtime_params.get keeper_max_tools_per_turn_rp
 
-let keeper_retry_max_tools_per_turn () : int =
-  min 15 (keeper_max_tools_per_turn ())
-
-let keeper_board_event_limit_rp =
-  _rp_int ~key:"keeper.turn.board_event_limit"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_EVENT_LIMIT"
-                          ~default:10 ~min_v:1 ~max_v:50)
-    ~min_v:1 ~max_v:50
-    ~description:"Max board events injected per turn" ()
-let keeper_board_event_limit () : int =
-  Runtime_params.get keeper_board_event_limit_rp
 
 let keeper_llm_rerank_enabled_rp =
   _rp_bool ~key:"keeper.turn.llm_rerank"
@@ -490,18 +348,12 @@ let keeper_llm_rerank_enabled_rp =
 let keeper_llm_rerank_enabled () : bool =
   Runtime_params.get keeper_llm_rerank_enabled_rp
 
-(** Named cascade profile for the LLM reranker.
-    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: [routes.llm_rerank]. *)
-let keeper_llm_rerank_cascade () : string =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
-  | Some v when String.trim v <> "" -> (
-      let trimmed = String.trim v in
-      match Keeper_cascade_profile.logical_use_of_string_opt trimmed with
-      | Some use -> Keeper_cascade_profile.cascade_name_for_use use
-      | None -> trimmed)
-  | _ ->
-      Keeper_cascade_profile.cascade_name_for_use
-        Keeper_cascade_profile.Tool_rerank_use
+(** Named runtime profile for the LLM reranker.
+    Env: [MASC_KEEPER_LLM_RERANK_RUNTIME]. Default: same global model. *)
+let keeper_llm_rerank_runtime () : string =
+  match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_RUNTIME" with
+  | Some v when String.trim v <> "" -> String.trim v
+  | _ -> default_runtime_id ()
 
 include Keeper_config_rule_thresholds
 
@@ -527,7 +379,7 @@ let keeper_unified_max_tokens_rp =
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_UNIFIED_MAX_TOKENS"
                           ~default:65536 ~min_v:256 ~max_v:262144)
     ~min_v:256 ~max_v:262144
-    ~description:"Keeper turn max output tokens fallback (cascade.toml may override in production)" ()
+    ~description:"Keeper turn max output tokens fallback (runtime.toml may override in production)" ()
 let keeper_unified_max_tokens () : int =
   Runtime_params.get keeper_unified_max_tokens_rp
 
@@ -550,25 +402,8 @@ let keeper_tool_search_top_k () : int =
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)
 let ensure_runtime_params_init () =
-  ignore (Runtime_params.get keeper_unified_temperature_rp)
-
-let keeper_slot_pool_size_rp =
-  _rp_int ~key:"keeper.turn.slot_pool_size"
-    ~default:(fun () -> int_of_env_default "MASC_KEEPER_SLOT_POOL_SIZE"
-                          ~default:4 ~min_v:0 ~max_v:32)
-    ~min_v:0 ~max_v:32
-    ~description:"slot pool size for keeper deterministic pinning (0=disabled)" ()
-let keeper_slot_pool_size () : int =
-  Runtime_params.get keeper_slot_pool_size_rp
-
-(** Compute a deterministic slot_id for a keeper name.
-    Returns [None] when slot pinning is disabled (num_slots = 0). *)
-let keeper_slot_id (name : string) : int option =
-  let num_slots = keeper_slot_pool_size () in
-  if num_slots <= 0 then None
-  else
-    let h = Hashtbl.hash name in
-    Some (h mod num_slots)
+  let (_ : float) = Runtime_params.get keeper_unified_temperature_rp in
+  ()
 
 let keeper_enable_thinking_rp =
   _rp_bool ~key:"keeper.turn.enable_thinking"
@@ -585,26 +420,3 @@ let keeper_adaptive_thinking_enabled_rp =
 
 let keeper_adaptive_thinking_enabled () : bool =
   Runtime_params.get keeper_adaptive_thinking_enabled_rp
-
-(* Separate flag from [adaptive_thinking_enabled] (which only tunes the
-   thinking BUDGET via [adaptive_thinking_budget]). This flag toggles a
-   per-turn BOOLEAN override of [enable_thinking] based on turn intent
-   classification (see [Keeper_turn_intent]). When both are true, users
-   get dynamic budget AND dynamic on/off. When only this is true, the
-   budget stays static but on/off adapts.
-
-   Precedence: when this flag is on, per-turn classification can set
-   [enable_thinking = Some true/false] which overrides the static
-   [MASC_KEEPER_ENABLE_THINKING] base. When off, falls back to the
-   static base (unchanged legacy behavior). *)
-let keeper_adaptive_thinking_mode_rp =
-  _rp_bool ~key:"keeper.turn.adaptive_thinking_mode"
-    ~default:(fun () -> bool_of_env_default "MASC_KEEPER_ADAPTIVE_THINKING_MODE" ~default:true)
-    ~description:"Enable per-turn boolean enable_thinking override driven by \
-                  Keeper_turn_intent classification (Mechanical → false, \
-                  Cognitive → true). Independent of adaptive_thinking budget \
-                  flag. Default: on (set MASC_KEEPER_ADAPTIVE_THINKING_MODE=false \
-                  to opt out)." ()
-
-let keeper_adaptive_thinking_mode () : bool =
-  Runtime_params.get keeper_adaptive_thinking_mode_rp

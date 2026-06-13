@@ -22,7 +22,9 @@ GET   /api/v1/sidecar/:id/status   →  200 OK, returns status.json
 GET   /api/v1/sidecar/:id/logs     →  200 OK, last N lines (?lines=N, default 200)
 ```
 
-`:id` ∈ `{discord, imessage, slack, telegram}`. Anything else returns
+`:id` ∈ `{imessage, slack, telegram}` (RFC-0203 §Phase 3 removed
+`discord` — it now runs in-process under
+`Server_discord_in_process_gateway`). Anything else returns
 `400 Bad Request {"ok":false,"error":"unknown sidecar id"}`.
 
 Auth model (mirroring `Server_routes_http_routes_channel_gate`):
@@ -69,7 +71,8 @@ open Server_auth
 open Server_utils
 module Http = Http_server_eio
 
-let known_ids = ["discord"; "imessage"; "slack"; "telegram"]
+(* RFC-0203 Phase 3: discord runs in-process; not a sidecar id. *)
+let known_ids = ["imessage"; "slack"; "telegram"]
 
 let parse_id_from_path req =
   (* expect path /api/v1/sidecar/<id>/<action> *)

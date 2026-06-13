@@ -1,7 +1,7 @@
 (** Unit tests for Chronicle_librarian (RFC-0035 PR-5,
     Master Report Dim02 P1 §2.4). *)
 
-open Masc_mcp.Chronicle_librarian
+open Masc.Chronicle_librarian
 module CE = Chronicle_event
 
 let make_event ?(id = "ev-x") ?(event_type = CE.Ev_keeper_step)

@@ -78,17 +78,18 @@ let mcp_session_of_json = Mcp_server_eio_governance.mcp_session_of_json
 
 (* Tag registry initialization.
    Most modules register via Tool_spec.register at module load time.
-   Only Tool_schemas_inline (sub-library) and Board remain here. *)
+   Inline schemas and domain adapters that need composition-root wiring
+   remain here. *)
 let () =
   let open Tool_dispatch in
   register_module_tag ~schemas:Tool_schemas_inline.schemas ~tag:Mod_inline;
-  Tool_board.register ();
+  Board_tool.register ();
   mark_tag_registry_initialized ();
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
-     Uses Config.raw_all_tool_schemas which includes Board schemas
-     not present in Tools.all_schemas_extended. *)
-  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
-  (* Report tool schema budget to Prometheus (#7483 Step 1). *)
+     Uses Config.raw_all_tool_schemas, including domain-adapter schemas not
+     present in Tools.all_schemas_extended. *)
+  Keeper_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  (* Report tool schema budget to Otel_metric_store (#7483 Step 1). *)
   (let schemas = Config.visible_tool_schemas () in
    let count = List.length schemas in
    let chars =
@@ -101,11 +102,11 @@ let () =
        0
        schemas
    in
-   Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
+   Otel_metric_store.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
   (* Wire tag-based dispatch for keeper masc_* tools.
-     See #4579: agent_tool_dispatch_runtime uses handler registry (Tool_Board only),
+     See #4579: keeper_tool_dispatch_runtime uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)
-  Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+  Keeper_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());
   (* C-4: Register input schema validation pre-hook.
      Validates tool arguments against their declared input_schema
@@ -130,6 +131,8 @@ let handle_request
       ~sw
       ?(profile = Full)
       ?mcp_session_id
+      ?otel_mcp_protocol_version
+      ?otel_transport_context
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -166,6 +169,8 @@ let handle_request
     ~sw
     ~profile:(profile : tool_profile :> Mcp_server_eio_types.tool_profile)
     ?mcp_session_id
+    ?otel_mcp_protocol_version
+    ?otel_transport_context
     ?auth_token
     ~internal_keeper_runtime
     state

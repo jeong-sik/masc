@@ -1,7 +1,7 @@
-module Tool_agent = Masc_mcp.Tool_agent
-module Coord = Masc_mcp.Coord
-module Meta_cognition = Masc_mcp.Meta_cognition
-module Prometheus = Masc_mcp.Prometheus
+module Tool_agent = Masc.Tool_agent
+module Workspace = Masc.Workspace
+module Meta_cognition = Masc.Meta_cognition
+module Otel_metric_store = Masc.Otel_metric_store
 
 let counter = ref 0
 let persistence_surface = "meta_cognition_snapshot"
@@ -30,8 +30,8 @@ let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
-  let config = Coord.default_config base_dir in
-  ignore (Coord.init config ~agent_name:(Some "tester"));
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "tester"));
   let ctx : Tool_agent.context = { config; agent_name = "tester" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () -> f ctx)
 
@@ -96,14 +96,14 @@ let json_list_ids key json =
          | _ -> None)
 
 let persistence_counter reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)] ()
 
 let test_snapshot_detects_signals () =
   with_ctx @@ fun ctx ->
-  ignore (Coord.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  ignore (Coord.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
-  let masc_dir = Coord.masc_dir ctx.config in
+  ignore (Workspace.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Workspace.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -167,7 +167,7 @@ let test_snapshot_detects_signals () =
 
 let test_snapshot_marks_contested_belief () =
   with_ctx @@ fun ctx ->
-  let masc_dir = Coord.masc_dir ctx.config in
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -247,7 +247,7 @@ let test_parse_summary_preserves_refs_and_secondary_signals () =
       Alcotest.(check string) "primary signal" "contested_belief"
         (Meta_cognition.salience_to_string interpretation.primary_salience);
       Alcotest.(check (list string)) "secondary signals"
-        [ "operator_tension"; "operator_desire"; "stagnant_room" ]
+        [ "operator_tension"; "operator_desire"; "stagnant_workspace" ]
         (interpretation.secondary_saliences
         |> List.map Meta_cognition.salience_to_string);
       Alcotest.(check (list string)) "primary evidence refs merged"
@@ -256,7 +256,7 @@ let test_parse_summary_preserves_refs_and_secondary_signals () =
 
 let test_snapshot_governance_cases_skip_bad_entries_with_metric () =
   with_ctx @@ fun ctx ->
-  let cases_dir = Filename.concat (Coord.masc_dir ctx.config) "governance_v2/cases" in
+  let cases_dir = Filename.concat (Workspace.masc_dir ctx.config) "governance_v2/cases" in
   Fs_compat.mkdir_p cases_dir;
   Fs_compat.save_file (Filename.concat cases_dir "good.json")
     (Yojson.Safe.to_string
@@ -283,7 +283,7 @@ let test_snapshot_governance_cases_skip_bad_entries_with_metric () =
   let json = Meta_cognition.snapshot_json ~limit:5 ctx.config in
   let open Yojson.Safe.Util in
   Alcotest.(check int) "valid governance case still counted" 1
-    (json |> member "room_state" |> member "governance_case_count" |> to_int);
+    (json |> member "workspace_state" |> member "governance_case_count" |> to_int);
   Alcotest.(check (float 0.1)) "broken file increments entry_load_error" 1.0
     (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
      -. before_entry);

@@ -7,6 +7,9 @@
     registry. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 open Keeper_keepalive_signal
@@ -18,12 +21,22 @@ let effective_keepalive_meta
       ~(disk_meta_opt : keeper_meta option)
   : keeper_meta
   =
-  match disk_meta_opt with
+  let selected =
+    match disk_meta_opt with
   | Some latest -> latest
   | None ->
     (match Keeper_registry.get ~base_path fallback.name with
      | Some entry -> entry.meta
      | None -> fallback)
+  in
+  match Keeper_meta_contract.effective_meta_result selected with
+  | Ok effective -> effective
+  | Error msg ->
+    Log.Keeper.warn
+      "effective_keepalive_meta: failed to overlay TOML profile for %s: %s"
+      selected.name
+      msg;
+    selected
 ;;
 
 let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
@@ -42,7 +55,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
         meta.name
         new_trace_id_raw
         err;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string HeartbeatFailures)
         ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
         ();
@@ -75,7 +88,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
            expected_agent_name;
          Some repaired
        | Error err ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
            ();
@@ -100,7 +113,7 @@ let keeper_agent_status (meta : keeper_meta) =
     Heartbeat health and turn health are independent in the keeper FSM. A
     successful heartbeat may recover [heartbeat_healthy], but it must not emit
     [Turn_succeeded] or reset provider/tool failure counters. Otherwise a
-    cascade_exhausted turn can be erased by the next keepalive heartbeat before
+    runtime_exhausted turn can be erased by the next keepalive heartbeat before
     auto-pause and diagnostics see the failure streak. *)
 let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : keeper_meta)
   =
@@ -119,102 +132,52 @@ let note_turn_failures_preserved_after_heartbeat ~(ctx : _ context) ~(meta : kee
 let sync_keeper_presence
       ~(ctx : _ context)
       ~(meta_current : keeper_meta)
-      ~(t_presence_start : float)
       ~(consecutive_failures : int ref)
       ~(last_successful_heartbeat_ts : float ref)
-      ~(work_as_hb : unit -> bool)
-      ~(max_silence : unit -> float)
   : keeper_meta
   =
-  let presence_fresh =
-    work_as_hb () && t_presence_start -. !last_successful_heartbeat_ts < max_silence ()
-  in
-  if presence_fresh
-  then (
-    Log.Keeper.debug
-      "presence sync skipped: fresh heartbeat %.0fs ago"
-      (t_presence_start -. !last_successful_heartbeat_ts);
+  try
+    let synced = meta_current in
+    consecutive_failures := 0;
+    last_successful_heartbeat_ts := Time_compat.now ();
     Keeper_registry.dispatch_event_unit
       ~base_path:ctx.config.base_path
       meta_current.name
       Keeper_state_machine.Heartbeat_ok;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string HeartbeatSuccesses)
+      ~labels:[ "keeper", meta_current.name ]
+      ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
-    meta_current)
-  else (
-    try
-      let synced = ensure_keeper_room_presence ctx.config meta_current in
-      if synced.joined_room_ids = []
-      then (
-        incr consecutive_failures;
-        (* RFC-0001 Gate A: record failure streak *)
-        Agent_stress.record
-          { agent_name = meta_current.name
-          ; room_id =
-              (match meta_current.joined_room_ids with
-               | r :: _ -> r
-               | [] -> "")
-          ; kind = Failure_streak !consecutive_failures
-          ; timestamp = Unix.gettimeofday ()
-          };
-        Log.Keeper.warn
-          "room presence returned empty rooms (%d/%d)"
-          !consecutive_failures
-          (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
-        (* RFC-0002: dispatch heartbeat failure *)
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string HeartbeatFailures)
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          (Keeper_state_machine.Heartbeat_failed
-             { consecutive = !consecutive_failures
-             ; max_allowed =
-                 Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-             }))
-      else (
-        consecutive_failures := 0;
-        last_successful_heartbeat_ts := Time_compat.now ();
-        (* RFC-0002: dispatch heartbeat success *)
-        Keeper_registry.dispatch_event_unit
-          ~base_path:ctx.config.base_path
-          meta_current.name
-          Keeper_state_machine.Heartbeat_ok;
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string HeartbeatSuccesses)
-          ~labels:[ "keeper", meta_current.name ]
-          ();
-        note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current);
-      match write_meta ctx.config synced with
-      | Ok () -> synced
-      | Error e ->
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
-          ();
-        Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
-        synced
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      incr consecutive_failures;
-      Prometheus.inc_counter
-        Keeper_metrics.(to_string RoomHeartbeatFailures)
-        ~labels:[ "keeper", meta_current.name ]
+    match write_meta ctx.config synced with
+    | Ok () -> synced
+    | Error e ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
         ();
-      Log.Keeper.error
-        "room heartbeat failed (%d/%d): %s"
-        !consecutive_failures
-        (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
-        (Printexc.to_string exn);
-      (* RFC-0002: dispatch heartbeat failure *)
-      Keeper_registry.dispatch_event_unit
-        ~base_path:ctx.config.base_path
-        meta_current.name
-        (Keeper_state_machine.Heartbeat_failed
-           { consecutive = !consecutive_failures
-           ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
-           });
-      meta_current)
+      Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
+      synced
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    incr consecutive_failures;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WorkspaceHeartbeatFailures)
+      ~labels:[ "keeper", meta_current.name ]
+      ();
+    Log.Keeper.error
+      "workspace heartbeat failed (%d/%d): %s"
+      !consecutive_failures
+      (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ())
+      (Printexc.to_string exn);
+    (* RFC-0002: dispatch heartbeat failure *)
+    Keeper_registry.dispatch_event_unit
+      ~base_path:ctx.config.base_path
+      meta_current.name
+      (Keeper_state_machine.Heartbeat_failed
+         { consecutive = !consecutive_failures
+         ; max_allowed = Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ()
+         });
+    meta_current
 ;;

@@ -1,0 +1,84 @@
+(include_subdirs no)
+
+(library
+ (name masc_workspace)
+ (public_name masc.masc_workspace)
+ (wrapped false)
+ (flags
+  (:standard -w +4))
+ (modules
+  workspace_core
+  telemetry_observe
+  workspace_backlog
+  workspace_bootstrap
+  workspace_broadcast
+  workspace_hooks
+  workspace_telemetry_drop_event
+  workspace_identity
+  workspace_task_id
+  workspace_utils_backend_setup
+  workspace_utils
+  workspace_utils_ops
+  workspace_utils_paths_backend
+  workspace_state
+  workspace_eio
+  workspace_agent
+  workspace_gc
+  workspace_init
+  workspace_lifecycle
+  workspace_query
+  workspace_status
+  workspace_task
+  workspace_task_capacity
+  workspace_task_classify
+  workspace_task_cache_invariant
+  task_cache_invariant
+  workspace_task_cleanup
+  workspace_task_claim
+  workspace_task_create
+  workspace_task_lifecycle
+  workspace_task_receipts
+  workspace_task_schedule
+  workspace_task_transition_executor
+  workspace_task_transitions
+  workspace_task_verification
+  workspace_verification_store
+  event_kind
+  workspace_git
+  playground_repo_cache
+  mention
+  mention_dedup
+  workspace_resilience
+  workspace_goal_index
+  heartbeat
+  nickname)
+ (libraries
+  masc_types
+  masc_core
+  masc_config
+  masc_log
+  masc_backend
+  masc_eio_context
+  masc_process
+  masc.masc_exec
+  ; RFC-0085 PR-9 — workspace_utils_backend_setup reads the env-derived
+  ; base_path via Host_config.from_env now that the dep direction is
+  ; reversed (host_config no longer depends on masc_workspace; audit
+  ; 2026-05-15 confirmed the masc_workspace dep was unused).
+  masc.host_config
+  time_compat
+  fs_compat
+  yojson
+  otoml
+  unix
+  re
+  re.str
+  re.pcre
+  eio
+  eio.unix
+  uri
+  uuidm
+  digestif
+  masc_random_id)
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

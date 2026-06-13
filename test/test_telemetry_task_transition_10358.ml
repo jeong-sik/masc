@@ -1,6 +1,6 @@
 (** Regression coverage for #10358 task lifecycle telemetry attrition. *)
 
-open Masc_mcp
+open Masc
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -23,14 +23,14 @@ let with_isolated_runtime_env f =
       with_env "MASC_STORAGE_TYPE" None f))
 
 let make_ctx base_path =
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let agent_name = "telemetry-agent" in
-  ignore (Coord.init config ~agent_name:(Some agent_name));
-  { Tool_task.config; agent_name; sw = None }
+  ignore (Workspace.init config ~agent_name:(Some agent_name));
+  { Task.Tool.config; agent_name; sw = None }
 
 let make_peer_ctx config agent_name =
-  ignore (Coord.join config ~agent_name ~capabilities:[] ());
-  { Tool_task.config; agent_name; sw = None }
+  ignore (Workspace.bind_session config ~agent_name ~capabilities:[] ());
+  { Task.Tool.config; agent_name; sw = None }
 
 let run_transition ctx ~task_id ~action ?(notes = "") () =
   let args =
@@ -41,7 +41,7 @@ let run_transition ctx ~task_id ~action ?(notes = "") () =
         ("notes", `String notes);
       ]
   in
-  match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
+  match Task.Tool.dispatch ctx ~name:"masc_transition" ~args with
   | Some result ->
       if not (Tool_result.is_success result) then Alcotest.fail ((Tool_result.message result))
   | None -> Alcotest.fail "masc_transition dispatch returned None"
@@ -65,7 +65,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     Unix.mkdir base_path 0o755;
     let ctx = make_ctx base_path in
     let result =
-      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Telemetry task") ])
+      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Telemetry task") ])
     in
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();

@@ -3,4 +3,4 @@
 (test
  (name test_otel_trace_context)
  (modules test_otel_trace_context)
- (libraries masc_test_deps))
+ (libraries alcotest masc.otel_trace_context))

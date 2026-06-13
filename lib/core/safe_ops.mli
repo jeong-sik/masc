@@ -49,7 +49,7 @@ val persistence_utf8_repair_stats : unit -> utf8_repair_stats
 
 val set_persistence_utf8_repair_metric_hook : (unit -> unit) -> unit
 (** Install the higher-level metrics hook called once for each persistence
-    UTF-8 repair. Safe_ops lives below Prometheus, so the hook keeps the
+    UTF-8 repair. Safe_ops lives below Otel_metric_store, so the hook keeps the
     dependency direction one-way. *)
 
 val reset_persistence_utf8_repair_stats_for_tests : unit -> unit
@@ -120,7 +120,7 @@ val report_persistence_read_drop :
   path:string ->
   detail:string ->
   unit
-(** Report a persisted read-model drop via WARN log + Prometheus counter. *)
+(** Report a persisted read-model drop via WARN log + Otel_metric_store counter. *)
 
 val result_to_option_logged :
   on_drop:(unit -> unit) ->

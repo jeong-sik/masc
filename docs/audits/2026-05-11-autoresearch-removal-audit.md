@@ -29,7 +29,7 @@
 - `autoresearch_storage.ml(.mli)` — persistent store
 
 추가:
-- `lib/autoresearch_codegen.ml` — LLM 기반 code change prompt builder + cascade 호출. "autonomous research assistant optimizing code" 책임
+- `lib/autoresearch_codegen.ml` — LLM 기반 code change prompt builder + runtime 호출. "autonomous research assistant optimizing code" 책임
 - `lib/tool_autoresearch.ml` — 7 도구 dispatch
 - `lib/tool_autoresearch_schemas.ml` — schema 정의
 - `lib/autoresearch/autoresearch_types.ml(.mli)` — shared types (verified, not under top-level `lib/autoresearch_types.ml`)
@@ -46,7 +46,7 @@
 - `lib/dashboard/dashboard_surface_readiness.ml`: `masc_autoresearch_status` 1 reference
 - `lib/dashboard/dashboard_http_autoresearch.ml(.mli)`: dedicated HTTP routes module (start/stop + GET loops/detail/CSV + POST retry/delete) — module 통째 삭제
 - `lib/keeper/keeper_agent_tool_surface.ml`: 4 도구 label (status/stop/cycle + 1) — 4 라인 제거
-- `lib/keeper/agent_tool_remote_mcp_runtime.ml(.mli)`: `handle_keeper_autoresearch_tool` + dispatch arm `Some Tool_dispatch.Mod_autoresearch ->` — module 삭제 + 한 분기 제거
+- legacy keeper registered-runtime module: `handle_keeper_autoresearch_tool` + dispatch arm `Some Tool_dispatch.Mod_autoresearch ->` — module 삭제 + 한 분기 제거
 - `lib/keeper/keeper_tool_policy.ml`: `@ Tool_shard.autoresearch_keeper_tools` (line 594) — 한 줄 제거
 - `lib/tool_dispatch.ml(.mli)`: `Mod_autoresearch` closed-variant + 2 dispatch arms (line 208, 248) — variant + 매치 제거
 - `lib/mcp_server_eio_execute.ml`: `| Mod_autoresearch ->` 분기 (line 849) — 매치 제거
@@ -93,7 +93,7 @@
 | 위험 | 완화 |
 |------|------|
 | 외부 (dashboard UI, 사용자 manual workflow)에서 autoresearch UI 사용 중 | PR-N2b.1 본문에 deprecation 명시 + dashboard release note |
-| `autoresearch_codegen.ml`의 LLM cascade가 다른 곳에서 import | grep으로 외부 caller 없음 확인 (지금 0건) — RE-VERIFY on N2b.3 시점 |
+| `autoresearch_codegen.ml`의 LLM runtime가 다른 곳에서 import | grep으로 외부 caller 없음 확인 (지금 0건) — RE-VERIFY on N2b.3 시점 |
 | Test `test_env_config_exec_timeout_10426.ml`가 timeout 일반 케이스인데 마침 Autoresearch_serde 사용 | test에서 다른 module로 마이그레이션 (string serde 또는 inline JSON) |
 
 ## 다음 단계

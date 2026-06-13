@@ -16,7 +16,6 @@ type run_result = {
   session_id : string;
   raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
   api_response : Agent_sdk.Types.api_response option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
 }
 
 type worker_container_state =
@@ -37,16 +36,8 @@ type worker_container_meta = {
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;
+  mcp_client_session_started_at : float option;
   last_run_at : float option;
-  (* RFC-0084 host-config-cleanup-H — typed disclosure strategy
-     (PR-13 surface, PR-G OAS bridges).  [None] preserves today's
-     Full_schema behaviour.  A follow-up Worker_meta_json I/O
-     cleanup will add round-trip support so config-driven keepers
-     can opt-in to Hybrid disclosure via TOML/JSON; until then this
-     field is always [None] in deserialized records (no JSON key)
-     and propagates through [Worker_oas.build_agent
-     ?disclosure_strategy] when callers set it explicitly. *)
-  disclosure_strategy : Keeper_disclosure_strategy.t option;
 }
 
 let worker_container_version = 1
@@ -66,10 +57,9 @@ let strip_mcp_prefix name =
 
 
 let has_agent_name_field (schema : Masc_domain.tool_schema) =
-  let open Yojson.Safe.Util in
-  match schema.input_schema |> member "properties" |> member "agent_name" with
-  | `Null -> false
-  | _ -> true
+  match (match Json_util.assoc_member_opt "properties" schema.input_schema with Some x -> Json_util.assoc_member_opt "agent_name" x | None -> None) with
+  | Some `Null | None -> false
+  | Some _ -> true
 
 let inject_default_agent_name ~(worker_name : string)
     ~(schema : Masc_domain.tool_schema option) (args : Yojson.Safe.t) =
@@ -101,14 +91,13 @@ let mcp_endpoint_url ~(auth_token : string option) =
   masc_http_base_url () ^ "/mcp"
 
 let request_id_matches request_id json =
-  let open Yojson.Safe.Util in
-  match member "id" json with
-  | `Int value -> value = request_id
-  | `Intlit value -> (
+  match Json_util.assoc_member_opt "id" json with
+  | Some (`Int value) -> value = request_id
+  | Some (`Intlit value) -> (
       match int_of_string_opt value with
       | Some v -> v = request_id
       | None -> false)
-  | `String value -> String.equal value (string_of_int request_id)
+  | Some (`String value) -> String.equal value (string_of_int request_id)
   | _ -> false
 
 let normalize_mcp_body ~request_id body =
@@ -141,24 +130,178 @@ let normalize_mcp_body ~request_id body =
       | [] -> body)
 
 let extract_tool_text json =
-  let open Yojson.Safe.Util in
-  match json |> member "result" |> member "content" with
-  | `List (`Assoc fields :: _) -> (
+  match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "content" x | None -> None) with
+  | Some (`List (`Assoc fields :: _)) -> (
       match List.assoc_opt "text" fields with
       | Some (`String s) -> s
       | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
 
-let extract_jsonrpc_error json =
+type client_operation_error =
+  { message : string
+  ; error_type : string
+  ; rpc_response_status_code : string option
+  }
+
+let client_operation_error ?rpc_response_status_code ~error_type message =
+  { message; error_type; rpc_response_status_code }
+
+let jsonrpc_error_code_string fields =
+  match List.assoc_opt "code" fields with
+  | Some (`Int code) -> Some (string_of_int code)
+  | Some (`Intlit code) when String.trim code <> "" -> Some code
+  | Some (`String code) when String.trim code <> "" -> Some code
+  | _ -> None
+
+let extract_jsonrpc_error_detail json =
   match json with
   | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc err_fields) -> (
-          match List.assoc_opt "message" err_fields with
-          | Some (`String s) when String.trim s <> "" -> Some s
-          | _ -> None)
-      | _ -> None)
+    match List.assoc_opt "error" fields with
+    | Some (`Assoc err_fields) ->
+      let message =
+        match List.assoc_opt "message" err_fields with
+        | Some (`String s) when String.trim s <> "" -> s
+        | _ -> Yojson.Safe.to_string json
+      in
+      let rpc_response_status_code = jsonrpc_error_code_string err_fields in
+      let error_type =
+        match rpc_response_status_code with
+        | Some code -> code
+        | None -> "jsonrpc_error"
+      in
+      Some (client_operation_error ?rpc_response_status_code ~error_type message)
+    | _ -> None)
   | _ -> None
+
+let option_label key = function
+  | Some value when String.trim value <> "" -> [ key, value ]
+  | _ -> []
+
+let tool_name_from_params = function
+  | `Assoc fields -> (
+    match List.assoc_opt "name" fields with
+    | Some (`String name) when String.trim name <> "" -> Some name
+    | _ -> None)
+  | _ -> None
+
+let server_labels_of_url url =
+  try
+    let uri = Uri.of_string url in
+    option_label Otel_genai.Mcp_attr_key.server_address (Uri.host uri)
+    @ option_label
+        Otel_genai.Mcp_attr_key.server_port
+        (Option.map string_of_int (Uri.port uri))
+  with _ -> []
+
+let mcp_client_operation_duration_labels ~url ~method_name ~params ?error () =
+  [ Otel_genai.Mcp_attr_key.mcp_method_name, method_name
+  ; ( Otel_genai.Mcp_attr_key.mcp_protocol_version
+    , Mcp_transport_protocol.default_protocol_version )
+  ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+  ; Otel_genai.Mcp_attr_key.network_protocol_version, "1.1"
+  ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+  ]
+  @
+  (if String.equal method_name Otel_genai.Mcp_value.tools_call_method
+   then
+     [ Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool" ]
+     @ option_label Otel_genai.Attr_key.gen_ai_tool_name (tool_name_from_params params)
+   else [])
+  @ server_labels_of_url url
+  @
+  match error with
+  | None -> []
+  | Some error ->
+    [ Otel_genai.Mcp_attr_key.error_type, error.error_type ]
+    @ option_label
+        Otel_genai.Mcp_attr_key.rpc_response_status_code
+        error.rpc_response_status_code
+
+let mcp_client_session_duration_labels ~url ?error_type () =
+  [ ( Otel_genai.Mcp_attr_key.mcp_protocol_version
+    , Mcp_transport_protocol.default_protocol_version )
+  ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+  ; Otel_genai.Mcp_attr_key.network_protocol_version, "1.1"
+  ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+  ]
+  @ server_labels_of_url url
+  @ option_label Otel_genai.Mcp_attr_key.error_type error_type
+
+let tools_call_result_is_error ~method_name json =
+  String.equal method_name Otel_genai.Mcp_value.tools_call_method
+  &&
+  match Json_util.assoc_member_opt "result" json with
+  | Some result -> (
+    match Json_util.assoc_member_opt "isError" result with
+    | Some (`Bool true) -> true
+    | _ -> false)
+  | None -> false
+
+let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result =
+  let error =
+    match result with
+    | Ok json when tools_call_result_is_error ~method_name json ->
+      Some
+        (client_operation_error
+           ~error_type:Otel_genai.Mcp_value.tool_error_type
+           "MCP tools/call result isError=true")
+    | Ok _ -> None
+    | Error error -> Some error
+  in
+  Otel_metric_store.observe_histogram
+    Otel_genai.Mcp_metric_name.client_operation_duration
+    ~labels:(mcp_client_operation_duration_labels ~url ~method_name ~params ?error ())
+    (* NDT-OK: client operation duration is telemetry only; admission and
+       result semantics use [result], not this wall-clock sample. *)
+    (max 0.0 (Unix.gettimeofday () -. started_at) (* NDT-OK: telemetry sample. *))
+
+let record_mcp_client_session_duration ~url ~started_at ?error_type () =
+  Otel_metric_store.observe_histogram
+    Otel_genai.Mcp_metric_name.client_session_duration
+    ~labels:(mcp_client_session_duration_labels ~url ?error_type ())
+    (* NDT-OK: client session duration is a runtime telemetry observation. *)
+    (max 0.0 (Unix.gettimeofday () -. started_at) (* NDT-OK: telemetry sample. *))
+
+module For_testing = struct
+  let client_operation_error_opt ?rpc_response_status_code = function
+    | None -> None
+    | Some error_type ->
+      Some
+        (client_operation_error
+           ?rpc_response_status_code
+           ~error_type
+           "test error")
+  ;;
+
+  let mcp_client_operation_duration_labels ~url ~method_name ~params ?error_type
+      ?rpc_response_status_code () =
+    let error = client_operation_error_opt ?rpc_response_status_code error_type in
+    mcp_client_operation_duration_labels ~url ~method_name ~params ?error ()
+  ;;
+
+  let record_mcp_client_operation_duration ~url ~method_name ~params ~started_at
+      ?error_type ?rpc_response_status_code ?(tool_result_is_error = false) () =
+    let result =
+      match client_operation_error_opt ?rpc_response_status_code error_type with
+      | None ->
+        Ok
+          (`Assoc
+            [ ( "result"
+              , `Assoc [ "isError", `Bool tool_result_is_error ] )
+            ])
+      | Some error -> Error error
+    in
+    record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result
+  ;;
+
+  let mcp_client_session_duration_labels ~url ?error_type () =
+    mcp_client_session_duration_labels ~url ?error_type ()
+  ;;
+
+  let record_mcp_client_session_duration ~url ~started_at ?error_type () =
+    record_mcp_client_session_duration ~url ~started_at ?error_type ()
+  ;;
+end
 
 let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
     ~(request_body : string) : (string, string) result =
@@ -190,6 +333,7 @@ let post_json_via_eio ~sw:_ ~(auth_token : string option) ~session_id
 let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : string)
     ~(params : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
   let request_id = next_jsonrpc_id () in
+  let url = mcp_endpoint_url ~auth_token in
   let request_body =
     `Assoc
       [
@@ -210,7 +354,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
         "15";
         "-X";
         "POST";
-        (mcp_endpoint_url ~auth_token);
+        url;
         "-H";
         "content-type: application/json";
         "-H";
@@ -234,7 +378,7 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
           ~actor:(Masc_exec.Agent_id.of_string "system/worker_container_types")
           ~raw_source
           ~summary:"worker container curl fallback"
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:(Unknown "misc") ())
+
           ~stdin_content:request_body
           argv
       in
@@ -255,7 +399,8 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
   in
   let rec decode attempts_left =
     match perform_request () with
-    | Error e -> Error e
+    | Error e ->
+        Error (client_operation_error ~error_type:"transport_error" e)
     | Ok raw_body ->
         let normalized = normalize_mcp_body ~request_id raw_body in
         if String.trim normalized = "" && attempts_left > 0 then
@@ -263,14 +408,21 @@ let call_jsonrpc ~sw ~(auth_token : string option) ~session_id ~(method_name : s
         else
           try
             let json = Yojson.Safe.from_string normalized in
-            match extract_jsonrpc_error json with
-            | Some msg -> Error msg
+            match extract_jsonrpc_error_detail json with
+            | Some error -> Error error
             | None -> Ok json
           with Yojson.Json_error msg ->
             if attempts_left > 0 then decode (attempts_left - 1)
-            else Error ("invalid JSON-RPC response: " ^ msg)
+            else
+              Error
+                (client_operation_error ~error_type:"json_parse_error"
+                   ("invalid JSON-RPC response: " ^ msg))
   in
-  decode 1
+  (* NDT-OK: request-boundary timestamp feeds only the OTel duration histogram. *)
+  let started_at = Unix.gettimeofday () (* NDT-OK: telemetry sample. *) in
+  let result = decode 1 in
+  record_mcp_client_operation_duration ~url ~method_name ~params ~started_at result;
+  Result.map_error (fun error -> error.message) result
 
 let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
     ~(args : Yojson.Safe.t) :
@@ -288,9 +440,8 @@ let call_masc_tool ~sw ~(auth_token : string option) ~session_id ~tool_name
   | Error e -> Error e
   | Ok json ->
       let is_error =
-        let open Yojson.Safe.Util in
-        match json |> member "result" |> member "isError" with
-        | `Bool b -> b
+        match (match Json_util.assoc_member_opt "result" json with Some x -> Json_util.assoc_member_opt "isError" x | None -> None) with
+        | Some (`Bool b) -> b
         | _ -> false
       in
       Ok { text = extract_tool_text json; is_error }
@@ -299,7 +450,7 @@ let list_masc_tools ~sw:_sw ~(auth_token : string option) ~session_id
     ?(names : string list option = None) () :
     (Masc_domain.tool_schema list, string) result =
   ignore (_sw, auth_token, session_id);
-  Agent_tool_surfaces.local_worker_tool_schemas ?names ()
+  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let tool_schema_of_name schemas tool_name =
   List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name) schemas
@@ -554,26 +705,6 @@ let local_worker_max_tokens () = Env_config.Worker.local_worker_max_tokens
 
 let local_worker_heartbeat_interval_sec () = Env_config.Worker.local_worker_heartbeat_sec
 
-let join_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args =
-    `Assoc
-      [
-        ("agent_name", `String worker_name);
-        ( "capabilities",
-          `List
-            [
-              `String "llama";
-              `String "mcp-worker";
-              `String "local-tool-loop";
-            ] );
-      ]
-  in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_join" ~args
-
-let leave_worker ~sw ~(auth_token : string option) ~session_id ~worker_name =
-  let args = `Assoc [ ("agent_name", `String worker_name) ] in
-  call_masc_tool ~sw ~auth_token ~session_id ~tool_name:"masc_leave" ~args
-
 let default_system_prompt ~worker_name ~model_id ?role
     ?selection_note () =
   let role_line =
@@ -594,7 +725,7 @@ Worker name: %s
 Model: %s
 %s%s
 Operate through the provided MASC tools.
-Use tools when state inspection, task coordination, work delegation, or room updates are needed.
+Use tools when state inspection, task updates, work delegation, or status updates are needed.
 Keep responses concise and task-focused.
 If a tool schema includes agent_name and you omit it, the runtime will inject %s automatically.
 Do not invent tool names or arguments that are not in schema.

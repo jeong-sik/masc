@@ -25,7 +25,7 @@ Related: RFC-0044 (read-side counterpart), RFC-0042 (closed sum for keeper termi
 
 ## 1. Problem
 
-RFC-0044 (Draft) closes the **read-side** telemetry-as-fix pattern: 12 PRs that catch read exceptions, increment a Prometheus counter with a free-string `reason`, and return a default to the caller. RFC-0044 §2 explicitly defers the **write-side** redesign: *"Append-only persistence / WAL... A genuine recovery story for these surfaces requires write-side redesign... Scope is out of this RFC and tracked separately."*
+RFC-0044 (Draft) closes the **read-side** telemetry-as-fix pattern: 12 PRs that catch read exceptions, increment a legacy metrics backend counter with a free-string `reason`, and return a default to the caller. RFC-0044 §2 explicitly defers the **write-side** redesign: *"Append-only persistence / WAL... A genuine recovery story for these surfaces requires write-side redesign... Scope is out of this RFC and tracked separately."*
 
 This RFC is that tracked-separately work.
 
@@ -39,7 +39,7 @@ keeper_heartbeat_loop.ml:195   write_meta failed (heartbeat)             -> warn
 keeper_keepalive.ml:513        write_meta failed (bootstrap)             -> warn + continue
 keeper_supervisor.ml:720       supervisor presence sync write_meta       -> warn + continue
 keeper_supervisor.ml:2061      auto-resume meta write failed             -> warn + skip resume
-keeper_turn_cascade_budget.ml:675  overflow pause write_meta failed      -> warn + continue
+keeper_turn_runtime_budget.ml:675  overflow pause write_meta failed      -> warn + continue
 keeper_agent_memory_episode.ml:103 episode_create failed                 -> error log + None
 keeper_agent_memory_episode.ml:192 failed_turn_episode_create failed     -> error log + None
 keeper_checkpoint_store.ml:279     OAS snapshot archive write failed     -> warn + drop archive
@@ -68,7 +68,7 @@ This is the **silent-write** variant of telemetry-as-fix that `instructions/soft
 
 ## 2. Non-goals
 
-- **Removing existing counters.** Where Prometheus counters already exist for write failures (e.g., `metric_keeper_write_meta_failures`, `metric_keeper_episode_create_failures`), this RFC does not remove them. Counter + typed result coexist until each caller chain migrates.
+- **Removing existing counters.** Where legacy metrics backend counters already exist for write failures (e.g., `metric_keeper_write_meta_failures`, `metric_keeper_episode_create_failures`), this RFC does not remove them. Counter + typed result coexist until each caller chain migrates.
 - **Append-only journal / WAL.** A true recovery story for `write_meta` requires a journal (commit-then-emit, version-tagged records). Out of scope. This RFC restricts to **typing the failure visibility surface** so that `21st-site` PRs can be rejected with `RFC-0077 §X`.
 - **Migrating all 20 sites in one PR.** Migration is per-call-chain. PR-1 introduces the typed module; subsequent PRs migrate one chain at a time.
 - **Read-side surfaces.** Covered by RFC-0044. Sites that mix read+write (e.g., `keeper_context_core.ml:1456, 1484` checkpoint read error-discarded) belong to RFC-0044.
@@ -99,7 +99,7 @@ val to_wire : t -> string
 val of_wire : string -> t option
 ```
 
-`to_wire` produces stable Prometheus label strings; existing label conventions for sites that already report a counter are preserved.
+`to_wire` produces stable legacy metrics backend label strings; existing label conventions for sites that already report a counter are preserved.
 
 ### 3.2 Result-based write helper
 
@@ -164,7 +164,7 @@ This is *behavior change at migration boundaries only*. PR-1 alone is byte-compa
 
 - **Q1**: Should `Read_drop_reason.t` (RFC-0044) and `Write_failure_reason.t` (this RFC) unify into `Persistence_failure_reason.t` with read/write phantom-type discriminator? **Decision**: defer. Unification is mechanical once both RFCs reach `Active`. Premature unification couples migration cadence.
 - **Q2**: `Meta_cas_conflict` retry policy — caller-level retry vs cycle-level retry? RFC-0026 (Work-Conserving Admission) suggests cycle-level. **Decision**: per-migration in PR-2 sub-steps.
-- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Coord` / OAS? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
+- **Q3**: How to handle the cross-module case `keeper_agent_memory_episode.ml` calling into `Workspace` / OAS? Result must propagate through the boundary or be absorbed at the boundary with explicit `Episode_create_error` annotation. **Decision**: PR-3 surfaces this question in the sub-PR.
 
 ## 8. Acceptance
 

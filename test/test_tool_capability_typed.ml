@@ -3,8 +3,8 @@ open Alcotest
 (** RFC-0084 PR-4 — [Tool_capability] typed sum + Set tests.
 
     Verifies:
-    - All 5 [kind] variants round-trip through [to_string] / [of_string]
-    - [all_kinds] enumerates exactly 5 variants
+    - All 4 [kind] variants round-trip through [to_string] / [of_string]
+    - [all_kinds] enumerates exactly 4 variants
     - [Set.diff] semantics for [check]
     - [has] reads [Tool_catalog] metadata
     - [granted] of an unknown tool returns the empty set
@@ -14,19 +14,19 @@ open Alcotest
 let test_round_trip_all_kinds () =
   List.iter
     (fun kind ->
-      let s = Masc_mcp.Tool_capability.to_string kind in
-      match Masc_mcp.Tool_capability.of_string s with
+      let s = Tool_capability.to_string kind in
+      match Tool_capability.of_string s with
       | Some kind' when kind = kind' -> ()
       | Some _ -> failf "round-trip kind mismatch for %s" s
       | None -> failf "of_string %S returned None" s)
-    Masc_mcp.Tool_capability.all_kinds
+    Tool_capability.all_kinds
 ;;
 
 let test_all_kinds_cardinality () =
   (check int)
-    "Tool_capability.all_kinds enumerates 5 variants"
-    5
-    (List.length Masc_mcp.Tool_capability.all_kinds)
+    "Tool_capability.all_kinds enumerates 4 variants"
+    4
+    (List.length Tool_capability.all_kinds)
 ;;
 
 let test_of_string_unknown_returns_none () =
@@ -34,23 +34,22 @@ let test_of_string_unknown_returns_none () =
     "of_string on unknown returns None"
     None
     (Option.map
-       Masc_mcp.Tool_capability.to_string
-       (Masc_mcp.Tool_capability.of_string "unknown_capability"))
+       Tool_capability.to_string
+       (Tool_capability.of_string "unknown_capability"))
 ;;
 
 let test_has_unknown_tool_returns_false () =
   (check bool)
     "has Read_only on an unregistered tool name returns false"
     false
-    (Masc_mcp.Tool_capability.has Read_only "__nonexistent_tool__")
+    (Tool_capability.has Read_only "__nonexistent_tool__")
 ;;
 
 let test_has_catalog_metadata () =
   let name = "__cap_catalog_tool" in
-  Masc_mcp.Tool_catalog.register_metadata name
-    { Masc_mcp.Tool_catalog.default_metadata with
+  Tool_catalog.register_metadata name
+    { Tool_catalog.default_metadata with
       readonly = Some true;
-      requires_join = Some true;
       mcp_context_required = Some true;
       destructive = Some true;
       idempotent = Some true;
@@ -58,40 +57,40 @@ let test_has_catalog_metadata () =
   List.iter
     (fun kind ->
       (check bool)
-        ("catalog metadata grants " ^ Masc_mcp.Tool_capability.to_string kind)
+        ("catalog metadata grants " ^ Tool_capability.to_string kind)
         true
-        (Masc_mcp.Tool_capability.has kind name))
-    Masc_mcp.Tool_capability.all_kinds
+        (Tool_capability.has kind name))
+    Tool_capability.all_kinds
 ;;
 
 let test_has_catalog_inferred_capabilities () =
   (check bool)
     "effect_domain=Read_only grants Read_only"
     true
-    (Masc_mcp.Tool_capability.has Read_only "tool_read_file");
+    (Tool_capability.has Read_only "tool_read_file");
   (check bool)
     "static inline metadata grants Mcp_context_required"
     true
-    (Masc_mcp.Tool_capability.has Mcp_context_required "masc_who");
+    (Tool_capability.has Mcp_context_required "masc_agents");
   (check bool)
     "static destructive metadata grants Destructive"
     true
-    (Masc_mcp.Tool_capability.has Destructive "shell_exec")
+    (Tool_capability.has Destructive "shell_exec")
 ;;
 
 let test_granted_unknown_tool_is_empty () =
-  let s = Masc_mcp.Tool_capability.granted "__nonexistent_tool__" in
+  let s = Tool_capability.granted "__nonexistent_tool__" in
   (check bool)
     "granted on an unregistered tool returns the empty set"
     true
-    (Masc_mcp.Tool_capability.Set.is_empty s)
+    (Tool_capability.Set.is_empty s)
 ;;
 
 let test_check_empty_required_is_ok () =
   let result =
-    Masc_mcp.Tool_capability.check
-      ~required:Masc_mcp.Tool_capability.Set.empty
-      ~granted:Masc_mcp.Tool_capability.Set.empty
+    Tool_capability.check
+      ~required:Tool_capability.Set.empty
+      ~granted:Tool_capability.Set.empty
   in
   match result with
   | Ok () -> ()
@@ -101,28 +100,28 @@ let test_check_empty_required_is_ok () =
 
 let test_check_missing_capability_returns_error () =
   let required =
-    Masc_mcp.Tool_capability.Set.singleton Masc_mcp.Tool_capability.Read_only
+    Tool_capability.Set.singleton Tool_capability.Read_only
   in
-  let granted = Masc_mcp.Tool_capability.Set.empty in
-  match Masc_mcp.Tool_capability.check ~required ~granted with
+  let granted = Tool_capability.Set.empty in
+  match Tool_capability.check ~required ~granted with
   | Ok () -> failf "check with missing capability should return Error"
   | Error missing ->
     (check int)
       "Error.missing.cardinality"
       1
-      (Masc_mcp.Tool_capability.Set.cardinal missing)
+      (Tool_capability.Set.cardinal missing)
 ;;
 
 let test_check_granted_superset_is_ok () =
   let required =
-    Masc_mcp.Tool_capability.Set.singleton Masc_mcp.Tool_capability.Read_only
+    Tool_capability.Set.singleton Tool_capability.Read_only
   in
   let granted =
-    Masc_mcp.Tool_capability.Set.add
-      Masc_mcp.Tool_capability.Idempotent
+    Tool_capability.Set.add
+      Tool_capability.Idempotent
       required
   in
-  match Masc_mcp.Tool_capability.check ~required ~granted with
+  match Tool_capability.check ~required ~granted with
   | Ok () -> ()
   | Error _ ->
     failf "check with granted ⊇ required should return Ok"

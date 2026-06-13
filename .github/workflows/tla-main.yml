@@ -1,10 +1,10 @@
 name: TLA+ Main Verification
 
-# Independent of ci.yml — ensures every main commit gets TLA verification
-# even when ci.yml's workflow-level cancel-in-progress aborts the main ci
-# run due to rapid back-to-back merges.
+# Owns main-branch and scheduled TLA+ model checking independently of ci.yml.
+# This keeps every main commit verified even when ci.yml's workflow-level
+# cancel-in-progress aborts the main CI run due to rapid back-to-back merges.
 #
-# Background: #14668 fixed a clean-spec violation (KeeperCascadeRouting
+# Background: #14668 fixed a clean-spec violation (KeeperRuntimeRouting
 # TypeOK) that persisted on main for 4 days. #14670 forced TLA to run on
 # every main push by bypassing path-scope. However, ci.yml's
 # concurrency.cancel-in-progress=true on push events cancels the entire

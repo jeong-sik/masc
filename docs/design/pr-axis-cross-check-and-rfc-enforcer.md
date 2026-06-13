@@ -7,7 +7,7 @@
 
 ## §0 Summary
 
-masc-mcp 개발에서 반복적으로 발생하는 두 가지 프로세스 실패:
+masc 개발에서 반복적으로 발생하는 두 가지 프로세스 실패:
 
 1. **Wave-pattern PR stale**: 단일 main merge(예: #14179 metric refactor)가 병렬로 열린 4-5개 Draft PR을 동시에 stale하게 만듦. 각 PR author는 자신의 PR만 보고 cross-axis 영향을 인식하지 못함.
 2. **RFC §1 caller-context 누락**: RFC sketch 작성 시 §1 Problem 섹션에 TODO 주석만 남기고 caller-context 수집을 미룸. 나중에 sub-agent가 수집하더라도 RFC 본문과 `.tmp/` 파일이 분리되어 drift 발생.
@@ -78,7 +78,7 @@ def check_pr_axis_stale(pr_number: int, repo: str) -> List[AxisRisk]:
 |------|-------------|---------|
 | `SUPERSEDED` | Merged PR's fix makes this PR's change unnecessary | PR A fixes bug X, PR B (merged) also fixes bug X |
 | `BUILD_DEP_BREAK` | Merged PR changed dune deps, this PR's build may fail | cdal_runtime migration adds new library |
-| `TYPE_CONFLICT` | Merged PR changed type definitions this PR uses | `Cascade_ref.cascade_item` field change |
+| `TYPE_CONFLICT` | Merged PR changed type definitions this PR uses | `Runtime_ref.runtime_item` field change |
 | `API_SIGNATURE_CHANGE` | Merged PR changed function signature this PR calls | `run_keeper_cycle` added `unit` param |
 
 #### Output
@@ -93,7 +93,7 @@ Recent merges that may affect this PR:
 | Merged PR | Risk Type | Overlap Files | Confidence |
 |-----------|-----------|---------------|------------|
 | #14241 | `BUILD_DEP_BREAK` | `lib/cdal_runtime/dune` | HIGH |
-| #14255 | `TYPE_CONFLICT` | `lib/cascade/cascade_ref.mli` | MEDIUM |
+| #14255 | `TYPE_CONFLICT` | `lib/runtime/runtime_ref.mli` | MEDIUM |
 
 **Recommended action**: Rebase on latest main and run `dune build @check`.
 ```
@@ -242,7 +242,7 @@ def check_rfc_section1(file: Path) -> List[Violation]:
 - [ ] 실패 시 PR 코멘트에 구체적인 수정 가이드 제공
 
 ### PR-C: Integration
-- [ ] 두 도구를 `masc-mcp` repo에 배포
+- [ ] 두 도구를 `masc` repo에 배포
 - [ ] 다른 repo(`me`, kidsnote)에 재사용 가능하도록 config 외부화
 
 ## §5 References

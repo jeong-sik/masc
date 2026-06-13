@@ -8,15 +8,6 @@
    Pure JSON builder over [Log.Ring.entry list] - the ring read happens
    in the caller. *)
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
-;;
-
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
-;;
 
 let store_path ~masc_root =
   Filename.concat
@@ -27,7 +18,7 @@ let store_path ~masc_root =
 ;;
 
 let build
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~limit
       ~level_filter
       ~applied_level
@@ -37,7 +28,7 @@ let build
       (entries : Log.Ring.entry list)
   : Yojson.Safe.t
   =
-  let masc_root = Coord.masc_root_dir config in
+  let masc_root = Workspace.masc_root_dir config in
   let newest =
     match entries with
     | [] -> None
@@ -55,7 +46,7 @@ let build
        ; ( "retention"
          , `Assoc
              [ "scope", `String "dashboard_logs"
-             ; "coordination_root", `String masc_root
+             ; "workspace_root", `String masc_root
              ; "buffer", `String "Log.Ring"
              ; "capacity", `Int Log.Ring.capacity
              ; "durable_store", `String (store_path ~masc_root)
@@ -73,12 +64,12 @@ let build
              ; "applied_level", `String (Log.level_to_string applied_level)
              ; "min_level", `Int min_level
              ; "module", `String module_filter
-             ; "since_seq", option_int_json since_seq
+             ; "since_seq", Json_util.int_option_to_yojson since_seq
              ] )
        ; "returned", `Int (List.length entries)
-       ; "latest_seq", option_int_json (entry_seq_json newest)
-       ; "oldest_seq", option_int_json (entry_seq_json oldest)
-       ; "latest_ts_iso", option_string_json (entry_ts_json newest)
+       ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)
+       ; "oldest_seq", Json_util.int_option_to_yojson (entry_seq_json oldest)
+       ; "latest_ts_iso", Json_util.string_option_to_yojson (entry_ts_json newest)
        ]
        @ fields)
   | json -> json

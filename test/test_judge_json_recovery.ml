@@ -1,10 +1,10 @@
 (* #9851: governance judge parse recovery — tests for the secondary
    brace-balanced block extraction used when [Lenient_json.parse] falls
-   through to the {raw: <text>} sentinel because the LLM prefixed prose
+   through to the {raw: <text>} marker because the LLM prefixed prose
    before the JSON. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let test_no_brace_returns_none () =
   let out = Judge_json_recovery.extract_balanced_object "no json here" in

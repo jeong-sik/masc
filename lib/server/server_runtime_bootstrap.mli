@@ -57,11 +57,6 @@ val runtime_path_diagnostics :
   Mcp_server.server_state ->
   Server_base_path_diagnostics.t
 
-val record_tool_policy_init_failure : base_path:string -> string -> unit
-(** Record and log a fatal startup failure while loading
-    [config/tool_policy.toml]. Exposed for focused regression tests and
-    used before the startup path exits. *)
-
 val restore_persisted_sessions : Mcp_server.server_state -> unit
 val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
@@ -70,7 +65,6 @@ val bootstrap_prompt_state : Mcp_server.server_state -> unit
 (** {1 Startup Tasks} *)
 
 val warm_tool_registry_from_telemetry : Mcp_server.server_state -> unit
-val migrate_legacy_dirs : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
@@ -85,12 +79,12 @@ type lazy_startup_group = {
   task_names : string list;
 }
 
-val lazy_startup_plan : has_legacy_traces:bool -> lazy_startup_group list
+val lazy_startup_plan : unit -> lazy_startup_group list
 (** Deterministic startup task grouping.  [Parallel] groups contain only
     tasks whose stores are independent; [Serial] groups preserve ordering for
     shared tool state and cleanup phases. *)
 
-val lazy_startup_task_names : has_legacy_traces:bool -> string list
+val lazy_startup_task_names : unit -> string list
 (** Flattened task names in the same dependency order used to activate
     {!Server_startup_state}'s lazy task queue. *)
 

@@ -9,7 +9,7 @@
 # field already separates `cancel` from `fail`; this script uses it, prints
 # only the genuine `fail` runs, and with --logs fetches the tail of each
 # failing job so you can judge real regression vs pre-existing advisory
-# failure (e.g. masc-mcp's `ocamlformat-check` on pre-existing in-file
+# failure (e.g. masc's `ocamlformat-check` on pre-existing in-file
 # violations) without opening a browser.
 #
 # Usage:

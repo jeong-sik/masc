@@ -36,7 +36,7 @@ is the single loudest line in MASC system logs on 2026-05-19:
 | Reason label | `entry_load_error` (100 %) | classification grep |
 | Unique `vrf-*` ids affected | 140 | `rg -o vrf-[a-f0-9]+ \| sort -u` |
 | Distinct emit sites | 1 (`Safe_ops.report_persistence_read_drop`) | `rg -n 'report_persistence_read_drop'` |
-| Distinct callers under load | 1 (`Coord_verification_store.list_request_headers`) | log path inspection |
+| Distinct callers under load | 1 (`Workspace_verification_store.list_request_headers`) | log path inspection |
 
 RFC-0044 typed the `reason` label (`Read_drop_reason.t` closed sum) and
 raised the *reject bar* for new counters. It explicitly carved out the
@@ -70,12 +70,12 @@ two real causes are operational/transient, not data corruption.
 
 ### 1.2 Why the 133 "not found" cases are a TOCTOU race
 
-`Coord_verification_store.list_request_headers`
-(`lib/coord/coord_verification_store.ml:185-215`) enumerates
+`Workspace_verification_store.list_request_headers`
+(`lib/workspace/workspace_verification_store.ml:185-215`) enumerates
 `verifications/*.json`, then for each filename id it calls
 `load_request_header`, which begins with `Sys.file_exists path` and
 returns `Error "Verification <id> not found"` on `false`
-(`lib/coord/coord_verification_store.ml:171-183`).
+(`lib/workspace/workspace_verification_store.ml:171-183`).
 
 The sequence is:
 
@@ -132,7 +132,7 @@ the *no recovery, only telemetry* property.
 
 ## 2. Non-goals
 
--   Removing `Read_drop_reason.t` or the Prometheus counter
+-   Removing `Read_drop_reason.t` or the legacy metrics backend counter
     `metric_persistence_read_drops`. The counter remains as a real
     drop signal once the false positives (TOCTOU + ENFILE) are
     classified out.
@@ -181,13 +181,13 @@ Wire mapping:
 -   `Concurrent_removal` → `"concurrent_removal"`
 -   `Transient_fd_pressure` → `"transient_fd_pressure"`
 
-Both are byte-stable additions; Prometheus label cardinality grows by
+Both are byte-stable additions; legacy metrics backend label cardinality grows by
 2.
 
 ### 3.2 Classify at the boundary
 
 `load_request_header`
-(`lib/coord/coord_verification_store.ml:171`) currently returns
+(`lib/workspace/workspace_verification_store.ml:171`) currently returns
 `("a", string) result`. Promote its `Error` payload to a typed shape
 that distinguishes the three cases at the syscall layer:
 
@@ -251,9 +251,9 @@ evidence.
 | PR | Scope | Files | Reversible |
 |---|---|---|---|
 | PR-1 | Add `Concurrent_removal` + `Transient_fd_pressure` to `Read_drop_reason.t`; wire `to_wire`/`of_wire`; no callsite change. | `lib/core/read_drop_reason.{ml,mli}`, alcotest | Yes (pure additive) |
-| PR-2 | Promote `Coord_verification_store.load_request_header` Error type to typed `load_error`. Callers continue to convert via a shim that maps to existing wire reasons. | `lib/coord/coord_verification_store.{ml,mli}`, callers in same module, alcotest | Yes |
-| PR-3 | In `list_request_headers`, classify the three branches. Skip WARN + counter for `Concurrent_removal`; emit DEBUG (no counter) for `Transient_fd_pressure`; keep WARN + counter for `Genuine_load_failure`. | `lib/coord/coord_verification_store.ml` | Yes |
-| PR-4 (optional) | Single-shot retry for `Transient_fd_pressure` with jitter; instrument under separate metric. | `lib/coord/coord_verification_store.ml`, `lib/keeper/keeper_unified_metrics.ml` (or equivalent) | Yes |
+| PR-2 | Promote `Workspace_verification_store.load_request_header` Error type to typed `load_error`. Callers continue to convert via a shim that maps to existing wire reasons. | `lib/workspace/workspace_verification_store.{ml,mli}`, callers in same module, alcotest | Yes |
+| PR-3 | In `list_request_headers`, classify the three branches. Skip WARN + counter for `Concurrent_removal`; emit DEBUG (no counter) for `Transient_fd_pressure`; keep WARN + counter for `Genuine_load_failure`. | `lib/workspace/workspace_verification_store.ml` | Yes |
+| PR-4 (optional) | Single-shot retry for `Transient_fd_pressure` with jitter; instrument under separate metric. | `lib/workspace/workspace_verification_store.ml`, `lib/keeper/keeper_unified_metrics.ml` (or equivalent) | Yes |
 
 PR-1 is independent and can land alone. PR-2 is wire-compatible (shim
 preserves existing labels). PR-3 is the visible behavior change and
@@ -313,8 +313,8 @@ This RFC is itself audited against the seven-item checklist:
 
 | | Pro | Con |
 |---|---|---|
-| Read-side classification only | Localised change, reversible, no writer coordination cost | TOCTOU window still exists; if a writer is *also* buggy the bug is now invisible at this surface |
-| Two new `Read_drop_reason.t` variants | Compile-time exhaustiveness everywhere | Prometheus label cardinality +2 |
+| Read-side classification only | Localised change, reversible, no writer workspace collaboration cost | TOCTOU window still exists; if a writer is *also* buggy the bug is now invisible at this surface |
+| Two new `Read_drop_reason.t` variants | Compile-time exhaustiveness everywhere | legacy metrics backend label cardinality +2 |
 | Separate metric for FD pressure (PR-4) | Data-integrity counter stops being polluted | One more metric to monitor |
 | No write-side WAL | Matches measured cause distribution (0 corruption events) | If write-side corruption ever appears, follow-up RFC needed |
 

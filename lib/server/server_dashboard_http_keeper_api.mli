@@ -47,12 +47,12 @@ val internal_history_json_to_trajectory_line :
     [None] for malformed entries. *)
 
 val read_internal_history_lines :
-  config:Coord.config ->
+  config:Workspace.config ->
   trace_id:string -> Trajectory.trajectory_line list
 (** Read the internal-history file for [trace_id] under [config]. *)
 
 val merge_keeper_trace_lines :
-  config:Coord.config ->
+  config:Workspace.config ->
   trace_id:string ->
   Trajectory.trajectory_line list ->
   Trajectory.trajectory_line list
@@ -62,7 +62,7 @@ val merge_keeper_trace_lines :
 (** {1 Tools route} *)
 
 val keeper_tools_response_json :
-  Keeper_types.keeper_meta -> Yojson.Safe.t
+  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** JSON shape returned by [GET /tools]. *)
 
 val handle_keeper_tools_post :
@@ -98,11 +98,11 @@ val oas_checkpoint_summary_json :
 (** JSON summary of an OAS checkpoint, used by the inventory listing. *)
 
 val keeper_checkpoint_inventory_json :
-  Coord.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
+  Workspace.config -> string -> [ `Not_found | `OK ] * Yojson.Safe.t
 (** Inventory JSON for [GET /checkpoints]. *)
 
 val keeper_runtime_trace_json :
-  Coord.config ->
+  Workspace.config ->
   string ->
   ?trace_id:string ->
   ?turn_id:int ->
@@ -128,11 +128,11 @@ val extract_keeper_name_for_post : string -> string -> string
 (** {1 Execution surface refresh} *)
 
 val refresh_keeper_execution_surfaces :
-  config:Coord_utils.config -> name:String.t -> string -> unit
+  config:Workspace_utils.config -> name:String.t -> string -> unit
 (** Re-read the keeper meta for [name] and update derived caches. *)
 
 val invalidate_keeper_execution_surfaces :
-  config:Coord_utils.config -> unit -> unit
+  config:Workspace_utils.config -> unit -> unit
 (** Drop every cached keeper execution surface; called on server-wide
     reconfiguration. *)
 

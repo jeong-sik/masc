@@ -13,6 +13,8 @@
 
 open Masc_domain
 
+module Descriptor = Masc.Keeper_tool_descriptor
+
 let yojson_testable : Yojson.Safe.t Alcotest.testable =
   Alcotest.testable
     (fun fmt v -> Format.fprintf fmt "%s" (Yojson.Safe.pretty_to_string v))
@@ -31,6 +33,20 @@ let find_by_name name (schemas : tool_schema list) : tool_schema =
 
 let has_schema name schemas =
   List.exists (fun (s : tool_schema) -> String.equal s.name name) schemas
+;;
+
+let descriptor_internal_schema name : tool_schema =
+  match
+    List.find_opt
+      (fun (descriptor : Descriptor.t) -> String.equal descriptor.internal_name name)
+      Descriptor.public_descriptors
+  with
+  | Some descriptor ->
+    { name = descriptor.internal_name
+    ; description = descriptor.description
+    ; input_schema = descriptor.input_schema
+    }
+  | None -> Alcotest.failf "descriptor %S not in Keeper_tool_descriptor.public_descriptors" name
 ;;
 
 let test_masc_config_name_matches () =
@@ -132,73 +148,59 @@ let test_masc_gc_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_masc_web_search_name_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_search name" hand.name gen.name
+let descriptor_internal_schema name : tool_schema =
+  match
+    Masc.Keeper_tool_descriptor.public_descriptors
+    |> List.find_opt (fun (descriptor : Masc.Keeper_tool_descriptor.t) ->
+           String.equal descriptor.internal_name name)
+  with
+  | Some descriptor ->
+      { name = descriptor.internal_name
+      ; description = descriptor.description
+      ; input_schema = descriptor.input_schema
+      }
+  | None -> Alcotest.failf "descriptor for internal tool %S not found" name
 ;;
 
-let test_masc_web_search_description_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_search description" hand.description gen.description
-;;
-
-let test_masc_web_search_input_schema_matches () =
-  let gen = find_by_name "masc_web_search" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_search" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_web_search input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
-let test_masc_web_fetch_name_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_fetch name" hand.name gen.name
-;;
-
-let test_masc_web_fetch_description_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_web_fetch description" hand.description gen.description
-;;
-
-let test_masc_web_fetch_input_schema_matches () =
-  let gen = find_by_name "masc_web_fetch" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_web_fetch" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_web_fetch input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
-let test_masc_tool_admin_snapshot_name_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_tool_admin_snapshot name" hand.name gen.name
-;;
-
-let test_masc_tool_admin_snapshot_description_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_snapshot description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_tool_admin_snapshot_input_schema_matches () =
-  let gen = find_by_name "masc_tool_admin_snapshot" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_snapshot" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_tool_admin_snapshot input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
+(* Regression guard for PR #19864 -> keeper web alias pruning spam.
+   Web tools are descriptor-backed keeper tools: they MUST be
+   present in the raw substrate inventory, but their schema owner is
+   [Keeper_tool_descriptor.public_descriptors], not [Tool_descriptors_gen]. *)
+let test_web_tools_owned_by_keeper_descriptors () =
+  List.iter
+    (fun name ->
+      let descriptor = descriptor_internal_schema name in
+      Alcotest.(check bool)
+        (name ^ " absent from Tool_descriptors_gen.schemas")
+        false
+        (has_schema name Tool_descriptors_gen.schemas);
+      Alcotest.(check bool)
+        (name ^ " absent from Tool_schemas_misc.schemas")
+        false
+        (has_schema name Tool_schemas_misc.schemas);
+      let raw = find_by_name name Masc.Config.raw_all_tool_schemas in
+      Alcotest.(check string)
+        (name ^ " raw description matches descriptor")
+        descriptor.description
+        raw.description;
+      Alcotest.check
+        yojson_testable
+        (name ^ " raw input_schema matches descriptor")
+        descriptor.input_schema
+        raw.input_schema;
+      Alcotest.(check bool)
+        (name ^ " present in Config.raw_all_tool_schemas")
+        true
+        (has_schema name Masc.Config.raw_all_tool_schemas);
+      Alcotest.(check bool)
+        (name ^ " present in Config.raw_tool_name_set")
+        true
+        (Masc.Config.is_raw_tool_name name);
+      Alcotest.(check bool)
+        (name ^ " absent from public_mcp_surface_tools")
+        false
+        (List.mem name Tool_catalog_surfaces.public_mcp_surface_tools))
+    [ "masc_web_search"; "masc_web_fetch" ]
 ;;
 
 let test_masc_tool_stats_name_matches () =
@@ -248,34 +250,6 @@ let test_masc_cleanup_zombies_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_masc_tool_admin_update_name_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_update name"
-    hand.name
-    gen.name
-;;
-
-let test_masc_tool_admin_update_description_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_tool_admin_update description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_tool_admin_update_input_schema_matches () =
-  let gen = find_by_name "masc_tool_admin_update" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_tool_admin_update" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_tool_admin_update input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -308,32 +282,11 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_gc_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_gc_input_schema_matches
         ] )
-    ; ( "masc_web_search field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_web_search_name_matches
-        ; Alcotest.test_case "description" `Quick test_masc_web_search_description_matches
-        ; Alcotest.test_case
-            "input_schema"
+    ; ( "descriptor-backed web tools"
+      , [ Alcotest.test_case
+            "owned by keeper descriptors"
             `Quick
-            test_masc_web_search_input_schema_matches
-        ] )
-    ; ( "masc_web_fetch field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_web_fetch_name_matches
-        ; Alcotest.test_case "description" `Quick test_masc_web_fetch_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_web_fetch_input_schema_matches
-        ] )
-    ; ( "masc_tool_admin_snapshot field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_snapshot_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_tool_admin_snapshot_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_tool_admin_snapshot_input_schema_matches
+            test_web_tools_owned_by_keeper_descriptors
         ] )
     ; ( "masc_tool_stats field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches
@@ -353,17 +306,6 @@ let () =
             "input_schema"
             `Quick
             test_masc_cleanup_zombies_input_schema_matches
-        ] )
-    ; ( "masc_tool_admin_update field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_tool_admin_update_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_tool_admin_update_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_tool_admin_update_input_schema_matches
         ] )
     ]
 ;;

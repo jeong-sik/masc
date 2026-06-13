@@ -5,18 +5,90 @@
    Extracted from keeper_keepalive.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 
-(** Optional gRPC client + env — WORM Atomic: set at server bootstrap
-    when [MASC_AGENT_TRANSPORT=grpc]. *)
-let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
+type grpc_heartbeat_starter_fn = {
+  f : 'a. ctx:'a context -> m:keeper_meta -> stop:bool Atomic.t -> (unit -> unit) option;
+}
 
-let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
+let grpc_heartbeat_starter_fn : grpc_heartbeat_starter_fn ref =
+  ref { f = (fun ~ctx:_ ~m:_ ~stop:_ -> None) }
 
-let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =
-  Atomic.set grpc_client_ref (Some c);
-  Atomic.set grpc_env_ref env
+let register_grpc_heartbeat_starter (f : grpc_heartbeat_starter_fn) =
+  grpc_heartbeat_starter_fn := f
+;;
+
+let grpc_heartbeat_starter ~ctx ~m ~stop =
+  (!grpc_heartbeat_starter_fn).f ~ctx ~m ~stop
+
+let record_wake_payload_callback : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit) ref =
+  ref (fun ~keeper_name:_ ~trace_id:_ ~turn_index:_ ~model_id:_ ~context_window:_ ~approx_body_bytes:_ ~system_prompt_bytes:_ ~tool_defs_bytes:_ ~messages_bytes:_ ~message_count:_ ~role_counts:_ ~tool_count:_ ~has_compact_happened:_ -> ())
+
+let register_record_wake_payload (f : (keeper_name:string -> trace_id:string -> turn_index:int -> model_id:string -> context_window:int -> approx_body_bytes:int -> system_prompt_bytes:int -> tool_defs_bytes:int -> messages_bytes:int -> message_count:int -> role_counts:(string * int) list -> tool_count:int -> has_compact_happened:bool -> unit)) =
+  record_wake_payload_callback := f
+;;
+
+let record_tool_skipped_callback : (keeper_name:string -> tool_name:string -> reason_code:string -> unit) ref =
+  ref (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ())
+
+let register_record_tool_skipped (f : (keeper_name:string -> tool_name:string -> reason_code:string -> unit)) =
+  record_tool_skipped_callback := f
+;;
+
+let record_execute_output_callback
+  : (keeper_name:string ->
+     task_id:string option ->
+     stdout:string ->
+     stderr:string ->
+     status:Yojson.Safe.t ->
+     streamed:bool ->
+     unit)
+      ref
+  =
+  ref
+    (fun ~keeper_name:_ ~task_id:_ ~stdout:_ ~stderr:_ ~status:_ ~streamed:_ -> ())
+
+let register_record_execute_output f =
+  record_execute_output_callback := f
+;;
+
+let record_execute_stream_chunk_callback
+  : (keeper_name:string ->
+     stream:[ `Stdout | `Stderr ] ->
+     string ->
+     unit)
+      ref
+  =
+  ref (fun ~keeper_name:_ ~stream:_ _chunk -> ())
+
+let register_record_execute_stream_chunk f =
+  record_execute_stream_chunk_callback := f
+;;
+
+let record_execute_stream_start_callback
+  : (keeper_name:string -> task_id:string option -> unit) ref
+  =
+  ref (fun ~keeper_name:_ ~task_id:_ -> ())
+
+let register_record_execute_stream_start f =
+  record_execute_stream_start_callback := f
+;;
+
+let record_execute_stream_end_callback
+  : (keeper_name:string ->
+     task_id:string option ->
+     status:Yojson.Safe.t ->
+     unit)
+      ref
+  =
+  ref (fun ~keeper_name:_ ~task_id:_ ~status:_ -> ())
+
+let register_record_execute_stream_end f =
+  record_execute_stream_end_callback := f
 ;;
 
 (* Skip log throttle removed with manual_reconcile blocker — no more
@@ -33,7 +105,7 @@ let format_since_last_scheduled_autonomous = function
    honest actions of [specs/keeper-state-machine/KeeperHeartbeat.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit], so an [Assert_failure] from a
-   PPX-injected guard increments the Prometheus violation counter and
+   PPX-injected guard increments the Otel_metric_store violation counter and
    re-raises. The bug-action [MissedWakeup] is
    intentionally NOT instrumented — it is the failure mode these guards
    are designed to detect, not to enforce. *)
@@ -67,7 +139,7 @@ let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
    skip the [current_task_id] field or persist a different id. *)
 let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
   ignore meta; ignore task_id
-  [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"]
+  [@@fsm_guard "meta.current_task_id = Some task_id"]
 
 (* HeartbeatTick: the [compare_and_set wakeup true false] in
    [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE
@@ -152,7 +224,7 @@ let wakeup_all_keepers ?base_path () =
 
 (* ── Board-reactive policy constants ── *)
 
-let board_reactive_debounce_sec = Env_config.KeeperKeepalive.board_debounce_sec
+let board_reactive_debounce_sec = 60.0
 
 let board_reactive_generic_wakeup_limit =
   Keeper_config.int_of_env_default
@@ -175,14 +247,7 @@ let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
+let take = List.take
 
 let select_board_wakeup_candidates
     ?(generic_limit = board_reactive_generic_wakeup_limit)
@@ -232,7 +297,7 @@ let board_signal_kind_to_string = function
   | Board_dispatch.Board_comment_added -> "comment_added"
 ;;
 
-let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_board_signal) =
+let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
   let payload =
     `Assoc
       [ "source", `String "board_signal"
@@ -241,9 +306,8 @@ let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.keeper_boa
       ; "author", `String signal.author
       ; "title", `String signal.title
       ; "content", `String signal.content
-      ; "hearth", (match signal.hearth with Some v -> `String v | None -> `Null)
-      ; ( "updated_at_unix"
-        , match signal.updated_at with Some v -> `Float v | None -> `Null )
+      ; "hearth", Json_util.string_opt_to_json signal.hearth
+      ; ( "updated_at_unix", Json_util.float_opt_to_json signal.updated_at )
       ; "wake_reason", `String reason
       ]
     |> Yojson.Safe.to_string
@@ -265,7 +329,7 @@ let board_signal_entry_is_wakeup_candidate (entry : Keeper_registry.registry_ent
 ;;
 
 let board_signal_wake_paused_keeper
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(stimulus : Keeper_event_queue.stimulus)
       (meta : keeper_meta)
   =
@@ -289,7 +353,7 @@ let board_signal_wake_paused_keeper
     Keeper_registry.wakeup ~base_path:config.base_path resumed_meta.name;
     Ok ()
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ ("keeper", meta.name); ("phase", "board_signal_resume_sync") ]
       ();
@@ -297,9 +361,9 @@ let board_signal_wake_paused_keeper
 ;;
 
 let board_signal_wake_keeper
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(reason : string)
-      ~(signal : Board_dispatch.keeper_board_signal)
+      ~(signal : Board_dispatch.board_signal)
       (meta : keeper_meta)
   =
   let stimulus = board_signal_stimulus ~reason signal in
@@ -311,8 +375,8 @@ let board_signal_wake_keeper
 ;;
 
 let wakeup_relevant_keeper_for_board_signal
-      ~(config : Coord.config)
-      (signal : Board_dispatch.keeper_board_signal)
+      ~(config : Workspace.config)
+      (signal : Board_dispatch.board_signal)
   =
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
@@ -344,11 +408,10 @@ let wakeup_relevant_keeper_for_board_signal
              reply after a self-comment. Without this counter, operators
              cannot distinguish between a board post that legitimately
              had no addressee and one that was silently dropped by a
-             keeper whose [room_signal_prompt_enabled] / mention_targets
-             configuration is too narrow. *)
+             keeper whose mention_targets configuration is too narrow. *)
           (match wake_reason, entry.phase with
            | None, Keeper_state_machine.Running ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string BoardSignalNoWakeTotal)
                ~labels:[
                  ("keeper", meta.name);
@@ -400,7 +463,7 @@ let wakeup_relevant_keeper_for_board_signal
     (* Counter tracks wakeups dropped by the cap, not capped events; under
        high fanout [dropped] can be >1 per signal, so add the actual amount
        (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
       ~labels:[("kind", signal_kind_label)]
       ~delta:(float_of_int dropped)
@@ -494,7 +557,7 @@ let dispatch_keepalive_event_with_audit
      with
      | Ok _ -> ()
      | Error err ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string KeepaliveSignalFailures)
            ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
            ();

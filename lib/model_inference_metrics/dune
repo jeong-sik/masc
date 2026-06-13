@@ -1,0 +1,29 @@
+; Model_inference_metrics — model/cost/latency aggregate domain.
+;
+; Extracted with the facade plus its decomposition siblings:
+; Model_inference_metrics_{entry,parser,reader,aggregate,json}. The cluster
+; reads decisions/cost JSONL rows, computes aggregates, and emits redacted
+; runtime-lane JSON/prompt payloads.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare `Model_inference_metrics` identifier and
+; sibling module names for existing call sites.
+
+(include_subdirs no)
+
+(library
+ (name masc_model_inference_metrics)
+ (public_name masc.model_inference_metrics)
+ (wrapped false)
+ (libraries
+  dated_jsonl
+  digestif
+  eio
+  fs_compat
+  masc.runtime_provider_labels
+  masc_core
+  masc_log
+  masc_types
+  time_compat
+  unix
+  yojson))

@@ -21,20 +21,17 @@ let init_eio_clock ?sw env =
   Option.iter Eio_context.set_switch sw
 
 let init_keeper_tool_registry () =
-  if not (Masc_mcp.Tool_dispatch.is_tag_registry_initialized ()) then
-    let _ = Masc_mcp.Mcp_server_eio.governance_defaults in
+  if not (Tool_dispatch.is_tag_registry_initialized ()) then
+    let _ = Masc.Mcp_server_eio.governance_defaults in
     ()
 
 (** Test fixture parser for [keeper_meta] JSON.
 
-    The production parser at [Masc_mcp.Keeper_types.meta_of_json] requires
-    explicit [sandbox_profile] / [network_mode] fields (see fail-loud change
-    in keeper_meta_json_parse.ml). Test fixtures historically built minimal
-    [`Assoc] payloads that omitted those fields and depended on the silent
-    Local fallback. Rather than thread two new fields through every fixture,
-    this helper auto-fills the sandbox policy fields with conservative
-    defaults (Local / Inherit) when absent, then delegates to the strict
-    production parser.
+    The production parser at [Masc.Keeper_meta_json_parse.meta_of_json] requires
+    explicit [tool_access]. Test fixtures historically built minimal [`Assoc]
+    payloads that omitted it. Rather than thread the field through every
+    fixture, this helper auto-fills a conservative test default when absent,
+    then delegates to the strict production parser.
 
     Production code MUST NOT use this helper — the strict parser exists to
     catch missing fields at the boundary. *)
@@ -45,15 +42,15 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       if has key then fs else fs @ [ (key, v) ]
     in
     fields
-    |> add_if_missing "sandbox_profile" (`String "local")
-    |> add_if_missing "network_mode"    (`String "inherit")
+    |> add_if_missing "tool_access"
+         (Json_util.json_string_list [])
   in
   let json' =
     match json with
     | `Assoc fields -> `Assoc (augment fields)
     | other -> other
   in
-  Masc_mcp.Keeper_types.meta_of_json json'
+  Masc.Keeper_meta_json_parse.meta_of_json json'
 
 (** Walk up the directory tree from [Sys.getcwd()] until
     [config/tool_policy.toml] is found, then return that directory.

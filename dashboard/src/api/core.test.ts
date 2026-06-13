@@ -376,7 +376,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.message).toContain('warming up')
   })
 
-  it('remaps namespace/room-truth aliases the same as project-snapshot', async () => {
+  it('remaps namespace/workspace-truth aliases the same as project-snapshot', async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
         new Response('{"error":"not initialized"}', {
@@ -394,7 +394,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(legacyNamespace.status).toBe('initializing')
     expect(legacyNamespace.message).toContain('warming up')
 
-    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/room-truth')
+    const data = await get<{ status?: string; message?: string }>('/api/v1/dashboard/workspace-truth')
     expect(data.status).toBe('initializing')
     expect(data.message).toContain('warming up')
   })
@@ -441,7 +441,7 @@ describe('get bootstrap warm-up mapping', () => {
     expect(data.task_backlog?.todo).toBe(0)
   })
 
-  it('maps mission not-initialized 5xx to empty mission payload', async () => {
+  it('maps briefing not-initialized 5xx to empty briefing payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response('{"error":"not initialized"}', {
         status: 500,
@@ -452,14 +452,14 @@ describe('get bootstrap warm-up mapping', () => {
 
     const data = await get<{
       generated_at?: string
-      summary?: { room_health?: string }
+      summary?: { workspace_health?: string }
       incidents?: unknown[]
       command_focus?: Record<string, unknown>
       operator_targets?: { keepers?: unknown[] }
-    }>('/api/v1/dashboard/mission')
+    }>('/api/v1/dashboard/briefing')
 
     expect(data.generated_at).toBeDefined()
-    expect(data.summary?.room_health).toBe('initializing')
+    expect(data.summary?.workspace_health).toBe('initializing')
     expect(data.incidents).toEqual([])
     expect(data.command_focus).toEqual({})
     expect(data.operator_targets?.keepers).toEqual([])

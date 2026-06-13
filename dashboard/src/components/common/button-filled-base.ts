@@ -1,8 +1,8 @@
 /**
  * Filled-button base class string.
  *
- * Three component files (`credential-settings.ts`, `keeper-repo-mapping.ts`,
- * `keeper-config-panel.ts`) each shipped a byte-identical local
+ * `keeper-repo-mapping.ts` and `keeper-config-panel.ts` shipped a
+ * byte-identical local
  * `const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'`
  * and used it as the prefix for `${btnBase} bg-X text-Y` filled buttons.
  *

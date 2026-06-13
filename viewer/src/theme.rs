@@ -165,7 +165,7 @@ fn bind_theme_selectors(buffer: Res<ThemeTransitionBuffer>) {
             return;
         };
 
-        // Bind both theme selectors (lobby + inline dashboard)
+        // Bind both theme selectors (home + inline dashboard)
         for selector_id in &["theme-selector", "theme-selector-inline"] {
             bind_single_theme_selector(&doc, selector_id, &buffer.pending);
         }

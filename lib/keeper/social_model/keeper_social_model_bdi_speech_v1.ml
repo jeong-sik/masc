@@ -4,6 +4,8 @@
     when it is selected. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module Types = Keeper_social_model_types
 module Protocol = Keeper_social_model_protocol
@@ -103,7 +105,7 @@ let belief_summary_of_observation
       ]
   in
   match parts with
-  | [] -> "quiet_room"
+  | [] -> "quiet_workspace"
   | _ -> String.concat "; " parts
 
 let make_state ~(meta : keeper_meta)
@@ -144,33 +146,31 @@ let inferred_text_reply_state ~(meta : keeper_meta)
   ( make_state ~meta ~observation ?previous_state (),
     { speech_act = Types.Inform; delivery_surface = Types.Visible_reply } )
 
-let keeper_tool_name tool = Tool_name.Keeper.to_string tool
+let canonical_tool_name = Keeper_tool_resolution.canonical_tool_name
 
 let keeper_tool_name_matches tool name =
-  match Tool_name.Keeper.of_string name with
-  | Some parsed -> parsed = tool
-  | None -> false
+  String.equal (canonical_tool_name name) tool
 
 let tools_include_keeper tool tools =
   List.exists (keeper_tool_name_matches tool) tools
 
 let inferred_tool_surface tools =
-  if tools = [ keeper_tool_name Tool_name.Keeper.Stay_silent ] then
+  if tools = [ "keeper_stay_silent" ] then
     Some
       ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
       , Types.Tool_only_stay_silent )
-  else if tools_include_keeper Tool_name.Keeper.Board_comment tools then
+  else if tools_include_keeper "keeper_board_comment" tools then
     Some
       ( {
           speech_act = Types.Comment_board;
           delivery_surface = Types.Board_comment;
         }
       , Types.Tool_only_comment_board )
-  else if tools_include_keeper Tool_name.Keeper.Board_post tools then
+  else if tools_include_keeper "keeper_board_post" tools then
     Some
       ( { speech_act = Types.Post_board; delivery_surface = Types.Board_post }
       , Types.Tool_only_post_board )
-  else if tools_include_keeper Tool_name.Keeper.Broadcast tools then
+  else if tools_include_keeper "keeper_broadcast" tools then
     Some
       ( {
           speech_act = Types.Broadcast;
@@ -192,7 +192,7 @@ let tool_only_state ~(meta : keeper_meta)
     ~(previous_state : state option)
     ~(result : Keeper_agent_run.run_result) =
   let output, transition_reason =
-    match inferred_tool_surface result.tools_used with
+    match inferred_tool_surface (Keeper_agent_result.tool_names result) with
     | Some routed -> routed
     | None ->
         ( {
@@ -306,7 +306,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
         Some
           (`Assoc
             [
-              ("source", `String (keeper_tool_name Tool_name.Keeper.Board_post));
+              ("source", `String "keeper_board_post");
               ("social_model", `String state.social_model);
               ( "speech_act",
                 `String (Types.speech_act_to_string state.speech_act) );
@@ -314,10 +314,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
               ("agent_name", `String meta.agent_name);
               ("belief_summary", `String state.belief_summary);
               ("blocker", `String blocker);
-              ( "need",
-                match state.need with
-                | Some value -> `String value
-                | None -> `Null );
+              ( "need", Json_util.string_opt_to_json state.need );
             ])
       in
       match
@@ -332,7 +329,8 @@ let transition (previous_state : state option) (input : input) =
   let meta = input.meta in
   let observation = input.observation in
   let result = input.result in
-  if result.tools_used <> [] then
+  let tool_names = Keeper_agent_result.tool_names result in
+  if tool_names <> [] then
     tool_only_state ~meta ~observation ~previous_state ~result
   else if input.headers <> [] then
     let state, output, transition_reason =
@@ -374,32 +372,24 @@ let transition (previous_state : state option) (input : input) =
 let apply_output_to_result ~(meta : keeper_meta)
     ~(result : Keeper_agent_run.run_result)
     ~(visible_response_body : string) (state : Types.social_state) =
+  let tool_names = Keeper_agent_result.tool_names result in
   match state.speech_act, state.delivery_surface with
-  | Request_help, Board_post when result.tools_used = [] ->
+  | Request_help, Board_post when tool_names = [] ->
       (match deliver_request_help_post ~meta ~state with
       | Request_help_posted ->
-          let tools_used =
-            dedupe_keep_order
-              (keeper_tool_name Tool_name.Keeper.Board_post :: result.tools_used)
-          in
-          ( { result with
-              response_text = "";
-              tools_used;
-              tool_calls_made = List.length tools_used;
-            },
-            state )
+          ({ result with response_text = "" }, state)
       | Request_help_deduped | Request_help_failed ->
           ({ result with response_text = "" }, state))
   | Defer, Silent ->
       ({ result with response_text = "" }, state)
-  | Stay_silent, Silent when result.tools_used = [] ->
+  | Stay_silent, Silent when tool_names = [] ->
       ({ result with response_text = "" }, state)
   | _ ->
       let response_text =
         match
           Keeper_tool_response.normalize_response_text
             ~text:visible_response_body
-            ~tool_names:result.tools_used ()
+            ~tool_names ()
         with
         | Ok normalized -> normalized
         | Error _ -> visible_response_body
@@ -433,15 +423,6 @@ let apply_to_result ~(meta : keeper_meta)
   in
   (result, social_state, transition_reason)
 
-let is_required_tool_use_contract_error = function
-  | Some
-      (Agent_sdk.Error.Agent
-         (Agent_sdk.Error.CompletionContractViolation
-            { contract = Agent_sdk.Completion_contract_id.Require_tool_use; _ }))
-    ->
-      true
-  | _ -> false
-
 let derive_failure_state ~(meta : keeper_meta)
     ~(observation : Keeper_world_observation.world_observation)
     ~(previous_state : Types.social_state option)
@@ -454,18 +435,8 @@ let derive_failure_state ~(meta : keeper_meta)
     | "" -> None
     | value -> Some (short_preview value)
   in
-  let required_tool_use_failed =
-    is_required_tool_use_contract_error sdk_error
-  in
   let state =
-    if required_tool_use_failed then
-      make_state ~meta ~observation ?previous_state
-        ~active_desire:"recover_tool_route"
-        ~current_intention:"surface_required_tool_blocker"
-        ?blocker
-        ~need:"operator_guidance_or_tool_capable_route"
-        ()
-    else if is_auto_recoverable && observation.claimable_task_count > 0 then
+    if is_auto_recoverable && observation.claimable_task_count > 0 then
       make_state ~meta ~observation ?previous_state
         ~active_desire:"recover_tool_route"
         ~current_intention:"retry_claim_after_recovery"
@@ -476,9 +447,6 @@ let derive_failure_state ~(meta : keeper_meta)
       make_state ~meta ~observation ?previous_state ?blocker ()
   in
   let output =
-    if required_tool_use_failed then
-      { speech_act = Types.Request_help; delivery_surface = Types.Board_post }
-    else
-      { speech_act = Types.Defer; delivery_surface = Types.Silent }
+    { speech_act = Types.Defer; delivery_surface = Types.Silent }
   in
   (to_social_state state output, Types.Failure_run_error)

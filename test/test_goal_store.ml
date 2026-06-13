@@ -9,7 +9,7 @@ module Types = Masc_domain
     [refresh_all] / [upsert_goal]. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let path = Filename.temp_file "goal_store_test" "" in
@@ -29,13 +29,13 @@ let rm_rf dir =
   in
   try rm dir with _ -> ()
 
-let with_room f =
+let with_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
-    let config = Coord.default_config dir in
-    ignore (Coord.init config ~agent_name:(Some "test"));
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:(Some "test"));
     f config)
 
 let iso_now () = Masc_domain.now_iso ()
@@ -53,7 +53,7 @@ let make_goal id title =
   }
 
 let test_delete_goal_bumps_version () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g = make_goal "g-1" "to delete" in
   Goal_store.write_state config
     { version = 10; updated_at = iso_now (); goals = [g] };
@@ -66,7 +66,7 @@ let test_delete_goal_bumps_version () =
   check int "version bumped by 1" (v_before + 1) v_after
 
 let test_multiple_deletes_each_bump () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let goals = List.init 3 (fun i ->
     make_goal (Printf.sprintf "g-%d" i) (Printf.sprintf "goal %d" i)) in
   Goal_store.write_state config
@@ -81,7 +81,7 @@ let test_multiple_deletes_each_bump () =
     (List.length (Goal_store.read_state config).goals)
 
 let test_delete_nonexistent_does_not_bump () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g = make_goal "exists" "one goal" in
   Goal_store.write_state config
     { version = 42; updated_at = iso_now (); goals = [g] };
@@ -93,7 +93,7 @@ let test_delete_nonexistent_does_not_bump () =
   check int "version unchanged on error" v_before v_after
 
 let test_updated_at_also_refreshed () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let g = make_goal "g-1" "x" in
   let stale_ts = "2020-01-01T00:00:00Z" in
   Goal_store.write_state config
@@ -103,8 +103,8 @@ let test_updated_at_also_refreshed () =
   check bool "updated_at refreshed" true (after.updated_at <> stale_ts)
 
 let test_legacy_status_defaults_phase () =
-  with_room @@ fun config ->
-  Coord.write_json config (Goal_store.goals_path config)
+  with_workspace @@ fun config ->
+  Workspace.write_json config (Goal_store.goals_path config)
     (`Assoc
       [
         ("version", `Int 1);
@@ -140,7 +140,7 @@ let test_legacy_status_defaults_phase () =
   | _ -> fail "expected one legacy goal"
 
 let test_blocked_phase_projects_legacy_status () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Blocked goal"
             ~phase:Goal_phase.Blocked ()
@@ -153,7 +153,7 @@ let test_blocked_phase_projects_legacy_status () =
     (match goal.status with Paused -> "paused" | _ -> "other")
 
 let test_list_goals_filters_by_phase () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let make title phase =
     match Goal_store.upsert_goal config ~title ~phase () with
     | Ok _ -> ()
@@ -173,7 +173,7 @@ let test_list_goals_filters_by_phase () =
   | _ -> fail "expected one filtered goal"
 
 let test_update_missing_goal_does_not_bump () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   let goal = make_goal "exists" "one goal" in
   Goal_store.write_state config
     { version = 9; updated_at = iso_now (); goals = [ goal ] };
@@ -186,7 +186,7 @@ let test_update_missing_goal_does_not_bump () =
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
 
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
-  with_room @@ fun config ->
+  with_workspace @@ fun config ->
   Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
   let replacement = "\xEF\xBF\xBD" in
   let goal =

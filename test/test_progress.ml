@@ -9,12 +9,12 @@ let mock_broadcast json =
 
 let setup () =
   captured_json := [];
-  Masc_mcp.Progress.reset_for_testing ();
-  Masc_mcp.Progress.set_sse_callback mock_broadcast
+  Masc.Progress.reset_for_testing ();
+  Masc.Progress.set_sse_callback mock_broadcast
 
 let test_notify_basic () =
   setup ();
-  Masc_mcp.Progress.notify ~task_id:"test-task" ~progress:0.5 ();
+  Masc.Progress.notify ~task_id:"test-task" ~progress:0.5 ();
 
   check int "one notification sent" 1 (List.length !captured_json);
 
@@ -29,7 +29,7 @@ let test_notify_basic () =
 
 let test_notify_with_message () =
   setup ();
-  Masc_mcp.Progress.notify ~task_id:"test-task" ~progress:0.75 ~message:"Processing..." ();
+  Masc.Progress.notify ~task_id:"test-task" ~progress:0.75 ~message:"Processing..." ();
 
   let json = List.hd !captured_json in
   let params = Yojson.Safe.Util.member "params" json in
@@ -38,17 +38,17 @@ let test_notify_with_message () =
 
 let test_tracker_create () =
   setup ();
-  let tracker = Masc_mcp.Progress.Tracker.create ~task_id:"tracker-test" ~total_steps:10 () in
+  let tracker = Masc.Progress.Tracker.create ~task_id:"tracker-test" ~total_steps:10 () in
   check bool "initial progress is 0" true (Float.equal 0.0 tracker.current)
 
 let test_tracker_step () =
   setup ();
-  let tracker = Masc_mcp.Progress.Tracker.create ~task_id:"step-test" ~total_steps:4 () in
+  let tracker = Masc.Progress.Tracker.create ~task_id:"step-test" ~total_steps:4 () in
 
-  Masc_mcp.Progress.Tracker.step tracker ();
+  Masc.Progress.Tracker.step tracker ();
   check bool "progress after 1 step" true (Float.equal 0.25 tracker.current);
 
-  Masc_mcp.Progress.Tracker.step tracker ();
+  Masc.Progress.Tracker.step tracker ();
   check bool "progress after 2 steps" true (Float.equal 0.5 tracker.current);
 
   (* Should have sent 2 notifications *)
@@ -56,9 +56,9 @@ let test_tracker_step () =
 
 let test_tracker_complete () =
   setup ();
-  let tracker = Masc_mcp.Progress.Tracker.create ~task_id:"complete-test" () in
+  let tracker = Masc.Progress.Tracker.create ~task_id:"complete-test" () in
 
-  Masc_mcp.Progress.Tracker.complete tracker ~message:"Done!" ();
+  Masc.Progress.Tracker.complete tracker ~message:"Done!" ();
   check bool "progress is 1.0" true (Float.equal 1.0 tracker.current);
 
   let json = List.hd !captured_json in
@@ -68,53 +68,53 @@ let test_tracker_complete () =
 
 let test_start_and_stop_tracking () =
   setup ();
-  let _ = Masc_mcp.Progress.start_tracking ~task_id:"track-test" ~total_steps:10 () in
-  check bool "tracker exists" true (Option.is_some (Masc_mcp.Progress.get_tracker "track-test"));
+  let _ = Masc.Progress.start_tracking ~task_id:"track-test" ~total_steps:10 () in
+  check bool "tracker exists" true (Option.is_some (Masc.Progress.get_tracker "track-test"));
 
-  Masc_mcp.Progress.stop_tracking "track-test";
-  check bool "tracker removed" true (Option.is_none (Masc_mcp.Progress.get_tracker "track-test"))
+  Masc.Progress.stop_tracking "track-test";
+  check bool "tracker removed" true (Option.is_none (Masc.Progress.get_tracker "track-test"))
 
 (** Validation tests *)
 
 let test_validate_task_id_empty () =
   setup ();
-  match Masc_mcp.Progress.validate_task_id "" with
+  match Masc.Progress.validate_task_id "" with
   | Error err ->
     check bool "error mentions empty" true
-      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+      (String.length (Masc.Progress.validation_error_to_string err) > 0)
   | Ok _ -> fail "empty task_id should fail"
 
 let test_validate_task_id_too_long () =
   setup ();
   let long_id = String.make 300 'x' in
-  match Masc_mcp.Progress.validate_task_id long_id with
+  match Masc.Progress.validate_task_id long_id with
   | Error err ->
     check bool "error mentions too long" true
-      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+      (String.length (Masc.Progress.validation_error_to_string err) > 0)
   | Ok _ -> fail "long task_id should fail"
 
 let test_validate_task_id_invalid_chars () =
   setup ();
-  match Masc_mcp.Progress.validate_task_id "task\x00id" with
+  match Masc.Progress.validate_task_id "task\x00id" with
   | Error err ->
     check bool "error mentions invalid" true
-      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+      (String.length (Masc.Progress.validation_error_to_string err) > 0)
   | Ok _ -> fail "task_id with null char should fail"
 
 let test_validate_progress_out_of_range () =
   setup ();
-  match Masc_mcp.Progress.validate_progress 1.5 with
+  match Masc.Progress.validate_progress 1.5 with
   | Error err ->
     check bool "error mentions range" true
-      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+      (String.length (Masc.Progress.validation_error_to_string err) > 0)
   | Ok _ -> fail "progress > 1.0 should fail"
 
 let test_validate_progress_negative () =
   setup ();
-  match Masc_mcp.Progress.validate_progress (-0.5) with
+  match Masc.Progress.validate_progress (-0.5) with
   | Error err ->
     check bool "error mentions range" true
-      (String.length (Masc_mcp.Progress.validation_error_to_string err) > 0)
+      (String.length (Masc.Progress.validation_error_to_string err) > 0)
   | Ok _ -> fail "negative progress should fail"
 
 let () =

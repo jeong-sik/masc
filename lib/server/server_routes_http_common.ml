@@ -6,9 +6,9 @@ module Http_h2 = Http_server_h2
 module Mcp_session = Mcp_session
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
-module Coord = Coord
-module Coord_utils = Coord_utils
-module Tool_keeper = Tool_keeper
+module Workspace = Workspace
+module Workspace_utils = Workspace_utils
+module Keeper_tool_surface = Keeper_tool_surface
 module Keeper_types = Keeper_types
 module Keeper_alerting = Keeper_alerting
 module Keeper_memory = Keeper_memory
@@ -18,20 +18,20 @@ module Ag_ui = Ag_ui
 module Tool_operator = Tool_operator
 module Operator_control = Operator_control
 module Dashboard_execution = Dashboard_execution
-module Dashboard_mission = Dashboard_mission
-module Dashboard_mission_briefing = Dashboard_mission_briefing
+module Dashboard_briefing = Dashboard_briefing
+module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Build_identity
 module Graphql_api = Graphql_api
 module Tempo = Tempo
 module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
-module Task_dispatch = Task_dispatch
+module Task_dispatch = Task.Dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
-module Tool_board = Tool_board
+module Board_tool = Board_tool
 module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
 
@@ -47,6 +47,9 @@ let is_valid_protocol_version =
 
 let remember_protocol_version =
   Server_mcp_transport_http.remember_protocol_version
+
+let remember_protocol_version_if_initialize_succeeded =
+  Server_mcp_transport_http.remember_protocol_version_if_initialize_succeeded
 
 let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
 
@@ -176,19 +179,22 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
             | Some sw, Some clock ->
                 Ok
                   {
-                    base_path = state.Mcp_server.room_config.base_path;
+                    base_path = state.Mcp_server.workspace_config.base_path;
                     sw;
                     clock;
                     handle_request =
                       (fun ?(profile = Server_mcp_transport_http.Full)
                            ?mcp_session_id
+                           ?otel_mcp_protocol_version
+                           ?otel_transport_context
                            ?auth_token ?internal_keeper_runtime body_str ->
                         let profile =
                           mcp_eio_profile_of_transport_profile profile
                         in
                         Mcp_server_eio.handle_request ~clock ~sw ~profile
-                          ?mcp_session_id ?auth_token ?internal_keeper_runtime
-                          state body_str);
+                          ?mcp_session_id ?otel_mcp_protocol_version
+                          ?otel_transport_context ?auth_token
+                          ?internal_keeper_runtime state body_str);
                     clear_resource_subscriptions_for_session =
                       Mcp_server_eio.clear_resource_subscriptions_for_session;
                   }
@@ -197,7 +203,7 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     get_base_path =
       (fun () ->
         match current_server_state_opt () with
-        | Some state -> state.Mcp_server.room_config.base_path
+        | Some state -> state.Mcp_server.workspace_config.base_path
         | None -> Server_mcp_transport_http.default_base_path ());
     verify_mcp_auth =
       (fun ~base_path request ->
@@ -250,3 +256,26 @@ let handle_ag_ui_events request reqd =
 let handle_presence_events request reqd =
   Server_mcp_transport_http.handle_presence_events
     ~deps:(mcp_transport_http_deps ()) request reqd
+
+(* Cached + offloaded dashboard read response.
+
+   The repeated dashboard-read pattern is: wrap a compute closure in the SWR
+   cache ([Dashboard_cache.get_or_compute]) and submit it to the shared
+   Executor_pool ([Domain_pool_ref.submit_io_or_inline]). ~20 routes inline
+   this 2-call nesting; ~28 dashboard GET routes still omit it and recompute
+   uncached on the main HTTP domain per request. The uncached ones (e.g.
+   /branches spawning `git branch`, /workspaces querying up to 1000 messages,
+   /status) head-of-line-block other requests when a dashboard page fires
+   many calls in parallel — a 12-way parallel probe converged every endpoint
+   (incl. ms-cached ones) to ~3.4s because the uncached handlers held the
+   single Eio domain.
+
+   This combinator names the pattern so routes adopt it as a one-liner and
+   the uncached migration stops being N-of-M hand-patching. [cache_key]
+   stays caller-built so request params (limit, actor, ...) vary the entry. *)
+let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl compute =
+  let json =
+    Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
+      Domain_pool_ref.submit_io_or_inline compute)
+  in
+  Http.Response.json_value ~compress ~request json reqd

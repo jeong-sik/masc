@@ -30,29 +30,13 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
-    effective_sandbox_image: 'ubuntu:24.04@sha256:test',
-    private_workspace_root: '/tmp/project-root/.masc/playground/keeper-sangsu',
-    sandbox_environment: {
-      base_path: '/tmp/project-root/.masc',
-      project_root: '/tmp/project-root',
-      docker_playground_enabled: true,
-      docker_container_name: 'keeper-playground',
-      container_playground_root: '/home/keeper/playground',
-      docker_image: 'ubuntu:24.04@sha256:test',
-      pids_limit: 128,
-      memory: '2g',
-      tmpfs_size: '256m',
-      seccomp_profile: null,
-      require_rootless: false,
-      require_userns: false,
-    },
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {
       goal: 'Ship stable keeper ops',
       short_goal: 'Diagnose agent liveness',
       mid_goal: 'Reduce restart confusion',
-      long_goal: 'Keep coordination stable',
+      long_goal: 'Keep workspace stable',
       will: 'Stay on call',
       needs: 'Accurate runtime state',
       desires: 'Clear operator feedback',
@@ -63,15 +47,18 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
         capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
       },
       effective_system_prompt: 'full prompt',
+      unified_system_prompt: 'unified prompt',
+      unified_user_message_preview: 'world state',
     },
     execution: {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
       per_provider_timeout_sec: null,
-      per_provider_timeout_mode: 'turn_budget_heuristic',
+      per_provider_timeout_mode: 'turn_budget_default',
       verify: true,
-      selected_cascade_name: 'tier-group.keeper_unified',
-      selected_cascade_canonical: 'tier-group.keeper_unified',
+      selected_runtime_id: 'tier-group.keeper_unified',
+      selected_runtime_canonical: 'tier-group.keeper_unified',
+      runtime_options: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     },
     compaction: {
       profile: 'balanced',
@@ -112,12 +99,10 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       keepalive_running: true,
       registry_state: 'running',
       fiber_health: 'healthy',
-      presence_keepalive: true,
-      presence_keepalive_sec: 30,
     },
-    coordination: {
+    workspace: {
       mention_targets: ['sangsu'],
-      joined_room_ids: ['default'],
+      bound_workspace_ids: ['default'],
       active_goal_ids: ['goal-runtime'],
       active_goals: [
         { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
@@ -132,12 +117,10 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
       override_fields: ['goal', 'instructions'],
-      cascade_catalog_source_kind: 'toml',
-      cascade_catalog_source_path: '/tmp/config/cascade.toml',
     },
     tools: {
-      tool_access: { kind: 'preset', preset: 'delivery' },
-      resolved_allowlist: ['keeper_fs_read'],
+      tool_access: ['tool_read_file'],
+      resolved_allowlist: ['tool_read_file'],
       tool_denylist: ['Execute'],
       active_masc_tool_count: 1,
       active_keeper_tool_count: 2,
@@ -243,8 +226,8 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
-  it('coerceSharedMemoryScope maps room, falls back to disabled otherwise', () => {
-    expect(coerceSharedMemoryScope('room')).toBe('room')
+  it('coerceSharedMemoryScope maps workspace, falls back to disabled otherwise', () => {
+    expect(coerceSharedMemoryScope('workspace')).toBe('workspace')
     expect(coerceSharedMemoryScope('disabled')).toBe('disabled')
     expect(coerceSharedMemoryScope('unknown')).toBe('disabled')
     expect(coerceSharedMemoryScope(undefined)).toBe('disabled')
@@ -279,9 +262,9 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       cooldown_sec: 0,
     } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
-    coordination: {
+    workspace: {
       mention_targets: [],
-      joined_room_ids: [],
+      bound_workspace_ids: [],
       active_goal_ids: [],
       active_goals: [],
       active_goal_count: 0,
@@ -303,6 +286,16 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.sandbox_profile).toBe('docker')
     expect(draft.network_mode).toBe('none')
+  })
+
+  it('preserves runtime_id from config', () => {
+    const c = makeKeeperConfigForSandbox({
+      execution: {
+        selected_runtime_id: 'runpod_mtp.qwen36-35b-a3b-mtp',
+      } as KeeperConfig['execution'],
+    })
+    const draft = initRuntimeDraftFromConfig(c)
+    expect(draft.runtime_id).toBe('runpod_mtp.qwen36-35b-a3b-mtp')
   })
 
   it('defaults sandbox fields when config is missing them', () => {
@@ -341,6 +334,18 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBeUndefined()
   })
 
+  it('emits runtime_id when selected runtime changes', () => {
+    const c = makeKeeperConfigForSandbox({
+      execution: {
+        selected_runtime_id: 'tier-group.keeper_unified',
+      } as KeeperConfig['execution'],
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      runtime_id: 'runpod_mtp.qwen36-35b-a3b-mtp',
+    }), c)
+    expect(payload.runtime_id).toBe('runpod_mtp.qwen36-35b-a3b-mtp')
+  })
+
   it('emits sandbox_profile when toggled on', () => {
     const c = makeKeeperConfigForSandbox({ sandbox_profile: 'local' })
     const payload = buildRuntimePayload(draftFrom(c, { sandbox_profile: 'docker' }), c)
@@ -353,7 +358,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBe('none')
   })
 
-  it('emits all three when switching to hardened+none+room in one save', () => {
+  it('emits all three when switching to hardened+none+workspace in one save', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
       network_mode: 'inherit',
@@ -377,9 +382,9 @@ describe('buildRuntimePayload — sandbox diffing', () => {
   it('emits active_goal_ids when goal bindings change', () => {
     const c = makeKeeperConfigForSandbox({
       active_goal_ids: ['goal-a'],
-      coordination: {
+      workspace: {
         mention_targets: [],
-        joined_room_ids: [],
+        bound_workspace_ids: [],
         active_goal_ids: ['goal-a'],
         active_goals: [{ id: 'goal-a', title: 'Goal A', horizon: 'short' }],
         active_goal_count: 1,
@@ -461,7 +466,7 @@ const mocks = vi.hoisted(() => ({
       overall_convergence_pct: 0,
     },
   })),
-  fetchCascadeProfiles: vi.fn(async () => ({
+  fetchRuntimeProfiles: vi.fn(async () => ({
     profiles: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     invalid_profiles: [
       {
@@ -471,15 +476,15 @@ const mocks = vi.hoisted(() => ({
     ],
   })),
   patchKeeperConfig: vi.fn(),
-  updateKeeperCascade: vi.fn(async () => ({ ok: true })),
+  updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
 }))
 
 vi.mock('../api/dashboard', () => ({
-  fetchCascadeProfiles: mocks.fetchCascadeProfiles,
+  fetchRuntimeProfiles: mocks.fetchRuntimeProfiles,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
   fetchKeeperConfig: mocks.fetchKeeperConfig,
   patchKeeperConfig: mocks.patchKeeperConfig,
-  updateKeeperCascade: mocks.updateKeeperCascade,
+  updateKeeperRuntime: mocks.updateKeeperRuntime,
 }))
 
 import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
@@ -497,9 +502,9 @@ describe('KeeperConfigPanel', () => {
     resetKeeperConfig()
     mocks.fetchKeeperConfig.mockClear()
     mocks.fetchDashboardGoalsTree.mockClear()
-    mocks.fetchCascadeProfiles.mockClear()
+    mocks.fetchRuntimeProfiles.mockClear()
     mocks.patchKeeperConfig.mockClear()
-    mocks.updateKeeperCascade.mockClear()
+    mocks.updateKeeperRuntime.mockClear()
   })
 
   afterEach(() => {
@@ -515,14 +520,13 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.fetchDashboardGoalsTree).toHaveBeenCalledTimes(1)
-    expect(mocks.fetchCascadeProfiles).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchRuntimeProfiles).not.toHaveBeenCalled()
     expect(container.textContent).toContain('편집 가능 범위')
-    expect(container.textContent).toContain('keeper TOML의 cascade_name')
-    expect(container.textContent).toContain('Cascade 선택')
+    expect(container.textContent).toContain('runtime.toml')
+    expect(container.textContent).toContain('[runtime.assignments]')
+    expect(container.textContent).toContain('Runtime 선택')
     expect(container.textContent).toContain('tier-group.keeper_unified')
-    expect(container.textContent).toContain('broken_profile')
     expect(container.textContent).toContain('/tmp/config/keepers/default.toml')
-    expect(container.textContent).toContain('/tmp/config/cascade.toml')
     expect(container.textContent).toContain('런타임 설정')
     expect(container.textContent).toContain('active_goal_ids')
     expect(container.textContent).toContain('Ship runtime clarity')
@@ -531,7 +535,6 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
-    expect(container.textContent).toContain('/tmp/project-root')
 
     const editButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('편집'),
@@ -544,41 +547,44 @@ describe('KeeperConfigPanel', () => {
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
   })
 
-  it('exposes cascade selection controls directly in the config panel', async () => {
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    const cascadeSelect = Array.from(container.querySelectorAll('select')).find(
-      (select) => !select.getAttribute('aria-label'),
-    ) as HTMLSelectElement | undefined
-    expect(cascadeSelect).toBeDefined()
-    expect(cascadeSelect?.value).toBe('tier-group.keeper_unified')
-
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+  it('patches runtime_id from the dashboard panel', async () => {
+    mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         execution: {
-          models: ['llama:test-balanced'],
-          active_model: 'llama:test-balanced',
-          per_provider_timeout_sec: null,
-          per_provider_timeout_mode: 'turn_budget_heuristic',
-          verify: true,
-          selected_cascade_name: 'tier.resilient_breaker',
-          selected_cascade_canonical: 'tier.resilient_breaker',
+          ...makeKeeperConfig().execution,
+          selected_runtime_id: 'tier.resilient_breaker',
+          selected_runtime_canonical: 'tier.resilient_breaker',
         },
       }),
     )
 
-    cascadeSelect!.value = 'tier.resilient_breaker'
-    cascadeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
     await flush()
 
-    expect(mocks.updateKeeperCascade).toHaveBeenCalledWith(
-      'keeper-sangsu',
-      'tier.resilient_breaker',
+    const runtimeSelect = container.querySelector('select[aria-label="runtime_id"]') as HTMLSelectElement | null
+    expect(runtimeSelect).not.toBeNull()
+    runtimeSelect!.value = 'tier.resilient_breaker'
+    runtimeSelect!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
     )
-    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      expect.objectContaining({
+        runtime_id: 'tier.resilient_breaker',
+      }),
+    )
+    expect(container.textContent).toContain('runtime_id')
+    expect(container.textContent).toContain('tier-group.keeper_unified')
+    expect(container.textContent).toContain('선택은 runtime.toml [runtime.assignments] 에서 관리됩니다.')
+    expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
   })
 
   it('patches sandbox runtime controls from the dashboard panel', async () => {

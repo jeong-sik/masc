@@ -8,4 +8,4 @@ val claim_scope_summary_json :
   Yojson.Safe.t
 
 val config_drift_summary_json :
-  config:Coord.config -> keeper_name:string -> Yojson.Safe.t
+  config:Workspace.config -> keeper_name:string -> Yojson.Safe.t

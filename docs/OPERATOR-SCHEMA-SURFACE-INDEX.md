@@ -18,7 +18,7 @@ Machine-readable catalog: `docs/schema-surfaces/operator-output-surfaces.v1.json
 | `masc.keeper_tool_call_log.jsonl.v1` | Keeper tool-call I/O JSONL | `lib/keeper_tool_call_log.mli` | Tool-call log tests |
 | `masc.runtime_contract_projection.v1` | Runtime contract JSON projection | `lib/keeper/keeper_runtime_contract.mli` | Tool-call/runtime contract tests |
 | `masc.mcp_openapi_tool_schema.v1` | MCP tool schemas and generated OpenAPI | `lib/keeper/keeper_schema.mli`, `lib/tool_schema_dsl.mli` | Tool matrix and OpenAPI smoke tests |
-| `masc.oas_bridge_events.v1` | OAS custom events bridged into MASC | `lib/cascade/cascade_event_bridge.mli`, event inventory doc | OAS integration tests |
+| `masc.oas_bridge_events.v1` | OAS custom events bridged into MASC | `lib/keeper/keeper_event_bridge.mli`, event inventory doc | OAS integration tests |
 
 ## Boundary Rules
 

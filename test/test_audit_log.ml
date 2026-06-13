@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let dir = Filename.temp_file "test_audit_log_" "" in
@@ -30,7 +30,7 @@ let test_system_internal_details_deduplicate_canonical_keys () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       Audit_log.log_system_internal_tool_call config ~agent_id:"agent_code"
         ~tool_name:"masc_status" ~success:true ~error_msg:None
         ~details:
@@ -61,7 +61,7 @@ let entry ~timestamp ~agent_id ~action ~outcome =
     Audit_log.timestamp;
     agent_id;
     action;
-    room_id = None;
+    workspace_id = None;
     details = `Null;
     outcome;
     cost_estimate = None;
@@ -91,6 +91,67 @@ let test_audit_events_filter_severity_before_paging () =
   check string "older error retained" "keeper-a" (row |> member "actor" |> to_string);
   check string "severity" "error" (row |> member "severity" |> to_string)
 
+(* ── Codec round-trip tests ────────────────────────────────────────── *)
+
+let action_roundtrip label action expected_wire =
+  let wire = Audit_log.action_to_string action in
+  check string (label ^ " encode") expected_wire wire;
+  let decoded = Audit_log.string_to_action wire in
+  (* Compare via re-encoding because [action] has no [equal] deriving *)
+  check string (label ^ " round-trip") wire (Audit_log.action_to_string decoded)
+
+let test_codec_roundtrip_simple_actions () =
+  action_roundtrip "ClaimTask" Audit_log.ClaimTask "claim_task";
+  action_roundtrip "StartTask" Audit_log.StartTask "start_task";
+  action_roundtrip "DoneTask" Audit_log.DoneTask "done_task";
+  action_roundtrip "CancelTask" Audit_log.CancelTask "cancel_task";
+  action_roundtrip "ReleaseTask" Audit_log.ReleaseTask "release_task";
+  action_roundtrip "Broadcast" Audit_log.Broadcast "broadcast";
+  action_roundtrip "Suspend" Audit_log.Suspend "suspend";
+  action_roundtrip "AuthSuccess" Audit_log.AuthSuccess "auth_success";
+  action_roundtrip "AuthFailure" Audit_log.AuthFailure "auth_failure";
+  action_roundtrip "CircuitOpen" Audit_log.CircuitOpen "circuit_open";
+  action_roundtrip "CircuitClose" Audit_log.CircuitClose "circuit_close";
+  action_roundtrip "SearchRefinement" Audit_log.SearchRefinement "search_refinement"
+
+let test_codec_roundtrip_parametric_actions () =
+  action_roundtrip "ToolCall"
+    (Audit_log.ToolCall "masc_status") "tool_call:masc_status";
+  action_roundtrip "ToolCall:colon-in-name"
+    (Audit_log.ToolCall "provider:model") "tool_call:provider:model";
+  action_roundtrip "GovernanceDecision:allow"
+    (Audit_log.GovernanceDecision Audit_log.Governance_allow)
+    "governance_decision:allow";
+  action_roundtrip "GovernanceDecision:deny"
+    (Audit_log.GovernanceDecision Audit_log.Governance_deny)
+    "governance_decision:deny";
+  action_roundtrip "Custom"
+    (Audit_log.Custom "my_event") "custom:my_event";
+  action_roundtrip "Custom:colon-in-name"
+    (Audit_log.Custom "foo:bar") "custom:foo:bar"
+
+let check_unknown label expected = function
+  | Audit_log.Unknown raw -> check string label expected raw
+  | action ->
+      failf "%s decoded as %s" label (Audit_log.action_to_string action)
+
+let test_codec_unknown_preserves_wire () =
+  let decoded = Audit_log.string_to_action "future_action" in
+  check_unknown "unknown bare" "future_action" decoded;
+  check string "unknown bare re-encoded" "future_action"
+    (Audit_log.action_to_string decoded);
+  let decoded_tagged = Audit_log.string_to_action "unknown_tag:payload" in
+  check_unknown "unknown tagged" "unknown_tag:payload" decoded_tagged;
+  check string "unknown tagged re-encoded" "unknown_tag:payload"
+    (Audit_log.action_to_string decoded_tagged)
+
+let test_codec_empty_payload () =
+  (* Edge: colon at end means empty payload *)
+  let decoded = Audit_log.string_to_action "custom:" in
+  check string "empty Custom payload" "custom:" (Audit_log.action_to_string decoded);
+  let decoded_tc = Audit_log.string_to_action "tool_call:" in
+  check string "empty ToolCall payload" "tool_call:" (Audit_log.action_to_string decoded_tc)
+
 let () =
   run "Audit_log"
     [
@@ -100,5 +161,16 @@ let () =
             test_system_internal_details_deduplicate_canonical_keys;
           test_case "audit event severity filters before paging" `Quick
             test_audit_events_filter_severity_before_paging;
+        ] );
+      ( "codec_roundtrip",
+        [
+          test_case "simple actions round-trip" `Quick
+            test_codec_roundtrip_simple_actions;
+          test_case "parametric actions round-trip" `Quick
+            test_codec_roundtrip_parametric_actions;
+          test_case "unknown preserves wire" `Quick
+            test_codec_unknown_preserves_wire;
+          test_case "empty payload edge case" `Quick
+            test_codec_empty_payload;
         ] );
     ]

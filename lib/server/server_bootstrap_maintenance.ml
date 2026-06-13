@@ -38,16 +38,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics.record r;
       Tool_metrics_persist.enqueue r
     | _ -> ());
-  Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.room_config.base_path;
-  (* Cascade trust JSONL snapshot fiber (Phase 0b observability).  Polls
-     [Cascade_health_tracker.global] every minute and appends one JSON
-     object per tick to base_path/cascade_trust/YYYY-MM/DD.jsonl.  Phase 1
-     (in-memory trust_score) consumes these snapshots offline to calibrate
-     reward / decay defaults instead of magic numbers. *)
-  Cascade_trust_persist.start_snapshot_fiber
-    ~sw
-    ~clock
-    ~base_path:state.room_config.base_path;
+  Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.workspace_config.base_path;
   (* Bare-alias audit fiber (PR #15112 surface refresh): re-run the
      classifier every minute so the [masc_auth_bare_alias] gauges
      reflect mid-run regressions, not only the boot snapshot. The
@@ -56,9 +47,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   Auth.start_bare_alias_audit_fiber
     ~sw
     ~clock
-    ~base_path:state.room_config.base_path
+    ~base_path:state.workspace_config.base_path
     ~canonical_names_fn:(fun () ->
-      Keeper_runtime.bootable_keeper_names state.room_config
+      Keeper_runtime.bootable_keeper_names state.workspace_config
       |> List.map Keeper_identity.keeper_agent_name);
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
@@ -67,19 +58,73 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      production. *)
   (* System_internal tool usage log: durable JSONL for pruning evidence (#5120) *)
   Tool_usage_log.init
-    ~base_path:state.room_config.base_path
-    ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
+    ~base_path:state.workspace_config.base_path
+    ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
-  Tool_usage_log.install ();
+  (* Inject keeper FD/disk pressure handling at the boundary so the generic
+     Tool_usage_log surface does not reference the keeper subsystem directly
+     (Tool->Keeper dependency direction; this server module is the right place
+     to name keeper, since the server orchestrates keepers). *)
+  Tool_usage_log.install ~on_io_failure:(fun ~site exn ->
+    Keeper_fd_pressure.note_exception ~site exn;
+    Keeper_disk_pressure.note_exception ~site exn);
   (* Keeper tool call I/O log: full input/output for dashboard inspector *)
   Keeper_tool_call_log.init
-    ~base_path:state.room_config.base_path
-    ~cluster_name:state.room_config.backend_config.Backend_types.cluster_name
+    ~base_path:state.workspace_config.base_path
+    ~cluster_name:state.workspace_config.backend_config.Backend_types.cluster_name
     ();
   Keeper_tool_call_log.start_flush_fiber ~sw ~clock;
+  (* Transition-audit forensics writes leave the keeper hot path: recorders
+     enqueue and this fiber drains (2026-06-10 fleet-freeze fix — the inline
+     append serialized all keepers on one store mutex). *)
+  Keeper_transition_audit.start_flush_fiber ~sw ~clock;
   Otel_dispatch_hook.install ();
+  (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
+     (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]
+     / Otel / Otel_metric_store; the wrapper is injected here at the composition root.
+     Without this call [guarded_dispatch] runs with the identity wrapper (no
+     span / no [tool_dispatch_total] metric). *)
+  Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
+  Otel_metric_store.register_otel_source_once ();
+  Otel_runtime_observables.register_once
+    ~masc_root:(Workspace.masc_root_dir state.workspace_config)
+    ();
   Otel_spans.setup_exporter ~sw env;
   Shutdown.register ~name:"otel_exporter" ~priority:20 Otel_spans.shutdown;
+  (* RFC-0217 S4-2: wire OAS OTLP exporter so OAS spans/metrics reach the
+     same collector as MASC-native telemetry.  The endpoint is read from
+     the same env-var that MASC's own OTLP client uses. *)
+  (match Sys.getenv_opt "OTEL_EXPORTER_OTLP_ENDPOINT" with
+   | Some endpoint ->
+     let config = Agent_sdk.Otel_export.default_export_config ~endpoint in
+     let instance = Agent_sdk.Otel_tracer.create_instance_eio () in
+     let tracer = Agent_sdk.Otel_tracer.tracer_of_instance instance in
+     Runtime_agent_context.set_oas_tracer tracer;
+     let (_state : Agent_sdk.Otel_export.t) =
+       Agent_sdk.Otel_export.start_daemon ~sw ~clock:env#clock ~net:env#net ~config instance
+     in
+     Log.Server.info "OAS OTLP exporter daemon started (endpoint=%s)" endpoint
+   | None ->
+     Log.Server.info "OTEL_EXPORTER_OTLP_ENDPOINT not set; OAS telemetry export disabled");
+  (* Scheduler-lag probe: 1s sleep, gauge = overshoot. A pure-Eio fiber
+     cannot observe a blocked domain from inside while it is blocked, but
+     the first tick after the block lands carries the full stall duration,
+     which is exactly the post-hoc signal the 2026-06 freeze RCAs lacked. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "eio_loop_lag_probe")
+    (fun () ->
+      let interval_sec = 1.0 in
+      let rec tick () =
+        let before = Unix.gettimeofday () in
+        Eio.Time.sleep clock interval_sec;
+        let lag = Unix.gettimeofday () -. before -. interval_sec in
+        Otel_metric_store.set_gauge
+          Otel_metric_store.metric_eio_loop_lag_seconds
+          (Float.max 0.0 lag);
+        tick ()
+      in
+      tick ());
   (* Board_listener removed: filesystem-first principle.
      JSONL path emits SSE directly via Board_dispatch.emit_board_sse_event.
      PG path also uses Board_dispatch, making the pg_notify relay redundant. *)
@@ -88,6 +133,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
     let last_prune = ref (Unix.gettimeofday ()) in
+    (* Restore MCP transport sessions from disk before first cleanup cycle.
+       Grace period timestamps survive server restart, so recently-active
+       clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
+    (try Server_mcp_transport_http_session.load_sessions_from_file ()
+     with exn ->
+       Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
       (try
@@ -105,7 +156,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            (* SSE replay-buffer eviction is periodic housekeeping; failed
                sends and stale connection reaping remain visible elsewhere. *)
            Log.Server.routine "Evicted %d expired SSE buffer events" evicted_events;
-         let evicted = Cache_eio.evict_expired state.room_config in
+         let evicted = Cache_eio.evict_expired state.workspace_config in
          if evicted > 0 then Log.Server.info "Cache: evicted %d expired entries" evicted;
          let sse_guards_reaped = Server_mcp_transport_http_sse.reap_stale_guards () in
          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
@@ -150,7 +201,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          if rl_reaped > 0
          then Log.Server.info "Reaped %d stale rate-limit buckets" rl_reaped;
          (* Agent registry: remove resolved-name cache for dead sessions *)
-         let ar_reaped = Agent_registry_eio.cleanup_stale_sessions () in
+         let ar_reaped = Client_registry_eio.cleanup_stale_sessions () in
          if ar_reaped > 0
          then Log.Server.info "Reaped %d stale agent registry sessions" ar_reaped;
          (* Keeper sandbox: remove stale Docker containers when owner_pid is
@@ -160,8 +211,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              ticks faster but the helper short-circuits when called too soon. *)
          (match
             Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-              ~base_path:state.room_config.base_path
-              ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Startup ())
+              ~base_path:state.workspace_config.base_path
+              ~timeout_sec:
+                (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
               ()
           with
           | None -> ()
@@ -185,7 +237,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              let days =
                Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
              in
-             let masc = Coord.masc_dir state.room_config in
+             let masc = Workspace.masc_dir state.workspace_config in
              let prune_dir dir =
                if Sys.file_exists dir
                then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
@@ -201,6 +253,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "activity-events")
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
+               (* transition-audit was absent from this list since its
+                  introduction (RFC-0002) — 82 MB across 3 month-dirs by
+                  2026-06-10, scanned by every store-fallback read. *)
+               + prune_dir (Filename.concat masc "transition-audit")
              in
              if total > 0
              then
@@ -230,7 +286,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let sync_once () =
       try
         let now = Int64.of_float (Eio.Time.now clock) in
-        match Repo_sync.sync_all ~base_path:state.room_config.base_path ~now with
+        match Repo_sync.sync_all ~base_path:state.workspace_config.base_path ~now with
         | Ok repos ->
           if repos <> []
           then Log.Server.info "repo_sync: synced %d repositories" (List.length repos)
@@ -266,9 +322,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
          of the request fiber for the canonical project-snapshot
          response (Step 4 retires the env knobs themselves). *)
       Dashboard_snapshot.refresh_loop
-        ~sw ~clock ~config:state.room_config ~state
+        ~sw ~clock ~config:state.workspace_config ~state
         ~interval_sec:2.0 ());
-  let resolved_base = state.room_config.base_path in
-  let masc_dir = Coord.masc_root_dir state.room_config in
+  let resolved_base = state.workspace_config.base_path in
+  let masc_dir = Workspace.masc_root_dir state.workspace_config in
   resolved_base, masc_dir
 ;;

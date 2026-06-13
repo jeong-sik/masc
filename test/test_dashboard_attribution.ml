@@ -3,8 +3,8 @@
     Ring-buffer semantics: cap enforcement, newest-first ordering, gate
     filter, summary outcome counts, reset. *)
 
-module DA = Masc_mcp.Dashboard_attribution
-module A = Masc_mcp.Attribution
+module DA = Masc.Dashboard_attribution
+module A = Attribution
 
 let ev = `Null
 

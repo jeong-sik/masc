@@ -1,6 +1,6 @@
 open Alcotest
 
-module TRM = Masc_mcp.Transport_read_model
+module TRM = Masc.Transport_read_model
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in

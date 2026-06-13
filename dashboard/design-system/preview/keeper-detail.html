@@ -27,7 +27,7 @@
 
        Preview note: in production the overlay covers the viewport. To
        keep this preview embedded inline (so you can compare it next to
-       the cascade banner and the Phase 2 catalog) we render it inside a
+       the runtime banner and the Phase 2 catalog) we render it inside a
        620×420 stage with position:absolute substituted for fixed, plus
        a faux dashboard underlay that exercises the blur. The class
        ".kd-overlay" is byte-identical to the production declaration
@@ -189,8 +189,8 @@
       font-family: var(--font-mono);
     }
 
-    /* ── Cascade chain banner ──────────────────────────────────── */
-    .cascade-banner {
+    /* ── Runtime chain banner ──────────────────────────────────── */
+    .runtime-banner {
       display: flex; align-items: stretch;
       gap: 0;
       border: 1px solid var(--color-border-default);
@@ -200,15 +200,15 @@
       font-family: var(--font-mono);
       font-size: var(--fs-11);
     }
-    .cascade-banner .step {
+    .runtime-banner .step {
       flex: 1;
       padding: 8px 12px;
       display: flex; flex-direction: column; gap: 2px;
       border-right: 1px solid var(--color-border-default);
       position: relative;
     }
-    .cascade-banner .step:last-child { border-right: 0; }
-    .cascade-banner .step::after {
+    .runtime-banner .step:last-child { border-right: 0; }
+    .runtime-banner .step::after {
       content: "→";
       position: absolute;
       right: -8px; top: 50%;
@@ -219,17 +219,17 @@
       padding: 0 2px;
       z-index: 1;
     }
-    .cascade-banner .step:last-child::after { content: none; }
-    .cascade-banner .step .lbl {
+    .runtime-banner .step:last-child::after { content: none; }
+    .runtime-banner .step .lbl {
       font-size: var(--fs-9);
       color: var(--color-fg-disabled);
       letter-spacing: var(--track-caps);
       text-transform: uppercase;
     }
-    .cascade-banner .step .v {
+    .runtime-banner .step .v {
       color: var(--color-fg-primary);
     }
-    .cascade-banner .step.terminal .v { color: var(--color-accent-fg); }
+    .runtime-banner .step.terminal .v { color: var(--color-accent-fg); }
 
     /* ── Z-index ladder mini ───────────────────────────────────── */
     .z-ladder {
@@ -340,14 +340,14 @@
     </div>
 
     <!-- ────────────────────────────────────────────────────────────
-         Cascade chain banner
+         Runtime chain banner
          ──────────────────────────────────────────────────────────── -->
     <section class="pv-sect">
       <div class="pv-sect-h">
-        <h2>Cascade chain</h2>
+        <h2>Runtime chain</h2>
         <span class="sub">main.ts → global.css → keeper-detail.css</span>
       </div>
-      <div class="cascade-banner" aria-label="CSS cascade chain ending at keeper-detail.css">
+      <div class="runtime-banner" aria-label="CSS runtime chain ending at keeper-detail.css">
         <div class="step"><span class="lbl">entry</span><span class="v">main.ts</span></div>
         <div class="step"><span class="lbl">@import</span><span class="v">global.css:L29</span></div>
         <div class="step"><span class="lbl">tokens</span><span class="v">tokens.generated.css</span></div>
@@ -384,7 +384,7 @@
                 <div class="row"><span>busy</span><span class="v">2</span></div>
                 <div class="row"><span>idle</span><span class="v">5</span></div>
                 <div class="row"><span>offline</span><span class="v">1</span></div>
-                <div class="row"><span>cascade</span><span class="v">spark</span></div>
+                <div class="row"><span>runtime</span><span class="v">spark</span></div>
               </div>
               <div class="body">
                 <div class="row"><span>turn 4 · masc_status</span><span class="v">412ms</span></div>
@@ -406,8 +406,8 @@
                 </div>
 
                 <dl class="kd-attr-stack" aria-label="Keeper attribution stack">
-                  <div class="row"><dt class="lbl">cascade</dt><dd class="v">spark · model-d-spark</dd></div>
-                  <div class="row"><dt class="lbl">tools</dt><dd class="v">workspace + cli-tool-a</dd></div>
+                  <div class="row"><dt class="lbl">runtime</dt><dd class="v">spark · capability-tier-c</dd></div>
+                  <div class="row"><dt class="lbl">tools</dt><dd class="v">workspace + descriptor-adapter-a</dd></div>
                   <div class="row"><dt class="lbl">sandbox</dt><dd class="v">docker-bind · /workspace</dd></div>
                   <div class="row"><dt class="lbl">network</dt><dd class="v">offline (proxy off)</dd></div>
                   <div class="row"><dt class="lbl">handoff</dt><dd class="v">auto · 88%</dd></div>
@@ -508,7 +508,7 @@
     </section>
 
     <!-- ────────────────────────────────────────────────────────────
-         Source trace · cascade context
+         Source trace · runtime context
          ──────────────────────────────────────────────────────────── -->
     <section class="pv-sect">
       <div class="pv-sect-h">

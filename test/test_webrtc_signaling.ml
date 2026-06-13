@@ -3,9 +3,9 @@
     Tests offer/answer signaling flow, peer registry,
     and cleanup logic. No actual WebRTC connections. *)
 
-module Wrtc = Masc_mcp.Server_webrtc_transport
-module Transport = Masc_mcp.Transport
-module Agent_transport = Masc_mcp.Masc_grpc_transport
+module Wrtc = Server_webrtc_transport
+module Transport = Masc.Transport
+module Agent_transport = Masc_grpc_transport
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in

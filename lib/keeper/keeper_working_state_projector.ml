@@ -5,15 +5,12 @@ module State = Keeper_working_state
 
 type source_field =
   | Next_item
-  | Open_question
 
 let source_field_name = function
   | Next_item -> "next_items"
-  | Open_question -> "open_questions"
 
 let source_field_why = function
   | Next_item -> "keeper_state_snapshot.next_items"
-  | Open_question -> "keeper_state_snapshot.open_questions"
 
 
 let normalized_items values =
@@ -59,16 +56,12 @@ let loops_of_items ~keeper_name ~trace_id ~keeper_turn_id ~updated_at_iso
 let of_state_snapshot ~keeper_name ~trace_id ~keeper_turn_id ~updated_at_iso
     ~updated_at_unix (snapshot : Snapshot.keeper_state_snapshot) =
   let next_items = normalized_items snapshot.next_items in
-  let open_questions = normalized_items snapshot.open_questions in
   let active_loops =
     loops_of_items ~keeper_name ~trace_id ~keeper_turn_id ~updated_at_iso
       ~updated_at_unix ~source:Next_item next_items
-    @ loops_of_items ~keeper_name ~trace_id ~keeper_turn_id ~updated_at_iso
-        ~updated_at_unix ~source:Open_question open_questions
   in
   State.compact { State.empty with active_loops }
 
 let active_open_loop_count_of_state_snapshot
     (snapshot : Snapshot.keeper_state_snapshot) =
   List.length (normalized_items snapshot.next_items)
-  + List.length (normalized_items snapshot.open_questions)

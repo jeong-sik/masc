@@ -1,8 +1,8 @@
 (** GraphQL API tests (read-only queries). *)
 
-module Graphql_api = Masc_mcp.Graphql_api
-module Coord = Masc_mcp.Coord
-module Coord_utils = Coord_utils
+module Graphql_api = Masc.Graphql_api
+module Workspace = Masc.Workspace
+module Workspace_utils = Workspace_utils
 
 let temp_dir () =
   let dir = Filename.temp_file "test_graphql_api_" "" in
@@ -32,8 +32,8 @@ let test_status_query () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let config = Coord_utils.default_config base_path in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace_utils.default_config base_path in
+  let _ = Workspace.init config ~agent_name:None in
   let json = graphql_query config "{ status { project paused } }" in
   let open Yojson.Safe.Util in
   let project = json |> member "data" |> member "status" |> member "project" |> to_string in
@@ -46,9 +46,9 @@ let test_tasks_connection () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let config = Coord_utils.default_config base_path in
-  let _ = Coord.init config ~agent_name:None in
-  let _ = Coord.add_task config ~title:"GraphQL task" ~priority:2 ~description:"test" in
+  let config = Workspace_utils.default_config base_path in
+  let _ = Workspace.init config ~agent_name:None in
+  let _ = Workspace.add_task config ~title:"GraphQL task" ~priority:2 ~description:"test" in
   let json =
     graphql_query config
       "{ tasks(first: 10) { totalCount edges { node { title } } } }"
@@ -69,10 +69,10 @@ let test_messages_temporal_decay_fields () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
-  let config = Coord_utils.default_config base_path in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace_utils.default_config base_path in
+  let _ = Workspace.init config ~agent_name:None in
   let _ =
-    Coord.broadcast config ~from_agent:"operator" ~content:"hello @sangsu"
+    Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu"
   in
   let json =
     graphql_query config

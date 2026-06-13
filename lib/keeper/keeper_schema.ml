@@ -1,27 +1,9 @@
 (** Keeper tool schemas — MCP tool definitions for keeper agents. *)
 
 open Masc_domain
-module Persona_contract = Keeper_persona_authoring_contract
 
-(** Issue #8430: canonical [tool_preset] strings. Mirrors
-    [Keeper_types.valid_tool_preset_strings]. Direct dependency would
-    create a cycle (Keeper_schema -> Keeper_types -> Keeper_types_profile
-    -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
-    asserts these two lists stay in sync. *)
-let tool_preset_enum_strings =
-  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "delivery"; "full" ]
-
-(** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
-    [network_mode], . Same cycle constraint as
-    [tool_preset_enum_strings] above — Keeper_schema cannot depend on
-    Keeper_types_profile directly because the latter [include]s
-    Keeper_config and is otherwise downstream. The test
-    [test_types.ml :: keeper_profile_enum_ssot] asserts these mirrors
-    stay in sync with [valid_*_strings] so adding a constructor in
-    Keeper_types_profile fails the test instead of silently dropping
-    from the JSON Schema. *)
-let sandbox_profile_enum_strings =
-  [ "local"; "docker" ]
+(** Network mode strings exposed only by explicit sandbox-management tools.
+    Keeper creation/update no longer accepts sandbox posture knobs. *)
 let network_mode_enum_strings =
   [ "none"; "inherit" ]
 (** Issue #8486: hand-mirrored from
@@ -40,47 +22,11 @@ let string_array_schema =
     ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
-let persona_axis_schema (axis : Persona_contract.archetype_axis) =
-  `Assoc
-    [ "type", `String "string"
-    ; "enum", Persona_contract.string_list_to_json axis.choices
-    ; "description", `String axis.schema_description
-    ]
-
 let tool_access_schema description =
-  let preset_shape =
-    `Assoc [
-      ("type", `String "object");
-      ("description", `String "Preset-based tool policy.");
-      ("properties", `Assoc [
-        ("kind", `Assoc [ ("const", `String "preset") ]);
-        ("preset", `Assoc [
-          ("type", `String "string");
-          ("enum",
-            `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-        ]);
-        ("also_allow", string_array_schema);
-      ]);
-      ("required", `List [ `String "kind"; `String "preset" ]);
-      ("additionalProperties", `Bool false);
-    ]
-  in
-  let custom_shape =
-    `Assoc [
-      ("type", `String "object");
-      ("description", `String "Custom tool allowlist policy.");
-      ("properties", `Assoc [
-        ("kind", `Assoc [ ("const", `String "custom") ]);
-        ("tools", string_array_schema);
-      ]);
-      ("required", `List [ `String "kind"; `String "tools" ]);
-      ("additionalProperties", `Bool false);
-    ]
-  in
   `Assoc [
-    ("type", `String "object");
+    ("type", `String "array");
     ("description", `String description);
-    ("oneOf", `List [ preset_shape; custom_shape ]);
+    ("items", `Assoc [ ("type", `String "string") ]);
   ]
 
 let keeper_schemas : tool_schema list = [
@@ -96,95 +42,6 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "If true, return full persona summaries. If false, return names only.");
         ]);
       ]);
-    ];
-  };
-  {
-    name = "masc_persona_schema";
-    description = "Explain persona profile.json fields, allowed values, and how each field affects persona-backed keeper creation.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("include_examples", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, include a minimal profile.json example.");
-        ]);
-      ]);
-    ];
-  };
-  {
-    name = "masc_persona_generate";
-    description = "Draft a persona profile.json from a natural-language concept. This does not write files; use masc_persona_schema for field and archetype choice effects, then masc_persona_save to persist it.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("concept", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Freeform character/operator concept, e.g. 'good evil chaos research keeper'.");
-        ]);
-        ("handle", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional stable persona handle. Must match [A-Za-z0-9._-]+.");
-        ]);
-        ("display_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional display label for the persona.");
-        ]);
-        ("language", `Assoc [
-          ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_language);
-          ("description", `String "Preferred language for generated text.");
-        ]);
-        ("alignment", persona_axis_schema Persona_contract.alignment_axis);
-        ("risk_posture", persona_axis_schema Persona_contract.risk_posture_axis);
-        ("proactive_enabled", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool Persona_contract.default_proactive_enabled);
-          ("description", `String "Default keeper.proactive_enabled for the draft.");
-        ]);
-        ("cascade_name", `Assoc [
-          ("type", `String "string");
-          ("default", `String Persona_contract.default_generation_cascade_name);
-          ("description", `String "Named cascade used to draft the persona.");
-        ]);
-        ("temperature", `Assoc [
-          ("type", `String "number");
-          ("default", `Float Persona_contract.default_temperature);
-        ]);
-        ("max_tokens", `Assoc [
-          ("type", `String "integer");
-          ("default", `Int Persona_contract.default_max_tokens);
-        ]);
-      ]);
-      ("required", `List [`String "concept"]);
-    ];
-  };
-  {
-    name = "masc_persona_save";
-    description = "Validate and atomically write a generated persona profile.json under the resolved personas root.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("handle", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Persona handle and directory name. Must match [A-Za-z0-9._-]+.");
-        ]);
-        ("profile", `Assoc [
-          ("type", `String "object");
-          ("description", `String "Persona profile.json object to validate and save.");
-        ]);
-        ("overwrite", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If false, reject when the persona already exists.");
-        ]);
-        ("dry_run", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, validate and return the target path without writing.");
-        ]);
-      ]);
-      ("required", `List [`String "handle"; `String "profile"]);
     ];
   };
   {
@@ -236,7 +93,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -271,16 +128,6 @@ let keeper_schemas : tool_schema list = [
           ("default", `Bool true);
           ("description", `String "If false, return only keepers with audit issues while keeping summary counts over all audited keepers.");
         ]);
-        ("repair", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, run Keeper_goal_repair.run after audit: create goals from keeper purpose statements and assign to keepers with empty active_goal_ids.");
-        ]);
-        ("dry_run_repair", `Assoc [
-          ("type", `String "boolean");
-          ("default", `Bool false);
-          ("description", `String "If true, run Keeper_goal_repair.dry_run after audit: preview what repair would do without making changes.");
-        ]);
       ]);
     ];
   };
@@ -311,10 +158,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "string");
           ("description", `String "Optional: long-term goal horizon (default: goal).");
         ]);
-        ("cascade_name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional: keeper-assignable cascade profile. Replaces legacy models/allowed_models/active_model inputs.");
-        ]);
         ("instructions", `Assoc [
           ("type", `String "string");
           ("description", `String "Optional: additional system instructions (kept across compaction/handoff).");
@@ -334,7 +177,7 @@ let keeper_schemas : tool_schema list = [
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Exact direct-mention tokens that can wake the keeper in room traffic (for example ['sangsu']).");
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['sangsu']).");
         ]);
         ("active_goal_ids", `Assoc [
           ("type", `String "array");
@@ -363,19 +206,19 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("compaction_profile", `Assoc [
           ("type", `String "string");
-          ("description", `String "Compaction preset. One of: aggressive, balanced, conservative, custom.");
+          ("description", `String "Compaction profile. One of: aggressive, balanced, conservative, custom.");
         ]);
         ("compaction_ratio_gate", `Assoc [
           ("type", `String "number");
-          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides preset when set.");
+          ("description", `String "Context ratio gate for compaction (0.1-0.98). Overrides compaction profile when set.");
         ]);
         ("compaction_message_gate", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides preset when set.");
+          ("description", `String "Message count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
         ("compaction_token_gate", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides preset when set.");
+          ("description", `String "Token count gate for compaction (0 disables this gate). Overrides compaction profile when set.");
         ]);
         ("continuity_compaction_cooldown_sec", `Assoc [
           ("type", `String "integer");
@@ -393,16 +236,6 @@ let keeper_schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Minimum seconds between handoffs (default: 300).");
         ]);
-        ("sandbox_profile", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
-          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
-        ]);
-        ("network_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
-          ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker'.");
-        ]);
         ("allowed_paths", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -410,11 +243,11 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
+            "Persisted tool candidate profiles for discovery. Does not alone grant execution; runtime applies descriptor availability, denylist, per-turn OAS policy, and eval gates.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Tool names to remove after preset resolution.");
+          ("description", `String "Execution removal layer after candidate discovery. Excludes matching tools from runtime execution.");
         ]);
       ]);
       ("required", `List [`String "name"]);
@@ -481,87 +314,6 @@ let keeper_schemas : tool_schema list = [
   };
 
   {
-    name = "masc_keeper_sandbox_status";
-    description = "Inspect Docker sandbox state for one keeper or all keepers. Reports Docker preflight, visible containers, why no container is present, and identity drift warnings.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle. When omitted, return sandbox status for all persisted or registered keepers.");
-        ]);
-        ("verbose", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include full Docker preflight details in each result.");
-        ]);
-        ("include_preflight", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "When true, include Docker preflight status for docker keepers.");
-        ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Docker command timeout in seconds (default: 5).");
-        ]);
-      ]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_sandbox_start";
-    description = "Start a visible managed Docker sandbox container for a keeper. Only applies to sandbox_profile=docker keepers.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Keeper handle.");
-        ]);
-        ("network_mode", `Assoc [
-          ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
-          ("description", `String "Managed container network policy. Defaults to the keeper's configured network_mode.");
-        ]);
-        ("ttl_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Managed container TTL in seconds before stale cleanup removes it (default: 1800).");
-        ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Docker command timeout in seconds (default: 10).");
-        ]);
-      ]);
-      ("required", `List [`String "name"]);
-    ];
-  };
-
-  {
-    name = "masc_keeper_sandbox_stop";
-    description = "Stop keeper sandbox containers scoped to this base path. Defaults to managed containers; pass container_kind=turn or container_kind=all to clean abandoned turn containers.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("name", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Optional keeper handle. When omitted, stop matching keeper sandbox containers for this base path.");
-        ]);
-        ("container_kind", `Assoc [
-          ("type", `String "string");
-          ("enum", `List [`String "managed"; `String "turn"; `String "all"]);
-          ("description", `String "Container kind to stop. Defaults to managed; use turn for turn-scoped containers such as masc-keeper-turn-*.");
-        ]);
-        ("prune_stale", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Also run stale keeper sandbox cleanup after stopping matching containers.");
-        ]);
-        ("timeout_sec", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Docker command timeout in seconds (default: 10).");
-        ]);
-      ]);
-    ];
-  };
-
-  {
     name = "masc_keeper_msg";
     description = "Send a message to a keeper (async). Returns immediately with a request_id. Poll masc_keeper_msg_result for the response.";
     input_schema = `Assoc [
@@ -577,17 +329,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
-          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its cascade turn");
-        ]);
-        ("required_tools", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional: tool names that must be visible and used during this one keeper turn. Missing required tools surface as tool_surface_mismatch/missing_required_tool_use.");
-        ]);
-        ("required_tool_names", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Optional alias for required_tools. Tool names listed here must be visible and used during this one keeper turn.");
+          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its runtime turn");
         ]);
         ("no_skill_route", `Assoc [
           ("type", `String "boolean");
@@ -614,6 +356,35 @@ let keeper_schemas : tool_schema list = [
         ]);
       ]);
       ("required", `List [`String "request_id"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_cancel";
+    description = "Cancel a running async keeper_msg request by request_id.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("request_id", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Request ID returned by masc_keeper_msg");
+        ]);
+      ]);
+      ("required", `List [`String "request_id"]);
+    ];
+  };
+
+  {
+    name = "masc_keeper_msg_queue";
+    description = "List all pending/running async keeper_msg requests, optionally filtered by keeper_name.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("keeper_name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: filter by keeper name");
+        ]);
+      ]);
     ];
   };
 

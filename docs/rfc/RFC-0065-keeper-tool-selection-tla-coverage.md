@@ -24,7 +24,7 @@ implementation_prs: []
 The Keeper Tool Selection lifecycle decomposes into five sequential stages:
 
 ```
-Stage 0  Admission     → Stage 1  Tool Surface  → Stage 2  Cascade Attempt
+Stage 0  Admission     → Stage 1  Tool Surface  → Stage 2  Runtime Attempt
                                                   → Stage 3  Tool Execution
                                                   → Stage 4  Post-Turn
 ```
@@ -35,7 +35,7 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 |---|---|---|---|
 | 0 Turn admission | `keeper_turn_slot` | Covered by keeper semaphore tests; MASC-side provider admission was retired | no |
 | 1 Tool Surface | `keeper_run_tools.compute_tool_surface` (lines 628–970, 11 transforms) | **None** — runtime `Keeper_tool_surface_mismatch` is the only invariant | — |
-| 2 Cascade Attempt FSM | `cascade_fsm.ml::decide` + `keeper_turn_driver::try_cascade` | KeeperCascadeRouting (365 LOC) models routing as *outcome predicates*, NOT as explicit FSM states | partial (routing only) |
+| 2 Runtime Attempt FSM | `runtime_fsm.ml::decide` + `keeper_turn_driver::try_runtime` | KeeperRuntimeRouting (365 LOC) models routing as *outcome predicates*, NOT as explicit FSM states | partial (routing only) |
 | 3 Tool Execution | `agent_tool_dispatch_runtime` + `keeper_tool_alias` | KeeperTurnCycle subsumes via `Awaiting_tool_result` phase | partial |
 | 4 Post-Turn orchestration | `keeper_post_turn` + `keeper_rollover` + `keeper_status_bridge` | KeeperRolloverDecision (#14613) covers blocker_class→rollover gate **only** | partial (rollover only) |
 
@@ -55,16 +55,17 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 8. affordance tool injection
 9. `Tool_op.compose` overlay + `validate_allow_list`
 10. fallback floor (when empty)
-11. last-turn safety intersect → passive loop strip → max-tools truncate → `Keeper_tool_surface_mismatch` guard
+11. last-turn safety intersect → passive loop observation
 
-There is no model-checking-time invariant. `Keeper_tool_surface_mismatch` (line 998-1011) is *runtime*. If a refactor breaks the guarantee that `required ⊆ all_allowed`, TLC does not catch it.
+There is no model-checking-time invariant for the local runtime schema filter.
+The filter is execution input, not a Keeper-visible contract.
 
-### 1.2 Stage 2 gap — Cascade Attempt FSM
+### 1.2 Stage 2 gap — Runtime Attempt FSM
 
-`cascade_fsm.ml::decide` returns one of `Accept | Accept_on_exhaustion | Try_next | Exhausted`. KeeperCascadeRouting.tla treats these as *outcome predicates* (provider selection result), not as states of an explicit attempt FSM. Two structural properties are unmodeled:
+`runtime_fsm.ml::decide` returns one of `Accept | Accept_on_exhaustion | Try_next | Exhausted`. KeeperRuntimeRouting.tla treats these as *outcome predicates* (provider selection result), not as states of an explicit attempt FSM. Two structural properties are unmodeled:
 
-- **Hard-quota override** (`keeper_turn_driver.ml:657-669`) forces `Exhausted` *bypassing* `Cascade_fsm.decide`. The override is correct (hard quotas are non-cascadeable by definition) but invisible to the model checker — a future refactor that routes hard quotas through `decide` and relies on cooldown would not be caught.
-- **Semaphore retention across tiers** (`keeper_turn_slot.ml::with_keeper_turn_slot`) holds one slot for the *full* `try_cascade` recursion. A future split that releases between tiers (well-intentioned for fairness) would silently break fleet starvation guarantees.
+- **Hard-quota override** (`keeper_turn_driver.ml:657-669`) forces `Exhausted` *bypassing* `Runtime_fsm.decide`. The override is correct (hard quotas are non-runtimeable by definition) but invisible to the model checker — a future refactor that routes hard quotas through `decide` and relies on cooldown would not be caught.
+- **Semaphore retention across tiers** (`keeper_turn_slot.ml::with_keeper_turn_slot`) holds one slot for the *full* `try_runtime` recursion. A future split that releases between tiers (well-intentioned for fairness) would silently break fleet starvation guarantees.
 
 ### 1.3 Stage 4 gap — Post-Turn orchestration
 
@@ -99,9 +100,9 @@ Spec drift relative to OCaml is currently detected only by humans reading both.
 
 ## 2. Non-Goals
 
-- **Not a rewrite of existing specs.** KeeperCascadeRouting, KeeperCompositeLifecycle, KeeperGenerationLineage remain authoritative for their stages. This RFC only adds three new specs and one harness.
+- **Not a rewrite of existing specs.** KeeperRuntimeRouting, KeeperCompositeLifecycle, KeeperGenerationLineage remain authoritative for their stages. This RFC only adds three new specs and one harness.
 - **Not a refinement proof.** TLC checks invariants and bounded liveness, not full state-space refinement against OCaml. The correspondence harness (§3.6) is *trace-replay*, not refinement.
-- **Not RFC-0058 territory.** Cascade routing (RFC-0058 Phase 5.1+) continues to evolve. This RFC's Stage 2 spec models the orthogonal *attempt FSM* axis (states + transitions), not provider selection.
+- **Not RFC-0058 territory.** Runtime routing (RFC-0058 Phase 5.1+) continues to evolve. This RFC's Stage 2 spec models the orthogonal *attempt FSM* axis (states + transitions), not provider selection.
 - **Not a CompositeLifecycle restructure.** New specs join as observer sub-FSMs (additive). Existing joint invariants stay unchanged.
 
 ---
@@ -124,9 +125,9 @@ Failure of any gate → reject. No `WORKAROUND:` label, no integration deferral.
 
 ### 3.2 New specs (B1–B3)
 
-#### 3.2.1 B1: `KeeperCascadeAttemptFSM.tla` — Stage 2
+#### 3.2.1 B1: `KeeperRuntimeAttemptFSM.tla` — Stage 2
 
-**Scope**: model `cascade_fsm.ml::decide` as an explicit state machine, not just outcomes.
+**Scope**: model `runtime_fsm.ml::decide` as an explicit state machine, not just outcomes.
 
 **States**:
 ```
@@ -149,26 +150,24 @@ Idle → Attempting → Awaiting_response →
 | `BugAction` | OCaml regression it models | Invariant it violates |
 |---|---|---|
 | `HardQuotaBypass` | the override at `keeper_turn_driver.ml:657-669` is removed and quota errors route through `decide` → tier fallback consumes additional providers | `HardQuotaTerminalImmediate` |
-| `SemaphoreReleaseBetweenTiers` | `with_keeper_turn_slot` releases between tiers — well-intentioned for fairness, breaks intra-cascade slot retention | `SlotReleasedOnTerminal` (becomes vacuously true mid-cascade, then re-violated on terminal) |
+| `SemaphoreReleaseBetweenTiers` | `with_keeper_turn_slot` releases between tiers — well-intentioned for fairness, breaks intra-runtime slot retention | `SlotReleasedOnTerminal` (becomes vacuously true mid-runtime, then re-violated on terminal) |
 | `TryNextLoopsForever` | `decide` returns `Try_next` with `tier_index` unchanged (off-by-one in tier walker) | `TryNextProgresses` |
 
 LOC budget: ~220.
 
-#### 3.2.2 B2: `KeeperToolSurface.tla` — Stage 1
+#### 3.2.2 B2: schema-filter projection — retired detailed spec
 
-**Scope**: model the 11-step `compute_tool_surface` transform as an ordered pipeline.
+The detailed per-stage tool-surface model was retired after the Keeper-side
+tool/budget gates were removed. The composite lifecycle keeps only a ghost bit
+that proves the runtime-facing schema filter was computed before provider
+attempts begin.
 
-**Pipeline (abstract)**:
-```
-allowlist → universe → discovered → prefiltered → reranked → merged →
-required → affordance → overlay_composed → fallback_floored →
-last_turn_safe → passive_filtered → truncated → emitted
-```
-
-Each stage is a set transformation on `Tools` (the universe of tool names). Required tools are tracked as a separate set `Required`.
+The active implementation is a query/selection merge plus policy validation;
+it no longer carries a final-turn whitelist, required-tool injection, or
+fallback-floor stage.
 
 **Invariants**:
-- `RequiredSubsetEmitted` — equivalent of `keeper_run_tools.ml:998-1011` mismatch guard at model-checking time: `Required ⊆ emitted ∨ Required ∩ AlwaysAffordanceless ≠ ∅` (the surface-mismatch branch must fire).
+- `AllowedSubsetEmitted` — equivalent of `keeper_run_tools.ml:998-1011` mismatch guard at model-checking time: `Allowed ⊆ emitted ∨ Allowed ∩ AlwaysAffordanceless ≠ ∅` (the surface-mismatch branch must fire).
 - `LastTurnSafeMonotone` — the last-turn safety filter only *removes* tools, never adds.
 - `FallbackFloorOnlyWhenEmpty` — the floor injects tools only when the upstream pipeline emits an empty set (covers `keeper_run_tools.ml:819-825`).
 - `MaxToolsCap` — `|emitted| ≤ MaxToolsPerTurn`, and the cap preserves all `Required` first.
@@ -177,10 +176,10 @@ Each stage is a set transformation on `Tools` (the universe of tool names). Requ
 
 | `BugAction` | OCaml regression it models | Invariant it violates |
 |---|---|---|
-| `RequiredEscapesValidate` | `validate_allow_list` is removed from the overlay compose path → required tools not in the universe leak through | `RequiredSubsetEmitted` |
+| `AllowedEscapesValidate` | `validate_allow_list` is removed from the overlay compose path → allowed tools not in the universe leak through | `AllowedSubsetEmitted` |
 | `LastTurnSafeAdds` | the last-turn safety filter is implemented as a union instead of an intersect | `LastTurnSafeMonotone` |
 | `FallbackFloorAlwaysOn` | floor fires unconditionally (defense-in-depth → permissive default; observed historically as the "always show floor" suspicion) | `FallbackFloorOnlyWhenEmpty` |
-| `MaxToolsDropsRequired` | truncation removes required tools instead of optional ones | `MaxToolsCap` (Required-preservation conjunct) |
+| `MaxToolsDropsAllowed` | truncation removes allowed tools instead of optional affordances | `MaxToolsCap` (Allowed-preservation conjunct) |
 
 LOC budget: ~260.
 
@@ -226,7 +225,7 @@ LOC budget: ~200.
 
 **Inputs**:
 - TLA+ traces emitted by TLC for each of B1/B2/B3 + the existing KeeperStateMachine and KeeperRolloverDecision clean cfgs.
-- OCaml state-machine functions: `keeper_state_machine.ml::next`, `keeper_turn_fsm.ml::transition`, `cascade_fsm.ml::decide`, `keeper_rollover.ml::classify_rollover_gate`.
+- OCaml state-machine functions: `keeper_state_machine.ml::next`, `keeper_turn_fsm.ml::transition`, `runtime_fsm.ml::decide`, `keeper_rollover.ml::classify_rollover_gate`.
 
 **Procedure**:
 1. For each spec, generate trace via `tlc -dump trace.tla <Spec>.cfg <Spec>.tla` (bounded trace, MaxSteps ≤ 8).
@@ -245,16 +244,16 @@ Existing Composite spec observes 5 sub-FSMs (KSM, KTC, KDP, KMC, KCL) at 449 LOC
 ```
 KCompositeLifecycle EXTENDS
   ...
-  KeeperCascadeAttemptFSM,      (* new *)
-  KeeperToolSurface,            (* new *)
+  KeeperRuntimeAttemptFSM,      (* new *)
+  SchemaFilterProjection,       (* composite ghost bit *)
   KeeperPostTurnOrchestration   (* new *)
 ```
 
 New joint invariants (one per pair of interest):
 
-- `AttemptFSMRespectsAdmission` — historical invariant name; the live projection now means KeeperCascadeAttemptFSM cannot enter `Attempting` before the turn measurement/semaphore entry signal.
-- `ToolSurfaceFeedsAttempt` — KeeperToolSurface's `emitted` is non-empty when KeeperCascadeAttemptFSM enters `Attempting` (no empty-surface attempt).
-- `PostTurnConsumesAttempt` — KeeperPostTurnOrchestration begins only when KeeperCascadeAttemptFSM reaches a terminal state.
+- `AttemptFSMRespectsAdmission` — historical invariant name; the live projection now means KeeperRuntimeAttemptFSM cannot enter `Attempting` before the turn measurement/semaphore entry signal.
+- `ToolSurfaceFeedsAttempt` — the schema-filter projection is complete before KeeperRuntimeAttemptFSM enters `Attempting`.
+- `PostTurnConsumesAttempt` — KeeperPostTurnOrchestration begins only when KeeperRuntimeAttemptFSM reaches a terminal state.
 
 Joint invariants stay weak (predicates over projections) — no full product state space is enumerated.
 
@@ -274,7 +273,7 @@ Three phases, each in its own PR. Each PR self-contained (no cross-PR atomicity 
 
 | Phase | Scope | Files | Estimated PR size |
 |---|---|---|---|
-| **5.1** | B1 (Cascade Attempt FSM) + observer wiring + correspondence harness scaffold (replays the existing KeeperStateMachine + KeeperRolloverDecision traces only — proves the harness works before adding new specs) | 3 spec/cfg + 1 harness `.ml` + 1 Composite observer edit | +400 LOC, –20 LOC |
+| **5.1** | B1 (Runtime Attempt FSM) + observer wiring + correspondence harness scaffold (replays the existing KeeperStateMachine + KeeperRolloverDecision traces only — proves the harness works before adding new specs) | 3 spec/cfg + 1 harness `.ml` + 1 Composite observer edit | +400 LOC, –20 LOC |
 | **5.2** | B2 (Tool Surface) + observer joint invariant `ToolSurfaceFeedsAttempt` + harness extension | 3 spec/cfg + Composite edit + harness extension | +350 LOC |
 | **5.3** | B3 (Post-Turn Orchestration) + observer joint invariant `PostTurnConsumesAttempt` + harness extension + memory `reference_keeper_state_machine_specs_consolidation_status` P5 closed | 3 spec/cfg + Composite edit + harness extension + memory note edit | +280 LOC |
 

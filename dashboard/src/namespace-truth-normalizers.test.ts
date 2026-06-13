@@ -47,12 +47,12 @@ describe('normalizeNamespaceTruth', () => {
       dashboard_surface: '/api/v1/dashboard/namespace-truth',
       dashboard_aliases: [
         '/api/v1/dashboard/project-snapshot',
-        '/api/v1/dashboard/room-truth',
+        '/api/v1/dashboard/workspace-truth',
       ],
       source: 'namespace_truth_read_model',
       retention: {
         scope: 'dashboard_namespace_truth',
-        coordination_root: '/Users/dancer/me',
+        workspace_root: '/Users/dancer/me',
         workspace_path: '/Users/dancer/me',
         shell_input: '/api/v1/dashboard/shell',
         execution_input: '/api/v1/dashboard/execution',
@@ -63,7 +63,7 @@ describe('normalizeNamespaceTruth', () => {
 
     expect(result.generated_at_iso).toBe('2026-04-17T10:00:00Z')
     expect(result.dashboard_surface).toBe('/api/v1/dashboard/namespace-truth')
-    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/room-truth')
+    expect(result.dashboard_aliases).toContain('/api/v1/dashboard/workspace-truth')
     expect(result.source).toBe('namespace_truth_read_model')
     expect(result.retention?.scope).toBe('dashboard_namespace_truth')
     expect(result.retention?.execution_input).toBe('/api/v1/dashboard/execution')
@@ -75,11 +75,11 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       root: {
         status: {
-          coordination_root: '/path/to/root',
+          workspace_root: '/path/to/root',
           workspace_path: '/path/to/ws',
           workspace_differs: true,
           cluster: 'local',
-          project: 'masc-mcp',
+          project: 'masc',
           paused: false,
           version: '1.0.0',
           generated_at: '2026-04-17T10:00:00Z',
@@ -89,7 +89,7 @@ describe('normalizeNamespaceTruth', () => {
     })
     const status = result.root.status
     expect(status).not.toBeNull()
-    expect(status!.coordination_root).toBe('/path/to/root')
+    expect(status!.workspace_root).toBe('/path/to/root')
     expect(status!.workspace_differs).toBe(true)
     expect(status!.paused).toBe(false)
     expect(status!.version).toBe('1.0.0')
@@ -99,7 +99,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       root: {
         status: {
-          coordination_root: '/path/to/root',
+          workspace_root: '/path/to/root',
           workspace_path: '/path/to/ws',
           version: '1.0.0',
           generated_at: '2026-04-17T10:00:00Z',
@@ -549,7 +549,7 @@ describe('normalizeNamespaceTruth', () => {
     const result = normalizeNamespaceTruth({
       generated_at: '2026-04-17T12:00:00Z',
       root: {
-        status: { coordination_root: '/root', workspace_path: '/ws' },
+        status: { workspace_root: '/root', workspace_path: '/ws' },
         counts: { agents: 3, tasks: 5, keepers: 2, total_runtimes: 3 },
         configured_keepers: 4,
         provenance: 'fs',

@@ -10,15 +10,15 @@ HTML companion: `docs/design/tool-execution-substrate-plan.html`
 MASC should keep a small, primitive, typed tool surface:
 
 - `Execute`
-- `SearchFiles`
-- `ReadFile`
-- `EditFile`
-- `WriteFile`
-- `SearchWeb`
-- `FetchWeb`
+- `Grep`
+- `Read`
+- `Edit`
+- `Write`
+- `WebSearch`
+- `WebFetch`
 
 `Shell_ir` is the first-class internal execution substrate behind `Execute`
-and `SearchFiles`. It is not a model-facing tool name and not a feature family.
+and `Grep`. It is not a model-facing tool name and not a feature family.
 It is the typed language-level representation that carries command structure,
 risk, path validation, sandbox target, and dispatch evidence.
 
@@ -43,23 +43,24 @@ safety model.
 Current main already points in the right direction.
 
 - `Agent_tool_descriptor.executor` is a closed set of `Shell_ir`,
-  `Filesystem`, `Remote_mcp`, and `In_process`.
-- `Execute` and `SearchFiles` are descriptor-routed through `Shell_ir`.
-- `ReadFile`, `EditFile`, and `WriteFile` are descriptor-routed through
+  `Filesystem`, and `In_process`.
+- `Execute` and `Grep` are descriptor-routed through `Shell_ir`.
+- `Read`, `Edit`, and `Write` are descriptor-routed through
   `Filesystem`.
-- `SearchWeb` and `FetchWeb` are descriptor-routed through `Remote_mcp`.
+- `WebSearch` and `WebFetch` are keeper-facing web aliases routed
+  through `In_process` and `Tool_masc_misc_dispatch`; they are not MCP
+  `tools/list` entries.
 - RFC-0160 is implemented: typed Execute lowers once to Shell IR, classifies
   the resulting IR, gates write/destructive behavior, validates paths, and
   dispatches via the decided IR path.
 - The keeper capability matrix already states that GitHub PR and issue work
   uses `Execute` with `executable = "gh"` and typed `argv`.
-- A 2026-05-27 live `scripts/audit-shell-ir-consumption.sh --json` run shows
-  the Shell IR substrate remains mostly in target range. One metric needs audit
-  maintenance: `g3_gate_typed_refs_in_keeper = 2`, while RFC-0160's historical
-  target was `>= 4`. This appears to be a measurement drift caused by routing
-  through the centralized `Agent_tool_execute_shell_ir` facade rather than
-  direct `gate_typed` calls in many keeper files. PR-E must prove this or fix
-  a real coverage regression before closing.
+- A 2026-06-01 live `scripts/audit-shell-ir-consumption.sh --json` run on
+  `origin/main` (`1096d319ba`) shows the Shell IR substrate inside the RFC-0160
+  targets: G1=3 files / 3 refs, G2 string=0 / IR=2, G3=5, G4 phantom=18 with
+  6 decided-dispatch consumers, G5=4, G6=1, G7=0, and G8=110/110 with the
+  single allowed generic arm. The baseline ratchet also passes with no
+  G1/G7/G8 regression and no unclassified parse sites.
 
 The remaining risk is not missing a `Gh_cli` executor. The risk is letting
 micro-tools re-enter through convenience pressure.
@@ -155,7 +156,7 @@ A new tool is admissible only when at least one condition holds:
   command, such as tasks, board posts, goals, approvals, memory, personas, or
   keeper lifecycle.
 - It needs structured review UX that a command cannot provide safely, such as
-  `EditFile` diff semantics.
+  `Edit` diff semantics.
 - It fronts a remote capability whose primary value is current evidence, such
   as web search/fetch with citations.
 - It is a discovery or introspection tool required to keep the tool surface
@@ -170,7 +171,6 @@ Descriptor executors remain:
 
 - `Shell_ir`
 - `Filesystem`
-- `Remote_mcp`
 - `In_process`
 
 Rejected executor variants:
@@ -272,18 +272,18 @@ the active-surface lint/source guard.
 
 Normalize keeper-facing prompts to the active public names:
 
-- `SearchWeb`
-- `FetchWeb`
-- `SearchFiles`
-- `ReadFile`
-- `EditFile`
-- `WriteFile`
+- `WebSearch`
+- `WebFetch`
+- `Grep`
+- `Read`
+- `Edit`
+- `Write`
 - `Execute`
 
-Keep the `masc_web_search` / `masc_web_fetch` MCP contract documented only
-where MCP public compatibility requires it. Model-facing keeper instructions
-should not ask keepers to call `masc_web_search` when the active public alias is
-`SearchWeb`.
+Keep `masc_web_search` / `masc_web_fetch` documented as Keeper-internal backend
+names only. They should not appear in the MCP public tool surface, and
+model-facing keeper instructions should call the active aliases `WebSearch` /
+`WebFetch`.
 
 Validation:
 
@@ -326,10 +326,17 @@ Expected state:
 - parallel parser refs remain zero
 - dispatch consumers use decided IR
 - no raw GitHub simple-command dispatch path returns
-- `G3` is either restored as a meaningful coverage metric or replaced with a
-  facade-aware metric. A lower direct `gate_typed` grep count is acceptable only
-  if all `Shell_ir` executor paths still route through
-  `Agent_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
+- `G3` is facade-aware: a lower direct `gate_typed` grep count is acceptable
+  only if all `Shell_ir` executor paths still route through
+  `Keeper_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
+
+Current status, 2026-06-06: verified on `origin/main` at `d498dd810a`.
+`scripts/audit-shell-ir-consumption.sh --json` reports G3=3, G5=5, and G7=0, and
+`scripts/audit-shell-ir-consumption.sh --baseline
+scripts/shell-ir-consumption-baseline.json` returns OK. PR-E is no longer an
+open measurement gap; it is a closeout evidence point. The remaining Shell IR
+cleanup is optional hardening: the three allowed non-test `Bash.parse_string`
+callers are still the canonical string-to-IR entrypoints.
 
 ### PR-F: GitHub Workflow Guidance Cleanup
 
@@ -359,7 +366,7 @@ names, and should be classified separately instead of deleted by string match.
 Before adding any new public or internal tool, answer:
 
 1. Can this be done by `Execute` with typed argv?
-2. Can this be done by `ReadFile`, `EditFile`, `WriteFile`, or `SearchFiles`?
+2. Can this be done by `Read`, `Edit`, `Write`, or `Grep`?
 3. Is the state owned by MASC rather than by a CLI or remote service?
 4. Does the tool add a stable semantic contract, or just wrap a vendor command?
 5. What policy decision will the receipt record for each call?
@@ -369,21 +376,23 @@ If answers 1 or 2 are yes, do not add a tool.
 
 ## Evidence
 
-[evidence] 2026-05-27, confidence High: local repo
-`lib/keeper/agent_tool_descriptor.mli` defines executor variants as `Shell_ir`,
-`Filesystem`, `Remote_mcp`, and `In_process`.
+[evidence] 2026-06-03, confidence High: local repo
+`lib/keeper/keeper_tool_descriptor.mli` defines executor variants as
+`Shell_ir`, `Filesystem`, and `In_process`.
 
 [evidence] 2026-05-27, confidence High: local repo
 `lib/keeper/agent_tool_execute_runtime.ml` lowers typed Execute input to Shell
 IR, classifies the IR, gates destructive/write behavior, and dispatches the
 classified IR.
 
-[evidence] 2026-05-27, confidence High: local repo
+[evidence] 2026-06-01, confidence High: local repo command output on
+`origin/main` at `1096d319ba`
 `docs/rfc/RFC-0160-shell-ir-first-class.md` records Shell IR first-class status
-as implemented. A live audit on 2026-05-27 returned G1=3, G2 string=0/IR=2,
-G4 phantom=18, G5=4, G6=1, and G7=0. It also returned G3=2, which requires
-metric follow-up because the current facade structure may make the old direct
-`gate_typed` grep heuristic stale.
+as implemented. A live `scripts/audit-shell-ir-consumption.sh --json` run
+returned G1=3 files / 3 refs, G2 string=0/IR=2, G3=5, G4 phantom=18 with
+6 decided-dispatch consumers, G5=4, G6=1, G7=0, and G8=110/110 with one
+allowed generic arm. The matching baseline run returned `OK (RFC-0160 ratchet:
+no G1/G7/G8 regression, no unclassified sites)`.
 
 [evidence] 2026-05-27, confidence High: local repo
 `docs/KEEPER-CAPABILITY-MATRIX.md` records GitHub PR/issue work as `Execute`

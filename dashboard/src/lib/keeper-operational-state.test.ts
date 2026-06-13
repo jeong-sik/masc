@@ -10,10 +10,10 @@ import {
   deriveKeeperDisplayReason,
   deriveKeeperOperationalState,
   deriveKeeperTurnPhase,
-  toKsmPhase,
   type KeeperAttention,
-  type KeeperKsmPhase,
 } from './keeper-operational-state'
+import { toKeeperPhase } from '../keeper-store-normalize'
+import type { KeeperPhase } from '../types/core'
 
 function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
@@ -33,7 +33,7 @@ function makeComposite(
     phase: 'Stable',
     turn_phase: 'idle',
     decision: { stage: 'idle' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'idle' },
     measurement: {} as KeeperCompositeSnapshot['measurement'],
     invariants: {} as KeeperCompositeSnapshot['invariants'],
@@ -98,6 +98,21 @@ describe('deriveKeeperOperationalState — paused branch', () => {
       kind: 'paused',
       attention: 'clean',
       cause: 'supervisor',
+    })
+  })
+
+  it('paused auto_recover cause when blocker is retryable timeout', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        paused: true,
+        runtime_blocker_class: 'turn_timeout',
+      }),
+      composite: null,
+    })
+    expect(state).toMatchObject({
+      kind: 'paused',
+      attention: 'clean',
+      cause: 'auto_recover',
     })
   })
 
@@ -192,7 +207,7 @@ describe('deriveKeeperOperationalState — offline branch', () => {
 })
 
 describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', () => {
-  it('blocker without composite ⇒ stuck reason=blocker_class', () => {
+  it('synthetic_stall without composite ⇒ running because it is diagnostic-only', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         runtime_blocker_class: 'synthetic_stall',
@@ -200,8 +215,24 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
       composite: null,
     })
     expect(state).toMatchObject({
-      kind: 'stuck',
+      kind: 'running',
       attention: 'clean',
+      staleBlocker: null,
+    })
+  })
+
+  it('synthetic_stall with blocked runtime_attention ⇒ stuck', () => {
+    const state = deriveKeeperOperationalState({
+      keeper: makeKeeper({
+        runtime_blocker_class: 'synthetic_stall',
+      }),
+      composite: makeComposite({
+        runtime_attention: attention({ execution_current: true, blocked: true }),
+      }),
+    })
+    expect(state).toMatchObject({
+      kind: 'stuck',
+      attention: 'blocked',
       reason: 'synthetic_stall',
     })
   })
@@ -212,7 +243,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     // attention=blocked here because runtime_attention.blocked=true (kind/
     // attention orthogonality covered in the §13 axis-extension suite).
     const state = deriveKeeperOperationalState({
-      keeper: makeKeeper({ runtime_blocker_class: 'cascade_exhausted' }),
+      keeper: makeKeeper({ runtime_blocker_class: 'runtime_exhausted' }),
       composite: makeComposite({
         runtime_attention: attention({ execution_current: true, blocked: true }),
       }),
@@ -220,7 +251,7 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     expect(state).toMatchObject({
       kind: 'stuck',
       attention: 'blocked',
-      reason: 'cascade_exhausted',
+      reason: 'runtime_exhausted',
     })
   })
 
@@ -261,7 +292,9 @@ describe('deriveKeeperOperationalState — stuck branch (RFC-0135 §1.1 root)', 
     for (const cls of KEEPER_RUNTIME_BLOCKER_CLASSES) {
       const state = deriveKeeperOperationalState({
         keeper: makeKeeper({ runtime_blocker_class: cls as KeeperRuntimeBlockerClass }),
-        composite: null,
+        composite: cls === 'synthetic_stall'
+          ? makeComposite({ runtime_attention: attention({ execution_current: true, blocked: true }) })
+          : null,
       })
       expect(state.kind === 'stuck' && state.reason === cls).toBe(true)
     }
@@ -372,7 +405,7 @@ describe('deriveKeeperOperationalState — priority invariants', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper({
         phase: 'Crashed',
-        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_class: 'runtime_exhausted',
       }),
       composite: null,
     })
@@ -446,37 +479,46 @@ interface DeriveInputsLite {
   composite: KeeperCompositeSnapshot | null
 }
 
-describe('toKsmPhase — RFC-0135 PR-11 wire-boundary narrow', () => {
-  it.each<KeeperKsmPhase>([
-    'offline', 'running', 'failing', 'overflowed', 'compacting',
-    'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-    'restarting', 'dead', 'zombie',
-  ])('accepts canonical KSM phase %s', (phase) => {
-    expect(toKsmPhase(phase)).toBe(phase)
+describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () => {
+  it.each<KeeperPhase>([
+    'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
+    'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
+    'Restarting', 'Dead', 'Zombie',
+  ])('accepts PascalCase KeeperPhase %s', (phase) => {
+    expect(toKeeperPhase(phase)).toBe(phase)
+  })
+  it.each([
+    ['offline', 'Offline'],
+    ['running', 'Running'],
+    ['failing', 'Failing'],
+    ['handing_off', 'HandingOff'],
+    ['dead', 'Dead'],
+  ])('accepts lowercase wire format %s → %s', (input, expected) => {
+    expect(toKeeperPhase(input)).toBe(expected)
   })
   it('returns null on unknown string', () => {
-    expect(toKsmPhase('plotting_revenge')).toBeNull()
+    expect(toKeeperPhase('plotting_revenge')).toBeNull()
   })
   it('returns null on null/undefined', () => {
-    expect(toKsmPhase(null)).toBeNull()
-    expect(toKsmPhase(undefined)).toBeNull()
+    expect(toKeeperPhase(null)).toBeNull()
+    expect(toKeeperPhase(undefined)).toBeNull()
   })
   it('returns null on empty string', () => {
-    expect(toKsmPhase('')).toBeNull()
+    expect(toKeeperPhase('')).toBeNull()
   })
 })
 
-describe('compositePhaseTone — RFC-0135 PR-11 exhaustive switch', () => {
-  it.each<KeeperKsmPhase>(['offline', 'running'])('phase %s ⇒ active', (phase) => {
+describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
+  it.each<KeeperPhase>(['Offline', 'Running'])('phase %s ⇒ active', (phase) => {
     expect(compositePhaseTone(phase)).toBe('active')
   })
-  it.each<KeeperKsmPhase>([
-    'overflowed', 'compacting', 'handing_off', 'draining', 'paused', 'restarting',
+  it.each<KeeperPhase>([
+    'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Paused', 'Restarting',
   ])('phase %s ⇒ warn', (phase) => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
-  it.each<KeeperKsmPhase>([
-    'failing', 'stopped', 'crashed', 'dead', 'zombie',
+  it.each<KeeperPhase>([
+    'Failing', 'Stopped', 'Crashed', 'Dead', 'Zombie',
   ])('phase %s ⇒ err', (phase) => {
     expect(compositePhaseTone(phase)).toBe('err')
   })
@@ -592,7 +634,7 @@ describe('KeeperOperationalState remaining Goal-2 axes — RFC-0135 strict close
     expect(state.turnPhase).toBe('failing')
   })
 
-  it('turnPhase uses explicit unknown sentinel when neither source is present', () => {
+  it('turnPhase uses explicit unknown marker when neither source is present', () => {
     const state = deriveKeeperOperationalState({
       keeper: makeKeeper(),
       composite: null,

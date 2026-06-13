@@ -10,7 +10,7 @@
     Thread-safe: protected by Eio.Mutex when available. *)
 
 type action =
-  | Broadcast of string   (** Broadcast a message to the keeper's room *)
+  | Broadcast of string   (** Broadcast a message to the keeper.s workspace *)
 
 type recurring_task = {
   id : string;

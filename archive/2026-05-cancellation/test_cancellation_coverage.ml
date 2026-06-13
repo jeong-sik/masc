@@ -11,7 +11,7 @@
 
 open Alcotest
 
-module Cancellation = Masc_mcp.Cancellation
+module Cancellation = Masc.Cancellation
 
 (* ============================================================
    TokenStore.create_with_id Tests

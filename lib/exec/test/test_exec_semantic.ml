@@ -66,6 +66,59 @@ let test_git_not_a_repo_via_path () =
       ~stderr:""
     = `Git_not_a_repo)
 
+(* git exit 128 inside a valid repo with a bad ref must NOT be
+   classified as not-a-repo: the self-correction is opposite. *)
+let test_git_unknown_revision () =
+  assert (
+    Exec_semantic.interpret
+      ~argv:[ "git"; "log"; "origin/task-575" ]
+      ~status:(ws 128)
+      ~stdout:""
+      ~stderr:
+        "fatal: ambiguous argument 'origin/task-575': unknown revision or \
+         path not in the working tree."
+    = `Git_unknown_revision)
+
+let test_git_unknown_revision_unknown_revision_only () =
+  assert (
+    Exec_semantic.interpret
+      ~argv:[ "git"; "rev-parse"; "deadbeef" ]
+      ~status:(ws 128)
+      ~stdout:""
+      ~stderr:"fatal: bad revision 'deadbeef'\nfatal: unknown revision"
+    = `Git_unknown_revision)
+
+(* The merged-output path (interpret_cmd) must reach the same split,
+   since git fatals are written to stderr and merged into [output]. *)
+let test_git_unknown_revision_via_cmd () =
+  assert (
+    Exec_semantic.interpret_cmd
+      ~cmd:"git log origin/task-575"
+      ~status:(ws 128)
+      ~output:"fatal: ambiguous argument 'origin/task-575': unknown revision"
+    = `Git_unknown_revision)
+
+let test_git_unknown_revision_hint_and_alternatives () =
+  (match Exec_semantic.to_hint `Git_unknown_revision with
+   | Some h ->
+       assert (String_util.contains_substring h "valid repository");
+       (* must NOT recycle the not-a-repo wording *)
+       assert (not (String_util.contains_substring h "not inside a git"))
+   | None -> assert false);
+  (match Exec_semantic.to_alternatives `Git_unknown_revision with
+   | alts ->
+       assert (List.length alts > 0);
+       (* must NOT advise cloning — the repo already exists *)
+       assert (
+         not
+           (List.exists
+              (fun a -> String_util.contains_substring a "git clone")
+              alts)))
+
+let test_git_unknown_revision_kind_and_payload () =
+  assert (Exec_semantic.to_kind `Git_unknown_revision = "git_unknown_revision");
+  assert (Exec_semantic.to_payload `Git_unknown_revision = [])
+
 let test_non_git_128_is_fail () =
   assert (
     Exec_semantic.interpret
@@ -143,6 +196,11 @@ let () =
   test_permission_denied ();
   test_git_not_a_repo ();
   test_git_not_a_repo_via_path ();
+  test_git_unknown_revision ();
+  test_git_unknown_revision_unknown_revision_only ();
+  test_git_unknown_revision_via_cmd ();
+  test_git_unknown_revision_hint_and_alternatives ();
+  test_git_unknown_revision_kind_and_payload ();
   test_non_git_128_is_fail ();
   test_oom_killed ();
   test_signaled_plain ();

@@ -64,7 +64,7 @@ let test_personas_dir_opt_callers_zero () =
 let test_config_dir_resolver_uses_host_config_from_env () =
   let n =
     Ast_grep.count_calls
-      ~module_path:"lib/config_dir_resolver.ml"
+      ~module_path:"lib/config_dir_resolver/config_dir_resolver.ml"
       ~callee:"Host_config.from_env"
   in
   if n < 4

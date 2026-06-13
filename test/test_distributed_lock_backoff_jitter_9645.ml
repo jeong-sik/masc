@@ -16,7 +16,7 @@
     main acquire loop is left to the existing #9645 metric — once
     contention drops we expect the [acquire-failed] counter to fall. *)
 
-module C = Coord_utils_ops
+module C = Workspace_utils_ops
 
 (* 1. Range invariants ------------------------------------------- *)
 

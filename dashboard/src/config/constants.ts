@@ -16,7 +16,6 @@ export const DEFAULT_MCP_TIMEOUT_MS = 60_000
 export const NAMESPACE_TRUTH_GET_TIMEOUT_MS = 30_000
 export const KEEPER_MESSAGE_TIMEOUT_MS = 90_000
 export const SOCIAL_SWEEP_TIMEOUT_MS = 45_000
-export const ACTIVITY_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZE_TIMEOUT_MS = 10_000
 export const MCP_INITIALIZED_NOTIFY_TIMEOUT_MS = 5_000
 export const MCP_INIT_COOLDOWN_MS = 2_000
@@ -85,9 +84,6 @@ export const TRUNCATE_DEFAULT = 260
 
 // --- TLA+ verification panel poll interval ---
 export const TLA_POLL_INTERVAL_MS = 60_000
-
-// --- Prometheus /metrics fetch timeout ---
-export const PROMETHEUS_FETCH_TIMEOUT_MS = 10_000
 
 // --- Default query window (minutes) ---
 export const DEFAULT_WINDOW_MINUTES_24H = 1440

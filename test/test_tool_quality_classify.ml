@@ -5,7 +5,7 @@
 
 open Alcotest
 
-let classify = Masc_mcp.Dashboard_http_tool_quality.classify_failure_output
+let classify = Dashboard_http_tool_quality.classify_failure_output
 
 let test_bare_json_error () =
   let output = {|{"ok":false,"error":"Invalid task state"}|} in

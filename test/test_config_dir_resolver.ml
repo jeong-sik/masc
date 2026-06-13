@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -59,7 +59,7 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat config "cascade.toml") "";
+  write_file (Filename.concat config "runtime.toml") "";
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
@@ -69,7 +69,7 @@ let make_toml_only_config_root root =
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
   write_file
-    (Filename.concat config "cascade.toml")
+    (Filename.concat config "runtime.toml")
     {|
 [providers.ollama]
 display-name = "Ollama Local"
@@ -86,23 +86,23 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[tier.primary]
+[runtime.primary]
 members = ["ollama.provider_h"]
 strategy = "failover"
 
-[tier-group.primary]
+[runtime.primary]
 tiers = ["primary"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.primary"
+target = "runtime.primary"
 |};
   write_file (Filename.concat config "tool_policy.toml") "# test marker\n";
   config
 
 let make_inputs ?env_base_path ?env_config_dir ?env_personas_dir
-    ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc-mcp") () =
+    ?(cwd = "/tmp/cwd") ?(executable_name = "/tmp/bin/masc") () =
   Config_dir_resolver.
     {
       cwd;
@@ -116,8 +116,8 @@ let test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
   in
   check (option string) "same captured parent-shell value ignored" None actual
 
@@ -125,7 +125,7 @@ let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
       ~current:(Some "/tmp/test-config-root")
   in
   check (option string) "runtime override preserved"
@@ -167,11 +167,11 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:true
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config")
+      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
   in
   check (option string) "opt-in preserves config-path override"
-    (Some "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/config") actual
+    (Some "/Users/dancer/me/workspace/yousleepwhen/masc/config") actual
 
 let test_inputs_from_env_honors_config_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-config" @@ fun root ->
@@ -251,8 +251,6 @@ let test_env_override_valid () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
-  check bool "cascade exists" true resolution.cascade.exists;
   check bool "prompts exists" true resolution.prompts.exists
 
 let test_env_override_valid_with_toml_only_root () =
@@ -266,27 +264,19 @@ let test_env_override_valid_with_toml_only_root () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade authoring exists" true resolution.cascade_authoring.exists;
-  check string "cascade authoring path targets toml"
-    (Filename.concat config "cascade.toml")
-    resolution.cascade_authoring.path;
-  check bool "cascade points at toml" true resolution.cascade.exists;
-  check string "cascade path targets toml"
-    (Filename.concat config "cascade.toml")
-    resolution.cascade.path
+  check bool "prompts absent in toml-only root" false resolution.prompts.exists
 
 let test_env_override_invalid_no_fallback () =
   let invalid = "/tmp/definitely-missing-masc-config-dir" in
   let resolution =
     Config_dir_resolver.resolve_with
       (make_inputs ~env_config_dir:invalid ~cwd:"/tmp/other"
-         ~executable_name:"/tmp/other/bin/masc-mcp" ())
+         ~executable_name:"/tmp/other/bin/masc" ())
   in
   check string "status" "invalid_env"
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "invalid_env"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade missing" false resolution.cascade.exists;
   check bool "warnings present" true (resolution.warnings <> [])
 
 let test_cwd_config_is_seed_only_not_fallback () =
@@ -300,8 +290,7 @@ let test_cwd_config_is_seed_only_not_fallback () =
     (Config_dir_resolver.status_to_string resolution.status);
   check string "root source" "missing"
     (Config_dir_resolver.source_to_string resolution.config_root.source);
-  check bool "cascade hidden because repo config is seed-only"
-    false resolution.cascade.exists
+  check bool "warnings present" true (resolution.warnings <> [])
 
 let test_cwd_config_remains_seed_only () =
   with_temp_dir "config-dir-cwd-seed-only" @@ fun cwd ->
@@ -323,7 +312,7 @@ let test_executable_relative_config_is_seed_only_not_fallback () =
   let _config = make_config_root repo in
   let bin_dir = Filename.concat repo "bin" in
   mkdir_p bin_dir;
-  let executable_name = Filename.concat bin_dir "masc-mcp" in
+  let executable_name = Filename.concat bin_dir "masc" in
   write_file executable_name "#!/bin/sh\n";
   let resolution =
     Config_dir_resolver.resolve_with
@@ -387,7 +376,7 @@ let test_local_masc_fallback_collapses_explicit_masc_dir () =
 let test_no_legacy_me_root_fallback () =
   with_temp_dir "config-dir-no-legacy" @@ fun me_root ->
   let _repo_root =
-    Filename.concat me_root "workspace/yousleepwhen/masc-mcp"
+    Filename.concat me_root "workspace/yousleepwhen/masc"
   in
   let resolution =
     Config_dir_resolver.resolve_with
@@ -444,7 +433,7 @@ let test_personas_dirs_ignores_base_path_fallback () =
   mkdir_p (Filename.concat config_root "prompts");
   mkdir_p (Filename.concat config_root "keepers");
   mkdir_p (Filename.concat config_root "personas");
-  write_file (Filename.concat config_root "cascade.toml") "";
+  write_file (Filename.concat config_root "runtime.toml") "";
   write_file (Filename.concat config_root "tool_policy.toml") "# test marker\n";
   let base = Filename.dirname config_root in
   let base_personas = Filename.concat (Filename.concat base Common.masc_dirname) "personas" in
@@ -476,11 +465,6 @@ let test_rfc0121_credentials_dir () =
     "/x/.masc/credentials"
     (Config_dir_resolver.credentials_dir ~base_path:"/x")
 
-let test_rfc0121_repo_cli_identities_dir () =
-  check string "repo-cli-identities under .masc"
-    "/x/.masc/repo-cli-identities"
-    (Config_dir_resolver.repo_cli_identities_dir ~base_path:"/x")
-
 let test_rfc0121_agent_runtime_dir () =
   check string "agent_runtime under .masc/runtime/agent"
     "/x/.masc/runtime/agent"
@@ -505,11 +489,6 @@ let test_rfc0121_data_dir () =
   check string "data is sibling of .masc"
     "/x/data"
     (Config_dir_resolver.data_dir ~base_path:"/x")
-
-let test_rfc0121_credentials_toml () =
-  check string "credentials.toml under .masc/config"
-    "/x/.masc/config/credentials.toml"
-    (Config_dir_resolver.credentials_toml_path ~base_path:"/x")
 
 let test_rfc0121_repositories_toml () =
   check string "repositories.toml under .masc/config"
@@ -593,15 +572,11 @@ let () =
           test_case "masc_root" `Quick test_rfc0121_masc_root;
           test_case "auth_dir" `Quick test_rfc0121_auth_dir;
           test_case "credentials_dir" `Quick test_rfc0121_credentials_dir;
-          test_case "repo_cli_identities_dir" `Quick
-            test_rfc0121_repo_cli_identities_dir;
           test_case "agent_runtime_dir" `Quick test_rfc0121_agent_runtime_dir;
           test_case "repos_dir" `Quick test_rfc0121_repos_dir;
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;
           test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
-          test_case "credentials_toml under config" `Quick
-            test_rfc0121_credentials_toml;
           test_case "repositories_toml under config" `Quick
             test_rfc0121_repositories_toml;
           test_case "keeper_repo_mappings_toml under config" `Quick

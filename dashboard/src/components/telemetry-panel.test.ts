@@ -10,8 +10,6 @@ describe('isTelemetryView', () => {
   it('returns true for each telemetry view key', () => {
     expect(isTelemetryView('cost')).toBe(true)
     expect(isTelemetryView('audit')).toBe(true)
-    expect(isTelemetryView('heuristics')).toBe(true)
-    expect(isTelemetryView('stress')).toBe(true)
   })
 
   it('returns false for primary runtime views', () => {
@@ -21,9 +19,9 @@ describe('isTelemetryView', () => {
   })
 
   it('returns false for raw / verification advanced views', () => {
-    // prometheus and verification live next to telemetry on the Advanced
+    // metrics and verification live next to telemetry on the Advanced
     // chip strip but are NOT routed through TelemetryPanel.
-    expect(isTelemetryView('prometheus')).toBe(false)
+    expect(isTelemetryView('metrics')).toBe(false)
     expect(isTelemetryView('verification')).toBe(false)
   })
 
@@ -36,9 +34,9 @@ describe('isTelemetryView', () => {
 })
 
 describe('TELEMETRY_VIEW_CHIPS', () => {
-  it('exposes exactly the four telemetry view keys', () => {
+  it('exposes exactly the telemetry view keys', () => {
     const keys = TELEMETRY_VIEW_CHIPS.map(chip => chip.key)
-    expect(keys).toEqual(['cost', 'audit', 'heuristics', 'stress'])
+    expect(keys).toEqual(['cost', 'audit'])
   })
 
   it('every chip key passes isTelemetryView (round-trip consistency)', () => {

@@ -1,7 +1,6 @@
 (** Dashboard Governance — live judge status surface (case tracking retired). *)
 
 
-let string_option_json = Json_util.option_to_yojson (fun value -> `String value)
 
 let timestamp_option_json value unix_value =
   match value, unix_value with
@@ -15,13 +14,13 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
       ("judge_online", `Bool runtime.judge_online);
       ("refreshing", `Bool runtime.refreshing);
       ("status", `String runtime.status);
-      ("degraded_reason", string_option_json runtime.degraded_reason);
+      ("degraded_reason", Json_util.string_option_to_yojson runtime.degraded_reason);
       ("cached_judgments_visible", `Bool runtime.cached_judgments_visible);
       ("generated_at", timestamp_option_json runtime.generated_at runtime.generated_at_unix);
       ("expires_at", timestamp_option_json runtime.expires_at runtime.expires_at_unix);
       ("model_used", `Null);
       ("keeper_name", `String runtime.keeper_name);
-      ("last_error", string_option_json runtime.last_error);
+      ("last_error", Json_util.string_option_to_yojson runtime.last_error);
       ("compute_in_flight", `Int runtime.compute_in_flight);
       ( "last_compute_duration_sec",
         Json_util.option_to_yojson (fun value -> `Float value)
@@ -30,9 +29,9 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
         Json_util.option_to_yojson (fun value -> `Float value)
           runtime.last_compute_timeout_sec );
       ( "last_compute_outcome",
-        string_option_json runtime.last_compute_outcome );
+        Json_util.string_option_to_yojson runtime.last_compute_outcome );
       ( "last_compute_reason",
-        string_option_json runtime.last_compute_reason );
+        Json_util.string_option_to_yojson runtime.last_compute_reason );
       ( "lenient_json_fallback",
         Judge_diagnostics.lenient_fallback_metrics_json ~judge_label:"Governance" );
     ]
@@ -70,7 +69,7 @@ let summary_json_of_runtime ?base_path
 
 let baseline_dir base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "governance"
   |> fun d -> Filename.concat d "baselines"
 

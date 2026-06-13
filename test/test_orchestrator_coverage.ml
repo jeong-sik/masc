@@ -1,6 +1,6 @@
 (** Orchestrator Module Coverage Tests
 
-    Tests for MASC Self-sustaining Agent Coordination:
+    Tests for MASC Self-sustaining Agent Workspace:
     - config record type and fields
     - default_config: default values
     - load_config: environment-based configuration
@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Orchestrator = Masc_mcp.Orchestrator
+module Orchestrator = Masc.Orchestrator
 
 (* ============================================================
    default_config Tests
@@ -129,10 +129,10 @@ let test_config_reasonable_timeout () =
     (cfg.agent_timeout_s >= 1 && cfg.agent_timeout_s <= 3600)
 
 (* ============================================================
-   should_orchestrate Tests (requires MASC Coord)
+   should_orchestrate Tests (requires MASC Workspace)
    ============================================================ *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -150,57 +150,57 @@ let make_test_dir () =
   (try Unix.mkdir tmp_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   tmp_dir
 
-let with_initialized_room f =
+let with_initialized_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmp_dir = make_test_dir () in
-  let config = Coord.default_config tmp_dir in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace.default_config tmp_dir in
+  let _ = Workspace.init config ~agent_name:None in
   Fun.protect
     ~finally:(fun () ->
       try
-        let _ = Coord.reset config in
+        let _ = Workspace.reset config in
         rm_rf tmp_dir
       with _ -> ())
     (fun () -> f config)
 
-let test_should_orchestrate_empty_room () =
-  with_initialized_room @@ fun config ->
-  (* Empty room with no tasks and no agents should return false *)
+let test_should_orchestrate_empty_workspace () =
+  with_initialized_workspace @@ fun config ->
+  (* Empty workspace with no tasks and no agents should return false *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration needed" false result
 
 let test_should_orchestrate_with_task_no_agent () =
-  with_initialized_room @@ fun config ->
+  with_initialized_workspace @@ fun config ->
   (* Add a high priority task *)
-  let _ = Coord.add_task config ~title:"Important Task" ~priority:1 ~description:"Test" in
+  let _ = Workspace.add_task config ~title:"Important Task" ~priority:1 ~description:"Test" in
   (* No active agents → should return true *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "orchestration needed" true result
 
 let test_should_orchestrate_with_task_and_agent () =
-  with_initialized_room @@ fun config ->
+  with_initialized_workspace @@ fun config ->
   (* Add task and join as agent *)
-  let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
-  let _ = Coord.join config ~agent_name:"active-agent" ~capabilities:[] () in
+  let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  let _ = Workspace.bind_session config ~agent_name:"active-agent" ~capabilities:[] () in
   (* Active agent exists → should return false *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration with active agent" false result
 
-let test_should_orchestrate_paused_room () =
-  with_initialized_room @@ fun config ->
+let test_should_orchestrate_paused_workspace () =
+  with_initialized_workspace @@ fun config ->
   (* Add task *)
-  let _ = Coord.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
-  (* Pause the room *)
-  let _ = Coord.pause config ~by:"test" ~reason:"Testing" in
-  (* Paused room should return false *)
+  let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"Test" in
+  (* Pause the workspace *)
+  let _ = Workspace.pause config ~by:"test" ~reason:"Testing" in
+  (* Paused workspace should return false *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration when paused" false result
 
 let test_should_orchestrate_low_priority_task () =
-  with_initialized_room @@ fun config ->
+  with_initialized_workspace @@ fun config ->
   (* Add low priority task (priority 5 > threshold 2) *)
-  let _ = Coord.add_task config ~title:"Low Priority" ~priority:5 ~description:"Test" in
+  let _ = Workspace.add_task config ~title:"Low Priority" ~priority:5 ~description:"Test" in
   (* Low priority tasks don't trigger orchestration *)
   let result = Orchestrator.should_orchestrate ~min_priority:2 config in
   check bool "no orchestration for low priority" false result
@@ -243,10 +243,10 @@ let () =
       test_case "reasonable timeout" `Quick test_config_reasonable_timeout;
     ];
     "should_orchestrate", [
-      test_case "empty room" `Quick test_should_orchestrate_empty_room;
+      test_case "empty workspace" `Quick test_should_orchestrate_empty_workspace;
       test_case "task no agent" `Quick test_should_orchestrate_with_task_no_agent;
       test_case "task and agent" `Quick test_should_orchestrate_with_task_and_agent;
-      test_case "paused room" `Quick test_should_orchestrate_paused_room;
+      test_case "paused workspace" `Quick test_should_orchestrate_paused_workspace;
       test_case "low priority task" `Quick test_should_orchestrate_low_priority_task;
     ];
   ]

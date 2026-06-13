@@ -6,7 +6,7 @@ import type { SurfaceReadinessData, SurfaceReadinessEntry } from './surface-read
 
 const payload: SurfaceReadinessData = {
   generated_at: '2026-05-14T00:00:00Z',
-  verification_ref_bar: 'live:3/3 logs:2/3 metrics:3/3',
+  verification_ref_bar: 'live:3/3 logs:2/3',
   surfaces: [
     {
       id: 'command.operations',
@@ -14,13 +14,12 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'main',
       hidden_from_nav: false,
       meets_main_gate: true,
-      verification_ref_bar: 'fixture+live_spotcheck+logs+metrics+tool',
+      verification_ref_bar: 'fixture+live_spotcheck+logs+tool',
       rationale: 'Canonical command surface.',
       route_hash: '#command?section=operations',
       verification_refs: [
         { kind: 'script', label: 'live_spotcheck', value: './scripts/harness_dashboard_execution_smoke.sh' },
         { kind: 'route', label: 'logs', value: '/api/v1/dashboard/logs' },
-        { kind: 'route', label: 'metrics', value: '/metrics' },
         { kind: 'tool', label: 'tool_name', value: 'masc_operator_digest' },
       ],
     },
@@ -30,13 +29,12 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'lab',
       hidden_from_nav: false,
       meets_main_gate: false,
-      verification_ref_bar: 'live_spotcheck+logs+metrics',
+      verification_ref_bar: 'live_spotcheck+logs',
       rationale: 'Lab safety harness surface.',
       route_hash: '#lab?section=harness',
       verification_refs: [
         { kind: 'route', label: 'live_spotcheck', value: '/api/v1/dashboard/harness-health' },
         { kind: 'route', label: 'logs', value: '/api/v1/dashboard/logs' },
-        { kind: 'route', label: 'metrics', value: '/metrics' },
       ],
     },
     {
@@ -45,12 +43,11 @@ const payload: SurfaceReadinessData = {
       exposure_status: 'main',
       hidden_from_nav: false,
       meets_main_gate: true,
-      verification_ref_bar: 'live_spotcheck+metrics',
+      verification_ref_bar: 'live_spotcheck',
       rationale: 'Intentionally missing logs for regression coverage.',
       route_hash: '#workspace?section=gap',
       verification_refs: [
         { kind: 'route', label: 'live_spotcheck', value: '/api/v1/dashboard/gap' },
-        { kind: 'route', label: 'metrics', value: '/metrics' },
       ],
     },
   ],
@@ -104,7 +101,7 @@ describe('SurfaceReadinessPanel', () => {
     expect(getMock).toHaveBeenCalledWith('/api/v1/dashboard/surface-readiness')
     expect(container.textContent).toContain('Surface Readiness')
     expect(container.textContent).toContain('2 main / 3 total')
-    expect(container.textContent).toContain('live:3/3 logs:2/3 metrics:3/3')
+    expect(container.textContent).toContain('live:3/3 logs:2/3')
     expect(container.textContent).toContain('command.operations')
     expect(container.textContent).toContain('#command?section=operations')
     expect(container.textContent).toContain('live_spotcheck')

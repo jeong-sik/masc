@@ -3,7 +3,7 @@
 \* loop and the storm-threshold escalation that breaks it.
 \*
 \* Production reality (#10765, 2026-04-25 24h evidence): when a
-\* persistent underlying issue (cascade dead, fd leak, provider auth
+\* persistent underlying issue (runtime dead, fd leak, provider auth
 \* expiry) caused stale kills, the supervisor's [`Crashed] branch blindly
 \* enqueued the keeper for restart.  The next turn re-stalled, the
 \* watchdog re-killed it, and the loop continued -- 116 events in 24h,

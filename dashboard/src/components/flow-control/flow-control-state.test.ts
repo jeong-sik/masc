@@ -76,7 +76,7 @@ describe('flow-control-state', () => {
     expect(callMcpTool).not.toHaveBeenCalled()
   })
 
-  it('keeps initializing rooms out of the running state', async () => {
+  it('keeps initializing workspaces out of the running state', async () => {
     callMcpTool.mockResolvedValueOnce(
       JSON.stringify({ status: 'initializing', initializing: true, paused: null }),
     )
@@ -86,7 +86,7 @@ describe('flow-control-state', () => {
     expect(flowState.value).toBe('initializing')
   })
 
-  it('marks paused rooms as paused', async () => {
+  it('marks paused workspaces as paused', async () => {
     callMcpTool.mockResolvedValueOnce(
       JSON.stringify({ status: 'paused', paused: true }),
     )
@@ -129,6 +129,7 @@ describe('flow-control-state', () => {
         },
       },
     }
+    callMcpTool.mockResolvedValueOnce(JSON.stringify({ status: 'running', paused: false }))
     await fetchPauseStatus()
     expect(flowState.value).toBe('running')
   })

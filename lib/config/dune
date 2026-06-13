@@ -2,27 +2,26 @@
 
 (library
  (name masc_config)
- (public_name masc_mcp.config)
+ (public_name masc.config)
  (modules
-   config_boot_overrides
-   env_config
-   env_config_core
-   env_config_exec_timeout
-   env_config_governance
-   env_config_keeper
-   env_config_keeper_retry_backoff
-   env_config_keeper_supervisor
-   env_config_oas_bridge
-   env_config_runtime
-   env_config_sandbox
-   env_config_snapshot
-   env_config_snapshot_core
-   feature_flag_registry
-   keeper_sandbox_config
-   masc_network_defaults
-   masc_time_constants
-   timeout_floor
-   playground_paths)
+  config_boot_overrides
+  env_config
+  env_config_core
+  env_config_governance
+  env_config_keeper
+  env_config_keeper_retry_backoff
+  env_config_keeper_supervisor
+  env_config_oas_bridge
+  env_config_runtime
+  env_config_sandbox
+  env_config_snapshot
+  env_config_snapshot_core
+  feature_flag_registry
+  keeper_sandbox_config
+  masc_grpc_transport
+  masc_network_defaults
+  masc_time_constants
+  playground_paths)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  ; Closed-variant fragile sites fixed in this PR: the two Shell_timeout.bucket
@@ -30,5 +29,6 @@
  ; Shell_timeout.is_floor_bucket, itself an exhaustive match). The remaining
  ; catch-all (env_config_runtime.ml string scrutinee) is open-type and warning
  ; 4 ignores it.
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries masc_core masc_log yojson otoml uri ipaddr unix))

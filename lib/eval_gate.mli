@@ -1,15 +1,17 @@
 (** Eval_gate — Pre/Post execution gates for Keeper tool calls.
 
     Multi-layer defense (Swiss Cheese Model):
-    1. Cost budget check
-    2. Destructive operation detection
-    3. Tool allowlist
-    4. Entropy check *)
+    1. Destructive operation detection
+    2. Tool allowlist
+    3. Entropy check
+
+    Cost thresholds are advisory telemetry only and must not reject execution. *)
 
 (** {1 Configuration} *)
 
 type gate_config = {
   max_cost_usd : float;
+  (** Advisory cost threshold used for reporting/warnings only. *)
   max_tool_calls_per_turn : int;
   entropy_threshold : int;
   destructive_check_enabled : bool;
@@ -31,7 +33,7 @@ val normalize_command : string -> string
 val destructive_patterns : (string * string) list
 (** The canonical 19-entry substring pattern catalogue used by
     [detect_destructive]. Exposed so the shell-safety classifier
-    (see [Worker_dev_tools.classify_destructive]) can enforce
+    (see [Shell_safety_types.classify_destructive]) can enforce
     a covenant that every pattern maps to a typed class. *)
 
 val detect_destructive : string -> (string * string) option
@@ -51,7 +53,7 @@ type evasion_kind =
 
 val evasion_kind_to_string : evasion_kind -> string
 (** Snake_case rendering for log / metric emission.  Pinned wording —
-    do not change without coordinating with any future telemetry. *)
+    do not change without synchronizing with future telemetry. *)
 
 type evasion_indicator = {
   kind : evasion_kind;

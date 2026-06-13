@@ -86,7 +86,7 @@ Denied launch attempts emit:
 
 - lifecycle custom event: `admission_denied`
 - phase projection: `Offline`
-- Prometheus counter:
+- legacy metrics backend counter:
   `masc_keeper_spawn_slot_denied_total{keeper,surface,reason}`
 - WARN log with the stable reason label and human detail
 

@@ -3,9 +3,11 @@
    Extracted from keeper_unified_turn.ml (L129-L255) during the
    run_keeper_cycle stage decomposition. The gate owns the three
    pre-dispatch early-exit paths plus the FSM transition into
-   Cascade_routing on the proceed path. *)
+   Runtime_routing on the proceed path. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 type phase_gate_outcome =
@@ -14,7 +16,7 @@ type phase_gate_outcome =
   | Phase_gate_terminal_error of Agent_sdk.Error.sdk_error
 
 let decide_and_record
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(generation : int)
       ~(keeper_turn_id : int)
@@ -50,9 +52,8 @@ let decide_and_record
       ~config
       ~meta
       ~generation
-      ~cascade_name:
-        (Cascade_name.of_string_exn
-           (cascade_name_of_meta meta))
+      ~runtime_id:
+        (           (runtime_id_of_meta meta))
       ~outcome:`Cancelled
       ~terminal_reason_code:"supervisor_stop"
       ~activity_kind:"keeper.turn_cancelled"
@@ -91,9 +92,8 @@ let decide_and_record
         ~config
         ~meta
         ~generation
-        ~cascade_name:
-          (Cascade_name.of_string_exn
-             (cascade_name_of_meta meta))
+        ~runtime_id:
+          (             (runtime_id_of_meta meta))
         ~outcome:`Skipped
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
@@ -128,9 +128,8 @@ let decide_and_record
         ~config
         ~meta
         ~generation
-        ~cascade_name:
-          (Cascade_name.of_string_exn
-             (cascade_name_of_meta meta))
+        ~runtime_id:
+          (             (runtime_id_of_meta meta))
         ~outcome:`Error
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_blocked"
@@ -158,5 +157,5 @@ let decide_and_record
         ~keeper_name:meta.name
         ~turn_id:keeper_turn_id
         ~prev:Keeper_turn_fsm.Phase_gating
-        Keeper_turn_fsm.Cascade_routing;
+        Keeper_turn_fsm.Runtime_routing;
       Phase_gate_proceed phase_opt)

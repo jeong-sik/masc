@@ -65,7 +65,7 @@ let shard_board : shard =
   { name = "board"
   ; tools = board_tools
   ; read_only_tools =
-      [ "keeper_board_get"
+      [ "keeper_board_post_get"
       ; "keeper_board_list"
       ; "keeper_board_stats"
       ; "keeper_board_search"
@@ -92,7 +92,7 @@ let shard_search_files : shard =
   ; tools = search_files_tools
   ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
-  ; description = "SearchFiles: structured repo inspection"
+  ; description = "Grep: structured repo inspection"
   }
 ;;
 
@@ -111,6 +111,17 @@ let shard_library : shard =
   ; read_only_tools = [ "keeper_library_search"; "keeper_library_read" ]
   ; removable = true
   ; description = "Knowledge library: search, read documents"
+  }
+;;
+
+(* RFC-0223 P3/P4 + RFC-0229: connector surface lane reading, acting,
+   and per-person notes. *)
+let shard_surface : shard =
+  { name = "surface"
+  ; tools = surface_tools
+  ; read_only_tools = [ "keeper_surface_read" ]
+  ; removable = true
+  ; description = "Connected surfaces: read lane conversation, roster, person notes"
   }
 ;;
 
@@ -168,6 +179,7 @@ let all_shards : shard StringMap.t =
     ; shard_search_files
     ; shard_voice
     ; shard_library
+    ; shard_surface
     ; shard_taskboard
     ]
 ;;
@@ -264,86 +276,21 @@ let keeper_model_tools : Masc_domain.tool_schema list =
 (** Re-exported from {!Tool_shard_schemas}. *)
 let schemas = Tool_shard_schemas.schemas
 
-(** {1 MCP Execute} *)
+(** {1 Removed MCP Execute Surface} *)
 
-let active_shards_of_agent agent_name_opt =
-  match agent_name_opt with
-  | Some name -> get_agent_shards name
-  | None -> default_shard_names
-;;
-
-(** Execute tool_shard MCP tools. *)
+(** Legacy compatibility entrypoint. [masc_tool_*] callable tools are not
+    exposed; shard membership is internal keeper policy state. *)
 let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Safe.t =
-  let module U = Yojson.Safe.Util in
-  let read_required_string key =
-    match U.member key arguments with
-    | `String v when not (String.equal (String.trim v) "") -> Some v
-    | _ -> None
-  in
-  match tool_name with
-  | "masc_tool_list" ->
-    let agent_name = read_required_string "agent_name" in
-    let all = list_all_shards () in
-    let active_shards = active_shards_of_agent agent_name in
-    let shard_list =
-      List.map
-        (fun (name, removable, tool_count) ->
-           `Assoc
-             [ "name", `String name
-             ; "removable", `Bool removable
-             ; "tool_count", `Int tool_count
-             ])
-        all
-    in
-    let active_shards =
-      List.filter_map
-        (fun (name, _, _) ->
-           Option.map
-             (fun () -> `String name)
-             (if List.mem name active_shards then Some () else None))
-        all
-    in
-    ( true
-    , `Assoc
-        [ "shards", `List shard_list
-        ; "agent_name", `String (Option.value ~default:"" agent_name)
-        ; "active_shards", `List active_shards
-        ] )
-  | "masc_tool_grant" | "masc_tool_revoke" ->
-    let op_fn, status_label =
-      if String.equal tool_name "masc_tool_grant"
-      then grant_shard, "granted"
-      else revoke_shard, "revoked"
-    in
-    let agent_name = read_required_string "agent_name" in
-    let shard_name = read_required_string "shard_name" in
-    (match agent_name, shard_name with
-     | Some agent_name, Some shard_name ->
-       (match op_fn (get_agent_shards agent_name) shard_name with
-        | Ok next_shards ->
-          set_agent_shards agent_name next_shards;
-          ( true
-          , `Assoc
-              [ "status", `String status_label
-              ; "agent_name", `String agent_name
-              ; "shard", `String shard_name
-              ; "active_shards", `List (List.map (fun s -> `String s) next_shards)
-              ] )
-        | Error msg ->
-          false, Tool_args.error_assoc [ "message", `String msg ])
-     | _ ->
-       ( false
-       , Tool_args.error_assoc
-           [ "message", `String "agent_name and shard_name are required" ] ))
-  | _ -> false, `String "Unknown tool"
+  ignore arguments;
+  false, `String ("Unknown tool: " ^ tool_name)
 ;;
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-(* tool_spec_read_only / tool_spec_destructive / tool_required_permission /
-   tool_effect_domain moved to Tool_shard_types (intra-library file split,
+(* tool_spec_read_only / tool_spec_destructive / tool_effect_domain moved to
+   Tool_shard_types (intra-library file split,
    2026-05-16). *)
 
 let () =
@@ -359,7 +306,6 @@ let () =
             ~is_read_only:(List.mem s.name tool_spec_read_only)
             ~is_idempotent:(List.mem s.name tool_spec_read_only)
             ~is_destructive:(List.mem s.name tool_spec_destructive)
-            ?required_permission:(tool_required_permission s.name)
             ?effect_domain:(tool_effect_domain s.name)
             ()))
     schemas

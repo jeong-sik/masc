@@ -20,29 +20,21 @@ type keeper_profile_defaults = {
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
   proactive_cooldown_sec : int option;
-  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  repo_cli_identity : string option;
-  git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_access : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_state : per_provider_timeout_state;
-  (* Per-provider timeout for cascade fallback. None = use turn budget heuristic. *)
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
-  models : string list option;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
@@ -81,17 +73,12 @@ let empty_keeper_profile_defaults =
     proactive_enabled = None;
     proactive_idle_sec = None;
     proactive_cooldown_sec = None;
-    room_signal_prompt_enabled = None;
     shards = None;
     allowed_paths = None;
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;
-    repo_cli_identity = None;
-    git_identity_mode = None;
-    tool_preset = None;
-    tool_preset_source = None;
-    tool_also_allow = None;
+    tool_access = None;
     tool_denylist = None;
     active_goal_ids = None;
     telemetry_feedback_enabled = None;
@@ -102,8 +89,6 @@ let empty_keeper_profile_defaults =
     social_model = None;
     max_turns_per_call = None;
     max_turns_per_call_scheduled_autonomous = None;
-    cascade_name = None;
-    models = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

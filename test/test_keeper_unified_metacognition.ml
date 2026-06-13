@@ -1,6 +1,6 @@
 open Alcotest
 
-module HK = Masc_mcp.Keeper_hooks_oas
+module HK = Masc.Keeper_hooks_oas
 
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
@@ -35,6 +35,90 @@ let test_on_idle_nudge_at_first_idle () =
       "nudge mentions repeated tools"
       true
       (contains_substring msg "keeper_board_list")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
+let test_on_idle_board_get_nudge_names_post_id_discovery () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_board_get"
+        ; "keeper_board_list"
+        ; "keeper_board_search"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_board_get" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "board_get nudge says post_id is required"
+      true
+      (contains_substring msg "keeper_board_get requires post_id");
+    check
+      bool
+      "board_get nudge points to board discovery tools"
+      true
+      (contains_substring msg "keeper_board_list or keeper_board_search");
+    check
+      bool
+      "board_get nudge forbids empty args"
+      true
+      (contains_substring msg "Do not call keeper_board_get with {}")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
+let test_on_idle_tools_list_loop_suggests_surface_read () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "extend_turns"
+        ; "keeper_broadcast"
+        ; "keeper_tasks_list"
+        ; "keeper_surface_read"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_tools_list" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tools_list loop nudge names surface_read"
+      true
+      (contains_substring msg "keeper_surface_read");
+    check
+      bool
+      "tools_list loop nudge explains capability-list trap"
+      true
+      (contains_substring msg "keeper_tools_list lists capabilities");
+    check
+      bool
+      "tools_list loop nudge points at connected-surface labels"
+      true
+      (contains_substring msg "Connected Surfaces");
+    check
+      bool
+      "tools_list loop nudge does not hardcode a discord surface argument"
+      false
+      (contains_substring msg "surface=\"discord\"")
   | other ->
     fail
       (Printf.sprintf
@@ -136,6 +220,14 @@ let () =
     "keeper unified metacognition"
     [ ( "metacognition"
       , [ test_case "on_idle nudge at first idle" `Quick test_on_idle_nudge_at_first_idle
+        ; test_case
+            "on_idle board_get nudge names post_id discovery"
+            `Quick
+            test_on_idle_board_get_nudge_names_post_id_discovery
+        ; test_case
+            "on_idle tools_list loop suggests surface_read"
+            `Quick
+            test_on_idle_tools_list_loop_suggests_surface_read
         ; test_case
             "on_idle final warning before skip"
             `Quick

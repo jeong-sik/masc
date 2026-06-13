@@ -4,52 +4,16 @@
     [Keeper_registry_setup] (godfile decomp). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_registry_setup
 
 
-let mark_turn_provider_attempt_started ~base_path name =
-  let set_cascade_state cascade_state =
-    set_turn_cascade_state
-      ~base_path
-      name
-      (Packed cascade_state : packed_cascade_state)
-  in
-  match get ~base_path name with
-  | None | Some { current_turn_observation = None; _ } -> ()
-  | Some { current_turn_observation = Some obs; _ } ->
-    (match obs.cascade_state with
-     | Packed Cascade_idle ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_selecting;
-       set_cascade_state Cascade_trying
-     | Packed Cascade_selecting ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected;
-       set_cascade_state Cascade_trying
-     | Packed Cascade_trying ->
-       set_turn_decision_stage
-         ~base_path
-         name
-         Decision_active_tool_policy_selected
-     | Packed Cascade_done
-     | Packed Cascade_exhausted ->
-       Log.Keeper.warn
-         "registry: ignoring provider-attempt start after terminal cascade state \
-          name=%s base_path=%s"
-         name
-         base_path)
-;;
-
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
-     Mirrors the cascade-side wiring (PR #14908) — idempotent self-loops no
+     Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
      longer flip [changed] or emit a broadcast, and forbidden transitions
      raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
      the [turn_phase_transition_spec_violation] payload directly.  The
@@ -70,7 +34,7 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
         }
       | Resolved_turn_violation violation ->
         (* #14926: route the violation raise through [wrap_unit] so the
-           guard's Prometheus counter [metric_fsm_guard_violation]
+           guard's Otel_metric_store counter [metric_fsm_guard_violation]
            (action=turn_phase_transition, stage=guard) keeps firing for
            forbidden transitions reached via this setter — prior to
            RFC-0072 Phase 4b (#14918) the instrumentation was transitive
@@ -93,6 +57,17 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
+let mark_turn_provider_attempt_started ~base_path name =
+  match get ~base_path name with
+  | None | Some { current_turn_observation = None; _ } -> ()
+  | Some _ ->
+    set_turn_decision_stage
+      ~base_path
+      name
+      Decision_active_tool_policy_selected;
+    set_turn_phase ~base_path name (Packed Turn_executing)
+;;
+
 let set_turn_selected_model ~base_path name selected_model =
   let changed = ref false in
   let now = Time_compat.now () in
@@ -110,15 +85,11 @@ let prepare_turn_retry_after_compaction ~base_path name =
   let now = Time_compat.now () in
   update_entry_if_registered ~base_path name (fun e ->
     update_current_turn e (fun obs ->
-      validate_cascade_transition
-        ~from:obs.cascade_state
-        ~to_:(Packed Cascade_idle : packed_cascade_state);
       validate_turn_phase_transition ~from:obs.turn_phase ~to_:(Packed Turn_prompting);
       changed := true;
       { (stamp_turn_progress ~now ~event_kind:"retry_after_compaction" obs) with
         turn_phase = Packed Turn_prompting
       ; decision_stage = Packed Decision_guard_ok
-      ; cascade_state = Packed Cascade_idle
       ; selected_model = None
       }));
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -177,7 +148,6 @@ let mark_turn_finished ~base_path name =
           ; ct_started_at = obs.started_at
           ; ct_ended_at = ended_at
           ; ct_decision_stage = obs.decision_stage
-          ; ct_cascade_state = obs.cascade_state
           ; ct_selected_model = obs.selected_model
           }
       | None -> e.last_completed_turn (* no live turn → preserve previous *)
@@ -336,38 +306,34 @@ let set_started_at_for_test ~base_path name started_at =
 
 type spawn_slot_denial_reason = Spawn_slots.denial_reason =
   | Fd_pressure_active
-  | Disk_pressure_active
   | Fd_admission_blocked
-  | Disk_admission_blocked
   | Max_active_keepers of { running_count : int; max_keepers : int }
 
 let spawn_slot_denial_reason_to_label = Spawn_slots.to_label
 let spawn_slot_denial_reason_to_detail = Spawn_slots.to_detail
 
-let spawn_slots_decision_internal ?base_path ?fd_admitted ?disk_admitted () =
+let spawn_slots_decision_internal ?fd_admitted () =
   Spawn_slots.decision
-    ?base_path
     ?fd_admitted
-    ?disk_admitted
     ~running_count:(Atomic.get running_count_atomic)
     ()
 ;;
 
-let spawn_slots_decision ?base_path () = spawn_slots_decision_internal ?base_path ()
+let spawn_slots_decision () = spawn_slots_decision_internal ()
 
-let spawn_slots_available ?base_path () =
-  match spawn_slots_decision ?base_path () with
+let spawn_slots_available () =
+  match spawn_slots_decision () with
   | Ok () -> true
   | Error _ -> false
 ;;
 
 module For_testing = struct
-  let spawn_slots_decision ?fd_admitted ?disk_admitted () =
-    spawn_slots_decision_internal ?fd_admitted ?disk_admitted ()
+  let spawn_slots_decision ?fd_admitted () =
+    spawn_slots_decision_internal ?fd_admitted ()
   ;;
 
-  let spawn_slots_available ?fd_admitted ?disk_admitted () =
-    match spawn_slots_decision ?fd_admitted ?disk_admitted () with
+  let spawn_slots_available ?fd_admitted () =
+    match spawn_slots_decision ?fd_admitted () with
     | Ok () -> true
     | Error _ -> false
   ;;
@@ -535,7 +501,7 @@ let tool_usage_of ~base_path name =
   | None -> []
   | Some entry ->
     StringMap.fold (fun n e acc -> (n, e) :: acc) entry.tool_usage []
-    |> List.sort (fun (_, a) (_, b) -> Int.compare b.count a.count)
+    |> List.sort (fun (_, a) (_, b) -> Int.compare b.Keeper_types.count a.Keeper_types.count)
 ;;
 
 (* Lookup API (find_by_name / find_by_agent_name / find_by_id /
@@ -675,7 +641,7 @@ let rec dispatch_event_with_audit
         | Running, phase when phase <> Running -> decr_running_count_clamped ()
         | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
         | _ -> ());
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleTransitions)
          ~labels:
            [ "keeper", name
@@ -781,7 +747,7 @@ let rec dispatch_event_with_audit
        broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Error e ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "event", Keeper_state_machine.event_to_string event ]
          ();
@@ -806,7 +772,7 @@ let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();
@@ -850,7 +816,7 @@ let dispatch_event_with_audit_and_log
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();

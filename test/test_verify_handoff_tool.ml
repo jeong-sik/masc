@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Mcp_eio = Masc.Mcp_server_eio
 
 let temp_dir () =
   let dir = Filename.temp_file "test_verify_handoff_tool_" "" in

@@ -64,7 +64,6 @@ describe("normalizeRepository", () => {
     expect(r.status).toBe("unknown")
     expect(r.auto_sync).toBe(false)
     expect(r.sync_interval).toBe(300)
-    expect(r.credential_id).toBeNull()
   })
   it("preserves all fields", () => {
     const r = normalizeRepository({
@@ -76,7 +75,6 @@ describe("normalizeRepository", () => {
       status: "paused",
       auto_sync: true,
       sync_interval: 60,
-      credential_id: "c1",
       created_at: "2024-01-01",
       updated_at: 1700000000,
     }) as Repository
@@ -86,7 +84,6 @@ describe("normalizeRepository", () => {
     expect(r.status).toBe("paused")
     expect(r.auto_sync).toBe(true)
     expect(r.sync_interval).toBe(60)
-    expect(r.credential_id).toBe("c1")
     expect(r.created_at).toBe("2024-01-01")
     expect(r.updated_at).toBe(1700000000)
   })

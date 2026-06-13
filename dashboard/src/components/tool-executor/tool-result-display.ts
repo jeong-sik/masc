@@ -130,7 +130,7 @@ function StoredBlobView({
 }
 
 export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolResultProps) {
-  // First check whether the payload is a sentinel marker. If so, the
+  // First check whether the payload is a blob marker. If so, the
   // dashboard switches to lazy-fetch mode so the operator sees the
   // preview + metadata first.
   const marker = parseToolBlobMarker(text)

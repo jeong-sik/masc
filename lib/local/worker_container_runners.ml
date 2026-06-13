@@ -12,9 +12,6 @@ let resolve_net ?net () =
       | Some net -> Ok net
       | None -> Error "Eio net not initialized")
 
-let default_shell_tool_names () =
-  [ "file_read"; "file_write"; "shell_exec" ]
-
 let build_execution_spec ~base_path ~worker_name ~model_label
     ~runtime_backend ?working_dir
     ?thinking_enabled ?worker_run_id ~role ~selection_note
@@ -72,7 +69,7 @@ let create_raw_trace ~base_path ~worker_name =
       (Printf.sprintf "failed to create worker raw trace for %s: %s"
          worker_name msg)
 
-let run_worker_oas ~sw ?net ~room_config
+let run_worker_oas ~sw ?net ~workspace_config:_
     (spec : Worker_execution_spec.t) : unit -> (run_result, string) result =
   fun () ->
     let* net = resolve_net ?net () in
@@ -106,10 +103,7 @@ let run_worker_oas ~sw ?net ~room_config
       build_oas_mcp_tools ~sw ~auth_token ~session_id:mcp_session_id
         ~worker_name
     in
-    let* shell_tools =
-      build_local_shell_tools ~room_config ~worker_name ~workdir:workspace_path
-    in
-    let tools = dedupe_tools_by_name (masc_tools @ shell_tools) in
+    let tools = dedupe_tools_by_name masc_tools in
     let* raw_trace = create_raw_trace ~base_path ~worker_name in
     match checkpoint with
     | Some checkpoint ->
@@ -131,4 +125,3 @@ let run_worker_oas ~sw ?net ~room_config
           ~provider ~system_prompt ~prompt:spec.prompt ~tools
           ~raw_trace ~gate_config
           ?worker_run_id:spec.worker_run_id ()
-

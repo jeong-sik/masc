@@ -45,6 +45,14 @@ val parse_since_ms : string -> int option
     - [["7d"]] -> [Some 604_800_000]
     - [["5"]] / [["m"]] / [["bad"]] -> [None] *)
 
+val slice_default_events_to_limit :
+  Yojson.Safe.t -> limit:int -> Yojson.Safe.t
+(** [slice_default_events_to_limit json ~limit] trims the
+    ["events"] list inside a default-shaped activity response down
+    to [limit] entries, dropping the oldest.  Updates ["count"],
+    ["limit"], and ["next_after_seq"] accordingly.  Pure —
+    exposed for unit testing ({!Test_server_activity_http}). *)
+
 (** {1 JSON dispatchers}
 
     All three take [~deps ~state request] and return a

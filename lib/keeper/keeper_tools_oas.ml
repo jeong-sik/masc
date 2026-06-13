@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
-    Bridges [Agent_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
+    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
     to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
@@ -37,7 +37,7 @@ let tool_usage_json keeper_name : Yojson.Safe.t =
 ;;
 
 let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
-  Tool_registry.record_call ~source:Keeper_internal ~tool_name ~success ~duration_ms ()
+  Tool_registry.record_call ~source:Agent_internal ~tool_name ~success ~duration_ms ()
 ;;
 
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
@@ -61,7 +61,7 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
    [ctx_snapshot] value. Tools that raise exceptions return error results
    instead of crashing the agent loop.
 
-   @param config Coord configuration for tool dispatch
+   @param config Workspace configuration for tool dispatch
    @param meta Keeper metadata (determines which tools are allowed)
    @param ctx_snapshot Immutable snapshot of current working context *)
 
@@ -70,8 +70,6 @@ let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
     Resets on success. Prevents infinite retry loops (e.g. keeper
     reading a non-existent file 400+ times). *)
 let max_consecutive_failures = Env_config.KeeperToolExec.max_consecutive_tool_failures
-
-type workflow_rejection_block = Keeper_tools_oas_workflow.workflow_rejection_block
 
 type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
 
@@ -84,7 +82,6 @@ type failure_counts =
   { table : (string, int) Hashtbl.t
   ; failure_timestamps : (string, float) Hashtbl.t
   ; workflow_table : (string, int) Hashtbl.t
-  ; workflow_block_table : (string, workflow_rejection_block) Hashtbl.t
   ; mutex : Mutex.t
   }
 
@@ -92,7 +89,6 @@ let create_failure_counts () =
   { table = Hashtbl.create 16
   ; failure_timestamps = Hashtbl.create 16
   ; workflow_table = Hashtbl.create 16
-  ; workflow_block_table = Hashtbl.create 16
   ; mutex = Mutex.create ()
   }
 ;;
@@ -143,12 +139,6 @@ let failure_count_jump_to counts key ~target =
     target)
 ;;
 
-(* TTL for workflow rejection scope blocks (#18500).
-   After this many seconds, a scope block expires and the agent may
-   retry the same (tool, task, action) scope — e.g. after creating a PR
-   externally and re-submitting for verification. *)
-let workflow_block_ttl_seconds = 1800.
-
 let workflow_rejection_count_record counts key =
   Mutex.protect counts.mutex (fun () ->
     let next =
@@ -164,38 +154,6 @@ let workflow_rejection_count_reset counts =
   Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
 ;;
 
-let workflow_rejection_scope_block_get counts key =
-  Mutex.protect counts.mutex (fun () ->
-    match Hashtbl.find_opt counts.workflow_block_table key with
-    | None -> None
-    | Some block ->
-      let age = Time_compat.now () -. block.blocked_at in
-      if age > workflow_block_ttl_seconds then begin
-        Hashtbl.remove counts.workflow_block_table key;
-        None
-      end else
-        Some block)
-;;
-
-let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_workflow.workflow_rejection_info) =
-  Mutex.protect counts.mutex (fun () ->
-    let previous_count =
-      match Hashtbl.find_opt counts.workflow_block_table key with
-      | Some block -> block.Keeper_tools_oas_workflow.count
-      | None -> 0
-    in
-    let block : Keeper_tools_oas_workflow.workflow_rejection_block =
-      { count = previous_count + 1
-      ; rule_id = info.rule_id
-      ; tool_suggestion = info.tool_suggestion
-      ; hint = info.hint
-      ; blocked_at = Time_compat.now ()
-      }
-    in
-    Hashtbl.replace counts.workflow_block_table key block;
-    block.Keeper_tools_oas_workflow.count)
-;;
-
 (* Test-only: inject a failure counter with a stale timestamp so the
    TTL expiry path in [failure_count_get] can be exercised. *)
 let inject_stale_failure_count_for_test counts key count =
@@ -205,21 +163,6 @@ let inject_stale_failure_count_for_test counts key count =
       (Time_compat.now () -. (failure_count_ttl_seconds +. 60.)))
 ;;
 
-(* Test-only: inject a scope block with a stale [blocked_at] timestamp
-   so the TTL expiry path in [workflow_rejection_scope_block_get]
-   can be exercised without sleeping. *)
-let inject_stale_workflow_block_for_test counts key =
-  let block : Keeper_tools_oas_workflow.workflow_rejection_block =
-    { count = 1
-    ; rule_id = None
-    ; tool_suggestion = None
-    ; hint = None
-    ; blocked_at = Time_compat.now () -. (workflow_block_ttl_seconds +. 60.)
-    }
-  in
-  Mutex.protect counts.mutex (fun () ->
-    Hashtbl.replace counts.workflow_block_table key block)
-;;
 open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 
@@ -235,7 +178,7 @@ open Keeper_tools_oas_deterministic_error
     - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
 
     The [success] flag comes from the typed outcome returned by
-    [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome]. *)
+    [Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome]. *)
 let normalize_tool_result
       ?(workflow_rejection_recovery_fields = [])
       ~(success : bool)
@@ -332,7 +275,7 @@ let normalize_tool_result
 ;;
 
 let record_deterministic_tool_failure_metric ~tool_name reason =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ToolsOasDeterministicFailures)
     ~labels:
       [ "tool", tool_name
@@ -386,11 +329,11 @@ let transient_mutex_contention_tool_error
     Telemetry SSOT contract: [~name] flows into every observability
     sink (Keeper_registry.record_tool_use, SSE broadcast tool_name,
     decision-log "tool" field, Tool_registry). The LLM-facing
-    public name (Execute/ReadFile/...) only appears as the [Tool.schema.name]
+    public name (Execute/Read/...) only appears as the [Tool.schema.name]
     set by [Tool_bridge.oas_tool_of_masc] above this helper.
 
-    [?translate_input] reshapes the incoming JSON from the public schema
-    to the internal tool's expected payload. Identity by default. *)
+    Public aliases validate the LLM-facing payload before translation to the
+    internal tool's expected payload. Identity by default. *)
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

@@ -1,10 +1,11 @@
 (** Eval_gate — Pre/Post execution gates for Keeper tool calls.
 
     Multi-layer defense (Swiss Cheese Model):
-    1. Cost budget check — reject if accumulated cost exceeds limit
-    2. Destructive operation detection — reject bash commands with rm/drop/etc.
-    3. Tool allowlist — reject tools not in keeper's permitted set
-    4. Entropy check — reject if same tool called N+ times consecutively
+    1. Destructive operation detection — reject bash commands with rm/drop/etc.
+    2. Tool allowlist — reject tools not in keeper's permitted set
+    3. Entropy check — reject if same tool called N+ times consecutively
+
+    Cost thresholds are advisory telemetry only and must not reject execution.
 
     Each gate check is independent: any single rejection blocks execution.
     This prevents a failure in one layer from being masked by another.
@@ -20,11 +21,11 @@ let eval_cost_warn_ratio = 0.8
 
 type gate_config = {
   max_cost_usd : float;
-  (** Per-session cost limit.
+  (** Per-session advisory cost threshold.
       Default 0.50 USD. Based on observed MASC keeper sessions averaging
       $0.02-0.15 per session (local llama + GLM fallback). 0.50 is ~3x the
-      worst-case observed session cost, providing headroom without allowing
-      runaway spending. Adjust upward if using expensive cloud models directly. *)
+      worst-case observed session cost. This value may drive warnings and
+      reporting, but never gates tool execution. *)
 
   max_tool_calls_per_turn : int;
   (** Max tool calls in a single LLM turn (before yielding control).
@@ -56,16 +57,17 @@ let default_config : gate_config = {
   denied_tools = [];
 }
 
+type tool_policy = {
+  allowed : string list;
+  denied : string list;
+  allowlist_enabled : bool;
+}
+
 let tool_policy_of_config (config : gate_config) =
-  let allow =
-    if config.allowlist_enabled && config.allowed_tools <> [] then
-      Tool_access_policy.Names config.allowed_tools
-    else
-      Tool_access_policy.All
-  in
   {
-    Tool_access_policy.allow;
-    deny = Tool_access_policy.Names config.denied_tools;
+    allowed = config.allowed_tools;
+    denied = config.denied_tools;
+    allowlist_enabled = config.allowlist_enabled;
   }
 
 (* ================================================================ *)
@@ -230,10 +232,11 @@ let detect_destructive (command : string) : (string * string) option =
     The checks run in order of cheapest-to-evaluate first:
     1. Deny list (O(n) string compare)
     2. Allowlist (O(n) string compare)
-    3. Cost budget (float compare)
-    4. Turn call limit (int compare)
-    5. Entropy (list scan)
-    6. Destructive pattern (string scan, only for bash tools)
+    3. Turn call limit (int compare)
+    4. Entropy (list scan)
+    5. Destructive pattern (string scan, only for bash tools)
+
+    Cost is telemetry-only and is intentionally not checked here.
 
     First rejection wins — remaining checks are skipped. *)
 
@@ -254,14 +257,15 @@ let pre_check
     ~(trajectory_acc : Trajectory.accumulator option)
     ~(tool_name : string)
     ~(args_json : string)
-    : Trajectory.gate_decision =
+  : Trajectory.gate_decision =
+  ignore accumulated_cost;
 
   let tool_policy = tool_policy_of_config config in
-  let deny_hit =
-    Tool_access_policy.selector_matches_name tool_policy.deny tool_name
-  in
+  let deny_hit = List.mem tool_name tool_policy.denied in
   let allow_hit =
-    Tool_access_policy.selector_matches_name tool_policy.allow tool_name
+    not tool_policy.allowlist_enabled
+    || tool_policy.allowed = []
+    || List.mem tool_name tool_policy.allowed
   in
 
   (* 1. Shared allow/deny policy *)
@@ -270,12 +274,7 @@ let pre_check
   else if not allow_hit then
     Trajectory.Reject (Printf.sprintf "tool '%s' not in allowlist" tool_name)
 
-  (* 3. Cost budget *)
-  else if accumulated_cost >= config.max_cost_usd then
-    Trajectory.Reject (Printf.sprintf "cost budget exceeded: $%.4f >= $%.4f limit"
-      accumulated_cost config.max_cost_usd)
-
-  (* 4. Turn call limit *)
+  (* 2. Turn call limit *)
   else begin
     match trajectory_acc with
     | Some acc ->
@@ -375,11 +374,10 @@ let post_eval
   let has_error =
     try
       let json = Yojson.Safe.from_string result in
-      let open Yojson.Safe.Util in
-      (match json |> member "error" with
-       | `Null -> false
-       | `String "" -> false
-       | `String _ -> true
+      (match Json_util.assoc_member_opt "error" json with
+       | Some `Null -> false
+       | Some (`String "") -> false
+       | Some (`String _) -> true
        | _ -> false)
     with Yojson.Json_error _ -> false
   in
@@ -395,24 +393,26 @@ let post_eval
     else None
   in
 
-  (* Warn if approaching cost limit.
+  (* Warn if approaching advisory cost threshold.
      80%% threshold: standard practice from capacity planning (e.g., disk usage
      alerts at 80%%). Gives ~20%% remaining budget for the agent to wrap up
-     gracefully rather than hitting a hard wall mid-operation. *)
+     gracefully. This is not a hard wall. *)
   let new_cost = accumulated_cost +. cost in
   let cost_warn_ratio = eval_cost_warn_ratio in
-  let approaching_limit = new_cost >= config.max_cost_usd *. cost_warn_ratio in
+  let approaching_limit =
+    config.max_cost_usd > 0.0 && new_cost >= config.max_cost_usd *. cost_warn_ratio
+  in
   let should_warn = approaching_limit in
   let warning =
     if approaching_limit then
-      Some (Printf.sprintf "approaching cost limit: $%.4f / $%.4f (%.0f%%)"
+      Some (Printf.sprintf "approaching advisory cost threshold: $%.4f / $%.4f (%.0f%%)"
         new_cost config.max_cost_usd (new_cost /. config.max_cost_usd *. 100.0))
     else None
   in
 
   (* Warn on unusually long execution.
-     30s threshold: most MASC tool calls complete in <5s (room ops, broadcasts).
-     The slowest normal operations (Neo4j queries, cascade LLM calls) take 10-20s.
+     30s threshold: most MASC tool calls complete in <5s (workspace ops, broadcasts).
+     The slowest normal operations (Neo4j queries, runtime LLM calls) take 10-20s.
      30s indicates either a hung connection or an unexpectedly large operation
      that may be consuming shared resources. *)
   let slow_threshold_ms = 30_000 in
@@ -448,7 +448,7 @@ let post_eval
     Returns (gate_decision, result option, post_eval option, duration_ms).
 
     If pre-check rejects, the execution function is never called.
-    This is the main integration point for tool_keeper.ml. *)
+    This is the main integration point for keeper_tool_surface.ml. *)
 let guarded_execute
     ~(config : gate_config)
     ~(accumulated_cost : float)
@@ -478,6 +478,9 @@ let guarded_execute
           duration_ms;
           error;
           cost_usd = Trajectory.tool_cost_estimate tool_name;
+          (* RFC-0233: this gate path has no paired tool_calls row to join
+             against; id adoption for worker-gate executions is deferred. *)
+          execution_id = None;
         } in
         Trajectory.record_entry acc entry
   in
@@ -495,7 +498,11 @@ let guarded_execute
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           let msg = Printexc.to_string exn in
           error_ref := Some msg;
-          Log.info "eval_gate tool %s failed: %s" tool_name msg;
+          (* Caught tool-execution exception (Cancelled is re-raised above):
+             degraded-with-recovery — the gate records the error and returns an
+             error result — so [Warn], not [Info]
+             (docs/spec/18-log-severity-taxonomy.md § 2). *)
+          Log.Harness.warn "eval_gate tool %s failed: %s" tool_name msg;
           Yojson.Safe.to_string (`Assoc [
             ("error", `String "Tool execution failed (internal error)");
             ("tool", `String tool_name);

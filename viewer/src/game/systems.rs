@@ -95,7 +95,7 @@ fn complete_actor(progress: &mut TurnProgressState, actor_id: &str, result: &str
     }
 }
 
-/// Reset runtime turn progress when entering TRPG mode or switching rooms.
+/// Reset runtime turn progress when entering TRPG mode or switching workspaces.
 pub fn reset_turn_progress(mut progress: ResMut<TurnProgressState>) {
     *progress = TurnProgressState::default();
 }
@@ -146,17 +146,17 @@ pub fn apply_area_move(
     }
 }
 
-/// Apply turn advance events to global room state.
+/// Apply turn advance events to global workspace state.
 pub fn apply_turn_advance(
     mut events: MessageReader<TurnAdvanced>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
     for TurnAdvanced(payload) in events.read() {
-        if !payload.room_id.is_empty() {
-            room_state.id = payload.room_id.clone();
+        if !payload.workspace_id.is_empty() {
+            workspace_state.id = payload.workspace_id.clone();
         }
-        room_state.turn = payload.turn;
-        room_state.phase = TurnPhase::from_str(&payload.phase);
+        workspace_state.turn = payload.turn;
+        workspace_state.phase = TurnPhase::from_str(&payload.phase);
     }
 }
 
@@ -164,7 +164,7 @@ pub fn apply_turn_advance(
 pub fn apply_turn_progress(
     mut events: MessageReader<TurnProgressUpdated>,
     mut progress: ResMut<TurnProgressState>,
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
 ) {
     for TurnProgressUpdated(payload) in events.read() {
         if payload.turn > 0 {
@@ -173,8 +173,8 @@ pub fn apply_turn_progress(
         if !payload.phase.is_empty() {
             progress.phase = payload.phase.clone();
         }
-        if !payload.room_status.is_empty() {
-            progress.room_status = payload.room_status.clone();
+        if !payload.workspace_status.is_empty() {
+            progress.workspace_status = payload.workspace_status.clone();
         }
         if !payload.dm_keeper.is_empty() {
             progress.dm_keeper = payload.dm_keeper.clone();
@@ -235,20 +235,20 @@ pub fn apply_turn_progress(
                     set_actor_reason(&mut progress, actor_id, "");
                 }
             }
-            "room.started" => {
-                if progress.room_status.is_empty() {
-                    progress.room_status = "active".to_string();
+            "workspace.started" => {
+                if progress.workspace_status.is_empty() {
+                    progress.workspace_status = "active".to_string();
                 }
                 progress.actor_reasons.clear();
             }
-            "room.ended" => {
-                progress.room_status = "ended".to_string();
+            "workspace.ended" => {
+                progress.workspace_status = "ended".to_string();
                 progress.current_actor.clear();
                 progress.next_actor.clear();
                 progress.actor_reasons.clear();
             }
             "session.outcome" => {
-                progress.room_status = "ended".to_string();
+                progress.workspace_status = "ended".to_string();
                 progress.current_actor.clear();
                 progress.next_actor.clear();
                 progress.actor_reasons.clear();
@@ -257,19 +257,19 @@ pub fn apply_turn_progress(
         }
 
         // Phase inference removed: apply_phase_changed is the canonical
-        // source for room_state.phase. Inferring phase from event types here
+        // source for workspace_state.phase. Inferring phase from event types here
         // caused conflicts when phase.changed events arrived at different
         // timing than progress events.
     }
 
     if progress.turn == 0 {
-        progress.turn = room_state.turn;
+        progress.turn = workspace_state.turn;
     }
     if progress.phase.is_empty() {
-        progress.phase = room_state.phase.as_str().to_string();
+        progress.phase = workspace_state.phase.as_str().to_string();
     }
-    if progress.room_status.is_empty() {
-        progress.room_status = room_state.status.clone();
+    if progress.workspace_status.is_empty() {
+        progress.workspace_status = workspace_state.status.clone();
     }
 }
 
@@ -489,17 +489,17 @@ pub fn apply_actor_released(
     }
 }
 
-/// Mark room as ended when RoomEnded event fires.
-pub fn apply_room_ended(
-    mut events: MessageReader<RoomEnded>,
-    mut room_state: ResMut<RoomState>,
+/// Mark workspace as ended when WorkspaceEnded event fires.
+pub fn apply_workspace_ended(
+    mut events: MessageReader<WorkspaceEnded>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut combat_state: ResMut<CombatState>,
 ) {
-    for RoomEnded(payload) in events.read() {
-        if room_state.id == payload.room_id || payload.room_id.is_empty() {
-            room_state.status = "ended".to_string();
+    for WorkspaceEnded(payload) in events.read() {
+        if workspace_state.id == payload.workspace_id || payload.workspace_id.is_empty() {
+            workspace_state.status = "ended".to_string();
 
-            // Reset combat state when room ends
+            // Reset combat state when workspace ends
             if combat_state.active {
                 combat_state.active = false;
                 combat_state.area.clear();
@@ -509,13 +509,13 @@ pub fn apply_room_ended(
     }
 }
 
-/// Update room state on scene transitions.
+/// Update workspace state on scene transitions.
 pub fn apply_scene_transitioned(
     mut events: MessageReader<SceneTransitioned>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
     for SceneTransitioned(payload) in events.read() {
-        room_state.current_scenario = payload.to_scene.clone();
+        workspace_state.current_scenario = payload.to_scene.clone();
     }
 }
 
@@ -533,28 +533,28 @@ pub fn apply_party_selected(
     }
 }
 
-pub fn apply_room_created(
-    mut events: MessageReader<RoomCreated>,
-    mut room_state: ResMut<RoomState>,
+pub fn apply_workspace_created(
+    mut events: MessageReader<WorkspaceCreated>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
-    for RoomCreated(p) in events.read() {
-        room_state.id = p.room_id.clone();
-        room_state.status = "created".to_string();
+    for WorkspaceCreated(p) in events.read() {
+        workspace_state.id = p.workspace_id.clone();
+        workspace_state.status = "created".to_string();
     }
 }
 
-pub fn apply_room_started(
-    mut events: MessageReader<RoomStarted>,
-    mut room_state: ResMut<RoomState>,
+pub fn apply_workspace_started(
+    mut events: MessageReader<WorkspaceStarted>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
-    for RoomStarted(p) in events.read() {
-        if !p.room_id.is_empty() {
-            room_state.id = p.room_id.clone();
+    for WorkspaceStarted(p) in events.read() {
+        if !p.workspace_id.is_empty() {
+            workspace_state.id = p.workspace_id.clone();
         }
         if !p.status.is_empty() {
-            room_state.status = p.status.clone();
+            workspace_state.status = p.status.clone();
         } else {
-            room_state.status = "started".to_string();
+            workspace_state.status = "started".to_string();
         }
     }
 }
@@ -567,26 +567,26 @@ pub fn apply_session_started(mut events: MessageReader<SessionStarted>) {
 
 pub fn apply_phase_changed(
     mut events: MessageReader<PhaseChanged>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
     for PhaseChanged(p) in events.read() {
-        if !p.room_id.is_empty() {
-            room_state.id = p.room_id.clone();
+        if !p.workspace_id.is_empty() {
+            workspace_state.id = p.workspace_id.clone();
         }
-        room_state.phase = TurnPhase::from_str(&p.phase);
+        workspace_state.phase = TurnPhase::from_str(&p.phase);
     }
 }
 
 pub fn apply_turn_started(
     mut events: MessageReader<TurnStarted>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
 ) {
     for TurnStarted(p) in events.read() {
-        if !p.room_id.is_empty() {
-            room_state.id = p.room_id.clone();
+        if !p.workspace_id.is_empty() {
+            workspace_state.id = p.workspace_id.clone();
         }
-        room_state.turn = p.turn;
-        room_state.phase = TurnPhase::from_str(&p.phase);
+        workspace_state.turn = p.turn;
+        workspace_state.phase = TurnPhase::from_str(&p.phase);
     }
 }
 
@@ -609,12 +609,12 @@ pub fn apply_turn_action_resolved(
 
 pub fn apply_combat_attack(
     mut events: MessageReader<CombatAttack>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut progress: ResMut<TurnProgressState>,
 ) {
     for CombatAttack(payload) in events.read() {
         if payload.turn > 0 {
-            room_state.turn = payload.turn;
+            workspace_state.turn = payload.turn;
             progress.turn = payload.turn;
         }
         let actor_id = payload.actor_id.trim();
@@ -632,12 +632,12 @@ pub fn apply_combat_attack(
 
 pub fn apply_combat_defense(
     mut events: MessageReader<CombatDefense>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut progress: ResMut<TurnProgressState>,
 ) {
     for CombatDefense(payload) in events.read() {
         if payload.turn > 0 {
-            room_state.turn = payload.turn;
+            workspace_state.turn = payload.turn;
             progress.turn = payload.turn;
         }
         let actor_id = payload.actor_id.trim();
@@ -659,17 +659,17 @@ pub fn apply_combat_defense(
 
 pub fn apply_session_outcome(
     mut events: MessageReader<SessionOutcome>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut progress: ResMut<TurnProgressState>,
     mut combat_state: ResMut<CombatState>,
 ) {
     for SessionOutcome(payload) in events.read() {
-        room_state.status = "ended".to_string();
+        workspace_state.status = "ended".to_string();
         if payload.turn > 0 {
-            room_state.turn = payload.turn;
+            workspace_state.turn = payload.turn;
             progress.turn = payload.turn;
         }
-        progress.room_status = "ended".to_string();
+        progress.workspace_status = "ended".to_string();
         let reason = payload.reason.trim();
         let source = payload.outcome_source.trim();
         let detail = if reason.is_empty() {

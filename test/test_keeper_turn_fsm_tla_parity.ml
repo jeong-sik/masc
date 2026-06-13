@@ -34,7 +34,7 @@ let spec_terminal_state_set = spec_quoted_set "TerminalStateSet"
 let sort = Masc_test_deps.sorted_strings
 
 let test_all_symbols_match_spec () =
-  let ocaml = sort Masc_mcp.Keeper_turn_fsm.all_symbols in
+  let ocaml = sort Masc.Keeper_turn_fsm.all_symbols in
   let spec = sort spec_turn_state_set in
   if ocaml <> spec then begin
     Printf.printf "OCaml all_symbols  : [%s]\n"
@@ -59,13 +59,13 @@ let check_symbol_set ~label ~ocaml ~spec =
 
 let test_classified_symbols_match_spec () =
   check_symbol_set ~label:"active_symbols"
-    ~ocaml:Masc_mcp.Keeper_turn_fsm.active_symbols
+    ~ocaml:Masc.Keeper_turn_fsm.active_symbols
     ~spec:spec_active_state_set;
   check_symbol_set ~label:"terminal_symbols"
-    ~ocaml:Masc_mcp.Keeper_turn_fsm.terminal_symbols
+    ~ocaml:Masc.Keeper_turn_fsm.terminal_symbols
     ~spec:spec_terminal_state_set;
   check_symbol_set ~label:"idle_symbols"
-    ~ocaml:Masc_mcp.Keeper_turn_fsm.idle_symbols
+    ~ocaml:Masc.Keeper_turn_fsm.idle_symbols
     ~spec:[ "idle" ]
 
 let test_to_tla_symbol_for_each_constructor () =
@@ -73,40 +73,40 @@ let test_to_tla_symbol_for_each_constructor () =
      into the spec set. Parameterised constructors are exercised with a
      dummy payload. *)
   let probe_nullary symbol_should_be ctor =
-    assert (Masc_mcp.Keeper_turn_fsm.to_tla_symbol ctor = symbol_should_be)
+    assert (Masc.Keeper_turn_fsm.to_tla_symbol ctor = symbol_should_be)
   in
-  probe_nullary "idle" Masc_mcp.Keeper_turn_fsm.Idle;
-  probe_nullary "phase_gating" Masc_mcp.Keeper_turn_fsm.Phase_gating;
-  probe_nullary "cascade_routing" Masc_mcp.Keeper_turn_fsm.Cascade_routing;
-  probe_nullary "awaiting_provider" Masc_mcp.Keeper_turn_fsm.Awaiting_provider;
-  probe_nullary "streaming" Masc_mcp.Keeper_turn_fsm.Streaming;
+  probe_nullary "idle" Masc.Keeper_turn_fsm.Idle;
+  probe_nullary "phase_gating" Masc.Keeper_turn_fsm.Phase_gating;
+  probe_nullary "runtime_routing" Masc.Keeper_turn_fsm.Runtime_routing;
+  probe_nullary "awaiting_provider" Masc.Keeper_turn_fsm.Awaiting_provider;
+  probe_nullary "streaming" Masc.Keeper_turn_fsm.Streaming;
   (* [@tla.symbol "awaiting_tool"] override exercised here. *)
   probe_nullary "awaiting_tool"
-    Masc_mcp.Keeper_turn_fsm.Awaiting_tool_result;
-  probe_nullary "completing" Masc_mcp.Keeper_turn_fsm.Completing;
-  probe_nullary "done" Masc_mcp.Keeper_turn_fsm.Done;
+    Masc.Keeper_turn_fsm.Awaiting_tool_result;
+  probe_nullary "completing" Masc.Keeper_turn_fsm.Completing;
+  probe_nullary "done" Masc.Keeper_turn_fsm.Done;
   let dummy_failure =
-    Masc_mcp.Keeper_turn_fsm.Failure_runtime_error "probe"
+    Masc.Keeper_turn_fsm.Failure_runtime_error "probe"
   in
   let dummy_cancel =
-    Masc_mcp.Keeper_turn_fsm.Cancelled_supervisor_stop
+    Masc.Keeper_turn_fsm.Cancelled_supervisor_stop
   in
   assert (
-    Masc_mcp.Keeper_turn_fsm.to_tla_symbol
-      (Masc_mcp.Keeper_turn_fsm.Failed dummy_failure)
+    Masc.Keeper_turn_fsm.to_tla_symbol
+      (Masc.Keeper_turn_fsm.Failed dummy_failure)
     = "failed");
   assert (
-    Masc_mcp.Keeper_turn_fsm.to_tla_symbol
-      (Masc_mcp.Keeper_turn_fsm.Cancelled dummy_cancel)
+    Masc.Keeper_turn_fsm.to_tla_symbol
+      (Masc.Keeper_turn_fsm.Cancelled dummy_cancel)
     = "cancelled")
 
 let test_classification_predicates () =
-  let open Masc_mcp.Keeper_turn_fsm in
+  let open Masc.Keeper_turn_fsm in
   assert (is_idle Idle);
   assert (not (is_active Idle));
   assert (not (is_terminal Idle));
   assert (is_active Phase_gating);
-  assert (is_active Cascade_routing);
+  assert (is_active Runtime_routing);
   assert (is_active Awaiting_provider);
   assert (is_active Streaming);
   assert (is_active Awaiting_tool_result);

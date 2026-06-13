@@ -8,6 +8,9 @@
     used by [Keeper_supervisor_self_preservation.apply]). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 
 let cleanup_dead_tombstone
@@ -36,7 +39,7 @@ let cleanup_dead_tombstone
         with
         | Ok () -> true
         | Error err when is_version_conflict_error err ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
             ();
@@ -46,7 +49,7 @@ let cleanup_dead_tombstone
             err;
           false
         | Error err ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
             ();
@@ -79,7 +82,7 @@ let cleanup_dead_tombstone
       Log.Keeper.warn
         "%s: dead tombstone unregistered despite meta write failure"
         entry.name;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string SupervisorCleanupFailures)
         ~labels:
           [ "keeper", entry.name
@@ -97,7 +100,7 @@ let cleanup_dead_tombstone
       "meta missing"
       ();
     Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
@@ -115,7 +118,7 @@ let cleanup_dead_tombstone
       (Printf.sprintf "meta read error: %s" err)
       ();
     Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name

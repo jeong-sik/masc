@@ -23,6 +23,7 @@ import { errorToString } from '../lib/format-string'
 
 const MCP_BLOCKED_MESSAGE = 'MCP 연결이 차단되었습니다.'
 const MCP_SESSION_BLOCKED = '__blocked__'
+const MCP_UNKNOWN_SESSION_MESSAGE = 'Unknown Mcp-Session-Id'
 
 let mcpSessionId: string | null = null
 let initPromise: Promise<void> | null = null
@@ -113,26 +114,72 @@ function mcpHeadersForActor(
   return headers
 }
 
+function resetMcpSessionOnly(): void {
+  mcpSessionId = null
+  initPromise = null
+  if (initCooldownTimer) {
+    clearTimeout(initCooldownTimer)
+    initCooldownTimer = null
+  }
+}
+
+function mcpBodyMethod(body: unknown): string | null {
+  if (typeof body !== 'object' || body === null) return null
+  const method = (body as Record<string, unknown>).method
+  return typeof method === 'string' ? method : null
+}
+
+function canRetryUnknownSession(body: unknown): boolean {
+  const method = mcpBodyMethod(body)
+  return method !== 'initialize'
+    && method !== 'notifications/initialized'
+    && method !== 'ping'
+    && method !== 'server/discover'
+}
+
+async function responseTextSnippet(res: Response): Promise<string> {
+  try {
+    return await res.clone().text()
+  } catch {
+    return ''
+  }
+}
+
 async function mcpPost(
   body: unknown,
   timeoutMs = DEFAULT_MCP_TIMEOUT_MS,
   actorName?: string | null,
+  retryUnknownSession = true,
 ): Promise<string> {
   const res = await fetchWithTimeout('/mcp', {
     method: 'POST',
     headers: mcpHeadersForActor(actorName),
     body: JSON.stringify(body),
   }, timeoutMs)
-  // Capture session ID from response
-  const sid = res.headers.get('Mcp-Session-Id')
-  if (sid) mcpSessionId = sid
   if (!res.ok) {
     if (res.status === 403) {
       mcpSessionId = MCP_SESSION_BLOCKED
       throw new Error(MCP_BLOCKED_MESSAGE)
     }
-    throw await apiRequestErrorFromResponse('POST', '/mcp', res)
+    const bodyText = res.status === 404 ? await responseTextSnippet(res) : ''
+    const err = await apiRequestErrorFromResponse('POST', '/mcp', res)
+    const message = `${bodyText}\n${errorToString(err)}`
+    if (
+      retryUnknownSession
+      && res.status === 404
+      && canRetryUnknownSession(body)
+      && message.includes(MCP_UNKNOWN_SESSION_MESSAGE)
+    ) {
+      resetMcpSessionOnly()
+      await ensureSession()
+      return mcpPost(body, timeoutMs, actorName, false)
+    }
+    throw err
   }
+  // Capture session ID only after successful responses. A stale-session 404
+  // may include a fresh header, but that header is not initialized yet.
+  const sid = res.headers.get('Mcp-Session-Id')
+  if (sid) mcpSessionId = sid
   return res.text()
 }
 
@@ -207,13 +254,8 @@ async function ensureSession(): Promise<void> {
 }
 
 export function resetMcpClientState(): void {
-  mcpSessionId = null
-  initPromise = null
+  resetMcpSessionOnly()
   resetDevTokenBootstrap()
-  if (initCooldownTimer) {
-    clearTimeout(initCooldownTimer)
-    initCooldownTimer = null
-  }
 }
 
 // --- MCP over HTTP helper ---

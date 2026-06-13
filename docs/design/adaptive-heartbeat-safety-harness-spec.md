@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - scripts/harness/
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_composite_observer.ml
 ---
 
@@ -64,7 +64,7 @@ Recommended environment surface:
 | `TARGET_SCENARIOS` | comma-separated scenario list |
 | `PORT` | server port override |
 | `KEEPER_NAME` | target durable keeper name |
-| `KEEPER_MODELS` | deterministic model cascade override |
+| `KEEPER_MODELS` | deterministic model runtime override |
 | `PLANNED_TEST` | planned fault injection marker, default `1` |
 
 ### 3.2 Default Scenario Set
@@ -123,11 +123,11 @@ Assertions:
 
 Purpose:
 
-- prove turn success does not mask room heartbeat failure
+- prove turn success does not mask workspace heartbeat failure
 
 Injection:
 
-- simulate or force `turn succeeds but Room.heartbeat_in_room fails`
+- simulate or force `turn succeeds but Workspace.heartbeat_in_workspace fails`
 
 Assertions:
 
@@ -196,7 +196,7 @@ Purpose:
 Assertions:
 
 - `grpc_connected` and `last_grpc_ack_age_sec` visible
-- disconnected gRPC stream does not refresh room freshness lease
+- disconnected gRPC stream does not refresh workspace freshness lease
 
 ### 6.2 `phi_shadow`
 
@@ -213,7 +213,7 @@ Assertions:
 
 Purpose:
 
-- validate transport-only phi enforcement per [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md)
+- validate transport-only phi enforcement per [adaptive-heartbeat-phi-enforcement-rfc.md](/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/adaptive-heartbeat-scheduling-rfc/docs/design/adaptive-heartbeat-phi-enforcement-rfc.md)
 
 Assertions:
 

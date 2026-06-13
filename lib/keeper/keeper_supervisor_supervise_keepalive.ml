@@ -11,8 +11,8 @@
     2. On [Ok ()]:
        - logs persona drift if missing
        - registers offline in [Keeper_registry]
-       - lazily initializes the coordination room (Coord.init)
-       - syncs keeper room presence + writes meta (failures degrade
+       - lazily initializes the workspace root (Workspace.init)
+       - syncs keeper workspace presence + writes meta (failures degrade
          to original meta but tick failure counters)
        - calls the injected [~launch_supervised_fiber] to actually
          spawn the supervised fiber
@@ -27,6 +27,9 @@
       just forwards) *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 module Startup_helpers = Keeper_supervisor_startup_helpers
 
@@ -47,7 +50,7 @@ let supervise_keepalive
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
   then ()
   else
-    match Keeper_registry.spawn_slots_decision ~base_path:ctx.config.base_path () with
+    match Keeper_registry.spawn_slots_decision () with
     | Error reason ->
       Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
       publish_lifecycle
@@ -65,27 +68,27 @@ let supervise_keepalive
     let reg =
       Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta
     in
-    (* Coord initialization *)
+    (* Workspace initialization *)
     (try
-       if not (Coord_utils.is_initialized ctx.config)
+       if not (Workspace_utils.is_initialized ctx.config)
        then (
-         let (_init_msg : string) = Coord.init ctx.config ~agent_name:None in
+         let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
          ())
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
-         Keeper_metrics.(to_string RoomInitFailures)
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string WorkspaceInitFailures)
          ~labels:[ "keeper", meta.name ]
          ();
-       Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
+       Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
     let live_meta =
       try
-        let synced = ensure_keeper_room_presence ctx.config meta in
+        let synced = meta in
         (match write_meta ctx.config synced with
          | Ok () -> ()
          | Error msg ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string WriteMetaFailures)
              ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
              ();
@@ -97,7 +100,7 @@ let supervise_keepalive
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string PresenceSyncFailures)
           ~labels:[ "keeper", meta.name ]
           ();

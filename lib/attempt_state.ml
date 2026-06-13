@@ -49,11 +49,7 @@ let to_json t =
     | Failed { reason } -> `String reason
     | Start_dispatched | Timed_out -> `Null
   in
-  let next_retry =
-    match t.next_retry_unix with
-    | Some v -> `Float v
-    | None -> `Null
-  in
+  let next_retry = Json_util.float_opt_to_json t.next_retry_unix in
   `Assoc
     [
       ("generation", `Int t.generation);

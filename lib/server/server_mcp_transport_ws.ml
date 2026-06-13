@@ -17,13 +17,23 @@
 let sha1 s =
   Digestif.SHA1.(digest_string s |> to_raw_string)
 
+(** Dashboard authentication state for a WebSocket session.  Set once by
+    [dashboard_hello] and then read on the SSE forward hot path and the
+    dashboard RPC auth gates.  Held in an [Atomic.t] on the session
+    ([dashboard_auth]) so the single write and the many reads stay tear-free
+    if dashboard serving moves off the main Eio domain (RFC-0204 §8.4,
+    Phase 1).  [Authenticated] carries the resolved agent name, or [None]
+    when the auth config permits tokenless dashboard reads. *)
+type dashboard_auth_state =
+  | Unauthenticated
+  | Authenticated of { agent : string option }
+
 (** Active WebSocket session state. *)
 type ws_session = {
   id: string;
   wsd: Httpun_ws.Wsd.t;
   mutable closed: bool;
-  mutable dashboard_authenticated: bool;
-  mutable dashboard_agent: string option;
+  dashboard_auth: dashboard_auth_state Atomic.t;
   mutable dashboard_route: string option;
   dashboard_slices: (string, unit) Hashtbl.t;
   mutable dashboard_seq: int;
@@ -40,6 +50,19 @@ type ws_session = {
   mutable dashboard_last_buffered_amount: int;
   mutable inbound_partial_text: Buffer.t option;
 }
+
+(** [true] when the dashboard handshake has completed for this state. *)
+let dashboard_auth_is_authenticated = function
+  | Unauthenticated -> false
+  | Authenticated _ -> true
+
+(** Resolved agent name for an authenticated state, [None] otherwise. *)
+let dashboard_auth_agent = function
+  | Unauthenticated -> None
+  | Authenticated { agent } -> agent
+
+(** Reads a session's current dashboard auth state (wait-free). *)
+let dashboard_auth session = Atomic.get session.dashboard_auth
 
 (** Registry of active WebSocket sessions. *)
 let sessions : (string, ws_session) Hashtbl.t = Hashtbl.create 16
@@ -130,8 +153,7 @@ let new_session ~id ~wsd =
     id;
     wsd;
     closed = false;
-    dashboard_authenticated = false;
-    dashboard_agent = None;
+    dashboard_auth = Atomic.make Unauthenticated;
     dashboard_route = None;
     dashboard_slices = Hashtbl.create 8;
     dashboard_seq = 0;
@@ -268,19 +290,14 @@ let dashboard_session_result session =
       session.dashboard_slices []
     |> List.sort compare
   in
+  let auth = dashboard_auth session in
   `Assoc
     [
       ("protocol", `String "dashboard-ws.v1");
       ("session_id", `String session.id);
-      ("authenticated", `Bool session.dashboard_authenticated);
-      ( "agent",
-        match session.dashboard_agent with
-        | Some agent -> `String agent
-        | None -> `Null );
-      ( "route",
-        match session.dashboard_route with
-        | Some route -> `String route
-        | None -> `Null );
+      ("authenticated", `Bool (dashboard_auth_is_authenticated auth));
+      ( "agent", Json_util.string_opt_to_json (dashboard_auth_agent auth) );
+      ( "route", Json_util.string_opt_to_json session.dashboard_route );
       ("slices", `List slices);
       ("seq", `Int session.dashboard_seq);
     ]
@@ -341,8 +358,10 @@ let dashboard_hello ~base_path ~session_id ?token () =
         match verify_dashboard_token ~base_path token with
         | Error msg -> Error msg
         | Ok agent ->
-            session.dashboard_authenticated <- true;
-            session.dashboard_agent <- agent;
+            (* Single writer per session: dashboard_hello is the only site
+               that sets the auth state, so Atomic.set (not compare_and_set)
+               is sufficient.  Revisit if a second writer is introduced. *)
+            Atomic.set session.dashboard_auth (Authenticated { agent });
             Ok (dashboard_auth_success_payload session))
   in
   Transport_metrics.observe_ws_dashboard_hello_latency
@@ -364,10 +383,7 @@ let dashboard_snapshot session =
     [
       ("protocol", `String "dashboard-ws.v1");
       ("seq", `Int (next_dashboard_seq session));
-      ( "route",
-        match session.dashboard_route with
-        | Some route -> `String route
-        | None -> `Null );
+      ( "route", Json_util.string_opt_to_json session.dashboard_route );
       ("slices", `Assoc slices);
     ]
 
@@ -375,7 +391,7 @@ let dashboard_subscribe ~session_id ?route ~slices () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not session.dashboard_authenticated then
+      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/subscribe requires dashboard/hello first"
       else begin
         let invalid =
@@ -406,7 +422,7 @@ let dashboard_unsubscribe ~session_id ?slices () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not session.dashboard_authenticated then
+      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/unsubscribe requires dashboard/hello first"
       else begin
         with_sessions_rw (fun () ->
@@ -427,7 +443,7 @@ let dashboard_ping ~session_id () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not session.dashboard_authenticated then
+      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/ping requires dashboard/hello first"
       else
         Ok
@@ -442,7 +458,7 @@ let dashboard_ack ~session_id ~seq ?buffered_amount () =
   match find_session session_id with
   | None -> Error "WebSocket session not found"
   | Some session ->
-      if not session.dashboard_authenticated then
+      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
         Error "dashboard/ack requires dashboard/hello first"
       else begin
         if seq > session.dashboard_last_ack_seq then
@@ -658,7 +674,7 @@ let client_buffer_limit_bytes () =
     authenticated dashboard sessions track bufferedAmount; anonymous
     sessions always pass. *)
 let session_is_backpressured session =
-  if not session.dashboard_authenticated then false
+  if not (dashboard_auth_is_authenticated (dashboard_auth session)) then false
   else
     let limit = client_buffer_limit_bytes () in
     limit > 0 && session.dashboard_last_buffered_amount >= limit
@@ -705,7 +721,7 @@ let send_dashboard_or_raw_sse session sse_event =
     Transport_metrics.inc_ws_throttled_delivery ();
     true
   end
-  else if session.dashboard_authenticated then begin
+  else if dashboard_auth_is_authenticated (dashboard_auth session) then begin
     (* Parse once and reuse for both the delta-build branch and the
        slice-mismatch decision.  parse_sse_dashboard_event hits a
        single-slot Atomic cache after the broadcast's first call, but
@@ -964,3 +980,17 @@ let close_all () =
   List.iter cleanup_session ids;
   Transport_metrics.set_ws_sessions 0;
   List.length ids
+;;
+
+let () = Shutdown_hooks.register_ws_cleanup (fun () -> close_all (), session_count ())
+
+let () =
+  Mcp_server_eio_protocol.register_dashboard_ws_handlers
+    ~hello:(fun ~base_path ~session_id ?token () -> dashboard_hello ~base_path ~session_id ?token ())
+    ~subscribe:(fun ~session_id ?route ~slices () -> dashboard_subscribe ~session_id ?route ~slices ())
+    ~unsubscribe:(fun ~session_id ?slices () -> dashboard_unsubscribe ~session_id ?slices ())
+    ~ping:(fun ~session_id () -> dashboard_ping ~session_id ());
+  Mcp_server_eio_protocol.register_dashboard_ack dashboard_ack
+;;
+
+

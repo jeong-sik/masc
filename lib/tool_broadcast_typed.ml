@@ -32,14 +32,14 @@ let broadcast_schema = Sg.one message_field
 
 type broadcast_output = {
   delivered : bool;
-  room_message : string;
+  broadcast_message : string;
   mention : string option;
 }
 
 let encode_broadcast (output : broadcast_output) : Yojson.Safe.t =
   `Assoc ([
     ("delivered", `Bool output.delivered);
-    ("room_message", `String output.room_message);
+    ("broadcast_message", `String output.broadcast_message);
   ] @ match output.mention with
     | Some m -> [("mention", `String m)]
     | None -> [])
@@ -50,7 +50,7 @@ let handle_broadcast (message : string)
   if String.equal trimmed "" then Error "Broadcast message cannot be empty"
   else
     let mention = Mention.extract trimmed in
-    Ok { delivered = true; room_message = trimmed; mention }
+    Ok { delivered = true; broadcast_message = trimmed; mention }
 
 let parse_broadcast (json : Yojson.Safe.t) =
   match Sg.parse broadcast_schema json with
@@ -63,10 +63,9 @@ let parse_broadcast (json : Yojson.Safe.t) =
 let tool = Typed_tool_masc.create
   ~name:"masc_broadcast_typed"
   ~description:"[Typed PoC] Send a message visible to ALL agents via SSE push."
-  ~module_tag:Tool_dispatch.Mod_room
+  ~module_tag:Tool_dispatch.Mod_state
   ~params:(Sg.to_params broadcast_schema)
   ~parse:parse_broadcast
   ~handler:handle_broadcast
   ~encode:encode_broadcast
-  ~requires_join:true
   ()

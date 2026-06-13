@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let test_standard_labels () =
   let cases =

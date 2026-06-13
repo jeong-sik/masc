@@ -2,14 +2,17 @@
 
 (library
  (name masc_ide)
- (public_name masc_mcp.ide)
+ (public_name masc.ide)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (modules
   ide_annotation_types
   ide_annotations
-  ide_migration
+  ide_command_descriptor
+  ide_bridge
+  ide_event_types
   ide_paths
   ide_region_tracker)
  (libraries
@@ -19,8 +22,6 @@
   yojson
   uuidm
   fs_compat
-  ;; RFC-0128 §5 Phase 3 — Ide_migration uses Repo_store.find_repo_by_path_prefix
-  ;; to route legacy records to their canonical-URL bucket. repo_manager
-  ;; depends only on config/fs_compat/exec/log so the new edge introduces
-  ;; no dependency cycle.
-  masc_mcp.repo_manager))
+  masc.command_descriptor
+  masc.agent_observation
+  masc.masc_exec))

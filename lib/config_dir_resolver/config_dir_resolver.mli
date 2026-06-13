@@ -31,8 +31,6 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
-  cascade_authoring : path_item;
-  cascade : path_item;
   prompts : path_item;
   keepers : path_item;
   personas : path_item;
@@ -49,9 +47,8 @@ type inputs = {
 (** {1 SSOT filenames}
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
-val cascade_toml_filename : string
 val tool_policy_toml_filename : string
-val keeper_runtime_toml_filename : string
+val runtime_toml_filename : string
 
 val inputs_from_env : unit -> inputs
 (** Snapshot current environment (cwd, executable, env vars). *)
@@ -73,16 +70,6 @@ val reset : unit -> unit
 
     Convenience functions that call [resolve ()] internally. *)
 
-(** Path to the on-disk cascade source ([cascade.toml]) when the config
-    root resolves to a usable directory and the file exists. Returns
-    [None] when the resolver state is [Invalid_env]/[Missing] or the
-    file is absent. *)
-val cascade_path_opt : unit -> string option
-
-(** Candidate path to the on-disk cascade source ([cascade.toml]),
-    independent of whether the file exists. Useful for diagnostics that
-    want to surface the expected path. *)
-val cascade_path_candidate : unit -> string
 val prompts_dir : unit -> string
 val keepers_dir : unit -> string
 val personas_dir_opt : unit -> string option
@@ -114,9 +101,6 @@ val auth_dir : base_path:string -> string
 val credentials_dir : base_path:string -> string
 (** [<base_path>/.masc/credentials/]. Per-credential file storage. *)
 
-val repo_cli_identities_dir : base_path:string -> string
-(** [<base_path>/.masc/repo-cli-identities/]. Repo CLI identity bundles. *)
-
 val agent_runtime_dir : base_path:string -> string
 (** [<base_path>/.masc/runtime/agent/]. Per-session agent runtime markers. *)
 
@@ -136,23 +120,20 @@ val data_dir : base_path:string -> string
 
 (** {2 Config-rooted file accessors} *)
 
-val credentials_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/credentials.toml]. Backwards-compatible
+val repositories_toml_path : base_path:string -> string
+(** [<base_path>/.masc/config/repositories.toml]. Backwards-compatible
     direct derivation from [base_path]. A future RFC may extend this to
     honour [MASC_CONFIG_DIR] override; until then the location matches
     pre-RFC-0121 caller behaviour. *)
 
-val repositories_toml_path : base_path:string -> string
-(** [<base_path>/.masc/config/repositories.toml]. Same caveat as
-    [credentials_toml_path]. *)
-
 val keeper_repo_mappings_toml_path : base_path:string -> string
 (** [<base_path>/.masc/config/keeper_repo_mappings.toml]. Same caveat as
-    [credentials_toml_path]. *)
+    [repositories_toml_path]. *)
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has cascade.toml, prompts/, keepers/, or personas/). *)
+    MASC config directory (has runtime.toml, tool_policy.toml, prompts/,
+    keepers/, or personas/). *)
 
 (** {1 Env introspection}
 

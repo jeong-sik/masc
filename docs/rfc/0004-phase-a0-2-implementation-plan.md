@@ -10,7 +10,7 @@ Related: PR #7955 (dashboard manual SSE schema, current TS boundary), PR #15807-
 Phase A0.1 완료 상태 (2026-05-17):
 
 - `lib/sse_event/sse_event.atd` 가 16 SSE event 의 typed schema SSOT
-- `lib/cascade/cascade_event_bridge.ml` 의 모든 publish arm 이 `Sse_event` typed constructor 경유
+- `lib/runtime/runtime_event_bridge.ml` 의 모든 publish arm 이 `Sse_event` typed constructor 경유
 - `test/sse_event/test_sse_event.ml` 의 19 byte-equal test 가 wire envelope SSOT 고정
 
 Phase A0.2 의 정확한 작업 = **이 SSOT 를 TypeScript 측에서도 사용하게 만드는 것**. 이 작업이 없으면 dashboard 의 `schemas/sse.ts` (현재 manual schema-like, ~310 LOC) 가 wire format 변경마다 drift 위험에 노출.
@@ -125,4 +125,4 @@ PR-A0.2-PR-1 의 첫 commit = `agent_started` 1 event 로 round-trip 검증 (atd
 
 ---
 
-**Phase A0.1 ↔ A0.2 의 본질적 차이**: A0.1 은 OCaml 내부의 boundary 정리 (cascade emitter ↔ leaf event lib). A0.2 는 *cross-language boundary* (OCaml ↔ TypeScript). 도구 체인 선택의 risk 가 A0.1 보다 큼. Plan 단계에서 충분한 옵션 평가가 PR cadence 안전성을 좌우.
+**Phase A0.1 ↔ A0.2 의 본질적 차이**: A0.1 은 OCaml 내부의 boundary 정리 (runtime emitter ↔ leaf event lib). A0.2 는 *cross-language boundary* (OCaml ↔ TypeScript). 도구 체인 선택의 risk 가 A0.1 보다 큼. Plan 단계에서 충분한 옵션 평가가 PR cadence 안전성을 좌우.

@@ -1,6 +1,8 @@
 (* keeper_run_context — Steps 0–4 of run_turn. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
@@ -23,7 +25,7 @@ type run_context =
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
-  ; cascade_config_path : string option
+  ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
   ; approval_mode_effective : string option
   ; approval_mode_derived : bool
@@ -31,11 +33,11 @@ type run_context =
   }
 
 val prepare_run_context :
-     config:Coord.config
+     config:Workspace.config
   -> meta:keeper_meta
   -> base_dir:string
   -> max_context:int
-  -> cascade_name:Cascade_name.t
+  -> runtime_id:string
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?shared_context:Agent_sdk.Context.t

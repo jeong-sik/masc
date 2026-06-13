@@ -35,11 +35,12 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
-val read_recent : t -> int -> Yojson.Safe.t list
-(** [read_recent t n] returns the newest [n] entries in chronological order
-    (oldest first).  Scans day-files from newest to oldest, stops early. *)
+val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
+(** [read_recent ?offset t n] returns the newest [n] entries in chronological
+    order (oldest first), skipping the first [offset] newest entries.
+    Scans day-files from newest to oldest, stops early. *)
 
-val read_recent_lines : t -> int -> string list
+val read_recent_lines : ?offset:int -> t -> int -> string list
 (** Like {!read_recent} but returns raw JSONL strings (no parse).
     Useful for tail-readers that do their own parsing. *)
 
@@ -47,6 +48,21 @@ val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
 (** [read_range t ~since ~until] returns entries whose day-file falls
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
     Result is in chronological order. *)
+
+val read_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> Yojson.Safe.t list
+(** [read_range_recent ?offset t ~since ~until n] returns at most the newest
+    [n] entries whose day-file falls within [[since, until]] (inclusive). Reads
+    newest day-file first and only the tail of each file, so it parses ~[n]
+    entries instead of the whole window — use it instead of {!read_range} when
+    a result bound exists and the window may span large stores. Result is
+    chronological (oldest-first) within the collected set, matching
+    {!read_recent}. *)
 
 val iter_all : t -> (Yojson.Safe.t -> unit) -> unit
 (** [iter_all t f] calls [f] for every parseable JSONL entry in chronological
@@ -66,22 +82,24 @@ val prune : t -> days:int -> int
 [@@@warning "-32"]
 val count_entries : t -> int
 [@@@warning "+32"]
-(* [count_entries t] returns the total number of non-empty lines across all
-   day-files. Scans files by counting newlines without JSON parsing.
-
-   Backed by a process-local TTL cache (RFC-0162 §3.2) keyed on
-   [base_dir]. The cached count is good for ~10 s; concurrent
-   dashboard refresh surfaces share the result so a 30 s window
-   costs one scan, not three. Tests and audit callers that need
-   the live count should use [count_entries_uncached]. *)
+(* [count_entries t] returns the total number of non-empty,
+   newline-terminated lines across all day-files. Scans bytes without
+   JSON parsing, backed by a per-file (boundary, count) cache: closed
+   day-files are never re-read and the growing current-day file only
+   re-reads the bytes appended since the previous call, so a call is
+   O(appended bytes) — exact, no TTL staleness window (the RFC-0162
+   §3.2 TTL layer this replaced traded 10 s of staleness for a bound
+   the incremental cache now provides structurally). A trailing line
+   not yet terminated by '\n' is not counted until its newline lands;
+   audit callers that must include it use [count_entries_uncached]. *)
 
 val count_entries_uncached : t -> int
-(** Like [count_entries] but bypasses the TTL cache. Use in tests
-    or rare audit paths that must observe the live filesystem
-    count. RFC-0162 §3.2. *)
+(** Like [count_entries] but bypasses the per-file cache and counts a
+    trailing unterminated line. Use in tests or rare audit paths that
+    must observe the live filesystem byte-for-byte. *)
 
 val reset_count_cache_for_testing : unit -> unit
-(** Reset the [count_entries] TTL cache. Test-only. *)
+(** Reset the per-file incremental count cache. Test-only. *)
 
 val load_tail_lines : string -> max_lines:int -> string list
 (** [load_tail_lines file ~max_lines] efficiently reads the last [max_lines]

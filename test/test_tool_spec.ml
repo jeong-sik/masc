@@ -2,10 +2,10 @@ module Types = Masc_domain
 
 (** Tests for Tool_spec — unified tool specification and registration. *)
 
-module Tool_spec = Masc_mcp.Tool_spec
-module Tool_dispatch = Masc_mcp.Tool_dispatch
-module Tool_catalog = Masc_mcp.Tool_catalog
-module Tool_capability = Masc_mcp.Tool_capability
+module Tool_spec = Tool_spec
+module Tool_dispatch = Tool_dispatch
+module Tool_catalog = Tool_catalog
+module Tool_capability = Tool_capability
 
 (** Helper: minimal input_schema for test tools. *)
 let empty_schema = `Assoc [ ("type", `String "object") ]
@@ -33,14 +33,13 @@ let () =
             check string "name" "__test_spec_required" spec.name;
             check string "description" "test required only" spec.description;
             check bool "is_read_only default" false spec.is_read_only;
-            check bool "requires_join default" false spec.requires_join;
+            check bool "requires_actor_binding default" true
+              (Option.is_none spec.requires_actor_binding);
             check bool "mcp_context_required default" false
               spec.mcp_context_required;
             check bool "is_destructive default" false spec.is_destructive;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
-            check bool "required_permission default" true
-              (Option.is_none spec.required_permission);
             check bool "canonical_name default" true (Option.is_none spec.canonical_name);
             check bool "replacement default" true (Option.is_none spec.replacement);
             check bool "reason default" true (Option.is_none spec.reason);
@@ -60,8 +59,7 @@ let () =
                 ~is_read_only:true
                 ~is_idempotent:true
                 ~visibility:Tool_catalog.Hidden
-                ~required_permission:Masc_domain.CanAdmin
-                ~effect_domain:Tool_catalog.Masc_coordination
+                ~effect_domain:Tool_catalog.Masc_workspace
                 ~requires_actor_binding:true
                 ~reason:"hidden for test"
                 ~title:"Test Tool"
@@ -69,10 +67,8 @@ let () =
             in
             check bool "is_read_only" true spec.is_read_only;
             check bool "is_idempotent" true spec.is_idempotent;
-            check bool "required_permission" true
-              (spec.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
-              (spec.effect_domain = Some Tool_catalog.Masc_coordination);
+              (spec.effect_domain = Some Tool_catalog.Masc_workspace);
             check bool "requires_actor_binding" true
               (spec.requires_actor_binding = Some true);
             check bool "reason present" true (Option.is_some spec.reason);
@@ -136,24 +132,22 @@ let () =
             Tool_spec.register spec;
             check bool "not read_only" false
               (Tool_capability.has Tool_capability.Read_only "__test_spec_rw"));
-          test_case "register sets requires_join metadata" `Quick (fun () ->
+          test_case "register sets actor-binding metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create
-                ~name:"__test_spec_join"
-                ~description:"join test"
+                ~name:"__test_spec_actor_binding"
+                ~description:"actor binding test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
-                ~requires_join:true
+                ~requires_actor_binding:true
                 ()
             in
             Tool_spec.register spec;
-            check bool "is_join_required" true
-              (Tool_capability.has Tool_capability.Requires_join "__test_spec_join");
-            let meta = Tool_catalog.metadata "__test_spec_join" in
-            check bool "catalog requires_join" true
-              (meta.requires_join = Some true);
-            check bool "requires_join implies actor binding" true
+            check bool "catalog requires_actor_binding" true
+              (Tool_catalog.requires_actor_binding "__test_spec_actor_binding");
+            let meta = Tool_catalog.metadata "__test_spec_actor_binding" in
+            check bool "requires_actor_binding metadata" true
               (meta.requires_actor_binding = Some true));
           test_case "register sets mcp context required" `Quick (fun () ->
             let spec =
@@ -181,7 +175,6 @@ let () =
                 ~input_schema:empty_schema
                 ~handler_binding:Tag_dispatch
                 ~is_destructive:true
-                ~required_permission:Masc_domain.CanAdmin
                 ~effect_domain:Tool_catalog.Host_repo_write
                 ~requires_actor_binding:true
                 ~visibility:Tool_catalog.Hidden
@@ -191,8 +184,6 @@ let () =
             Tool_spec.register spec;
             let meta = Tool_catalog.metadata "__test_spec_catalog" in
             check bool "destructive" true (meta.destructive = Some true);
-            check bool "required_permission" true
-              (meta.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
               (meta.effect_domain = Some Tool_catalog.Host_repo_write);
             check bool "requires_actor_binding" true
@@ -205,7 +196,7 @@ let () =
             Tool_catalog.register_metadata name
               { existing with
                 requires_actor_binding = Some true;
-                effect_domain = Some Tool_catalog.Masc_coordination };
+                effect_domain = Some Tool_catalog.Masc_workspace };
             let spec =
               Tool_spec.create
                 ~name
@@ -270,38 +261,10 @@ let () =
             check string "name" "__test_spec_schema_conv" schema.Masc_domain.name;
             check string "description" "schema conv test" schema.description);
         ] );
-      ( "tool_catalog_groups",
-        [
-          test_case "typed tool groups are exposed without string-prefix routing" `Quick
-            (fun () ->
-              let check_group name expected =
-                check (option string) name (Some expected)
-                  (Option.map Tool_catalog.tool_group_to_string
-                     (Tool_catalog.tool_group name))
-              in
-              check_group "keeper_board_post" "board";
-              check_group "keeper_memory_search" "knowledge";
-              check_group "keeper_library_read" "knowledge";
-              check_group "keeper_task_claim" "tasks";
-              check_group "keeper_voice_speak" "voice";
-              check_group "tool_read_file" "filesystem";
-              check_group "tool_execute" "filesystem";
-              check_group "masc_board_post" "masc_board";
-              check_group "masc_keeper_status" "masc_keeper";
-              check_group "masc_plan_get" "masc_plan";
-              check_group "masc_agents" "masc_agent";
-              check_group "masc_status" "masc_core";
-              check (option string) "unknown" None
-                (Option.map Tool_catalog.tool_group_to_string
-                   (Tool_catalog.tool_group "__unknown_tool")));
-          test_case "metadata fields include typed tool group" `Quick (fun () ->
-            let fields = Tool_catalog.metadata_to_fields "keeper_board_post" in
-            check bool "toolGroup=board" true
-              (List.mem ("toolGroup", `String "board") fields);
-            check bool "unknown has no toolGroup" false
-              (Tool_catalog.metadata_to_fields "__unknown_tool"
-              |> List.exists (fun (key, _) -> String.equal key "toolGroup")));
-        ] );
+      (* The "tool_catalog_groups" test group was removed in the surface-cut
+         refactor: it exercised the deleted [Tool_catalog.tool_group] display
+         classifier (and was already failing on base — it asserted richer
+         categories the classifier never produced). *)
       ( "verify_handler_coverage",
         [
           test_case "Tag_dispatch binding not in verify missing" `Quick (fun () ->

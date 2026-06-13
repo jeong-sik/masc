@@ -26,7 +26,7 @@ Three concrete defects:
 3. **Layer coupling.** `MASC_CLIENT_CAPACITY` (env) and
    `cli_max_concurrent` (TOML field) are two layers for the same
    knob, with the env taking precedence. The relationship is
-   documented as a comment in `cascade_client_capacity.ml:216` —
+   documented as a comment in `runtime_client_capacity.ml:216` —
    correct but undiscoverable from outside that file.
 
 The audit framed this as "443 → 50 통합 JSON" but that conflates two
@@ -88,7 +88,7 @@ type = "string"
 format = "url=max,url=max,..."
 description = "Per-URL client concurrency override; precedence over `cli_max_concurrent` TOML field."
 related_field = "cli_max_concurrent"
-owner_module = "lib/cascade/cascade_client_capacity.ml"
+owner_module = "lib/runtime/runtime_client_capacity.ml"
 ```
 
 The `owner_module` field is the gate: each knob has exactly one
@@ -129,7 +129,7 @@ in production. `validate_value` (catalog-time) and `get_int_typed`
 
 ### 4.3 Drift gate
 
-CI step (extending the existing `cascade-drift-gate` and
+CI step (extending the existing `runtime-drift-gate` and
 `env-knob-catalog-drift-gate` from `.github/workflows/ci.yml`):
 
 ```bash
@@ -174,10 +174,10 @@ Migration is per-module, not per-knob. Each `lib/<module>` PR:
 
 Order of migration (by impact, low → high):
 
-1. `lib/cascade/` — well-isolated, ~30 knobs.
+1. `lib/runtime/` — well-isolated, ~30 knobs.
 2. `lib/keeper/` — hot path; ~50 knobs. Migrate per-keeper-submodule.
 3. `lib/dashboard/` — ~20 knobs.
-4. `lib/server/`, `lib/oas*/`, `lib/coord/` — remainder.
+4. `lib/server/`, `lib/oas*/`, `lib/workspace/` — remainder.
 
 Each module migration is one PR. Total PR count: ~10–15.
 
@@ -229,7 +229,7 @@ the loader must not keep accepting the old name.
   `RUNPOD_API_TOKEN`) be in the catalog?** No — those are external
   third-party knobs without our naming control. The catalog covers
   knobs we own.
-- **What about per-keeper / per-cascade env knobs that have a name
+- **What about per-keeper / per-runtime env knobs that have a name
   template?** e.g. `MASC_KEEPER_<NAME>_FOO`. Held off — these are
   rare today. If they grow, the catalog gains a `template` field.
 

@@ -1,6 +1,6 @@
 (** Gate_protocol -- wire-level types for the Channel Gate HTTP API.
 
-    Pure module: no Eio, no Agent_identity, no Tool_keeper, no Coord.
+    Pure module: no Eio, no Client_identity, no Keeper_tool_surface, no Workspace.
     Only depends on Yojson for JSON serialization.
 
     Connectors (Discord, Telegram, etc.) and the gate orchestrator
@@ -18,7 +18,7 @@ type inbound_message = {
           The gate never interprets this beyond passing it to metrics. *)
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;
@@ -28,7 +28,7 @@ type inbound_message = {
 (** Turn-level statistics from the keeper. *)
 type turn_stats = {
   model_used : string;
-      (** Legacy in-memory compatibility slot. Public JSON redacts this field;
+      (** Internal in-memory model slot. Public JSON redacts this field;
           callers should use duration/token metrics, not provider/model
           identity. *)
   duration_ms : int;
@@ -45,6 +45,38 @@ type outbound_message = {
           See [docs/spec/structured-content-schema.md] for the JSON schema. *)
   turn_stats : turn_stats option;
 }
+
+(** Durable MASC message request envelope.
+
+    This is the layer shared by dashboard chat, Connectors, and future
+    MASC<->MASC peers: a producer submits a request, receives a
+    [request_id], then observes live projections and reconciles terminal
+    state by id.  [modalities] is intentionally open-string JSON so the
+    text-only dashboard path can grow into image/audio/file parts without
+    another route shape. *)
+type message_request_status =
+  | Accepted
+  | Queued
+  | Running
+  | Done
+  | Failed
+  | Lost
+  | Cancelled
+
+type message_request = {
+  request_id : string;
+  destination_type : string;
+  destination_id : string;
+  channel : string;
+  actor_id : string option;
+  status : message_request_status;
+  modalities : string list;
+  transport : string option;
+  metadata : (string * string) list;
+}
+
+val message_request_status_to_string : message_request_status -> string
+val message_request_to_json : message_request -> Yojson.Safe.t
 
 (** {1 Validation} *)
 

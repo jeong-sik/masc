@@ -10,7 +10,6 @@
 type event =
   | Mention of { from_agent : string; target_agent : string option; message : string }
   | Interrupt of { agent : string; action : string }
-  | PortalMessage of { from_agent : string; target_agent : string option; message : string }
   | TaskCompleted of { agent : string; task_id : string }
   | Custom of { title : string; subtitle : string; message : string }
 
@@ -31,8 +30,6 @@ val notify : event -> unit
 (** {1 Convenience} *)
 
 val notify_mention :
-  ?target_agent:string -> from_agent:string -> message:string -> unit -> unit
-val notify_portal :
   ?target_agent:string -> from_agent:string -> message:string -> unit -> unit
 val notify_task_done : agent:string -> task_id:string -> unit
 

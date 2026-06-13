@@ -1,17 +1,19 @@
 [@@@warning "-32-69"]
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
-module Server_bootstrap_loops = Masc_mcp.Server_bootstrap_loops
-module Shutdown_hooks = Masc_mcp.Shutdown_hooks
-module Board_dispatch = Masc_mcp.Board_dispatch
+module Mcp_eio = Masc.Mcp_server_eio
+module Server_runtime_bootstrap = Server_runtime_bootstrap
+module Server_bootstrap_loops = Server_bootstrap_loops
+module Shutdown_hooks = Masc.Shutdown_hooks
+module Board_dispatch = Masc.Board_dispatch
 
 open Cmdliner
 
-let default_base_path () = Masc_mcp.Server_mcp_transport_http.default_base_path ()
+let default_base_path () = Server_mcp_transport_http.default_base_path ()
 
 let base_path =
-  let doc = "Base path for MASC data (.masc folder location)" in
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 let run_cmd base_path =
@@ -43,7 +45,7 @@ let run_cmd base_path =
 
 let cmd =
   let doc = "MASC MCP Server (stdio, Eio)" in
-  let info = Cmd.info "masc-mcp-stdio" ~version:Masc_mcp.Version.version ~doc in
+  let info = Cmd.info "masc-stdio" ~version:Masc.Version.version ~doc in
   Cmd.v info Term.(const run_cmd $ base_path)
 
 let () = exit (Cmd.eval cmd)

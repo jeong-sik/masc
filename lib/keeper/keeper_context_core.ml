@@ -5,6 +5,8 @@
 
 open Printf
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 include Keeper_context_core_accessors
 
@@ -17,7 +19,32 @@ let add_checkpoint_sanitize_stats
     dropped_chars = a.dropped_chars + b.dropped_chars;
     truncated_blocks = a.truncated_blocks + b.truncated_blocks;
     truncated_chars = a.truncated_chars + b.truncated_chars;
+    tool_pair_repair =
+      add_tool_pair_repair_stats a.tool_pair_repair b.tool_pair_repair;
   }
+
+let checkpoint_stats_of_tool_pair_repair repair_stats =
+  { empty_checkpoint_sanitize_stats with tool_pair_repair = repair_stats }
+
+let tool_pair_repair_stats_to_json (stats : tool_pair_repair_stats) =
+  let tool_use_samples =
+    List.map
+      (fun (tool_use_id, tool_name) ->
+         `Assoc
+           [ "tool_use_id", `String tool_use_id
+           ; "tool_name", `String tool_name
+           ])
+      stats.dropped_tool_use_samples
+  in
+  let tool_result_ids =
+    List.map (fun tool_use_id -> `String tool_use_id) stats.dropped_tool_result_ids
+  in
+  `Assoc
+    [ "dropped_tool_uses", `Int stats.dropped_tool_uses
+    ; "dropped_tool_results", `Int stats.dropped_tool_results
+    ; "dropped_tool_use_samples", `List tool_use_samples
+    ; "dropped_tool_result_ids", `List tool_result_ids
+    ]
 
 let truncate_checkpoint_text ~max_chars (text : string) : string * int =
   let len = String.length text in
@@ -215,7 +242,7 @@ let sanitize_checkpoint_message
                (* Over count or aggregate byte budget: stub the result.
                   The two triggers are split into separate [reason]
                   labels (and named in [stub_content]) so operators
-                  reading the Prometheus rate or inspecting a stubbed
+                  reading the Otel_metric_store rate or inspecting a stubbed
                   checkpoint know which cap to revisit, and so an
                   LLM that later reads the checkpoint can tell that a
                   payload was removed (and why) rather than silently
@@ -237,8 +264,8 @@ let sanitize_checkpoint_message
                    tool_chars
                in
                let () =
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_context_tool_result_compacted
+                 Otel_metric_store.inc_counter
+                   Otel_metric_store.metric_keeper_context_tool_result_compacted
                    ~labels:[ "action", "stubbed"; "reason", stub_reason ]
                    ()
                in
@@ -247,7 +274,8 @@ let sanitize_checkpoint_message
                    { tool_use_id;
                      content = stub_content;
                      is_error;
-                     json = None }
+                     json = None;
+                     content_blocks = None }
                in
                ( stub :: kept_rev,
                  kept_text_blocks, kept_text_chars,
@@ -264,8 +292,8 @@ let sanitize_checkpoint_message
                   itself; the counter increment is what surfaces the
                   rate to operators without log scraping. *)
                let () =
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_context_tool_result_compacted
+                 Otel_metric_store.inc_counter
+                   Otel_metric_store.metric_keeper_context_tool_result_compacted
                    ~labels:
                      [ "action", "truncated"; "reason", "over_single_byte" ]
                    ()
@@ -277,7 +305,12 @@ let sanitize_checkpoint_message
                in
                let block =
                  Agent_sdk.Types.ToolResult
-                   { tool_use_id; content = capped; is_error; json = None }
+                   { tool_use_id
+                   ; content = capped
+                   ; is_error
+                   ; json = None
+                   ; content_blocks = None
+                   }
                in
                ( block :: kept_rev,
                  kept_text_blocks, kept_text_chars,
@@ -381,16 +414,19 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+           | Agent_sdk.Types.ToolResult
+               { tool_use_id; content; is_error; content_blocks; _ } ->
                cap_content
                  (fun content ->
                    Agent_sdk.Types.ToolResult
-                     { tool_use_id; content; is_error; json = None })
+                     { tool_use_id; content; is_error; json = None; content_blocks })
                  content
-           | Agent_sdk.Types.Thinking { content; _ } ->
-               cap_content (fun text -> Agent_sdk.Types.Text text) content
+           | Agent_sdk.Types.Thinking t ->
+               cap_content
+                 (fun text -> Agent_sdk.Types.Thinking { t with content = text })
+                 t.content
            | Agent_sdk.Types.RedactedThinking text ->
-               cap_content (fun text -> Agent_sdk.Types.Text text) text
+               cap_content (fun text -> Agent_sdk.Types.RedactedThinking text) text
            | _ -> (block :: kept_rev, stats))
         ([], empty_checkpoint_sanitize_stats)
         msg.content
@@ -457,16 +493,19 @@ let sanitize_oas_checkpoint
     (cp : Agent_sdk.Checkpoint.t)
   : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
-  let messages =
-    if repair_orphans then repair_broken_tool_call_pairs messages
-    else messages
+  let messages, stats =
+    if repair_orphans then (
+      let messages, repair_stats = repair_broken_tool_call_pairs_with_stats messages in
+      messages, add_checkpoint_sanitize_stats stats
+        (checkpoint_stats_of_tool_pair_repair repair_stats))
+    else messages, stats
   in
   ({ cp with messages }, stats)
 
-let capped_checkpoint_messages_of_context
+let capped_checkpoint_messages_of_context_with_stats
       ~(max_checkpoint_messages : int)
       (ctx : working_context)
-  : Agent_sdk.Types.message list
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats
   =
   (* Shared by checkpoint persistence and pre-dispatch resume: both paths
      must honor the load-time message cap plus content-size guards. *)
@@ -478,6 +517,13 @@ let capped_checkpoint_messages_of_context
   let capped_messages_were_truncated =
     List.length capped_messages < List.length original_messages
   in
+  let capped_stats =
+    if capped_messages_were_truncated then
+      { empty_checkpoint_sanitize_stats with
+        dropped_messages = List.length original_messages - List.length capped_messages
+      }
+    else empty_checkpoint_sanitize_stats
+  in
   let capped_messages =
     Agent_sdk.Context_reducer.reduce
       (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
@@ -486,9 +532,21 @@ let capped_checkpoint_messages_of_context
   let capped_messages, sanitize_stats =
     sanitize_checkpoint_messages capped_messages
   in
+  let stats = add_checkpoint_sanitize_stats capped_stats sanitize_stats in
   if capped_messages_were_truncated || checkpoint_sanitize_changed sanitize_stats
-  then repair_broken_tool_call_pairs capped_messages
-  else capped_messages
+  then (
+    let capped_messages, repair_stats =
+      repair_broken_tool_call_pairs_with_stats capped_messages
+    in
+    capped_messages, add_checkpoint_sanitize_stats stats
+      (checkpoint_stats_of_tool_pair_repair repair_stats))
+  else capped_messages, stats
+
+let capped_checkpoint_messages_of_context
+    ~(max_checkpoint_messages : int)
+    (ctx : working_context)
+  : Agent_sdk.Types.message list =
+  fst (capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx)
 
 let resume_checkpoint_of_context
       ~(max_checkpoint_messages : int)
@@ -534,40 +592,47 @@ let context_of_oas_checkpoint
   sync_oas_context
     { checkpoint; max_tokens }
 
-let checkpoint_model_of_meta (meta : keeper_meta) =
-  let candidates =
-    meta.runtime.usage.last_model_used
-    :: Keeper_model_labels.configured_model_labels_of_meta meta
-  in
-  match List.find_opt (fun value -> String.trim value <> "") candidates with
-  | Some value -> value
-  | None -> Cascade_runtime_candidate.default_local_runtime_label ()
-
 let save_oas_checkpoint
     ~(max_checkpoint_messages : int)
     ~(session : session_context)
     ~(agent_name : string)
-    ~(model : string)
     ~(ctx : working_context)
     ~(generation : int)
   : (Agent_sdk.Checkpoint.t, string) result =
   let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
+  let checkpoint_messages, checkpoint_stats =
+    capped_checkpoint_messages_of_context_with_stats ~max_checkpoint_messages ctx
+  in
   let checkpoint =
     {
       ctx.checkpoint with
       version = Agent_sdk.Checkpoint.checkpoint_version;
       session_id = session.session_id;
       agent_name;
-      model;
+      model = "runtime";
       system_prompt = Some (system_prompt_of_context ctx);
-      messages = capped_checkpoint_messages_of_context ~max_checkpoint_messages ctx;
+      messages = checkpoint_messages;
       created_at = Time_compat.now ();
       max_total_tokens = Some (max_tokens_of_context ctx);
       context = checkpoint_context;
     }
   in
+  if checkpoint_sanitize_changed checkpoint_stats then (
+    let pair_repair_json =
+      Yojson.Safe.to_string
+        (tool_pair_repair_stats_to_json checkpoint_stats.tool_pair_repair)
+    in
+    Log.Keeper.info
+      "keeper:%s OAS checkpoint save sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
+      session.session_id
+      checkpoint_stats.dropped_blocks
+      checkpoint_stats.dropped_messages
+      checkpoint_stats.dropped_chars
+      checkpoint_stats.truncated_blocks
+      checkpoint_stats.truncated_chars
+      pair_repair_json);
   match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir checkpoint with
   | Ok () -> Ok checkpoint
   | Error e -> Error e
@@ -593,25 +658,25 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   in
   (match oas_result with
    | Error (Parse_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_parse))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_store))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_io))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sdk))]
          ();
@@ -629,18 +694,22 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     |> Option.map (fun checkpoint ->
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin
+        let pair_repair_json =
+          Yojson.Safe.to_string (tool_pair_repair_stats_to_json stats.tool_pair_repair)
+        in
         Log.Keeper.info
-          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d tool_pair_repair=%s"
           trace_id
           stats.dropped_blocks
           stats.dropped_messages
           stats.dropped_chars
           stats.truncated_blocks
-          stats.truncated_chars;
+          stats.truncated_chars
+          pair_repair_json;
         (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
          | Ok () -> ()
          | Error detail ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sanitize_save))]
                ();

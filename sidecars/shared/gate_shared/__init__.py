@@ -1,11 +1,11 @@
 """Shared connector components for MASC Channel Gate sidecars."""
 
-from .doctor import (
+from .diagnostics import (
     NETWORK_TIMEOUT_SEC,
     AutoFix,
     Check,
     CheckFn,
-    Doctor,
+    Diagnostics,
     FixOutcome,
     Severity,
     check_dependencies_installed,
@@ -22,7 +22,7 @@ __all__ = [
     "BreakerSnapshot",
     "Check",
     "CheckFn",
-    "Doctor",
+    "Diagnostics",
     "FixOutcome",
     "GateClientBase",
     "GateResponse",

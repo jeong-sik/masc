@@ -4,6 +4,8 @@
    Extracted from keeper_unified_turn.ml (L21-326) during the god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 (* Interval (seconds) for the per-turn background fiber that drains the
@@ -17,40 +19,10 @@ open Keeper_context_runtime
 let default_turn_event_bus_drain_interval_sec = 0.05
 let turn_event_bus_drain_interval_sec () = default_turn_event_bus_drain_interval_sec
 
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset = needle_len
-    then true
-    else if haystack.[start_idx + offset] <> needle.[offset]
-    then false
-    else loop (offset + 1)
-  in
-  loop 0
+let string_contains_substring = String_util.string_contains_substring
 ;;
 
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  if needle_len = 0
-  then true
-  else if needle_len > hay_len
-  then false
-  else (
-    let rec loop i =
-      if i + needle_len > hay_len
-      then false
-      else if substring_matches_at ~needle haystack i
-      then true
-      else loop (i + 1)
-    in
-    loop 0)
-;;
-
-let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
-  string_contains_substring
-    ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
+let string_contains_substring_ci = String_util.string_contains_substring_ci
 ;;
 
 let side_effect_metric_label side_effect =
@@ -66,7 +38,7 @@ let side_effect_metric_label side_effect =
 ;;
 
 let report_keeper_cycle_side_effect_issue
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(side_effect : string)
       ?(severity = `Warn)
@@ -75,7 +47,7 @@ let report_keeper_cycle_side_effect_issue
   =
   let message = Printf.sprintf "keeper cycle %s failed: %s" side_effect detail in
   Keeper_registry_error_recording.record ~base_path:config.base_path keeper_name message;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string DispatchEventFailures)
     ~labels:[ "keeper", keeper_name; "site", side_effect_metric_label side_effect ]
     ();
@@ -85,7 +57,7 @@ let report_keeper_cycle_side_effect_issue
 ;;
 
 let dispatch_keeper_phase_event_checked
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       ~(side_effect : string)
       (event : Keeper_state_machine.event)
@@ -105,7 +77,7 @@ let dispatch_keeper_phase_event_checked
 ;;
 
 let finalize_trajectory_acc
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(keeper_name : string)
       (trajectory_acc : Trajectory.accumulator)
       (outcome : Trajectory.trajectory_outcome)
@@ -130,7 +102,7 @@ let finalize_trajectory_acc
 ;;
 
 let record_execution_receipt_gap
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(stale_reason : string)
       ~(error : string)
@@ -138,7 +110,7 @@ let record_execution_receipt_gap
   : unit
   =
   try
-    let masc_root = Coord.masc_root_dir config in
+    let masc_root = Workspace.masc_root_dir config in
     Telemetry_coverage_gap.record
       ~masc_root
       ~source:"execution_receipt"
@@ -156,13 +128,12 @@ let record_execution_receipt_gap
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name; "phase", "receipt_coverage_gap" ]
       ();
-    Log.Keeper.warn
-      "keeper:%s pre-dispatch execution_receipt coverage gap append failed: %s"
-      meta.name
+    Log.Keeper.warn ~keeper_name:meta.name
+      "pre-dispatch execution_receipt coverage gap append failed: %s"
       (Printexc.to_string exn)
 ;;
 
@@ -172,7 +143,7 @@ let record_execution_receipt_gap
    honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
    Each helper is wrapped at the call site by
    [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
-   PPX-injected guard increments the Prometheus violation counter and
+   PPX-injected guard increments the Otel_metric_store violation counter and
    re-raises. Bug-action [TaskRejected] is NOT
    instrumented -- it is the failure mode these guards are designed to
    detect.
@@ -212,24 +183,14 @@ let post_turn_complete_task ~(cycle_completed : bool ref) = ignore cycle_complet
 ;;
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
-  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch
-  ; tool_surface_class = Keeper_agent_tool_surface.Surface_none
-  ; tool_requirement = No_tools
-  ; visible_tool_count = 0
-  ; tool_gate_enabled = false
-  ; tool_surface_fallback_used = false
-  ; required_tools = []
-  ; required_tool_candidates = []
-  ; missing_required_tools = []
-  ; materialized_tools = []
-  }
+  { turn_lane = Keeper_agent_tool_surface.Lane_pre_dispatch }
 ;;
 
 let record_pre_dispatch_terminal_observation
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(generation : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(runtime_id : string)
       ~(outcome : Keeper_execution_receipt.outcome_kind)
       ~(terminal_reason_code : string)
       ~(activity_kind : string)
@@ -240,14 +201,14 @@ let record_pre_dispatch_terminal_observation
       ()
   : unit
   =
-  let cascade_name_string =
-    Cascade_name.to_string cascade_name
+  let runtime_id_string =
+    runtime_id
   in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
-  let masc_root = Coord.masc_root_dir config in
+  let masc_root = Workspace.masc_root_dir config in
   let trajectory_acc =
-    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation
+    Trajectory.create_accumulator ~masc_root ~keeper_name:meta.name ~trace_id ~generation ()
   in
   finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in
@@ -262,35 +223,29 @@ let record_pre_dispatch_terminal_observation
          | None -> Some meta.runtime.usage.total_turns)
     ; oas_turn_count = None
     ; oas_dispatch_mode = None
-    ; oas_internal_cascade_disabled = true
+    ; oas_internal_runtime_disabled = true
     ; current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id
     ; goal_ids = meta.active_goal_ids
     ; outcome
     ; terminal_reason_code
     ; response_text_present = false
     ; model_used = None
-    ; requested_tools = []
-    ; reported_tools = []
-    ; observed_tools = []
-    ; canonical_tools = []
-    ; unexpected_tools = []
-    ; tools_used = []
-    ; tool_contract_result = Keeper_execution_receipt.Contract_not_dispatched
+    ; completion_contract_result = Keeper_execution_receipt.Contract_not_dispatched
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)
     ; network_mode = meta.network_mode
     ; approval_profile = None
     ; approval_profile_derived = false
-    ; cascade_name
-    ; cascade_selected_model = None
-    ; cascade_attempt_count = 0
-    ; cascade_fallback_applied = false
-    ; cascade_outcome = Keeper_execution_receipt.Cascade_not_dispatched
+    ; runtime_id
+    ; runtime_selected_model = None
+    ; runtime_attempt_count = 0
+    ; runtime_fallback_applied = false
+    ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
     ; degraded_retry_applied = false
-    ; degraded_retry_cascade = None
+    ; degraded_retry_runtime = None
     ; fallback_reason = None
-    ; cascade_rotation_attempts = []
+    ; runtime_rotation_attempts = []
     ; stop_reason = None
     ; error_kind
     ; error_message
@@ -303,7 +258,7 @@ let record_pre_dispatch_terminal_observation
     ; pre_dispatch_compaction_trigger = None
     ; pre_dispatch_compaction_before_tokens = None
     ; pre_dispatch_compaction_after_tokens = None
-    ; oas_internal_cascade_allowed = false
+    ; oas_internal_runtime_allowed = false
     }
   in
   let receipt_path =
@@ -318,7 +273,7 @@ let record_pre_dispatch_terminal_observation
     in
     Keeper_runtime_manifest.make ~ts:ended_at ~keeper_name:meta.name
       ~agent_name:meta.agent_name ~trace_id ~generation ?keeper_turn_id ~event
-      ~cascade_name:cascade_name_string ~status ?decision ~receipt_path ()
+      ~runtime_id:runtime_id_string ~status ?decision ~receipt_path ()
     |> Keeper_runtime_manifest.append_best_effort ~site config
   in
   append_manifest
@@ -331,7 +286,7 @@ let record_pre_dispatch_terminal_observation
             `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
           );
           ("terminal_reason_code", `String terminal_reason_code);
-          ("cascade_name", `String cascade_name_string);
+          ("runtime_id", `String runtime_id_string);
           ( "error_message",
             match error_message with
             | None -> `Null
@@ -346,13 +301,12 @@ let record_pre_dispatch_terminal_observation
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       let error = Printexc.to_string exn in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", meta.name; "phase", "receipt_append" ]
         ();
-      Log.Keeper.warn
-        "keeper:%s pre-dispatch execution_receipt append failed: %s"
-        meta.name
+      Log.Keeper.warn ~keeper_name:meta.name
+        "pre-dispatch execution_receipt append failed: %s"
         error;
       record_execution_receipt_gap
         ~config
@@ -394,7 +348,7 @@ let record_pre_dispatch_terminal_observation
                 , `String (Keeper_execution_receipt.outcome_kind_to_string outcome)
                 )
               ; "terminal_reason_code", `String terminal_reason_code
-              ; "cascade_name", `String cascade_name_string
+              ; "runtime_id", `String runtime_id_string
               ])
         ()
     in
@@ -417,40 +371,10 @@ let local_discovery_refresh_for_test : (string list -> bool) option Atomic.t =
   Atomic.make None
 ;;
 
-let ensure_local_discovery_ready ?refresh (labels : string list) : (unit, string) result =
-  let refresh_for_test = Atomic.get local_discovery_refresh_for_test in
-  let refresh =
-    match refresh with
-    | Some f -> f
-    | None ->
-      (match refresh_for_test with
-       | Some f -> f
-       | None -> fun labels -> Cascade_runtime.refresh_local_discovery_if_possible labels)
-  in
-  let should_refresh =
-    match refresh_for_test with
-    | Some _ -> true
-    | None -> Cascade_runtime.labels_require_local_discovery labels
-  in
-  if not should_refresh
-  then Ok ()
-  else (
-    try
-      if refresh labels
-      then Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "local discovery refresh required for labels [%s] but refresh failed"
-             (String.concat ", " labels))
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Error
-        (Printf.sprintf
-           "local discovery refresh raised for labels [%s]: %s"
-           (String.concat ", " labels)
-           (Printexc.to_string exn)))
+(* Local discovery disabled: tier-based local/non-local classification
+   no longer exists. All providers are treated uniformly. *)
+let ensure_local_discovery_ready ?refresh:_ (_labels : string list) : (unit, string) result =
+  Ok ()
 ;;
 
 module For_testing = struct

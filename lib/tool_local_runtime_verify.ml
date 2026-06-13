@@ -19,6 +19,21 @@ module Float = Stdlib.Float
 
 module Oas_types = Agent_sdk.Types
 
+
+let http_error_message (err : Llm_provider.Http_client.http_error) =
+  match err with
+  | Llm_provider.Http_client.NetworkError { message; _ } -> message
+  | Llm_provider.Http_client.TimeoutError { message; phase } ->
+      Printf.sprintf "provider timeout: %s: %s"
+        (Llm_provider.Http_client.timeout_phase_to_label phase) message
+  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
+  | Llm_provider.Http_client.ProviderTerminal { kind; message } ->
+      Printf.sprintf "provider terminal: %s" message
+  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+      Llm_provider.Http_client.provider_failure_to_string ~kind ~message
+  | Llm_provider.Http_client.HttpError { code; body } ->
+      Printf.sprintf "HTTP %d: %s" code
+        (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
 let safe_discovery_endpoints () =
   try Some (Discovery_cache.get_cached_or_refresh ())
   with
@@ -74,7 +89,7 @@ let first_endpoint_url endpoints =
   | (endpoint : Discovery_cache.endpoint_info) :: _ -> Some endpoint.url
   | [] -> None
 
-let error_message_of_http_error = Oas_compat.Http_client.error_message
+let error_message_of_http_error = http_error_message
 
 (** Probe whether an endpoint supports the OpenAI chat-completions protocol.
     This is a protocol-level probe; it explicitly depends on OAS
@@ -86,20 +101,18 @@ let probe_chat_completion_compatible
   match Masc_eio_env.get_opt (), endpoint_model_id endpoint with
   | None, _ -> (None, None)
   | _, None ->
-      Log.warn ~ctx:"runtime_verify"
-        "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
+      Log.Runtime_verify.warn "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
         endpoint.url;
       (None, Some "missing model id")
   | Some env, Some model_id ->
-      Log.info ~ctx:"runtime_verify"
-        "chat-completions probe caller_surface=runtime_verify endpoint=%s model_id=%s timeout_sec=%d"
+      Log.Runtime_verify.info "chat-completions probe caller_surface=runtime_verify endpoint=%s model_id=%s timeout_sec=%d"
         endpoint.url model_id timeout_sec;
       let provider_config =
         Llm_provider.Provider_config.make
-          ~kind:Llm_provider.Provider_config.Provider_d_compat
+          ~kind:Llm_provider.Provider_config.OpenAI_compat
           ~model_id ~base_url:endpoint.url
           ~request_path:Masc_network_defaults.openai_chat_completions_path
-          ~max_tokens:1 ~temperature:Llm_provider.Constants.Inference_profile.deterministic.temperature ()
+          ~max_tokens:1 ~temperature:Runtime_provider_defaults.deterministic_temperature ()
       in
       let messages : Oas_types.message list =
         [

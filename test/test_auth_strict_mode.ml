@@ -6,7 +6,7 @@
     behavior on this variant, so a silent rename or unknown-handling change
     must fail at the test boundary rather than in production telemetry. *)
 
-open Masc_mcp
+open Masc
 
 let mode_testable =
   Alcotest.testable

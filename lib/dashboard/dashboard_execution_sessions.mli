@@ -1,7 +1,7 @@
 (** Dashboard_execution_sessions — session-context aggregation
     for the execution dashboard.
 
-    {b Cascade chain}: starts with
+    {b Runtime chain}: starts with
     [include Dashboard_execution_helpers], so
     {!Dashboard_execution_builders} (which does
     [include Dashboard_execution_sessions]) re-exports the full
@@ -12,17 +12,16 @@
     {!related_session_for_member} (used by
     {!Dashboard_execution_builders}) and
     {!build_execution_queue} (used by {!Dashboard_execution}) are
-    cascade-visible.  The remaining helpers are keeper-internal
+    runtime-visible.  The remaining helpers are keeper-internal
     and refactor-free:
 
-    - 9 JSON field accessors ([session_payload_json],
-      [session_meta_json], [session_summary_json],
-      [session_team_health_json],
-      [session_communication_json],
-      [session_status_string],
-      [session_recent_events],
-      [event_detail_json],
-      [event_summary]).
+    - 8 JSON field accessors now in {!Dashboard_utils}
+      ([session_payload_json], [session_meta_json],
+      [session_summary_json], [session_team_health_json],
+      [session_communication_json], [session_status_opt],
+      [session_recent_events], [event_detail_json]),
+      re-exported via {!Dashboard_execution_helpers}.
+      [event_summary] stays private here.
     - [session_severity] (severity classification).
     - [build_session_seed] / [session_operation_links] /
       [build_session_contexts] (session aggregation).
@@ -36,7 +35,7 @@ include module type of struct
   include Dashboard_execution_helpers
 end
 
-(** {1 Member -> session lookup (cascade-visible)} *)
+(** {1 Member -> session lookup (runtime-visible)} *)
 
 val related_session_for_member :
   session_context list -> string -> session_context option
@@ -49,9 +48,9 @@ val related_session_for_member :
     agent / keeper member -> session relationships during brief
     aggregation.  Pinned at the contract seam — agent-name
     normalisation rules (lowercase + trim) must stay consistent
-    across cascade consumers. *)
+    across runtime consumers. *)
 
-(** {1 Execution queue (cascade-visible)} *)
+(** {1 Execution queue (runtime-visible)} *)
 
 val build_execution_queue :
   session_context list ->
@@ -64,5 +63,5 @@ val build_execution_queue :
     Returns a list of structurally-typed queue-item records (each
     has at minimum [severity_rank: int] and
     [last_seen_ts: float]).  {!Dashboard_execution} consumes the
-    list bare via include cascade and applies a [take 10] cap
+    list bare via include runtime and applies a [take 10] cap
     before serialisation. *)

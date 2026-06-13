@@ -5,8 +5,8 @@
 
 [[hints]]
 name = "keeper_task_claim"
-call = "`keeper_task_claim` {}"
-description = "reserve the next eligible task"
+call = "`keeper_task_claim` {} or { task_id: \"task-123\" }"
+description = "reserve the next eligible task or an explicitly requested task"
 
 [[hints]]
 name = "keeper_tasks_list"
@@ -19,9 +19,9 @@ call = "`keeper_task_create` { title: \"actionable title\", description: \"accep
 description = "create a new backlog task with keeper-native evidence"
 
 [[hints]]
-name = "keeper_board_get"
-call = "`keeper_board_get` { id: \"POST_ID\" }"
-description = "read a board post before replying"
+name = "keeper_board_post_get"
+call = "`keeper_board_post_get` { post_id: \"POST_ID\" }"
+description = "read one board post only after you have its post_id"
 
 [[hints]]
 name = "keeper_board_comment"
@@ -31,7 +31,7 @@ description = "reply to a board post"
 [[hints]]
 name = "keeper_board_post"
 call = "`keeper_board_post` { content: \"note\" }"
-description = "coordinate via board"
+description = "align via board"
 
 [[hints]]
 name = "keeper_broadcast"
@@ -39,23 +39,23 @@ call = "`keeper_broadcast` { message: \"note\" }"
 description = "share broadly in the namespace"
 
 [[hints]]
-name = "ReadFile"
-call = "`ReadFile` { file_path: \"path/to/file\" }"
+name = "Read"
+call = "`Read` { file_path: \"path/to/file\" }"
 description = "read one file before editing or reporting"
 
 [[hints]]
-name = "EditFile"
-call = "`EditFile` { file_path: \"path/to/file\", old_string: \"...\", new_string: \"...\" }"
+name = "Edit"
+call = "`Edit` { file_path: \"path/to/file\", old_string: \"...\", new_string: \"...\" }"
 description = "patch an existing file inside the keeper workspace"
 
 [[hints]]
-name = "WriteFile"
-call = "`WriteFile` { file_path: \"path/to/file\", content: \"full file content\" }"
+name = "Write"
+call = "`Write` { file_path: \"path/to/file\", content: \"full file content\" }"
 description = "create or overwrite a file inside the keeper workspace"
 
 [[hints]]
-name = "SearchFiles"
-call = "`SearchFiles` { pattern: \"regex\", path: \"repos/REPO/lib\", glob: \"*.ml\" }"
+name = "Grep"
+call = "`Grep` { pattern: \"regex\", path: \"repos/REPO/lib\", glob: \"*.ml\" }"
 description = "search files without Execute pipes, redirects, grep/head chains, or repo-wide scans"
 
 [[hints]]
@@ -64,19 +64,14 @@ call = "`Execute` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \
 description = "run one typed argv command; set cwd for git, never type keeper_* names as commands, and use the pipeline field instead of shell syntax"
 
 [[hints]]
-name = "SearchWeb"
-call = "`SearchWeb` { query: \"current-info query\", limit: 5 }"
-description = "look up current public context before time-sensitive claims"
+name = "WebSearch"
+call = "`WebSearch` { query: \"current-info query\", limit: 5, includeContent: true, contentMaxChars: 4000 }"
+description = "MASC-owned tool-list alias for current public context; includeContent returns keeper-readable content_text plus raw page_content for top results"
 
 [[hints]]
-name = "FetchWeb"
-call = "`FetchWeb` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
-description = "fetch and read a web page before citing it"
-
-[[hints]]
-name = "keeper_task_submit_for_verification"
-call = "`keeper_task_submit_for_verification` { notes: \"evidence\", pr_url: \"https://github.com/OWNER/REPO/pull/NUMBER\" }"
-description = "submit PR/code work for verification"
+name = "WebFetch"
+call = "`WebFetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}}, extractMode: \"markdown\" }"
+description = "fetch one known URL for deeper reading or citation after search"
 
 [[hints]]
 name = "masc_transition"
@@ -85,8 +80,8 @@ description = "approve or reject an awaiting_verification task after inspecting 
 
 [[hints]]
 name = "keeper_task_done"
-call = "`keeper_task_done` { notes: \"evidence\" }"
-description = "close non-PR task work with evidence"
+call = "`keeper_task_done` { task_id: \"TASK_ID\", result: \"completion evidence\" }"
+description = "close claimed task work with task_id and concrete result evidence"
 
 [[hints]]
 name = "keeper_stay_silent"

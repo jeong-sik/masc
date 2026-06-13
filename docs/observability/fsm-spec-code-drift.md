@@ -32,14 +32,14 @@ Neutral diff between TLA+ specs, OCaml types, and the composite observer project
 
 | Layer | Source                                                  | States                                             | Count |
 | ----- | ------------------------------------------------------- | -------------------------------------------------- | ----- |
-| Spec  | `KeeperCascadeLifecycle.tla:33`, `KeeperCompactionLifecycle.tla:30` | `{"idle", "prompting", "executing", "compacting", "finalizing"}` | 5     |
+| Spec  | `KeeperRuntimeLifecycle.tla:33`, `KeeperCompactionLifecycle.tla:30` | `{"idle", "prompting", "executing", "compacting", "finalizing"}` | 5     |
 | Code  | `keeper_registry.mli:42` (`type turn_phase`)            | `Turn_idle \| Turn_prompting \| ... \| Turn_finalizing` | 5     |
 
 **Drift kind**: none. Prefix `Turn_` is an OCaml naming convention; JSON schema at `dashboard/src/api/schemas/keeper-composite.ts` normalizes to bare string. ✅
 
-**Note**: `KeeperCompactionLifecycle.tla:30` declares `TurnPhaseSet` without `"finalizing"` (4 states), using the cascade spec's 5-state set via `EXTENDS`. Confirmed consistent at model-check time; the spec simply doesn't need `finalizing` for compaction reasoning.
+**Note**: `KeeperCompactionLifecycle.tla:30` declares `TurnPhaseSet` without `"finalizing"` (4 states), using the runtime spec's 5-state set via `EXTENDS`. Confirmed consistent at model-check time; the spec simply doesn't need `finalizing` for compaction reasoning.
 
-**Sub-axis (Step 4, 2026-04-28)**: `Keeper_turn_fsm.turn_state` (`lib/keeper/keeper_turn_fsm.mli`) introduces a 10-state typed ADT *inside* a single KTC turn — `Idle / Phase_gating / Cascade_routing / Awaiting_provider / Streaming / Awaiting_tool_result / Completing / Done / Failed of failure_reason / Cancelled of cancel_reason`. This is a finer-grained projection than the 5-state KTC vocabulary above; the two coexist (KTC tracks the registry-visible turn cycle, `turn_state` tracks the in-process FSM emit chain). The ADT pairs with `specs/keeper-turn-fsm/KeeperTurnFSM.tla` at the abstraction level the TLA+ spec uses (`{"failed", "cancelled"}` collapsed; reasons abstracted), so spec-code drift on the ADT side stays bounded to the reason variants and is checked by the `test_keeper_turn_fsm_emit` sentinel. Operator counter / dashboard / alerts use the `turn_state` labels, not the KTC ones — see `docs/observability/keeper-turn-fsm-metrics.md`.
+**Sub-axis (Step 4, 2026-04-28)**: `Keeper_turn_fsm.turn_state` (`lib/keeper/keeper_turn_fsm.mli`) introduces a 10-state typed ADT *inside* a single KTC turn — `Idle / Phase_gating / Runtime_routing / Awaiting_provider / Streaming / Awaiting_tool_result / Completing / Done / Failed of failure_reason / Cancelled of cancel_reason`. This is a finer-grained projection than the 5-state KTC vocabulary above; the two coexist (KTC tracks the registry-visible turn cycle, `turn_state` tracks the in-process FSM emit chain). The ADT pairs with `specs/keeper-turn-fsm/KeeperTurnFSM.tla` at the abstraction level the TLA+ spec uses (`{"failed", "cancelled"}` collapsed; reasons abstracted), so spec-code drift on the ADT side stays bounded to the reason variants and is checked by the `test_keeper_turn_fsm_emit` marker. Operator counter / dashboard / alerts use the `turn_state` labels, not the KTC ones — see `docs/observability/keeper-turn-fsm-metrics.md`.
 
 ---
 
@@ -54,12 +54,12 @@ Neutral diff between TLA+ specs, OCaml types, and the composite observer project
 
 ---
 
-### KCL — Keeper Cascade Lifecycle
+### KCL — Keeper Runtime Lifecycle
 
 | Layer | Source                                                  | States                                                              | Count |
 | ----- | ------------------------------------------------------- | ------------------------------------------------------------------- | ----- |
-| Spec  | `KeeperCascadeLifecycle.tla:35`                         | `{"idle", "selecting", "trying", "done", "exhausted"}`              | 5     |
-| Code  | `keeper_registry.mli:55` (`type cascade_state`)         | `Cascade_idle \| Cascade_selecting \| Cascade_trying \| Cascade_done \| Cascade_exhausted` | 5     |
+| Spec  | `KeeperRuntimeLifecycle.tla:35`                         | `{"idle", "selecting", "trying", "done", "exhausted"}`              | 5     |
+| Code  | `keeper_registry.mli:55` (`type runtime_state`)         | `Runtime_idle \| Runtime_selecting \| Runtime_trying \| Runtime_done \| Runtime_exhausted` | 5     |
 
 **Drift kind**: none. ✅
 
@@ -81,7 +81,6 @@ Neutral diff between TLA+ specs, OCaml types, and the composite observer project
 | Spec                        | What it models                                    | Code touchpoint (exists?)                          | Recommendation                                                                  |
 | --------------------------- | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `HebbianLearning`           | Trait drift under reinforcement                   | `lib/keeper/social_model/` — records, not an FSM   | **Retire spec to docs/**. No reactive state machine in the code; spec predates refactor. Keep as `docs/research/` reference. |
-| `SessionRegistryGhost`      | Session registry eviction-race safety             | `lib/session/` — ad-hoc invariants, no FSM type    | **Formalize**. Add `type session_state = Active \| Evicting \| Evicted` mirroring the spec. Separate PR, not this cycle. |
 | `DispatchHookChain`         | Hook execution ordering                           | `lib/dispatch_hook/` — list-based dispatch         | **Demote to invariant test**. The chain is a list, not an FSM; model-checker tests its invariants as properties. Convert to alcotest property test. |
 | `DashboardCacheStampede`    | Cache invalidation race                           | `lib/server/` — single cache per route, no FSM     | **Retire spec**. The stampede scenario was fixed architecturally (per-route single-flight); spec is no longer load-bearing. Archive. |
 | `KeeperOASAdvanced_TTrace_*`| Counterexample trace artifact                     | generated                                          | Already a build artifact; leave alone.                                          |
@@ -142,4 +141,4 @@ No runtime code change in this PR. Matrix, flowchart, schema, and dashboard are 
 - `specs/keeper-state-machine/KeeperCompositeLifecycle.tla` — the joint spec.
 - `lib/keeper/keeper_composite_observer.mli` — authoritative projection contract.
 - `docs/observability/composite-fsm-matrix-design.md` (LT-12) — downstream design this audit feeds into.
-- `docs/observability/cascade-metrics.md` — pre-existing 5-surface consistency pattern this 6-place contract extends.
+- `docs/observability/runtime-metrics.md` — pre-existing 5-surface consistency pattern this 6-place contract extends.

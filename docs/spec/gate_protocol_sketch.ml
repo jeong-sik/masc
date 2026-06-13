@@ -27,7 +27,7 @@ let outbound_event_to_json (e : outbound_event) : Yojson.Safe.t =
     ("event_type", `String (event_type_to_string e.event_type));
     ("content", payload_content_to_json e.content);
   ] in
-  let room = match e.target_room_id with Some r -> [("target_room_id", `String r)] | None -> [] in
+  let workspace = match e.target_workspace_id with Some r -> [("target_workspace_id", `String r)] | None -> [] in
   let stats = match e.turn_stats with
     | Some s -> [("turn_stats", `Assoc [
         ("model_used", `String s.model_used);
@@ -36,7 +36,7 @@ let outbound_event_to_json (e : outbound_event) : Yojson.Safe.t =
       ])]
     | None -> []
   in
-  `Assoc (base @ room @ stats)
+  `Assoc (base @ workspace @ stats)
 
 let control_action_to_json = function
   | Mute -> `String "mute"
@@ -49,7 +49,7 @@ let control_event_to_json (c : control_event) : Yojson.Safe.t =
     ("target_channel", `String c.target_channel);
     ("action", control_action_to_json c.action);
   ] in
-  let room = match c.target_room_id with Some r -> [("target_room_id", `String r)] | None -> [] in
+  let workspace = match c.target_workspace_id with Some r -> [("target_workspace_id", `String r)] | None -> [] in
   let dur = match c.duration_sec with Some d -> [("duration_sec", `Int d)] | None -> [] in
   let rsn = match c.reason with Some r -> [("reason", `String r)] | None -> [] in
-  `Assoc (base @ room @ dur @ rsn)
+  `Assoc (base @ workspace @ dur @ rsn)

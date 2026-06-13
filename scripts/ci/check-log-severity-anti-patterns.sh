@@ -47,6 +47,11 @@ BASELINE_L1_LOGGING_ONLY=2
 BASELINE_L2_OPERATOR_BROADCAST=1
 BASELINE_L4_WATCHDOG_TICK=1
 BASELINE_L5_VALIDATION_SUCCESS=0
+# 2026-06-03: L6 added strict (0). An outcome-carrying line must derive its
+# level from the outcome value, not hardcode [Info]. The three known sites
+# (governance compute-finish, keeper lifecycle POST, MCP exn logger) were fixed
+# in the same PR, so the baseline is 0 — any new static-Info outcome line fails.
+BASELINE_L6_OUTCOME_CARRYING=0
 
 exit_code=0
 total_current=0
@@ -148,6 +153,16 @@ check_rule "L5" "validation success (coerced) + info" \
   'Log\.[A-Z][a-z]+\.info[^"]*(?s:.{0,500})tool_input_validation coerced' \
   "$BASELINE_L5_VALIDATION_SUCCESS" \
   "§ 3.5"
+
+# L6 — an outcome-carrying line must derive its level from the outcome, not
+# hardcode [Info]. The pattern requires the format string to open directly
+# after [.info] ([.info] then optional whitespace then a double-quote), so a
+# level-selecting [(match outcome with ... -> Log.X.info) "...outcome=%s..."]
+# expression (which closes with [)] before the string) is NOT flagged.
+check_rule "L6" "outcome-carrying line + static info" \
+  'Log\.[A-Z][a-z]+\.info\s*"(?s:.{0,500})outcome=%s' \
+  "$BASELINE_L6_OUTCOME_CARRYING" \
+  "§ 3.6"
 
 echo
 echo "─── Summary ───────────────────────────────"

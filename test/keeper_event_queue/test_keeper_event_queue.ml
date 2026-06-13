@@ -112,15 +112,6 @@ let test_dequeue_only_consumes_enqueued () =
   let _, rest = Option.get (dequeue q) in
   assert (Option.is_none (dequeue rest))
 
-let test_classify_alive_but_stuck_recovery () =
-  let s =
-    make_stim "alive-but-stuck:k"
-      "{\"source\":\"alive_but_stuck_recovery\",\"keeper\":\"k\"}"
-  in
-  match classify s with
-  | Alive_but_stuck_recovery -> ()
-  | _ -> assert false
-
 let test_classify_stay_silent_recovery () =
   let s =
     make_stim "stay-silent-loop:k"
@@ -140,6 +131,5 @@ let () =
   test_conservation ();
   test_queue_overrides_policy ();
   test_dequeue_only_consumes_enqueued ();
-  test_classify_alive_but_stuck_recovery ();
   test_classify_stay_silent_recovery ();
   print_endline "Keeper_event_queue: all tests passed"

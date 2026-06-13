@@ -25,11 +25,11 @@ let test_lookup_matches_registered_agent () =
     {
       defaults = Approval_config.enforced_all;
       per_agent = [
-        (`Coord_git, Approval_config.permissive_default);
+        (`Workspace_git, Approval_config.permissive_default);
       ];
     }
   in
-  let alpha = Approval_config.lookup cfg ~actor:`Coord_git in
+  let alpha = Approval_config.lookup cfg ~actor:`Workspace_git in
   assert (alpha = Approval_config.permissive_default);
   let other = Approval_config.lookup cfg ~actor:`Other_agent in
   assert (other = Approval_config.enforced_all)

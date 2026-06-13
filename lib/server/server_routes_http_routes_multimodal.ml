@@ -41,18 +41,17 @@ let case_contains ~(haystack : string) ~(needle : string) : bool =
       loop 0
 
 let json_string_field (json : Yojson.Safe.t) (field : string) : string =
-  match Yojson.Safe.Util.member field json with
-  | `String s -> s
-  | _ -> ""
+  Json_util.get_string_with_default json ~key:field ~default:""
 
 let json_created_by (json : Yojson.Safe.t) : string =
-  match Yojson.Safe.Util.member "provenance" json with
-  | `Null -> ""
-  | prov -> json_string_field prov "created_by"
+  match Json_util.assoc_member_opt "provenance" json with
+  | Some `Null -> ""
+  | Some prov -> json_string_field prov "created_by"
+  | None -> ""
 
 let json_metadata_keys (json : Yojson.Safe.t) : string list =
-  match Yojson.Safe.Util.member "metadata" json with
-  | `Assoc kv -> List.map fst kv
+  match Json_util.assoc_member_opt "metadata" json with
+  | Some (`Assoc kv) -> List.map fst kv
   | _ -> []
 
 let artifact_passes

@@ -23,9 +23,12 @@ type SchemaLike<T> = {
 }
 
 const FIXED_SSE_EVENT_TYPES = new Set([
-  'agent_joined',
-  'agent_left',
+  'agent_bound',
+  'masc/agent_bound',
+  'agent_unbound',
+  'masc/agent_unbound',
   'broadcast',
+  'masc/broadcast',
   'task_update',
   'board_post',
   'masc/board_post',
@@ -48,6 +51,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'masc/keeper_guardrail',
   'keeper_phase_changed',
   'keeper_composite_changed',
+  'keeper_chat_appended',
   'keeper_tool_call',
   'masc/keeper_tool_call',
   'keeper_tool_skipped',
@@ -73,6 +77,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
 const STRING_FIELDS = new Set([
   'severity',
   'source',
+  'connector',
   'agent',
   'from',
   'from_agent',

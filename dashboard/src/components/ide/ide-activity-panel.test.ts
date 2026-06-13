@@ -126,7 +126,7 @@ describe('IdeActivityPanel', () => {
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-1' },
@@ -187,7 +187,7 @@ describe('IdeActivityPanel', () => {
       'Telemetry1',
     ])
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'PR1')!)
-    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15000')
+    expect(window.location.hash).toBe('#workspace?section=repositories&pr=15000')
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Session1')!)
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-runtime&operation_id=op-runtime&worker_run_id=wr-runtime&q=turn-1')
     fireEvent.click(surfaceLinks.find(link => link.textContent === 'Telemetry1')!)
@@ -252,6 +252,56 @@ describe('IdeActivityPanel', () => {
     })]))
   })
 
+  it('merges IDE bridge events into the activity timeline', async () => {
+    vi.stubGlobal('fetch', vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'tool',
+              tool_name: 'execute',
+              keeper_id: 'sangsu',
+              turn_id: 'turn-bridge',
+              outcome: 'success',
+              typed_outcome: 'progress',
+              latency_ms: 50,
+              summary: 'opened PR',
+              file_path: 'lib/runtime.ml',
+              command_descriptor: { kind: 'gh_pr_comment', pr_number: 20402 },
+              timestamp_ms: 500,
+            }],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    const container = document.createElement('div')
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml' }), container)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('tool:execute')
+      expect(container.textContent).toContain('progress: opened PR')
+      expect(container.textContent).toContain('1/1 linked')
+      expect(container.textContent).toContain('PR 20402')
+    })
+
+    const jump = container.querySelector<HTMLButtonElement>('.ide-activity-context-jump')
+    expect(jump?.textContent).toContain('runtime.ml')
+    fireEvent.click(jump!)
+    expect(ideContextFocus.value).toMatchObject({
+      file_path: 'lib/runtime.ml',
+      surface: 'PR',
+      keeper_id: 'sangsu',
+      source_id: 'ide-tool-turn-bridge-500-0',
+    })
+  })
+
   it('shows linked context coverage for mixed activity events', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       new Response(JSON.stringify({
@@ -260,7 +310,7 @@ describe('IdeActivityPanel', () => {
             seq: 1,
             ts_ms: 100,
             ts_iso: '2026-05-05T10:00:00Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'telemetry.turn',
             actor: { kind: 'keeper', id: 'sangsu' },
             subject: { kind: 'log', id: 'turn-1' },
@@ -273,7 +323,7 @@ describe('IdeActivityPanel', () => {
             seq: 2,
             ts_ms: 200,
             ts_iso: '2026-05-05T10:00:01Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'keeper.note',
             actor: { kind: 'keeper', id: 'analyst' },
             subject: { kind: 'note', id: 'note-1' },
@@ -305,7 +355,7 @@ describe('IdeActivityPanel', () => {
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-8' },
@@ -367,13 +417,13 @@ describe('IdeActivityPanel', () => {
 
   it('refreshes activity events when polling is enabled', async () => {
     vi.useFakeTimers()
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+    const activityResponses = [
+      {
         events: [{
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-1' },
@@ -384,13 +434,13 @@ describe('IdeActivityPanel', () => {
           },
           tags: [],
         }],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+      },
+      {
         events: [{
           seq: 2,
           ts_ms: 200,
           ts_iso: '2026-05-05T10:00:10Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'analyst' },
           subject: { kind: 'log', id: 'turn-2' },
@@ -402,7 +452,24 @@ describe('IdeActivityPanel', () => {
           },
           tags: [],
         }],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      },
+    ]
+    let activityIndex = 0
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: true, data: { events: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      const body = activityResponses[Math.min(activityIndex, activityResponses.length - 1)]
+      activityIndex += 1
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
@@ -411,13 +478,13 @@ describe('IdeActivityPanel', () => {
     await vi.waitFor(() => {
       expect(container.textContent).toContain('turn-1')
     })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
       expect(container.textContent).toContain('goal goal-refresh')
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(container.textContent).toContain('turn-2')
     expect(container.textContent).not.toContain('turn-1')
 
@@ -427,13 +494,23 @@ describe('IdeActivityPanel', () => {
   it('keeps the last activity snapshot when a refresh fails', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-05-05T10:00:00Z'))
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
+    let activityCalls = 0
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: true, data: { events: [] } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      activityCalls += 1
+      if (activityCalls === 1) {
+        return new Response(JSON.stringify({
         events: [{
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-stable' },
@@ -444,8 +521,10 @@ describe('IdeActivityPanel', () => {
           },
           tags: [],
         }],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-      .mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('unavailable', { status: 503 })
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
@@ -459,7 +538,7 @@ describe('IdeActivityPanel', () => {
     vi.setSystemTime(new Date('2026-05-05T10:00:10Z'))
     await vi.advanceTimersByTimeAsync(1_000)
     await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(4)
     })
 
     expect(container.textContent).toContain('turn-stable')
@@ -504,7 +583,7 @@ describe('IdeActivityPanel', () => {
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'task', id: 'task-runtime-b' },
@@ -545,7 +624,7 @@ describe('IdeActivityPanel', () => {
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-1' },
@@ -590,7 +669,7 @@ describe('IdeActivityPanel', () => {
           seq: 1,
           ts_ms: 100,
           ts_iso: '2026-05-05T10:00:00Z',
-          room_id: 'run-default',
+          workspace_id: 'run-default',
           kind: 'telemetry.turn',
           actor: { kind: 'keeper', id: 'sangsu' },
           subject: { kind: 'log', id: 'turn-1' },
@@ -625,7 +704,7 @@ describe('IdeActivityPanel', () => {
             seq: 1,
             ts_ms: 100,
             ts_iso: '2026-05-05T10:00:00Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'telemetry.turn',
             actor: { kind: 'keeper', id: 'sangsu' },
             subject: { kind: 'log', id: 'turn-1' },
@@ -640,7 +719,7 @@ describe('IdeActivityPanel', () => {
             seq: 2,
             ts_ms: 90,
             ts_iso: '2026-05-05T10:00:01Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'telemetry.turn',
             actor: { kind: 'keeper', id: 'sangsu' },
             subject: { kind: 'log', id: 'turn-2' },
@@ -654,7 +733,7 @@ describe('IdeActivityPanel', () => {
             seq: 3,
             ts_ms: 80,
             ts_iso: '2026-05-05T10:00:02Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'telemetry.turn',
             actor: { kind: 'keeper', id: 'sangsu' },
             subject: { kind: 'log', id: 'turn-3' },
@@ -669,7 +748,7 @@ describe('IdeActivityPanel', () => {
             seq: 4,
             ts_ms: 70,
             ts_iso: '2026-05-05T10:00:03Z',
-            room_id: 'run-default',
+            workspace_id: 'run-default',
             kind: 'telemetry.turn',
             actor: { kind: 'keeper', id: 'sangsu' },
             subject: { kind: 'log', id: 'turn-4' },
@@ -802,7 +881,7 @@ describe('IdeActivityPanel', () => {
     ])
     expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',
@@ -862,7 +941,7 @@ describe('IdeActivityPanel', () => {
 
     expect(summary.surfaceCounts.find(surface => surface.label === 'PR')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(summary.surfaceCounts.find(surface => surface.label === 'Telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',

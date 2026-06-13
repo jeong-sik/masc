@@ -1,6 +1,6 @@
 open Alcotest
 
-module Lsp = Masc_mcp.Server_ide_lsp_proxy.For_testing
+module Lsp = Server_ide_lsp_proxy.For_testing
 
 let member key = function
   | `Assoc fields -> List.assoc_opt key fields
@@ -33,19 +33,19 @@ let test_initialize_handshake_is_read_only () =
 ;;
 
 let test_workspace_root_initialize_stays_in_base () =
-  let base_path = "/workspace/masc-mcp" in
+  let base_path = "/workspace/masc" in
   check
     string
     "inside root accepted"
-    "/workspace/masc-mcp/subdir"
+    "/workspace/masc/subdir"
     (Lsp.workspace_root_for_initialize
        ~base_path
-       "file:///workspace/masc-mcp/subdir/");
+       "file:///workspace/masc/subdir/");
   check
     string
     "sibling root rejected"
     base_path
-    (Lsp.workspace_root_for_initialize ~base_path "file:///workspace/masc-mcp-other");
+    (Lsp.workspace_root_for_initialize ~base_path "file:///workspace/masc-other");
   check
     string
     "outside root rejected"
@@ -54,22 +54,22 @@ let test_workspace_root_initialize_stays_in_base () =
 ;;
 
 let test_file_uri_resolution_is_workspace_scoped () =
-  let base = "/workspace/masc-mcp" in
+  let base = "/workspace/masc" in
   check
     (option string)
     "inside file becomes relative"
     (Some "lib/server.ml")
-    (Lsp.resolve_relative ~base "file:///workspace/masc-mcp/lib/server.ml");
+    (Lsp.resolve_relative ~base "file:///workspace/masc/lib/server.ml");
   check
     (option string)
     "encoded inside file decodes"
     (Some "docs/with space.md")
-    (Lsp.resolve_relative ~base "file:///workspace/masc-mcp/docs/with%20space.md");
+    (Lsp.resolve_relative ~base "file:///workspace/masc/docs/with%20space.md");
   check
     (option string)
     "sibling prefix is rejected"
     None
-    (Lsp.resolve_relative ~base "file:///workspace/masc-mcp-other/lib/server.ml");
+    (Lsp.resolve_relative ~base "file:///workspace/masc-other/lib/server.ml");
   check
     (option string)
     "outside file is rejected"

@@ -1,21 +1,37 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const devTokenMock = vi.hoisted(() => ({
+  ensureDevToken: vi.fn(() => Promise.resolve()),
+}))
+
+vi.mock('./dev-token', () => ({
+  ensureDevToken: devTokenMock.ensureDevToken,
+}))
+
 import {
   fetchDashboardShell,
   fetchDashboardExecutionTrust,
   fetchDashboardGovernance,
   fetchDashboardGoalDetail,
   fetchDashboardGoalsTree,
+  fetchDashboardBriefing,
   fetchDashboardTools,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchDashboardMemory,
+  fetchDashboardMission,
+  fetchDashboardMissionBriefing,
+  fetchDashboardRuntimeProbe,
   fetchCostLatency,
   fetchKeeperConfig,
   fetchKeeperCostMetrics,
   fetchKeeperDecisions,
   fetchMemorySubsystems,
   fetchRuntimeProviders,
+  fetchRuntimeTomlConfig,
   fetchRuntimeModelMetrics,
+  patchKeeperConfig,
+  saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
   fetchTelemetry,
   fetchTelemetrySummary,
@@ -27,6 +43,8 @@ import { keeperRuntimeBlockerLabel } from '../lib/keeper-runtime-display'
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  devTokenMock.ensureDevToken.mockClear()
+  devTokenMock.ensureDevToken.mockResolvedValue(undefined)
 })
 
 function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
@@ -179,6 +197,79 @@ describe('fetchDashboardExecutionTrust', () => {
       keeper_name: 'sangsu',
       trace_id: 'trace-exec-gap',
     })
+  })
+})
+
+describe('dashboard briefing fetchers', () => {
+  it('requests the canonical briefing surface', async () => {
+    const rawResponse = {
+      summary: { workspace_health: 'ok' },
+      incidents: [],
+      recommended_actions: [],
+      command_focus: {},
+      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      attention_queue: [],
+      sessions: [],
+      agent_briefs: [],
+      keeper_briefs: [],
+      internal_signals: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardBriefing()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
+  })
+
+  it('keeps the mission snapshot fetcher as a compatibility alias', async () => {
+    const rawResponse = {
+      summary: { workspace_health: 'ok' },
+      incidents: [],
+      recommended_actions: [],
+      command_focus: {},
+      operator_targets: { keepers: [], pending_confirms: [], available_actions: [] },
+      attention_queue: [],
+      sessions: [],
+      agent_briefs: [],
+      keeper_briefs: [],
+      internal_signals: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMission()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing')
+  })
+
+  it('requests canonical briefing sections and preserves force', async () => {
+    const rawResponse = {
+      status: 'ok',
+      criteria: [],
+      sections: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchDashboardMissionBriefing(true)
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/briefing/sections?force=1')
   })
 })
 
@@ -357,6 +448,35 @@ describe('fetchDashboardTools', () => {
     expect(tools[0]).toMatchObject({ name: 'tool_a', category: 'uncategorized', tier: '(unknown tier)' })
     expect(tools[1]).toMatchObject({ name: 'tool_b', category: 'keeper', tier: '(unknown tier)' })
     expect(tools[2]).toMatchObject({ name: 'tool_c', category: 'uncategorized', tier: 'essential' })
+  })
+
+  it('totalizes a missing surfaces field to an empty array', async () => {
+    // Tool-layer decoupling groundwork: the OCaml tool layer is shedding the
+    // `surfaces` classification. Once the endpoint stops emitting it, the
+    // normalizer must still hand consumers an array, not undefined.
+    const rawResponse = {
+      tool_inventory: {
+        tools: [
+          { name: 'tool_no_surfaces' },
+          { name: 'tool_with_surfaces', surfaces: ['public_mcp'] },
+        ],
+      },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 2 },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardTools()
+
+    const tools = result.tool_inventory.tools
+    expect(tools[0]).toMatchObject({ name: 'tool_no_surfaces', surfaces: [] })
+    expect(tools[1]).toMatchObject({ name: 'tool_with_surfaces', surfaces: ['public_mcp'] })
   })
 
   it('returns a new object without mutating the raw response', async () => {
@@ -821,15 +941,15 @@ describe('dashboard goals decoding', () => {
               id: 'gvr-1',
               goal_id: 'goal-1',
               target_phase: 'completed',
-              requested_by: { kind: 'operator', id: 'planner' },
+              requested_by: { id: 'planner' },
               policy_snapshot: {
-                principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
-                eligible_principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
+                principals: [{ id: 'keeper-alpha' }],
+                eligible_principals: [{ id: 'keeper-alpha' }],
                 required_verdicts: 1,
               },
               votes: [
                 {
-                  principal: { kind: 'keeper', id: 'keeper-alpha', display_name: 'keeper-alpha' },
+                  principal: { id: 'keeper-alpha', display_name: 'keeper-alpha' },
                   decision: 'approve',
                   note: 'checked receipt and tests',
                   evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
@@ -1054,9 +1174,9 @@ describe('dashboard goals decoding', () => {
           active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
-          cascade_name: 'keeper_unified',
+          runtime_id: 'keeper_unified',
           approval_profile: 'strict',
-          cascade_outcome: 'passed_to_next_model',
+          runtime_outcome: 'passed_to_next_model',
           latest_execution_outcome: 'completed',
           latest_execution_at: '2026-04-23T00:10:00Z',
           latest_receipt: { outcome: 'completed' },
@@ -1078,20 +1198,11 @@ describe('dashboard goals decoding', () => {
               },
             },
             execution: {
-              tool_contract_result: 'unknown',
-              runtime_proof_status: 'missing_required_tool_use',
-              required_tools: ['keeper_task_done'],
-              missing_required_tools: ['keeper_task_done'],
-              requested_tools: ['keeper_task_claim', 'keeper_task_done'],
               tools_used: ['keeper_task_claim'],
-              unexpected_tools: ['keeper_board_list'],
-              requested_tool_count: 2,
-              tools_used_count: 1,
-              unexpected_tool_count: 1,
               provider_attempt_count: 2,
               provider_fallback_applied: true,
               provider_selected_model: 'runtime-lane',
-              cascade_outcome: 'fallback_exhausted',
+              runtime_outcome: 'fallback_exhausted',
               sandbox_summary: 'docker / none',
               sandbox_root: '/tmp/keeper-sandbox',
               mutation_guard_summary: 'mutation_contract_not_observed',
@@ -1158,20 +1269,10 @@ describe('dashboard goals decoding', () => {
           },
         },
         execution_summary: {
-          tool_contract_result: 'unknown',
-          runtime_proof_status: 'missing_required_tool_use',
-          required_tools: ['keeper_task_done'],
-          missing_required_tools: ['keeper_task_done'],
-          requested_tools: ['keeper_task_claim', 'keeper_task_done'],
-          tools_used: ['keeper_task_claim'],
-          unexpected_tools: ['keeper_board_list'],
-          requested_tool_count: 2,
-          tools_used_count: 1,
-          unexpected_tool_count: 1,
           provider_attempt_count: 2,
           provider_fallback_applied: true,
           provider_selected_model: 'runtime-lane',
-          cascade_outcome: 'fallback_exhausted',
+          runtime_outcome: 'fallback_exhausted',
           sandbox_summary: 'docker / none',
           sandbox_root: '/tmp/keeper-sandbox',
           mutation_guard_summary: 'mutation_contract_not_observed',
@@ -1203,9 +1304,9 @@ describe('dashboard goals decoding', () => {
           active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           network_mode: 'none',
-          cascade_name: 'keeper_unified',
+          runtime_id: 'keeper_unified',
           approval_profile: null,
-          cascade_outcome: null,
+          runtime_outcome: null,
           latest_execution_outcome: null,
           latest_execution_at: null,
           latest_receipt: null,
@@ -1217,7 +1318,6 @@ describe('dashboard goals decoding', () => {
               pending_count: 0,
             },
             execution: {
-              tool_contract_result: 'allowed_in_sandbox',
               sandbox_summary: 'docker / none',
               mutation_guard_summary: 'allowed_in_sandbox',
               latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -1249,7 +1349,6 @@ describe('dashboard goals decoding', () => {
         pending_count: 0,
       },
       execution_summary: {
-        tool_contract_result: 'allowed_in_sandbox',
         sandbox_summary: 'docker / none',
         mutation_guard_summary: 'allowed_in_sandbox',
         latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -1266,29 +1365,13 @@ describe('fetchKeeperConfig', () => {
       sandbox_profile: 'docker',
       network_mode: 'none',
       sandbox_last_error: 'sandbox docker exec failed',
-      effective_sandbox_image: 'ubuntu:24.04@sha256:test',
-      private_workspace_root: '.masc/playground/keeper-sangsu',
-      sandbox_environment: {
-        base_path: '/tmp/project-root/.masc',
-        project_root: '/tmp/project-root',
-        docker_playground_enabled: 'true',
-        docker_container_name: 'keeper-playground',
-        container_playground_root: '/home/keeper/playground',
-        docker_image: 'ubuntu:24.04@sha256:test',
-        pids_limit: '128',
-        memory: '2g',
-        tmpfs_size: '256m',
-        seccomp_profile: '',
-        require_rootless: 'false',
-        require_userns: 'true',
-      },
       allowed_paths: '/tmp/workspace',
       effective_allowed_paths: ['/tmp/workspace'],
       prompt: {
         goal: 'Ship stable keeper ops',
         short_goal: 'Diagnose agent liveness',
         mid_goal: 'Reduce restart confusion',
-        long_goal: 'Keep coordination stable',
+        long_goal: 'Keep workspace stable',
         will: 'Stay on call',
         needs: 'Accurate runtime state',
         desires: 'Clear operator feedback',
@@ -1299,6 +1382,8 @@ describe('fetchKeeperConfig', () => {
           capabilities: { key: 'keeper.capabilities', source: 'file', text: 'capabilities text' },
         },
         effective_system_prompt: 'full prompt',
+        unified_system_prompt: 'unified prompt',
+        unified_user_message_preview: 'world state',
       },
       execution: {
         models: 'llama:test-balanced',
@@ -1306,8 +1391,9 @@ describe('fetchKeeperConfig', () => {
         per_provider_timeout_sec: 12.5,
         per_provider_timeout_mode: 'override',
         verify: 'true',
-        selected_cascade_name: 'keeper_unified',
-        selected_cascade_canonical: 'keeper_unified',
+        selected_runtime_id: 'keeper_unified',
+        selected_runtime_canonical: 'keeper_unified',
+        runtime_options: ['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'],
       },
       compaction: {
         profile: 'balanced',
@@ -1354,8 +1440,6 @@ describe('fetchKeeperConfig', () => {
         keepalive_running: 'true',
         registry_state: 'running',
         fiber_health: 'healthy',
-        presence_keepalive: 'true',
-        presence_keepalive_sec: '30',
         runtime_blocker_class: 'stale_fleet_batch',
         runtime_blocker_summary: 'Fleet batch paused after stale termination storm.',
         runtime_blocker_continue_gate: 'false',
@@ -1365,9 +1449,9 @@ describe('fetchKeeperConfig', () => {
         disposition_reason: 'healthy',
         needs_attention: false,
       },
-      coordination: {
+      workspace: {
         mention_targets: 'sangsu',
-        joined_room_ids: 'default',
+        bound_workspace_ids: 'default',
         active_goal_ids: ['goal-runtime'],
         active_goals: [
           { id: 'goal-runtime', title: 'Ship runtime clarity', horizon: 'mid' },
@@ -1376,8 +1460,8 @@ describe('fetchKeeperConfig', () => {
         missing_active_goal_ids: [],
       },
       tools: {
-        tool_access: { kind: 'preset', preset: 'delivery' },
-        resolved_allowlist: 'keeper_fs_read',
+        tool_access: ['tool_read_file'],
+        resolved_allowlist: 'tool_read_file',
         tool_denylist: 'Execute',
         active_masc_tool_count: '1',
         active_keeper_tool_count: '2',
@@ -1390,8 +1474,6 @@ describe('fetchKeeperConfig', () => {
         precedence: 'live_meta',
         has_live_override: 'true',
         override_fields: 'goal',
-        cascade_catalog_source_kind: 'toml',
-        cascade_catalog_source_path: '/tmp/config/cascade.toml',
       },
       metrics: {
         generation: '3',
@@ -1425,39 +1507,47 @@ describe('fetchKeeperConfig', () => {
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
-    expect(result.effective_sandbox_image).toBe('ubuntu:24.04@sha256:test')
-    expect(result.private_workspace_root).toBe('.masc/playground/keeper-sangsu')
-    expect(result.sandbox_environment?.base_path).toBe('/tmp/project-root/.masc')
-    expect(result.sandbox_environment?.project_root).toBe('/tmp/project-root')
-    expect(result.sandbox_environment?.docker_playground_enabled).toBe(true)
-    expect(result.sandbox_environment?.docker_container_name).toBe('keeper-playground')
-    expect(result.sandbox_environment?.container_playground_root).toBe('/home/keeper/playground')
-    expect(result.sandbox_environment?.docker_image).toBe('ubuntu:24.04@sha256:test')
-    expect(result.sandbox_environment?.pids_limit).toBe(128)
-    expect(result.sandbox_environment?.memory).toBe('2g')
-    expect(result.sandbox_environment?.tmpfs_size).toBe('256m')
-    expect(result.sandbox_environment?.seccomp_profile).toBeNull()
-    expect(result.sandbox_environment?.require_rootless).toBe(false)
-    expect(result.sandbox_environment?.require_userns).toBe(true)
     expect(result.execution.models).toEqual(['llama:test-balanced'])
     expect(result.execution.verify).toBe(true)
-    expect(result.execution.selected_cascade_name).toBe('keeper_unified')
-    expect(result.execution.selected_cascade_canonical).toBe('keeper_unified')
+    expect(result.execution.selected_runtime_id).toBe('keeper_unified')
+    expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
+    expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
     expect(result.execution.per_provider_timeout_sec).toBe(12.5)
     expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
     expect(result.sources.precedence).toEqual(['live_meta'])
-    expect(result.sources.cascade_catalog_source_kind).toBe('toml')
-    expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')
     expect(result.metrics.total_cost_usd).toBe(0.12)
-    expect(result.runtime.presence_keepalive_sec).toBe(30)
     expect(result.runtime.runtime_blocker_class).toBe('stale_fleet_batch')
     expect(result.runtime.runtime_blocker_summary).toBe('Fleet batch paused after stale termination storm.')
     expect(result.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.coordination.active_goal_ids).toEqual(['goal-runtime'])
-    expect(result.coordination.active_goals[0]?.title).toBe('Ship runtime clarity')
+    expect(result.workspace.active_goal_ids).toEqual(['goal-runtime'])
+    expect(result.workspace.active_goals[0]?.title).toBe('Ship runtime clarity')
     expect(result.runtime_trust?.disposition).toBe('Pass')
+  })
+
+  it('normalizes default per-provider timeout mode without legacy label', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          name: 'keeper-sangsu',
+          execution: {
+            per_provider_timeout_sec: null,
+            per_provider_timeout_mode: 'legacy-value',
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+
+    expect(result.execution.per_provider_timeout_sec).toBeNull()
+    expect(result.execution.per_provider_timeout_mode).toBe('turn_budget_default')
   })
 
   it('preserves missing keeper config latency as null instead of zero', async () => {
@@ -1492,9 +1582,9 @@ describe('fetchKeeperConfig', () => {
 
   it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
     const cases = [
-      ['no_tool_capable_provider', '도구 실행 Provider 없음'],
-      ['provider_runtime_error', 'Provider 런타임 오류'],
-      ['tool_required_unsatisfied', '필수 도구 미충족'],
+      ['runtime_exhausted', '런타임 후보 소진'],
+      ['provider_runtime_error', '런타임 호출 오류'],
+      ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],
       ['stale_turn_timeout', '오래된 턴 만료'],
       ['awaiting_operator', '운영자 조치 대기'],
@@ -1507,7 +1597,6 @@ describe('fetchKeeperConfig', () => {
       ['sdk_cost_budget_exceeded', 'SDK 비용 예산 초과'],
       ['sdk_unrecognized_stop_reason', 'SDK 미식별 정지 사유'],
       ['sdk_idle_detected', 'SDK Idle 감지'],
-      ['sdk_tool_retry_exhausted', 'SDK 도구 재시도 소진'],
       ['sdk_guardrail_violation', 'SDK 가드레일 위반'],
       ['sdk_tripwire_violation', 'SDK Tripwire 위반'],
       ['sdk_exit_condition_met', 'SDK 종료 조건 충족'],
@@ -1539,6 +1628,133 @@ describe('fetchKeeperConfig', () => {
   })
 })
 
+describe('keeper config mutation API', () => {
+  it('ensures dashboard auth before posting runtime_id changes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'keeper-sangsu',
+        execution: {
+          selected_runtime_id: 'b.two',
+          selected_runtime_canonical: 'b.two',
+          runtime_options: ['a.one', 'b.two'],
+        },
+        sources: {
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/.masc/config/keepers/sangsu.toml',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchKeeperConfig('keeper-sangsu', { runtime_id: 'b.two' })
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/keepers/keeper-sangsu/config')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'b.two' })
+    expect(result.execution.selected_runtime_id).toBe('b.two')
+  })
+})
+
+describe('dashboard runtime probe API', () => {
+  it('ensures dashboard auth before fetching runtime probe status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        generated_at: '2026-06-10T12:00:00Z',
+        probe: {
+          status: 'ok',
+          probe_ok: true,
+          summary: { runtimes: 1, reachable: 1, failed: 0 },
+          providers: [],
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardRuntimeProbe(true)
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/runtime-probe?force=1')
+    expect(result.probe?.probe_ok).toBe(true)
+  })
+})
+
+describe('runtime.toml raw config API', () => {
+  it('fetches and normalizes the raw runtime.toml source', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
+        reloaded: false,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchRuntimeTomlConfig()
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/runtime/config/raw')
+    expect(result.path).toBe('/tmp/.masc/config/runtime.toml')
+    expect(result.file_name).toBe('runtime.toml')
+    expect(result.source_text).toContain('[runtime]')
+    expect(result.reloaded).toBe(false)
+  })
+
+  it('posts the full raw TOML source through source_text', async () => {
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await saveRuntimeTomlConfig(sourceText)
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
+      fetchMock.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/raw')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
+    expect(result.reloaded).toBe(true)
+    expect(result.source_text).toBe(sourceText)
+  })
+})
+
 describe('fetchRuntimeProviders', () => {
   it('preserves stable provider lane IDs emitted by the API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1546,20 +1762,26 @@ describe('fetchRuntimeProviders', () => {
         updated_at: '2026-05-13T13:00:00Z',
         summary: {
           providers: 1,
+          runtimes: 1,
           local_models: 0,
           cloud_models: 1,
           cli_models: 0,
+          default_runtime_id: 'runpod_mtp.qwen',
         },
         providers: [
           {
-            provider: 'runtime_lane_deadbeef1234',
-            kind: 'runtime',
-            runtime_kind: 'cloud',
-            status: 'available',
+            provider: 'runpod_mtp.qwen',
+            runtime_id: 'runpod_mtp.qwen',
+            provider_id: 'runpod_mtp',
+            model_id: 'qwen',
+            model_api_name: 'Qwen/Qwen3-32B',
+            kind: 'cloud',
+            runtime_kind: 'http',
+            status: 'configured',
             available: true,
-            supports_single_agent_run: true,
             model_count: 1,
-            source: 'runtime',
+            models: ['Qwen/Qwen3-32B'],
+            source: 'runtime.toml',
             discovery: {
               healthy: true,
               ctx_size: 200000,
@@ -1576,9 +1798,12 @@ describe('fetchRuntimeProviders', () => {
     const result = await fetchRuntimeProviders()
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/providers')
-    expect(result.providers[0]?.provider).toBe('runtime_lane_deadbeef1234')
-    expect(result.providers[0]?.kind).toBe('runtime')
-    expect(result.providers[0]?.runtime_kind).toBe('cloud')
+    expect(result.summary?.default_runtime_id).toBe('runpod_mtp.qwen')
+    expect(result.providers[0]?.provider).toBe('runpod_mtp.qwen')
+    expect(result.providers[0]?.provider_id).toBe('runpod_mtp')
+    expect(result.providers[0]?.model_api_name).toBe('Qwen/Qwen3-32B')
+    expect(result.providers[0]?.kind).toBe('cloud')
+    expect(result.providers[0]?.runtime_kind).toBe('http')
     expect(result.providers[0]?.discovery?.ctx_size).toBe(200000)
   })
 })

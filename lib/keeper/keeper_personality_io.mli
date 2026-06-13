@@ -76,7 +76,7 @@ type field = Will | Needs | Desires | Instructions
 
 val field_to_string : field -> string
 (** Snake_case name of the field — stable identifier for log lines and
-    Prometheus labels. *)
+    Otel_metric_store labels. *)
 
 (** Soft warning emitted when a field exceeds the configured byte cap.
     The harness never truncates: callers decide whether to soft-warn
@@ -92,7 +92,7 @@ val check_byte_caps :
   ?max_bytes:int -> coerced_personality -> cap_warning list
 (** [check_byte_caps ?max_bytes p] returns a warning per oversized
     field. [max_bytes] defaults to [Keeper_config.prompt_render_max_bytes].
-    Always pure — no logging, no Prometheus, no transformation. The
+    Always pure — no logging, no Otel_metric_store, no transformation. The
     caller chooses what to do with the warnings (soft-warn at create/
     update boundaries; structured-feedback in Layer 4 retry). *)
 
@@ -132,7 +132,7 @@ val to_prompt_form :
   max_bytes:int -> raw_personality -> raw_personality
 (** [to_prompt_form ~max_bytes p] returns a copy of [p] with each
     field trimmed and then truncated to [max_bytes] using
-    [Keeper_config.utf8_safe_prefix_bytes] (UTF-8 boundary safe).
+    [String_util.utf8_prefix] (UTF-8 boundary safe).
     This is the only place in the harness where data is shortened —
     parse / coerce / compare all preserve raw bytes. Callers are
     responsible for fallback defaults when a field is empty after

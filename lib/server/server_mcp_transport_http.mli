@@ -10,6 +10,8 @@ type runtime = Server_mcp_transport_http_types.runtime = {
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
+    ?otel_mcp_protocol_version:string ->
+    ?otel_transport_context:Otel_dispatch_hook.transport_context ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->
@@ -35,8 +37,24 @@ val mcp_protocol_versions : string list
 val mcp_protocol_version_default : string
 val default_base_path : unit -> string
 val is_valid_protocol_version : string -> bool
-val remember_protocol_version : string -> string -> unit
-val remember_mcp_profile : string -> tool_profile -> unit
+val remember_protocol_version :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  string ->
+  unit
+
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+
+val remember_mcp_profile :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  tool_profile ->
+  unit
 val forget_mcp_session : string -> unit
 val profile_label : tool_profile -> string
 val reap_stale_sessions : is_active_session:(string -> bool) -> int
@@ -79,6 +97,9 @@ val get_protocol_version_for_session :
 val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
+val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
+val validate_2026_request_headers :
+  Httpun.Request.t -> string -> (unit, string) result
 val should_use_sse_for_body :
   Httpun.Request.t ->
   string ->

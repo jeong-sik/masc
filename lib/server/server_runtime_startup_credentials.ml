@@ -1,93 +1,10 @@
-(* Server_runtime_startup_credentials — credential sync and egress audit
-   at server startup.
+(* Server_runtime_startup_credentials — credential sync at server startup.
    Extracted from server_runtime_bootstrap.ml during godfile decomposition.
-   Contains keeper egress audit, admin/internal token sync, bootable keeper
-   credential sync, and shared token rotation. *)
-
-let keeper_egress_inactive_missing_reason
-    ~(metas : Keeper_types.keeper_meta list)
-    (r : Keeper_egress_audit.result) =
-  metas
-  |> List.find_opt (fun (meta : Keeper_types.keeper_meta) ->
-    String.equal meta.name r.keeper_name)
-  |> function
-  | Some meta -> Keeper_egress_audit.inactive_missing_reason meta
-  | None -> None
-
-let audit_keeper_egress_policies (state : Mcp_server.server_state) =
-  (* PR-Eg2b (Leak 11): on every boot, audit each keeper's [egress.json]
-     placement.  Reads only — never writes.  Writes are deferred to the
-     opt-in seed PR (PR-Eg4).  The audit is fail-soft: any unexpected
-     exception is logged and swallowed so a misbehaving keepers/ tree
-     can't keep the server from starting. *)
-  let config = state.Mcp_server.room_config in
-  let keepers_dir = Filename.concat (Coord.masc_root_dir config) "keepers" in
-  let metas =
-    if not (Sys.file_exists keepers_dir) then []
-    else
-      try
-        Sys.readdir keepers_dir
-        |> Array.to_list
-        |> List.filter_map (fun name ->
-            match Keeper_types.read_meta config name with
-            | Ok (Some meta) -> Some meta
-            | Ok None -> None
-            | Error err ->
-                Log.Misc.warn
-                  "[egress_audit:read_meta_failed] keeper=%s err=%s"
-                  name err;
-                None)
-      with exn ->
-        Log.Misc.warn
-          "[egress_audit:enumerate_failed] dir=%s exn=%s"
-          keepers_dir (Printexc.to_string exn);
-        []
-  in
-  if metas = [] then
-    Log.Misc.info
-      "[egress_audit:skip] no keeper metas found at %s" keepers_dir
-  else begin
-    let results = Keeper_egress_audit.audit_all ~config ~metas in
-    let oks, missings, orphans = Keeper_egress_audit.partition results in
-    let active_missings, inactive_missings =
-      List.fold_left
-        (fun (active, inactive) r ->
-          match keeper_egress_inactive_missing_reason ~metas r with
-          | Some reason -> (active, (r, reason) :: inactive)
-          | None -> (r :: active, inactive))
-        ([], []) missings
-    in
-    List.iter (fun r ->
-      Log.Misc.info "%s" (Keeper_egress_audit.format_log_line r))
-      oks;
-    (match Keeper_egress_audit.format_missing_summary_line active_missings with
-     | Some line -> Log.Misc.warn "%s" line
-     | None -> ());
-    List.iter (fun r ->
-      Prometheus.inc_counter Prometheus.metric_egress_audit_missing
-        ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
-      active_missings;
-    List.iter
-      (fun (r, reason) ->
-        Log.Misc.info "%s inactive_reason=%s"
-          (Keeper_egress_audit.format_log_line r)
-          reason)
-      inactive_missings;
-    List.iter (fun r ->
-      Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
-      Prometheus.inc_counter Prometheus.metric_egress_audit_stale_orphan
-        ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
-      orphans;
-    Log.Misc.info
-      "[egress_audit:summary] total=%d ok=%d missing=%d inactive_missing=%d stale_orphan=%d"
-      (List.length results) (List.length oks)
-      (List.length active_missings)
-      (List.length inactive_missings)
-      (List.length orphans)
-  end
+   Contains admin/internal token sync, bootable keeper credential sync,
+   and shared token rotation. *)
 
 let sync_admin_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   let admin_agent_name =
     match Auth.read_initial_admin base_path with
     | Some name ->
@@ -136,19 +53,40 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
              (Masc_domain.masc_error_to_string err))
 
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
+  let pre_existing =
+    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
+    | Some raw when String.trim raw <> "" -> true
+    | _ -> false
+  in
   let raw_token = Auth.ensure_internal_keeper_token base_path in
   Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
-  Log.Server.info
-    "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN"
+  let post_existing =
+    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
+    | Some raw when String.trim raw <> "" -> true
+    | _ -> false
+  in
+  let source = if pre_existing then "inherited" else "generated" in
+  if post_existing then
+    Log.Server.info
+      "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=%s)"
+      source
+  else
+    Log.Server.error
+      "startup internal keeper MCP token sync failed: MASC_INTERNAL_MCP_TOKEN not set after putenv";
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_startup_internal_keeper_token_sync
+    ~labels:[("source", source)]
+    ~delta:1.0
+    ()
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   let keeper_names =
-    Keeper_runtime.bootable_keeper_names state.Mcp_server.room_config
+    Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
   in
   let excluded_keepers =
-    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.room_config
+    Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.workspace_config
   in
   let keeper_agent_names =
     List.map Keeper_identity.keeper_agent_name keeper_names
@@ -212,7 +150,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
      for ping-pong regression. *)
   (* [Auth.bare_alias_audit] mirrors the result into the
      [masc_auth_bare_alias{state=...}] gauges so the boot signal
-     stays surfaced on every Prometheus scrape. The INFO line below
+     stays surfaced on every Otel_metric_store export. The INFO line below
      is the one-shot boot log mirror; the WARN that follows is the
      regression canary. *)
   let audit =
@@ -244,8 +182,8 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
       in
       let success_count = List.length successes in
       if success_count > 0 then begin
-        Prometheus.inc_counter
-          Prometheus.metric_auth_credential_token_rotated
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_auth_credential_token_rotated
           ~labels:[
             ("token_hash_prefix", outcome.token_hash_prefix);
             ("scope", "bootable_keepers");

@@ -7,13 +7,13 @@
     <link data-trunk rel="css" href="style.css" />
     <link data-trunk rel="copy-dir" href="assets" />
 </head>
-<body class="mode-lobby">
+<body class="mode-home">
 
-    <!-- ═══ Lobby Screen (Mode Selector) ═══ -->
-    <div id="lobby-screen">
-        <div class="lobby-header">
-            <h1 class="lobby-title">MASC Viewer</h1>
-            <p class="lobby-subtitle">Multi-Agent Streaming Coordination</p>
+    <!-- ═══ Home Screen (Mode Selector) ═══ -->
+    <div id="home-screen">
+        <div class="home-header">
+            <h1 class="home-title">MASC Viewer</h1>
+            <p class="home-subtitle">Multi-Agent Shared Context</p>
         </div>
 
         <div id="mode-cards" class="mode-grid">
@@ -42,7 +42,7 @@
             </button>
         </div>
 
-        <div class="lobby-footer">
+        <div class="home-footer">
             <span class="theme-label">Theme</span>
             <select id="theme-selector">
                 <option value="dark-fantasy" selected>Dark Fantasy</option>
@@ -64,7 +64,7 @@
         <div class="mode-panel-header">
             <h2>System Monitor</h2>
             <div id="monitor-status" class="mode-status status-disconnected">연결 대기 중</div>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="monitor-grid">
@@ -75,7 +75,7 @@
                     </div>
                 </div>
                 <div class="monitor-card">
-                    <h3>Room Activity</h3>
+                    <h3>Workspace Activity</h3>
                     <div id="monitor-events" class="monitor-event-feed">
                         <p class="placeholder-text">Waiting for events...</p>
                     </div>
@@ -94,7 +94,7 @@
     <div id="social-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Social Board</h2>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="panel-header">
@@ -111,7 +111,7 @@
     <div id="experiment-panel" class="mode-panel" style="display: none;">
         <div class="mode-panel-header">
             <h2>Experiments</h2>
-            <button class="back-btn" data-back="lobby">◂ Back</button>
+            <button class="back-btn" data-back="home">◂ Back</button>
         </div>
         <div class="mode-panel-content">
             <div class="panel-header">
@@ -128,18 +128,18 @@
     <div id="dashboard" style="display: none;" data-auto-round="0">
         <!-- Top Bar -->
         <header id="top-bar">
-            <button id="back-to-lobby" class="icon-btn" title="Back to Lobby">◂</button>
+            <button id="back-to-home" class="icon-btn" title="Back to Home">◂</button>
             <span id="mode-title">—</span>
             <div class="top-bar-right">
-                <div class="room-switch-inline">
-                    <select id="room-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
+                <div class="workspace-switch-inline">
+                    <select id="workspace-selector-inline" class="inline-select" title="진행 중인 게임 방 선택">
                         <option value="default" selected>default (기본 방)</option>
                     </select>
-                    <input id="room-input-inline" class="inline-input" type="text" placeholder="방 ID 입력 (없으면 빈 방)" maxlength="64" title="방 ID를 직접 입력해 엽니다. 세션은 자동 시작되지 않습니다." />
-                    <button id="room-apply-btn" class="inline-toggle" type="button" title="입력한 방을 엽니다 (세션 시작 아님)">방 열기</button>
-                    <button id="room-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
-                    <button id="room-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
-                    <span id="room-status" class="widget-pill">현재 게임: default</span>
+                    <input id="workspace-input-inline" class="inline-input" type="text" placeholder="방 ID 입력 (없으면 빈 방)" maxlength="64" title="방 ID를 직접 입력해 엽니다. 세션은 자동 시작되지 않습니다." />
+                    <button id="workspace-apply-btn" class="inline-toggle" type="button" title="입력한 방을 엽니다 (세션 시작 아님)">방 열기</button>
+                    <button id="workspace-refresh-btn" class="inline-toggle" type="button" title="서버에서 방 목록을 다시 불러옵니다">방 새로고침</button>
+                    <button id="workspace-hub-toggle" class="inline-toggle" type="button" aria-pressed="false" title="전체 방 목록 패널을 열거나 닫습니다">방 목록</button>
+                    <span id="workspace-status" class="widget-pill">현재 게임: default</span>
                     <span id="top-controls-help" class="widget-pill">방 전환(세션 시작 아님) · 새 게임에서 세션 시작 · 멈춤/재개는 진행 중 세션 제어</span>
                 </div>
                 <button id="new-game-toggle" class="inline-toggle" type="button" title="새로운 TRPG 세션을 시작합니다">새 게임</button>
@@ -177,8 +177,8 @@
 
         <section id="ops-hud" aria-label="TRPG 운영 상태">
             <div class="ops-hud-item">
-                <span class="ops-k">Room</span>
-                <span id="ops-room-id" class="ops-v">default</span>
+                <span class="ops-k">Workspace</span>
+                <span id="ops-workspace-id" class="ops-v">default</span>
             </div>
             <div class="ops-hud-item">
                 <span class="ops-k">Session</span>
@@ -219,8 +219,8 @@
                     <label class="new-game-field">
                         <span>방 이름</span>
                         <div class="new-game-inline">
-                            <input id="new-game-room-id" type="text" maxlength="64" placeholder="adventure-..." title="게임 방의 고유 이름" />
-                            <button id="new-game-room-regenerate" class="inline-toggle" type="button" title="랜덤 방 이름 다시 생성">재생성</button>
+                            <input id="new-game-workspace-id" type="text" maxlength="64" placeholder="adventure-..." title="게임 방의 고유 이름" />
+                            <button id="new-game-workspace-regenerate" class="inline-toggle" type="button" title="랜덤 방 이름 다시 생성">재생성</button>
                         </div>
                     </label>
 
@@ -265,7 +265,7 @@
                             <button id="new-game-manual-reset" class="inline-toggle" type="button">선택순으로 리셋</button>
                         </div>
                         <div id="new-game-manual-table" class="manual-map-table">
-                            <div class="room-chip-empty">플레이어 keeper를 먼저 선택하세요.</div>
+                            <div class="workspace-chip-empty">플레이어 keeper를 먼저 선택하세요.</div>
                         </div>
                     </div>
 
@@ -273,8 +273,8 @@
                         <span>AI 모델 (쉼표로 구분)</span>
                         <input id="new-game-models" type="text" value="glm:glm-4.7" title="AI가 사용할 MODEL 모델 지정" />
                         <div id="new-game-model-status" class="new-game-inline-hint">가용 모델 조회 대기 중</div>
-                        <div id="new-game-model-list" class="room-chip-list model-chip-list">
-                            <div class="room-chip-empty">가용 모델을 불러오는 중입니다.</div>
+                        <div id="new-game-model-list" class="workspace-chip-list model-chip-list">
+                            <div class="workspace-chip-empty">가용 모델을 불러오는 중입니다.</div>
                         </div>
                     </label>
                 </div>
@@ -292,12 +292,12 @@
             </div>
         </section>
 
-        <section id="room-hub" class="room-hub" style="display: none;">
-            <div class="room-hub-placeholder">방 목록을 불러오는 중...</div>
+        <section id="workspace-hub" class="workspace-hub" style="display: none;">
+            <div class="workspace-hub-placeholder">방 목록을 불러오는 중...</div>
         </section>
 
         <section id="trpg-surface-nav" class="trpg-surface-nav" style="display: none;" aria-label="TRPG 운영 콘솔">
-            <button class="trpg-surface-tab" type="button" data-trpg-surface="lobby" aria-pressed="false">Lobby</button>
+            <button class="trpg-surface-tab" type="button" data-trpg-surface="idle" aria-pressed="false">Idle</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="overview" aria-pressed="true">Overview</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="timeline" aria-pressed="false">Timeline</button>
             <button class="trpg-surface-tab" type="button" data-trpg-surface="control" aria-pressed="false">Control</button>
@@ -308,7 +308,7 @@
             <div id="trpg-overview-panel" class="trpg-surface-panel">
                 <div class="trpg-surface-head">
                     <h3>Overview</h3>
-                    <p>현재 room의 핵심 상태, 경고, 다음 액션을 한 번에 봅니다.</p>
+                    <p>현재 workspace의 핵심 상태, 경고, 다음 액션을 한 번에 봅니다.</p>
                 </div>
                 <div id="trpg-overview-summary" class="trpg-summary-cards">
                     <div class="trpg-summary-empty">개요를 불러오는 중입니다.</div>
@@ -350,7 +350,7 @@
                 </div>
 
                 <div class="actor-admin">
-                    <div class="actor-admin-head">액터 관리 (현재 room)</div>
+                    <div class="actor-admin-head">액터 관리 (현재 workspace)</div>
                     <div class="actor-admin-grid actor-admin-grid-basic">
                         <label class="new-game-field">
                             <span>이름</span>
@@ -472,13 +472,13 @@
                     <div id="state-legend" class="state-legend runtime-advanced">
                         <span class="state-chip state-running">RUNNING: 라운드 순환 중</span>
                         <span class="state-chip state-stopped">STOPPED: 일시 정지/재개 대기</span>
-                        <span class="state-chip state-lobby">LOBBY: 세션 시작 전</span>
+                        <span class="state-chip state-idle">IDLE: 세션 시작 전</span>
                         <span class="state-chip state-ended">ENDED: 세션 종료</span>
                         <span class="state-chip state-unavailable">UNAVAILABLE: 연결/키퍼 오류</span>
                     </div>
                     <div id="lifecycle-diagram" class="lifecycle-diagram runtime-advanced" aria-label="TRPG 상태 전이 다이어그램">
                         <div class="lifecycle-track">
-                            <span class="lifecycle-node" data-state="lobby">LOBBY</span>
+                            <span class="lifecycle-node" data-state="idle">IDLE</span>
                             <span class="lifecycle-edge">→</span>
                             <span class="lifecycle-node" data-state="running">RUNNING</span>
                             <span class="lifecycle-edge">↔</span>
@@ -666,7 +666,7 @@
                         <div id="action-history" class="action-history"></div>
                         <input type="hidden" id="claimed-actor-id" value="" />
                         <input type="hidden" id="claimed-keeper" value="" />
-                        <input type="hidden" id="claimed-room-id" value="" />
+                        <input type="hidden" id="claimed-workspace-id" value="" />
                     </div>
                 </div>
             </section>
@@ -700,7 +700,7 @@
         const body = document.body;
         let booted = false;
 
-        function hideLoading(forceLobby, message) {
+        function hideLoading(forceHome, message) {
             if (!loading) return;
             loading.classList.add('hidden');
             loading.style.opacity = '0';
@@ -708,8 +708,8 @@
             if (message && loadingText) {
                 loadingText.textContent = message;
             }
-            if (forceLobby && body) {
-                body.classList.add('mode-lobby');
+            if (forceHome && body) {
+                body.classList.add('mode-home');
             }
         }
 

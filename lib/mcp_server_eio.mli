@@ -66,7 +66,7 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 
 (** Create server state (synchronous, no effect)
     @param test_mode Optional flag (ignored, for API compatibility)
-    @param base_path Base path for MASC data directory *)
+    @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
 val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
 
 (** Create server state with Eio context.
@@ -77,7 +77,7 @@ val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
     @param clock Eio time clock for timestamps/sleep
     @param mono_clock Eio monotonic clock
     @param net Eio network capability for HTTP/TLS calls
-    @param base_path Base path for MASC data directory *)
+    @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
 val create_state_eio :
   sw:Eio.Switch.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
@@ -106,6 +106,8 @@ val handle_request :
   sw:Eio.Switch.t ->
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
+  ?otel_mcp_protocol_version:string ->
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
   server_state ->

@@ -7,11 +7,11 @@ code_refs:
   - lib/mcp_server.ml
 ---
 
-# MASC-MCP Product Review
+# MASC Product Review
 
 ## Summary
 
-- As a repo-coordination OSS product, `masc-mcp` is already useful.
+- As a repo-workspace collaboration OSS product, `masc` is already useful.
 - As a keeper-supervised delivery system, it is promising but still an advanced path.
 - As a remote or internal-ops product, it is still held back by auth posture, API contract truth, and release hygiene.
 
@@ -21,14 +21,14 @@ Keeper continuity now fits the same pattern: it is real enough to design and val
 
 ## Product Posture by Promise Level
 
-### 1. Repo coordination
+### 1. Repo workspace collaboration
 
 Current judgment: pass
 
 Why:
 
-- room and task ownership are real
-- broadcasts, worktrees, and file-lock style coordination are real
+- workspace and task ownership are real
+- broadcasts, worktrees, and file-lock style workspace collaboration are real
 - the basic single-machine coding workflow is already useful
 
 What still matters:
@@ -59,7 +59,7 @@ Current judgment: useful, but supporting rather than front-door
 Why:
 
 - dashboard read paths and operator surfaces exist
-- current views help with coordination and diagnosis
+- current views help with workspace collaboration and diagnosis
 
 What still blocks stronger promises:
 
@@ -88,7 +88,7 @@ These are the blockers for the current product promise, not for every possible f
 
 ## Advanced-Path Blockers
 
-These matter after the repo-coordination front door is clean.
+These matter after the repo-workspace collaboration front door is clean.
 
 - auth hardening for non-local operation
 - REST API contract versioning and error-shape discipline
@@ -106,7 +106,7 @@ Historical security audit (SECURITY-AUDIT.md, 2025-02-02, verified 2026-02-17) i
 Current security-sensitive areas requiring attention:
 - Auth defaults for non-loopback binds
 - Token generation for bearer auth
-- Room token validation
+- Workspace token validation
 - Shell command construction in worktree operations
 - Path traversal prevention in static asset serving
 
@@ -116,7 +116,7 @@ See `docs/spec/09-server-transport.md` for remote auth semantics and `docs/LOCAL
 
 ## Judgment
 
-- **Repo-local multi-agent coordination**: ready to describe and use
+- **Repo-local multi-agent workspace collaboration**: ready to describe and use
 - **Keeper-supervised delivery**: real and worth documenting, but not the first promise
 - **Keeper continuity**: should be described as checkpoint-backed same-trace continuity, not as general memory
 - **Remote or ops-grade product story**: still incomplete and should remain explicit about its gaps

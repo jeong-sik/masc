@@ -31,7 +31,7 @@ let spec_terminal_outcome_set : string list =
    are still accepted on parse for backward compatibility. *)
 let ocaml_terminal_outcome_set =
   List.map
-    Masc_mcp.Keeper_execution_receipt.outcome_kind_to_tla_receipt
+    Masc.Keeper_execution_receipt.outcome_kind_to_tla_receipt
     [ `Ok; `Skipped; `Error; `Cancelled ]
 
 let sort = Masc_test_deps.sorted_strings
@@ -64,10 +64,10 @@ let test_string_roundtrip () =
   List.iter
     (fun k ->
       let s =
-        Masc_mcp.Keeper_execution_receipt.outcome_kind_to_string k
+        Masc.Keeper_execution_receipt.outcome_kind_to_string k
       in
       match
-        Masc_mcp.Keeper_execution_receipt.outcome_kind_of_string s
+        Masc.Keeper_execution_receipt.outcome_kind_of_string s
       with
       | Some k' when k = k' -> ()
       | Some _ | None ->
@@ -82,10 +82,10 @@ let test_tla_name_roundtrip () =
   List.iter
     (fun k ->
       let s =
-        Masc_mcp.Keeper_execution_receipt.outcome_kind_to_tla_receipt k
+        Masc.Keeper_execution_receipt.outcome_kind_to_tla_receipt k
       in
       match
-        Masc_mcp.Keeper_execution_receipt.outcome_kind_of_string s
+        Masc.Keeper_execution_receipt.outcome_kind_of_string s
       with
       | Some k' when k = k' -> ()
       | Some _ | None ->
@@ -103,7 +103,7 @@ let test_skipped_is_terminal_success () =
      [ReceiptMatchesState] then accepts {receipt_done, receipt_skipped}
      as the receipt set valid for terminal [Done]. *)
   if not
-       (Masc_mcp.Keeper_execution_receipt.outcome_kind_is_terminal_success
+       (Masc.Keeper_execution_receipt.outcome_kind_is_terminal_success
           `Skipped)
   then
     failwith
@@ -114,7 +114,7 @@ let test_unset_is_not_a_terminal_outcome () =
   (* receipt_unset is the initial-state marker only; it must NOT parse
      into a terminal outcome_kind. *)
   match
-    Masc_mcp.Keeper_execution_receipt.outcome_kind_of_string "unset"
+    Masc.Keeper_execution_receipt.outcome_kind_of_string "unset"
   with
   | None -> ()
   | Some _ ->

@@ -1,6 +1,8 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
+import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
@@ -53,7 +55,7 @@ interface ApiActivityEvent {
   readonly seq: number
   readonly ts_ms: number
   readonly ts_iso: string
-  readonly room_id: string
+  readonly workspace_id: string
   readonly kind: string
   readonly actor?: { readonly kind: string; readonly id: string } | null
   readonly subject?: { readonly kind: string; readonly id: string } | null
@@ -69,7 +71,7 @@ interface ApiActivityResponse {
 
 interface ActivityFetchResult {
   readonly events: ReadonlyArray<RunActivityEvent>
-  readonly roomId: string
+  readonly workspaceId: string
   readonly ok: boolean
 }
 
@@ -111,7 +113,7 @@ const PROGRESS_SURFACES: ReadonlyArray<ProgressSurfaceSpec> = [
   { key: 'worker_run_id', label: 'Run', routeLabel: 'Telemetry' },
 ]
 
-const DEFAULT_ROOM_ID = 'run-default'
+const DEFAULT_WORKSPACE_ID = 'run-default'
 type MutableRunActivityContext = {
   -readonly [K in keyof RunActivityContext]?: RunActivityContext[K]
 }
@@ -180,10 +182,10 @@ function detailFromPayload(payload: unknown, kind: string): string | undefined {
   return kind
 }
 
-function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent {
+function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityEvent {
   return {
     id: `evt-${event.seq}`,
-    run_id: roomId,
+    run_id: workspaceId,
     timestamp_ms: event.ts_ms,
     keeper_id: event.actor?.id ?? 'system',
     verb: verbFromKind(event.kind),
@@ -196,18 +198,109 @@ function mapApiEvent(event: ApiActivityEvent, roomId: string): RunActivityEvent 
 }
 
 async function fetchActivityEvents(): Promise<ActivityFetchResult> {
+  const graph = await fetchActivityGraphEvents()
+  const bridgeEvents = await fetchIdeBridgeRunActivityEvents(graph.workspaceId)
+  return {
+    ...graph,
+    events: mergeRunActivityEvents(graph.events, bridgeEvents),
+  }
+}
+
+async function fetchActivityGraphEvents(): Promise<ActivityFetchResult> {
   try {
     const data = await get<ApiActivityResponse>('/api/v1/activity/events?limit=50')
     const rawEvents = data.events
     if (!Array.isArray(rawEvents) || rawEvents.length === 0) {
-      return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: true }
+      return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: true }
     }
-    const roomId = rawEvents[0].room_id || DEFAULT_ROOM_ID
-    const mapped = rawEvents.map(e => mapApiEvent(e, roomId))
-    return { events: mapped, roomId, ok: true }
+    const workspaceId = rawEvents[0].workspace_id || DEFAULT_WORKSPACE_ID
+    const mapped = rawEvents.map(e => mapApiEvent(e, workspaceId))
+    return { events: mapped, workspaceId, ok: true }
   } catch {
-    return { events: EMPTY_ACTIVITY, roomId: DEFAULT_ROOM_ID, ok: false }
+    return { events: EMPTY_ACTIVITY, workspaceId: DEFAULT_WORKSPACE_ID, ok: false }
   }
+}
+
+async function fetchIdeBridgeRunActivityEvents(
+  workspaceId: string,
+): Promise<ReadonlyArray<RunActivityEvent>> {
+  try {
+    const events = await fetchIdeEvents({ limit: 50 })
+    return events.map((event, index) => mapIdeBridgeEvent(event, workspaceId, index))
+  } catch {
+    return EMPTY_ACTIVITY
+  }
+}
+
+function mergeRunActivityEvents(
+  graphEvents: ReadonlyArray<RunActivityEvent>,
+  bridgeEvents: ReadonlyArray<RunActivityEvent>,
+): ReadonlyArray<RunActivityEvent> {
+  if (bridgeEvents.length === 0) return graphEvents
+  if (graphEvents.length === 0) return bridgeEvents
+  return [...graphEvents, ...bridgeEvents].sort(compareRunActivityEvents)
+}
+
+function mapIdeBridgeEvent(
+  event: IdeBridgeEvent,
+  workspaceId: string,
+  index: number,
+): RunActivityEvent {
+  return {
+    id: `ide-${event.type}-${event.turn_id}-${event.timestamp_ms}-${index}`,
+    run_id: workspaceId,
+    timestamp_ms: event.timestamp_ms,
+    keeper_id: event.keeper_id,
+    verb: 'noted',
+    target: bridgeEventTarget(event),
+    detail: bridgeEventDetail(event),
+    kind: `ide.bridge.${event.type}`,
+    tags: [`ide:${event.type}`, `turn:${event.turn_id}`],
+    context: bridgeEventContext(event),
+  }
+}
+
+function bridgeEventTarget(event: IdeBridgeEvent): string {
+  if (event.type === 'tool') return `tool:${event.tool_name}`
+  if (event.type === 'turn') return `turn:${event.phase}`
+  return `pr:${event.pr_number}`
+}
+
+function bridgeEventDetail(event: IdeBridgeEvent): string {
+  if (event.type === 'tool') {
+    const outcome = event.typed_outcome || event.outcome
+    return `${outcome}: ${event.summary}`
+  }
+  if (event.type === 'turn') {
+    return [event.phase, event.model_used, event.stop_reason]
+      .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+      .join(' · ') || event.phase
+  }
+  return event.pr_title || event.pull_request_url || event.pr_state || `PR ${event.pr_number}`
+}
+
+function bridgeEventContext(event: IdeBridgeEvent): RunActivityContext | undefined {
+  const context: MutableRunActivityContext = {}
+  if (event.turn_id) context.log_id = event.turn_id
+  if (event.type === 'tool') {
+    const filePath = event.file_path ? normalizeIdeContextFilePath(event.file_path) : null
+    if (filePath) context.file_path = filePath
+    mergeCommandDescriptorContext(context, event.command_descriptor)
+  } else if (event.type === 'pr') {
+    if (event.pr_number > 0) context.pr_id = String(event.pr_number)
+  }
+  return Object.keys(context).length === 0 ? undefined : context
+}
+
+function mergeCommandDescriptorContext(
+  context: MutableRunActivityContext,
+  descriptor: unknown,
+): void {
+  if (!isRecord(descriptor)) return
+  const prNumber = positiveInteger(descriptor.pr_number)
+  if (prNumber !== undefined) context.pr_id = String(prNumber)
+  const branch = stringValue(descriptor.branch)
+  if (branch) context.git_ref = branch
 }
 
 function contextFromPayloadAndTags(
@@ -336,11 +429,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   } = props
   const activeFile = rawActiveFile ?? ''
   const store = useMemo(() => {
-    const store = createRunActivityStore(DEFAULT_ROOM_ID)
+    const store = createRunActivityStore(DEFAULT_WORKSPACE_ID)
     store.seed(EMPTY_ACTIVITY)
     return store
   }, [])
-  const [, forceRender] = useState(0)
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
   const emittedTraceIds = useRef<ReadonlySet<string>>(new Set())
   const refreshMs = normalizedPollMs(pollMs)
@@ -355,10 +447,10 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, roomId, ok } = await fetchActivityEvents()
+      const { events, workspaceId, ok } = await fetchActivityEvents()
       if (cancelled) return
       if (ok) {
-        store.reset(roomId)
+        store.reset(workspaceId)
         store.seed(events)
         setRefreshState({
           tone: 'live',
@@ -383,26 +475,11 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     }
   }, [store, refreshMs])
 
-  useEffect(() => {
-    const unsub = store.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [store])
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = ideConversationThreadSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = lspDiagnosticSnapshot.subscribe(() => forceRender(tick => tick + 1))
-    return () => unsub()
-  }, [])
+  useStoreSubscription(store.subscribe)
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
+  useSignalValue(ideConversationThreadSnapshot)
+  useSignalValue(lspDiagnosticSnapshot)
 
   const events = store.events()
   const keepers = store.knownKeepers()
@@ -769,6 +846,11 @@ function latestRunActivityEvent(events: ReadonlyArray<RunActivityEvent>): RunAct
 function isLaterRunActivityEvent(candidate: RunActivityEvent, current: RunActivityEvent): boolean {
   return candidate.timestamp_ms > current.timestamp_ms
     || (candidate.timestamp_ms === current.timestamp_ms && candidate.id > current.id)
+}
+
+function compareRunActivityEvents(left: RunActivityEvent, right: RunActivityEvent): number {
+  if (left.timestamp_ms !== right.timestamp_ms) return right.timestamp_ms - left.timestamp_ms
+  return left.id.localeCompare(right.id)
 }
 
 function activityRouteLinks(item: RunActivityEvent): ReadonlyArray<IdeContextRouteLink> {

@@ -28,7 +28,7 @@ The summary includes:
 
 - SCC count and largest SCC size
 - SCC count delta and added/removed SCC member sets when a baseline is provided
-- Room/coordination dependent counts
+- Workspace/workspace collaboration dependent counts
 - Top hub modules by dependent count
 - Heaviest importers by dependency count
 - Batch 2 extraction candidates from prefix clusters
@@ -58,7 +58,7 @@ python3 scripts/lib_dep_report.py \
 
 The JSON shape is stable enough for CI checks to read `scc_count_delta`,
 `largest_scc_size`, `largest_scc_delta`, `scc_delta`,
-`room_coordination_dependents`, and `batch2_candidate_delta`.
+`workspace_state_dependents`, and `batch2_candidate_delta`.
 
 ## CI Report
 
@@ -72,5 +72,5 @@ summary to the GitHub Actions step summary and uploads:
 - `reports/lib-dependency-summary.json`
 
 On pull requests, the baseline graph is generated from the base branch so SCC
-count, largest SCC size, room/coordination dependents, and extraction candidate
+count, largest SCC size, workspace/workspace collaboration dependents, and extraction candidate
 deltas are visible without a manual local compare.

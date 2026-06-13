@@ -6,7 +6,7 @@
     summary itself stops growing unboundedly even if the LLM emits
     longer [STATE] blocks turn after turn. *)
 
-module KMP = Masc_mcp.Keeper_memory_policy
+module KMP = Masc.Keeper_memory_policy
 
 let long_string n ch = String.make n ch
 

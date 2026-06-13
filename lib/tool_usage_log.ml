@@ -32,7 +32,7 @@ module StringMap = Set_util.StringMap
 (* -- System_internal membership set (O(log n) lookup) -- *)
 
 let system_internal_set : StringSet.t =
-  let tools = Tool_catalog_surfaces.system_internal_surface_tools in
+  let tools = Tool_catalog_surfaces.system_internal_hidden in
   List.fold_left (fun s name -> StringSet.add name s) StringSet.empty tools
 
 let is_system_internal name = StringSet.mem name system_internal_set
@@ -147,6 +147,15 @@ let coverage_gaps masc_root =
 let latest_coverage_gap gaps =
   List.rev gaps |> List.find_opt (fun _ -> true)
 
+let coverage_gap_recovered ~latest_ts gap =
+  match latest_ts, ts_of_record gap with
+  | Some source_ts, Some gap_ts when Float.compare source_ts gap_ts >= 0 ->
+    true
+  | _ -> false
+
+let active_coverage_gaps ~latest_ts gaps =
+  List.filter (fun gap -> not (coverage_gap_recovered ~latest_ts gap)) gaps
+
 let synthetic_store_gap ~durable_store ~stale_reason ~error =
   let now = Time_compat.now () in
   `Assoc
@@ -213,7 +222,7 @@ let init ?cluster_name ~base_path () =
   let cluster_name =
     Option.value ~default:(Env_config_core.cluster_name ()) cluster_name
   in
-  let masc_root = Coord_utils.masc_root_dir_from ~base_path ~cluster_name in
+  let masc_root = Workspace_utils.masc_root_dir_from ~base_path ~cluster_name in
   let dir = store_dir masc_root in
   (try
      Fs_compat.mkdir_p dir;
@@ -247,7 +256,13 @@ let record_to_json ~tool_name ~success ~caller =
 
 (* -- Write -- *)
 
-let log_call ~tool_name ~success ~caller =
+(* [on_io_failure] is injected by the installer (server bootstrap) so this
+   generic tool-usage logger does not reference the keeper FD/disk pressure
+   subsystem directly. Tool->Keeper dependency direction: a tool-surface module
+   must not name keeper internals (generalizes RFC-0084's dispatch-path rule to
+   the whole surface). Keeper-facing IO-failure handling is supplied at the
+   install boundary (lib/server/server_bootstrap_maintenance.ml). *)
+let log_call ~on_io_failure ~tool_name ~success ~caller =
   match !store_ref with
   | None ->
       Log.Misc.debug "tool_usage_log: store not initialized, skipping %s" tool_name
@@ -255,8 +270,7 @@ let log_call ~tool_name ~success ~caller =
       let json = record_to_json ~tool_name ~success ~caller in
       (try Dated_jsonl.append store json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Keeper_fd_pressure.note_exception ~site:"tool_usage_log.append" exn;
-         Keeper_disk_pressure.note_exception ~site:"tool_usage_log.append" exn;
+         on_io_failure ~site:"tool_usage_log.append" exn;
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
            tool_name (Stdlib.Printexc.to_string exn);
          let durable_store = Dated_jsonl.base_dir store in
@@ -283,13 +297,14 @@ let extract_caller (result : Tool_result.result) : string option =
 
 (* Log only handled System_internal dispatches. Non-handled outcomes are
    represented by dispatch telemetry, not tool-usage rows. *)
-let install () =
+let install ~on_io_failure =
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some (result : Tool_result.result) ->
       let tool_name = Tool_result.tool_name result in
       if is_system_internal tool_name then
         log_call
+          ~on_io_failure
           ~tool_name
           ~success:(Tool_result.is_success result)
           ~caller:(extract_caller result)
@@ -347,7 +362,8 @@ let source_metadata_json ~masc_root =
     else
       gaps
   in
-  let coverage_gap = latest_coverage_gap coverage_gaps in
+  let active_coverage_gaps = active_coverage_gaps ~latest_ts coverage_gaps in
+  let coverage_gap = latest_coverage_gap active_coverage_gaps in
   `Assoc
     ([
        ("source", `String source_name);
@@ -359,6 +375,7 @@ let source_metadata_json ~masc_root =
        ("exists", `Bool exists);
        ("coverage_gaps", `List coverage_gaps);
        ("coverage_gap_count", `Int (List.length coverage_gaps));
+       ("active_coverage_gap_count", `Int (List.length active_coverage_gaps));
      ]
     @ freshness_fields ~now latest_ts
     @ source_health_fields

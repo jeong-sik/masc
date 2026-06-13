@@ -8,10 +8,14 @@
 
 open Alcotest
 
-module H = Masc_mcp.Keeper_lifecycle_hooks
-module P = Masc_mcp.Prometheus
-module SM = Masc_mcp.Keeper_state_machine
-module TCG = Masc_mcp.Telemetry_coverage_gap
+module H = Masc.Keeper_lifecycle_hooks
+(* Masc.Otel_metric_store is the store production code writes to.
+   The bare Otel_metric_store module here is the test shim
+   (test/deps/otel_metric_store.ml) with its own private store, so
+   reading it can never observe lib emits. *)
+module P = Masc.Otel_metric_store
+module SM = Keeper_state_machine
+module TCG = Telemetry_coverage_gap
 
 let setup () = H.reset_for_testing ()
 
@@ -48,7 +52,7 @@ let make_keeper_meta ~name ~trace_id =
 
 let lifecycle_hook_failure_count ~keeper =
   P.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:
       [
         ("keeper", keeper);

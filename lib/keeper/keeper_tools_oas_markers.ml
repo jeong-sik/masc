@@ -6,14 +6,6 @@ let add_unique_marker marker markers =
   if List.mem marker markers then markers else marker :: markers
 ;;
 
-let json_string_field_opt key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String value) -> Some value
-     | _ -> None)
-  | _ -> None
-;;
-
 let strip_simple_quotes text =
   let len = String.length text in
   if len >= 2
@@ -66,30 +58,30 @@ let add_json_marker_fields ?(trusted_route_fields = true) json markers =
   let markers =
     if trusted_route_fields
     then (
-      match json_string_field_opt "via" json with
+      match Json_util.get_string json "via" with
       | Some via -> add_via_marker via markers
       | None -> markers)
     else markers
   in
   let markers =
-    match json_string_field_opt "cmd" json with
+    match Json_util.get_string json "cmd" with
     | Some command -> add_command_markers command markers
     | None -> markers
   in
   let markers =
-    match json_string_field_opt "command" json with
+    match Json_util.get_string json "command" with
     | Some command -> add_command_markers command markers
     | None -> markers
   in
   let markers =
-    match json_string_field_opt "op_cmd" json with
+    match Json_util.get_string json "op_cmd" with
     | Some command -> add_command_markers command markers
     | None -> markers
   in
   let markers =
     if trusted_route_fields
     then (
-      match json_string_field_opt "action" json with
+      match Json_util.get_string json "action" with
       | Some action -> add_action_marker action markers
       | None -> markers)
     else markers
@@ -97,7 +89,7 @@ let add_json_marker_fields ?(trusted_route_fields = true) json markers =
   let markers =
     if trusted_route_fields
     then (
-      match json_string_field_opt "event" json with
+      match Json_util.get_string json "event" with
       | Some event -> add_event_marker event markers
       | None -> markers)
     else markers

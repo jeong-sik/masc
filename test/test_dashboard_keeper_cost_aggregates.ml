@@ -1,9 +1,9 @@
 open Alcotest
 
-module Coord = Masc_mcp.Coord
-module Dashboard_http_keeper = Masc_mcp.Dashboard_http_keeper
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_types_support = Masc_mcp.Keeper_types_support
+module Workspace = Masc.Workspace
+module Dashboard_http_keeper = Dashboard_http_keeper
+module Keeper_types = Keeper_types
+module Keeper_types_support = Masc.Keeper_types_support
 
 let test_counter = ref 0
 
@@ -28,7 +28,7 @@ let make_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String "test-runtime");
           ("last_model_used", `String "test-model");
         ])
   with
@@ -78,8 +78,8 @@ let test_heartbeat_snapshots_do_not_count_as_cost_samples () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_test_deps.init_eio_clock env;
   let base_dir = temp_dir "keeper_cost_aggregates" in
-  let config = Coord.default_config base_dir in
-  ignore (Coord.init config ~agent_name:None);
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:None);
   let keeper_name = "cost-keeper" in
   let meta = make_meta keeper_name in
   let ts = Unix.gettimeofday () -. 1.0 in

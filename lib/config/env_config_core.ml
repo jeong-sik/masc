@@ -22,9 +22,12 @@ let () = Printexc.register_printer (function
   | _ -> None)
 
 let raw_value_opt name =
-  match Sys.getenv_opt name with
-  | Some _ as value -> value
-  | None -> Config_boot_overrides.get_opt name
+  match Unix.getenv name with
+  | v -> Some v
+  | exception Not_found ->
+    match Sys.getenv_opt name with
+    | Some _ as value -> value
+    | None -> Config_boot_overrides.get_opt name
 
 (** Safe getters with defaults *)
 let get_string ~default name =
@@ -181,8 +184,7 @@ let home_dir_opt () =
 
    The deprecation_warned Hashtbl + warn_deprecated + deprecated_opt +
    resolve_deprecated + get_{float,int,bool}_deprecated cluster had a
-   single caller (keeper_turn_slot.int_of_env_default_with_deprecated
-   for the MASC_KEEPER_AUTOBOT_MAX typo legacy).  Per
+   single caller for the MASC_KEEPER_AUTOBOT_MAX typo legacy is gone. Per
    memory/feedback_hardcoding_and_legacy_zero_tolerance.md, legacy env
    support is deleted at the same time as the mechanism that hosts it;
    the typo env is no longer recognised and operators using it must
@@ -239,7 +241,7 @@ let cluster_name () =
     Defined here (above [masc_http_base_url]) so the constant is in scope
     before first use. *)
 let http_base_url_env_key = "MASC_HTTP_BASE_URL"
-let mcp_url_env_key = "MASC_MCP_URL"
+let mcp_url_env_key = "MASC_URL"
 
 let rec masc_http_base_url () =
   match masc_http_base_url_result () with
@@ -277,7 +279,7 @@ let get_port ~default name =
 
 (** Env var names exposed as SSOT constants so out-of-process callers
     that read/write the variable by name (docker worker putenv, sidecar
-    lookup, config doctor diagnostics, runtime-bootstrap putenv) can
+    lookup, config auth diagnostics, runtime-bootstrap putenv) can
     reference the same literal. Issue 8352. *)
 let base_path_env_key = "MASC_BASE_PATH"
 let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
@@ -370,14 +372,14 @@ let base_path_prod_guard path =
         else path
   end
 
-(** Project base path. Missing [MASC_BASE_PATH] falls back to cwd, not HOME. *)
+(** Project base path. [MASC_BASE_PATH] is required. *)
 let base_path () =
-  let raw =
-    match base_path_opt () with
-    | Some path -> path
-    | None -> "."
-  in
-  base_path_prod_guard raw
+  match base_path_opt () with
+  | Some path -> base_path_prod_guard path
+  | None ->
+      raise (Config_error
+        "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
+         containing the .masc/ directory.")
 
 let sb_path_opt () =
   match base_path_opt () with
@@ -495,17 +497,19 @@ let governance_level () =
   get_string ~default:"production" governance_level_env_key
   |> String.lowercase_ascii
 
+let disable_hitl_env_key = "MASC_DISABLE_HITL"
+
+(** Whether to disable HITL (human-in-the-loop) approval gates. Default: true.
+    @category Security
+    @ops_class operator *)
+let disable_hitl () =
+  get_bool ~default:true "MASC_DISABLE_HITL"
+
 (** {1 Build Identity} *)
 
 (** Git commit hash override for build identity. *)
 let build_git_commit_opt () =
   raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
-
-(** {1 Auto Respond} *)
-
-(** Raw MASC_AUTO_RESPOND value for mode parsing. *)
-let auto_respond_opt () =
-  raw_value_opt "MASC_AUTO_RESPOND" |> trim_opt
 
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =

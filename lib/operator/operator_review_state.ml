@@ -1,5 +1,3 @@
-module U = Yojson.Safe.Util
-
 open Operator_pending_confirm
 
 type review_decision_value = Review_decision_value of string
@@ -32,35 +30,35 @@ let review_decision_to_yojson (entry : review_decision) =
       ("reason", `String entry.reason);
       ("at", `String entry.at);
       ("target_type", `String entry.target_type);
-      ("target_id", string_option_to_json entry.target_id);
+      ("target_id", Json_util.string_opt_to_json entry.target_id);
       ( "recommended_action_type",
-        string_option_to_json entry.recommended_action_type );
+        Json_util.string_opt_to_json entry.recommended_action_type );
     ]
 
 let review_decision_of_yojson json =
   try
+    let get = Json_util.get_string json in
     Ok
       {
-        item_id = json |> U.member "item_id" |> U.to_string;
-        fingerprint = json |> U.member "fingerprint" |> U.to_string;
+        item_id = get "item_id" |> Option.value ~default:"";
+        fingerprint = get "fingerprint" |> Option.value ~default:"";
         decision =
-          json |> U.member "decision" |> U.to_string
+          get "decision" |> Option.value ~default:""
           |> review_decision_value_of_string;
-        actor = json |> U.member "actor" |> U.to_string;
-        reason = json |> U.member "reason" |> U.to_string;
-        at = json |> U.member "at" |> U.to_string;
-        target_type = json |> U.member "target_type" |> U.to_string;
-        target_id = json |> U.member "target_id" |> U.to_string_option;
-        recommended_action_type =
-          json |> U.member "recommended_action_type" |> U.to_string_option;
+        actor = get "actor" |> Option.value ~default:"";
+        reason = get "reason" |> Option.value ~default:"";
+        at = get "at" |> Option.value ~default:"";
+        target_type = get "target_type" |> Option.value ~default:"";
+        target_id = get "target_id";
+        recommended_action_type = get "recommended_action_type";
       }
-  with U.Type_error (msg, _) | Failure msg -> Error msg
+  with Failure msg -> Error msg
 
 let compare_review_decision (left : review_decision) (right : review_decision) =
   String.compare right.at left.at
 
 let raw_review_decisions config =
-  match Coord_utils.read_json_opt config (review_state_path config) with
+  match Workspace_utils.read_json_opt config (review_state_path config) with
   | None -> []
   | Some (`List rows) ->
       rows

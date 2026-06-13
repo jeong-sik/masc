@@ -9,9 +9,9 @@ val reconcile_keepalive_keepers :
      unit) ->
   supervise_keepalive:
     (proactive_warmup_sec:int ->
-     'a Keeper_types.context ->
-     Keeper_types.keeper_meta ->
+     'a Keeper_types_profile.context ->
+     Keeper_meta_contract.keeper_meta ->
      unit) ->
-  'a Keeper_types.context ->
+  'a Keeper_types_profile.context ->
   unit
 (** Re-launch durable keepalive keepers not dominated by the supervisor sweep. *)

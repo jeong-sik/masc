@@ -12,7 +12,7 @@
     from the most recent JSONL file (if any) so sessions that resume
     an existing audit log continue the chain correctly.
 
-    {b Single-process design}: this implementation does not coordinate
+    {b Single-process design}: this implementation does not orchestrate
     across processes. For multi-process audit (e.g., concurrent keepers
     writing to the same log), a follow-up PR will add file-locking
     or a single-writer dispatcher.

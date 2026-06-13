@@ -10,12 +10,12 @@
     The .ml does [include Tool_local_runtime_http] for internal
     access to HTTP helpers ([http_post_json_text_with_status],
     [trim_to_option], etc.).  The .mli intentionally does NOT
-    mirror the cascade — those helpers are implementation
+    mirror the runtime — those helpers are implementation
     detail; probe is the contract layer.
 
     Internal: ~22 helpers stay private — \[bool_opt_to_json] /
     \[clamp] / \[trim_to_option] / \[ns_to_ms] / \[tok_per_second] /
-    \[collapse_preview] / \[truncate_text] / \[default_ps_timeout_sec] /
+    \[collapse_preview] / \[truncate_text] /
     \[generate_probe_skip_reason_to_string] / \[string_or_fallback] /
     \[loaded_model_name] / \[ollama_loaded_model_to_yojson] /
     \[ollama_probe_run_to_yojson] / \[default_probe_prompt] /
@@ -23,7 +23,7 @@
     \[failed_probe_run] / \[run_single_probe] /
     \[prompt_eval_duration_ms_of_run_json] /
     \[generate_probe_skip_reason] type + the
-    [include Tool_local_runtime_http] cascade.  All consumed
+    [include Tool_local_runtime_http] runtime.  All consumed
     only inside {!runtime_ollama_probe_json}'s pipeline. *)
 
 (** {1 Snapshot types} *)
@@ -84,12 +84,6 @@ type generate_probe_skip_reason =
 type generate_probe_decision =
   | Run_generate_probe
   | Skip_generate_probe of generate_probe_skip_reason
-
-(** {1 Constants} *)
-
-val default_probe_timeout_sec : int
-(** [6].  Pinned upper bound for the [/api/generate] timeout in
-    seconds.  Drift would change CI-vs-cold-start tradeoff. *)
 
 (** {1 URL helpers} *)
 
@@ -243,9 +237,10 @@ val runtime_ollama_probe_json :
   Yojson.Safe.t
 (** Top-level probe orchestrator.  Defaults: [probe_runs=2]
     (clamped to [\[1, 4]]), [max_tokens=16] (clamped to
-    [\[1, 128]]), [think_mode=Think_auto],
-    [timeout_sec=default_probe_timeout_sec] (clamped to
-    [\[3, 300]]), [ps_timeout_sec=default_ps_timeout_sec]
-    (clamped to [\[1, 30]]), [generate_when_unloaded=true],
-    [run_generate=true].  Returns a JSON snapshot with
-    [/api/ps] state + per-run timing + KV-cache assessment. *)
+    [\[1, 128]]), [think_mode=Think_auto], [timeout_sec=6]
+    (clamped to [\[3, 300]]), [ps_timeout_sec=2] (clamped to
+    [\[1, 30]]), [generate_when_unloaded=true], [run_generate=true].
+    Returns a JSON snapshot with [/api/ps] state + per-run timing +
+    KV-cache assessment.  Per PR #20479 spirit: the tool itself
+    (ollama [OLLAMA_LOAD_TIMEOUT]) owns hang protection; callers do
+    not observe these timeouts. *)

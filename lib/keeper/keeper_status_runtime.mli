@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val active_model_of_meta : keeper_meta -> string
 val active_model_label_of_meta : keeper_meta -> string
@@ -6,7 +8,7 @@ val next_model_hint_of_meta : keeper_meta -> string option
 val string_of_fiber_health : fiber_health -> string
 val agent_status_text : Yojson.Safe.t -> string
 val agent_runtime_has_live_signal : Yojson.Safe.t -> bool
-val parse_agent_status : Coord.config -> agent_name:string -> Yojson.Safe.t
+val parse_agent_status : Workspace.config -> agent_name:string -> Yojson.Safe.t
 val keeper_reply_snapshot_of_history :
   Yojson.Safe.t list -> Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t
 
@@ -54,3 +56,8 @@ val keeper_surface_status :
 (** Derive pipeline stage directly from phase (RFC-0002).
     Deterministic mapping, no 30s recency heuristic. *)
 val pipeline_stage_of_phase : Keeper_state_machine.phase -> string
+
+(** Human/operator-facing explanation for the lossy [pipeline_stage] label.
+    For example, [Offline], [Stopped], and [Dead] all map to ["offline"],
+    but their detail strings remain distinct. *)
+val pipeline_stage_detail_of_phase : Keeper_state_machine.phase -> string

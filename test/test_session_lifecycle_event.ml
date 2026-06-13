@@ -7,7 +7,7 @@
     {!test_mcp_error_code} for RFC-0098). *)
 
 open Alcotest
-module E = Masc_mcp.Session_lifecycle_event
+module E = Session_lifecycle_event
 
 let pp_evt fmt e = E.pp fmt e
 

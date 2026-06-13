@@ -36,7 +36,9 @@ import { SidecarLogToggle, SidecarLogViewer } from './sidecar-log-viewer'
 import { ConnectorConfigToggle, ConnectorConfigForm, openConnectorConfig } from './connector-config-form'
 import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight } from './connector-readiness-rail'
 import { StartupCheckBanner, markStartAttempt, clearStartAttempt } from './sidecar-startup-watch'
+import { showConnectorActionError } from './connector-action-error'
 import { QuickBindForm } from './connector-quick-bind'
+import { ConnectorFlowSection } from './connector-flow'
 import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
@@ -63,8 +65,12 @@ function activeConnectorFilter(): string | null {
   return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
-// Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper
-// (discord/imessage/slack/telegram) — see sidecars/<id>-bot/run.sh.
+// Per-connector lifecycle hints. The three remaining external sidecars
+// (imessage/slack/telegram) ship a run.sh wrapper — see
+// sidecars/<id>-bot/run.sh. Discord runs in-process under
+// Server_discord_in_process_gateway (RFC-0203 §Phase 3, PR #19393);
+// no sidecar process, no lifecycle command panel — see
+// {@link IN_PROCESS_CONNECTOR_IDS}.
 // Source of truth: docs/CONNECTOR-CONFIG-SCHEMA.md.
 interface SidecarCommands {
   start: string
@@ -73,10 +79,35 @@ interface SidecarCommands {
   stop: string
 }
 
-// Known connectors with first-class onboarding/lifecycle support. Source of
-// truth: the four sidecars under /sidecars/ and config/navigation.ts.
+// Known connectors that appear in the dashboard (status panels, accent
+// colours, channel icons). Includes both external sidecars and the
+// in-process Discord gateway — the operator still wants to see Discord's
+// status row even though there's no sidecar process to start.
+//
+// Source of truth: the three remaining sidecars under /sidecars/, the
+// in-process gateway under lib/server/server_discord_in_process_gateway.{ml,mli},
+// and config/navigation.ts.
 export const KNOWN_CONNECTOR_IDS = ['discord', 'imessage', 'slack', 'telegram'] as const
 export type KnownConnectorId = (typeof KNOWN_CONNECTOR_IDS)[number]
+
+// Subset of {@link KNOWN_CONNECTOR_IDS} that run inside the server
+// process. For these, the "사이드카 미시작 / Start / Stop / tail
+// run.sh" lifecycle affordances are suppressed because there is no
+// sidecar process — the operator boots them by setting an env var and
+// restarting the server. RFC-0203 §Phase 3.
+export const IN_PROCESS_CONNECTOR_IDS = ['discord'] as const
+export type InProcessConnectorId = (typeof IN_PROCESS_CONNECTOR_IDS)[number]
+
+export function isInProcessConnector(connectorId: string): boolean {
+  return (IN_PROCESS_CONNECTOR_IDS as readonly string[]).includes(connectorId)
+}
+
+// The env var the operator must set to activate an in-process connector.
+// One per IN_PROCESS_CONNECTOR_IDS entry. Used by the status panel hint
+// shown in place of the "Start sidecar" affordance.
+export const IN_PROCESS_CONNECTOR_ENV: Record<InProcessConnectorId, string> = {
+  discord: 'DISCORD_BOT_TOKEN',
+}
 
 export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   discord: 'Discord',
@@ -85,8 +116,10 @@ export const CONNECTOR_DISPLAY_NAMES: Record<KnownConnectorId, string> = {
   telegram: 'Telegram',
 }
 
+// Sidecar directories — only for connectors that actually run as
+// external sidecar processes. Discord is intentionally absent
+// (RFC-0203 §Phase 3 deleted sidecars/discord-bot/).
 const SIDECAR_DIRS: Record<string, string> = {
-  discord: 'sidecars/discord-bot',
   imessage: 'sidecars/imessage-bot',
   slack: 'sidecars/slack-bot',
   telegram: 'sidecars/telegram-bot',
@@ -463,6 +496,8 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
     connected: false,
     stale: false,
     stale_after_sec: 0,
+    gateway_state: '',
+    status_source: '',
     error: '',
     status_path: '',
     binding_store_path: '',
@@ -536,7 +571,7 @@ export async function startSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'start failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -552,16 +587,19 @@ export async function stopSidecar(connectorId: string) {
     showToast(`${connectorId} sidecar에 SIGTERM 전송`, 'success')
     await refresh()
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'stop failed', 'error')
+    showConnectorActionError(`${connectorId} sidecar 중지 실패`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
 }
 
-export async function bindConnector(connectorId: string, keeperName: string, channelId: string) {
+/** Returns true only when the bind POST succeeded. Errors are surfaced
+    here (toast + 상세 dialog) and swallowed, so this promise never
+    rejects — callers must branch on the boolean, not try/catch. */
+export async function bindConnector(connectorId: string, keeperName: string, channelId: string): Promise<boolean> {
   const keeper = keeperName.trim()
   const channel = channelId.trim()
-  if (!keeper || !channel) return
+  if (!keeper || !channel) return false
 
   patchConnectorUiState(connectorId, { actionLoading: true })
   try {
@@ -575,8 +613,10 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
     })
     await refresh()
     showToast(`Bound ${channel} -> ${keeper}`, 'success')
+    return true
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'bind failed', 'error')
+    showConnectorActionError(`바인딩 실패: ${channel} → ${keeper}`, err)
+    return false
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -594,7 +634,7 @@ async function unbindConnector(connectorId: string, channelId: string) {
     await refresh()
     showToast(`Unbound ${channel}`, 'success')
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'unbind failed', 'error')
+    showConnectorActionError(`바인딩 해제 실패: ${channel}`, err)
   } finally {
     patchConnectorUiState(connectorId, { actionLoading: false })
   }
@@ -631,6 +671,11 @@ function ConnectorLivePanel({
   const bindingActionsEnabled = connector != null && connector.capabilities.includes('bindings')
   const directLabel = connectorStateLabel(connector)
   const directTone = connectorStateTone(connector)
+  // In-process gateway machine state (RFC-0203 / #20813). Shown only
+  // when the connector advertises it AND it adds information beyond
+  // the coarse 4-word label (reconnect_pending, identifying, failed...).
+  const gatewayState = connector?.gateway_state ?? ''
+  const showGatewayChip = gatewayState !== '' && gatewayState !== directLabel
 
   let gateHealthLabel = 'unknown'
   if (connector?.gate_healthy === true) {
@@ -646,13 +691,13 @@ function ConnectorLivePanel({
       )
     : ''
 
-  const observedRooms = uniqueStrings([
+  const observedWorkspaces = uniqueStrings([
     ...(gate?.bindings ?? [])
       .filter(binding => binding.channel === (connector?.channel ?? ''))
-      .map(binding => binding.room_id),
+      .map(binding => binding.workspace_id),
     ...(gate?.recent_events ?? [])
       .filter(event => event.channel === (connector?.channel ?? ''))
-      .map(event => event.room_id),
+      .map(event => event.workspace_id),
     ...configuredBindings.map(binding => binding.channel_id),
   ])
 
@@ -749,8 +794,19 @@ function ConnectorLivePanel({
 
   const showNoKeeperEmpty =
     configuredBindings.length === 0 && !connector?.available && keepers.length === 0 && !keeperDirectoryError
+  // RFC-0203 §Phase 3: in-process connectors (currently just Discord)
+  // have no sidecar process and therefore no "사이드카 미시작" Start
+  // affordance. Render the in-process info hint instead — see
+  // showInProcessUnavailableHint below.
   const showSidecarOffEmpty =
-    !showNoKeeperEmpty && configuredBindings.length === 0 && !connector?.available
+    !showNoKeeperEmpty
+    && configuredBindings.length === 0
+    && !connector?.available
+    && !isInProcessConnector(connectorId)
+  const showInProcessUnavailableHint =
+    !showNoKeeperEmpty
+    && !connector?.available
+    && isInProcessConnector(connectorId)
 
   const headerIcon = channelIcon(connector?.channel ?? connectorId)
 
@@ -767,6 +823,9 @@ function ConnectorLivePanel({
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
+        ${showGatewayChip
+          ? html`<span class="text-3xs lowercase text-[var(--color-fg-disabled)]" data-gateway-state-chip>gw ${gatewayState}</span>`
+          : null}
         <${MutedSpan}><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</${MutedSpan}>
         ${connector?.reply_mode
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>reply ${connector.reply_mode}</${MutedSpan}>`
@@ -775,7 +834,7 @@ function ConnectorLivePanel({
           ? html`<${MutedSpan}><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</${MutedSpan}>`
           : null}
         <span class="ml-auto flex items-center gap-2">
-          ${connector?.available
+          ${connector?.available && !isInProcessConnector(connectorId)
             ? html`
                 <button
                   type="button"
@@ -786,9 +845,11 @@ function ConnectorLivePanel({
                 >${isActionLoading ? '…' : 'Stop'}</button>
               `
             : null}
-          <${SidecarLogToggle} connectorId=${connectorId} />
+          ${!isInProcessConnector(connectorId)
+            ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
+            : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath
+          ${sidecarLogPath && !isInProcessConnector(connectorId)
             ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
             : null}
           <button
@@ -811,6 +872,12 @@ function ConnectorLivePanel({
           {
             openConfig: () => openConnectorConfig(connectorId),
             toggleProcess: () => {
+              // RFC-0203 §Phase 3: in-process gateways have no
+              // sidecar process to toggle. The readiness rail still
+              // gets a callback to keep the type stable, but it's a
+              // no-op for these connectors — the operator manages
+              // them via env var + server restart.
+              if (isInProcessConnector(connectorId)) return
               const isUp = connector?.available === true
               void withRailInflight(connectorId, 'process', () =>
                 isUp ? stopSidecar(connectorId) : startSidecar(connectorId),
@@ -828,9 +895,11 @@ function ConnectorLivePanel({
 
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
-      ${connector?.available === true && configuredBindings.length === 0 && keepers.length > 0
+      ${connector?.available === true && keepers.length > 0
         ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
         : null}
+
+      <${ConnectorFlowSection} connector=${connector} gate=${gate} />
 
       ${ui.headerExpanded
         ? html`
@@ -880,7 +949,9 @@ function ConnectorLivePanel({
           `
         : null}
 
-      <${SidecarLogViewer} connectorId=${connectorId} />
+      ${!isInProcessConnector(connectorId)
+        ? html`<${SidecarLogViewer} connectorId=${connectorId} />`
+        : null}
       <${ConnectorConfigForm} connectorId=${connectorId} />
 
       ${keeperDirectoryError && keepers.length === 0
@@ -1022,6 +1093,42 @@ function ConnectorLivePanel({
           })()
         : null}
 
+      ${showInProcessUnavailableHint
+        ? (() => {
+            // RFC-0203 §Phase 3: in-process gateways (Discord) have no
+            // sidecar process to start, so the operator sees this hint
+            // instead of the "Start sidecar" panel. Same amber tone as
+            // the sidecar panel — "needs action, not broken" — but the
+            // remediation is an env var + restart, not a CLI command.
+            const envVar = IN_PROCESS_CONNECTOR_ENV[connectorId as InProcessConnectorId]
+            return html`
+              <${SurfaceCard}
+                class="mt-3 !border-dashed !border-[var(--warn-20)] !border-l-4 !border-l-[var(--color-warn)] !bg-[var(--warn-10)] !px-3 !py-3 text-xs"
+                data-in-process-not-running-panel
+              >
+                <div class="mb-1 flex flex-wrap items-center gap-2">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-warn)]"
+                    aria-label=${`${connectorName} in-process gateway 상태: 연결되지 않음`}
+                    data-in-process-status-chip
+                  >
+                    <span aria-hidden="true">⊘</span>
+                    <span>연결되지 않음</span>
+                  </span>
+                  <span class="font-medium text-[var(--color-fg-primary)]">서버 내장 게이트웨이</span>
+                  ${connector?.updated_at
+                    ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">last seen ${timeAgo(connector.updated_at)}</span>`
+                    : null}
+                </div>
+                <div class="text-2xs text-[var(--color-status-warn)]/80">
+                  ${connectorName} 게이트웨이가 서버 프로세스 내부에서 동작합니다. 별도 사이드카 프로세스가 없으므로 Start/Stop 버튼이 없습니다. <${Tk}>${envVar}<//> 환경변수를 설정하고 서버를 재기동하면 자동으로 Discord Gateway 에 연결됩니다.
+                </div>
+                <${SetupGuideCard} connectorId=${connectorId} />
+              </${SurfaceCard}>
+            `
+          })()
+        : null}
+
       ${knownGroups.length > 0
         ? html`
             <div class="mt-3 space-y-2" id=${`keepers-${connectorId}`}>
@@ -1101,12 +1208,12 @@ function ConnectorLivePanel({
                     ${bindingActionsEnabled
                       ? html`
                           <div class="mt-2">
-                            <button
-                              type="button"
-                              class="cursor-pointer text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
-                              aria-label=${`add channel to ${group.name}`}
+                            <${ActionButton}
+                              variant="subtle"
+                              size="sm"
+                              ariaLabel=${`add channel to ${group.name}`}
                               onClick=${toggleExpand}
-                            >${expanded ? '− close' : '+ add channel'}</button>
+                            >${expanded ? '− 닫기' : '+ 채널 연결'}<//>
                           </div>
                           ${expanded
                             ? html`
@@ -1120,22 +1227,22 @@ function ConnectorLivePanel({
                                   ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
                                     ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
                                     : null}
-                                  ${observedRooms.length > 0
+                                  ${observedWorkspaces.length > 0
                                     ? html`
                                         <div class="mt-2 flex flex-wrap gap-1.5">
-                                          ${observedRooms.slice(0, 8).map(roomId => {
-                                            const humanized = humanizeChannel(names, roomId)
+                                          ${observedWorkspaces.slice(0, 8).map(workspaceId => {
+                                            const humanized = humanizeChannel(names, workspaceId)
                                             return html`
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
                                                 class="!rounded-[var(--r-0)] !py-0.5"
-                                                title=${roomId}
-                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
-                                                onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
+                                                title=${workspaceId}
+                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(workspaceId, 22)}`}
+                                                onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: workspaceId }) }}
                                               >${humanized
-                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(roomId, 10)}</span>`
-                                                : truncateMiddle(roomId, 22)}<//>
+                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(workspaceId, 10)}</span>`
+                                                : truncateMiddle(workspaceId, 22)}<//>
                                             `
                                           })}
                                         </div>
@@ -1265,7 +1372,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div>
           <div class="text-[var(--color-fg-disabled)]">namespaces</div>
-          <div class="font-mono text-[var(--color-fg-primary)]">${ch.room_count}</div>
+          <div class="font-mono text-[var(--color-fg-primary)]">${ch.workspace_count}</div>
         </div>
         <div>
           <div class="text-[var(--color-fg-disabled)]">last active</div>
@@ -1288,7 +1395,7 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
         </div>
         <div>
           last namespace
-          <span class="font-mono text-[var(--color-fg-primary)]"> ${ch.last_room_id || '-'}</span>
+          <span class="font-mono text-[var(--color-fg-primary)]"> ${ch.last_workspace_id || '-'}</span>
         </div>
       </div>
 
@@ -1315,7 +1422,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--color-fg-primary)]">
-            ${binding.channel} · room ${truncateMiddle(binding.room_id)}
+            ${binding.channel} · workspace ${truncateMiddle(binding.workspace_id)}
           </div>
           <div class="text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
             ${binding.keeper ? `keeper ${binding.keeper}` : 'keeper pending'}
@@ -1361,7 +1468,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--color-fg-disabled)]">
           <div class="font-medium text-[var(--color-fg-primary)]">
-            ${event.channel} · ${event.keeper || 'unassigned'} · room ${truncateMiddle(event.room_id)}
+            ${event.channel} · ${event.keeper || 'unassigned'} · workspace ${truncateMiddle(event.workspace_id)}
           </div>
           <div class="mt-1">
             ${timeAgo(event.timestamp)}
@@ -1469,10 +1576,10 @@ function GateAnalyticsSection({
               <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
                 <div>
                   <div class="mb-2 text-3xs uppercase tracking-5 text-[var(--color-fg-disabled)]">
-                    Observed room bindings
+                    Observed workspace bindings
                   </div>
                   ${gate.bindings.length === 0
-                    ? html`<${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 room 바인딩 없음</${SurfaceCard}>`
+                    ? html`<${SurfaceCard} class="!border-dashed !border-[var(--color-border-default)] !px-3 !py-4 text-xs text-[var(--color-fg-disabled)]">관찰된 workspace 바인딩 없음</${SurfaceCard}>`
                     : html`
                         <div class="space-y-2">
                           ${gate.bindings.slice(0, 6).map(binding => html`<${BindingRow} binding=${binding} />`)}
@@ -1590,6 +1697,7 @@ export function ConnectorStatusPanel() {
             <${ConnectorOverviewStrip}
               connectors=${allConnectors}
               keeperCount=${snapshot.keepers.length}
+              discordTriggerPolicy=${snapshot.connectors?.discord_trigger_policy}
               selectedConnectorId=${focusedConnectorId}
               onSelectConnector=${(connectorId: KnownConnectorId) => { selectedConnectorId.value = connectorId }}
               detailTargetId="connector-detail-panel"

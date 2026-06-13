@@ -3,7 +3,7 @@
     Uses Unix.socketpair to create connected FDs, writes protocol
     prefixes on one end, and verifies detection on the other. *)
 
-open Masc_mcp
+open Masc
 
 let test_detect_h2_preface () =
   let fd_r, fd_w = Unix.socketpair Unix.PF_UNIX Unix.SOCK_STREAM 0 in

@@ -1,8 +1,8 @@
 module Types = Masc_domain
 
-module Lib = Masc_mcp
-module Auth = Masc_mcp.Auth
-module Coord = Masc_mcp.Coord
+module Lib = Masc
+module Auth = Masc.Auth
+module Workspace = Masc.Workspace
 
 open Alcotest
 
@@ -53,7 +53,7 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 
 let with_cached_surface_success
-      (surface : Lib.Server_dashboard_http_cache.cached_surface)
+      (surface : Server_dashboard_http_cache.cached_surface)
       json
       f
   =
@@ -89,7 +89,7 @@ let with_cached_surface_success
       surface.last_error_at <- last_error_at;
       surface.last_error_unix <- last_error_unix)
     (fun () ->
-      Lib.Server_dashboard_http_cache.mark_cached_surface_success surface json;
+      Server_dashboard_http_cache.mark_cached_surface_success surface json;
       f ())
 
 let with_env key value f =
@@ -116,7 +116,7 @@ let with_test_env f =
       with_env "MASC_STORAGE_TYPE" "filesystem" @@ fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord_utils.default_config dir in
+      let config = Workspace_utils.default_config dir in
       Eio.Switch.run @@ fun sw ->
       Eio_context.with_test_env
         ~net:(Eio.Stdenv.net env)
@@ -129,7 +129,7 @@ let test_run_dashboard_compute_without_pool_stays_in_current_domain () =
   with_test_env @@ fun ~env ~sw ~config ->
   let caller_domain = Domain.self () in
   let result_domain =
-    Lib.Server_dashboard_http_core.run_dashboard_compute
+    Server_dashboard_http_core.run_dashboard_compute
       ~sw
       ~clock:(Eio.Stdenv.clock env)
       ~config
@@ -147,10 +147,10 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   let exec_pool =
     Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
   in
-  Lib.Server_dashboard_http_core.set_executor_pool exec_pool;
+  Server_dashboard_http_core.set_executor_pool exec_pool;
   let caller_domain = Domain.self () in
   let result_domain =
-    Lib.Server_dashboard_http_core.run_dashboard_compute
+    Server_dashboard_http_core.run_dashboard_compute
       ~sw
       ~clock:(Eio.Stdenv.clock env)
       ~config
@@ -159,9 +159,30 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   check bool "non-PG backend offloads to executor pool domain" true
     (result_domain <> caller_domain)
 
+let test_meta_cognition_cold_cache_worker_domain_skips_root_switch () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let exec_pool =
+    Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+  in
+  let key =
+    Server_dashboard_http_core_meta_cognition.meta_cognition_summary_key config
+  in
+  Dashboard_cache.invalidate key;
+  Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag key;
+  let json =
+    Eio.Executor_pool.submit_exn exec_pool ~weight:1.0 (fun () ->
+      Server_dashboard_http_core_meta_cognition.meta_cognition_summary_cached
+        config)
+  in
+  check bool "cold worker call returns placeholder" true (json = `Null);
+  check bool "worker fork failure clears warm slot" true
+    (Server_dashboard_http_core_meta_cognition.Mc_cache.try_acquire_warm_slot
+       key);
+  Server_dashboard_http_core_meta_cognition.clear_meta_cognition_warm_flag key
+
 let test_dashboard_shell_http_json_includes_paths () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+  let json = Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
   let fields =
     match json with
@@ -219,11 +240,11 @@ let test_dashboard_shell_http_json_includes_paths () =
          match config_resolution |> member "config_root" |> member "path" with
          | `String value -> String.length value > 0
          | _ -> false));
-  check bool "shell cascade authoring path surfaced when available" true
+  check bool "shell runtime authoring path surfaced when available" true
     (match config_resolution with
      | `Null -> true
      | _ -> (
-         match config_resolution |> member "cascade_authoring" |> member "path" with
+         match config_resolution |> member "runtime_authoring" |> member "path" with
          | `String value -> String.length value > 0
          | _ -> false));
   check bool "shell runtime resolution is object or null" true
@@ -256,7 +277,7 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
   let raw_input = Filename.concat config.base_path Common.masc_dirname in
   with_env "MASC_BASE_PATH_INPUT" raw_input @@ fun () ->
   with_env "MASC_BASE_PATH" config.base_path @@ fun () ->
-  let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+  let json = Server_dashboard_http_core.dashboard_shell_http_json config in
   let open Yojson.Safe.Util in
   check string "runtime base_path preserves raw input" raw_input
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
@@ -264,20 +285,20 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
 
 let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http.shell_warming true;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
       let json =
-        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+        Server_dashboard_http_core.dashboard_shell_http_json
           ~request:(request "/api/v1/dashboard/shell")
           config
       in
@@ -292,33 +313,33 @@ let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
 
 let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
   let last_good =
     `Assoc
       [
         ("generated_at", `String "2026-04-17T00:00:00Z");
-        ("status", `Assoc [("project", `String "warm-room")]);
+        ("status", `Assoc [("project", `String "warm-workspace")]);
         ("counts", `Assoc [("agents", `Int 7); ("tasks", `Int 11); ("keepers", `Int 3)]);
       ]
   in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http.shell_warming true;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell last_good;
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell last_good;
       let json =
-        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+        Server_dashboard_http_core.dashboard_shell_http_json
           ~request:(request "/api/v1/dashboard/shell")
           config
       in
       let open Yojson.Safe.Util in
-      check string "last-good project reused" "warm-room"
+      check string "last-good project reused" "warm-workspace"
         (json |> member "status" |> member "project" |> to_string);
       check int "last-good counts reused" 7
         (json |> member "counts" |> member "agents" |> to_int))
@@ -326,21 +347,21 @@ let test_dashboard_shell_http_json_prefers_last_good_while_prewarming () =
 let test_dashboard_shell_http_json_records_light_last_good () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let original_light_last_good =
-    Atomic.get Lib.Server_dashboard_http.last_good_shell_light
+    Atomic.get Server_dashboard_http.last_good_shell_light
   in
   Fun.protect
     ~finally:(fun () ->
-      Lib.Dashboard_cache.invalidate_all ();
+      Dashboard_cache.invalidate_all ();
       Atomic.set
-        Lib.Server_dashboard_http.last_good_shell_light
+        Server_dashboard_http.last_good_shell_light
         original_light_last_good)
     (fun () ->
-      Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http.last_good_shell_light (`Assoc []);
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.last_good_shell_light (`Assoc []);
       let json =
-        Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
       in
-      let cached = Atomic.get Lib.Server_dashboard_http.last_good_shell_light in
+      let cached = Atomic.get Server_dashboard_http.last_good_shell_light in
       let open Yojson.Safe.Util in
       check bool "light last-good populated" true (cached = json);
       check bool "cached payload is light shell" true
@@ -351,48 +372,48 @@ let test_dashboard_shell_http_json_records_light_last_good () =
 
 let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
   let original_light_last_good =
-    Atomic.get Lib.Server_dashboard_http.last_good_shell_light
+    Atomic.get Server_dashboard_http.last_good_shell_light
   in
   let full_last_good =
     `Assoc
       [
-        ("status", `Assoc [("project", `String "full-room")]);
+        ("status", `Assoc [("project", `String "full-workspace")]);
         ("counts", `Assoc [("agents", `Int 9)]);
       ]
   in
   let light_last_good =
     `Assoc
       [
-        ("status", `Assoc [("project", `String "light-room")]);
+        ("status", `Assoc [("project", `String "light-workspace")]);
         ("counts", `Assoc [("agents", `Int 2)]);
         ("projection_diagnostics", `Assoc [("light", `Bool true)]);
       ]
   in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good;
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good;
       Atomic.set
-        Lib.Server_dashboard_http.last_good_shell_light
+        Server_dashboard_http.last_good_shell_light
         original_light_last_good)
     (fun () ->
-      Atomic.set Lib.Server_dashboard_http.shell_warmed false;
-      Atomic.set Lib.Server_dashboard_http.shell_warming true;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell full_last_good;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell_light light_last_good;
+      Atomic.set Server_dashboard_http.shell_warmed false;
+      Atomic.set Server_dashboard_http.shell_warming true;
+      Atomic.set Server_dashboard_http.last_good_shell full_last_good;
+      Atomic.set Server_dashboard_http.last_good_shell_light light_last_good;
       let json =
-        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+        Server_dashboard_http_core.dashboard_shell_http_json
           ~request:(request "/api/v1/dashboard/shell?light=1")
           ~light:true
           config
       in
       let open Yojson.Safe.Util in
-      check string "light last-good project reused" "light-room"
+      check string "light last-good project reused" "light-workspace"
         (json |> member "status" |> member "project" |> to_string);
       check int "light last-good counts reused" 2
         (json |> member "counts" |> member "agents" |> to_int);
@@ -427,11 +448,11 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ]
   in
   with_cached_surface_success
-    Lib.Server_dashboard_http_core.operator_snapshot_cache
+    Server_dashboard_http_core_operator.operator_snapshot_cache
     seed
   @@ fun () ->
   let json =
-    Lib.Server_dashboard_http_core.operator_snapshot_http_json
+    Server_dashboard_http_core.operator_snapshot_http_json
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
@@ -471,10 +492,10 @@ let test_operator_digest_default_route_exposes_provenance () =
       ; "generated_at", `String "2026-05-15T00:00:01Z"
       ]
   in
-  with_cached_surface_success Lib.Server_dashboard_http_core.operator_digest_cache seed
+  with_cached_surface_success Server_dashboard_http_core_operator.operator_digest_cache seed
   @@ fun () ->
   match
-    Lib.Server_dashboard_http_core.operator_digest_http_json
+    Server_dashboard_http_core.operator_digest_http_json
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
@@ -502,31 +523,31 @@ let test_operator_digest_default_route_exposes_provenance () =
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  let original_warmed = Atomic.get Lib.Server_dashboard_http.shell_warmed in
-  let original_warming = Atomic.get Lib.Server_dashboard_http.shell_warming in
-  let original_last_good = Atomic.get Lib.Server_dashboard_http.last_good_shell in
+  let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
+  let original_warming = Atomic.get Server_dashboard_http.shell_warming in
+  let original_last_good = Atomic.get Server_dashboard_http.last_good_shell in
   Fun.protect
     ~finally:(fun () ->
-      Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http.shell_warmed original_warmed;
-      Atomic.set Lib.Server_dashboard_http.shell_warming original_warming;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell original_last_good)
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.shell_warmed original_warmed;
+      Atomic.set Server_dashboard_http.shell_warming original_warming;
+      Atomic.set Server_dashboard_http.last_good_shell original_last_good)
     (fun () ->
-      Lib.Dashboard_cache.invalidate_all ();
-      Atomic.set Lib.Server_dashboard_http.shell_warmed true;
-      Atomic.set Lib.Server_dashboard_http.shell_warming false;
-      Atomic.set Lib.Server_dashboard_http.last_good_shell (`Assoc []);
+      Dashboard_cache.invalidate_all ();
+      Atomic.set Server_dashboard_http.shell_warmed true;
+      Atomic.set Server_dashboard_http.shell_warming false;
+      Atomic.set Server_dashboard_http.last_good_shell (`Assoc []);
       let cache_key =
-        Lib.Server_dashboard_http_core.dashboard_shell_cache_key config
+        Server_dashboard_http_core.dashboard_shell_cache_key config
       in
       ignore
-        (Lib.Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
+        (Dashboard_cache.get_or_compute cache_key ~ttl:15.0 (fun () ->
              `Assoc
                [
                  ("error", `String "computation_timeout");
                  ("key", `String cache_key);
                ]));
-      let json = Lib.Server_dashboard_http_core.dashboard_shell_http_json config in
+      let json = Server_dashboard_http_core.dashboard_shell_http_json config in
       let open Yojson.Safe.Util in
       let diagnostics = json |> member "projection_diagnostics" in
       check string "timeout fallback cache state" "timeout_fallback"
@@ -564,7 +585,7 @@ let test_dashboard_proof_http_json_surfaces_verification_index () =
    | Ok _ -> ()
    | Error message -> fail message);
   let json =
-    Lib.Server_dashboard_http.dashboard_proof_http_json
+    Server_dashboard_http.dashboard_proof_http_json
       ~config
       (request "/api/v1/dashboard/proof?limit=5&recent=2")
   in
@@ -596,20 +617,20 @@ let test_dashboard_proof_route_registered_in_http_routers () =
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let hangul_ga = "\234\176\128" in
   let title = String.concat "" (List.init 40 (fun _ -> hangul_ga)) in
-  (match Lib.Goal_store.upsert_goal config ~title () with
+  (match Goal_store.upsert_goal config ~title () with
    | Ok _ -> ()
    | Error msg -> fail msg);
-  let json = Lib.Server_dashboard_http.dashboard_planning_http_json ~config in
+  let json = Server_dashboard_http.dashboard_planning_http_json ~config in
   let serialized = Yojson.Safe.to_string json in
   check int "planning json remains valid utf8" 0 (invalid_utf8_byte_count serialized)
 
 let credential_archived_starvation_total () =
   int_of_float
-    (Lib.Prometheus.metric_total
-       Lib.Prometheus.metric_config_credential_archived_starvation)
+    (Lib.Otel_metric_store.metric_total
+       Lib.Otel_metric_store.metric_config_credential_archived_starvation)
 
 let record_test_credential_archive () =
   let keeper_name =
@@ -617,21 +638,21 @@ let record_test_credential_archive () =
       (Unix.getpid ())
       (Random.bits ())
   in
-  Lib.Prometheus.inc_counter
-    Lib.Prometheus.metric_config_credential_archived_starvation
-    ~labels:[("keeper_name", keeper_name)]
+  Lib.Otel_metric_store.inc_counter
+    Lib.Otel_metric_store.metric_config_credential_archived_starvation
+    ~labels:[("keeper", keeper_name)]
     ()
 
 let test_credential_monitoring_json_surfaces_archive_counter () =
   let before = credential_archived_starvation_total () in
   record_test_credential_archive ();
-  let json = Lib.Dashboard_http_monitoring.credential_monitoring_json () in
+  let json = Dashboard_http_monitoring.credential_monitoring_json () in
   let open Yojson.Safe.Util in
   check int "credential archive total"
     (before + 1)
     (json |> member "credential_archived_starvation_total" |> to_int);
   check string "metric name"
-    Lib.Prometheus.metric_config_credential_archived_starvation
+    Lib.Otel_metric_store.metric_config_credential_archived_starvation
     (json |> member "metric_name" |> to_string);
   check string "alert level" "bad"
     (json |> member "alert_level" |> to_string);
@@ -640,10 +661,10 @@ let test_credential_monitoring_json_surfaces_archive_counter () =
 
 let test_dashboard_batch_json_includes_credential_monitoring () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
+  ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
   let before = credential_archived_starvation_total () in
   record_test_credential_archive ();
-  let json = Lib.Server_dashboard_http_core.dashboard_batch_json config in
+  let json = Server_dashboard_http_core.dashboard_batch_json config in
   let open Yojson.Safe.Util in
   let credentials =
     json |> member "status" |> member "monitoring" |> member "credentials"
@@ -664,7 +685,7 @@ let test_dashboard_shell_auth_json_canonicalizes_token_owner () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let json =
-        Lib.Server_dashboard_http_core.dashboard_shell_http_json
+        Server_dashboard_http_core.dashboard_shell_http_json
           ~request:
             (request_with_headers "/api/v1/dashboard/shell"
                [
@@ -694,7 +715,7 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
   in
   Auth.save_auth_config config.base_path cfg;
   let json =
-    Lib.Server_dashboard_http_core.dashboard_shell_http_json
+    Server_dashboard_http_core.dashboard_shell_http_json
       ~request:
         (request_with_headers "/api/v1/dashboard/shell"
            [
@@ -711,12 +732,12 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
 
 let test_dashboard_shell_snapshot_selector_injects_auth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
+  Dashboard_snapshot.reset_for_test ();
   Fun.protect
-    ~finally:Lib.Dashboard_snapshot.reset_for_test
+    ~finally:Dashboard_snapshot.reset_for_test
     (fun () ->
        let snapshot =
-         Lib.Dashboard_snapshot.make_for_test
+         Dashboard_snapshot.make_for_test
            ~shell:
              (`Assoc
                 [
@@ -727,9 +748,9 @@ let test_dashboard_shell_snapshot_selector_injects_auth () =
            ~namespace_truth:`Null
            ~telemetry_summary:`Null ()
        in
-       Lib.Dashboard_snapshot.publish_for_test snapshot;
+       Dashboard_snapshot.publish_for_test snapshot;
        let json =
-         Lib.Server_dashboard_snapshot_select.select_shell_json
+         Server_dashboard_snapshot_select.select_shell_json
            ~request:(request "/api/v1/dashboard/shell")
            config
        in
@@ -751,7 +772,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let actor =
-        Lib.Server_dashboard_http_execution_surfaces.execution_actor_for_request
+        Server_dashboard_http_execution_surfaces.execution_actor_for_request
           ~base_path:config.base_path
           (request_with_headers "/api/v1/dashboard/execution"
              [
@@ -772,7 +793,7 @@ let test_verifier_of_request_canonicalizes_token_owner () =
   | Error e -> fail (Masc_domain.masc_error_to_string e)
   | Ok (raw_token, _) ->
       let verifier =
-        Lib.Server_routes_http_routes_verification.verifier_of_request
+        Server_routes_http_routes_verification.verifier_of_request
           ~base_path:config.base_path
           (request_with_headers "/api/v1/verification/resolve"
              [
@@ -797,7 +818,7 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
       relevance = "critical";
     }
   in
-  let json = Lib.Server_dashboard_http_core.dashboard_message_json message in
+  let json = Server_dashboard_http_core.dashboard_message_json message in
   let open Yojson.Safe.Util in
   check string "type" "broadcast" (json |> member "type" |> to_string);
   check string "trace_context" "traceparent"
@@ -815,45 +836,45 @@ let test_dashboard_message_json_surfaces_temporal_decay_fields () =
 
    1. snapshot published + light=false  -> return [snap.shell]
    2. snapshot empty + light=false      -> fall back to compute path
-   3. snapshot published + light=true   -> ignore snapshot, fall back
-                                           (one-sprint compatibility) *)
+   3. snapshot published + light=true   -> return [snap.shell_light]
+                                           (RFC-0204 section 8.3 "A") *)
 
 let test_shell_snapshot_wire_returns_snapshot_when_published () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
-  Lib.Dashboard_snapshot.publish_for_test
-    (Lib.Dashboard_snapshot.make_for_test
-       ~shell:sentinel ~tools:`Null
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "wire_marker", `String "snapshot-path" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
+       ~shell:marker ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
-  let timing = Lib.Server_timing.create () in
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_shell_json
+    Server_dashboard_snapshot_select.select_shell_json
       ~timing config
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "snapshot path returns published sentinel"
+    "snapshot path returns published marker"
     "snapshot-path"
-    (json |> member "wire_sentinel" |> to_string);
-  let header = Lib.Server_timing.to_header_value timing in
+    (json |> member "wire_marker" |> to_string);
+  let header = Server_timing.to_header_value timing in
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
     true
     (let re = Re.compile (Re.Perl.re "snapshot_read") in
      Re.execp re header);
-  Lib.Dashboard_snapshot.reset_for_test ()
+  Dashboard_snapshot.reset_for_test ()
 
 let test_shell_snapshot_wire_falls_back_when_empty () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let timing = Lib.Server_timing.create () in
+  Dashboard_snapshot.reset_for_test ();
+  let timing = Server_timing.create () in
   let snapshot_json =
-    Lib.Server_dashboard_snapshot_select.select_shell_json
+    Server_dashboard_snapshot_select.select_shell_json
       ~timing config
   in
   let direct_json =
-    Lib.Server_dashboard_http_core.dashboard_shell_http_json
+    Server_dashboard_http_core.dashboard_shell_http_json
       ~light:false config
   in
   let open Yojson.Safe.Util in
@@ -864,30 +885,39 @@ let test_shell_snapshot_wire_falls_back_when_empty () =
     (paths_of snapshot_json <> `Null
      && paths_of snapshot_json = paths_of direct_json)
 
-let test_shell_snapshot_wire_light_variant_bypasses_snapshot () =
+let test_shell_snapshot_wire_light_reads_shell_light () =
+  (* RFC-0204 section 8.3 ("A"): light=true now serves the published light
+     projection [snap.shell_light], not the full [snap.shell] and not a
+     recompute. *)
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "wire_sentinel", `String "snapshot-path" ] in
-  Lib.Dashboard_snapshot.publish_for_test
-    (Lib.Dashboard_snapshot.make_for_test
-       ~shell:sentinel ~tools:`Null
+  Dashboard_snapshot.reset_for_test ();
+  let full = `Assoc [ "wire_marker", `String "full-shell" ] in
+  let light = `Assoc [ "wire_marker", `String "light-shell" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
+       ~shell:full ~shell_light:light ~tools:`Null
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
-  let timing = Lib.Server_timing.create () in
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_shell_json
+    Server_dashboard_snapshot_select.select_shell_json
       ~timing ~light:true config
   in
   let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "light=true returns the published shell_light projection"
+    "light-shell"
+    (json |> member "wire_marker" |> to_string);
+  let header = Server_timing.to_header_value timing in
   Alcotest.(check bool)
-    "light=true must NOT return the snapshot sentinel"
+    "Server-Timing records snapshot_read on light hit"
     true
-    (json |> member "wire_sentinel" = `Null);
-  Lib.Dashboard_snapshot.reset_for_test ()
+    (let re = Re.compile (Re.Perl.re "snapshot_read") in Re.execp re header);
+  Dashboard_snapshot.reset_for_test ()
 
 let test_dashboard_shell_light_includes_runtime_health_ssot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let json =
-    Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+    Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
   in
   let open Yojson.Safe.Util in
   let runtime_resolution = json |> member "runtime_resolution" in
@@ -917,12 +947,12 @@ let test_dashboard_shell_light_includes_runtime_health_ssot () =
 
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Coord.init config ~agent_name:None);
+  ignore (Workspace.init config ~agent_name:None);
   let write_agent ~name ~agent_type ~status =
     let path =
-      Filename.concat (Coord.agents_dir config) (Coord.safe_filename name ^ ".json")
+      Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename name ^ ".json")
     in
-    Coord.write_json
+    Workspace.write_json
       config
       path
       (`Assoc
@@ -930,7 +960,7 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
         ; "agent_type", `String agent_type
         ; "status", `String status
         ; "capabilities", `List []
-        ; "joined_at", `String "2026-05-20T00:00:00Z"
+        ; "session_bound_at", `String "2026-05-20T00:00:00Z"
         ; "last_seen", `String "2026-05-20T00:00:00Z"
         ])
   in
@@ -938,7 +968,7 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   write_agent ~name:"keeper-active" ~agent_type:"keeper" ~status:"busy";
   write_agent ~name:"agent_code-inactive" ~agent_type:"agent_code" ~status:"inactive";
   let json =
-    Lib.Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+    Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
   in
   let open Yojson.Safe.Util in
   Alcotest.(check int)
@@ -954,29 +984,29 @@ let test_dashboard_shell_light_counts_agents_from_summary_fields () =
 
 let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "tools_sentinel", `String "from-snapshot" ] in
-  Lib.Dashboard_snapshot.publish_for_test
-    (Lib.Dashboard_snapshot.make_for_test
-       ~shell:`Null ~tools:sentinel
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "tools_marker", `String "from-snapshot" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
+       ~shell:`Null ~tools:marker
        ~namespace_truth:`Null ~telemetry_summary:`Null ());
-  let timing = Lib.Server_timing.create () in
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_tools_json
+    Server_dashboard_snapshot_select.select_tools_json
       ~timing config
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "actor-less snapshot path returns published sentinel"
+    "actor-less snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "tools_sentinel" |> to_string);
+    (json |> member "tools_marker" |> to_string);
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
     true
-    (let header = Lib.Server_timing.to_header_value timing in
+    (let header = Server_timing.to_header_value timing in
      let re = Re.compile (Re.Perl.re "snapshot_read") in
      Re.execp re header);
-  Lib.Dashboard_snapshot.reset_for_test ()
+  Dashboard_snapshot.reset_for_test ()
 
 (* [test_tools_snapshot_wire_bypasses_snapshot_when_actor_given]
    intentionally omitted from the unit suite.  The selector's
@@ -990,30 +1020,30 @@ let test_tools_snapshot_wire_returns_snapshot_when_actor_omitted () =
 
 let test_telemetry_summary_snapshot_wire_returns_snapshot () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel = `Assoc [ "tele_sentinel", `String "from-snapshot" ] in
-  Lib.Dashboard_snapshot.publish_for_test
-    (Lib.Dashboard_snapshot.make_for_test
+  Dashboard_snapshot.reset_for_test ();
+  let marker = `Assoc [ "tele_marker", `String "from-snapshot" ] in
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:`Null ~telemetry_summary:sentinel ());
-  let timing = Lib.Server_timing.create () in
+       ~namespace_truth:`Null ~telemetry_summary:marker ());
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
+    Server_dashboard_snapshot_select.select_telemetry_summary_json
       ~timing config
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "telemetry_summary snapshot path returns published sentinel"
+    "telemetry_summary snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "tele_sentinel" |> to_string);
-  Lib.Dashboard_snapshot.reset_for_test ()
+    (json |> member "tele_marker" |> to_string);
+  Dashboard_snapshot.reset_for_test ()
 
 let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let timing = Lib.Server_timing.create () in
+  Dashboard_snapshot.reset_for_test ();
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_telemetry_summary_json
+    Server_dashboard_snapshot_select.select_telemetry_summary_json
       ~timing config
   in
   Alcotest.(check bool)
@@ -1031,34 +1061,59 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
 
 let test_project_snapshot_wire_returns_snapshot_when_populated () =
   with_test_env @@ fun ~env ~sw ~config:_ ->
-  Lib.Dashboard_snapshot.reset_for_test ();
-  let sentinel =
-    `Assoc [ "namespace_truth_sentinel", `String "from-snapshot" ]
+  Dashboard_snapshot.reset_for_test ();
+  let marker =
+    `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
   in
-  Lib.Dashboard_snapshot.publish_for_test
-    (Lib.Dashboard_snapshot.make_for_test
+  Dashboard_snapshot.publish_for_test
+    (Dashboard_snapshot.make_for_test
        ~shell:`Null ~tools:`Null
-       ~namespace_truth:sentinel ~telemetry_summary:`Null ());
+       ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
   let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
   let req = request "/api/v1/dashboard/project-snapshot" in
-  let timing = Lib.Server_timing.create () in
+  let timing = Server_timing.create () in
   let json =
-    Lib.Server_dashboard_snapshot_select.select_project_snapshot_json
+    Server_dashboard_snapshot_select.select_project_snapshot_json
       ~state ~sw ~clock ~timing req
   in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
-    "populated snapshot path returns published sentinel"
+    "populated snapshot path returns published marker"
     "from-snapshot"
-    (json |> member "namespace_truth_sentinel" |> to_string);
+    (json |> member "namespace_truth_marker" |> to_string);
   Alcotest.(check bool)
     "Server-Timing header records snapshot_read phase on hit"
     true
-    (let header = Lib.Server_timing.to_header_value timing in
+    (let header = Server_timing.to_header_value timing in
      let re = Re.compile (Re.Perl.re "snapshot_read") in
      Re.execp re header);
-  Lib.Dashboard_snapshot.reset_for_test ()
+  Dashboard_snapshot.reset_for_test ()
+
+(* Freeze guard: /api/v1/dashboard/telemetry must never default to an
+   unbounded read. Observatory polls with since_ms/until_ms and no [n];
+   before this fix the windowed default was n=0 (unbounded), letting one
+   poll Yojson-parse up to the read clamp (#20659: 50k) per source across
+   all sources and peg the single Eio domain -> keeper-fleet freeze. *)
+let test_telemetry_n_default_is_bounded () =
+  let resolve = Server_routes_http_routes_dashboard_setup.resolve_telemetry_n in
+  Alcotest.(check int)
+    "windowed + no n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:None);
+  Alcotest.(check int)
+    "no window + no n -> small default"
+    100 (resolve ~has_time_window:false ~n_param:None);
+  Alcotest.(check int)
+    "unparseable n -> bounded default, never 0"
+    2000 (resolve ~has_time_window:true ~n_param:(Some "garbage"));
+  (* #20659 all-in-window contract: explicit n=0 is honoured (clamped
+     downstream), so an operator can still request the full window. *)
+  Alcotest.(check int)
+    "explicit n=0 preserved"
+    0 (resolve ~has_time_window:true ~n_param:(Some "0"));
+  Alcotest.(check int)
+    "explicit positive n honoured"
+    500 (resolve ~has_time_window:true ~n_param:(Some "500"))
 
 let () =
   run "dashboard_http_core"
@@ -1069,6 +1124,8 @@ let () =
             test_run_dashboard_compute_without_pool_stays_in_current_domain;
           test_case "pool uses executor domain" `Quick
             test_run_dashboard_compute_with_pool_uses_executor_domain;
+          test_case "meta-cognition cold worker skips root switch" `Quick
+            test_meta_cognition_cold_cache_worker_domain_skips_root_switch;
           test_case "shell payload includes paths diagnostics" `Quick
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick
@@ -1115,8 +1172,8 @@ let () =
             test_shell_snapshot_wire_returns_snapshot_when_published;
           test_case "RFC-0138 shell wire falls back when snapshot empty" `Quick
             test_shell_snapshot_wire_falls_back_when_empty;
-          test_case "RFC-0138 shell wire light variant bypasses snapshot" `Quick
-            test_shell_snapshot_wire_light_variant_bypasses_snapshot;
+          test_case "RFC-0204 shell wire light reads shell_light" `Quick
+            test_shell_snapshot_wire_light_reads_shell_light;
           test_case "light shell carries runtime health SSOT" `Quick
             test_dashboard_shell_light_includes_runtime_health_ssot;
           test_case "light shell counts agents from summary fields" `Quick
@@ -1129,5 +1186,7 @@ let () =
             test_telemetry_summary_snapshot_wire_falls_back_when_empty;
           test_case "RFC-0138 project-snapshot wire returns snapshot when populated" `Quick
             test_project_snapshot_wire_returns_snapshot_when_populated;
+          test_case "telemetry n default is bounded (freeze guard)" `Quick
+            test_telemetry_n_default_is_bounded;
         ] );
     ]

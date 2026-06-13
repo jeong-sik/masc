@@ -3,13 +3,13 @@
     This avoids the large shared [tests] stanza while still exercising the
     real handler path that used to rely only on allowed_paths resolution. *)
 
-module Coord = Masc_mcp.Coord
+module Workspace = Masc.Workspace
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
-module Agent_tool_filesystem_runtime = Masc_mcp.Agent_tool_filesystem_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
+module Keeper_registry = Masc.Keeper_registry
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_types = Keeper_types
 
 let temp_dir () =
   let d = Filename.temp_file "tool_edit_file_containment_" "" in
@@ -77,7 +77,7 @@ let setup f =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        Keeper_registry.clear ();
-       let config = Coord.default_config base in
+       let config = Workspace.default_config base in
        let meta = make_meta "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
@@ -117,7 +117,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
-    Agent_tool_filesystem_runtime.handle_file_write
+    Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name
@@ -145,7 +145,7 @@ let test_docker_write_allows_playground () =
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
-    Agent_tool_filesystem_runtime.handle_file_write
+    Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name

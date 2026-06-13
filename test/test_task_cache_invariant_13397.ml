@@ -33,7 +33,7 @@ let status_awaiting =
     { assignee = "k1"
     ; submitted_at = now
     ; verification_id = "req-1"
-    ; deadline = None
+    ; phase = Awaiting_verifier
     }
 
 let test_is_terminal_done () =
@@ -67,7 +67,7 @@ let with_temp_config f =
   let dir = Filename.temp_file "task_cache_inv_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
-  let config = Masc_mcp.Coord.default_config dir in
+  let config = Masc.Workspace.default_config dir in
   Fun.protect
     ~finally:(fun () ->
       let rec rm path =
@@ -90,8 +90,6 @@ let make_task ~id ~status =
   ; files = []
   ; created_at = now
   ; created_by = None
-  ; goal_id = None
-  ; stage = None
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
@@ -104,11 +102,11 @@ let seed_backlog config task =
   let backlog : T.backlog =
     { tasks = [ task ]; last_updated = now; version = 1 }
   in
-  Coord_backlog.write_backlog config backlog
+  Workspace_backlog.write_backlog config backlog
 
 let test_fresh_status_done () =
   with_temp_config (fun config ->
-    let _ = Masc_mcp.Coord.init config ~agent_name:(Some "tester") in
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-037" ~status:status_done);
     let result = TCI.fresh_task_status config ~task_id:"task-037" in
     check bool "done task status found" true (Option.is_some result);
@@ -117,7 +115,7 @@ let test_fresh_status_done () =
 
 let test_fresh_status_active () =
   with_temp_config (fun config ->
-    let _ = Masc_mcp.Coord.init config ~agent_name:(Some "tester") in
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-038" ~status:status_claimed);
     let result = TCI.fresh_task_status config ~task_id:"task-038" in
     check bool "claimed task status found" true (Option.is_some result);
@@ -126,14 +124,14 @@ let test_fresh_status_active () =
 
 let test_fresh_status_missing () =
   with_temp_config (fun config ->
-    let _ = Masc_mcp.Coord.init config ~agent_name:(Some "tester") in
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-001" ~status:T.Todo);
     let result = TCI.fresh_task_status config ~task_id:"task-999" in
     check bool "absent task returns None" true (Option.is_none result))
 
 let test_with_fresh_terminal_returns_none () =
   with_temp_config (fun config ->
-    let _ = Masc_mcp.Coord.init config ~agent_name:(Some "tester") in
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-102" ~status:status_done);
     let result =
       TCI.with_fresh_task_status config
@@ -147,7 +145,7 @@ let test_with_fresh_terminal_returns_none () =
 
 let test_with_fresh_active_calls_continuation () =
   with_temp_config (fun config ->
-    let _ = Masc_mcp.Coord.init config ~agent_name:(Some "tester") in
+    let _ = Masc.Workspace.init config ~agent_name:(Some "tester") in
     seed_backlog config (make_task ~id:"task-050" ~status:status_claimed);
     let called = ref false in
     let result =

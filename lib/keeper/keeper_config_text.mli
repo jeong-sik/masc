@@ -25,20 +25,15 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
 val prompt_render_max_bytes : int
-val legacy_provider_filter_name : string
-
-val keeper_room_signal_prompt_enabled_override : unit -> bool option
 
 (* ── Removed / rejected keeper input keys ───────────────────── *)
 
 val removed_keeper_input_key_names : string list
 val non_public_keeper_input_key_names : string list
 val removed_keeper_msg_input_key_names : string list
-val removed_keeper_meta_key_names : string list
 
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 
@@ -49,8 +44,6 @@ val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
-
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
 
 val utf8_repair_string : string -> string
 

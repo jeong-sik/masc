@@ -40,17 +40,13 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
     Hashtbl.mem link_task_cache (keeper, task_id, trace_id))
 
 let per_provider_timeout_for_turn
-    ~(meta : Keeper_types.keeper_meta)
     ?oas_timeout_s
     ?(oas_timeout_is_explicit = true)
     ~(timeout_s : float)
     () =
   match (oas_timeout_s, oas_timeout_is_explicit) with
   | (Some _ as explicit_timeout), true -> explicit_timeout
-  | _, _ -> (
-      match meta.per_provider_timeout_s with
-      | Some configured -> Some (Float.min configured timeout_s)
-      | None -> Some timeout_s)
+  | _, _ -> Some timeout_s
 
 let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   match event with
@@ -71,50 +67,23 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.SSEError _ -> Some "sse_error"
   | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Agent_sdk.Types.Connected -> Some "sse_connected"
+  | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"
 
 let registry_progress_on_event ~record_turn_progress downstream event =
   Option.iter record_turn_progress (sse_event_progress_kind event);
   Option.iter (fun cb -> cb event) downstream
 
-let select_cdal_proof ~result_proof ~captured_proof =
-  match result_proof with
-  | Some _ -> result_proof
-  | None -> captured_proof
 
-let should_require_provider_tool_choice_support
-    ~initial_tool_requirement
-    ~actionable_observation_requires_tool_support =
-  initial_tool_requirement = Keeper_agent_tool_surface.Required
-  || actionable_observation_requires_tool_support
-
-let tool_contract_result_for_observed_tools
-    ~(required_tool_names : string list)
-    ~(missing_visible_required : string list)
+let completion_contract_result_for_progress_evidence
     ~(had_owned_active_task_at_turn_start : bool)
     ~(actual_keeper_tool_names : string list) :
-    Keeper_execution_receipt.tool_contract_result =
+    Keeper_execution_receipt.completion_contract_result =
   let class_of name = Keeper_tool_progress.classify_tool_progress name in
   let classes = List.map class_of actual_keeper_tool_names in
   let has_class wanted = List.exists (( = ) wanted) classes in
   let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
-  let all_required_used =
-    List.for_all
-      (fun name -> List.mem name actual_keeper_tool_names)
-      required_tool_names
-  in
-  if missing_visible_required <> [] then
-    Keeper_execution_receipt.Contract_tool_surface_mismatch
-  else if required_tool_names <> [] && not all_required_used then
-    if actual_keeper_tool_names = [] then
-      Keeper_execution_receipt.Contract_missing_required_tool_use
-    else if
-      all_class Keeper_tool_progress.Claim_context
-      && had_owned_active_task_at_turn_start
-    then Keeper_execution_receipt.Contract_claim_only_after_owned_task
-    else if all_class Keeper_tool_progress.Passive_status then
-      Keeper_execution_receipt.Contract_passive_only
-    else Keeper_execution_receipt.Contract_missing_required_tool_use
-  else if actual_keeper_tool_names = [] then
+  if actual_keeper_tool_names = [] then
     Keeper_execution_receipt.Contract_satisfied_completion
   else if
     all_class Keeper_tool_progress.Claim_context
@@ -136,7 +105,7 @@ let emit_turn_end_safely ~keeper_name () =
   try Masc_runtime_events.emit_turn_end () with
   | Eio.Cancel.Cancelled _ -> ()
   | e ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DispatchEventFailures)
         ~labels:[ "keeper", keeper_name; "site", "emit_turn_end" ]
         ();
@@ -169,7 +138,7 @@ let runtime_manifest_context ~keeper_name ~agent_name ~trace_id ~generation
   }
 
 let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
-    ~generation ~cascade_name ?status ?decision ?keeper_turn_id
+    ~generation ~runtime_id ?status ?decision ?keeper_turn_id
     ?oas_turn_count ?elapsed_ms ?logical_seq ?checkpoint_path ?receipt_path
     ?compaction_source ~site event =
   let decision =
@@ -193,7 +162,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
            decision)
   in
   Keeper_runtime_manifest.make ~keeper_name ~agent_name ~trace_id ~generation
-    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~cascade_name ?status
+    ?keeper_turn_id ?oas_turn_count ?logical_seq ~event ~runtime_id ?status
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
 
@@ -202,7 +171,7 @@ let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
   | Eio.Cancel.Cancelled _ -> ()
   | e ->
       let backtrace = Printexc.get_backtrace () in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DispatchEventFailures)
         ~labels:[ "keeper", keeper_name; "site", "tool_cleanup" ]
         ();
@@ -228,7 +197,7 @@ let make_append_manifest
     ~agent_name
     ~trace_id
     ~generation
-    ~cascade_name
+    ~runtime_id
     ~(turn_start : Mtime.t)
     ~(seq_ref : int ref)
   : Keeper_agent_run_sidecar.append_manifest_fn
@@ -257,7 +226,7 @@ let make_append_manifest
     ~agent_name
     ~trace_id
     ~generation
-    ~cascade_name
+    ~runtime_id
     ?status ?decision ?keeper_turn_id ?oas_turn_count
     ?elapsed_ms ?logical_seq
     ?checkpoint_path ?compaction_source
@@ -267,7 +236,7 @@ let make_append_manifest
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
-      ~base_path:config.Coord.base_path
+      ~base_path:config.Workspace.base_path
       keeper_name
       ~event_kind
   in

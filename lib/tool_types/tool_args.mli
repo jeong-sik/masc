@@ -58,7 +58,7 @@ type error_code =
   | Timeout               (** Operation timed out. *)
   | Not_implemented       (** Feature exists in schema but not in runtime. *)
   | Internal_error        (** Unexpected server-side failure. *)
-  | Precondition_failed   (** Required precondition not met (e.g. room not joined). *)
+  | Precondition_failed   (** Required precondition not met (e.g. workspace not session-bound). *)
 
 val error_code_to_string : error_code -> string
 
@@ -136,7 +136,7 @@ val ( let*! ) :
     deterministic self-correction.
 
     @since 2.170.0
-    @see <https://github.com/jeong-sik/masc-mcp/issues/4963> *)
+    @see <https://github.com/jeong-sik/masc/issues/4963> *)
 
 type field_constraint =
   | Required           (** Field must be present. *)

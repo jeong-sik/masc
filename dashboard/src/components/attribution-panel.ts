@@ -26,7 +26,7 @@ import { isAbortError } from '../lib/async-state'
 const POLL_INTERVAL_MS = 5_000
 const RECENT_LIMIT = 50
 
-// Known gates. Gates not yet wired (accountability, coord_task, etc.) will
+// Known gates. Gates not yet wired (accountability, workspace_task, etc.) will
 // show zero counts so the operator sees which sources are live.
 const KNOWN_GATES = [
   'cdal_verdict',

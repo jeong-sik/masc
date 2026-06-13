@@ -1,4 +1,4 @@
-// MASC seed data — derived from real keeper/goal/task names in .masc/
+// Synthetic cockpit seed data. Do not mirror .masc records or provider names.
 
 window.MASC_DATA = (function () {
   const keepers = [
@@ -24,16 +24,16 @@ window.MASC_DATA = (function () {
     { id: "t-4b11", keeper: "masc-improver", title: "Refactor keeper.claim() for clarity",         status: "running",  goal: "goal-keeper-clarity",      t: "5m" },
     { id: "t-7c03", keeper: "sangsu",        title: "Drift audit — src/keeper/pipeline.ts L187",   status: "pending",  goal: "goal-keeper-clarity",      t: "8m" },
     { id: "t-2e88", keeper: "qa-king",       title: "suite-merge-blockers · 3 FAIL",               status: "fail",     goal: "goal-merge-blockers",      t: "12m" },
-    { id: "t-d551", keeper: "rama",          title: "Research cascade regression @step=2",         status: "stalled",  goal: "goal-masc-product",        t: "22m" },
+    { id: "t-d551", keeper: "rama",          title: "Research runtime regression @step=2",         status: "stalled",  goal: "goal-masc-product",        t: "22m" },
     { id: "t-c022", keeper: "nick0cave",     title: "Backport fix to release-0.42 branch",         status: "queued",   goal: "goal-merge-blockers",      t: "—"  },
     { id: "t-a9e1", keeper: "masc-improver", title: "Write keeper-clarity runbook",                status: "queued",   goal: "goal-keeper-clarity",      t: "—"  },
   ];
 
   const providers = [
-    { id: "provider-a", model: "model-a-haiku",   tps: 1.24, status: "ok",   cascade: 1 },
-    { id: "provider-b",  model: "model-c",            tps: 0.88, status: "ok",   cascade: 2 },
-    { id: "provider-d",    model: "model-d-mini",        tps: 1.02, status: "warn", cascade: 3 },
-    { id: "provider-e",       model: "model-e",             tps: 0.76, status: "idle", cascade: 4 },
+    { id: "runtime-slot-a", model: "capability-tier-a", tps: 1.24, status: "ok",   runtime: 1 },
+    { id: "runtime-slot-b", model: "capability-tier-b", tps: 0.88, status: "ok",   runtime: 2 },
+    { id: "runtime-slot-c", model: "capability-tier-c", tps: 1.02, status: "warn", runtime: 3 },
+    { id: "runtime-slot-d", model: "capability-tier-d", tps: 0.76, status: "idle", runtime: 4 },
   ];
 
   // Event stream for ticker and swimlanes
@@ -47,8 +47,8 @@ window.MASC_DATA = (function () {
     { t: "16:30:55Z", keeper: "masc-improver", kind: "tool",  text: "tool.grep 'claim(' → 14 hits" },
     { t: "16:30:40Z", keeper: "scholar",       kind: "note",  text: "indexed 82 files · cold-read done" },
     { t: "16:30:18Z", keeper: "nick0cave",     kind: "claim", text: "claimed t-c022 (backport)" },
-    { t: "16:29:50Z", keeper: "sangsu",        kind: "flag",  text: "cascade hit@step=2 — 1.24s provider-a→provider-b" },
-    { t: "16:29:22Z", keeper: "qa-king",       kind: "err",   text: "flake in test_cascade_retry · re-running" },
+    { t: "16:29:50Z", keeper: "sangsu",        kind: "flag",  text: "descriptor run hit@step=2 — 1.24s" },
+    { t: "16:29:22Z", keeper: "qa-king",       kind: "err",   text: "flake in test_runtime_retry · re-running" },
   ];
 
   // Swimlane events (for timeline) — normalized x 0..1
@@ -60,16 +60,16 @@ window.MASC_DATA = (function () {
     "rama":          [{x:.08,k:"text"},{x:.18,k:"text"},{x:.24,k:"text"}],
   };
 
-  // cascade trace
-  const cascade = {
-    id: "cascade-3f19",
+  // runtime trace
+  const runtime = {
+    id: "runtime-3f19",
     steps: [
-      { provider: "provider-a", status: "miss", ms: 820, reason: "rate-limit.soft" },
-      { provider: "provider-b",  status: "hit",  ms: 420, reason: "ok" },
-      { provider: "provider-d",    status: "—",    ms: 0,   reason: "skipped" },
+      { provider: "runtime-slot-a", status: "miss", ms: 820, reason: "rate-limit.soft" },
+      { provider: "runtime-slot-b", status: "hit",  ms: 420, reason: "ok" },
+      { provider: "runtime-slot-c", status: "—",    ms: 0,   reason: "skipped" },
     ],
     total_ms: 1240,
   };
 
-  return { keepers, goals, tasks, providers, events, laneEvents, cascade };
+  return { keepers, goals, tasks, providers, events, laneEvents, runtime };
 })();

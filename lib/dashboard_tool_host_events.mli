@@ -61,7 +61,7 @@ val details_json : report -> Yojson.Safe.t
 
 val record :
   ?fs:'fs ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   report ->
   unit
 (** [record ?fs config report] is the fan-out side-effect:
@@ -77,19 +77,18 @@ val record :
 
 (** {1 Tool-assignment lifecycle event}
 
-    Snapshot the dashboard records when a profile/preset is assigned
+    Snapshot the dashboard records when a profile is assigned
     to an agent.  Concrete record for the same reason as {!report}. *)
 type assignment_snapshot = {
   agent_name : string;
   profile : string;
-  preset : string option;
   tool_count : int;
   assignment_id : string;
 }
 
 val record_assignment :
   ?fs:'fs ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   assignment_snapshot ->
   unit
 (** [record_assignment ?fs config snapshot] forwards to

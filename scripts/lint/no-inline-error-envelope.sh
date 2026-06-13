@@ -12,7 +12,7 @@ ALLOWLIST=(
   # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
   "lib/tool_types/tool_args.ml"
 
-  # T27 alias backstop (sibling-include cascade for tool_local_runtime_*.ml).
+  # T27 alias backstop (sibling-include runtime for tool_local_runtime_*.ml).
   "lib/tool_local_runtime_core.ml"
 
   # ---- Temporary allowlist — REMOVE after T27 (#14876) merges ----

@@ -10,7 +10,7 @@ type claim_status =
   | Partial
 
 val accountability_emit_skip_metric : string
-(** #10314: Prometheus counter name surfaced for tests and dashboards.
+(** #10314: Otel_metric_store counter name surfaced for tests and dashboards.
     Labels:
     - [kind] ∈ task_transition | completion_claim
     - [reason] ∈ not_keeper_agent_name | empty_subject
@@ -18,7 +18,7 @@ val accountability_emit_skip_metric : string
     indicates the fleet observability gap from #10314. *)
 
 val record_task_transition :
-  Coord_query.config ->
+  Workspace_query.config ->
   agent_name:string ->
   task_id:string ->
   transition:Masc_domain.task_action ->
@@ -26,7 +26,7 @@ val record_task_transition :
   unit
 
 val record_completion_claim :
-  Coord_query.config ->
+  Workspace_query.config ->
   keeper_name:string ->
   agent_name:string ->
   trace_id:string ->
@@ -41,13 +41,13 @@ val record_completion_claim :
   unit
 
 val accountability_summary_json :
-  Coord_query.config ->
+  Workspace_query.config ->
   keeper_name:string ->
   agent_name:string ->
   Yojson.Safe.t
 
 val accountability_summary_lookup :
-  Coord_query.config ->
+  Workspace_query.config ->
   keeper_name:string ->
   agent_name:string ->
   Yojson.Safe.t
@@ -57,7 +57,7 @@ val disable_window_read_count_for_testing : unit -> unit
 val window_read_count_for_testing : unit -> int
 
 val accountability_risk_is_high :
-  Coord_query.config ->
+  Workspace_query.config ->
   keeper_name:string ->
   agent_name:string ->
   bool

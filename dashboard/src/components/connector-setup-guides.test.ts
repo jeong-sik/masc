@@ -15,7 +15,7 @@ describe("CONNECTOR_SETUP_GUIDES", () => {
   })
 
   it.each([
-    ["discord", "Discord 봇 등록"],
+    ["discord", "Discord 봇 등록 (서버 내장 게이트웨이)"],
     ["imessage", "iMessage 권한 (macOS only)"],
     ["slack", "Slack App + Socket Mode"],
     ["telegram", "Telegram BotFather"],

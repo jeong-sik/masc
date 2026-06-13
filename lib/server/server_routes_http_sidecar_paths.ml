@@ -27,7 +27,7 @@ let runtime_base_path ?base_path () =
      | _ -> Sys.getcwd ())
 ;;
 
-let request_base_path state = state.Mcp_server.room_config.base_path
+let request_base_path state = state.Mcp_server.workspace_config.base_path
 let dir_exists path = Sys.file_exists path && Sys.is_directory path
 
 let project_root_from_executable () =
@@ -87,8 +87,8 @@ let missing_sidecar_dir_message ?sidecar_root ?project_root ~base_path id =
   in
   Printf.sprintf
     "sidecar directory not found for %s; looked under %s. Set \
-     MASC_SIDECAR_ROOT=/path/to/masc-mcp or start the server with `start-masc-mcp.sh \
-     --sidecar-root /path/to/masc-mcp`."
+     MASC_SIDECAR_ROOT=/path/to/masc or start the server with `start-masc.sh \
+     --sidecar-root /path/to/masc`."
     id
     searched_text
 ;;
@@ -300,8 +300,8 @@ let runtime_sidecar_script_result ?base_path id =
       Error
         (Printf.sprintf
            "sidecar run.sh not found for %s at %s. Set \
-            MASC_SIDECAR_ROOT=/path/to/masc-mcp or start the server with \
-            `start-masc-mcp.sh --sidecar-root /path/to/masc-mcp`."
+            MASC_SIDECAR_ROOT=/path/to/masc or start the server with \
+            `start-masc.sh --sidecar-root /path/to/masc`."
            id
            script)
 ;;

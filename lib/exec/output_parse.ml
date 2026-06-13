@@ -199,6 +199,33 @@ let parse_ls_long output =
 
 (* --- dune test output --- *)
 
+(** Classification of dune runtest output lines.
+    Replaces ad-hoc [String.starts_with] prefix matching with a typed
+    variant so the compiler enforces exhaustive handling. *)
+type dune_line =
+  | Dune_test_line
+      (** A "test ..." line with a recognized path prefix (src/ or test/). *)
+  | Dune_error_line  (** An "error:..." line indicating test failure. *)
+  | Dune_indent_line  (** An indented line (ignored in counting). *)
+  | Dune_other  (** Any other line (ignored in counting). *)
+
+let classify_dune_line (l : string) : dune_line =
+  let len = String.length l in
+  if len >= 5 && String.sub l 0 5 = "test " then
+    let rest = String.trim (String.sub l 5 (len - 5)) in
+    let rest_len = String.length rest in
+    if rest_len >= 4 && String.sub rest 0 4 = "src/"
+    then Dune_test_line
+    else if rest_len >= 5 && String.sub rest 0 5 = "test/"
+    then Dune_test_line
+    else Dune_other
+  else if len >= 2 && l.[0] = ' ' && l.[1] = ' '
+  then Dune_indent_line
+  else if len >= 6 && String.sub l 0 6 = "error:"
+  then Dune_error_line
+  else Dune_other
+;;
+
 let parse_dune_test output =
   (* dune runtest outputs like:
      "Test src/...: ok" or "...FAILED..."
@@ -209,21 +236,17 @@ let parse_dune_test output =
     (fun line ->
       let trimmed = String.trim line in
       let l = String.lowercase_ascii trimmed in
-      if String.starts_with ~prefix:"test " l then
-        let rest = String.trim (String.sub l 5 (String.length l - 5)) in
-        if String.starts_with ~prefix:"src/" rest
-           || String.starts_with ~prefix:"test/" rest
-        then
-          let len = String.length l in
-          if len >= 3 && String.sub l (len - 2) 2 = "ok" then incr passed
-          else if String.length trimmed > 5 then begin
-            (* look for FAILED or ERROR in the line *)
-            if String_util.contains_substring l "failed" then incr failed
-            else if String_util.contains_substring l "error" then incr failed
-          end
-      else if String.starts_with ~prefix:"  " l then ()
-      else if String.starts_with ~prefix:"error:" l then incr failed
-      else ())
+      match classify_dune_line l with
+      | Dune_test_line ->
+        let len = String.length l in
+        if len >= 3 && String.sub l (len - 2) 2 = "ok" then incr passed
+        else if String.length trimmed > 5 then begin
+          (* look for FAILED or ERROR in the line *)
+          if String_util.contains_substring l "failed" then incr failed
+          else if String_util.contains_substring l "error" then incr failed
+        end
+      | Dune_error_line -> incr failed
+      | Dune_indent_line | Dune_other -> ())
     lines;
   let total = !passed + !failed + !skipped in
   if total = 0 then None
@@ -400,16 +423,25 @@ let git_option_requires_arg = function
       true
   | _ -> false
 
+(** Git global options that take an inline value (e.g. [--git-dir=PATH]).
+    Replaces ad-hoc [String.starts_with] prefix matching with a list-driven
+    check over the known option set. *)
+let git_option_inline_prefixes =
+  [ "--git-dir="
+  ; "--work-tree="
+  ; "--namespace="
+  ; "--exec-path="
+  ; "--super-prefix="
+  ; "--config-env="
+  ]
+;;
+
 let git_option_has_inline_arg opt =
-  String.starts_with ~prefix:"--git-dir=" opt
-  || String.starts_with ~prefix:"--work-tree=" opt
-  || String.starts_with ~prefix:"--namespace=" opt
-  || String.starts_with ~prefix:"--exec-path=" opt
-  || String.starts_with ~prefix:"--super-prefix=" opt
-  || String.starts_with ~prefix:"--config-env=" opt
+  List.exists (fun prefix -> String.starts_with ~prefix opt) git_option_inline_prefixes
   || (String.length opt > 2
-      && (String.starts_with ~prefix:"-C" opt
-          || String.starts_with ~prefix:"-c" opt))
+      && (let c = opt.[1] in
+          c = 'C' || c = 'c')
+      && opt.[0] = '-')
 
 let git_subcommand tokens =
   let rec loop = function

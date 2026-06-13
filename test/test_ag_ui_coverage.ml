@@ -45,14 +45,14 @@ let test_role_to_string () =
 (* ---------- Event Serialization Tests ---------- *)
 
 let test_event_to_json_basic () =
-  let e = make_event ~thread_id:"room-1" Run_started in
+  let e = make_event ~thread_id:"workspace-1" Run_started in
   let json = event_to_json e in
   check_json_field json "type" "RUN_STARTED";
-  check_json_field json "threadId" "room-1";
+  check_json_field json "threadId" "workspace-1";
   check_json_has_field json "timestamp"
 
 let test_event_to_json_with_optional_fields () =
-  let e = make_event ~thread_id:"room-1"
+  let e = make_event ~thread_id:"workspace-1"
     ~run_id:(Some "agent-a")
     ~message_id:(Some "msg-001")
     ~role:(Some Assistant)
@@ -60,14 +60,14 @@ let test_event_to_json_with_optional_fields () =
     Text_message_content in
   let json = event_to_json e in
   check_json_field json "type" "TEXT_MESSAGE_CONTENT";
-  check_json_field json "threadId" "room-1";
+  check_json_field json "threadId" "workspace-1";
   check_json_field json "runId" "agent-a";
   check_json_field json "messageId" "msg-001";
   check_json_field json "role" "assistant";
   check_json_field json "delta" "Hello world"
 
 let test_event_to_json_custom () =
-  let e = make_event ~thread_id:"room-1"
+  let e = make_event ~thread_id:"workspace-1"
     ~custom_name:(Some "MY_EVENT")
     ~custom_value:(Some (`Assoc [("key", `String "value")]))
     Custom in
@@ -77,7 +77,7 @@ let test_event_to_json_custom () =
   check_json_has_field json "value"
 
 let test_event_to_sse_format () =
-  let e = make_event ~thread_id:"room-1" Run_started in
+  let e = make_event ~thread_id:"workspace-1" Run_started in
   let sse = event_to_sse e in
   assert (String.length sse > 0);
   assert (String.sub sse 0 6 = "data: ");
@@ -87,15 +87,15 @@ let test_event_to_sse_format () =
 
 (* ---------- MASC → AG-UI Mapping Tests ---------- *)
 
-let test_of_agent_joined () =
-  let e = of_agent_joined ~agent_name:"agent_llm_a" in
+let test_of_agent_session_bound () =
+  let e = of_agent_session_bound ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_started);
   assert (e.thread_id = "default");
   assert (e.run_id = Some "agent_llm_a");
-  assert (e.custom_name = Some "AGENT_JOINED")
+  assert (e.custom_name = Some "AGENT_SESSION_BOUND")
 
-let test_of_agent_left () =
-  let e = of_agent_left ~agent_name:"agent_llm_a" in
+let test_of_agent_unbound () =
+  let e = of_agent_unbound ~agent_name:"agent_llm_a" in
   assert (e.event_type = Run_finished);
   assert (e.thread_id = "default");
   assert (e.run_id = Some "agent_llm_a")
@@ -139,9 +139,9 @@ let test_of_tool_call () =
   let e2 = List.nth events 2 in
   assert (e2.event_type = Tool_call_end)
 
-let test_of_room_state () =
+let test_of_workspace_state () =
   let state = `Assoc [("agents", `Int 3); ("tasks", `Int 5)] in
-  let e = of_room_state state in
+  let e = of_workspace_state state in
   assert (e.event_type = State_snapshot);
   assert (e.snapshot = Some state)
 
@@ -197,13 +197,13 @@ let () =
     ("event_to_json_optional_fields", test_event_to_json_with_optional_fields);
     ("event_to_json_custom", test_event_to_json_custom);
     ("event_to_sse_format", test_event_to_sse_format);
-    ("of_agent_joined", test_of_agent_joined);
-    ("of_agent_left", test_of_agent_left);
+    ("of_agent_session_bound", test_of_agent_session_bound);
+    ("of_agent_unbound", test_of_agent_unbound);
     ("of_broadcast", test_of_broadcast);
     ("of_task_claimed", test_of_task_claimed);
     ("of_task_done", test_of_task_done);
     ("of_tool_call", test_of_tool_call);
-    ("of_room_state", test_of_room_state);
+    ("of_workspace_state", test_of_workspace_state);
     ("of_custom", test_of_custom);
     ("of_task_update_claimed", test_of_task_update_claimed);
     ("of_task_update_done", test_of_task_update_done);

@@ -25,7 +25,7 @@ export function observeSnapshot(
     phase: snapshot.phase,
     turn: snapshot.turn_phase,
     decision: snapshot.decision.stage,
-    cascade: snapshot.cascade.state,
+    runtime: snapshot.runtime.state,
     compaction: snapshot.compaction.stage,
     // LT-16-KCB Phase 3: default to 'clean' when the backend has not
     // yet emitted circuit_breaker. Matches extractLaneValue's
@@ -41,7 +41,7 @@ function sameObservation(
   return left.phase === right.phase
     && left.turn === right.turn
     && left.decision === right.decision
-    && left.cascade === right.cascade
+    && left.runtime === right.runtime
     && left.compaction === right.compaction
 }
 
@@ -131,7 +131,7 @@ export function deriveTopTransitions(
     can attribute without additional event-bus signals. */
 export function inferTransitionReason(field: string, from: string, to: string): string | null {
   if (field === 'KTC') {
-    if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — OAS worker 호출 진행'
+    if (from === 'idle' && to === 'executing') return '턴이 시작되었습니다 — runtime 호출 진행'
     if (from === 'executing' && to === 'idle') return '턴이 정상 종료되어 대기 상태로 복귀'
     if (to === 'compacting') return 'KMC 가 compaction 단계를 시작 — 컨텍스트 압축 중'
     if (to === 'finalizing') return '턴 마무리 — checkpoint/메트릭 emit'
@@ -149,9 +149,9 @@ export function inferTransitionReason(field: string, from: string, to: string): 
     if (to === 'tool_policy_selected') return '호출 가능한 도구 목록이 정해짐'
   }
   if (field === 'KCL') {
-    if (to === 'trying') return 'cascade 의 provider 호출 진행 중'
-    if (to === 'exhausted') return '모든 cascade provider 가 실패 — fallback 도 소진'
-    if (from === 'trying' && to === 'idle') return 'provider 호출 종료 (성공/실패와 무관)'
+    if (to === 'trying') return 'runtime 호출 진행 중'
+    if (to === 'exhausted') return '모든 runtime lane 실패 — failover 소진'
+    if (from === 'trying' && to === 'idle') return 'runtime 호출 종료 (성공/실패와 무관)'
   }
   if (field === 'KMC') {
     if (to === 'compacting') return '컨텍스트 압축 작업 시작 (KMC 동기화)'
@@ -216,27 +216,27 @@ export function deriveStateEntries(
     phase: first.ts,
     turn: first.ts,
     decision: first.ts,
-    cascade: first.ts,
+    runtime: first.ts,
     compaction: first.ts,
   }
   const seen: Record<keyof StateEntries, boolean> = {
     phase: false,
     turn: false,
     decision: false,
-    cascade: false,
+    runtime: false,
     compaction: false,
   }
   for (let index = observations.length - 1; index > 0; index -= 1) {
     const prev = observations[index - 1]
     const next = observations[index]
     if (!prev || !next) continue
-    for (const key of ['phase', 'turn', 'decision', 'cascade', 'compaction'] as const) {
+    for (const key of ['phase', 'turn', 'decision', 'runtime', 'compaction'] as const) {
       if (!seen[key] && prev[key] !== next[key]) {
         result[key] = next.ts
         seen[key] = true
       }
     }
-    if (seen.phase && seen.turn && seen.decision && seen.cascade && seen.compaction) break
+    if (seen.phase && seen.turn && seen.decision && seen.runtime && seen.compaction) break
   }
   return result
 }

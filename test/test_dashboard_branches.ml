@@ -1,4 +1,4 @@
-module DB = Masc_mcp.Dashboard_branches
+module DB = Dashboard_branches
 
 let check = Alcotest.check
 

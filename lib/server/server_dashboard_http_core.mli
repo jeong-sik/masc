@@ -27,8 +27,8 @@ val run_dashboard_compute :
   ?mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Coord.config ->
-  (config:Coord.config -> sw:Eio.Switch.t -> 'a) ->
+  config:Workspace.config ->
+  (config:Workspace.config -> sw:Eio.Switch.t -> 'a) ->
   'a
 
 (** Internal cached surfaces for proactive refresh loops.
@@ -55,7 +55,7 @@ val with_dashboard_timeout :
 
 (** {1 Cache Key Helpers} *)
 
-val dashboard_cache_key : Coord.config -> string -> string -> string
+val dashboard_cache_key : Workspace.config -> string -> string -> string
 
 (** {1 Projection Diagnostics} *)
 
@@ -72,7 +72,7 @@ val operator_actor_hint : Httpun.Request.t -> string option
 
 val dashboard_shell_with_request_auth_json :
   request:Httpun.Request.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 (** Inject the request-bound dashboard auth contract into a shell payload.
@@ -82,7 +82,7 @@ val dashboard_shell_with_request_auth_json :
 (** {1 Batch API} *)
 
 val dashboard_batch_json :
-  ?compact:bool -> Coord.config -> Yojson.Safe.t
+  ?compact:bool -> Workspace.config -> Yojson.Safe.t
 
 (** {1 Operator Snapshot/Digest} *)
 
@@ -120,7 +120,7 @@ val start_mission_refresh_loop :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit
 
-val dashboard_mission_http_json :
+val dashboard_briefing_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -134,7 +134,7 @@ val dashboard_session_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
-val dashboard_mission_briefing_http_json :
+val dashboard_briefing_sections_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -143,33 +143,33 @@ val dashboard_mission_briefing_http_json :
 
 (** {1 Shell and Data Helpers} *)
 
-val dashboard_shell_status_json : Coord.config -> Yojson.Safe.t
-val dashboard_task_json : Coord.config -> Masc_domain.task -> Yojson.Safe.t
+val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
+val dashboard_task_json : Workspace.config -> Masc_domain.task -> Yojson.Safe.t
 val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
-(* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
-val dashboard_tasks_safe : Coord.config -> Masc_domain.task list
-val dashboard_agents_safe : Coord.config -> Masc_domain.agent list
+(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
+val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
+val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 val dashboard_messages_safe :
-  Coord.config -> since_seq:int -> limit:int -> Masc_domain.message list
+  Workspace.config -> since_seq:int -> limit:int -> Masc_domain.message list
 val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?request:Httpun.Request.t ->
   ?timing:Server_timing.t ->
   ?light:bool ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 
 val dashboard_shell_cache_key :
   ?light:bool ->
-  Coord.config ->
+  Workspace.config ->
   string
 
 val dashboard_shell_payload_json :
   ?timing:Server_timing.t ->
   ?light:bool ->
-  Coord.config -> Yojson.Safe.t
+  Workspace.config -> Yojson.Safe.t
 
 val is_dashboard_cache_timeout_json :
   Yojson.Safe.t -> bool

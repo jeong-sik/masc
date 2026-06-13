@@ -26,7 +26,7 @@ const toasts = signal<Toast[]>([])
 
     Reference — Sonner's `visibleToasts` default is 3; react-hot-toast
     doesn't cap out of the box but most teams wrap it with a cap. We
-    pick 5 here because masc-mcp often bursts 3-4 "sidecar started"
+    pick 5 here because masc often bursts 3-4 "sidecar started"
     toasts on bulk Start All, and 5 leaves headroom for one incidental
     toast on top. */
 const MAX_VISIBLE_TOASTS = 5

@@ -1,11 +1,11 @@
 (** MCP HTTP Session ID management
     MCP Spec 2025-03-26: Session IDs must be visible ASCII (0x21-0x7E) *)
 
-(* Issue #8520: Variant SSOT for masc_mcp_session tool action.  Adding
+(* Issue #8520: Variant SSOT for masc_session tool action.  Adding
    a constructor forces compilation in [action_to_string] AND extends
    [valid_action_strings]; the schema in [tool_schemas_inline_infra.ml]
    mirrors the SSOT (cycle-aware, sync test) and the dispatcher in
-   [tool_inline_dispatch.ml] consumes the Variant via
+   [mcp_tool_runtime.ml] consumes the Variant via
    [action_of_string_opt]. The previous code had two independent
    string lists (schema enum + match arms) with no compile-time
    linkage. *)

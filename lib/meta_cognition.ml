@@ -1,4 +1,4 @@
-(** Meta_cognition — room-level read model derived from existing artifacts.
+(** Meta_cognition — workspace-level read model derived from existing artifacts.
 
     Facade module: re-exports sub-modules for backward compatibility.
     All callers can continue using [Meta_cognition.snapshot_json] etc.

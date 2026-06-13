@@ -157,7 +157,7 @@ function Swimlanes({ keepers, laneEvents }) {
 }
 
 // ============== Deck ==============
-function Deck({ tasks, goals, providers, cascade }) {
+function Deck({ tasks, goals, providers, runtime }) {
   const [tab, setTab] = useState("board");
   const [colDeck] = _useCol("deck");
   const tabs = [
@@ -166,7 +166,7 @@ function Deck({ tasks, goals, providers, cascade }) {
     { id:"goals",     label:"Goals",     ct: goals.length },
     { id:"verified",  label:"Verified",  ct: 128 },
     { id:"providers", label:"Providers", ct: providers.length },
-    { id:"cascade",   label:"Cascade",   ct: 2 },
+    { id:"runtime",   label:"Runtime",   ct: 2 },
     { id:"sandbox",   label:"Sandbox" },
   ];
 
@@ -275,7 +275,7 @@ function Deck({ tasks, goals, providers, cascade }) {
             <tbody>
               <tr><td>#9712</td><td>dashboard/goals: batch-rename backport</td><td>sangsu · nick0cave</td><td><span className="chip ok"><span className="d"></span>pass</span></td><td>3m ago</td></tr>
               <tr><td>#9718</td><td>keeper.claim() clarity refactor</td><td>sangsu</td><td><span className="chip ok"><span className="d"></span>pass</span></td><td>12m ago</td></tr>
-              <tr><td>#9721</td><td>cascade retry @step=2 regression fix</td><td>sangsu · qa-king</td><td><span className="chip warn"><span className="d"></span>drift</span></td><td>32m ago</td></tr>
+              <tr><td>#9721</td><td>runtime retry @step=2 regression fix</td><td>sangsu · qa-king</td><td><span className="chip warn"><span className="d"></span>drift</span></td><td>32m ago</td></tr>
               <tr><td>#9724</td><td>suite-merge-blockers de-flake</td><td>qa-king</td><td><span className="chip err"><span className="d"></span>fail</span></td><td>—</td></tr>
             </tbody>
           </table>
@@ -289,18 +289,18 @@ function Deck({ tasks, goals, providers, cascade }) {
                 <div className="m">{p.model}</div>
                 <div className="t">{p.tps.toFixed(2)}<span className="u">tps</span></div>
                 <div className={"chip "+statusColor(p.status)}><span className="d"></span>{p.status}</div>
-                <div className="cascade-n">cascade #{p.cascade}</div>
+                <div className="runtime-n">runtime #{p.runtime}</div>
               </div>
             ))}
           </div>
         )}
 
-        {tab === "cascade" && (
-          <div className="cascade">
-            <div className="cascade-head"><h3>Cascade · {cascade.id}</h3><span className="tm">total {cascade.total_ms}ms</span></div>
-            <div className="cascade-steps">
-              {cascade.steps.map((s,i)=>(
-                <div key={i} className={"cascade-step " + (s.status==="hit"?"hit":s.status==="miss"?"miss":"skip")}>
+        {tab === "runtime" && (
+          <div className="runtime">
+            <div className="runtime-head"><h3>Runtime · {runtime.id}</h3><span className="tm">total {runtime.total_ms}ms</span></div>
+            <div className="runtime-steps">
+              {runtime.steps.map((s,i)=>(
+                <div key={i} className={"runtime-step " + (s.status==="hit"?"hit":s.status==="miss"?"miss":"skip")}>
                   <span className="pv">{s.provider}</span>
                   <span className="st">{s.status}</span>
                   <span className="ms">{s.ms}ms · {s.reason}</span>
@@ -308,7 +308,7 @@ function Deck({ tasks, goals, providers, cascade }) {
               ))}
             </div>
             <div style={{font:"10px/1.5 var(--font-mono)",color:"var(--color-fg-muted)",paddingTop:4}}>
-              Triggered by <span style={{color:"var(--color-accent-fg)"}}>nick0cave</span> on <span style={{color:"var(--color-fg-primary)"}}>t-9f2a</span> · soft rate-limit on provider-a → fell through to provider-b at step 2 · model-c responded in 420ms.
+              Triggered by <span style={{color:"var(--color-accent-fg)"}}>nick0cave</span> on <span style={{color:"var(--color-fg-primary)"}}>t-9f2a</span> · soft rate-limit on runtime-slot-a → fell through to runtime-slot-b at step 2 · capability-tier-b responded in 420ms.
             </div>
           </div>
         )}
@@ -320,8 +320,8 @@ function Deck({ tasks, goals, providers, cascade }) {
 `> keeper.claim({ goal: "goal-merge-blockers", priority: 1 })
   ↳ task=t-9f2a assigned to nick0cave
 
-> keeper.trace({ cascade: "cascade-3f19" })
-  ↳ provider-a[miss 820ms] → provider-b[hit 420ms] · total 1240ms
+> keeper.trace({ runtime: "runtime-3f19" })
+  ↳ runtime-slot-a[miss 820ms] → runtime-slot-b[hit 420ms] · total 1240ms
 
 > keeper.verify("suite-merge-blockers")
   ↳ 3 FAIL / 47 PASS
@@ -368,7 +368,7 @@ function RailSectBody({ id, children, style, className }) {
   return <div className={"rail-sect-body " + (className||"")} style={style}>{children}</div>;
 }
 
-function Rail({ events, cascade }) {
+function Rail({ events, runtime }) {
   const nudges = (window.MASC_P2 && window.MASC_P2.nudges) || [];
   const [colRail, toggleRail] = _useCol("rail");
   if (colRail) {
@@ -420,9 +420,9 @@ function Rail({ events, cascade }) {
         </RailSectBody>
       </div>
       <div className="rail-sect">
-        <RailSectHead id="rail.cascade" label="Last Cascade" count={`${cascade.total_ms}ms`} />
-        <RailSectBody id="rail.cascade" style={{padding:"0 var(--sp-3) var(--sp-3)"}}>
-          {cascade.steps.map((s,i)=>(
+        <RailSectHead id="rail.runtime" label="Last Runtime" count={`${runtime.total_ms}ms`} />
+        <RailSectBody id="rail.runtime" style={{padding:"0 var(--sp-3) var(--sp-3)"}}>
+          {runtime.steps.map((s,i)=>(
             <div key={i} style={{
               display:"grid", gridTemplateColumns:"80px auto 1fr auto",
               gap:8, alignItems:"center",
@@ -448,7 +448,7 @@ function Composer({ selKeeper }) {
   const [val, setVal] = useState("");
   const [hist, setHist] = useState([
     { ts:"16:31", kp:"nick0cave", cmd:"keeper.claim(t-9f2a)",  ok:true  },
-    { ts:"16:24", kp:"sangsu",    cmd:"keeper.trace(cascade-3f19)", ok:true },
+    { ts:"16:24", kp:"sangsu",    cmd:"keeper.trace(runtime-3f19)", ok:true },
     { ts:"16:18", kp:"qa-king",   cmd:"verify(suite-merge-blockers)", ok:false },
   ]);
   const ctxLabel = (window.MASC_P2 && window.MASC_P2.repos)
@@ -466,7 +466,7 @@ function Composer({ selKeeper }) {
              value={val}
              onChange={(e)=>setVal(e.target.value)}
              onKeyDown={(e)=>{ if (e.key === "Enter") submit(); }}
-             placeholder="keeper.claim(task) · keeper.trace(cascade_id) · /goal goal-keeper-clarity …" />
+             placeholder="keeper.claim(task) · keeper.trace(runtime_id) · /goal goal-keeper-clarity …" />
       <div className="compose-hist" title="recent commands">
         {hist.slice(0,3).map((h,i) => (
           <span key={i} className={"hb " + (h.ok?"ok":"err")}>

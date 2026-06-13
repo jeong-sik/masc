@@ -1,13 +1,10 @@
 (** Tool audit helpers (lightweight fallback + cached JSON) for operator
     control snapshot, extracted from operator_control_snapshot.ml. *)
 
-module U = Yojson.Safe.Util
-
-let string_option_to_json = Operator_pending_confirm.string_option_to_json
 let merge_tool_name_lists = Operator_control_snapshot_tool_names.merge_tool_name_lists
 let collect_recent_tool_names = Operator_control_snapshot_tool_names.collect_recent_tool_names
 
-let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
+let lightweight_tool_audit_fallback_json (meta : Keeper_meta_contract.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let has_runtime_activity =
     last_autonomous <> ""
@@ -15,8 +12,7 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
     || meta.runtime.autonomous_action_count > 0
   in
   `Assoc
-    [ "allowed_tool_names", `List []
-    ; "recent_tool_names", `List []
+    [ "recent_tool_names", `List []
     ; "latest_tool_names", `List []
     ; ("latest_tool_call_count", if has_runtime_activity then `Int 0 else `Null)
     ; "latest_action_source", `Null
@@ -69,14 +65,7 @@ let recent_tool_names_from_files config keeper_name =
     (collect_recent_tool_names metrics_lines)
 ;;
 
-let keeper_tool_audit_fields
-      ?(include_allowed_tools = true)
-      config
-      (meta : Keeper_types.keeper_meta)
-  =
-  let fallback_allowed =
-    if include_allowed_tools then Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta else []
-  in
+let keeper_tool_audit_fields config (meta : Keeper_meta_contract.keeper_meta) =
   let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in
   let fallback_snapshot =
@@ -111,8 +100,7 @@ let keeper_tool_audit_fields
            else None)
       }
   in
-  ( fallback_allowed
-  , recent_tool_names
+  ( recent_tool_names
   , fallback_snapshot.latest_tool_names
   , fallback_snapshot.latest_tool_call_count
   , fallback_snapshot.latest_action_source
@@ -122,21 +110,14 @@ let keeper_tool_audit_fields
 
 let cached_tool_audit_json
       ~lightweight
-      (config : Coord.config)
-      (meta : Keeper_types.keeper_meta)
+      (config : Workspace.config)
+      (meta : Keeper_meta_contract.keeper_meta)
   =
   let base_hash = Digest.to_hex (Digest.string config.base_path) in
   let cache_key = "kta:" ^ base_hash ^ ":" ^ meta.name in
-  if lightweight
-  then
-    Dashboard_cache.seed_stale_if_missing
-      cache_key
-      ~stale_for:120.0
-      (lightweight_tool_audit_fallback_json meta);
-  let ttl = if lightweight then 30.0 else 2.0 in
+  let ttl = 4.0 in
   Dashboard_cache.get_or_compute cache_key ~ttl (fun () ->
-    let ( allowed_tool_names
-        , recent_tool_names
+    let ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
         , latest_action_source
@@ -145,18 +126,16 @@ let cached_tool_audit_json
       =
       if lightweight
       then (
-        let ( _
-            , recent_tool_names
+        let ( recent_tool_names
             , latest_tool_names
             , latest_tool_call_count
             , latest_action_source
             , tool_audit_source
             , tool_audit_at )
           =
-          keeper_tool_audit_fields ~include_allowed_tools:false config meta
+          keeper_tool_audit_fields config meta
         in
-        ( []
-        , recent_tool_names
+        ( recent_tool_names
         , latest_tool_names
         , latest_tool_call_count
         , latest_action_source
@@ -165,13 +144,12 @@ let cached_tool_audit_json
       else keeper_tool_audit_fields config meta
     in
     `Assoc
-      [ "allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names)
-      ; "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
+      [ "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
       ; "latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names)
       ; "latest_tool_call_count", Json_util.option_to_yojson (fun v -> `Int v) latest_tool_call_count
-      ; "latest_action_source", string_option_to_json latest_action_source
-      ; "tool_audit_source", string_option_to_json tool_audit_source
-      ; "tool_audit_at", string_option_to_json tool_audit_at
+      ; "latest_action_source", Json_util.string_opt_to_json latest_action_source
+      ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
+      ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
       ])
 ;;
 

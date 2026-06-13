@@ -1,6 +1,6 @@
 (** #9764/#9733/#9769: write_meta CAS retry semantics.
 
-    Verifies that [Keeper_types.write_meta_with_merge] with
+    Verifies that [Keeper_meta_store.write_meta_with_merge] with
     [Keeper_meta_merge.caller_wins]:
       - succeeds when no concurrent writer interferes
       - succeeds after N attempts when the disk version has advanced
@@ -8,7 +8,7 @@
         [is_version_conflict_error] *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
@@ -54,32 +54,36 @@ let test_no_conflict_writes_first_attempt () =
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"alpha" in
     (* Initial write — no existing file. *)
     (match
-       Keeper_types.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.caller_wins config m0
      with
      | Ok () -> ()
      | Error e -> fail ("first write failed: " ^ e));
     (* Read what landed on disk and bump caller's version to match. *)
-    let disk = match Keeper_types.read_meta config "alpha" with
+    let disk = match Keeper_meta_store.read_meta config "alpha" with
       | Ok (Some m) -> m
       | _ -> fail "disk read failed"
     in
-    let m1 = { disk with goal = "updated goal" } in
+    (* #20781: [goal] became TOML-only (meta JSON persists runtime state),
+       so the round-trip payload marker is [continuity_summary], which is
+       still JSON-persisted. *)
+    let m1 = { disk with continuity_summary = "updated summary" } in
     match
-      Keeper_types.write_meta_with_merge
+      Keeper_meta_store.write_meta_with_merge
         ~merge:Keeper_meta_merge.caller_wins config m1
     with
     | Ok () ->
-      let after = match Keeper_types.read_meta config "alpha" with
+      let after = match Keeper_meta_store.read_meta config "alpha" with
         | Ok (Some m) -> m
         | _ -> fail "read after write failed"
       in
-      check string "goal updated" "updated goal" after.goal
+      check string "continuity_summary updated" "updated summary"
+        after.continuity_summary
     | Error e -> fail ("second write failed: " ^ e))
 
 let test_retry_succeeds_after_concurrent_bump () =
@@ -88,61 +92,120 @@ let test_retry_succeeds_after_concurrent_bump () =
   Eio.Switch.run @@ fun _sw ->
   let base_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
-    (match Keeper_types.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta ~force:true config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
-    let caller_view = match Keeper_types.read_meta config "beta" with
+    let caller_view = match Keeper_meta_store.read_meta config "beta" with
       | Ok (Some m) -> m
       | _ -> fail "seed read failed"
     in
     (* Simulate a concurrent writer bumping the disk version while
        [caller_view] is held by the cycle-completion fiber. *)
-    let racing = { caller_view with goal = "racing writer" } in
-    (match Keeper_types.write_meta config racing with
+    let racing = { caller_view with continuity_summary = "racing writer" } in
+    (match Keeper_meta_store.write_meta config racing with
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
        once; caller_wins retry must lift the payload onto the new disk
        version and succeed. *)
-    let cycle_payload = { caller_view with goal = "cycle payload" } in
+    let cycle_payload =
+      { caller_view with continuity_summary = "cycle payload" }
+    in
     let before_retry_metric =
-      Prometheus.metric_value_or_zero
-        Prometheus.metric_write_meta_cas_retry_total
-        ~labels:[("keeper_name", "beta")]
+      Otel_metric_store.metric_value_or_zero
+        Otel_metric_store.metric_write_meta_cas_retry_total
+        ~labels:[("keeper", "beta")]
         ()
     in
     (match
-       Keeper_types.write_meta_with_merge
+       Keeper_meta_store.write_meta_with_merge
          ~merge:Keeper_meta_merge.caller_wins config cycle_payload
      with
      | Ok () -> ()
      | Error e -> fail ("retry write failed: " ^ e));
     let after_retry_metric =
-      Prometheus.metric_value_or_zero
-        Prometheus.metric_write_meta_cas_retry_total
-        ~labels:[("keeper_name", "beta")]
+      Otel_metric_store.metric_value_or_zero
+        Otel_metric_store.metric_write_meta_cas_retry_total
+        ~labels:[("keeper", "beta")]
         ()
     in
-    let final = match Keeper_types.read_meta config "beta" with
+    let final = match Keeper_meta_store.read_meta config "beta" with
       | Ok (Some m) -> m
       | _ -> fail "final read failed"
     in
-    check string "cycle payload wins (last writer)" "cycle payload" final.goal;
+    check string "cycle payload wins (last writer)" "cycle payload"
+      final.continuity_summary;
     check bool "version moved past racing write" true
       (final.meta_version > racing.meta_version + 1);
     check (float 0.001) "CAS retry metric increments" 1.0
       (after_retry_metric -. before_retry_metric))
 
+(* RFC-0225 §3.2: a CAS retry from a stale snapshot must not rewind
+   cumulative usage counters. Reproduces the 2026-06-10 total_turns
+   385→370 regression shape: a concurrent writer advanced the disk
+   counters, then a stale cycle write (computed from the old snapshot)
+   retried under CAS and — with plain caller_wins — clobbered them. *)
+let test_monotonic_usage_counters_on_cas_retry () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"gamma" in
+    (match Keeper_meta_store.write_meta ~force:true config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let caller_view = match Keeper_meta_store.read_meta config "gamma" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let with_usage (m : Keeper_meta_contract.keeper_meta) usage =
+      { m with runtime = { m.runtime with usage } }
+    in
+    (* Concurrent writer advances cumulative counters on disk. *)
+    let racing =
+      with_usage caller_view
+        { caller_view.runtime.usage with
+          total_turns = 10; total_tokens = 1000 }
+    in
+    (match Keeper_meta_store.write_meta config racing with
+     | Ok () -> ()
+     | Error e -> fail ("racing write failed: " ^ e));
+    (* Stale cycle write computed from the pre-race snapshot. *)
+    let stale =
+      with_usage caller_view
+        { caller_view.runtime.usage with
+          total_turns = 3; total_tokens = 200; last_latency_ms = 777 }
+    in
+    (match
+       Keeper_meta_store.write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk config stale
+     with
+     | Ok () -> ()
+     | Error e -> fail ("stale retry write failed: " ^ e));
+    let final = match Keeper_meta_store.read_meta config "gamma" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check int "total_turns keeps the larger disk value" 10
+      final.runtime.usage.total_turns;
+    check int "total_tokens keeps the larger disk value" 1000
+      final.runtime.usage.total_tokens;
+    check int "last_* observation stays with the caller" 777
+      final.runtime.usage.last_latency_ms)
+
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
   check bool "classifies version conflict" true
-    (Keeper_types.is_version_conflict_error conflict_msg);
+    (Keeper_meta_store.is_version_conflict_error conflict_msg);
   check bool "rejects unrelated error" false
-    (Keeper_types.is_version_conflict_error other_msg)
+    (Keeper_meta_store.is_version_conflict_error other_msg)
 
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"
@@ -153,6 +216,8 @@ let () =
             test_no_conflict_writes_first_attempt;
           test_case "lifts payload onto disk version after concurrent bump" `Quick
             test_retry_succeeds_after_concurrent_bump;
+          test_case "usage counters stay monotonic on stale retry (RFC-0225 §3.2)"
+            `Quick test_monotonic_usage_counters_on_cas_retry;
         ] );
       ( "is_version_conflict_error",
         [

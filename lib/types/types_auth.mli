@@ -1,7 +1,7 @@
 (** Types_auth — authentication, authorization, and rate-limit
     types.
 
-    {b Include cascade:} starts with [include Masc_error] so the
+    {b Include runtime:} starts with [include Masc_error] so the
     error type / serialisation surface flows through into
     {!Types}.  Adds:
 
@@ -96,14 +96,14 @@ val agent_credential_of_yojson :
 
 type auth_config = {
   enabled : bool;
-  room_secret_hash : string option;  [@default None]
+  workspace_secret_hash : string option;  [@default None]
   require_token : bool;  [@default false]
   token_expiry_hours : int;  [@default 24]
 }
 [@@deriving show]
 
 val default_auth_config : auth_config
-(** [enabled = true; room_secret_hash = None; require_token = true;
+(** [enabled = true; workspace_secret_hash = None; require_token = true;
        token_expiry_hours = 24]. *)
 
 val auth_config_to_yojson : auth_config -> Yojson.Safe.t
@@ -116,15 +116,11 @@ val auth_config_of_yojson : Yojson.Safe.t -> (auth_config, string) result
 type permission =
   | CanInit
   | CanReset
-  | CanJoin
-  | CanLeave
   | CanReadState
   | CanAddTask
   | CanClaimTask
   | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal
-  | CanSendPortal
   | CanVote
   | CanAdmin
 [@@deriving show { with_path = false }]

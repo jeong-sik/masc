@@ -3,7 +3,7 @@
     Observability surface for stuck-turn livelocks: per-keeper
     in-memory state tracks the most recent turn id seen and the
     attempt count for that id.  Re-starts of the same id and
-    backwards regressions emit dedicated Prometheus counters so
+    backwards regressions emit dedicated Otel_metric_store counters so
     operators can alert without grepping log lines.
 
     [guard_and_record_turn_start] can also gate dispatch once a

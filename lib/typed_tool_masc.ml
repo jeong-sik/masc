@@ -9,18 +9,17 @@ type ('input, 'output) t = {
   is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  requires_join : bool;
   effect_domain : Tool_catalog.effect_domain option;
 }
 
 let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
     ?(is_read_only = false) ?(is_destructive = false) ?(is_idempotent = false)
-    ?(visibility = Tool_catalog.Default) ?(requires_join = false)
+    ?(visibility = Tool_catalog.Default)
     ?effect_domain () =
   let oas_tool = Agent_sdk.Typed_tool.create
     ~name ~description ~params ~parse ~handler ~encode () in
   { oas_tool; module_tag; is_read_only; is_destructive;
-    is_idempotent; visibility; requires_join; effect_domain }
+    is_idempotent; visibility; effect_domain }
 
 (** Build a dispatch handler for the typed tool.
     The handler is registered via [Tool_spec.Direct] for a specific tool name,
@@ -77,7 +76,6 @@ let to_spec tool =
     ~is_destructive:tool.is_destructive
     ~is_idempotent:tool.is_idempotent
     ~visibility:tool.visibility
-    ~requires_join:tool.requires_join
     ?effect_domain:tool.effect_domain
     ()
 

@@ -1,19 +1,16 @@
 (** Harness tests for WARN root cause fixes.
 
-    1. AllowList pruning: core_discovery_tools filtered by preset
+    1. Tool access discovery: core_discovery_tools stay candidate-visible
+       across narrow tool_access lists and are hidden by denylist
     2. Atomic agent JSON writes: no empty-file race condition *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
 let init_registry () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  let base_path = Masc_test_deps.find_project_root () in
-  match Keeper_tool_policy.init_policy_config ~base_path with
-  | Ok () -> ()
-  | Error e -> failwith (Printf.sprintf "init_policy_config failed: %s" e)
+  Masc_test_deps.init_keeper_tool_registry ()
 
 let file_contains_pattern file_rel pattern =
   let source_root =
@@ -42,126 +39,141 @@ let require_write_ok label = function
   | Ok () -> ()
   | Error msg -> failf "%s: %s" label msg
 
-let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
+let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-warn")]) with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the allowed_exec_set: preset-allowed internal names resolved to
-    public names (via descriptor registry) + core_always_tools.
-    RFC-0179 moved core_discovery_tools to public names while
-    keeper_allowed_tool_names still returns internal names. *)
-let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
-  let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+(** Build the visible policy set used by the local filter mirror. *)
+let build_policy_allowed_tool_set (meta : Keeper_meta_contract.keeper_meta) =
+  let allowed_names = Keeper_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
-  (* Map internal names to public names via descriptor registry *)
   let public_of_internal name =
-    match Agent_tool_descriptor.public_name_for_internal name with
-    | Some pub -> pub
-    | None -> name
+    match Keeper_tool_descriptor_resolution.public_names_for_internal name with
+    | [] -> [ name ]
+    | public_names -> public_names
   in
   let public_set =
     Keeper_tool_policy.StringSet.of_list
-      (List.map public_of_internal allowed_names)
+      (List.concat_map public_of_internal allowed_names)
   in
   Keeper_tool_policy.StringSet.union
     (Keeper_tool_policy.StringSet.union internal_set public_set)
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
-(** Filter core_discovery_tools by preset (the fix). *)
-let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
-  let allowed_set = build_allowed_exec_set meta in
+(** Filter core_discovery_tools through the current policy-visible set. *)
+let filter_core_by_tool_access (meta : Keeper_meta_contract.keeper_meta) =
+  let policy_allowed_tool_set = build_policy_allowed_tool_set meta in
   List.filter
-    (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
+    (fun name -> Keeper_tool_policy.StringSet.mem name policy_allowed_tool_set)
     Keeper_tool_registry.core_discovery_tools
 
-(* Direct write tools require delivery/full presets. *)
-let write_only_tools = [ "EditFile" ]
+let write_tools = [ "Edit" ]
 
-(* tool_execute stays visible across presets for read-only shell usage.
-   Mutating shell commands are gated separately by privileged presets. *)
 let shell_bridge_tools = [ "Execute" ]
+let read_alias_tools = [ "Grep"; "Search"; "Read" ]
 
-let privileged_presets =
-  [ Keeper_types.Delivery; Keeper_types.Delivery; Keeper_types.Full ]
+let write_enabled_tool_access =
+  [ "tool_edit_file"; "tool_execute" ]
 
-let unprivileged_presets =
-  [
-    Keeper_types.Minimal;
-    Keeper_types.Social;
-    Keeper_types.Messaging;
-    Keeper_types.Dispatch;
-    Keeper_types.Research;
-  ]
-
-let test_privileged_preset_write_gates () =
-  List.iter
-    (fun preset ->
-      check bool "privileged preset allows shell write" true
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "privileged preset allows workflow" true
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
-    privileged_presets;
-  List.iter
-    (fun preset ->
-      check bool "unprivileged preset blocks shell write" false
-        (Keeper_tool_policy.allows_shell_write_for_preset preset);
-      check bool "unprivileged preset blocks workflow" false
-        (Keeper_tool_policy.allows_workflow_for_preset preset))
-    unprivileged_presets
-
-(* ── Test 1: Core discovery tools respect preset ──────────────── *)
-
-let test_core_tools_filtered_by_research_preset () =
+let test_core_tools_visible_with_empty_tool_access () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-research" ()) with
-      tool_access = Preset { preset = Research; also_allow = [] };
+    { (make_meta ~name:"test-empty-access" ()) with
+      tool_access = [];
       tool_denylist = [] }
   in
-  (* Precondition: direct write tools ARE in unfiltered core *)
+  (* Precondition: descriptor-backed public tools are in unfiltered core. *)
   List.iter (fun t ->
     if not (List.mem t Keeper_tool_registry.core_discovery_tools) then
       fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
-  ) write_only_tools;
-  let filtered = filter_core_by_preset meta in
-  (* Research preset now includes filesystem_write + execute groups,
-     so write tools and shell bridge tools survive the filter. *)
+  ) (write_tools @ read_alias_tools);
+  let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s must survive research preset filter" t)
-  ) (write_only_tools @ shell_bridge_tools);
+      fail (Printf.sprintf "%s must stay visible without explicit tool_access" t)
+  ) (write_tools @ read_alias_tools);
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "core_always %s must survive preset filter" t)
+      fail (Printf.sprintf "core_always %s must survive tool_access filter" t)
   ) Keeper_tool_registry.core_always_tools
 
-let test_core_tools_filtered_by_social_preset () =
+let test_core_tools_visible_with_read_only_tool_access () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-social" ()) with
-      tool_access = Preset { preset = Social; also_allow = [] };
+    { (make_meta ~name:"test-read-only-access" ()) with
+      tool_access = [ "tool_read_file"; "tool_search_files" ];
       tool_denylist = [] }
   in
-  let filtered = filter_core_by_preset meta in
-  if List.mem "EditFile" filtered then
-    fail "EditFile should be excluded for social preset"
-
-let test_core_tools_include_write_for_delivery_preset () =
-  ignore (init_registry ());
-  let meta =
-    { (make_meta ~name:"test-delivery" ()) with
-      tool_access = Preset { preset = Delivery; also_allow = [] };
-      tool_denylist = [] }
-  in
-  let filtered = filter_core_by_preset meta in
+  let filtered = filter_core_by_tool_access meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should be included for delivery preset" t)
-  ) (write_only_tools @ shell_bridge_tools)
+      fail (Printf.sprintf "%s should stay visible for read-only tool_access" t)
+  ) (write_tools @ read_alias_tools)
+
+let test_core_tools_include_write_for_write_enabled_tool_access () =
+  ignore (init_registry ());
+  let meta =
+    { (make_meta ~name:"test-write-access" ()) with
+      tool_access = write_enabled_tool_access;
+      tool_denylist = [] }
+  in
+  let filtered = filter_core_by_tool_access meta in
+  List.iter (fun t ->
+    if not (List.mem t filtered) then
+      fail (Printf.sprintf "%s should be included for write-enabled tool_access" t)
+  ) (write_tools @ shell_bridge_tools)
+
+let test_core_tools_hidden_by_denylist () =
+  ignore (init_registry ());
+  let meta =
+    { (make_meta ~name:"test-deny-access" ()) with
+      tool_access = [];
+      tool_denylist = [ "Edit"; "Search" ] }
+  in
+  let filtered = filter_core_by_tool_access meta in
+  List.iter (fun t ->
+    if List.mem t filtered then
+      fail (Printf.sprintf "%s should be excluded by denylist" t)
+  ) [ "Edit"; "Grep"; "Search" ]
+
+let test_web_alias_bundle_visible_without_injected_masc_schema () =
+  ignore (init_registry ());
+  let prior_masc_schemas = Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_web_alias_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_dispatch_runtime.set_masc_schemas prior_masc_schemas;
+      try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      Keeper_tool_dispatch_runtime.set_masc_schemas [];
+      let config = Workspace.default_config dir in
+      let meta = make_meta ~name:"test-web-alias-no-injected-schema" () in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+      in
+      let bundle =
+        Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+          let names =
+            bundle.tools
+            |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+          in
+          check bool "WebSearch remains bundle-visible" true
+            (List.mem "WebSearch" names);
+          check bool "WebFetch remains bundle-visible" true
+            (List.mem "WebFetch" names)))
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
@@ -175,7 +187,7 @@ let test_atomic_write_not_empty () =
   let json =
     `Assoc [ ("name", `String "test"); ("status", `String "ok") ]
   in
-  require_write_ok "atomic write" (Coord_utils.write_json_local path json);
+  require_write_ok "atomic write" (Workspace_utils.write_json_local path json);
   let content = Fs_compat.load_file path in
   check bool "file not empty after atomic write" true
     (String.length content > 0);
@@ -197,7 +209,7 @@ let test_concurrent_atomic_writes_never_empty () =
   let path = Filename.concat dir "agent.json" in
   (* Seed with initial content *)
   require_write_ok "seed write"
-    (Coord_utils.write_json_local path
+    (Workspace_utils.write_json_local path
        (`Assoc [ ("name", `String "init") ]));
   let empty_seen = ref false in
   let iterations = 200 in
@@ -208,7 +220,7 @@ let test_concurrent_atomic_writes_never_empty () =
       let json =
         `Assoc [ ("name", `String (Printf.sprintf "v%d" i)) ]
       in
-      require_write_ok "concurrent write" (Coord_utils.write_json_local path json);
+      require_write_ok "concurrent write" (Workspace_utils.write_json_local path json);
       Eio.Fiber.yield ()
     done);
   (* Reader fiber: read concurrently *)
@@ -229,7 +241,7 @@ let test_concurrent_atomic_writes_never_empty () =
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"keeper:%s cascade=%s missing OAS checkpoint after run"|});
+       {|"keeper:%s runtime=%s missing OAS checkpoint after run"|});
   check bool "memory write failures log at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|"keeper:%s memory_write failed: %s"|});
@@ -237,12 +249,9 @@ let test_keeper_mainline_failures_log_at_error () =
     (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|Log.Keeper.warn
                "keeper:%s memory_write failed: %s"|});
-  check bool "episode creation failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
-       {|"keeper:%s episode_create failed: %s"|});
-  check bool "episode creation failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
-       {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|})
+  check bool "stale episode creation failure string is absent" true
+    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+       {|episode_create failed|})
 
 let test_oas_mainline_warns_are_promoted_in_bridge () =
   check bool "bridge promotes MCP server failure" true
@@ -269,63 +278,23 @@ let test_correction_pipeline_log_preserves_detail_fields () =
     ; "changed_fields", {|; "changed_fields"|}
     ]
 
-let tool_policy_unloaded_metric accessor =
-  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_unloaded_query
-    ~labels:[("accessor", accessor)]
-    ()
-
-let test_tool_policy_unloaded_accessors_emit_metric () =
-  Keeper_tool_policy.reset_policy_config_for_test ();
-  let fallback_accessors =
-    [
-      ( "preset_can_satisfy",
-        fun () ->
-          ignore
-            (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"delivery"
-               ~required_preset:"minimal") );
-      ( "configured_preset_names",
-        fun () -> ignore (Keeper_tool_policy.configured_preset_names ()) );
-    ]
-  in
-  List.iter
-    (fun (accessor, call) ->
-      let before = tool_policy_unloaded_metric accessor in
-      call ();
-      let after = tool_policy_unloaded_metric accessor in
-      check bool (accessor ^ " pre-init query increments metric") true
-        (after >= before +. 1.0))
-    fallback_accessors;
-  init_registry ()
-
-let tool_policy_init_failed_metric base_path =
-  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_init_failed
-    ~labels:[("base_path", base_path)]
-    ()
-
-let test_tool_policy_init_failure_emits_metric () =
-  let base_path = "/tmp/masc-test-tool-policy-init-failed" in
-  let before = tool_policy_init_failed_metric base_path in
-  Server_runtime_bootstrap.record_tool_policy_init_failure ~base_path
-    "synthetic test failure";
-  let after = tool_policy_init_failed_metric base_path in
-  check bool "tool policy init failure increments metric" true
-    (after >= before +. 1.0)
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
   run "Warn_root_causes"
     [
-      ( "allowlist_preset_filter",
+      ( "allowlist_tool_access_filter",
         [
-          test_case "research preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_research_preset;
-          test_case "social preset excludes direct write tools" `Quick
-            test_core_tools_filtered_by_social_preset;
-          test_case "delivery preset includes shell + write tools" `Quick
-            test_core_tools_include_write_for_delivery_preset;
-          test_case "privileged presets gate shell write and workflow" `Quick
-            test_privileged_preset_write_gates;
+          test_case "empty tool_access keeps descriptor public tools visible" `Quick
+            test_core_tools_visible_with_empty_tool_access;
+          test_case "read-only tool_access keeps descriptor public tools visible" `Quick
+            test_core_tools_visible_with_read_only_tool_access;
+          test_case "write-enabled tool_access includes shell + write tools" `Quick
+            test_core_tools_include_write_for_write_enabled_tool_access;
+          test_case "denylist excludes descriptor public tools" `Quick
+            test_core_tools_hidden_by_denylist;
+          test_case "web aliases survive missing injected masc schema" `Quick
+            test_web_alias_bundle_visible_without_injected_masc_schema;
         ] );
       ( "atomic_agent_json",
         [
@@ -342,9 +311,5 @@ let () =
             test_oas_mainline_warns_are_promoted_in_bridge;
           test_case "correction pipeline log preserves detail fields" `Quick
             test_correction_pipeline_log_preserves_detail_fields;
-          test_case "tool policy pre-init accessors emit metric" `Quick
-            test_tool_policy_unloaded_accessors_emit_metric;
-          test_case "tool policy init failure emits metric" `Quick
-            test_tool_policy_init_failure_emits_metric;
         ] );
     ]

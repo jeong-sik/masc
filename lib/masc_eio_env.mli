@@ -47,6 +47,6 @@ val get : unit -> t
 val get_opt : unit -> t option
 (** Read the captured environment without raising. Returns
     [None] when {!init} has not run — used by tests and by
-    code paths that must degrade gracefully (cascade catalog
+    code paths that must degrade gracefully (runtime catalog
     runtime, masc_oas_bridge fallback, local-runtime probes,
     oas_worker_named scheduler). *)

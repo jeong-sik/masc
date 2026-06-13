@@ -10,7 +10,7 @@
 
 open Alcotest
 
-module Pages = Masc_mcp.Server_routes_http_pages
+module Pages = Server_routes_http_pages
 
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_http_pages_test" "" in

@@ -90,10 +90,90 @@ describe('QuickBindForm', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     await flushUi()
 
-    const bindCall = fetchSpy.mock.calls.find(c => String(c[0]).includes('/api/v1/gate/connector/bind'))
+    const bindCall = fetchSpy.mock.calls.find(c =>
+      String(c[0]).includes('/api/v1/gate/connector/bind') && String(c[0]).includes('name=slack'),
+    )
     expect(bindCall).toBeTruthy()
     const body = bindCall?.[1]?.body as string
     expect(body).toContain('"channel_id":"C09TK9L4DV4"')
+  })
+
+  it('bind FAILURE preserves the typed channel ID and re-enables the form (regression: draft wiped on failure)', async () => {
+    // Local flag instead of fetchSpy.mock.calls: spyOn(globalThis, 'fetch')
+    // accumulates call history across tests in this file, so only state
+    // recorded by THIS implementation is trustworthy. Fresh Response per
+    // call — the body is single-use.
+    let bindRequested = false
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+      if (String(url).includes('/api/v1/gate/connector/bind')) bindRequested = true
+      return Promise.resolve(new Response(JSON.stringify({ error: 'unknown keeper' }), { status: 404 }))
+    })
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    const form = container.querySelector('[data-quick-bind="discord"]')!
+    const input = form.querySelector('input') as HTMLInputElement
+    input.value = '1234567890123456789'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await vi.waitFor(() => { expect(bindRequested).toBe(true) })
+    // The failure path (error-body read -> toast -> setEntry) is
+    // microtask-chained; two macrotask hops guarantee it has settled.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushUi()
+
+    const btn = Array.from(form.querySelectorAll('button')).find(b => b.textContent?.includes('Bind')) as HTMLButtonElement
+    // 'Bind' (not '연결 중...') + enabled proves the submitting cycle
+    // completed — guards against asserting the draft before the wipe
+    // would have happened.
+    expect(btn).toBeTruthy()
+    expect(btn.disabled).toBe(false)
+    expect(input.value).toBe('1234567890123456789')
+  })
+
+  it('bind SUCCESS clears the channel draft for the next bind', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    )
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    const form = container.querySelector('[data-quick-bind="discord"]')!
+    const input = form.querySelector('input') as HTMLInputElement
+    input.value = '1234567890123456789'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await vi.waitFor(() => { expect(input.value).toBe('') })
+  })
+
+  it('a second Enter while a bind is in flight does not fire a second POST (regression: Enter bypassed the submitting guard)', async () => {
+    // Count via the implementation, not fetchSpy.mock.calls — spyOn call
+    // history accumulates across tests in this file and would also count
+    // earlier tests' bind POSTs.
+    const deferred: Array<(r: Response) => void> = []
+    let bindPosts = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url) => {
+      if (String(url).includes('/api/v1/gate/connector/bind')) bindPosts += 1
+      return new Promise<Response>(resolve => { deferred.push(resolve) })
+    })
+    render(html`<${QuickBindForm} connectorId="discord" keepers=${[mkKeeper('kpr-a')]} />`, container)
+    const form = container.querySelector('[data-quick-bind="discord"]')!
+    const input = form.querySelector('input') as HTMLInputElement
+    input.value = '1234567890123456789'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushUi()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await flushUi()
+
+    expect(bindPosts).toBe(1)
+
+    // Settle the in-flight bind so it cannot leak into the next test.
+    deferred.forEach(resolve => { resolve(new Response(JSON.stringify({ ok: true }), { status: 200 })) })
+    await flushUi()
   })
 
   it('renders the connector-specific placeholder (Slack shows C-prefix example, not Discord snowflake)', () => {

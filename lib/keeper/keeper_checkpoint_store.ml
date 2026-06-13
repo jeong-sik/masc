@@ -66,7 +66,7 @@ let prune_oas_history ~(session_dir : string) : unit =
          | exn ->
              Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
                path (Printexc.to_string exn);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_cleanup))]
                ())
@@ -108,7 +108,7 @@ let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : u
     prune_oas_history ~session_dir
   | Error msg ->
     Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CheckpointFailures)
       ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_save))]
       ()
@@ -127,7 +127,7 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
         | exn ->
             Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
               path (Printexc.to_string exn);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CheckpointFailures)
               ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_delete))]
               ();
@@ -138,7 +138,9 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
     snapshot_ids
   |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
 
-let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+(* Unguarded write body. Public [save_oas] (defined after [load_oas]
+   below) wraps this with the RFC-0225 §3.2 stale-write guard. *)
+let save_oas_unguarded ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
   : (unit, string) result =
   let fallback () =
     match Keeper_fs.save_atomic
@@ -150,7 +152,7 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
        | exn ->
            Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
              ckpt.session_id (Printexc.to_string exn);
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CheckpointFailures)
              ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_fallback))]
              ());
@@ -171,7 +173,7 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
                   | exn ->
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
                         ckpt.session_id (Printexc.to_string exn);
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string CheckpointFailures)
                         ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_primary))]
                         ());
@@ -232,7 +234,7 @@ let classify_sdk_error (e : Agent_sdk.Error.sdk_error) : checkpoint_load_error =
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Provider _ | Agent _ | Mcp _ | Config _
-  | Orchestration _ | A2a _ | Internal _ ->
+  | Orchestration _ | Internal _ ->
       Sdk_other_error (Agent_sdk.Error.to_string e)
 
 let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
@@ -282,3 +284,89 @@ let load_oas ~(session_dir : string) ~(session_id : string) :
        | Error e -> Error (Store_error (Agent_sdk.Error.to_string e)))
   | Some _ | None ->
       fallback ()
+
+(* ── RFC-0225 §3.2: stale checkpoint write guard ─────────────────────
+   Two writers for the same session are last-writer-wins on disk; a
+   stale writer (e.g. a lane that resumed from an older snapshot)
+   overwrote the conversation the newer writer had just persisted
+   (2026-06-10 voice incident: oas turn_count 1355 clobbered by 1324).
+   The checkpoint carrier is OAS-owned, so the version is tracked on
+   the MASC side: a process-local map of the highest turn_count saved
+   per checkpoint path, backfilled from disk once per session. *)
+
+let last_saved_oas_turn_count_mu = Stdlib.Mutex.create ()
+let last_saved_oas_turn_count : (string, int) Hashtbl.t = Hashtbl.create 16
+
+let known_oas_turn_count ~session_dir ~session_id =
+  let key = oas_checkpoint_path ~session_dir ~session_id in
+  let cached =
+    (* Stdlib mutex on purpose: the critical section is a pure Hashtbl
+       lookup, never yields. Disk backfill happens outside the lock. *)
+    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+      Hashtbl.find_opt last_saved_oas_turn_count key)
+  in
+  match cached with
+  | Some _ as hit -> hit
+  | None ->
+    (match load_oas ~session_dir ~session_id with
+     | Ok existing -> Some existing.turn_count
+     | Error _ -> None)
+
+let record_saved_oas_turn_count ~session_dir ~session_id turn_count =
+  let key = oas_checkpoint_path ~session_dir ~session_id in
+  Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+    match Hashtbl.find_opt last_saved_oas_turn_count key with
+    | Some known when known >= turn_count -> ()
+    | Some _ | None -> Hashtbl.replace last_saved_oas_turn_count key turn_count)
+
+type save_oas_relation = [ `Cold | `Forward | `Equal ]
+
+type save_oas_outcome =
+  | Saved of { relation : save_oas_relation; turn_count : int }
+  | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
+
+let save_relation ~known ~incoming =
+  match known with
+  | None -> `Cold
+  | Some previous when incoming > previous -> `Forward
+  | Some _ -> `Equal
+
+let save_oas_classified ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (save_oas_outcome, string) result =
+  let known = known_oas_turn_count ~session_dir ~session_id:ckpt.session_id in
+  match known with
+  | Some known when ckpt.turn_count < known ->
+    Log.Keeper.warn
+      "stale OAS checkpoint write skipped for %s: incoming turn_count=%d, last saved=%d"
+      ckpt.session_id ckpt.turn_count known;
+    Otel_metric_store.inc_counter
+      "masc_keeper_checkpoint_stale_noop_total"
+      ~labels:[("site", "store_watermark")]
+      ();
+    Ok (Stale_noop
+          { incoming_turn_count = ckpt.turn_count
+          ; known_turn_count = known
+          })
+  | Some _ | None ->
+    (match save_oas_unguarded ~session_dir ckpt with
+     | Ok () ->
+       record_saved_oas_turn_count
+         ~session_dir ~session_id:ckpt.session_id ckpt.turn_count;
+       Ok
+         (Saved
+            { relation = save_relation ~known ~incoming:ckpt.turn_count
+            ; turn_count = ckpt.turn_count
+            })
+     | Error _ as e -> e)
+
+let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
+  : (unit, string) result =
+  match save_oas_classified ~session_dir ckpt with
+  | Ok (Saved _) | Ok (Stale_noop _) -> Ok ()
+  | Error _ as e -> e
+
+module For_testing = struct
+  let reset_stale_write_guard () =
+    Stdlib.Mutex.protect last_saved_oas_turn_count_mu (fun () ->
+      Hashtbl.reset last_saved_oas_turn_count)
+end

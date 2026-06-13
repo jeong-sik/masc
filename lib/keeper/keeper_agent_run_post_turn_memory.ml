@@ -5,15 +5,17 @@
 let run
   ~config
   ~meta
-  ~memory
+  ~generation
   ~turn
   ~oas_turn_count
   ~response_text
   ~actual_tools
   ~state_snapshot
+  ~state_snapshot_source
+  ~librarian_messages
   ~post_turn_t0
   ?provider_filter
-  ~cascade_name
+  ~runtime_id
   ~inference_telemetry
   ()
   =
@@ -22,10 +24,11 @@ let run
      See RFC #3646 Section 3: Det/NonDet boundary. *)
   (try
      let notes_written, kinds_written =
-       Keeper_memory_bank.append_memory_notes_from_reply
+       Memory.append_from_reply
          config
          meta
          ~snapshot:state_snapshot
+         ~state_snapshot_source
          ~turn
          ~reply:response_text
          ()
@@ -37,7 +40,7 @@ let run
            Keeper_tool_emission_hook.(
              snapshot (accumulator_for_keeper meta.name))
          in
-         Keeper_memory_bank.append_memory_notes_from_tool_results
+         Memory.append_from_tool_results
            config
            meta
            ~turn
@@ -60,63 +63,58 @@ let run
          ~kinds_written
    with
    | exn ->
-     Log.Keeper.error
-       "keeper:%s memory_write failed: %s"
-       meta.name
+     Log.Keeper.error ~keeper_name:meta.name
+       "memory_write failed: %s"
        (Printexc.to_string exn);
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string MemoryWriteFailures)
        ~labels:[ "keeper", meta.name ]
        ());
 
-  (* Episodic memory: create an episode from [STATE] after
-     Agent.run returns, then persist and emit activity through the
-     post-run memory adapter. Collaboration learning (Hebbian
-     strengthen/weaken) is owned by the task lifecycle path. *)
-  Keeper_agent_memory_episode.record_success
-    ~config
-    ~keeper_name:meta.name
-    ~memory
-    ~turn
-    ~oas_turn_count
-    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-    ~snapshot:state_snapshot
-    ();
+  (* Memory OS librarian extraction: opt-in, provider-backed, best-effort. *)
+  let librarian_input : Keeper_librarian.input =
+    { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+    ; generation
+    ; messages = librarian_messages
+    }
+  in
+  Keeper_librarian_runtime.run_best_effort
+    ~runtime_id
+    ~keeper_id:meta.name
+    librarian_input;
 
   (* Memory bank compaction: dedup + consolidate if over threshold. *)
   (try
      let memory_summarizer =
        Keeper_memory_llm_summary.make
          ?provider_filter
-         ~cascade_name
+         ~runtime_id
          ~keeper_name:meta.name
          ()
      in
      let compaction =
-       Keeper_memory_bank.compact_memory_bank_if_needed
+       Memory.compact_if_needed
          ?summarizer:memory_summarizer
          config
          meta
      in
      if compaction.performed
      then
-       Log.Keeper.info
-         "keeper:%s memory_compacted before=%d after=%d dropped=%d"
-         meta.name
+       Log.Keeper.info ~keeper_name:meta.name
+         "memory_compacted before=%d after=%d dropped=%d"
          compaction.before_notes
          compaction.after_notes
          compaction.dropped_notes
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "memory_bank_compaction" ]
        ();
-     Log.Keeper.warn
-       "keeper:%s cascade=%s compaction failed: %s"
-       meta.name
-       (Keeper_types.cascade_name_of_meta meta)
+     Log.Keeper.warn ~keeper_name:meta.name
+       "runtime=%s compaction failed: %s"
+       (Keeper_meta_contract.runtime_id_of_meta meta)
        (Printexc.to_string exn));
 
   (* Post-turn quality metrics — goal alignment + memory recall.
@@ -153,14 +151,13 @@ let run
              let exn_label =
                Keeper_memory_recall_exn_class.to_label exn_class
              in
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string DispatchEventFailures)
                ~labels:
                  [ "keeper", meta.name; "site", "memory_recall" ]
                ();
-             Log.Keeper.warn
-               "keeper:%s memory recall history load failed: <error class=%s>"
-               meta.name
+             Log.Keeper.warn ~keeper_name:meta.name
+               "memory recall history load failed: <error class=%s>"
                exn_label;
              []
          in
@@ -183,8 +180,6 @@ let run
           ; "turn", `Int turn
           ; "oas_turn_count", `Int oas_turn_count
           ; "goal_alignment", `Float goal_score
-          ; ( "tools_used_count"
-            , `Int (List.length actual_tools) )
           ; "used_memory_search", `Bool used_search
           ; "post_turn_ms", `Float post_turn_ms
           ]
@@ -211,12 +206,11 @@ let run
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "post_turn_eval" ]
        ();
-     Log.Keeper.warn
-       "keeper:%s post_turn_eval jsonl append failed: %s"
-       meta.name
+     Log.Keeper.warn ~keeper_name:meta.name
+       "post_turn_eval jsonl append failed: %s"
        (Printexc.to_string exn))
 ;;

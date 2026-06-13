@@ -58,50 +58,31 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_product_evidence=False,
         require_design_evidence=False,
         require_pr_created_evidence=False,
-        require_pr_url_evidence=False,
         require_provider_turn_evidence=False,
         require_checkpoint_evidence=False,
         require_history_evidence=False,
-        require_tool_call_log_evidence=False,
+        tool_call_log_evidence_required=False,
         require_persistent_work_evidence=False,
-        forbid_repo_cli_identity=[],
     )
 
 
-def write_ready_keeper(
-    root: Path,
-    name: str,
-    *,
-    repo_cli_identity: str = "anyang-keepers",
-    github_account_login: str | None = None,
-) -> None:
+def write_ready_keeper(root: Path, name: str) -> None:
     config_dir = root / ".masc" / "config" / "keepers"
     runtime_dir = root / ".masc" / "keepers"
-    credential_dir = root / ".masc" / "repo-cli-identities" / repo_cli_identity / "gh"
     config_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    credential_dir.mkdir(parents=True, exist_ok=True)
-    account_login = github_account_login or repo_cli_identity
-    (credential_dir / "hosts.yml").write_text(
-        "\n".join(
-            [
-                "github.com:",
-                "    git_protocol: https",
-                f"    user: {account_login}",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
     (config_dir / f"{name}.toml").write_text(
         "\n".join(
             [
                 "[keeper]",
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
-                'tool_preset = "delivery"',
-                f'repo_cli_identity = "{repo_cli_identity}"',
-                'git_identity_mode = "repo_cli_identity"',
+                "tool_access = [",
+                '  "tool_execute",',
+                '  "tool_edit_file",',
+                '  "tool_write_file",',
+                '  "keeper_board_post"',
+                "]",
                 "",
             ]
         ),
@@ -112,9 +93,12 @@ def write_ready_keeper(
             {
                 "sandbox_profile": "docker",
                 "network_mode": "inherit",
-                "tool_preset": "delivery",
-                "repo_cli_identity": repo_cli_identity,
-                "git_identity_mode": "repo_cli_identity",
+                "tool_access": [
+                    "tool_execute",
+                    "tool_edit_file",
+                    "tool_write_file",
+                    "keeper_board_post",
+                ],
                 "last_turn_ts": time.time(),
             }
         ),
@@ -306,7 +290,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "tool": "tool_execute",
                 "ok": True,
                 "output": {
-                    "pr_url": "https://github.com/acme/repo/pull/123",
+                    "url": "https://github.com/acme/repo/pull/123",
                     "number": 123,
                 },
             }
@@ -327,7 +311,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 "_source_path": "events.jsonl",
                 "tool": "tool_execute",
                 "ok": False,
-                "output": {"pr_url": "https://github.com/acme/repo/pull/123"},
+                "output": {"url": "https://github.com/acme/repo/pull/123"},
             }
         )
 
@@ -347,7 +331,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
-    def test_pr_creation_evidence_reads_structured_pr_url(self):
+    def test_pr_creation_evidence_reads_structured_ref_url(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
@@ -360,7 +344,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, {"https://github.com/acme/repo/pull/124"})
         self.assertEqual(sources, {"events.jsonl"})
 
-    def test_pr_creation_evidence_ignores_freeform_pr_url_mentions(self):
+    def test_pr_creation_evidence_ignores_freeform_review_ref_mentions(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
@@ -384,7 +368,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         "tool": "tool_execute",
                         "ok": True,
                         "output": {
-                            "pr_url": "https://github.com/acme/repo/pull/125",
+                            "url": "https://github.com/acme/repo/pull/125",
                             "number": 125,
                         },
                     }
@@ -407,13 +391,13 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             {str(keepers_dir / "alpha.decisions.jsonl")},
         )
 
-    def test_pr_creation_evidence_reads_route_evidence_pr_url(self):
+    def test_pr_creation_evidence_reads_route_evidence_ref_url(self):
         row = {
             "_source_path": "tool_calls.jsonl",
             "tool": "tool_execute",
             "success": True,
             "route_evidence": {
-                "pr_url": "https://github.com/acme/repo/pull/42\n",
+                "url": "https://github.com/acme/repo/pull/42\n",
                 "via": "docker",
             },
         }
@@ -532,6 +516,46 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             report["fleet_failures"], ["minimum_2_configured_keepers_got_1"]
         )
 
+    def test_explicit_tool_access_shape_does_not_gate_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            runtime_path = root / ".masc" / "keepers" / "alpha.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime["tool_access"] = ["keeper_board_post"]
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertTrue(report["ok"])
+
+    def test_missing_tool_access_does_not_gate_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ready_keeper(root, "alpha")
+            runtime_path = root / ".masc" / "keepers" / "alpha.json"
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+            runtime.pop("tool_access")
+            runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+            config_path = root / ".masc" / "config" / "keepers" / "alpha.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[keeper]",
+                        'sandbox_profile = "docker"',
+                        'network_mode = "inherit"',
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            report = audit.build_report(audit_args(root, expected_keepers=1))
+
+        self.assertTrue(report["ok"])
+        keeper = report["keepers"][0]
+        self.assertIsNone(keeper["tool_access"])
+
     def test_require_persistent_work_evidence_fails_without_runtime_artifacts(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -648,41 +672,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(len(keeper["history_evidence_refs"]), 1)
         self.assertEqual(len(keeper["tool_call_log_evidence_refs"]), 1)
 
-    def test_forbid_repo_cli_identity_fails_matching_keeper(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha", repo_cli_identity="operator")
-            args = audit_args(root, expected_keepers=1)
-            args.forbid_repo_cli_identity = ["operator"]
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(
-            report["keepers"][0]["failures"],
-            ["repo_cli_identity_forbidden_operator"],
-        )
-
-    def test_forbid_repo_cli_identity_fails_matching_account_login(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(
-                root,
-                "alpha",
-                repo_cli_identity="reviewer-keepers",
-                github_account_login="operator",
-            )
-            args = audit_args(root, expected_keepers=1)
-            args.forbid_repo_cli_identity = ["operator"]
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(
-            report["keepers"][0]["failures"],
-            ["github_account_forbidden_operator"],
-        )
-
     def test_scan_keeper_evidence_reads_tool_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -776,7 +765,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "pr_url": "https://github.com/acme/repo/pull/2",
+                            "url": "https://github.com/acme/repo/pull/2",
                             "via": "docker",
                         }
                     ),
@@ -849,7 +838,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         row = {
             "ts": 110.0,
             "keeper": "alpha",
-            "tool": "SearchWeb",
+            "tool": "WebSearch",
             "input": {"query": "latest MASC MCP keeper proof"},
             "output": json.dumps({"ok": True}),
             "success": True,
@@ -860,7 +849,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             evidence,
             {
-                "web_search:SearchWeb:"
+                "web_search:WebSearch:"
                 "query=latest MASC MCP keeper proof:"
                 "ts=110:"
                 "source=06.jsonl"

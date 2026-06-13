@@ -1,6 +1,6 @@
 open Alcotest
 
-module KGL = Masc_mcp.Keeper_generation_lineage
+module KGL = Masc.Keeper_generation_lineage
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -19,8 +19,8 @@ let with_temp_file prefix contents f =
   Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
 
 let persistence_read_drop_total ~surface ~reason =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_persistence_read_drops
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", surface); ("reason", reason)]
     ()
 

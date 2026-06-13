@@ -21,24 +21,13 @@ let merge_env overrides =
 let git_terminal_prompt_key = "GIT_" ^ "TERMINAL_PROMPT"
 let git_askpass_key = "GIT_" ^ "ASKPASS"
 
-let env_of_credential credential =
-  let non_interactive =
-    [
-      (git_terminal_prompt_key, "0");
-      (git_askpass_key, "");
-      ("SSH_ASKPASS", "");
-      ("GCM_INTERACTIVE", "Never");
-    ]
-  in
-  match credential.cred_type with
-  | Github | Gitlab -> (
-      match credential.gh_config_dir with
-      | Some dir -> ("GH_CONFIG_DIR", dir) :: non_interactive
-      | None -> non_interactive)
-  | Local -> (
-      match credential.ssh_key_path with
-      | Some key -> ("GIT_SSH_COMMAND", Printf.sprintf "ssh -i %S" key) :: non_interactive
-      | None -> non_interactive)
+let non_interactive_git_env =
+  [
+    (git_terminal_prompt_key, "0");
+    (git_askpass_key, "");
+    ("SSH_ASKPASS", "");
+    ("GCM_INTERACTIVE", "Never");
+  ]
 
 let split_lines text =
   if text = "" then []
@@ -51,7 +40,7 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
   let status, stdout, stderr =
     Masc_exec.Exec_gate.run_argv_with_status_split
       ~actor:(Masc_exec.Agent_id.of_string "repo-manager/git") ~raw_source ~summary:"repo manager git"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Repo_manager_git ()) ~env:envp argv
+ ~env:envp argv
   in
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
@@ -71,8 +60,8 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
       in
       Error (Printf.sprintf "git %s failed: %s" (String.concat " " args) detail)
 
-let clone ~repository ~credential =
-  let env = env_of_credential credential in
+let clone ~repository =
+  let env = non_interactive_git_env in
   let parent_dir = Filename.dirname repository.local_path in
   Fs_compat.mkdir_p parent_dir;
   match
@@ -82,8 +71,8 @@ let clone ~repository ~credential =
   | Ok _ -> Ok ()
   | Error msg -> Error msg
 
-let fetch ~repository ~credential : (string list, string) result =
-  let env = env_of_credential credential in
+let fetch ~repository : (string list, string) result =
+  let env = non_interactive_git_env in
   match run_git ~env ~cwd:repository.local_path ["fetch"; "--all"] with
   | Error msg -> Error msg
   | Ok _ -> (
@@ -93,6 +82,20 @@ let fetch ~repository ~credential : (string list, string) result =
       with
       | Ok lines -> Ok lines
       | Error msg -> Error msg)
+
+(* [fast_forward ~repository ~target_ref] advances the current branch to
+   [target_ref] with `git merge --ff-only`. git refuses (non-zero exit) unless
+   the move is a pure fast-forward: it never creates a merge commit, rebases, or
+   rewrites history, so it cannot drop, reorder, or overwrite commits. A
+   non-fast-forward (divergent tree) is returned as [Error] and the caller must
+   preserve the tree rather than force the move. No credential is needed (the
+   merge is local; the ref must already be fetched). *)
+let fast_forward ~repository ~target_ref : (unit, string) result =
+  match
+    run_git ~cwd:repository.local_path [ "merge"; "--ff-only"; target_ref ]
+  with
+  | Ok _ -> Ok ()
+  | Error msg -> Error msg
 
 let get_branches ~repository =
   match

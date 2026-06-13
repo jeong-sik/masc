@@ -137,12 +137,12 @@ let get_or_create_ring name =
    unflushed decision_record — the flush loop has not kept up with
    the append rate and a forensic record is being silently dropped.
    Without this counter, ring overflow was invisible: [unflushed]
-   stayed pegged at [cap] and no Prometheus signal fired.  Closes
+   stayed pegged at [cap] and no Otel_metric_store signal fired.  Closes
    the silent data-loss gap noted in
    .tmp/memory-compacting-analysis.html (decision_audit ring
    overflow). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string DecisionAuditRingOverflows)
     ~help:
       "Total [Keeper_decision_audit.append] events where the ring \
@@ -159,7 +159,7 @@ let append ~keeper_name (rec_ : decision_record) =
     let ring = get_or_create_ring keeper_name in
     let cap = Array.length ring.buf in
     if ring.unflushed >= cap then
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DecisionAuditRingOverflows)
         ~labels:[("keeper", keeper_name)]
         ();
@@ -230,7 +230,7 @@ let flush_if_needed ~base_path ~keeper_name =
           ring.unflushed <- 0
         with Eio.Cancel.Cancelled _ as e -> raise e
            | e ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string DecisionAuditFlushFailures)
                ~labels:[("keeper", keeper_name)]
                ();
@@ -248,8 +248,6 @@ let decision_pipeline_to_mermaid
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
     ~(thompson_beta : float)
-    ~(tool_count : int)
-    ~(recovery_floor_count : int)
     ()
     : string =
   let b = Buffer.create 512 in
@@ -268,9 +266,8 @@ let decision_pipeline_to_mermaid
   p "        ThompsonPenalty --> NormalOps: cap 1/cycle\n";
   p "    }\n";
   p "    state Failing {\n";
-  p "        [*] --> ToolRestricted\n";
-  p "        ToolRestricted --> TurnAttempt: recovery floor (%d tools)\n"
-    recovery_floor_count;
+  p "        [*] --> RecoveryPending\n";
+  p "        RecoveryPending --> TurnAttempt: recovery floor\n";
   p "        TurnAttempt --> TurnAttempt: turn fails\n";
   p "        TurnAttempt --> RecoveryReady: turn succeeds\n";
   p "    }\n";
@@ -301,7 +298,6 @@ let decision_pipeline_to_mermaid
   in
   p "    note right of Running\n";
   p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
-  p "      Tools: %d / floor %d\n" tool_count recovery_floor_count;
   p "      Level: %d\n" level;
   p "      Guard pen this cycle: %s\n" penalty_str;
   p "      Turn outcome: %s\n" outcome_str;
@@ -309,7 +305,7 @@ let decision_pipeline_to_mermaid
   Buffer.contents b
 
 (* ================================================================ *)
-(* Cascade FSM Mermaid diagram                                      *)
+(* Runtime FSM Mermaid diagram                                      *)
 (* ================================================================ *)
 
 type unhealthy_reason =
@@ -337,17 +333,16 @@ let unhealthy_reason_label = function
   | `Timeout -> "timeout"
   | `Other s -> sanitize_mermaid_note s
 
-let cascade_fsm_to_mermaid
+let runtime_fsm_to_mermaid
     ?(provider_health : (string * provider_health) list option)
-    ?(slot_state : (int * int) option)
-    ?(effective_cascade_reason : string option)
+    ?(effective_runtime_reason : string option)
     ~(models : string list)
     ~(last_provider_result : string option)
     ()
     : string =
   let b = Buffer.create 512 in
   let p fmt = Printf.bprintf b fmt in
-  (* Look up provider health by label (mirrors CascadeLiveness.tla phealth). *)
+  (* Look up provider health by label (mirrors RuntimeLiveness.tla phealth). *)
   let health_for label =
     match provider_health with
     | None -> `Unknown
@@ -409,10 +404,7 @@ let cascade_fsm_to_mermaid
   p "    note right of SelectProvider\n";
   p "      Models: %d\n" n;
   p "      Order: %s\n" (String.concat " > " models);
-  (match slot_state with
-   | Some (used, max) -> p "      Slots: %d / %d\n" used max
-   | None -> ());
-  (match effective_cascade_reason with
+  (match effective_runtime_reason with
    | Some r when String.length r > 0 -> p "      Reason: %s\n" r
    | _ -> ());
   p "    end note\n";

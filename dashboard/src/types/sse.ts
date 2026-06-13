@@ -3,9 +3,12 @@ import type { BoardActorIdentity, BoardPost } from './core'
 // --- SSE Events ---
 
 export type SSEEventType =
-  | 'agent_joined'
-  | 'agent_left'
+  | 'agent_bound'
+  | 'masc/agent_bound'
+  | 'agent_unbound'
+  | 'masc/agent_unbound'
   | 'broadcast'
+  | 'masc/broadcast'
   | 'task_update'
   | 'board_post'
   | 'masc/board_post'
@@ -29,6 +32,7 @@ export type SSEEventType =
   | 'masc/keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
+  | 'keeper_chat_appended'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_tool_skipped'
@@ -128,8 +132,12 @@ export interface Attribution {
 
 export interface SSEEvent {
   type: SSEEventType
-  severity?: JournalSeverity | string
-  source?: JournalSource | string
+  severity?: JournalSeverity
+  source?: JournalSource
+  // Originating connector for keeper_chat_appended ('dashboard' |
+  // 'discord' | 'slack' | 'agent' | gate channel). Distinct from
+  // [source], which is reserved for the journal origin.
+  connector?: string
   agent?: string
   from?: string
   from_agent?: string
@@ -144,13 +152,13 @@ export interface SSEEvent {
   author_identity?: BoardActorIdentity | null
   voter?: string
   voter_identity?: BoardActorIdentity | null
-  direction?: 'up' | 'down' | string
-  target_type?: 'post' | 'comment' | string
+  direction?: 'up' | 'down'
+  target_type?: 'post' | 'comment'
   target_id?: string
   user_id?: string
   emoji?: string
   reacted?: boolean
-  post_kind?: BoardPost['post_kind'] | string
+  post_kind?: BoardPost['post_kind']
   hearth?: string
   agent_name?: string
   keeper_name?: string
@@ -223,8 +231,8 @@ export interface SSEEvent {
 // --- Journal ---
 
 export type JournalEventType =
-  | 'agent_joined'
-  | 'agent_left'
+  | 'agent_bound'
+  | 'agent_unbound'
   | 'broadcast'
   | 'task_update'
   | 'board_post'
@@ -303,60 +311,3 @@ export const VALID_TABS: TabId[] = [
   'code',
   'logs',
 ]
-
-// --- Activity Graph types ---
-// The response shapes for `/api/v1/activity/graph` and
-// `/api/v1/activity/swimlane` are defined as valibot schemas in
-// `src/api/schemas/actions-activity.ts`; re-exported here so the
-// barrel (`src/types.ts`) surface stays stable for consumers.
-import type {
-  ActivityGraphNode,
-  ActivityGraphEdge,
-  ActivityGraphTimelineEvent,
-  ActivityGraphStats,
-  ActivityGraphHeatmap,
-  ActivityGraphKindCounts,
-  ActivityGraphResponse,
-  AgentSpan,
-  SwimlaneResponse,
-} from '../api/schemas/actions-activity'
-
-export type {
-  ActivityGraphNode,
-  ActivityGraphEdge,
-  ActivityGraphTimelineEvent,
-  ActivityGraphStats,
-  ActivityGraphHeatmap,
-  ActivityGraphKindCounts,
-  ActivityGraphResponse,
-  AgentSpan,
-  SwimlaneResponse,
-}
-
-export type ActivityCategory =
-  | 'task'
-  | 'session'
-  | 'message'
-  | 'board'
-  | 'governance'
-  | 'lifecycle'
-  | 'other'
-
-export interface ActionTimelineGroup {
-  id: string
-  category: ActivityCategory
-  actor: string
-  subjectId: string | null
-  title: string
-  summary: string
-  latestTs: string
-  latestTsMs: number
-  rawCount: number
-  kinds: string[]
-  rawEvents: ActivityGraphTimelineEvent[]
-}
-
-// --- Swimlane types ---
-// `AgentSpan` and `SwimlaneResponse` are re-exported above from the
-// schema file. Keep this divider so future activity-related local
-// types have a clear section.

@@ -1,7 +1,7 @@
 open Alcotest
 
-module D = Masc_mcp.Keeper_deliberation
-module Keeper_types = Masc_mcp.Keeper_types
+module D = Masc.Keeper_deliberation
+module Keeper_types = Keeper_types
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.deliberation.md")
@@ -21,7 +21,7 @@ let repo_root () =
 let () =
   let prompts_dir = Filename.concat (repo_root ()) "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  Masc_mcp.Prompt_defaults.init ()
+  Masc.Prompt_defaults.init ()
 
 (* ---------- Triage tests ---------- *)
 
@@ -65,13 +65,13 @@ let test_triage_failed_task () =
       check bool "contains FailedTask" true
         (List.mem D.FailedTask triggers)
 
-let test_triage_agent_change () =
-  let obs = { base_obs with agent_count_changed = true } in
+let test_triage_keeper_fiber_count_change () =
+  let obs = { base_obs with keeper_fiber_count_changed = true } in
   match D.triage obs with
-  | D.Skip _ -> fail "expected Triggered for agent change"
+  | D.Skip _ -> fail "expected Triggered for keeper fiber count change"
   | D.Triggered triggers ->
-      check bool "contains AgentJoinedOrLeft" true
-        (List.mem D.AgentJoinedOrLeft triggers)
+      check bool "contains KeeperFiberStartedOrStopped" true
+        (List.mem D.KeeperFiberStartedOrStopped triggers)
 
 let test_triage_board_mention () =
   let obs = { base_obs with board_mention_count = 2 } in
@@ -123,11 +123,6 @@ let test_action_to_policy_label_noop () =
   check string "noop policy label" "noop"
     (D.deliberation_action_to_policy_label (D.Noop "test"))
 
-let test_action_to_policy_label_reply () =
-  check string "reply policy label" "reply_in_room"
-    (D.deliberation_action_to_policy_label
-       (D.ReplyInRoom { room_id = "r1"; content = "hello" }))
-
 let test_action_to_policy_label_board_post () =
   check string "board_post policy label" "board_post"
     (D.deliberation_action_to_policy_label
@@ -139,12 +134,12 @@ let test_action_to_policy_label_task_claim () =
        (D.TaskClaim { task_id = "t-1"; reason = "needed" }))
 
 let test_action_to_json_roundtrip () =
-  let action = D.ReplyInRoom { room_id = "room-1"; content = "hello" } in
+  let action = D.BoardPost { content = "hello"; hearth = None } in
   let json = D.deliberation_action_to_json action in
   let typ =
     Yojson.Safe.Util.member "type" json |> Yojson.Safe.Util.to_string
   in
-  check string "json type field" "reply_in_room" typ
+  check string "json type field" "board_post" typ
 
 let test_action_to_json_noop () =
   let action = D.Noop "nothing to do" in
@@ -168,12 +163,12 @@ let test_action_multistep_to_string () =
 
 (* ---------- Baseline action tests ---------- *)
 
-let test_baseline_mention_returns_reply () =
+let test_baseline_mention_returns_noop () =
   let obs = { base_obs with direct_mention = true } in
   let action = D.deterministic_baseline_action obs in
   match action with
-  | D.ReplyInRoom _ -> ()
-  | _ -> fail "expected ReplyInRoom for direct mention"
+  | D.Noop _ -> ()
+  | _ -> fail "expected Noop for direct mention"
 
 let test_baseline_no_mention_returns_noop () =
   let obs = base_obs in
@@ -255,7 +250,7 @@ let test_keeper_meta_deliberation_fields_default () =
 (* ---------- Triage result JSON ---------- *)
 
 let test_triage_result_skip_json () =
-  let json = D.triage_result_to_json (D.Skip "quiet room") in
+  let json = D.triage_result_to_json (D.Skip "quiet workspace") in
   let decision =
     Yojson.Safe.Util.member "decision" json |> Yojson.Safe.Util.to_string
   in
@@ -354,9 +349,6 @@ let test_prompt_contains_action_list () =
   check bool "mentions noop action" true
     (try ignore (Str.search_forward (Str.regexp_string "noop") prompt 0); true
      with Not_found -> false);
-  check bool "mentions reply_in_room action" true
-    (try ignore (Str.search_forward (Str.regexp_string "reply_in_room") prompt 0); true
-     with Not_found -> false);
   check bool "mentions task_claim action" true
     (try ignore (Str.search_forward (Str.regexp_string "task_claim") prompt 0); true
      with Not_found -> false);
@@ -379,19 +371,6 @@ let test_parse_valid_noop_json () =
        | _ -> fail "expected Noop action");
       check string "reasoning" "Nothing to do" reasoning;
       check (float 0.01) "confidence" 0.95 confidence
-
-let test_parse_valid_reply_json () =
-  let raw =
-    {|{"action":"reply_in_room","params":{"room_id":"room-42","content":"Hello team"},"reasoning":"Responding to mention","confidence":0.8}|}
-  in
-  match D.parse_deliberation_response raw with
-  | Error msg -> fail ("expected Ok, got Error: " ^ msg)
-  | Ok (action, _reasoning, _confidence) ->
-      match action with
-      | D.ReplyInRoom { room_id; content } ->
-          check string "room_id" "room-42" room_id;
-          check string "content" "Hello team" content
-      | _ -> fail "expected ReplyInRoom action"
 
 let test_parse_valid_task_claim_json () =
   let raw =
@@ -561,14 +540,6 @@ let test_parse_unknown_action_type () =
          with Not_found -> false)
   | Ok _ -> fail "expected Error for unknown action type"
 
-let test_parse_reply_empty_content_fails () =
-  let raw =
-    {|{"action":"reply_in_room","params":{"room_id":"r1","content":""},"reasoning":"test","confidence":0.5}|}
-  in
-  match D.parse_deliberation_response raw with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error for empty reply content"
-
 let test_parse_task_claim_empty_task_id_fails () =
   let raw =
     {|{"action":"task_claim","params":{"task_id":"","reason":"test"},"reasoning":"test","confidence":0.5}|}
@@ -611,15 +582,15 @@ let test_budget_check_under_budget () =
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.05)
 
 let test_budget_check_at_budget () =
-  check bool "at budget (should fail)" false
+  check bool "at budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.10)
 
 let test_budget_check_over_budget () =
-  check bool "over budget" false
+  check bool "over budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.10 ~cost_today_usd:0.15)
 
 let test_budget_check_zero_budget () =
-  check bool "zero budget always fails" false
+  check bool "zero budget remains advisory" true
     (D.deliberation_budget_check ~daily_budget_usd:0.0 ~cost_today_usd:0.0)
 
 let test_budget_check_zero_cost () =
@@ -804,12 +775,12 @@ let test_parse_multi_step_nested_rejected () =
 let test_parse_multi_step_invalid_substep_fails () =
   let raw =
     {|{"action":"multi_step","params":{"steps":[
-        {"action":"reply_in_room","params":{"room_id":"r1","content":""}},
+        {"action":"task_claim","params":{"task_id":"","reason":"missing task"}},
         {"action":"noop","params":{"reason":"ok"}}
       ]},"reasoning":"bad step","confidence":0.5}|}
   in
   match D.parse_deliberation_response raw with
-  | Error _ -> () (* expected: reply with empty content fails *)
+  | Error _ -> ()
   | Ok _ -> fail "expected Error for invalid substep in multi_step"
 
 (* ---------- multi_step is always included ---------- *)
@@ -830,7 +801,7 @@ let test_prompt_always_includes_multi_step () =
 (* ---------- removed keeper field + idle gate tests ---------- *)
 
 let test_removed_initiative_field_rejected () =
-  let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","goal":"g","cascade_name":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","goal":"g","runtime_id":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "initiative_enabled should be rejected"
@@ -839,7 +810,7 @@ let test_removed_initiative_field_rejected () =
         (String.contains e 'i')
 
 let test_removed_persona_profile_path_rejected () =
-  let json_str = {|{"name":"test","persona_profile_path":"config/personas/test/profile.json","trace_id":"t2","goal":"g","cascade_name":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
+  let json_str = {|{"name":"test","persona_profile_path":"config/personas/test/profile.json","trace_id":"t2","goal":"g","runtime_id":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "persona_profile_path should be rejected"
@@ -1023,8 +994,8 @@ let () =
             test_triage_unclaimed_task;
           test_case "failed task triggers" `Quick
             test_triage_failed_task;
-          test_case "agent change triggers" `Quick
-            test_triage_agent_change;
+          test_case "keeper fiber count change triggers" `Quick
+            test_triage_keeper_fiber_count_change;
           test_case "board mention triggers" `Quick
             test_triage_board_mention;
           test_case "idle with goals triggers" `Quick
@@ -1048,8 +1019,6 @@ let () =
         [
           test_case "noop to policy label" `Quick
             test_action_to_policy_label_noop;
-          test_case "reply to policy label" `Quick
-            test_action_to_policy_label_reply;
           test_case "board_post to policy label" `Quick
             test_action_to_policy_label_board_post;
           test_case "task_claim to policy label" `Quick
@@ -1063,8 +1032,8 @@ let () =
         ] );
       ( "baseline",
         [
-          test_case "mention returns ReplyInRoom" `Quick
-            test_baseline_mention_returns_reply;
+          test_case "mention returns Noop" `Quick
+            test_baseline_mention_returns_noop;
           test_case "no mention returns Noop" `Quick
             test_baseline_no_mention_returns_noop;
           test_case "baseline execution emits baseline source" `Quick
@@ -1127,8 +1096,6 @@ let () =
       ( "parse_deliberation_response",
         [
           test_case "parse valid noop" `Quick test_parse_valid_noop_json;
-          test_case "parse valid reply_in_room" `Quick
-            test_parse_valid_reply_json;
           test_case "parse valid task_claim" `Quick
             test_parse_valid_task_claim_json;
           test_case "parse valid broadcast" `Quick
@@ -1145,8 +1112,6 @@ let () =
             test_parse_missing_action_field;
           test_case "parse unknown action type" `Quick
             test_parse_unknown_action_type;
-          test_case "reply with empty content fails" `Quick
-            test_parse_reply_empty_content_fails;
           test_case "task_claim with empty task_id fails" `Quick
             test_parse_task_claim_empty_task_id_fails;
           test_case "confidence clamped to 1.0" `Quick
@@ -1170,11 +1135,11 @@ let () =
         [
           test_case "under budget returns true" `Quick
             test_budget_check_under_budget;
-          test_case "at budget returns false" `Quick
+          test_case "at budget remains advisory" `Quick
             test_budget_check_at_budget;
-          test_case "over budget returns false" `Quick
+          test_case "over budget remains advisory" `Quick
             test_budget_check_over_budget;
-          test_case "zero budget always false" `Quick
+          test_case "zero budget remains advisory" `Quick
             test_budget_check_zero_budget;
           test_case "zero cost under positive budget" `Quick
             test_budget_check_zero_cost;

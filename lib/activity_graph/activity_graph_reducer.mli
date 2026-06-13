@@ -54,15 +54,15 @@ val reduce_event :
 (** [reduce_event ~nodes ~edges value] folds [value] into the
     accumulators in place.  Effects (in order):
 
-    + Ensure a [room:<room_id>] node exists with status [Coord]
+    + Ensure a [workspace:<workspace_id>] node exists with status [Workspace]
       and the event's [ts_iso].
     + If [value.actor = Some actor], ensure the entity node with
       fallback status [Active] and add a [belongs_to] edge to the
-      room node.
+      workspace node.
     + If [value.subject = Some subject], same with fallback status
       [Observed].
     + Apply event-kind-specific edges between actor / subject /
-      room (e.g. [task.assigned] -> actor->subject [assigned] edge).
+      workspace (e.g. [task.assigned] -> actor->subject [assigned] edge).
 
     Semantic weight delta applied to nodes:
     {!Activity_graph_types}-tagged kinds map to fixed multipliers

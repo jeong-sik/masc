@@ -9,7 +9,7 @@
 *)
 
 open Alcotest
-module Routes = Masc_mcp.Server_routes_http_routes_sidecar
+module Routes = Server_routes_http_routes_sidecar
 
 let result_of = function
   | Ok s -> "Ok " ^ s
@@ -216,12 +216,12 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     bool
     "mentions explicit env hint"
     true
-    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc-mcp");
+    (contains_substring message "MASC_SIDECAR_ROOT=/path/to/masc");
   check
     bool
     "mentions launcher flag hint"
     true
-    (contains_substring message "--sidecar-root /path/to/masc-mcp");
+    (contains_substring message "--sidecar-root /path/to/masc");
   check
     bool
     "includes searched runtime path"
@@ -771,7 +771,7 @@ let test_atomic_write_file_replaces_content () =
    See #8930 for the attempt_state SSOT consolidation. *)
 
 let test_isoish_now_fixed_shape () =
-  let s = Routes.isoish_now () in
+  let s = Masc_domain.now_iso () in
   check int "isoish_now length" 20 (String.length s);
   (* "1234-67-9012:45:78Z" — positional separators *)
   check char "isoish_now dash y-m" '-' s.[4];
@@ -783,26 +783,26 @@ let test_isoish_now_fixed_shape () =
 ;;
 
 let test_isoish_at_epoch_round_trip () =
-  check string "isoish_at epoch" "1970-01-01T00:00:00Z" (Routes.isoish_at 0.0);
+  check string "isoish_at epoch" "1970-01-01T00:00:00Z" (Masc_domain.iso8601_of_unix_seconds 0.0);
   check
     string
     "isoish_at one second past epoch"
     "1970-01-01T00:00:01Z"
-    (Routes.isoish_at 1.0)
+    (Masc_domain.iso8601_of_unix_seconds 1.0)
 ;;
 
 let test_isoish_lexical_matches_chronological () =
   (* If these two lose correspondence, [retry_backoff_active]'s
      [String.compare next_retry_at now > 0] would silently drift.  *)
-  let earlier = Routes.isoish_at 1_000_000.0 in
-  let later = Routes.isoish_at 2_000_000.0 in
+  let earlier = Masc_domain.iso8601_of_unix_seconds 1_000_000.0 in
+  let later = Masc_domain.iso8601_of_unix_seconds 2_000_000.0 in
   check bool "earlier < later lexically" true (String.compare earlier later < 0);
   check bool "later > earlier lexically" true (String.compare later earlier > 0);
   check
     int
     "equal timestamps compare zero"
     0
-    (String.compare earlier (Routes.isoish_at 1_000_000.0))
+    (String.compare earlier (Masc_domain.iso8601_of_unix_seconds 1_000_000.0))
 ;;
 
 (* ── retry_backoff_active (#8930 phase 3) ──────────────────────────────

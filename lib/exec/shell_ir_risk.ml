@@ -43,13 +43,230 @@ let is_destructive e = e.risk = Destructive_protected
 
 (* --- Write sub-classification --------------------------------------- *)
 
+let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-'
+let has_short_flag flag arg = is_short_option arg && String.contains arg flag
+
+let is_eq_flag flag arg =
+  String.equal arg flag || String.starts_with ~prefix:(flag ^ "=") arg
+;;
+
+let git_branch_has_flag flags args =
+  List.exists
+    (fun arg ->
+       List.exists
+         (fun flag ->
+            if String.length flag = 2 && flag.[0] = '-'
+            then has_short_flag flag.[1] arg
+            else is_eq_flag flag arg)
+         flags)
+    args
+;;
+
+let git_branch_args_are_read_only args =
+  let mutating_flags =
+    [ "-d"; "-D"; "--delete"; "-m"; "-M"; "--move"; "-c"; "-C"; "--copy"
+    ; "-f"; "--force"; "-u"; "--set-upstream-to"; "--unset-upstream"
+    ; "--track"; "--no-track"; "--edit-description"; "--create-reflog"
+    ]
+  in
+  let read_flags =
+    [ "-l"; "--list"; "-a"; "--all"; "-r"; "--remotes"; "--show-current"
+    ; "-v"; "--contains"; "--no-contains"; "--merged"; "--no-merged"
+    ; "--points-at"; "--format"; "--sort"; "--color"; "--no-color"; "--column"
+    ; "--no-column"; "--ignore-case"; "--abbrev"; "--no-abbrev"
+    ]
+  in
+  match args with
+  | [] -> true
+  | _ when git_branch_has_flag mutating_flags args -> false
+  | _ -> git_branch_has_flag read_flags args
+;;
+
+let is_env_assignment arg =
+  match String.index_opt arg '=' with
+  | None -> false
+  | Some 0 -> false
+  | Some i ->
+    let name = String.sub arg 0 i in
+    String.for_all
+      (function
+        | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' -> true
+        | _ -> false)
+      name
+;;
+
+let rec strip_env_prefix words =
+  let rec strip_env_args = function
+    | [] -> []
+    | "--" :: rest -> rest
+    | ("-i" | "--ignore-environment" | "--null" | "-0") :: rest ->
+      strip_env_args rest
+    | ("-u" | "--unset") :: _ :: rest -> strip_env_args rest
+    | arg :: rest
+      when String.starts_with ~prefix:"--unset=" arg
+           || String.starts_with ~prefix:"-u" arg
+           || is_env_assignment arg ->
+      strip_env_args rest
+    (* env -S/--split-string splits a string into arguments and executes
+       the resulting command — arbitrary command execution. Cannot safely
+       extract and classify the embedded command string at the word level.
+       Return a sentinel that triggers Destructive_protected escalation
+       via shell_interpreter_names. *)
+    | ("-S" | "--split-string") :: _ -> ["bash"]
+    | arg :: _
+      when String.starts_with ~prefix:"--split-string=" arg
+           || (String.length arg > 2 && String.starts_with ~prefix:"-S" arg) ->
+      ["bash"]
+    | rest -> rest
+  in
+  match words with
+  | "env" :: rest -> strip_env_prefix (strip_env_args rest)
+  | _ -> words
+;;
+
+let rec skip_git_global_options = function
+  | [] -> []
+  | "--" :: rest -> rest
+  | ("-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix"
+    | "--config-env" | "--exec-path") :: _ :: rest ->
+    skip_git_global_options rest
+  | ("--bare" | "--no-pager" | "--paginate" | "--no-replace-objects"
+    | "--literal-pathspecs" | "--glob-pathspecs" | "--noglob-pathspecs"
+    | "--icase-pathspecs" | "--no-optional-locks" | "--version" | "-v") :: rest ->
+    skip_git_global_options rest
+  | opt :: rest
+    when String.length opt > 1
+         && opt.[0] = '-'
+         && (String.starts_with ~prefix:"--git-dir=" opt
+             || String.starts_with ~prefix:"--work-tree=" opt
+             || String.starts_with ~prefix:"--namespace=" opt
+             || String.starts_with ~prefix:"--exec-path=" opt
+             || String.starts_with ~prefix:"--config-env=" opt
+             || String.starts_with ~prefix:"-c" opt) ->
+    skip_git_global_options rest
+  | parts -> parts
+;;
+
+let rec skip_gh_global_options = function
+  | [] -> []
+  | ("--repo" | "-R" | "--hostname" | "--config" | "--git-protocol") :: _ :: rest ->
+    skip_gh_global_options rest
+  | ("--help" | "-h" | "--version" | "--debug" | "--verbose" | "--no-color"
+    | "--paginate") :: rest ->
+    skip_gh_global_options rest
+  | opt :: rest
+    when String.length opt > 1
+         && opt.[0] = '-'
+         && (String.starts_with ~prefix:"--repo=" opt
+             || String.starts_with ~prefix:"-R=" opt
+             || String.starts_with ~prefix:"--hostname=" opt
+             || String.starts_with ~prefix:"--config=" opt
+             || String.starts_with ~prefix:"--git-protocol=" opt) ->
+    skip_gh_global_options rest
+  | parts -> parts
+;;
+
+let normalize_command_words words =
+  match strip_env_prefix words with
+  | "git" :: rest -> "git" :: skip_git_global_options rest
+  | "gh" :: rest -> "gh" :: skip_gh_global_options rest
+  | words -> words
+;;
+
+let normalized_head_name = function
+  | [] -> None
+  | raw :: _ ->
+    Some (raw |> Filename.basename |> String.lowercase_ascii)
+;;
+
+let head_name_in names words =
+  match normalized_head_name words with
+  | Some name -> List.mem name names
+  | None -> false
+;;
+
+let shell_interpreter_names =
+  [ "sh"; "bash"; "zsh"; "fish"; "ksh"; "dash"; "csh"; "tcsh"; "ash" ]
+;;
+
+let network_primitive_names =
+  [ "curl"; "wget"; "ssh"; "scp"; "rsync"; "ftp"; "sftp"; "nc" ]
+;;
+
+let shell_capable_executable_names =
+  [ "node"; "npx"; "pip"; "python"; "python3" ]
+;;
+
+(* STR-OK: Shell argv boundary parser; git option strings are normalized here
+   before risk is converted into the typed [risk_class] envelope. *)
+let git_config_arg_is_read_flag = function
+  | "--get" | "--get-all" | "--get-regexp" | "--list" | "-l" | "--show-origin"
+  | "--show-scope" | "--name-only" | "--null" | "-z" ->
+    true
+  | _ -> false
+;;
+
+let git_config_arg_is_write_flag = function
+  | "--add" | "--replace-all" | "--unset" | "--unset-all" | "--remove-section"
+  | "--rename-section" | "--edit" | "-e" ->
+    true
+  | _ -> false
+;;
+
+let git_config_args_are_read_only args =
+  match args with
+  | [] -> false
+  | _ ->
+    List.exists git_config_arg_is_read_flag args
+    && not (List.exists git_config_arg_is_write_flag args)
+;;
+
+let git_remote_args_are_read_only = function
+  | [] -> true
+  | ("-v" | "--verbose") :: _ -> true
+  | ("show" | "get-url") :: _ -> true
+  | _ -> false
+;;
+
+let git_tag_args_are_read_only = function
+  | [] -> true
+  | args ->
+    let is_read_flag = function
+      | "-l" | "--list" | "-n" | "--points-at" -> true
+      | _ -> false
+    in
+    let is_write_flag = function
+      | "-a" | "--annotate" | "-s" | "--sign" | "-d" | "--delete" | "-f" ->
+        true
+      | _ -> false
+    in
+    List.exists is_read_flag args && not (List.exists is_write_flag args)
+;;
+
+let git_clean_args_are_dry_run args =
+  let is_dry_run_flag = function
+    | "-n" | "--dry-run" -> true
+    | _ -> false
+  in
+  List.exists is_dry_run_flag args
+;;
+
 let classify_write_detail (words : string list) : risk_class option =
   match words with
-  | "git" :: sub :: _ ->
+  | "git" :: sub :: rest ->
     (match sub with
-     | "push" | "merge" | "rebase" | "commit" -> Some R1_Reversible_mutation
+     | "push" | "merge" | "rebase" | "commit" | "add" | "apply" | "am"
+     | "cherry-pick" | "revert" | "switch" | "restore" | "pull" | "fetch"
+     | "worktree" | "submodule" | "config" | "remote" ->
+       Some R1_Reversible_mutation
      | "reset" -> Some R2_Irreversible
-     | "checkout" | "branch" | "tag" | "stash" | "clone" | "init" ->
+     | "clean" ->
+       if git_clean_args_are_dry_run rest then None else Some R2_Irreversible
+     | "branch" ->
+       if git_branch_args_are_read_only rest
+       then None
+       else Some R1_Reversible_mutation
+     | "checkout" | "tag" | "stash" | "clone" | "init" ->
        Some R1_Reversible_mutation
      | _ -> None)
   | ("npm" | "pnpm" | "yarn") :: _ -> Some R1_Reversible_mutation
@@ -81,7 +298,7 @@ let repo_hosting_cli_irreversible_ops =
 let repo_hosting_cli_reversible_mutations =
   [
     ("pr",
-     [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock";
+     [ "create"; "close"; "reopen"; "edit"; "comment"; "review"; "lock"; "checkout";
        "unlock" ]);
     ("issue",
      [ "create"; "close"; "reopen"; "edit"; "comment"; "lock"; "unlock";
@@ -283,11 +500,18 @@ let flat_stage_words (ir : Shell_ir.t) : string list =
 
 let is_write_operation (words : string list) =
   match words with
+  | "git" :: "branch" :: rest -> not (git_branch_args_are_read_only rest)
+  | "git" :: "clean" :: rest -> not (git_clean_args_are_dry_run rest)
+  | "git" :: "config" :: rest -> not (git_config_args_are_read_only rest)
+  | "git" :: "remote" :: rest -> not (git_remote_args_are_read_only rest)
+  | "git" :: "tag" :: rest -> not (git_tag_args_are_read_only rest)
   | "git" :: sub :: _ ->
-    List.mem
-      sub
-      [ "push"; "commit"; "merge"; "rebase"; "reset"; "checkout"; "branch";
-        "tag"; "stash"; "clone"; "init" ]
+    not
+      (List.mem
+         sub
+         [ "status"; "log"; "show"; "diff"; "blame"; "rev-parse"; "merge-base";
+           "ls-files"; "ls-tree"; "cat-file"; "describe"; "name-rev"; "for-each-ref";
+           "shortlog"; "grep"; "help"; "--help"; "--version"; "version" ])
   | "dune" :: sub :: _ -> List.mem sub [ "clean"; "promote" ]
   | "make" :: sub :: _ -> List.mem sub [ "clean"; "deploy"; "install"; "publish" ]
   | ("npm" | "pnpm" | "yarn") :: sub :: _ ->
@@ -320,29 +544,13 @@ let is_write_operation (words : string list) =
 ;;
 
 let is_destructive_bash_operation (words : string list) =
-  let is_short_option arg = String.length arg > 1 && arg.[0] = '-' && arg.[1] <> '-' in
-  let has_short_flag flag arg = is_short_option arg && String.contains arg flag in
-  let is_protected_branch_target arg =
-    let target = String.lowercase_ascii arg in
-    List.mem
-      target
-      [ "main"; "master"; "origin/main"; "origin/master";
-        "refs/heads/main"; "refs/heads/master" ]
-    || List.exists
-         (fun suffix -> String.ends_with ~suffix target)
-         [ ":main"; ":master"; ":origin/main"; ":origin/master";
-           ":refs/heads/main"; ":refs/heads/master" ]
-  in
   match words with
   | "git" :: "push" :: rest ->
-    let has_force =
-      List.exists
-        (fun arg ->
-           arg = "--force" || arg = "-f"
-           || String.starts_with ~prefix:"--force-with-lease" arg)
-        rest
-    in
-    has_force && List.exists is_protected_branch_target rest
+    List.exists
+      (fun arg ->
+         arg = "--force" || arg = "-f"
+         || String.starts_with ~prefix:"--force-with-lease" arg)
+      rest
   | "rm" :: rest ->
     let option_args =
       List.filter (fun arg -> String.length arg > 0 && arg.[0] = '-') rest
@@ -360,20 +568,393 @@ let is_destructive_bash_operation (words : string list) =
   | _ -> false
 ;;
 
+(* --- Action-flag danger (read-shaped tools, dangerous flags) ---
+
+   find/sed/sort are legitimate read-shaped tools, but a single flag turns
+   them destructive or write-capable while the command identity stays read-like.
+   [is_write_operation]/[classify_write_detail] (head-token
+   keyed) therefore never see the danger. The Find/Sort typed GADT does
+   not model these flags either — like [gh], the risk is string-borne — so
+   [classify_words] owns it as the floor. ([Sed.in_place] IS modeled, so
+   [risk_of_typed] escalates it on the typed path too; the floor stays
+   redundant there.)
+
+   Mapping rationale: [-exec]/[-execdir]/[-ok]/[-okdir] run an arbitrary
+   command and [-delete] removes files —
+   the intent is "nobody destroys", so [Destructive_protected] blocks all
+   keepers (dev included). The file-writing primaries ([-fprintf]/[-fls]/
+   [-fprint]/[-fprint0], [sed -i], [sort -o]) are ordinary writes: [R1]
+   (readonly keeper blocked, dev keeper allowed — a split that belongs to
+   risk classification rather than executable-name admission). *)
+
+let find_destructive_primaries = [ "-delete"; "-exec"; "-execdir"; "-ok"; "-okdir" ]
+let find_write_primaries = [ "-fprintf"; "-fls"; "-fprint"; "-fprint0" ]
+
+(* sed [-i]/[-i.bak]/[-Ei]/[--in-place]/[--in-place=.bak]. No other sed
+   short option carries 'i', so a bundled short flag containing 'i' is
+   in-place edit. *)
+let sed_is_in_place arg =
+  has_short_flag 'i' arg
+  || String.equal arg "--in-place"
+  || String.starts_with ~prefix:"--in-place=" arg
+;;
+
+(* sort [-o FILE]/[-ro FILE]/[--output FILE]/[--output=FILE]. 'o' is the
+   only sort short option, so any short flag containing 'o' writes a file. *)
+let sort_writes_file arg =
+  has_short_flag 'o' arg
+  || String.equal arg "--output"
+  || String.starts_with ~prefix:"--output=" arg
+;;
+
+let action_flag_risk (words : string list) : risk_class =
+  match words with
+  | "find" :: rest ->
+    if List.exists (fun a -> List.mem a find_destructive_primaries) rest
+    then Destructive_protected
+    else if List.exists (fun a -> List.mem a find_write_primaries) rest
+    then R1_Reversible_mutation
+    else R0_Read
+  | "sed" :: rest ->
+    if List.exists sed_is_in_place rest then R1_Reversible_mutation else R0_Read
+  | "sort" :: rest ->
+    if List.exists sort_writes_file rest then R1_Reversible_mutation else R0_Read
+  | _ -> R0_Read
+;;
+
+(* --- Word-list decision (pre-typed-GADT path) -----------------------
+
+   Retained for the [Generic] escape hatch (env/redirect/$VAR/unknown
+   bin), for [Pipeline]s, and as the differential baseline that
+   [risk_of_typed] must never under-classify. *)
+
+let classify_words (words : string list) : risk_class =
+  let words = normalize_command_words words in
+  if head_name_in shell_interpreter_names words then Destructive_protected
+  else if head_name_in shell_capable_executable_names words
+  then Destructive_protected
+  else if head_name_in network_primitive_names words then R1_Reversible_mutation
+  else if is_destructive_bash_operation words then Destructive_protected
+  else
+    (* find/sed/sort action-flags are checked before the write/gh/R0
+       fall-through; these heads do not overlap [is_write_operation] or
+       [classify_write_detail], so an early escalation here is the max. *)
+    match action_flag_risk words with
+    | (Destructive_protected | R1_Reversible_mutation | R2_Irreversible) as r -> r
+    | R0_Read ->
+      if is_write_operation words then
+        (match classify_write_detail words with
+         | Some r -> r
+         | None -> R2_Irreversible)
+      else
+        (match words with
+         | "gh" :: _ -> classify_repo_hosting_cli words
+         | _ -> R0_Read)
+;;
+
+(* --- Typed-GADT decision substrate (RFC-0160 §S1 completion) ----------
+
+   [risk_of_typed] is the risk opinion implied by the typed command
+   shape alone — the first decision path that reads the [Shell_ir_typed]
+   GADT instead of re-flattening to a word list. [classify] combines it
+   with the word-list floor ([classify_words]) by taking the stricter of
+   the two, so the overall decision is monotone-safe by construction.
+
+   The match is exhaustive (no [_ ->] catch-all): adding a constructor
+   to [Shell_ir_typed_types.command] forces a compile error here, so a
+   new typed command cannot reach dispatch without a risk decision.
+   CLAUDE.md §"FSM Sparse Match" — every constructor named, no wildcard.
+
+   Policy (2026-06-07, Shell IR SSOT — monotone-safe, escalate dangerous
+   gaps only): the type closes word-list holes it makes visible —
+   [Sudo] (privilege escalation; the word-list head token was "sudo" so
+   its "rm"/"git push" arms never fired -> silent R0), [Su] and [Mkfs]
+   (R0 -> R2), plus network primitives ([Curl]/[Wget]/[Ssh]/[Scp]/[Rsync])
+   that are not local reads and must not promote to Safe_IR. Commands the
+   word-list already classifies keep their risk (sed/git pull stay R0;
+   git push/commit stay R1; rm -rf protected stays Destructive). [Gh] and
+   [Generic] return R0 here because the
+   type cannot see their risk-bearing tokens (gh -X METHOD / graphql
+   body / -f fields live in argv strings, not the typed shape); the
+   word-list floor in [classify] supplies it. For gh this is by design
+   and permanent — gh risk is irreducibly string-borne, so floor
+   retirement (P7) is scoped to structurally-typed classes and never
+   covers gh. *)
+
+let npm_write_subcommands =
+  [ "add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink";
+    "update"; "up" ]
+;;
+
+let risk_of_typed (w : Shell_ir_typed.wrapped) : risk_class =
+  let open Shell_ir_typed in
+  match w with
+  (* --- read / inspection: R0_Read ----------------------------------- *)
+  | W (Ls _) -> R0_Read
+  | W (Cat _) -> R0_Read
+  | W (Rg _) -> R0_Read
+  (* find -delete / -exec / -fprintf carry their danger in action-flags the
+     Find GADT does not model, so (like gh) the risk is string-borne and
+     classify_words owns it as the floor. The typed shape alone is R0. *)
+  | W (Find _) -> R0_Read
+  | W (Head _) -> R0_Read
+  | W (Tail _) -> R0_Read
+  | W (Grep _) -> R0_Read
+  | W (Wc _) -> R0_Read
+  | W (Pwd _) -> R0_Read
+  | W (Echo _) -> R0_Read
+  | W (Which _) -> R0_Read
+  (* sort -o FILE writes a file; the Sort GADT does not model [-o], so
+     classify_words owns it as the floor (string-borne, like find). R0 here. *)
+  | W (Sort _) -> R0_Read
+  | W (Cut _) -> R0_Read
+  | W (Tr _) -> R0_Read
+  | W (Date _) -> R0_Read
+  | W (Env _) -> R0_Read
+  | W (Printenv _) -> R0_Read
+  | W (Uniq _) -> R0_Read
+  | W (Basename _) -> R0_Read
+  | W (Dirname _) -> R0_Read
+  | W (Test _) -> R0_Read
+  | W (Stat _) -> R0_Read
+  | W (Hostname _) -> R0_Read
+  | W (Whoami _) -> R0_Read
+  | W (Du _) -> R0_Read
+  | W (Df _) -> R0_Read
+  | W (File _) -> R0_Read
+  | W (Printf _) -> R0_Read
+  | W (Uname _) -> R0_Read
+  | W (Ps _) -> R0_Read
+  | W (Tty _) -> R0_Read
+  | W (Diff _) -> R0_Read
+  (* git read subcommands: R0 (parity with word-list) *)
+  | W (Git_status _) -> R0_Read
+  | W (Git_diff _) -> R0_Read
+  | W (Git_log _) -> R0_Read
+  (* git pull: word-list does not list "pull" as write -> R0 (kept under
+     option B; escalation deferred to a correctness follow-up) *)
+  | W (Git_pull _) -> R0_Read
+  | W (Git_stash _) -> R0_Read
+  | W (Git_rebase _) -> R0_Read
+  | W (Git_merge _) -> R0_Read
+  | W (Git_branch _) -> R0_Read
+  (* RFC-0208 P3: checkout mutates the working tree / HEAD (and -b creates
+     a branch); the word-list floor classifies all [git checkout] as a
+     write (R1). Match it on the typed path so the floor is redundant
+     here. *)
+  | W (Git_checkout _) -> R1_Reversible_mutation
+  | W (Git_fetch _) -> R0_Read
+  | W (Git_show _) -> R0_Read
+  (* RFC-0208 P3: the word-list floor classifies all [git reset] as R2
+     (classify_write_detail). Match it on the typed path. A future,
+     deliberate de-escalation could rate --soft/--mixed as R1, but only
+     by lowering the floor in lockstep — never below it (monotone). *)
+  | W (Git_reset _) -> R2_Irreversible
+  | W (Git_blame _) -> R0_Read
+  | W (Git_add _) -> R0_Read
+  (* Network primitives are not local reads. Keep this in Shell IR risk so
+     Execute/safe_sh consume one classification substrate instead of each
+     keeping executable-name gates. *)
+  | W (Curl _) -> R1_Reversible_mutation
+  | W (Wget _) -> R1_Reversible_mutation
+  | W (Ssh _) -> R1_Reversible_mutation
+  | W (Scp _) -> R1_Reversible_mutation
+  | W (Tar _) -> R0_Read
+  (* sed -i / --in-place edits files in place (R1). The GADT models
+     [in_place], so the typed path escalates it; classify_words owns the
+     word-list floor for parity. Non-in-place sed is a read filter (R0). *)
+  | W (Sed { in_place; _ }) ->
+    if in_place then R1_Reversible_mutation else R0_Read
+  | W (Rsync _) -> R1_Reversible_mutation
+  (* Shell-capable interpreters/package entrypoints can run arbitrary
+     filesystem and process mutations even when their argv looks read-shaped. *)
+  | W (Node _) -> Destructive_protected
+  | W (Python _) -> Destructive_protected
+  | W (Python3 _) -> Destructive_protected
+  | W (Pip _) -> Destructive_protected
+  | W (Npx _) -> Destructive_protected
+  (* build and analysis tools the word-list leaves at R0 *)
+  | W (Patch _) -> R0_Read
+  | W (Cargo _) -> R0_Read
+  | W (Go _) -> R0_Read
+  | W (Opam { subcommand; _ }) ->
+    if String.equal subcommand "exec" then Destructive_protected
+    else R0_Read
+  | W (Uv _) -> R0_Read
+  | W (Glab _) -> R0_Read
+  | W (Pytest _) -> R0_Read
+  | W (Terminal_notifier _) -> R0_Read
+  | W (Ruff _) -> R0_Read
+  | W (Pyright _) -> R0_Read
+  | W (Tsc _) -> R0_Read
+  | W (Ocamlfind _) -> R0_Read
+  | W (Rustc _) -> R0_Read
+  | W (Gofmt _) -> R0_Read
+  | W (Gradle _) -> R0_Read
+  | W (Ninja _) -> R0_Read
+  | W (Java _) -> R0_Read
+  | W (Javac _) -> R0_Read
+  | W (Mvn _) -> R0_Read
+  | W (Cmake _) -> R0_Read
+  | W (Dune_local_sh _) -> R0_Read
+  | W (Osascript _) -> R0_Read
+  | W (Play _) -> R0_Read
+  | W (Rec _) -> R0_Read
+  | W (Ffplay _) -> R0_Read
+  | W (Mpg123 _) -> R0_Read
+  | W (Open _) -> R0_Read
+  (* --- reversible mutation: R1 (parity with word-list write list) --- *)
+  | W (Mkdir _) -> R1_Reversible_mutation
+  | W (Chmod _) -> R1_Reversible_mutation
+  | W (Chown _) -> R1_Reversible_mutation
+  | W (Make _) -> R1_Reversible_mutation
+  | W (Git_clone _) -> R1_Reversible_mutation
+  | W (Git_commit _) -> R1_Reversible_mutation
+  (* node package managers: write subcommands -> R1, else R0 *)
+  | W (Npm { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  | W (Yarn { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  | W (Pnpm { subcommand; _ }) ->
+    if List.mem subcommand npm_write_subcommands then R1_Reversible_mutation
+    else R0_Read
+  (* git push: force / force-with-lease is Destructive_protected;
+     protected-branch escalation lives in policy hooks (RFC-0208). *)
+  | W (Git_push { force; force_with_lease; _ }) ->
+    if force || force_with_lease then Destructive_protected
+    else R1_Reversible_mutation
+  (* --- irreversible: R2 --------------------------------------------- *)
+  (* Su / Dd / Mkfs: word-list head-token match missed Su/Mkfs (-> R0);
+     the type makes them visible. Dd was already R2 in the word-list. *)
+  | W (Su _) -> R2_Irreversible
+  | W (Dd _) -> R2_Irreversible
+  | W (Mkfs _) -> R2_Irreversible
+  (* rm: recursive + force -> Destructive_protected, else R2 (word-list
+     parity with [is_destructive_bash_operation] / [classify_write_detail]) *)
+  | W (Rm { recursive; force; _ }) ->
+    if recursive && force then Destructive_protected else R2_Irreversible
+  (* --- privilege escalation: Destructive_protected ------------------ *)
+  (* sudo wraps an arbitrary argv; the word-list head was "sudo" so its
+     "rm"/"git push" arms never fired (silent R0). Privilege escalation
+     always requires approval. *)
+  | W (Sudo _) -> Destructive_protected
+  (* RFC-0208: gh risk is irreducibly string-borne. The HTTP method
+     (-X DELETE), -f/--field key=values, the graphql mutation body, and a
+     large, evolving set of subcommands all live in argv strings, not in
+     the command's typed shape. Unlike [rm -rf] / [git reset] / [sudo],
+     whose risk IS structural and typeable, gh has no risk-bearing typed
+     shape for [risk_of_typed] to read, so it returns R0 and [classify]'s
+     word-list floor ([classify_words] -> [classify_repo_hosting_cli] on
+     the original, un-round-tripped words) owns gh risk by design. This is
+     the honest boundary: an earlier version round-tripped the IR back to
+     words here to fake a typed opinion, but the round-trip mis-parsed
+     `-X DELETE` and silently under-classified it to R0 — strictly worse
+     than the floor it duplicated. gh stays floor-owned; P7 floor
+     retirement is scoped to structurally-typed classes only. *)
+  | W (Gh _) -> R0_Read
+  | W (Docker _) -> R0_Read
+  (* File operations — cp/mv/ln/touch are reversible or low-risk mutations *)
+  | W (Cp _) -> R1_Reversible_mutation
+  | W (Mv _) -> R1_Reversible_mutation
+  | W (Ln _) -> R1_Reversible_mutation
+  | W (Touch _) -> R1_Reversible_mutation
+  | W (Tee _) -> R1_Reversible_mutation
+  | W (Awk _) -> R0_Read
+  | W (Xargs _) -> R2_Irreversible
+  (* escape hatch (env/redirect/$VAR/unknown bin): no typed shape to
+     read; [classify]'s word-list floor classifies it. *)
+  | W (Generic _) -> R0_Read
+;;
+
 (* --- Main classifier ------------------------------------------------ *)
 
-let classify (T ir : undecided t) : decided decided_ir =
-  let words = flat_stage_words ir in
-  let risk =
-    if is_destructive_bash_operation words then
-      Destructive_protected
-    else if is_write_operation words then
-      (match classify_write_detail words with
-       | Some r -> r
-       | None -> R2_Irreversible)
-    else
-      (match words with
-       | "gh" :: _ -> classify_repo_hosting_cli words
-       | _ -> R0_Read)
+let risk_rank = function
+  | R0_Read -> 0
+  | R1_Reversible_mutation -> 1
+  | R2_Irreversible -> 2
+  | Destructive_protected -> 3
+;;
+
+let max_risk a b = if risk_rank a >= risk_rank b then a else b
+
+let redirect_risk = function
+  | Redirect_scope.File { mode = (Redirect_scope.Write | Redirect_scope.Append); _ } ->
+    R1_Reversible_mutation
+  | Redirect_scope.File { mode = Redirect_scope.Read; _ }
+  | Redirect_scope.Fd_to_fd _ ->
+    R0_Read
+;;
+
+let redirect_floor redirects =
+  List.fold_left
+    (fun acc redirect -> max_risk acc (redirect_risk redirect))
+    R0_Read
+    redirects
+;;
+
+(* Per-[Simple] decision: the stricter of the typed-shape opinion and
+   the word-list floor for that single command. Both opinions are scoped
+   to one command's own words, so a pipeline can compose them stage by
+   stage instead of flattening every stage into one head-anchored list.
+   When [literal_words_of_simple] returns [None] (env/redirect/$VAR present)
+   the word-list floor cannot be computed and falls back to [R0_Read];
+   the typed opinion still supplies escalation for those cases. Redirect
+   writes are command syntax rather than argv tokens, so they get their
+   own floor here; otherwise [echo hi > file] can remain R0 in receipts
+   even though capability policy correctly sees [Write_path]. *)
+let decision_of_simple (s : Shell_ir.simple) : risk_class =
+  let typed = risk_of_typed (Shell_ir_typed.of_simple s) in
+  let floor =
+    match literal_words_of_simple s with
+    | Some words -> classify_words words
+    | None -> R0_Read
   in
-  { ir; risk }
+  max_risk (redirect_floor s.redirects) (max_risk typed floor)
+;;
+
+(* RFC-0208 P0: compose the per-stage decision across a pipeline with
+   [max_risk], rather than the previous blanket [Pipeline -> R0_Read]
+   for the typed path. Before this, a privilege-escalation or destructive
+   command in any non-head pipeline stage (e.g.
+   [echo x | sudo tee /etc/passwd], [cat f | git push --force origin main],
+   [sudo cat f | grep y]) was invisible to both the typed path (which
+   read no stage) and the word-list floor (which matches only the head
+   token of the flattened word list). The fold reuses the existing
+   per-constructor [risk_of_typed] and [classify_words] per stage — in
+   particular the [W (Sudo)] arm now fires for sudo anywhere in a
+   pipeline — so it adds no new string classifier. *)
+let rec composed_decision (ir : Shell_ir.t) : risk_class =
+  match ir with
+  | Shell_ir.Simple s -> decision_of_simple s
+  | Shell_ir.Pipeline stages ->
+    List.fold_left
+      (fun acc stage -> max_risk acc (composed_decision stage))
+      R0_Read
+      stages
+;;
+
+(* RFC-0208 P6: [classify] returns [composed_decision] directly.
+   The legacy flat word-list floor was removed: per-stage [max_risk]
+   composition (P0) already covers every cross-stage scenario the flat
+   floor caught, and P2 harness data showed 84% redundancy / 0%
+   structural load-bearing. Any remaining string-borne gaps are owned by
+   Hook/Policy pre-flight checks, not core classification. *)
+let classify (T ir : undecided t) : decided decided_ir =
+  { ir; risk = composed_decision ir }
+;;
+
+(* RFC-0208 P1 observability: did the typed lowering classify every
+   [Simple] node via a real constructor, or did it fall to the [Generic]
+   escape hatch? [classify] folds the typed and word-list verdicts into a
+   single [risk_class] and discards which path won, so the 110 typed
+   constructors are invisible in production. [typed_hit_of_ir] recovers
+   the typed-vs-Generic signal so the dispatch log and the differential
+   harness can measure real coverage. A pipeline is a typed hit only when
+   all of its stages are. *)
+let rec typed_hit_of_ir (ir : Shell_ir.t) : bool =
+  match ir with
+  | Shell_ir.Simple s -> not (Shell_ir_typed.is_generic (Shell_ir_typed.of_simple s))
+  | Shell_ir.Pipeline stages -> List.for_all typed_hit_of_ir stages
+;;

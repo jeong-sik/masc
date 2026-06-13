@@ -105,7 +105,7 @@ let extract_region_from_full_file ~keeper_id ~file_path ~turn ~tool_name ~conten
 let is_file_write_tool name =
   name = "write_file" || name = "edit_file" || name = "apply_patch"
 
-let regions_file ~base_dir ?(partition = Ide_paths.Legacy) () =
+let regions_file ~base_dir ?(partition = Ide_paths.Orphan) () =
   Filename.concat (Ide_paths.partition_store_dir ~base_dir partition) "regions.jsonl"
 
 let rec ensure_dir path =
@@ -116,15 +116,13 @@ let rec ensure_dir path =
     try Unix.mkdir path 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let append_region ~base_dir ?(partition = Ide_paths.Legacy) region =
+let append_region ~base_dir ?(partition = Ide_paths.Orphan) region =
   let path = regions_file ~base_dir ~partition () in
   ensure_dir (Filename.dirname path);
   Fs_compat.append_jsonl path (region_to_json region)
 
 (* RFC-0128 §5 — read-side helpers. Regions are append-only; reads do
-   not mutate. The structural dedup key avoids treating a Legacy
-   record and its By_url cousin as two separate entries when both
-   files have the same write. *)
+   not mutate. *)
 
 let load_regions_from_path ?file_path path =
   if not (Sys.file_exists path) then []
@@ -158,18 +156,10 @@ let region_key (r : code_region) =
     r.timestamp_ms
     src_tag
 
-let read_regions ~base_dir ?(partition = Ide_paths.Legacy) ?file_path () =
+let read_regions ~base_dir ?(partition = Ide_paths.Orphan) ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
-let json_string_field key json =
-  match json with
-  | `Assoc fields -> (
-      match List.assoc_opt key fields with
-      | Some (`String s) when s <> "" -> Some s
-      | _ -> None)
-  | _ -> None
-
-let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn json =
+let ingest_tool_call ~base_dir ?(partition = Ide_paths.Orphan) ~keeper_id ~turn json =
   let tool_name =
     match json with
     | `Assoc fields -> (
@@ -207,7 +197,7 @@ let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy) ~keeper_id ~turn 
                content is available.
            RFC-0128 PR-1e: the content fallback for edit_file/apply_patch
            used to be served by Ide_meta_sync.flush_regions, which wrote
-           to the Legacy partition and produced a double-write against the
+           to the flat store and produced a double-write against the
            by-url partition once PR-1c routed ingest_tool_call. Moving the
            fallback into ingest_tool_call lets us drop the meta_sync call
            site so all keeper write records land in a single, consistent

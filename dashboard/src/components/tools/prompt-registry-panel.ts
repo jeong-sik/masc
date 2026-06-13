@@ -16,6 +16,7 @@ import { TextArea, TextInput } from '../common/input'
 import { FilterChips } from '../common/filter-chips'
 import { StatusChip } from '../common/status-chip'
 import { errorToString } from '../../lib/format-string'
+import { KeeperPromptAssemblyPanel } from '../keeper-prompt-assembly-panel'
 
 type PromptSourceFilter = 'all' | PromptSource
 
@@ -171,6 +172,8 @@ export function PromptRegistryPanel() {
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
+
+      <${KeeperPromptAssemblyPanel} prompts=${prompts} />
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
       ${status ? html`<div class="mb-4 rounded-[var(--r-1)] border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[var(--sky-light)]">${status}</div>` : null}

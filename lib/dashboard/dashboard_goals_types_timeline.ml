@@ -11,8 +11,10 @@
     inspectors. Re-included by [Dashboard_goals_types] so the public
     surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
+
+let json_to_string_opt = function | `String s -> Some s | _ -> None
+let json_to_int_opt = function | `Int n -> Some n | `Intlit s -> (try Some (int_of_string s) with _ -> None) | _ -> None
 
 let goal_status_color = function
   | Goal_store.Active -> "#4ade80"
@@ -53,19 +55,10 @@ let task_to_tree_json ((task, linkage_source) : Masc_domain.task * string) =
     [
       ("id", `String task.id);
       ("title", `String task.title);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
       ("status", `String status);
       ("status_color", `String (task_status_color status));
       ("priority", `Int task.priority);
-      ("goal_id", Json_util.string_opt_to_json task.goal_id);
-      ("assignee",
-       match task_assignee task with
-       | Some assignee -> `String assignee
-       | None -> `Null);
-      ("goal_id",
-       match task.goal_id with
-       | Some goal_id -> `String goal_id
-       | None -> `Null);
+      ("assignee", Json_util.string_opt_to_json (task_assignee task));
       ("linkage_source", `String linkage_source);
       ("is_terminal", `Bool (task_is_terminal task));
       ("created_at", `String task.created_at);
@@ -155,8 +148,8 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
   let meta = detail.meta in
   let latest_receipt = detail.latest_receipt in
   let latest_causal_event =
-    match detail.runtime_trust |> member "latest_causal_event" with
-    | `Assoc _ as event -> event
+    match Json_util.assoc_member_opt "latest_causal_event" detail.runtime_trust with
+    | Some (`Assoc _ as event) -> event
     | _ -> `Null
   in
   let latest_execution_outcome =
@@ -175,34 +168,17 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
       ( "active_goal_ids",
         `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) );
       ( "sandbox_profile",
-        `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile) );
-      ("network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode));
-      ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
+        `String (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile) );
+      ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode));
+      ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
       ( "approval_profile",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_approval_profile receipt with
-             | Some profile -> `String profile
-             | None -> `Null)
-        | None -> `Null );
-      ( "cascade_outcome",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_cascade_outcome receipt with
-             | Some outcome -> `String outcome
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_approval_profile) );
+      ( "runtime_outcome",
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_runtime_outcome) );
       ( "latest_execution_outcome",
-        match latest_execution_outcome with
-        | Some outcome -> `String outcome
-        | None -> `Null );
+        Json_util.string_opt_to_json latest_execution_outcome );
       ( "latest_execution_at",
-        match latest_receipt with
-        | Some receipt ->
-            (match receipt_ended_at receipt with
-             | Some ended_at -> `String ended_at
-             | None -> `Null)
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt receipt_ended_at) );
       ( "latest_receipt",
         match latest_receipt with
         | Some receipt -> receipt
@@ -223,17 +199,17 @@ let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
     ]
 
 let json_member_or_null field = function
-  | `Assoc _ as json -> member field json
+  | `Assoc _ as json -> Option.value ~default:`Null (Json_util.assoc_member_opt field json)
   | _ -> `Null
 
 let goal_event_timeline_json event =
   let event_type =
-    event |> member "event_type" |> to_string_option
+    Json_util.get_string event "event_type"
     |> Option.value ~default:"goal_event"
   in
-  let payload = event |> member "payload" in
+  let payload = Option.value ~default:`Null (Json_util.assoc_member_opt "payload" event) in
   let payload_field field = json_member_or_null field payload in
-  let ts = event |> member "ts" |> to_string_option |> Option.value ~default:"" in
+  let ts = Json_util.get_string event "ts" |> Option.value ~default:"" in
   let title, summary, severity =
     match event_type with
     | "goal_phase" ->
@@ -245,15 +221,15 @@ let goal_event_timeline_json event =
            with any legitimate value named "unknown" in the producer
            event stream, so the operator cannot tell "the payload
            field was missing" apart from "the producer sent the
-           string 'unknown'".  Bracketed sentinels are not emitted by
+           string 'unknown'".  Bracketed markers are not emitted by
            any producer, so a non-zero appearance is an unambiguous
            producer-side fix signal. *)
         let phase =
-          payload_field "phase" |> to_string_option
+          payload_field "phase" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.phase>"
         in
         let actor =
-          payload_field "actor" |> json_member_or_null "id" |> to_string_option
+          payload_field "actor" |> json_member_or_null "id" |> json_to_string_opt
         in
         ( "Goal Phase",
           (match actor with
@@ -266,12 +242,12 @@ let goal_event_timeline_json event =
     | "goal_verification_opened" ->
         let request = payload_field "request" in
         let request_id =
-          request |> json_member_or_null "id" |> to_string_option
+          request |> json_member_or_null "id" |> json_to_string_opt
           |> Option.value ~default:"request"
         in
         let required =
           request |> json_member_or_null "policy_snapshot"
-          |> json_member_or_null "required_verdicts" |> to_int_option
+          |> json_member_or_null "required_verdicts" |> json_to_int_opt
         in
         ( "Goal Verification Opened",
           (match required with
@@ -281,12 +257,12 @@ let goal_event_timeline_json event =
     | "goal_vote" ->
         let vote = payload_field "vote" in
         let decision =
-          vote |> json_member_or_null "decision" |> to_string_option
+          vote |> json_member_or_null "decision" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.vote.decision>"
         in
         let principal =
           vote |> json_member_or_null "principal" |> json_member_or_null "id"
-          |> to_string_option
+          |> json_to_string_opt
           |> Option.value ~default:"principal"
         in
         ( "Goal Vote",
@@ -294,7 +270,7 @@ let goal_event_timeline_json event =
           if String.equal decision "reject" then "bad" else "ok" )
     | "goal_verification_resolved" ->
         let status =
-          payload_field "status" |> to_string_option
+          payload_field "status" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.status>"
         in
         ( "Goal Verification Resolved",
@@ -304,7 +280,7 @@ let goal_event_timeline_json event =
           | "rejected" -> "bad"
           | _ -> "warn") )
     | "goal_approval_opened" ->
-        let request_id = payload_field "request_id" |> to_string_option in
+        let request_id = payload_field "request_id" |> json_to_string_opt in
         ( "Goal Approval Opened",
           (match request_id with
           | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
@@ -312,7 +288,7 @@ let goal_event_timeline_json event =
           "warn" )
     | "goal_approval_resolved" ->
         let decision =
-          payload_field "decision" |> to_string_option
+          payload_field "decision" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.decision>"
         in
         ( "Goal Approval Resolved",
@@ -343,15 +319,15 @@ let build_goal_timeline node linked_keepers approvals goal_events =
   let approval_events =
     approvals
     |> List.filter_map (fun approval ->
-           match approval |> member "requested_at_iso" |> to_string_option with
+           match Json_util.get_string approval "requested_at_iso" with
            | None -> None
            | Some requested_at ->
                let approval_id =
-                 approval |> member "id" |> to_string_option
+                 Json_util.get_string approval "id"
                  |> Option.value ~default:"approval"
                in
                let tool_name =
-                 approval |> member "tool_name" |> to_string_option
+                 Json_util.get_string approval "tool_name"
                  |> Option.value ~default:"tool"
                in
                Some
@@ -359,7 +335,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                     ~lane:("approval:" ^ approval_id)
                     ~title:(Printf.sprintf "Approval · %s" tool_name)
                     ~summary:
-                      (approval |> member "input_preview" |> to_string_option
+                      (Json_util.get_string approval "input_preview"
                        |> Option.value ~default:"pending operator decision")
                     ~severity:"warn"))
   in
@@ -369,19 +345,19 @@ let build_goal_timeline node linked_keepers approvals goal_events =
            match trust_latest_event detail.runtime_trust with
            | Some event ->
                let title =
-                 event |> member "title" |> to_string_option
+                 Json_util.get_string event "title"
                  |> Option.value ~default:(Printf.sprintf "Keeper · %s" detail.meta.name)
                in
                let summary =
-                 event |> member "summary" |> to_string_option
+                 Json_util.get_string event "summary"
                  |> Option.value ~default:"latest keeper event"
                in
                let severity =
-                 event |> member "severity" |> to_string_option
+                 Json_util.get_string event "severity"
                  |> Option.value ~default:"warn"
                in
                let ts =
-                 event |> member "ts" |> to_string_option
+                 Json_util.get_string event "ts"
                  |> Option.value ~default:(Masc_domain.now_iso ())
                in
                Some
@@ -403,7 +379,7 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                        let severity =
                          if receipt_has_error receipt then "bad"
                          else if receipt_has_sandbox_risk receipt
-                                 || receipt_has_cascade_risk receipt
+                                 || receipt_has_runtime_risk receipt
                          then "warn"
                          else "ok"
                        in
@@ -414,13 +390,13 @@ let build_goal_timeline node linked_keepers approvals goal_events =
                             ~summary:
                               (Printf.sprintf "%s · %s"
                                  outcome
-                                 (receipt_cascade_name receipt
-                                  |> Option.value ~default:(Keeper_types.cascade_name_of_meta detail.meta)))
+                                 (receipt_runtime_id receipt
+                                  |> Option.value ~default:(Keeper_meta_contract.runtime_id_of_meta detail.meta)))
                             ~severity)))
   in
   let goal_events = List.map goal_event_timeline_json goal_events in
   task_events @ approval_events @ keeper_events @ goal_events
   |> List.sort (fun left right ->
-         let lts = left |> member "ts" |> to_string_option |> Option.value ~default:"" in
-         let rts = right |> member "ts" |> to_string_option |> Option.value ~default:"" in
+         let lts = Json_util.get_string left "ts" |> Option.value ~default:"" in
+         let rts = Json_util.get_string right "ts" |> Option.value ~default:"" in
          String.compare rts lts)

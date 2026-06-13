@@ -68,18 +68,7 @@ let source_of_string_opt = function
   | "observation" -> Some Observation
   | _ -> None
 
-(* String helper - check if sub is contained in s *)
-let string_contains ~sub s =
-  let sub_len = String.length sub in
-  let s_len = String.length s in
-  if sub_len > s_len then false
-  else
-    let rec check i =
-      if i > s_len - sub_len then false
-      else if String.equal (Stdlib.String.sub s i sub_len) sub then true
-      else check (i + 1)
-    in
-    check 0
+let string_contains = String_util.string_contains_substring
 
 type context = {
   agent_name: string;
@@ -89,7 +78,7 @@ type context = {
 let workspace_root () =
   match Sys.getenv_opt "MASC_BASE_PATH" |> Option.map String.trim with
   | Some root when root <> "" -> Env_config_core.normalize_masc_base_path_input root
-  | _ -> (Host_config.host ()).agent_runtime_root
+  | _ -> (Host_config.host ()).sandbox_workspace_root
 
 let library_root () =
   Filename.concat (workspace_root ()) "docs/library"
@@ -229,8 +218,8 @@ let text_ok ~tool_name ~start_time body : Tool_result.result =
 
 let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =
-    match Yojson.Safe.Util.member "include_candidates" args with
-    | `Bool b -> b
+    match Json_util.assoc_member_opt "include_candidates" args with
+    | Some (`Bool b) -> b
     | _ -> false
   in
   let docs = list_documents ~include_candidates () in
@@ -239,7 +228,7 @@ let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
       let content = In_channel.with_open_text path In_channel.input_all in
       match parse_frontmatter content with
       | Some fm ->
-          let is_candidate = string_contains ~sub:"/candidates/" path in
+          let is_candidate = string_contains ~needle:"/candidates/" path in
           Some (sprintf "- **%s** [%.2f] %s%s\n  tags: %s"
             fm.title fm.confidence
             fm.source
@@ -256,7 +245,7 @@ let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Read document *)
 let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
   if String.equal topic "" then topic_required ~tool_name ~start_time
   else begin
@@ -264,7 +253,7 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
     let files = list_documents ~include_candidates:true () in
     let matching = List.filter (fun f ->
       let base = Filename.basename f in
-      string_contains ~sub:topic (String.lowercase_ascii base)
+      string_contains ~needle:topic (String.lowercase_ascii base)
     ) files in
     match matching with
     | [] ->
@@ -285,13 +274,11 @@ let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
 
 (* Add document *)
 let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
-  let module U = Yojson.Safe.Util in
-  let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
-  let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
-  let confidence = U.member "confidence" args |> U.to_float_option |> Option.value ~default:0.7 in
-  let tags = try U.member "tags" args |> U.to_list |> List.filter_map U.to_string_option
-    with Yojson.Safe.Util.Type_error (_, _) -> [] in
-  let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
+  let title = Json_util.get_string args "title" |> Option.value ~default:"" in
+  let source = Json_util.get_string args "source" |> Option.value ~default:"direct_experience" in
+  let confidence = Json_util.get_float args "confidence" |> Option.value ~default:0.7 in
+  let tags = Json_util.get_string_list args "tags" in
+  let content = Json_util.get_string args "content" |> Option.value ~default:"" in
 
   if String.equal title "" then missing_required ~tool_name ~start_time "title"
   else if String.equal content "" then missing_required ~tool_name ~start_time "content"
@@ -355,9 +342,9 @@ verified_by: []
 
 (* Promote candidate to library *)
 let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
-  let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
+  let topic = Json_util.get_string args "topic"
     |> Option.value ~default:"" in
-  let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
+  let new_confidence = Json_util.get_float args "confidence"
     |> Option.value ~default:0.7 in
 
   if String.equal topic "" then topic_required ~tool_name ~start_time
@@ -367,8 +354,8 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
   else begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
-      string_contains ~sub:"/candidates/" f &&
-      string_contains ~sub:topic_lower (String.lowercase_ascii (Filename.basename f))
+      string_contains ~needle:"/candidates/" f &&
+      string_contains ~needle:topic_lower (String.lowercase_ascii (Filename.basename f))
     ) in
     match candidates with
     | [] ->
@@ -403,7 +390,7 @@ let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
 
 (* Search documents *)
 let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
+  let query = Json_util.get_string args "query"
     |> Option.value ~default:"" in
   if String.equal query "" then query_required ~tool_name ~start_time
   else begin
@@ -413,7 +400,7 @@ let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
       try
         let content = In_channel.with_open_text path In_channel.input_all in
         let content_lower = String.lowercase_ascii content in
-        if string_contains ~sub:query_lower content_lower then
+        if string_contains ~needle:query_lower content_lower then
           match parse_frontmatter content with
           | Some fm -> Some (sprintf "- **%s** [%.2f] %s" fm.title fm.confidence (Filename.basename path))
           | None -> Some (sprintf "- %s" (Filename.basename path))
@@ -466,127 +453,8 @@ let tool_definitions = [
     ("confidence", "number", true, "New confidence score (must be >= 0.5)");
   ]);
   ("masc_library_search", {|Search library documents by content or tags.|}, [
-    ("query", "string", true, "Search query");
+    ("query", "string", false, "Search query; empty or missing returns a workflow error");
   ]);
-]
-
-let schemas : Masc_domain.tool_schema list = [
-  (* masc_library_list *)
-  {
-    name = "masc_library_list";
-    description = "List all documents in the agent knowledge library with title, confidence, source, and tags. \
-Use when browsing available knowledge or checking if a topic is already documented. \
-Pair with masc_library_read to fetch a specific document or masc_library_search to query by content.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("include_candidates", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Include candidate documents awaiting verification");
-        ]);
-      ]);
-    ];
-  };
-
-  (* masc_library_read *)
-  {
-    name = "masc_library_read";
-    description = "Read a specific library document by topic name or partial match. \
-Use when you need the full content of a known knowledge document. \
-After masc_library_list or masc_library_search to find the topic name.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("topic", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Topic name or partial match (e.g., 'eio-mutex')");
-        ]);
-      ]);
-      ("required", `List [`String "topic"]);
-    ];
-  };
-
-  (* masc_library_add *)
-  {
-    name = "masc_library_add";
-    description = "Add a new document to the agent knowledge library (confidence < 0.5 goes to candidates/ for review). \
-Use when recording a new finding, experiment result, or pattern that other agents should know about. \
-Follow up with masc_library_promote to move candidates to the main library after verification.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("title", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Document title");
-        ]);
-        ("source", `Assoc [
-          ("type", `String "string");
-          ("description",
-           `String
-             (sprintf "Source type: %s"
-                (String.concat ", " valid_source_strings)));
-          (* Issue #8601: enum derived from Variant SSOT. *)
-          ("enum",
-           `List (List.map (fun s -> `String s) valid_source_strings));
-        ]);
-        ("confidence", `Assoc [
-          ("type", `String "number");
-          ("description", `String "Confidence score 0.0-1.0");
-        ]);
-        ("tags", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "List of tags");
-        ]);
-        ("content", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Document body content (markdown)");
-        ]);
-      ]);
-      ("required", `List [`String "title"; `String "source"; `String "confidence"; `String "content"]);
-    ];
-  };
-
-  (* masc_library_promote *)
-  {
-    name = "masc_library_promote";
-    description = "Promote a candidate document to the main library after verification (new confidence must be >= 0.5). \
-Use when a candidate document has been reviewed and confirmed as accurate. \
-After masc_library_add placed the document in candidates/.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("topic", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Topic name to promote");
-        ]);
-        ("confidence", `Assoc [
-          ("type", `String "number");
-          ("description", `String "New confidence score (must be >= 0.5)");
-        ]);
-      ]);
-      ("required", `List [`String "topic"; `String "confidence"]);
-    ];
-  };
-
-  (* masc_library_search *)
-  {
-    name = "masc_library_search";
-    description = "Search the agent knowledge library by content keywords or tags. \
-Use when looking for documents on a specific topic without knowing the exact title. \
-Pair with masc_library_read to fetch matching documents in full.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("query", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Search query");
-        ]);
-      ]);
-      ("required", `List [`String "query"]);
-    ];
-  };
-
 ]
 
 (* ================================================================ *)
@@ -604,4 +472,7 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ()))
-    schemas
+    Tool_schemas_library.schemas
+
+let schemas = Tool_schemas_library.schemas
+

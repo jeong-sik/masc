@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 type case_category =
-  | Tool_required
+  | Tool_use
   | Tool_forbidden
   | Recovery_required
   | Multi_step
@@ -49,8 +49,8 @@ type benchmark_case = {
   prompt : string;
   category : case_category;
   keeper_profiles : string list;
-  required_tools : string list;
   forbidden_tools : string list;
+  forbidden_selectors : Eval_tool_selector.t list;
   max_tool_calls : int;
   success_checks : json_check list;
   arg_checks : arg_check list;
@@ -62,6 +62,7 @@ type tool_call = {
   success : bool;
   input : Yojson.Safe.t;
   output : Yojson.Safe.t option;
+  route_evidence : Yojson.Safe.t option;
   duration_ms : float option;
 }
 
@@ -124,7 +125,7 @@ type summary_row = {
   cases_total : int;
   cases_passed : int;
   task_pass_rate : float;
-  correct_tool_rate : float;
+  tool_policy_rate : float;
   arg_valid_rate : float;
   recovery_rate : float;
   unnecessary_tool_rate : float;

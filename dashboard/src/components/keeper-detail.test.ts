@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen } from '@testing-library/preact'
 import { html } from 'htm/preact'
 
 import type { Keeper } from '../types'
@@ -117,7 +117,7 @@ vi.mock('./agent-detail-journal', () => ({
 }))
 
 vi.mock('./keeper-shared', () => ({
-  KeeperConversationPanel: () => null,
+  KeeperConversationPanel: ({ keeperName }: { keeperName: string }) => `direct chat ${keeperName}`,
   KeeperDiagnosticSummary: () => null,
   KeeperRuntimeActions: () => null,
 }))
@@ -137,6 +137,7 @@ vi.mock('../router', () => ({
 }))
 
 import { KeeperDetailPage } from './keeper-detail-page'
+import { activeKeeperDetailSection } from './keeper-detail-shell'
 import {
   clearKeeperDetailSelection,
   closeKeeperDetail,
@@ -262,6 +263,7 @@ describe('KeeperDetailPage', () => {
       params: { section: 'agents', view: 'keepers', keeper: 'analyst' },
       postId: null,
     }
+    activeKeeperDetailSection.value = 'keeper-comms'
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({}), {
       headers: { 'content-type': 'application/json' },
       status: 200,
@@ -296,7 +298,7 @@ describe('KeeperDetailPage', () => {
         name: 'keeper-analyst-agent',
         agent_type: 'agent',
         status: 'active',
-        capabilities: ['keeper', 'preset:research'],
+        capabilities: ['keeper', 'research'],
         current_task: null,
         joined_at: '2026-05-01T00:46:51Z',
         last_seen: '2026-05-01T00:48:26Z',
@@ -321,14 +323,24 @@ describe('KeeperDetailPage', () => {
       },
       trust: {
         disposition: 'Blocked',
-        disposition_reason: 'tool_required_unsatisfied',
+        disposition_reason: 'tool_route_recoverable_failure',
         needs_attention: true,
       },
     } as unknown as Keeper
     keepers.value = [analyst]
 
-    render(html`<${KeeperDetailPage} />`)
+    const { container } = render(html`<${KeeperDetailPage} />`)
     expect(screen.getByText('analyst')).toBeTruthy()
+    expect(screen.getByText('direct chat analyst')).toBeTruthy()
+    expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
+    const pageText = container.textContent ?? ''
+    expect(pageText.indexOf('대화 / 세션')).toBeGreaterThanOrEqual(0)
+    expect(pageText.indexOf('운영 상태 개요')).toBe(-1)
+    const statusTab = screen.getByRole('tab', { name: '상태' })
+    fireEvent.click(statusTab)
+    expect(statusTab.getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByText('운영 상태 개요')).toBeTruthy()
+    expect(screen.queryByText('대화 / 세션')).toBeNull()
     expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
   })
 

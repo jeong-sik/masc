@@ -40,17 +40,7 @@ vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
 
-vi.mock('./components/activity-graph-store', () => ({
-  refreshActivityGraph: vi.fn(),
-}))
-
-vi.mock('./components/git-graph-store', () => ({
-  refreshGitGraph: vi.fn(),
-}))
-
 import { refreshFeatureHealth } from './components/feature-health'
-import { refreshActivityGraph } from './components/activity-graph-store'
-import { refreshGitGraph } from './components/git-graph-store'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
@@ -98,19 +88,19 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'activity' },
-    })).toEqual(['namespaceTruth', 'activityGraph'])
+    })).toEqual(['namespaceTruth', 'observatory'])
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'live' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth', 'observatory'])
   })
 
   it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
     expect(refreshPlanForRoute({
       tab: 'command',
       params: { section: 'operations' },
-    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest'])
+    })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest'])
 
     expect(refreshPlanForRoute({
       tab: 'command',
@@ -128,11 +118,6 @@ describe('refreshPlanForRoute', () => {
       tab: 'workspace',
       params: { section: 'board' },
     })).toEqual(['board'])
-
-    expect(refreshPlanForRoute({
-      tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
-    })).toEqual(['gitGraph'])
 
     expect(refreshPlanForRoute({
       tab: 'lab',
@@ -188,30 +173,17 @@ describe('refreshPlanForRoute', () => {
 
     await waitFor(() => {
       expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
-      expect(refreshActivityGraph).not.toHaveBeenCalled()
     })
   })
 
-  it('refreshes the activity graph only on its explicit evidence lens', async () => {
+  it('keeps retired observatory lens routes on the unified observatory surface', async () => {
     refreshForRoute({
       tab: 'monitoring',
       params: { section: 'observatory', view: 'activity' },
     })
 
     await waitFor(() => {
-      expect(refreshObservatorySurface).not.toHaveBeenCalled()
-      expect(refreshActivityGraph).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('refreshes the repository Git graph view on route entry', async () => {
-    refreshForRoute({
-      tab: 'workspace',
-      params: { section: 'repositories', view: 'graph' },
-    })
-
-    await waitFor(() => {
-      expect(refreshGitGraph).toHaveBeenCalledTimes(1)
+      expect(refreshObservatorySurface).toHaveBeenCalledTimes(1)
     })
   })
 

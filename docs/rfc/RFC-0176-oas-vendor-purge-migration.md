@@ -18,7 +18,7 @@ OAS RFC-0001 (PRs #1727 / #1729 / #1731) renamed the entire public SDK identifie
 - Module file renames (`backend_anthropic.{ml,mli} → backend_provider_a.{ml,mli}`, etc.)
 - Env vars (`ANTHROPIC_API_KEY → PROVIDER_A_API_KEY`, etc.)
 
-masc-mcp consumes `agent_sdk` via opam pin and has ~115 SDK call sites referencing the old names. They must migrate atomically with the new SDK version.
+masc consumes `agent_sdk` via opam pin and has ~115 SDK call sites referencing the old names. They must migrate atomically with the new SDK version.
 
 OAS PR #1737 introduced the post-purge `agent_sdk` floor, and OAS PR #1743 released the reachable downstream pin as `0.198.0`.
 
@@ -67,7 +67,7 @@ OAS PR #1737 introduced the post-purge `agent_sdk` floor, and OAS PR #1743 relea
 
 ## 3. Out of scope
 
-- **masc-mcp 자체 vendor-coupled enum** (`Phonebook.Zai_glm`, `Phonebook.Qwen`, `cascade_phonebook_types.Anthropic_http`, dashboard string `"provider_a-cli"`, etc.) — separate RFC. These are internal classifications that map *to* the SDK; the mapping is updated here (e.g., `Zai_glm -> Llm_provider.Provider_config.Provider_k`), but the masc-mcp side identifiers are preserved pending a future audit.
+- **masc 자체 vendor-coupled enum** (`Phonebook.Zai_glm`, `Phonebook.Qwen`, `runtime_phonebook_types.Anthropic_http`, dashboard string `"provider_a-cli"`, etc.) — separate RFC. These are internal classifications that map *to* the SDK; the mapping is updated here (e.g., `Zai_glm -> Llm_provider.Provider_config.Provider_k`), but the masc side identifiers are preserved pending a future audit.
 - **opam state cleanup** for local development — operator responsibility (`opam pin remove agent_sdk && opam pin add agent_sdk git+https://github.com/jeong-sik/oas.git --yes` after #1743 merges).
 
 ## 4. Verification plan
@@ -85,4 +85,4 @@ All 7 signatures: NO.
 
 1. OAS PR #1737 (version 0.197.0) merges, then PR #1743 publishes the reachable 0.198.0 release boundary.
 2. This PR's CI fetches fresh agent_sdk.0.198.0 → caller migration validates.
-3. masc-mcp operator runs `opam pin remove agent_sdk; opam install masc-mcp` for local development to pick up the new SDK.
+3. masc operator runs `opam pin remove agent_sdk; opam install masc` for local development to pick up the new SDK.

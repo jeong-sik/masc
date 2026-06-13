@@ -4,6 +4,8 @@
     (included below). This module adds recall-specific logic on top. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Re-exported from Keeper_memory_bank} *)
 
@@ -37,7 +39,7 @@ val record_memory_recall_read_error :
     choose their own degraded value explicitly. *)
 
 val read_keeper_memory_summary_result :
-  Coord.config ->
+  Workspace.config ->
   name:string ->
   max_bytes:int ->
   max_lines:int ->
@@ -52,7 +54,7 @@ val read_keeper_memory_summary_result :
     @since RFC-0149 Phase 1 *)
 
 val read_memory_horizon_counts_result :
-  Coord.config ->
+  Workspace.config ->
   name:string ->
   max_bytes:int ->
   max_lines:int ->
@@ -65,7 +67,7 @@ val read_memory_horizon_counts_result :
     @since RFC-0149 §3.1 *)
 
 val read_recent_memory_texts_result :
-  Coord.config ->
+  Workspace.config ->
   name:string ->
   horizon:string ->
   max_bytes:int ->

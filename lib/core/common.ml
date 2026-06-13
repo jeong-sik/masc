@@ -5,7 +5,7 @@ let env_true name =
       let v = String.trim v |> String.lowercase_ascii in
       v = "1" || v = "true" || v = "yes" || v = "on"
 
-let strict_finalizers () = env_true "MASC_MCP_STRICT_FINALIZERS"
+let strict_finalizers () = env_true "MASC_STRICT_FINALIZERS"
 
 let handle_finalizer_error ~module_name ~label ~during_exception ~backtrace ex =
   let suffix = if during_exception then " (during exception)" else "" in
@@ -36,8 +36,22 @@ let protect ~module_name ~finally_label ~finally f =
 
 let masc_dirname = ".masc"
 
+(* OUTPUT root segment for server-written keeper runtime state (meta json +
+   metrics/memory/decisions/receipts sidecars). The SINGLE literal behind both
+   keeper-dir SSOT functions; the input/output relocation (RFC) flips this one
+   string (e.g. to "runtime/keepers"). *)
+let keepers_runtime_dirname = "keepers"
+
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname
+
+(* Default-cluster keeper OUTPUT dir for callers holding only [base_path].
+   Low-level on purpose: the cluster-aware [Workspace.keepers_runtime_dir]
+   cannot be called from workspace-internal or accountability modules without a
+   dependency cycle, so those route through here (matching their prior
+   default-cluster behavior). *)
+let keepers_runtime_dir_of_base ~base_path =
+  Filename.concat (masc_dir_from_base_path ~base_path) keepers_runtime_dirname
 
 let auth_dir_from_base_path ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) "auth"

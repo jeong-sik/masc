@@ -45,10 +45,10 @@
 \*                      |                                                         |                                      |                           | (KeeperDecisionPipeline) and short-circuits
 \*                      |                                                         |                                      |                           | the turn before the compaction-relevant
 \*                      |                                                         |                                      |                           | path is reached.
-\*   cascade_state      | idle/selecting/trying/done/exhausted                    | idle/trying                          | selecting/done/exhausted  | selecting is a sub-step of cascade
+\*   runtime_state      | idle/selecting/trying/done/exhausted                    | idle/trying                          | selecting/done/exhausted  | selecting is a sub-step of runtime
 \*                      |                                                         |                                      |                           | attempt (modelled inside trying);
 \*                      |                                                         |                                      |                           | done/exhausted are terminal states
-\*                      |                                                         |                                      |                           | owned by KeeperCascadeLifecycle.
+\*                      |                                                         |                                      |                           | owned by KeeperRuntimeLifecycle.
 \*
 \* If a future change makes one of the excluded variants reachable inside
 \* the compaction lifecycle, this spec MUST be updated (extend the matching
@@ -57,11 +57,11 @@
 \*
 \* compaction_stage variant ↔ OCaml: TLA models {accumulating, compacting,
 \* done}; OCaml runtime uses the same labels in
-\* lib/keeper/keeper_registry.ml + lib/keeper/keeper_state_machine.ml
+\* lib/keeper/keeper_registry.ml + lib/keeper_registry/keeper_state_machine.ml
 \* (search "compaction_stage").
 \*
 \* retry_exhausted boolean ↔ OCaml: latched by Compact_retry_exhausted
-\* event; cleared by Compaction_completed (lib/keeper/keeper_state_machine.ml).
+\* event; cleared by Compaction_completed (lib/keeper_registry/keeper_state_machine.ml).
 
 EXTENDS TLC
 
@@ -70,28 +70,28 @@ VARIABLES
     ksm_phase,
     turn_phase,
     decision_stage,
-    cascade_state,
+    runtime_state,
     compaction_stage,
     overflow_latched,
     retry_exhausted
 
 vars ==
-    << turn_live, ksm_phase, turn_phase, decision_stage, cascade_state,
+    << turn_live, ksm_phase, turn_phase, decision_stage, runtime_state,
        compaction_stage, overflow_latched, retry_exhausted >>
 
 PhaseSet         == {"Running", "Overflowed", "Compacting", "Paused"}
 \* Class B (DELIBERATE projection) — KMC_ prefix isolates these from the
-\* canonical cross-spec sets (KTC/KCascadeLifecycle/KDP/KCompositeLifecycle
+\* canonical cross-spec sets (KTC/KRuntimeLifecycle/KDP/KCompositeLifecycle
 \* carry full 7-/4-/5-member vocabularies). The KMC projection scope is
 \* documented at file header §"Out-of-scope subsidiary variants (#8957)".
 \* See iter 41 audit docs/tla-audit/cross-spec-3-divergences-classify-2026-05-12.md.
 KMC_TurnPhaseSet == {"idle", "prompting", "executing", "compacting"}
 KMC_DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
-KMC_CascadeSet   == {"idle", "trying"}
+KMC_RuntimeSet   == {"idle", "trying"}
 CompactionSet    == {"accumulating", "compacting", "done"}
 ActionSet     == {
     "StartTurn",
-    "BeginCascadeAttempt",
+    "BeginRuntimeAttempt",
     "DetectOverflow",
     "AutoCompact",
     "CompactionCompleted",
@@ -114,7 +114,7 @@ TypeOK ==
     /\ ksm_phase \in PhaseSet
     /\ turn_phase \in KMC_TurnPhaseSet
     /\ decision_stage \in KMC_DecisionSet
-    /\ cascade_state \in KMC_CascadeSet
+    /\ runtime_state \in KMC_RuntimeSet
     /\ compaction_stage \in CompactionSet
     /\ overflow_latched \in BOOLEAN
     /\ retry_exhausted \in BOOLEAN
@@ -124,7 +124,7 @@ Init ==
     /\ ksm_phase = "Running"
     /\ turn_phase = "idle"
     /\ decision_stage = "undecided"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ compaction_stage = "accumulating"
     /\ overflow_latched = FALSE
     /\ retry_exhausted = FALSE
@@ -135,21 +135,21 @@ StartTurn ==
     /\ turn_live' = TRUE
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ compaction_stage' = "accumulating"
     /\ overflow_latched' = FALSE
     /\ retry_exhausted' = FALSE
     /\ UNCHANGED <<ksm_phase>>
 
-BeginCascadeAttempt ==
+BeginRuntimeAttempt ==
     /\ turn_live
     /\ ksm_phase = "Running"
     /\ turn_phase = "prompting"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ turn_phase' = "executing"
     /\ decision_stage' = "tool_policy_selected"
-    /\ cascade_state' = "trying"
+    /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, ksm_phase, compaction_stage,
                     overflow_latched, retry_exhausted>>
 
@@ -158,10 +158,10 @@ DetectOverflow ==
     /\ ksm_phase = "Running"
     /\ turn_phase = "executing"
     /\ decision_stage = "tool_policy_selected"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ ksm_phase' = "Overflowed"
     /\ overflow_latched' = TRUE
-    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, cascade_state,
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, runtime_state,
                     compaction_stage, retry_exhausted>>
 
 AutoCompact ==
@@ -171,7 +171,7 @@ AutoCompact ==
     /\ ksm_phase' = "Compacting"
     /\ turn_phase' = "compacting"
     /\ compaction_stage' = "compacting"
-    /\ UNCHANGED <<turn_live, decision_stage, cascade_state,
+    /\ UNCHANGED <<turn_live, decision_stage, runtime_state,
                     overflow_latched, retry_exhausted>>
 
 CompactionCompleted ==
@@ -181,7 +181,7 @@ CompactionCompleted ==
     /\ ksm_phase' = "Running"
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "guard_ok"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ compaction_stage' = "done"
     /\ overflow_latched' = FALSE
     /\ retry_exhausted' = FALSE
@@ -194,7 +194,7 @@ CompactionFailed ==
     /\ ksm_phase' = "Overflowed"
     /\ turn_phase' = "executing"
     /\ decision_stage' = "tool_policy_selected"
-    /\ cascade_state' = "trying"
+    /\ runtime_state' = "trying"
     /\ compaction_stage' = "accumulating"
     /\ overflow_latched' = TRUE
     /\ UNCHANGED <<turn_live, retry_exhausted>>
@@ -207,7 +207,7 @@ ExhaustRetryBudget ==
     /\ compaction_stage = "accumulating"
     /\ ksm_phase' = "Paused"
     /\ retry_exhausted' = TRUE
-    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, cascade_state,
+    /\ UNCHANGED <<turn_live, turn_phase, decision_stage, runtime_state,
                     compaction_stage, overflow_latched>>
 
 OperatorCompactRequested ==
@@ -219,7 +219,7 @@ OperatorCompactRequested ==
     /\ turn_phase' = "compacting"
     /\ compaction_stage' = "compacting"
     /\ retry_exhausted' = FALSE
-    /\ UNCHANGED <<turn_live, decision_stage, cascade_state,
+    /\ UNCHANGED <<turn_live, decision_stage, runtime_state,
                     overflow_latched>>
 
 OperatorClearRequested ==
@@ -229,7 +229,7 @@ OperatorClearRequested ==
     /\ ksm_phase' = "Running"
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ compaction_stage' = "accumulating"
     /\ overflow_latched' = FALSE
     /\ retry_exhausted' = FALSE
@@ -241,13 +241,13 @@ FinishTurnAfterCompaction ==
     /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ UNCHANGED <<ksm_phase, compaction_stage, overflow_latched,
                    retry_exhausted>>
 
 Next ==
     \/ StartTurn
-    \/ BeginCascadeAttempt
+    \/ BeginRuntimeAttempt
     \/ DetectOverflow
     \/ AutoCompact
     \/ CompactionCompleted
@@ -294,7 +294,7 @@ DoneIdleTurnResetsProjection ==
     compaction_stage = "done" /\ ~turn_live =>
         /\ turn_phase = "idle"
         /\ decision_stage = "undecided"
-        /\ cascade_state = "idle"
+        /\ runtime_state = "idle"
 
 Safety ==
     /\ TypeOK
@@ -316,7 +316,7 @@ BugCompactionDesync ==
     /\ compaction_stage = "accumulating"
     /\ compaction_stage' = "compacting"
     /\ UNCHANGED <<turn_live, ksm_phase, turn_phase, decision_stage,
-                   cascade_state, overflow_latched, retry_exhausted>>
+                   runtime_state, overflow_latched, retry_exhausted>>
 
 SpecBuggy == Init /\ [][Next \/ BugCompactionDesync]_vars /\ Fairness
 

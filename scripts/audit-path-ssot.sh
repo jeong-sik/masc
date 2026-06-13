@@ -64,7 +64,7 @@ scan "lib resolver-bypass (inline .masc/<sub> concat)" \
 # 2. Shell: home-anchored .masc fallback
 scan "shell HOME-anchored .masc fallback" \
   '\$\{?HOME[}]?[^"]*\.masc|HOME/me/\.masc' \
-  scripts/ start-masc-mcp.sh .githooks/ 2>/dev/null
+  scripts/ start-masc.sh .githooks/ 2>/dev/null
 
 # 3. Python: Path(...).expanduser() on script base_path arguments.
 #    goal_loop_live_replay.py is intentionally permitted (already guards
@@ -78,7 +78,7 @@ scan "python expanduser on base_path arg" \
 #    variable names and is excluded to keep the gate signal-only.)
 scan "non-canonical MASC env var" \
   '\bMASC_HOME\b|\bMASC_ROOT\b' \
-  lib/ scripts/ docs/ start-masc-mcp.sh
+  lib/ scripts/ docs/ start-masc.sh
 
 if [ "$VIOLATIONS" -eq 0 ]; then
   echo "audit-path-ssot: OK (0 violations)"

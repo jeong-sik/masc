@@ -6,7 +6,7 @@
     runtime_contract.sandbox_root was
     [/Users/dancer/me/.masc/playground/docker/masc-improver/]. The
     initial guess was that two parallel path systems
-    ([keeper_playground_root] in [agent_tool_shared_runtime] versus
+    ([keeper_playground_root] in [keeper_tool_shared_runtime] versus
     [Keeper_sandbox.allowed_root_rel_of_meta]) had drifted apart.
 
     Code inspection in keeper_sandbox.ml:100 found that
@@ -24,10 +24,10 @@
     surfaces the wrong root after PR-F lands, this test suite
     should still pass and the diagnosis must look elsewhere. *)
 
-module Coord = Masc_mcp.Coord
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
+module Workspace = Masc.Workspace
+module Keeper_types = Keeper_types
+module Keeper_sandbox = Masc.Keeper_sandbox
+module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 
 let temp_dir () =
   let path = Filename.temp_file "masc-path-ssot-" "" in
@@ -44,7 +44,7 @@ let make_meta ~name ~sandbox =
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "path ssot invariant test");
         ( "sandbox_profile",
-          `String (Keeper_types.sandbox_profile_to_string sandbox) );
+          `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) );
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -54,7 +54,7 @@ let make_meta ~name ~sandbox =
 let make_config () =
   let base = temp_dir () in
   Unix.mkdir (Filename.concat base ".masc") 0o755;
-  Coord.default_config base
+  Workspace.default_config base
 
 let rec mkdir_p path =
   if Sys.file_exists path then ()
@@ -73,7 +73,7 @@ let write_keeper_toml ~config ~name ~sandbox_profile =
   let dir =
     Filename.concat
       (Filename.concat
-         (Filename.concat config.Coord.base_path ".masc")
+         (Filename.concat config.Workspace.base_path ".masc")
          "config")
       "keepers"
   in
@@ -95,17 +95,17 @@ let assert_ssot ~name ~sandbox =
        "[%s/%s] host_root_abs_of_meta must equal base_path / \
         allowed_root_rel_of_meta"
        name
-       (Keeper_types.sandbox_profile_to_string sandbox))
+       (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox))
     constructed host_abs
 
 let test_ssot_docker_keeper () =
-  assert_ssot ~name:"sangsu" ~sandbox:Keeper_types.Docker
+  assert_ssot ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 let test_ssot_local_keeper () =
-  assert_ssot ~name:"analyst" ~sandbox:Keeper_types.Local
+  assert_ssot ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Local
 
 let test_ssot_docker_keeper_with_dashed_name () =
-  assert_ssot ~name:"masc-improver" ~sandbox:Keeper_types.Docker
+  assert_ssot ~name:"masc-improver" ~sandbox:Keeper_types_profile_sandbox.Docker
 
 (* ── Wrong-meta detection: changing the keeper name MUST change the root ── *)
 
@@ -116,8 +116,8 @@ let test_root_depends_on_keeper_name () =
      masc-improver request" symptom proves the roots are in fact
      name-distinct, so this invariant must hold. *)
   let config = make_config () in
-  let m1 = make_meta ~name:"masc-improver" ~sandbox:Keeper_types.Docker in
-  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
+  let m1 = make_meta ~name:"masc-improver" ~sandbox:Keeper_types_profile_sandbox.Docker in
+  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let r1 = Keeper_sandbox.host_root_abs_of_meta ~config m1 in
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config m2 in
   Alcotest.(check bool)
@@ -130,10 +130,10 @@ let test_root_depends_on_sandbox_profile () =
      metas that share a name but differ in profile must also diverge. *)
   let config = make_config () in
   let m_docker =
-    make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker
+    make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Docker
   in
   let m_local =
-    make_meta ~name:"sangsu" ~sandbox:Keeper_types.Local
+    make_meta ~name:"sangsu" ~sandbox:Keeper_types_profile_sandbox.Local
   in
   let r_docker = Keeper_sandbox.host_root_abs_of_meta ~config m_docker in
   let r_local = Keeper_sandbox.host_root_abs_of_meta ~config m_local in
@@ -146,7 +146,7 @@ let test_root_depends_on_sandbox_profile () =
 
 let test_ssot_idempotent () =
   let config = make_config () in
-  let meta = make_meta ~name:"scholar" ~sandbox:Keeper_types.Docker in
+  let meta = make_meta ~name:"scholar" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let r1 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Alcotest.(check string) "host_root_abs_of_meta is pure / idempotent" r1 r2
@@ -167,12 +167,12 @@ let test_config_agent_projection_docker () =
   let visible =
     Filename.concat
       (Keeper_sandbox.container_root agent_name)
-      "repos/masc-mcp/lib/foo.ml"
+      "repos/masc/lib/foo.ml"
   in
   let expected =
     Filename.concat
-      config.Coord.base_path
-      ".masc/playground/docker/sangsu/repos/masc-mcp/lib/foo.ml"
+      config.Workspace.base_path
+      ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml"
   in
   Alcotest.(check string)
     "sandbox-visible path maps to backend-scoped host path"
@@ -201,78 +201,14 @@ let test_config_agent_projection_rejects_legacy_alias () =
        (Printf.sprintf
           "%s: invalid sandbox_profile %S (allowed: local, docker)"
           (Keeper_sandbox_config.keeper_toml_path
-             ~base_path:config.Coord.base_path
+             ~base_path:config.Workspace.base_path
              ~agent_name:"keeper-sangsu-agent")
           "docker_hardened"))
     (fun () ->
        ignore
          (Keeper_sandbox_config.sandbox_profile_of_agent
-            ~base_path:config.Coord.base_path
+            ~base_path:config.Workspace.base_path
             ~agent_name:"keeper-sangsu-agent"))
-
-(* ── Egress policy file path SSOT ─────────────────────────────────────────
-
-   Leak 11 (2026-04-27): keeper "executor" had its egress.json placed at
-   the host-direct path [playground/<name>/egress.json] while the docker
-   keeper code looked at [playground/docker/<name>/egress.json].  This
-   silently fail-closed every URL command for 24+ hours because the
-   policy file lookup used a path system that disagreed with where the
-   file had been seeded.
-
-   These tests pin the invariant that
-   [Keeper_sandbox_docker.egress_policy_path] composes from the same
-   [host_root_abs_of_meta] SSOT — any future helper that resolves a
-   policy file under a separate path system will fail at build time
-   rather than producing another silent block in production. *)
-
-let assert_egress_path_ssot ~name ~sandbox =
-  let config = make_config () in
-  let meta = make_meta ~name ~sandbox in
-  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  let expected = Filename.concat host_root "egress.json" in
-  let actual = Keeper_sandbox_docker.egress_policy_path ~config ~meta in
-  Alcotest.(check string)
-    (Printf.sprintf
-       "[%s/%s] egress_policy_path must equal host_root_abs_of_meta / \
-        egress.json"
-       name
-       (Keeper_types.sandbox_profile_to_string sandbox))
-    expected actual
-
-let test_egress_path_docker () =
-  assert_egress_path_ssot ~name:"sangsu" ~sandbox:Keeper_types.Docker
-
-let test_egress_path_local () =
-  assert_egress_path_ssot ~name:"ramarama" ~sandbox:Keeper_types.Local
-
-let test_egress_path_dashed () =
-  assert_egress_path_ssot ~name:"masc-improver" ~sandbox:Keeper_types.Docker
-
-let test_egress_path_distinct_per_keeper () =
-  let config = make_config () in
-  let m1 = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
-  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
-  let p1 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m1 in
-  let p2 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m2 in
-  Alcotest.(check bool)
-    "distinct keepers must yield distinct egress policy paths" true
-    (not (String.equal p1 p2))
-
-let test_egress_path_distinct_per_profile () =
-  let config = make_config () in
-  let m_docker = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
-  let m_local = make_meta ~name:"executor" ~sandbox:Keeper_types.Local in
-  let p_docker =
-    Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_docker
-  in
-  let p_local =
-    Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_local
-  in
-  Alcotest.(check bool)
-    "same keeper across docker/local profiles must yield distinct egress \
-     policy paths"
-    true
-    (not (String.equal p_docker p_local))
 
 let () =
   Alcotest.run "Keeper Path SSOT" [
@@ -303,15 +239,5 @@ let () =
           test_config_agent_projection_local;
         Alcotest.test_case "legacy profile rejected" `Quick
           test_config_agent_projection_rejects_legacy_alias;
-      ] );
-    ( "egress_policy_path SSOT",
-      [
-        Alcotest.test_case "docker keeper" `Quick test_egress_path_docker;
-        Alcotest.test_case "local keeper" `Quick test_egress_path_local;
-        Alcotest.test_case "dashed-name keeper" `Quick test_egress_path_dashed;
-        Alcotest.test_case "distinct keepers => distinct paths" `Quick
-          test_egress_path_distinct_per_keeper;
-        Alcotest.test_case "profile-distinct => distinct paths" `Quick
-          test_egress_path_distinct_per_profile;
       ] );
   ]

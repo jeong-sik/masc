@@ -25,11 +25,14 @@
 
 open Alcotest
 
-let target_file = "lib/server/server_dashboard_http_keeper_api.ml"
+let target_files =
+  [ "lib/server/server_dashboard_http_keeper_api_lifecycle_post.ml"
+  ; "lib/server/server_dashboard_http_keeper_api_post.ml"
+  ]
 
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
 
-let metric_name = "metric_keeper_paused_state_persist_errors"
+let metric_name = "Keeper_metrics.(to_string PausedStatePersistErrors)"
 
 let load_source rel =
   let source_root =
@@ -60,27 +63,30 @@ let count_occurrences ~needle haystack =
     in
     loop 0 0
 
+let target_source () =
+  String.concat "\n" (List.map load_source target_files)
+
 let test_metric_registered () =
-  (* The metric literal moved out of [lib/prometheus.ml] and into
-     [lib/keeper/keeper_metrics.ml] in #14179 (RFC-0043 distribute
-     metric ownership). [lib/prometheus.ml] now only references
+  (* The metric literal moved out of [lib/otel_metric_store.ml] and into
+     [lib/keeper_metrics/keeper_metrics.ml] in #14179 (RFC-0043 distribute
+     metric ownership). Builtin registration now references
      [Keeper_metrics.(to_string PausedStatePersistErrors)] by
      symbol, so the structural guard checks both files: the literal
      must live somewhere, and the registration site (by symbol) must
-     still be in [lib/prometheus.ml]. *)
-  let metrics = load_source "lib/keeper/keeper_metrics.ml" in
+     still be in [lib/otel_metric_store_builtin_metrics_part2.ml]. *)
+  let metrics = load_source "lib/keeper_metrics/keeper_metrics.ml" in
   check bool "paused-state persist-errors metric declared" true
     (count_occurrences
        ~needle:"masc_keeper_paused_state_persist_errors_total"
        metrics
      >= 1);
-  let prom = load_source "lib/prometheus.ml" in
-  check bool "paused-state persist-errors metric registered with HELP"
+  let prom = load_source "lib/keeper_metrics/keeper_metrics.ml" in
+  check bool "paused-state persist-errors metric registered in all list"
     true
-    (count_occurrences ~needle:metric_name prom >= 1)
+    (count_occurrences ~needle:"PausedStatePersistErrors" prom >= 1)
 
 let test_happy_path_preserved () =
-  let src = load_source target_file in
+  let src = target_source () in
   (* (a) The happy [Ok (Some meta)] arms must still be present in both
      closures so successful pause/resume keeps returning 200. *)
   check bool "persist_keeper_paused_state happy arm present" true
@@ -95,7 +101,7 @@ let test_happy_path_preserved () =
      >= 1)
 
 let test_silent_fold_removed () =
-  let src = load_source target_file in
+  let src = target_source () in
   (* (d) The exact silent fold ["Ok None | Error _ -> ()"] must not
      reappear inside [persist_keeper_paused_state] or
      [resume_booted_keeper_if_needed]. We allow it elsewhere because
@@ -106,7 +112,7 @@ let test_silent_fold_removed () =
     (count_occurrences ~needle src)
 
 let test_ok_none_branch_observable () =
-  let src = load_source target_file in
+  let src = target_source () in
   (* (b) The [Ok None] case must be observable: either logged + counter,
      or a distinct HTTP response. We assert the log marker. *)
   check bool "Ok None warn log: persist phase" true
@@ -128,7 +134,7 @@ let test_ok_none_branch_observable () =
     (count_occurrences ~needle:"meta_missing" src >= 3)
 
 let test_error_branch_observable () =
-  let src = load_source target_file in
+  let src = target_source () in
   (* (c) The [Error err] case must surface the underlying reason. *)
   check bool "Error err: persist phase logs reason" true
     (count_occurrences
@@ -149,12 +155,12 @@ let test_error_branch_observable () =
     (count_occurrences ~needle:"read_meta_error" src >= 3)
 
 let test_counter_inc_calls () =
-  let src = load_source target_file in
+  let src = target_source () in
   (* The metric must actually be incremented at least 4 times: 2 in
      [persist_keeper_paused_state] (Ok None / Error), 2 in
      [resume_booted_keeper_if_needed] (Ok None / Error), 2 in the
      directive endpoint (Ok None / Error) — total 6. *)
-  check bool "Prometheus.inc_counter called for new metric >= 6 times"
+  check bool "Otel_metric_store.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
        ~needle:"Keeper_metrics.(to_string PausedStatePersistErrors)"

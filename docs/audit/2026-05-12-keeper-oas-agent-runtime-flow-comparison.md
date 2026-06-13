@@ -3,22 +3,22 @@
 Date: 2026-05-12 Asia/Seoul
 Scope:
 
-- MASC keeper turn lifecycle, tool search/use, provider/model/cascade routing.
+- MASC keeper turn lifecycle, tool search/use, provider/model/runtime routing.
 - OAS single-agent runtime, provider dispatch, memory/context/compaction primitives.
 - External references: Agent-LLM-A Agent SDK, Google ADK, Provider-D Agents SDK, OpenClaw, Hermes Agent.
 
 This is the audit snapshot. The follow-up implementation and product-readiness
 status live in the goal/plan document below.
 
-Follow-up goal/plan: `docs/design/keeper-runtime-truth-unification-goal.md`
+Follow-up goal/plan: runtime naming cleanup moved into implementation PRs; the stale design note was removed.
 
 ## TL;DR
 
 | Area | Current truth | Risk / missing consideration | Suggested direction |
 |---|---|---|---|
-| Keeper lifecycle | MASC owns a keeper-cycle FSM above OAS and records pre-dispatch terminal receipts for skips/errors before `Agent.run`. | One "turn" is split across MASC keeper turn, MASC cascade attempts, and OAS agent turns. A reader can easily confuse these clocks. | Add/keep a single turn manifest that records all three counters and every context/cascade/tool decision. |
-| Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, required tools, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; fail loud when required tool policy and provider lane disagree. |
-| Provider/model/cascade | `cascade.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_cascade`, but the keeper hot path does not use it. | Two cascade concepts exist. Future fixes can accidentally use OAS cascade semantics in a MASC-owned policy lane. | Document/enforce "one cascade plane per call path"; keep OAS `Complete_cascade` out of keeper hot path unless deliberately migrated. |
+| Keeper lifecycle | MASC owns a keeper-cycle FSM above OAS and records pre-dispatch terminal receipts for skips/errors before `Agent.run`. | One "turn" is split across MASC keeper turn, MASC runtime attempts, and OAS agent turns. A reader can easily confuse these clocks. | Add/keep a single turn manifest that records all three counters and every context/runtime/tool decision. |
+| Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, advisory tool affordances, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; degrade unsupported tool exposure instead of treating tools as mandatory. |
+| Provider/model/runtime | `runtime.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_runtime`, but the keeper hot path does not use it. | Two runtime concepts exist. Future fixes can accidentally use OAS runtime semantics in a MASC-owned policy lane. | Document/enforce "one runtime plane per call path"; keep OAS `Complete_runtime` out of keeper hot path unless deliberately migrated. |
 | Context/memory/compaction | MASC has pre-dispatch checkpoint hygiene, memory hook injection, OAS proactive/emergency compaction, post-run checkpoint patching, and memory-bank writes. | Context state still straddles MASC `working_context`, OAS checkpoint, raw `[STATE]` text, memory hooks, and durable MASC memory. Boundary doc already calls this a partial migration. | Make OAS checkpoint/session the runtime SSOT and move MASC continuity to structured sidecars/receipts instead of raw markers. |
 | External comparison | Agent-LLM-A/Provider-D/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
 
@@ -31,11 +31,11 @@ MASC:
 - Direct non-heartbeat entry: `lib/tool_keeper.ml:462`, `:1633`, `lib/server/server_openai_compat.ml:87`, `lib/server/server_routes_http_keeper_stream.ml:52`, `lib/keeper/keeper_turn.ml:205`, `:481`.
 - Per-turn OAS setup and dispatch: `lib/keeper/keeper_agent_run.ml:103`, `:169`, `:231`, `:522`, `:1093`, `:1233`, `:1495`, `:1571`.
 - Context and checkpoint: `lib/keeper/keeper_run_context.ml:32`, `:80`, `:136`, `:164`, `:169`.
-- Prompt/context injection: `lib/keeper/keeper_run_prompt.ml:71`, `:100`, `:109`, `:166`, `:169`; `lib/memory_hooks.ml:1`, `:126`, `:148`.
+- Prompt/context assembly: `lib/keeper/keeper_run_prompt.ml:71`, `:100`, `:109`, `:166`, `:169`.
 - Tool search/selection: `lib/keeper/keeper_run_tools.ml:139`, `:278`, `:345`, `:640`, `:733`, `:752`, `:843`, `:908`, `:1035`, `:1219`, `:1464`, `:1483`, `:1650`.
-- Tool execution/observation: `lib/keeper/keeper_tools_oas.ml:481`, `:589`, `:947`; `lib/keeper/keeper_hooks_oas.ml:2173`; `lib/keeper/keeper_tool_observation.ml`, `lib/keeper/keeper_tool_resolution.ml`.
-- MASC cascade/provider loop: `lib/keeper/keeper_turn_driver.ml:34`, `:111`, `:150`, `:319`, `:404`, `:867`, `:952`; `lib/keeper/keeper_turn_driver_try_provider.ml:92`, `:118`, `:264`.
-- Catalog/provider resolution: `lib/cascade/cascade_catalog_runtime.ml:1230`, `:1270`, `:1375`; `docs/CASCADE-TOML.md`.
+- Tool execution and hook logging: `lib/keeper/keeper_tools_oas.ml:481`, `:589`, `:947`; `lib/keeper/keeper_hooks_oas.ml:2173`; `lib/keeper_tool_call_log.ml`, `lib/keeper/keeper_tool_resolution.ml`.
+- MASC runtime/provider loop: `lib/keeper/keeper_turn_driver.ml:34`, `:111`, `:150`, `:319`, `:404`, `:867`, `:952`; `lib/keeper/keeper_turn_driver_try_provider.ml:92`, `:118`, `:264`.
+- Catalog/provider resolution: `lib/runtime/runtime_catalog_runtime.ml:1230`, `:1270`, `:1375`; `docs/RUNTIME-TOML.md`.
 - Boundary contract: `docs/OAS-MASC-BOUNDARY.md:66`, `:70`, `:82`, `:86`, `:115`.
 
 OAS:
@@ -44,7 +44,7 @@ OAS:
 - Pipeline: `oas/lib/pipeline/pipeline.ml:1`, `:262`, `:290`, `:410`, `:598`, `:657`, `:765`, `:867`.
 - Tool preparation/execution: `oas/lib/agent/agent_turn.ml:323`, `:385`, `:455`, `:574`; `oas/lib/agent/agent_tools.ml:611`.
 - Tool descriptor/contract/trace: `oas/lib/base/tool.ml:96`, `:109`, `:195`; `oas/lib/agent/agent_tools.ml:177`, `:250`, `:353`; `oas/lib/completion_contract.ml:74`, `:143`; `oas/lib/raw_trace.ml:348`, `:482`, `:506`.
-- Provider/cascade primitives: `oas/lib/llm_provider/provider_config.ml`, `oas/lib/llm_provider/complete.ml`, `oas/lib/llm_provider/complete_cascade.ml:191`.
+- Provider/runtime primitives: `oas/lib/llm_provider/provider_config.ml`, `oas/lib/llm_provider/complete.ml`, `oas/lib/llm_provider/complete_runtime.ml:191`.
 - Context/memory: `oas/lib/context_reducer.ml:16`, `:98`; `oas/lib/memory.ml:16`, `:65`, `:80`.
 
 External official/primary sources:
@@ -95,13 +95,13 @@ flowchart TD
     E -- yes --> R1[pre-dispatch receipt: cancelled supervisor_stop] --> Z[Ok meta]
     E -- no --> F{phase executable?}
     F -- no --> R2[pre-dispatch receipt: skipped non_executable_phase] --> Z
-    F -- yes --> G[Cascade_routing FSM]
-    G --> H[selected_item may override cascade_ref]
-    H --> I[Keeper_cascade_routing.select_cascade]
+    F -- yes --> G[Runtime_routing FSM]
+    G --> H[selected_item may override runtime_ref]
+    H --> I[Keeper_runtime_routing.select_runtime]
     I --> J[fail_open_local_only_when_unavailable + model labels]
     J --> K{local saturation / pre-dispatch gate?}
     K -- saturated --> R3[pre-dispatch receipt: skipped ollama_saturated] --> Z
-    K -- ok --> L[build_cascade_execution]
+    K -- ok --> L[build_runtime_execution]
     L --> M{API keys, local discovery, context window OK?}
     M -- no --> R4[pre-dispatch receipt: error pre_dispatch_*] --> ERR[Error]
     M -- yes --> N[turn livelock guard]
@@ -114,7 +114,7 @@ flowchart TD
     T --> U{result?}
     U -- context overflow --> V[dispatch phase compaction + retry]
     V --> T
-    U -- transient / degraded retry --> W[next fail-open cascade budget]
+    U -- transient / degraded retry --> W[next fail-open runtime budget]
     W --> L
     U -- cancelled --> R6[streaming cancelled receipt] --> ERR
     U -- ok/error terminal --> X[post-run checkpoint, memory, CDAL, receipt]
@@ -128,8 +128,8 @@ flowchart TD
 1. `run_keeper_cycle` starts with a stable `keeper_turn_id`, emits `Phase_gating`, and handles supervisor stop before any provider/tool I/O.
 2. Heartbeat entry first passes smart heartbeat gates, event-queue/durable-signal overrides, board-event collection, warmup skips, and stimulus classification. Direct MCP/Provider-D/HTTP message paths bypass the heartbeat loop and converge at `Keeper_agent_run.run_turn`.
 3. Non-executable phases do not call OAS. They emit `record_pre_dispatch_terminal_observation` and return `Ok meta`.
-4. Executable phases route through `Keeper_cascade_routing.select_cascade`, then apply cascade availability/fail-open and model-label resolution.
-5. `build_cascade_execution` resolves max context, temperature, and max tokens from cascade/provider capability before prompt construction.
+4. Executable phases route through `Keeper_runtime_routing.select_runtime`, then apply runtime availability/fail-open and model-label resolution.
+5. `build_runtime_execution` resolves max context, temperature, and max tokens from runtime/provider capability before prompt construction.
 6. `Keeper_turn_livelock.guard_and_record_turn_start` gates dispatch.
 7. `Keeper_agent_run.run_turn` creates OAS run context, prepares prompt/history/tool hooks, then calls `Keeper_turn_driver.run_named`.
 8. The driver performs MASC-owned provider iteration and calls OAS `Agent.run` once per provider attempt.
@@ -142,11 +142,11 @@ flowchart TD
 |---|---|---|
 | Supervisor stop before I/O | `run_keeper_cycle` entry | Cancel receipt, `Cancelled_supervisor_stop`, returns `Ok meta`. |
 | Heartbeat smart gate skips | heartbeat loop before turn | No `run_keeper_cycle` dispatch; classified as busy/idle/warmup/signal gate depending on branch. |
-| Direct `masc_keeper_msg` / Provider-D compat / HTTP stream | direct path | Converges at `Keeper_turn.handle_keeper_msg` -> `Keeper_agent_run.run_turn`; bypasses heartbeat scheduling but not OAS/tool/cascade setup. |
+| Direct `masc_keeper_msg` / Provider-D compat / HTTP stream | direct path | Converges at `Keeper_turn.handle_keeper_msg` -> `Keeper_agent_run.run_turn`; bypasses heartbeat scheduling but not OAS/tool/runtime setup. |
 | Phase is `Paused`, `Offline`, etc. | phase gate | Skip receipt with `non_executable_phase:*`; no OAS call. |
-| `Compacting` / `HandingOff` | cascade routing | Routes to local-only/buffer cascade when executable. |
-| Selected board/scope item has cascade ref | selected item branch | Overrides meta cascade_ref before routing. |
-| Provider/cascade unavailable before dispatch | `build_cascade_execution` / discovery | Error receipt before OAS; no partial OAS turn. |
+| `Compacting` / `HandingOff` | runtime routing | Routes to local-only/buffer runtime when executable. |
+| Selected board/scope item has runtime ref | selected item branch | Overrides meta runtime_ref before routing. |
+| Provider/runtime unavailable before dispatch | `build_runtime_execution` / discovery | Error receipt before OAS; no partial OAS turn. |
 | Ollama/local saturation | saturation skip | Skip receipt and optional sleep; no OAS call until cap forces dispatch. |
 | Livelock guard blocks | livelock guard | Error receipt and provider-error FSM edge. |
 | OAS context overflow | OAS pipeline + MASC retry loop | OAS compacts and retries within its route attempt; MASC can also retry after compaction at keeper level. |
@@ -164,9 +164,9 @@ flowchart TD
     C --> D[Build Tool_index over keeper tools]
     D --> E[Install local tool-search function]
     E --> F[Compute initial tool surface]
-    F --> G{missing required tools?}
+    F --> G{allowed tool surface empty?}
     G -- yes --> H[Contract_tool_surface_mismatch -> blocker]
-    G -- no --> I{required gate but no visible tools?}
+    G -- no --> I{tool gate requested but no allowed tools?}
     I -- yes --> J[Contract_no_tool_capable_provider -> blocker]
     I -- no --> K[Compose hooks]
     K --> L[Memory hooks]
@@ -175,12 +175,12 @@ flowchart TD
     N --> O[compute_tool_surface]
     O --> P[core tools + deterministic BM25 prefilter]
     P --> Q{LLM rerank enabled?}
-    Q -- yes --> R[resolve llm_rerank cascade + Tool_selector.TopK_llm]
+    Q -- yes --> R[resolve llm_rerank runtime + Tool_selector.TopK_llm]
     Q -- no --> S[skip rerank]
-    R --> T[merge core/prefilter/LLM/discovered/required/affordance]
+    R --> T[merge core/prefilter/LLM/discovered/affordance]
     S --> T
     T --> U[Tool_op overlay + allowlist validate]
-    U --> V[last-turn / passive-loop / required-tool filters]
+    U --> V[last-turn / passive-loop / allowed-tool filters]
     V --> W[Guardrails.AllowList + tool_choice + completion contract]
     W --> X[OAS provider call]
     X --> Y{StopToolUse?}
@@ -195,11 +195,11 @@ flowchart TD
 
 ### Code-Level Notes
 
-- Tool discovery is not only "search". Search is a tool in the surface: `keeper_tool_search` uses `local_search_fn_ref`, which queries `Agent_sdk.Tool_index.retrieve`, partitions core/visible/discoverable/policy-filtered hits, and adds discovered names to `Keeper_discovered_tools`.
-- The actual visible surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
-- LLM rerank is a hint layer, not a hard dependency. If rerank cascade resolution, health filtering, or `Tool_selector.select_names` fails, the surface falls back to core + BM25 prefilter + discovered tools.
-- Required tools can come from the active task contract and per-call `required_tool_names`.
-- The hook sets both `Guardrails.AllowList all_allowed` and `tool_choice`. This is important: `AllowList` constrains execution, while `tool_choice` nudges or forces provider-side tool use.
+- Tool discovery is not only "search". Search is a tool in the surface: `keeper_tool_search` uses `local_search_fn_ref`, which queries `Agent_sdk.Tool_index.retrieve`, partitions core/allowed/discoverable/policy-filtered hits, and adds discovered names to `Keeper_discovered_tools`.
+- The actual allowed surface is recomputed every OAS SDK turn in `BeforeTurnParams`.
+- LLM rerank is a hint layer, not a hard dependency. If rerank runtime resolution, health filtering, or `Tool_selector.select_names` fails, the surface falls back to core + BM25 prefilter + discovered tools.
+- Task and per-call context can add advisory tool affordances, but tool calls remain optional.
+- The hook sets a local `Guardrails.AllowList` schema filter and clears strict inherited tool choice in the keeper turn path.
 - OAS later dispatches only `ToolUse` blocks. Parallelism is handled in OAS `execute_tools` via sequential/exclusive/parallel batches.
 - MASC does not trust only the final assistant blocks. It reconciles reported tool names from response content, registry-observed names, hook-observed names, canonical aliases, and unexpected names before writing the receipt.
 - Tool execution observation has two layers: OAS publishes `ToolCalled` / `ToolCompleted` and raw trace records, while MASC wraps keeper tool handlers and logs keeper-specific route evidence, policy outcomes, and hook observations.
@@ -208,10 +208,10 @@ flowchart TD
 
 | Case | Current behavior |
 |---|---|
-| Search hits only already-visible core tools | Search result says call them directly; no extra discovery needed. |
-| Search hits policy-denied tools | Hidden from visible results and counted as filtered. |
-| Required tool already satisfied in prior tool calls | Required `tool_choice` is cleared for that requirement. |
-| Last OAS turn | Surface intersects last-turn-safe tools unless required tools remain. |
+| Search hits only already-allowed core tools | Search result says call them directly; no extra discovery needed. |
+| Search hits policy-denied tools | Hidden from allowed results and counted as filtered. |
+| Advisory tool already satisfied in prior tool calls | Strict `tool_choice` is cleared for that turn. |
+| Last OAS turn | OAS enforces `max_turns`; Keeper does not rewrite the schema for the final turn. |
 | Passive loop + actionable signal | Contract enforcement can narrow the surface to force progress. |
 | No tools after overlay/filter | Fallback floor tools may be injected; otherwise blocker/receipt mismatch. |
 | Provider lacks inline tool support | Provider-lane resolution happens later in `run_try_provider`; this must stay visible in receipt/debugging because tool policy was selected earlier. |
@@ -219,17 +219,17 @@ flowchart TD
 | MASC keeper policy denies | Keeper handler returns a structured denial/error; OAS records the tool result and loop continues unless retry/contract policy escalates. |
 | All tool calls unexpected | MASC disclosure layer can mark contract failure even if OAS executed valid tool blocks. |
 
-## 3. Provider, Model, Cascade
+## 3. Provider, Model, Runtime
 
 ### Flowchart
 
 ```mermaid
 flowchart TD
-    A[cascade.toml / active catalog] --> B[routes.logical_use -> profile]
-    B --> C[keeper meta cascade_name / selected item override]
-    C --> D[Keeper_cascade_profile.normalize_declared_name]
-    D --> E[Keeper_cascade_routing.select_cascade by phase]
-    E --> F[build_cascade_execution]
+    A[runtime.toml / active catalog] --> B[routes.logical_use -> profile]
+    B --> C[keeper meta runtime_id / selected item override]
+    C --> D[Keeper_runtime_profile.normalize_declared_name]
+    D --> E[Keeper_runtime_routing.select_runtime by phase]
+    E --> F[build_runtime_execution]
     F --> G[model labels + context + temperature + max_tokens]
     G --> H[Keeper_turn_driver.run_named]
     H --> I{model_strings provided?}
@@ -242,49 +242,49 @@ flowchart TD
     N --> O{empty?}
     O -- yes --> P[terminal no-callable-provider diagnostic]
     O -- no --> Q[candidate providers]
-    P --> X[operator-facing required-tool/cascade exhaustion reason]
+    P --> X[operator-facing required-tool/runtime exhaustion reason]
     Q --> R[resolve strategy + capacity probes + admission permit]
     R --> S[cycle_loop order_candidates]
-    S --> T[try_cascade over providers]
+    S --> T[try_runtime over providers]
     T --> U[run_try_provider]
     U --> V[resolve_tool_lane_for_oas_tools]
-    V --> W[Cascade_runner.default_config]
-    W --> X[Cascade_runner.run]
+    V --> W[Runtime_runner.default_config]
+    W --> X[Runtime_runner.run]
     X --> Y[OAS Agent.run single provider]
     Y --> Z{accepted?}
-    Z -- yes --> OK[cascade_observation success]
+    Z -- yes --> OK[runtime_observation success]
     Z -- accept rejected --> NEXT[record rejected + maybe next provider]
     Z -- error --> E2[classify hard quota/terminal/rate limit/transient]
-    E2 --> F2{Cascade_fsm.decide}
+    E2 --> F2{Runtime_fsm.decide}
     F2 -- try next --> T
-    F2 -- exhausted --> FAIL[cascade exhausted]
+    F2 -- exhausted --> FAIL[runtime exhausted]
 ```
 
 ### Ownership
 
-- `docs/OAS-MASC-BOUNDARY.md` states config ownership directly: cascade schema, parsing, label semantics, and selection policy are MASC-owned.
-- The keeper hot path resolves providers through MASC `Cascade_catalog_runtime` and `Keeper_turn_driver`; it does not use OAS `Llm_provider.Complete_cascade` for provider iteration.
-- OAS still has reusable provider/cascade primitives (`Provider_config`, `Complete.complete`, `Complete_cascade.complete_cascade`), but in this path it is the single-provider execution engine.
+- `docs/OAS-MASC-BOUNDARY.md` states config ownership directly: runtime schema, parsing, label semantics, and selection policy are MASC-owned.
+- The keeper hot path resolves providers through MASC runtime resolution and `Keeper_turn_driver`; it does not use OAS `Llm_provider.Complete_runtime` for provider iteration.
+- OAS still has reusable provider/runtime primitives (`Provider_config`, `Complete.complete`, `Complete_runtime.complete_runtime`), but in this path it is the single-provider execution engine.
 
 ### Config Decision Points
 
 | Decision | Owner | Code path |
 |---|---|---|
-| Logical route -> cascade profile | MASC | `Keeper_cascade_profile.cascade_name_for_use`, `config/cascade.toml [routes]` |
-| Phase override | MASC | `Keeper_cascade_routing.select_cascade` |
-| Model label expansion | MASC catalog | `Cascade_runtime.models_of_cascade_name_result` |
+| Logical route -> runtime profile | MASC | `Keeper_runtime_profile.runtime_id_for_use`, `config/runtime.toml [routes]` |
+| Phase override | MASC | `Keeper_runtime_routing.select_runtime` |
+| Model label expansion | MASC catalog | `Runtime_runtime.models_of_runtime_id_result` |
 | Provider config parsing/filtering | MASC catalog + OAS provider config type | `resolve_named_providers_strict_with_secondary_resolver` |
 | Tool capability filter | MASC/OAS bridge | `Provider_tool_support.apply_required_tool_use_filter` and `resolve_tool_lane_for_oas_tools` |
 | Provider attempt timeout | MASC | `effective_provider_attempt_timeout_s` |
 | Agent loop and tool execution per attempt | OAS | `Agent.run` -> pipeline |
-| Cascade observation and receipt | MASC | `Cascade_observation.cascade_observation_with_metrics`, `Keeper_execution_receipt` |
+| Runtime observation and receipt | MASC | `Runtime_observation.runtime_observation_with_metrics`, `Keeper_execution_receipt` |
 
 ### Key Reflection
 
-The system currently has two legitimate cascade layers:
+The system currently has two legitimate runtime layers:
 
-1. MASC cascade: fleet/operator policy, keeper phase routing, provider attempt order, admission, fallback, health cooldowns, receipts.
-2. OAS cascade primitive: generic provider cascade completion for SDK users.
+1. MASC runtime: fleet/operator policy, keeper phase routing, provider attempt order, admission, fallback, health cooldowns, receipts.
+2. OAS runtime primitive: generic provider runtime completion for SDK users.
 
 For keepers, only layer 1 should be treated as the live truth unless a deliberate migration changes the contract. Mixing these layers would make receipt interpretation and failure attribution ambiguous.
 
@@ -344,9 +344,8 @@ flowchart TD
     G --> H[render memory context for metrics + memory hook source]
     H --> I[render temporal context]
     I --> J[append user message to working_context and persist]
-    J --> K[Memory_oas_bridge.make_backend]
-    K --> L[Memory_hooks.before_turn_params injects memory as extra_system_context]
-    L --> M[Keeper BeforeTurnParams appends dynamic/temporal/task/budget context]
+    J --> K[Keeper memory bank remains MASC-owned]
+    K --> L[Keeper BeforeTurnParams appends dynamic/temporal/task/budget context]
     M --> N[OAS prepare_messages + Context_reducer]
     N --> O{OAS proactive/emergency compaction?}
     O -- yes --> P[Budget_strategy + Context_reducer + compact events]
@@ -390,16 +389,16 @@ flowchart TD
 - MASC patches and saves the OAS checkpoint after the run.
 - Memory is injected hook-first, but continuity still depends on text blocks and state snapshots.
 
-The improvement target is not "add more compaction"; it is a clearer SSOT: OAS should own runtime transcript/checkpoint state, and MASC should own coordination receipts, sidecars, governance, and durable memory policy.
+The improvement target is not "add more compaction"; it is a clearer SSOT: OAS should own runtime transcript/checkpoint state, and MASC should own workspace collaboration receipts, sidecars, governance, and durable memory policy.
 
 ## 6. External Runtime Comparison
 
 | Runtime | Turn loop | Tool flow | Provider/model/fallback | Memory/context/compaction | Main contrast with MASC |
 |---|---|---|---|---|---|
 | Agent-LLM-A Agent SDK | Prompt + system + tools + history, then Agent-LLM-A emits tool calls, SDK executes, feeds results, repeats until final text or budget. | Built-ins include file/search/Bash/web/ToolSearch/subagents/skills; permissions gate execution; read-only tool calls can run in parallel. | One Agent-LLM-A model selected by `model`; no documented generic provider fallback chain in checked docs. | Session continuity and automatic compaction near context limit; AGENT-LLM-A.md-style rules are reloaded outside transient history. | Similar tool loop, less explicit operator receipt/fallback machinery. |
-| Google ADK | `LlmAgent` is reasoning unit; workflow agents provide deterministic sequential/parallel/loop orchestration. | Explicit tools/functions/OpenAPI/AgentTool/memory tools; delegation via subagent descriptions. | Model field selects Provider-F/Vertex or wrappers; no first-class automatic provider failover found in checked docs. | `Session` stores events/state; `MemoryService` is searchable cross-session store. | More app-framework style; less built-in autonomous cascade policy. |
+| Google ADK | `LlmAgent` is reasoning unit; workflow agents provide deterministic sequential/parallel/loop orchestration. | Explicit tools/functions/OpenAPI/AgentTool/memory tools; delegation via subagent descriptions. | Model field selects Provider-F/Vertex or wrappers; no first-class automatic provider failover found in checked docs. | `Session` stores events/state; `MemoryService` is searchable cross-session store. | More app-framework style; less built-in autonomous runtime policy. |
 | Provider-D Agents SDK | `Runner.run` loops until final output; handoff switches agent; otherwise tool calls execute and loop continues. | Hosted tools, function tools, agents-as-tools, MCP, ToolSearch, Agent-Code tool. | Provider-D Responses/Chat Completions plus custom providers; model/provider can vary per agent/run; no built-in MASC-like failover chain in checked Python docs. | Sessions automate history; SQLite/Redis/SQLAlchemy/Dapr backends; Responses compaction sessions can compact after turns. | Closest OAS-style runner/session model; less fleet-specific governance. |
-| OpenClaw | Gateway/session prepares turn for embedded or CLI runtime; steering can be injected between batches. | Core tools, session tools, skills, plugins; tool policy controls exposure. | Explicit primary + fallback model chain, provider/profile rotation, cooldown/disabled state. | Auto-compaction default; summaries saved to transcript; tool-call/result pairs kept together; optional memory flush before compaction. | Closest to MASC cascade/compaction operations, but with a more unified session transcript story. |
+| OpenClaw | Gateway/session prepares turn for embedded or CLI runtime; steering can be injected between batches. | Core tools, session tools, skills, plugins; tool policy controls exposure. | Explicit primary + fallback model chain, provider/profile rotation, cooldown/disabled state. | Auto-compaction default; summaries saved to transcript; tool-call/result pairs kept together; optional memory flush before compaction. | Closest to MASC runtime/compaction operations, but with a more unified session transcript story. |
 | Hermes Agent | `AIAgent.run_conversation()` builds prompt, checks compression, calls provider, executes tool calls, appends results, loops. | Registry-backed tools, plugins, MCP, delegation; concurrent tool calls except interactive tools. | Provider runtime resolver with primary/fallback providers/models and auxiliary chains. | SQLite sessions, injected memory files, session search, dual compression at roughly 50%/85%, tool-pair sanitization. | Similar long-running operational flavor; MASC has stronger typed receipts/CDAL but more OCaml/OAS boundary split. |
 
 ## 7. Recommended Improvements
@@ -408,20 +407,20 @@ The improvement target is not "add more compaction"; it is a clearer SSOT: OAS s
 
 Create one durable manifest per keeper turn that links:
 
-- MASC keeper turn id, OAS SDK turn count, cascade attempt index.
-- Phase gate decision, cascade route/profile, selected model labels, final provider attempt list.
+- MASC keeper turn id, OAS SDK turn count, runtime attempt index.
+- Phase gate decision, runtime route/profile, selected model labels, final provider attempt list.
 - Tool surface requested by keeper hook, provider-lane-resolved surface, `tool_choice`, completion contract.
 - Context sources injected: base prompt hash, dynamic context hash, memory sections count, temporal context hash, reducer/compaction decision.
 - Checkpoint ids before/after, state snapshot id, receipt id.
 
 This does not replace receipts; it gives receipts a causality spine.
 
-### P1: Make Cascade Plane Explicit
+### P1: Make Runtime Plane Explicit
 
 Add a short invariant to the boundary docs and relevant module comments:
 
-- Keeper path uses MASC cascade.
-- OAS `Complete_cascade` is a generic SDK primitive and is not part of keeper provider iteration.
+- Keeper path uses MASC runtime.
+- OAS `Complete_runtime` is a generic SDK primitive and is not part of keeper provider iteration.
 - Any future migration must move observation, health, admission, receipt, and dashboard semantics together.
 
 ### P1: Provider-Lane/Tool-Surface Contract
@@ -430,7 +429,7 @@ Extend receipt/tool-call context with:
 
 - provider kind/model chosen for the successful attempt,
 - inline tool lane vs runtime MCP lane,
-- whether required tools were materialized inline, via runtime MCP, or unavailable,
+- whether allowed tools were materialized inline, via runtime MCP, or unavailable,
 - whether `tool_choice` support was native, emulated, or ignored.
 
 This closes the gap where tool policy is selected before final provider attempt.
@@ -477,13 +476,13 @@ Do not borrow blindly:
 |---|---|
 | Keeper lifecycle code flow and flowchart | Sections 1 and 5. |
 | Tool search/use code flow and flowchart | Section 2. |
-| Provider, model, cascade config/decision/use/turn return | Section 3. |
+| Provider, model, runtime config/decision/use/turn return | Section 3. |
 | External agent SDK/product turn exchange | Section 6. |
 | Compaction, memory, context add/remove/instruction insertion comparison | Sections 5, 6, and 7. |
 
 ## 9. Verification Performed
 
-- Read-only code inspection of MASC worktree: `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-agent-runtime-flow-20260512`.
+- Read-only code inspection of MASC worktree: `/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/audit-agent-runtime-flow-20260512`.
 - Read-only code inspection of sibling OAS checkout: `/Users/dancer/me/workspace/yousleepwhen/oas`.
 - Official/primary external docs opened for Agent-LLM-A, ADK, Provider-D Agents SDK, OpenClaw, and Hermes.
 - No build/test command was run because this is a documentation-only audit.

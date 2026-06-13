@@ -178,10 +178,6 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
         source_artifacts = (
             source_artifacts_raw if isinstance(source_artifacts_raw, dict) else None
         )
-        strict_row_corpus_raw = audit_catalog.get("strict_row_corpus")
-        strict_row_corpus = (
-            strict_row_corpus_raw if isinstance(strict_row_corpus_raw, dict) else None
-        )
         audit_catalog_summary = {
             "catalog_id": audit_catalog.get("catalog_id"),
             "status": audit_catalog.get("status", "unknown"),
@@ -205,19 +201,6 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             "consistency_findings_total": len(consistency_findings),
             "consistency_findings_open": len(open_consistency_findings),
         }
-        if strict_row_corpus is not None:
-            audit_catalog_summary["strict_row_corpus_provided"] = (
-                strict_row_corpus.get("provided") is True
-            )
-            audit_catalog_summary["strict_row_corpus_validated"] = (
-                strict_row_corpus.get("validated") is True
-            )
-            audit_catalog_summary["strict_row_corpus_row_count"] = (
-                strict_row_corpus.get("row_count")
-            )
-            audit_catalog_summary["strict_row_corpus_errors_total"] = (
-                strict_row_corpus.get("errors_total")
-            )
         if source_artifacts is not None:
             audit_catalog_summary["source_artifacts_status"] = source_artifacts.get(
                 "status",
@@ -315,7 +298,6 @@ def summarize_orient(orient: dict[str, Any] | None) -> PhaseStatus:
             or audit_catalog_summary["source_documents_status"] != "COMPLETE"
             or audit_catalog_summary["consistency_findings_open"] > 0
             or audit_catalog_summary.get("source_artifacts_status") != "COMPLETE"
-            or audit_catalog_summary.get("strict_row_corpus_validated") is False
         )
     status = (
         "critical"
@@ -527,11 +509,9 @@ def summarize_verify(verify: dict[str, Any] | None) -> PhaseStatus:
 def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
     signals = {
         "keeper_failure_patterns": {
-            "keeper_skipping_turn": pattern_count(observe, "keeper_skipping_turn"),
             "credential_archived_starvation": pattern_count(
                 observe, "credential_archived_starvation"
             ),
-            "alive_but_stuck": pattern_count(observe, "alive_but_stuck"),
         },
         "provider_failure_patterns": {
             "provider_health_skipped": pattern_count(

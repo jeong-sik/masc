@@ -4,11 +4,20 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
-let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
+let remove_pending_confirms_by_target_callback =
+  ref (fun _config ~target_type:_ ~target_id:_ -> 0)
+
+let register_remove_pending_confirms_by_target fn =
+  remove_pending_confirms_by_target_callback := fn
+
+let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
     tool_result_error
@@ -25,7 +34,7 @@ let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
     | Ok None -> tool_result_ok (Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
       let pending_confirms_removed =
-        Operator_pending_confirm.remove_pending_confirms_by_target config
+        (!remove_pending_confirms_by_target_callback) config
           ~target_type:"keeper" ~target_id:(Some name)
       in
       Log.Misc.info
@@ -57,7 +66,7 @@ let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
            with
            | Ok () -> ()
            | Error err ->
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", name);
                           ("phase",
@@ -87,7 +96,7 @@ let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
         if validate_name (Keeper_id.Trace_id.to_string m.runtime.trace_id) then (
           let dir = Filename.concat (session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string SessionCleanupFailures)
               ();
             Log.Keeper.error "session dir cleanup failed: %s"

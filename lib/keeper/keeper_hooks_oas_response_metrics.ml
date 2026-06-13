@@ -4,7 +4,7 @@ open Keeper_hooks_oas_types
 
 (* #9919: counter for post_tool_use_failure events.
 
-   Replaces an earlier [Heuristic_metrics.record] emit that produced
+   Replaces an earlier low-signal metric emit that produced
    degenerate 1-bit records (51 identical rows in 48h of production,
    [threshold=0.0, raw=1.0, triggered=true]).  Per keeper + per tool
    labels let dashboards and #9880 governance judgments distinguish
@@ -13,7 +13,7 @@ open Keeper_hooks_oas_types
 let tool_use_failure_metric = Keeper_metrics.(to_string ToolUseFailure)
 
 let record_tool_use_failure ~keeper_name ~tool_name =
-  Prometheus.inc_counter tool_use_failure_metric
+  Otel_metric_store.inc_counter tool_use_failure_metric
     ~labels:[ (label_keeper, keeper_name); (label_tool, tool_name) ] ()
 
 (* #10083 originally patched empty [response.model] leaks by recovering a
@@ -23,13 +23,13 @@ let record_tool_use_failure ~keeper_name ~tool_name =
    signals for missing or selector-like response.model values, but their
    labels never carry the concrete model id. *)
 let empty_response_model_metric =
-  Prometheus.metric_after_turn_response_model_empty
+  Otel_metric_store.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
-  Prometheus.metric_after_turn_response_model_alias
+  Otel_metric_store.metric_after_turn_response_model_alias
 
 let empty_response_content_metric =
-  Prometheus.metric_after_turn_response_content_empty
+  Otel_metric_store.metric_after_turn_response_content_empty
 
 (* zero_usage moved to Keeper_hooks_oas_types (intra-library file split). *)
 
@@ -44,21 +44,21 @@ let resolve_after_turn_model ~keeper_name
   if String.equal raw_model "" then begin
     let source =
       let source_telemetry_resolved = "telemetry_resolved" in
-      let source_unknown_sentinel = "unknown_sentinel" in
+      let source_unknown_source = "unknown_source" in
       if telemetry_has_canonical_model_id response.telemetry then
         source_telemetry_resolved
-      else source_unknown_sentinel
+      else source_unknown_source
     in
-    Prometheus.inc_counter empty_response_model_metric
+    Otel_metric_store.inc_counter empty_response_model_metric
       ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
-    Log.Keeper.warn
-      "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
-      keeper_name source;
+    Log.Keeper.warn ~keeper_name:keeper_name
+      "after_turn response.model empty -> runtime_lane source=%s"
+      source;
     runtime_lane_label
   end else begin
     if is_runtime_selector_alias raw_model then (
       let source_telemetry_canonical = "telemetry_canonical" in
-      Prometheus.inc_counter alias_response_model_metric
+      Otel_metric_store.inc_counter alias_response_model_metric
         ~labels:
           [
             (label_keeper, keeper_name);
@@ -66,9 +66,9 @@ let resolve_after_turn_model ~keeper_name
             (label_source, source_telemetry_canonical);
           ]
         ();
-      Log.Keeper.warn
-        "keeper:%s after_turn response.model selector -> runtime_lane source=%s"
-        keeper_name "telemetry_canonical");
+      Log.Keeper.warn ~keeper_name:keeper_name
+        "after_turn response.model selector -> runtime_lane source=%s"
+        "telemetry_canonical");
     runtime_lane_label
   end
 
@@ -77,6 +77,10 @@ let stop_reason_metric_label = function
   | Agent_sdk.Types.StopToolUse -> "tool_use"
   | Agent_sdk.Types.MaxTokens -> "max_tokens"
   | Agent_sdk.Types.StopSequence -> "stop_sequence"
+  | Agent_sdk.Types.Refusal -> "refusal"
+  | Agent_sdk.Types.PauseTurn -> "pause_turn"
+  | Agent_sdk.Types.Compaction -> "compaction"
+  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
   | Agent_sdk.Types.Unknown _ -> "unknown"
 
 let content_block_has_visible_or_tool_progress = function
@@ -108,7 +112,7 @@ let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =
   if not (List.exists content_block_has_visible_or_tool_progress response.content)
   then
-    Prometheus.inc_counter empty_response_content_metric
+    Otel_metric_store.inc_counter empty_response_content_metric
       ~labels:
         [
           (label_keeper, keeper_name);
@@ -116,6 +120,40 @@ let record_response_content_quality_metric ~keeper_name
           (label_shape, response_content_empty_shape response.content);
         ]
       ()
+
+let tool_call_duration_bucket_metric =
+  Keeper_metrics.(to_string ToolCallDurationBucket)
+
+let tool_call_duration_bucket_bounds =
+  [ 0.05, "0.05"
+  ; 0.1, "0.1"
+  ; 0.25, "0.25"
+  ; 0.5, "0.5"
+  ; 1.0, "1"
+  ; 2.5, "2.5"
+  ; 5.0, "5"
+  ; 10.0, "10"
+  ; 30.0, "30"
+  ; 60.0, "60"
+  ]
+
+let record_keeper_tool_duration_bucket ~labels duration_seconds =
+  let duration_seconds = max 0.0 duration_seconds in
+  let emit_bucket le ~increment =
+    let labels = labels @ [ "le", le ] in
+    Otel_metric_store.register_counter
+      ~name:tool_call_duration_bucket_metric
+      ~help:tool_call_duration_bucket_metric
+      ~labels
+      ();
+    if increment then
+      Otel_metric_store.inc_counter tool_call_duration_bucket_metric ~labels ()
+  in
+  List.iter
+    (fun (upper_bound, le) ->
+       emit_bucket le ~increment:(duration_seconds <= upper_bound))
+    tool_call_duration_bucket_bounds;
+  emit_bucket "+Inf" ~increment:true
 
 (* default_context_max + context_max_of_telemetry moved to
    Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
@@ -138,7 +176,7 @@ let record_usage_anomaly_metrics ~keeper_name usage_trust =
     in
     List.iter
       (fun reason ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string UsageAnomalies)
 	           ~labels:
 	             [
@@ -153,15 +191,19 @@ let record_keeper_tool_duration_metric
     ~(keeper_name : string)
     (summary : tool_execution_summary)
   : unit =
-  Prometheus.observe_histogram
+  let labels =
+    [label_keeper, keeper_name
+    ; label_provider, summary.provider
+    ; label_tool, summary.tool_name
+    ; label_outcome, summary.outcome
+    ]
+  in
+  let duration_seconds = summary.duration_ms /. ms_per_second in
+  Otel_metric_store.observe_histogram
     Keeper_metrics.(to_string ToolCallDuration)
-    ~labels:
-      [label_keeper, keeper_name
-      ; "provider", summary.provider
-      ; "tool", summary.tool_name
-      ; "outcome", summary.outcome
-      ]
-    (summary.duration_ms /. ms_per_second)
+    ~labels
+    duration_seconds;
+  record_keeper_tool_duration_bucket ~labels duration_seconds
 
 (** Emit prompt/decode tokens-per-second histograms from an OAS turn
     response.  Safe to call with [telemetry = None] (no-op) and with
@@ -192,13 +234,13 @@ let record_llm_tok_s_metrics
   in
   (match prompt_tok_s_opt with
    | Some v when v > 0.0 ->
-     Prometheus.observe_histogram
-       Prometheus.metric_llm_prompt_tok_per_sec ~labels v
+     Otel_metric_store.observe_histogram
+       Otel_metric_store.metric_llm_prompt_tok_per_sec ~labels v
    | _ -> ());
   (match decode_tok_s_opt with
    | Some v when v > 0.0 ->
-     Prometheus.observe_histogram
-       Prometheus.metric_llm_decode_tok_per_sec ~labels v
+     Otel_metric_store.observe_histogram
+       Otel_metric_store.metric_llm_decode_tok_per_sec ~labels v
    | _ -> ())
 
 (** Emit the after-turn wall-clock latency histogram.  A zero/negative
@@ -209,25 +251,25 @@ let record_llm_inference_latency_metric
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let labels = [("model", runtime_lane_label)] in
-  Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
+  Otel_metric_store.inc_counter Otel_metric_store.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->
     let observed_latency_ms =
       match t.request_latency_ms with
       | Some latency_ms when latency_ms > 0 -> latency_ms
       | _ ->
-          Prometheus.inc_counter
-            Prometheus.metric_after_turn_telemetry_zero_latency
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_after_turn_telemetry_zero_latency
             ~labels ();
           1
     in
-    Prometheus.observe_histogram
-      Prometheus.metric_llm_inference_duration
+    Otel_metric_store.observe_histogram
+      Otel_metric_store.metric_llm_inference_duration
       ~labels
       (Float.of_int observed_latency_ms /. ms_per_second)
   | None ->
-    Prometheus.inc_counter
-      Prometheus.metric_after_turn_telemetry_missing
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_after_turn_telemetry_missing
       ~labels ()
 
 let wall_tokens_per_second

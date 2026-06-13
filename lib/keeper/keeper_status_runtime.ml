@@ -3,6 +3,14 @@
     Metrics summary aggregation is in Keeper_status_metrics. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
+
+(* Agent staleness threshold — 2 minutes. An agent that hasn't sent a
+   signal within this window is considered non-live. Used for live-signal
+   detection, live-work detection, startup-vs-never-started classification,
+   and zombie/stale assessment. *)
+let agent_staleness_threshold_s = 120.0
 
 let active_model_of_meta (m : keeper_meta) : string =
   let _ = m in
@@ -61,14 +69,14 @@ let keeper_continuity_to_string = function
   | Continuity_recovering -> "recovering"
   | Continuity_not_running -> "not_running"
 
-let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.Safe.t =
+let parse_agent_status (config : Workspace.config) ~(agent_name : string) : Yojson.Safe.t =
   let agent_file =
-    Filename.concat (Coord.agents_dir config) (Coord.safe_filename agent_name ^ ".json")
+    Filename.concat (Workspace.agents_dir config) (Workspace.safe_filename agent_name ^ ".json")
   in
-  if not (Coord.path_exists config agent_file) then
+  if not (Workspace.path_exists config agent_file) then
     `Assoc [ ("exists", `Bool false) ]
   else (
-    match Coord.read_json_opt config agent_file with
+    match Workspace.read_json_opt config agent_file with
     | None ->
         `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_read") ]
     | Some json -> (
@@ -77,15 +85,15 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
             `Assoc [ ("exists", `Bool true); ("error", `String "failed_to_parse") ]
         | Ok (agent : Masc_domain.agent) ->
             let now_ts = Time_compat.now () in
-            let joined_ts =
-              Coord_resilience.Time.parse_iso8601_opt agent.joined_at
+            let session_bound_ts =
+              Workspace_resilience.Time.parse_iso8601_opt agent.session_bound_at
               |> Option.value ~default:0.0
             in
             let last_seen_ts =
-              Coord_resilience.Time.parse_iso8601_opt agent.last_seen
+              Workspace_resilience.Time.parse_iso8601_opt agent.last_seen
               |> Option.value ~default:0.0
             in
-            let age_s = if joined_ts <= 0.0 then 0.0 else now_ts -. joined_ts in
+            let age_s = if session_bound_ts <= 0.0 then 0.0 else now_ts -. session_bound_ts in
             let last_seen_ago_s =
               if last_seen_ts <= 0.0 then 0.0 else now_ts -. last_seen_ts
             in
@@ -98,24 +106,19 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ( "capabilities",
                   `List (List.map (fun s -> `String s) agent.capabilities) );
                 ( "current_task", Json_util.string_opt_to_json agent.current_task );
-                ("joined_at", `String agent.joined_at);
+                ("session_bound_at", `String agent.session_bound_at);
                 ("last_seen", `String agent.last_seen);
                 ("age_s", `Float age_s);
                 ("last_seen_ago_s", `Float last_seen_ago_s);
                 ("is_zombie",
                  `Bool
-                   (Coord.is_zombie_agent
+                   (Workspace.is_zombie_agent
                       ~agent_type:agent.agent_type
                       ~agent_name:agent.name
                       agent.last_seen));
               ]))
 
-let json_string_opt key json =
-  match Safe_ops.json_string_opt key json with
-  | Some s ->
-      let trimmed = String.trim s in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let json_string_opt key json = Json_util.get_string_nonempty json key
 
 let json_bool key json default =
   Safe_ops.json_bool ~default key json
@@ -130,7 +133,7 @@ let agent_status_text agent_status =
 
 let agent_last_seen_ts_opt agent_status =
   match json_string_opt "last_seen" agent_status with
-  | Some value -> Coord_resilience.Time.parse_iso8601_opt value
+  | Some value -> Workspace_resilience.Time.parse_iso8601_opt value
   | None -> None
 
 let agent_last_seen_ago_s agent_status =
@@ -139,26 +142,16 @@ let agent_last_seen_ago_s agent_status =
 let agent_runtime_has_live_signal agent_status =
   match agent_status_text agent_status with
   | "active" | "busy" | "listening" | "idle" ->
-      agent_last_seen_ago_s agent_status <= 120.0
+      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | _ -> false
 
 let agent_runtime_has_live_work agent_status =
   match agent_status_text agent_status with
   | "active" | "busy" | "listening" ->
-      agent_last_seen_ago_s agent_status <= 120.0
+      agent_last_seen_ago_s agent_status <= agent_staleness_threshold_s
   | _ -> false
 
-let string_contains_ci haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  let rec loop idx =
-    if idx + nlen > hlen then false
-    else if String.sub haystack idx nlen = needle then true
-    else loop (idx + 1)
-  in
-  needle <> "" && loop 0
+let string_contains_ci = String_util.contains_substring_ci
 
 let quiet_hours_active () =
   let current_hour =
@@ -173,7 +166,6 @@ let quiet_hours_active () =
   && current_hour < quiet_end
 
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
-  let open Yojson.Safe.Util in
   let normalize_content item =
     match json_string_opt "content" item with
     | Some value -> value
@@ -192,7 +184,7 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
       (fun acc item ->
         match item with
         | `Assoc _ ->
-            let role = item |> member "role" |> to_string_option in
+            let role = Json_util.get_string item "role" in
             let ts_unix =
               match json_float_opt "ts_unix" item with
               | Some ts when ts > 0.0 -> Some ts
@@ -246,43 +238,65 @@ let keeper_error_hint ~agent_status ~meta =
           | Some reason when looks_error_like reason -> Some reason
           | _ -> None))
 
+(* A live signal newer than the persisted error snapshot means
+   [last_proactive_reason] is stale and must not surface as a current error.
+   Shared by quiet-reason classification and the dashboard diagnostic so a
+   running keeper that has recovered does not keep showing a dead error string
+   — including across server restarts, where the persisted snapshot is reloaded
+   verbatim and never reset.
+
+   Two independent supersede paths, because the persisted error and the live
+   signal can come from different sources:
+
+   - Keeper self-progress: the error is recorded on the last *proactive* cycle
+     ([proactive_rt.last_ts]). If the keeper has completed any later turn
+     ([usage.last_turn_ts] strictly greater), the proactive error predates the
+     keeper's current activity and is stale. Keepers do not publish an external
+     agent-registry record ([.masc/agents/]), so this is the only path that
+     fires for them. Equality (the erroring proactive turn *is* the latest
+     turn) does not supersede — a fresh error stays visible.
+
+   - External agent-registry signal: present for non-keeper participants that
+     write an agent record. A fresh live presence newer than all recorded
+     activity. Threshold preserved verbatim so non-keeper behaviour is
+     unchanged. *)
+let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta =
+  if not keepalive_running then false
+  else begin
+    let proactive_error_ts = meta.runtime.proactive_rt.last_ts in
+    let last_turn_ts = meta.runtime.usage.last_turn_ts in
+    let self_progressed_past_proactive_error =
+      proactive_error_ts > 0.0 && last_turn_ts > proactive_error_ts
+    in
+    let external_live_signal =
+      json_bool "exists" agent_status false
+      && agent_runtime_has_live_signal agent_status
+      &&
+      match agent_last_seen_ts_opt agent_status with
+      | Some last_seen_ts -> last_seen_ts > max proactive_error_ts last_turn_ts
+      | None -> false
+    in
+    self_progressed_past_proactive_error || external_live_signal
+  end
+
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
   let quiet_active = quiet_hours_active () in
-  let agent_exists = json_bool "exists" agent_status false in
-  let agent_status_text = agent_status_text agent_status in
-  let live_signal_supersedes_persisted_error =
-    keepalive_running
-    && agent_exists
-    && agent_runtime_has_live_signal agent_status
-    &&
-    match agent_last_seen_ts_opt agent_status with
-    | Some last_seen_ts ->
-        let persisted_error_ts =
-          max meta.runtime.proactive_rt.last_ts meta.runtime.usage.last_turn_ts
-        in
-        last_seen_ts > persisted_error_ts
-    | None -> false
-  in
   let error_hint =
-    if live_signal_supersedes_persisted_error then None
+    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
+    then None
     else keeper_error_hint ~agent_status ~meta
   in
   if not meta.proactive.enabled then
     Some "disabled"
   else if not keepalive_running then
     Some "not_running"
-  else if
-    not agent_exists
-    || agent_status_text = "offline"
-    || agent_status_text = "inactive"
-  then Some "agent_missing"
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
-      match Coord_resilience.Time.parse_iso8601_opt meta.created_at with
+      match Workspace_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in
-    if keeper_age_s <= 120.0 then Some "startup" else Some "never_started"
+    if keeper_age_s <= agent_staleness_threshold_s then Some "startup" else Some "never_started"
   else if quiet_active then
     Some "quiet_hours"
   else
@@ -339,7 +353,7 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     json_float_opt "last_seen_ago_s" agent_status |> Option.value ~default:max_float
   in
   let is_zombie = json_bool "is_zombie" agent_status false in
-  let stale_threshold_s = 120.0 in
+  let stale_threshold_s = agent_staleness_threshold_s in
   let last_turn_ago_s =
     if meta.runtime.usage.last_turn_ts <= 0.0 then max_float
     else max 0.0 (now_ts -. meta.runtime.usage.last_turn_ts)
@@ -350,12 +364,14 @@ let keeper_health_state ?(fiber_health = Fiber_unknown)
     else
       last_turn_ago_s
   in
-  if not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive"
+  if
+    (not keepalive_running)
+    && (not agent_exists || agent_status_text = "offline" || agent_status_text = "inactive")
   then KH_offline
   (* H-4 fix: true zombies are stale regardless of keepalive state *)
   else if is_zombie then KH_stale
   else if keepalive_running then
-    if last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
+    if agent_exists && last_seen_ago_s > 2.0 *. keepalive_interval_s then KH_stale
     else
       (match quiet_reason with
     | Some "graphql_error" | Some "model_error" -> KH_degraded
@@ -523,7 +539,13 @@ let keeper_diagnostic_json
     keeper_reply_snapshot_of_history history_items
   in
   let last_error =
-    Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
+    (* Mirror classify_keeper_quiet_reason: a recovered running keeper whose
+       live signal postdates the persisted error must not surface the stale
+       reason. Without this guard the dashboard "이전 오류" badge survives
+       server restarts because the snapshot is reloaded verbatim. *)
+    if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
+    then `Null
+    else Json_util.string_opt_to_json (keeper_error_hint ~agent_status ~meta)
   in
   `Assoc
     [
@@ -556,3 +578,22 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
   | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> "offline"
+
+(** Explain the lossy [pipeline_stage] label without changing its wire value.
+    Consumers that need exact lifecycle authority should read [lifecycle_phase];
+    this field explains why two phases can share a single stage label. *)
+let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string =
+  match phase with
+  | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
+  | Keeper_state_machine.Running -> "phase_running_idle"
+  | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
+  | Keeper_state_machine.Overflowed -> "context_overflow_pending_compaction"
+  | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
+  | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
+  | Keeper_state_machine.Draining -> "graceful_shutdown_draining"
+  | Keeper_state_machine.Paused -> "operator_or_policy_paused"
+  | Keeper_state_machine.Stopped -> "clean_stop_terminal"
+  | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
+  | Keeper_state_machine.Restarting -> "supervisor_restart_backoff_elapsed"
+  | Keeper_state_machine.Dead -> "restart_budget_exhausted_terminal"
+  | Keeper_state_machine.Zombie -> "structural_failure_terminal"

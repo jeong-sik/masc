@@ -31,6 +31,12 @@ type tool_call_entry = {
   duration_ms : int;                (** Wall-clock execution time *)
   error : string option;            (** Exception message if failed *)
   cost_usd : float;                 (** Estimated cost of this call *)
+  execution_id : string option;
+      (** RFC-0233 canonical join key minted at the dispatch boundary; the
+          tool_calls JSONL row for the same execution carries the identical
+          value. Plain string here: Trajectory is a dependency-leaf
+          persistence record, the typed [Ids.Execution_id.t] lives at the
+          mint site. *)
 }
 
 type gate_decode_summary = {
@@ -64,7 +70,7 @@ type trajectory = {
   outcome : trajectory_outcome;
   task_id : string option;
   (** Claimed task ID for cost attribution.
-      Set when keeper claims a task via masc_claim_next or masc_transition;
+      Set when keeper claims a task via keeper_task_claim or masc_transition;
       None if no task claimed.
       Enables per-task cost aggregation from trajectory summaries. *)
 }
@@ -91,7 +97,7 @@ type trajectory_line =
 (* ================================================================ *)
 
 (* model_token_pricing and estimate_turn_cost removed (#3029).
-   Pricing belongs to OAS cascade, not MASC.
+   Pricing belongs to OAS runtime, not MASC.
    MASC records cost_usd from OAS responses via emit_cost_event. *)
 
 (** Rough per-call cost estimates for keeper tools.
@@ -170,6 +176,9 @@ let entry_to_json ?(result_max_len = default_result_truncation)
        ("error", Json_util.string_opt_to_json e.error);
        ("cost_usd", `Float e.cost_usd);
      ]
+    @ (match e.execution_id with
+       | Some id -> [ ("execution_id", `String id) ]
+       | None -> [])
     @ runtime_contract_field @ action_radius_field)
 
 let default_thinking_truncation = 2000
@@ -230,6 +239,48 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
    via its own registry, so the trajectory-local copy is redundant.
    Calls below delegate directly. *)
 
+(* ── In-memory round counter ──────────────────────────────────────
+   Replaces the read-all-entries-just-to-count-round pattern.
+   Key: (keeper_name, trace_id, turn) -> count of tool calls in that turn.
+   Hydrated lazily on first access per key. *)
+
+let round_counters : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
+let round_counters_mu = Stdlib.Mutex.create ()
+
+(** Get the next round number for a given (keeper_name, trace_id, turn).
+    Lazily hydrates from disk on first access, then increments in-memory.
+    This avoids reading the entire JSONL file on every tool call. *)
+let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string) ~(turn : int) : int =
+  let key = (keeper_name, trace_id, turn) in
+  Stdlib.Mutex.protect round_counters_mu (fun () ->
+    let current =
+      match Hashtbl.find_opt round_counters key with
+      | Some n -> n
+      | None ->
+          (* Hydrate from disk: count existing entries for this turn *)
+          let path = trajectory_path masc_root keeper_name trace_id in
+          if not (Sys.file_exists path) then 0
+          else
+            let content = Fs_compat.load_file path in
+            String.split_on_char '\n' content
+            |> List.filter (fun line -> String.trim line <> "")
+            |> List.fold_left (fun acc line ->
+                try
+                  let json = Yojson.Safe.from_string line in
+                  let entry_turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0) in
+                  if entry_turn = turn then acc + 1 else acc
+                with _ -> acc
+              ) 0
+    in
+    let next = current + 1 in
+    Hashtbl.replace round_counters key next;
+    next)
+
+(** Reset round counters for testing. *)
+let reset_round_counters_for_testing () =
+  Stdlib.Mutex.protect round_counters_mu (fun () ->
+    Hashtbl.reset round_counters)
+
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
@@ -245,7 +296,12 @@ let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : s
   let dir = trajectories_dir masc_root keeper_name in
   Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
-  let json = thinking_entry_to_json entry in
+  (* 남김없이: the thinking trajectory is the eval/audit SSOT, so persist the
+     FULL untruncated reasoning text. Truncation is a read/display concern
+     ([content_max_len] query param on the trajectory endpoint), never a
+     write-time one — truncating here destroyed reasoning before it was ever
+     stored. [content_length] still records the true length either way. *)
+  let json = thinking_entry_to_json ~content_max_len:0 entry in
   Fs_compat.append_jsonl path json
 
 (** Write a trajectory summary line (appended after session ends). *)
@@ -273,6 +329,10 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
 (* Trajectory accumulator (mutable, per-session)                    *)
 (* ================================================================ *)
 
+type pending_entry = {
+  pe_json : Yojson.Safe.t;
+}
+
 type accumulator = {
   mutable entries : tool_call_entry list;
   mutable total_cost : float;
@@ -287,10 +347,28 @@ type accumulator = {
   (** Claimed task ID for cost attribution.
       Starts as None; set via [set_task_id] when keeper claims a task.
       Propagated to trajectory record on [finalize]. *)
+  pending_queue : pending_entry Queue.t;
+  pending_mu : Stdlib.Mutex.t;
+  mutable last_flush : float;
+  mutable on_flush_error : (exn -> unit) option;
 }
 
-let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulator =
-  { entries = [];
+(* Global registry of active accumulators for batch flush.
+   The background flush fiber iterates this to drain pending queues. *)
+let active_accumulators : (string * string, accumulator) Hashtbl.t = Hashtbl.create 16
+let active_acc_mu = Stdlib.Mutex.create ()
+
+let register_accumulator (acc : accumulator) =
+  Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.replace active_accumulators (acc.keeper_name, acc.trace_id) acc)
+
+let unregister_accumulator (acc : accumulator) =
+  Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.remove active_accumulators (acc.keeper_name, acc.trace_id))
+
+let create_accumulator ?on_flush_error ~masc_root ~keeper_name ~trace_id ~generation () : accumulator =
+  let acc = {
+    entries = [];
     total_cost = 0.0;
     total_calls = 0;
     turn = 0;
@@ -300,7 +378,13 @@ let create_accumulator ~masc_root ~keeper_name ~trace_id ~generation : accumulat
     started_at = Time_compat.now ();
     masc_root;
     task_id = None;
-  }
+    pending_queue = Queue.create ();
+    pending_mu = Stdlib.Mutex.create ();
+    last_flush = 0.0;
+    on_flush_error;
+  } in
+  register_accumulator acc;
+  acc
 
 (** Bind a claimed task to this trajectory for cost attribution. *)
 let set_task_id (acc : accumulator) (id : string) : unit =
@@ -318,16 +402,42 @@ let record_entry ?runtime_contract ?action_radius ?on_persist_error
   acc.entries <- entry :: acc.entries;
   acc.total_cost <- acc.total_cost +. entry.cost_usd;
   acc.total_calls <- acc.total_calls + 1;
-  (* Persist immediately for crash recovery *)
-  (try
-     append_entry ?runtime_contract ?action_radius ~masc_root:acc.masc_root
-       ~keeper_name:acc.keeper_name ~trace_id:acc.trace_id entry
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-       Log.Keeper.error "Failed to persist entry for %s: %s" acc.trace_id
-         (Printexc.to_string exn);
-       (match on_persist_error with
+  (* Store on_persist_error for use during batch flush *)
+  (match on_persist_error, acc.on_flush_error with
+   | Some cb, None -> acc.on_flush_error <- Some cb
+   | _ -> ());
+  (* Enqueue for batched write instead of synchronous disk I/O *)
+  let json = entry_to_json ?runtime_contract ?action_radius entry in
+  Stdlib.Mutex.protect acc.pending_mu (fun () ->
+    Queue.push { pe_json = json } acc.pending_queue)
+
+(** Drain the pending queue and write all entries in a single batch.
+    Acquires the per-accumulator mutex to safely drain the queue. *)
+let flush_pending (acc : accumulator) : unit =
+  let entries_to_flush =
+    Stdlib.Mutex.protect acc.pending_mu (fun () ->
+      if Queue.is_empty acc.pending_queue then []
+      else
+        let items = Queue.fold (fun acc pe -> pe :: acc) [] acc.pending_queue in
+        Queue.clear acc.pending_queue;
+        List.rev items)
+  in
+  match entries_to_flush with
+  | [] -> ()
+  | _ ->
+    let dir = trajectories_dir acc.masc_root acc.keeper_name in
+    Fs_compat.mkdir_p dir;
+    let path = trajectory_path acc.masc_root acc.keeper_name acc.trace_id in
+    let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
+    (try
+       Fs_compat.append_jsonl_batch path jsons;
+       acc.last_flush <- Time_compat.now ()
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.error "Failed to flush trajectory batch for %s: %s"
+         acc.trace_id (Printexc.to_string exn);
+       (match acc.on_flush_error with
         | None -> ()
         | Some report ->
             try report exn
@@ -335,11 +445,21 @@ let record_entry ?runtime_contract ?action_radius ?on_persist_error
             | Eio.Cancel.Cancelled _ as e -> raise e
             | report_exn ->
                 Log.Keeper.warn
-                  "Failed to report trajectory persist gap for %s: %s"
+                  "Failed to report trajectory flush error for %s: %s"
                   acc.trace_id
                   (Printexc.to_string report_exn)))
 
+(** Flush pending entries for all active accumulators.
+    Called by the background flush fiber in server_runtime_bootstrap. *)
+let flush_all_pending () : unit =
+  let accs = Stdlib.Mutex.protect active_acc_mu (fun () ->
+    Hashtbl.fold (fun _ acc accs -> acc :: accs) active_accumulators []) in
+  List.iter flush_pending accs
+
 let finalize (acc : accumulator) (outcome : trajectory_outcome) : trajectory =
+  (* Flush any remaining pending entries before writing summary *)
+  flush_pending acc;
+  unregister_accumulator acc;
   let traj = {
     scenario_id = None;
     keeper_name = acc.keeper_name;
@@ -518,35 +638,38 @@ let gate_decision_of_json = function
 let tool_call_entry_of_json (json : Yojson.Safe.t) :
     (tool_call_entry * bool) option =
   try
-    let open Yojson.Safe.Util in
-    match member "type" json with
-    | `String "trajectory_summary" -> None
-    | `String "thinking" -> None
+    match Json_util.assoc_member_opt "type" json with
+    | Some (`String "trajectory_summary") -> None
+    | Some (`String "thinking") -> None
     | _ ->
         let gate_decision, parsed_gate =
-          gate_decision_of_json (member "gate" json)
+          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
         in
         Some
           ( {
-              ts = json |> member "ts" |> to_float;
-              ts_iso = json |> member "ts_iso" |> to_string;
-              turn = json |> member "turn" |> to_int;
-              round = json |> member "round" |> to_int;
-              tool_name = json |> member "tool_name" |> to_string;
-              args_json = json |> member "args" |> Yojson.Safe.to_string;
+              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
+              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
+              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
+              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
+              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
               gate_decision;
               result =
-                (match json |> member "result" with
-                 | `Null -> None
-                 | `String s -> Some s
-                 | _ -> None);
-              duration_ms = json |> member "duration_ms" |> to_int;
+                (match Json_util.assoc_member_opt "result" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
               error =
-                (match json |> member "error" with
-                 | `Null -> None
-                 | `String s -> Some s
+                (match Json_util.assoc_member_opt "error" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              execution_id =
+                (match Json_util.assoc_member_opt "execution_id" json with
+                 | Some (`String s) -> Some s
                  | _ -> None);
-              cost_usd = json |> member "cost_usd" |> to_float;
             },
             parsed_gate )
   with
@@ -632,17 +755,16 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     |> List.filter_map (fun line ->
         try
           let json = Yojson.Safe.from_string line in
-          let open Yojson.Safe.Util in
-          match json |> member "type" with
-          | `String "trajectory_summary" -> None
-          | `String "thinking" ->
+          match Json_util.assoc_member_opt "type" json with
+          | Some (`String "trajectory_summary") -> None
+          | Some (`String "thinking") ->
               Some (Thinking {
-                ts = json |> member "ts" |> to_float;
-                ts_iso = json |> member "ts_iso" |> to_string;
-                turn = json |> member "turn" |> to_int;
-                content = json |> member "content" |> to_string;
-                content_length = json |> member "content_length" |> to_int;
-                redacted = (match json |> member "redacted" with `Bool b -> b | _ -> false);
+                ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+                ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
+                turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
+                content = (match Json_util.assoc_member_opt "content" json with Some (`String s) -> s | _ -> "");
+                content_length = (match Json_util.assoc_member_opt "content_length" json with Some (`Int n) -> n | _ -> 0);
+                redacted = (match Json_util.assoc_member_opt "redacted" json with Some (`Bool b) -> b | _ -> false);
               })
           | _ ->
               (match tool_call_entry_of_json json with

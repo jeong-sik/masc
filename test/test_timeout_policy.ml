@@ -1,14 +1,14 @@
 (* test/test_timeout_policy.ml
 
    Covers Timeout_policy.Deadline arithmetic and overshoot_warn gating.
-   Related to masc-mcp#9639 (timeout SSOT meta) and #9662 (keeper_llm_bridge
+   Related to masc#9639 (timeout SSOT meta) and #9662 (keeper_llm_bridge
    ~24s overshoot).
 
    overshoot_warn returns [true] exactly when actual_wall_s > cap + slack.
    The surrounding log side effect is not asserted; we rely on the boolean
    return as the observable signal so the test stays deterministic. *)
 
-open Masc_mcp
+open Masc
 
 let assert_eq_float ~epsilon ~msg expected got =
   if Float.abs (expected -. got) > epsilon then

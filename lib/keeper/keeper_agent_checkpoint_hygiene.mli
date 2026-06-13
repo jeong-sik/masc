@@ -20,7 +20,7 @@ type pre_dispatch_checkpoint_hygiene_result =
   ; trigger : Compaction_trigger.t option
     (** [Some _] when {!Keeper_compact_policy.compact_if_needed_typed}
       classified a trigger; [None] when no compaction fired.  Use
-      {!Compaction_trigger.to_label} for Prometheus emission and
+      {!Compaction_trigger.to_label} for Otel_metric_store emission and
       {!Compaction_trigger.to_detail_json} for SSE / JSON receipt. *)
   ; decision : Keeper_compact_policy.compaction_decision
     (** Typed decision tag from the policy. Render with
@@ -53,7 +53,7 @@ type pre_dispatch_checkpoint_hygiene_result =
        with the same message-count, old-tool-result, per-block, and
        total-content caps used by checkpoint persistence. *)
 val prepare_resume_checkpoint_for_dispatch
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> loaded_checkpoint_present:bool
   -> save_checkpoint:

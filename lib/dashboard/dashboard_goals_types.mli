@@ -33,7 +33,7 @@ type tree_node = {
 (** Per-goal projection node returned by [build_forest]. *)
 
 type goal_detail_keeper = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   latest_receipt : Yojson.Safe.t option;
   runtime_trust : Yojson.Safe.t;
 }
@@ -45,8 +45,10 @@ type attainment_unit =
 
 (** {1 Pure task-status helpers} *)
 
-val task_is_linked_to_goal : Masc_domain.task -> string -> bool
-val task_linkage_source_opt : Masc_domain.task -> string -> string option
+val task_is_linked_to_goal :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
+val task_linkage_source_opt :
+  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> string option
 val task_assignee : Masc_domain.task -> string option
 val task_status_label : Masc_domain.task -> string
 val task_is_terminal : Masc_domain.task -> bool
@@ -64,9 +66,9 @@ val receipt_error_kind : Yojson.Safe.t -> string option
 val receipt_error_message : Yojson.Safe.t -> string option
 val receipt_sandbox_kind : Yojson.Safe.t -> string option
 val receipt_approval_profile : Yojson.Safe.t -> string option
-val receipt_cascade_name : Yojson.Safe.t -> string option
-val receipt_cascade_outcome : Yojson.Safe.t -> string option
-val receipt_cascade_fallback_applied : Yojson.Safe.t -> bool
+val receipt_runtime_id : Yojson.Safe.t -> string option
+val receipt_runtime_outcome : Yojson.Safe.t -> string option
+val receipt_runtime_fallback_applied : Yojson.Safe.t -> bool
 val receipt_outcome : Yojson.Safe.t -> string option
 val receipt_started_at : Yojson.Safe.t -> string option
 val receipt_ended_at : Yojson.Safe.t -> string option
@@ -82,11 +84,11 @@ val trust_latest_event : Yojson.Safe.t -> Yojson.Safe.t option
 val trust_latest_event_ts : Yojson.Safe.t -> string option
 val trust_latest_event_ts_unix : Yojson.Safe.t -> float option
 val trust_sandbox_risk : Yojson.Safe.t -> bool
-val trust_cascade_risk : Yojson.Safe.t -> bool
+val trust_runtime_risk : Yojson.Safe.t -> bool
 
 val receipt_has_error : Yojson.Safe.t -> bool
 val receipt_has_sandbox_risk : Yojson.Safe.t -> bool
-val receipt_has_cascade_risk : Yojson.Safe.t -> bool
+val receipt_has_runtime_risk : Yojson.Safe.t -> bool
 
 val iso_max : string -> string -> string
 val latest_iso : ?fallback:string -> string list -> string option
@@ -99,8 +101,6 @@ val human_duration : int -> string
 val clamp_float : float -> float -> float -> float
 val pct_of_float : float -> int
 
-val json_float_opt : float option -> Yojson.Safe.t
-val json_int_opt : int option -> Yojson.Safe.t
 val attainment_unit_to_string : attainment_unit -> string
 
 val contains_ci : string -> string -> bool
@@ -160,7 +160,7 @@ val goal_health_reason :
   child_blocked:bool ->
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   stagnation_seconds:int ->
@@ -180,7 +180,7 @@ val tree_health :
 val tree_badges :
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   activity_unobserved:bool ->
@@ -190,10 +190,10 @@ val tree_badges :
 
 val approval_matches_goal : string -> Yojson.Safe.t -> bool
 
-val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+val keeper_name_matches_meta : Keeper_meta_contract.keeper_meta list -> string -> bool
 
 val keeper_name_of_assignee :
-  Keeper_types.keeper_meta list -> string -> string option
+  Keeper_meta_contract.keeper_meta list -> string -> string option
 
 val goal_fsm_state_kind : Goal_phase.t -> string
 
@@ -272,8 +272,8 @@ val goal_policy_nodes :
     [runtime_blocker_class] and [runtime_blocker_summary] are absent or
     empty. Reads wall-clock for [ts] / [observed_at]. *)
 val runtime_blocker_event_from_meta :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t option
 
 (** {1 Runtime trust fallback projection from execution receipt} *)
@@ -282,8 +282,8 @@ val runtime_blocker_event_from_meta :
     a 19-key runtime_trust JSON record. Used when the upstream
     [Keeper_runtime_trust_snapshot.snapshot_json] is unavailable. *)
 val runtime_trust_from_receipt_fallback :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t ->
   Yojson.Safe.t
 
@@ -305,9 +305,10 @@ type build_context = {
   now_ts : float;
   all_tasks : Masc_domain.task list;
   pending_approvals : Yojson.Safe.t list;
-  keeper_metas : Keeper_types.keeper_meta list;
+  keeper_metas : Keeper_meta_contract.keeper_meta list;
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
+  goal_task_index : (string, string list) Hashtbl.t;
 }
 
 (** Recursive pure projection: given a [build_context] snapshot, build

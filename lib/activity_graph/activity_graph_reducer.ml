@@ -27,8 +27,8 @@ type edge_acc = {
 let entity_node_id (value : entity_ref) = value.kind ^ ":" ^ value.id
 
 let payload_string field json =
-  match Yojson.Safe.Util.member field json with
-  | `String value when String.trim value <> "" -> Some value
+  match Json_util.assoc_member_opt field json with
+  | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
 
 let is_generic_status = function
@@ -36,7 +36,7 @@ let is_generic_status = function
   | Offline | Spawned | Retired | Compacting | Handoff | Autonomy | Guardrail
   | Todo | Claimed | In_progress | Done | Cancelled
   | Posted | Discussed | Open | Resolved | Approved | Denied
-  | Running | Paused | Stopped | Finalized | Coord -> false
+  | Running | Paused | Stopped | Finalized | Workspace -> false
 
 (* Semantic weight multiplier by event kind.
    Completion events score high; routine lifecycle events score low. *)
@@ -51,7 +51,7 @@ let semantic_multiplier = function
   | "board.commented" | "decision.voted" -> 1.0
   | "operation.started" | "operation.resumed" -> 1.0
   | "policy.approved" | "policy.denied" -> 2.0
-  | "agent.joined" | "agent.left" -> 0.5
+  | "agent.session_bound" | "agent.left" -> 0.5
   | "agent.retired" | "agent.compacted" -> 0.5
   | "keeper.compaction" | "keeper.guardrail" -> 0.5
   | "keeper.autonomy_started" | "keeper.autonomy_completed" -> 1.5
@@ -124,9 +124,9 @@ let ensure_edge (edges : (string, edge_acc) Hashtbl.t) ~source ~target ~kind
 
 let reduce_event ~nodes ~edges (value : event) =
   let sw = semantic_multiplier value.kind in
-  let room_node_id = "room:" ^ value.room_id in
-  ensure_node nodes ~id:room_node_id ~kind:"room" ~label:value.room_id
-    ~status:Coord ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
+  let workspace_node_id = "workspace:" ^ value.workspace_id in
+  ensure_node nodes ~id:workspace_node_id ~kind:"workspace" ~label:value.workspace_id
+    ~status:Workspace ~ts_iso:value.ts_iso ~meta:default_meta ~sw_delta:sw;
   let actor_id =
     match value.actor with
     | Some actor ->
@@ -134,7 +134,7 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes actor ~fallback_status:Active
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
-        ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
+        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
@@ -146,7 +146,7 @@ let reduce_event ~nodes ~edges (value : event) =
           ensure_entity_node nodes subject ~fallback_status:Observed
             ~ts_iso:value.ts_iso ~meta:value.payload ~sw_delta:sw
         in
-        ensure_edge edges ~source:id ~target:room_node_id ~kind:"belongs_to"
+        ensure_edge edges ~source:id ~target:workspace_node_id ~kind:"belongs_to"
           ~active:true ~ts_iso:value.ts_iso ~meta:default_meta;
         Some id
     | None -> None
@@ -168,7 +168,7 @@ let reduce_event ~nodes ~edges (value : event) =
     | None -> ()
   in
   (match value.kind with
-  | "agent.joined" -> set_subject_status Active
+  | "agent.session_bound" -> set_subject_status Active
   | "agent.left" -> set_subject_status Offline
   | "agent.spawned" -> set_subject_status Spawned
   | "agent.retired" -> set_subject_status Retired
@@ -226,7 +226,7 @@ let reduce_event ~nodes ~edges (value : event) =
   | "message.broadcast" ->
       (match actor_id with
       | Some source ->
-          ensure_edge edges ~source ~target:room_node_id ~kind:"broadcasts"
+          ensure_edge edges ~source ~target:workspace_node_id ~kind:"broadcasts"
             ~active:false ~ts_iso:value.ts_iso ~meta:value.payload
       | None -> ())
   | "message.mentioned" ->

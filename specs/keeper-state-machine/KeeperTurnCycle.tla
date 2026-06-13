@@ -10,7 +10,7 @@
 (*                       finalizing | exhausted                            *)
 (*   - decision_stage  : undecided | guard_ok | gate_rejected |            *)
 (*                       tool_policy_selected                              *)
-(*   - cascade_state   : idle | selecting | trying | done | exhausted      *)
+(*   - runtime_state   : idle | selecting | trying | done | exhausted      *)
 (*                                                                         *)
 (* Turn idle is represented by [turn_live = FALSE] plus cleared substate.  *)
 (* The authoritative write points live in:                                  *)
@@ -27,7 +27,7 @@
 (*   turn_live            | current_turn_observation = Some _        | record on keeper_runtime *)
 (*   turn_phase           | type turn_phase                          | lib/keeper/keeper_registry_types.ml — type turn_phase *)
 (*   decision_stage       | type decision_stage                      | lib/keeper/keeper_registry_types.ml — type decision_stage *)
-(*   cascade_state        | type cascade_state                       | lib/keeper/keeper_registry_types.ml — type cascade_state *)
+(*   runtime_state        | type runtime_state                       | lib/keeper/keeper_registry_types.ml — type runtime_state *)
 (*   measurement_bound    | observation.measurement_bound : bool     | record field *)
 (*   selected_model_bound | observation.selected_model = Some _      | record field *)
 (*                                                                         *)
@@ -39,7 +39,7 @@
 (*     line 493   mark_turn_started                                        *)
 (*     line 515   mark_turn_measurement                                    *)
 (*     line 535   set_turn_decision_stage                                  *)
-(*     line 544   set_turn_cascade_state                                   *)
+(*     line 544   set_turn_runtime_state                                   *)
 (*     line 566   set_turn_selected_model                                  *)
 (*     line 575   prepare_turn_retry_after_compaction                      *)
 (*     line 590   mark_turn_gate_rejected_by_name                          *)
@@ -49,17 +49,17 @@
 (*     line 1559  mark_turn_started        (StartTurn)                     *)
 (*     line 1576  set_turn_decision_stage  (GuardOk -- when measurement bound) *)
 (*     line 1616  mark_turn_finished       (FinishTurn -- in finally)      *)
-(*     retry_loop sets CascadeDone/Exhausted directly; CascadeTrying is    *)
+(*     retry_loop sets RuntimeDone/Exhausted directly; RuntimeTrying is    *)
 (*     now materialised inside the disclosure hook below (atomic group     *)
 (*     with SelectToolPolicy) so the [idle -> trying] jump is avoided.     *)
-(*     line 1813  set_turn_selected_model  (CascadeDone)                   *)
+(*     line 1813  set_turn_selected_model  (RuntimeDone)                   *)
 (*     line 2052  prepare_turn_retry_after_compaction  (RetryAfterCompaction) *)
 (*                                                                         *)
 (*   lib/keeper/keeper_run_tools.ml -- BeforeTurnParams disclosure hook    *)
 (*     set_turn_decision_stage = Decision_tool_policy_selected             *)
-(*     set_turn_cascade_state  = Cascade_selecting                         *)
-(*     set_turn_cascade_state  = Cascade_trying                            *)
-(*       (atomic group materialising SelectToolPolicy + CascadeTrying;     *)
+(*     set_turn_runtime_state  = Runtime_selecting                         *)
+(*     set_turn_runtime_state  = Runtime_trying                            *)
+(*       (atomic group materialising SelectToolPolicy + RuntimeTrying;     *)
 (*        keeping the two transitions adjacent at the only site that       *)
 (*        asserts decision_stage = tool_policy_selected satisfies          *)
 (*        SelectingRequiresToolPolicy and avoids the idle-to-trying jump   *)
@@ -73,24 +73,24 @@
 (* Composite contract (why this spec exists alongside the 1-axis specs):   *)
 (*                                                                         *)
 (*   - KeeperDecisionPipeline   covers decision_stage in isolation.        *)
-(*   - KeeperCascadeLifecycle   covers cascade_state in isolation.         *)
+(*   - KeeperRuntimeLifecycle   covers runtime_state in isolation.         *)
 (*   - KeeperConditionsGovernPhase covers handoff signal in isolation.    *)
 (*                                                                         *)
 (*   This spec is the COMPOSITE -- the 3-axis invariants below             *)
 (*     (SelectingRequiresToolPolicy, ExecutingRequiresTrying,              *)
-(*      CompactingRequiresTrying, TerminalCascadeRequiresFinalizing)       *)
+(*      CompactingRequiresTrying, TerminalRuntimeRequiresFinalizing)       *)
 (*   are CROSS-AXIS and cannot be expressed in any single-axis sibling.    *)
 (*   That is the load-bearing reason this spec is not redundant.           *)
 (*                                                                         *)
 (* Adding new constructors:                                                *)
 (*   - new turn_phase    -> update TurnPhaseSet + every action's phase guard *)
 (*   - new decision_stage-> update DecisionSet + per-axis sibling spec     *)
-(*   - new cascade_state -> update CascadeSet + cross-axis invariants here *)
+(*   - new runtime_state -> update RuntimeSet + cross-axis invariants here *)
 (*                                                                         *)
 (* Out-of-scope (intentionally not modelled):                              *)
 (*   - selected_model identity (just a boolean here)                       *)
-(*   - cascade attempt graph below the keeper-facing projection            *)
-(*     (Llm_provider / cascade_runtime cycle)                              *)
+(*   - runtime attempt graph below the keeper-facing projection            *)
+(*     (Llm_provider / runtime_runtime cycle)                              *)
 (*   - the full keeper lifecycle FSM in keeper_state_machine.ml            *)
 (*     (Offline / Running / Crashed / etc. -- orthogonal axis)             *)
 (*   - `routing` and `exhausted` ACTION-LEVEL transitions (B-2 gap).       *)
@@ -103,10 +103,10 @@
 (*     OCaml `keeper_registry_types.ml`'s `module Turn_phase_transition` (GADT-encoded turn_phase transitions) declares the cross-state transitions *)
 (*     (Prompting_to_routing, Routing_to_prompting/_routing/_executing/    *)
 (*     _exhausted, Executing_to_routing, Prompting_to_exhausted) — the     *)
-(*     keeper-projection view of the per-attempt cascade FSM.              *)
+(*     keeper-projection view of the per-attempt runtime FSM.              *)
 (*                                                                         *)
 (*     Attempt-internal modeling is THE RESPONSIBILITY OF                  *)
-(*     KeeperCascadeAttemptFSM.tla (KCAF), which models 6 attempt phases   *)
+(*     KeeperRuntimeAttemptFSM.tla (KCAF), which models 6 attempt phases   *)
 (*     + 3 BugActions independently of the turn-level projection.  See:   *)
 (*       - docs/tla-audit/ktc-b2-routing-action-modeling-2026-05-12.md     *)
 (*         (R-B-2.a/b/c RFC candidates and TLC state-space estimate)       *)
@@ -127,12 +127,12 @@ VARIABLES
     turn_live,            \* current_turn_observation = Some _
     turn_phase,           \* Keeper_registry.turn_phase
     decision_stage,       \* Keeper_registry.decision_stage
-    cascade_state,        \* Keeper_registry.cascade_state
+    runtime_state,        \* Keeper_registry.runtime_state
     measurement_bound,    \* mark_turn_measurement already consumed
     selected_model_bound  \* selected_model = Some _
 
 vars ==
-    << turn_live, turn_phase, decision_stage, cascade_state,
+    << turn_live, turn_phase, decision_stage, runtime_state,
        measurement_bound, selected_model_bound >>
 
 \* TurnPhaseSet: phase membership type.
@@ -154,16 +154,16 @@ vars ==
 TurnPhaseSet == {"idle", "prompting", "routing", "executing",
                  "compacting", "finalizing", "exhausted"}
 DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
-CascadeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
+RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
     "BindMeasurement",
     "GuardOk",
     "SelectToolPolicy",
     "GateRejected",
-    "CascadeTrying",
-    "CascadeDone",
-    "CascadeExhausted",
+    "RuntimeTrying",
+    "RuntimeDone",
+    "RuntimeExhausted",
     "EnterCompacting",
     "RetryAfterCompaction",
     "FinishTurn"
@@ -175,14 +175,14 @@ InvariantSet == {
     "SelectingRequiresToolPolicy",
     "ExecutingRequiresTrying",
     "CompactingRequiresTrying",
-    "TerminalCascadeRequiresFinalizing"
+    "TerminalRuntimeRequiresFinalizing"
 }
 
 TypeOK ==
     /\ turn_live \in BOOLEAN
     /\ turn_phase \in TurnPhaseSet
     /\ decision_stage \in DecisionSet
-    /\ cascade_state \in CascadeSet
+    /\ runtime_state \in RuntimeSet
     /\ measurement_bound \in BOOLEAN
     /\ selected_model_bound \in BOOLEAN
 
@@ -190,7 +190,7 @@ Init ==
     /\ turn_live = FALSE
     /\ turn_phase = "idle"
     /\ decision_stage = "undecided"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ measurement_bound = FALSE
     /\ selected_model_bound = FALSE
 
@@ -203,7 +203,7 @@ StartTurn ==
     /\ turn_live' = TRUE
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
     /\ selected_model_bound' = FALSE
 
@@ -212,11 +212,11 @@ BindMeasurement ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "undecided"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ ~measurement_bound
     /\ measurement_bound' = TRUE
     /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
-                    cascade_state, selected_model_bound>>
+                    runtime_state, selected_model_bound>>
 
 \* keeper_unified_turn.ml elevates guard_ok when a measurement is present.
 GuardOk ==
@@ -225,7 +225,7 @@ GuardOk ==
     /\ measurement_bound
     /\ decision_stage = "undecided"
     /\ decision_stage' = "guard_ok"
-    /\ UNCHANGED <<turn_live, turn_phase, cascade_state,
+    /\ UNCHANGED <<turn_live, turn_phase, runtime_state,
                     measurement_bound, selected_model_bound>>
 
 \* keeper_agent_run.ml: tool disclosure completes, selected policy becomes active.
@@ -234,11 +234,11 @@ GuardOk ==
 SelectToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
-    /\ cascade_state = "idle"
+    /\ runtime_state = "idle"
     /\ measurement_bound
     /\ decision_stage \in {"undecided", "guard_ok"}
     /\ decision_stage' = "tool_policy_selected"
-    /\ cascade_state' = "selecting"
+    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, measurement_bound,
                     selected_model_bound>>
 
@@ -249,40 +249,40 @@ GateRejected ==
     /\ turn_live
     /\ turn_phase = "executing"
     /\ decision_stage = "tool_policy_selected"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
     /\ decision_stage' = "gate_rejected"
-    /\ UNCHANGED <<turn_live, cascade_state, measurement_bound,
+    /\ UNCHANGED <<turn_live, runtime_state, measurement_bound,
                     selected_model_bound>>
 
-\* keeper_unified_turn.ml: retry_loop sets Cascade_trying before OAS run.
-CascadeTrying ==
+\* keeper_unified_turn.ml: retry_loop sets Runtime_trying before OAS run.
+RuntimeTrying ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "tool_policy_selected"
-    /\ cascade_state = "selecting"
+    /\ runtime_state = "selecting"
     /\ turn_phase' = "executing"
-    /\ cascade_state' = "trying"
+    /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
                     selected_model_bound>>
 
-\* Successful cascade attempt chooses a model and enters finalizing.
-CascadeDone ==
+\* Successful runtime attempt chooses a model and enters finalizing.
+RuntimeDone ==
     /\ turn_live
     /\ turn_phase = "executing"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
-    /\ cascade_state' = "done"
+    /\ runtime_state' = "done"
     /\ selected_model_bound' = TRUE
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
-\* Exhausted cascade also terminates the turn, without binding a model.
-CascadeExhausted ==
+\* Exhausted runtime also terminates the turn, without binding a model.
+RuntimeExhausted ==
     /\ turn_live
     /\ turn_phase = "executing"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "finalizing"
-    /\ cascade_state' = "exhausted"
+    /\ runtime_state' = "exhausted"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound,
                     selected_model_bound>>
 
@@ -290,21 +290,21 @@ CascadeExhausted ==
 EnterCompacting ==
     /\ turn_live
     /\ turn_phase = "executing"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "compacting"
-    /\ UNCHANGED <<turn_live, decision_stage, cascade_state,
+    /\ UNCHANGED <<turn_live, decision_stage, runtime_state,
                     measurement_bound, selected_model_bound>>
 
 \* keeper_unified_turn.ml: prepare_turn_retry_after_compaction
 \* Re-enters prompting with the measurement still bound, but clears the old
-\* cascade attempt and selected model before the next retry.
+\* runtime attempt and selected model before the next retry.
 RetryAfterCompaction ==
     /\ turn_live
     /\ turn_phase = "compacting"
-    /\ cascade_state = "trying"
+    /\ runtime_state = "trying"
     /\ turn_phase' = "prompting"
     /\ decision_stage' = "guard_ok"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ selected_model_bound' = FALSE
     /\ UNCHANGED <<turn_live, measurement_bound>>
 
@@ -315,7 +315,7 @@ FinishTurn ==
     /\ turn_live' = FALSE
     /\ turn_phase' = "idle"
     /\ decision_stage' = "undecided"
-    /\ cascade_state' = "idle"
+    /\ runtime_state' = "idle"
     /\ measurement_bound' = FALSE
     /\ selected_model_bound' = FALSE
 
@@ -325,15 +325,15 @@ Next ==
     \/ GuardOk
     \/ SelectToolPolicy
     \/ GateRejected
-    \/ CascadeTrying
-    \/ CascadeDone
-    \/ CascadeExhausted
+    \/ RuntimeTrying
+    \/ RuntimeDone
+    \/ RuntimeExhausted
     \/ EnterCompacting
     \/ RetryAfterCompaction
     \/ FinishTurn
 
 \* ── Bug Model: Selecting Without Tool Policy ───────────────
-\* Models a regression where cascade_state jumps to "selecting"
+\* Models a regression where runtime_state jumps to "selecting"
 \* without decision_stage being "tool_policy_selected".
 \* SHOULD violate SelectingRequiresToolPolicy.
 
@@ -341,7 +341,7 @@ BugSelectingWithoutToolPolicy ==
     /\ turn_live
     /\ turn_phase = "prompting"
     /\ decision_stage = "guard_ok"  \* BUG: not tool_policy_selected
-    /\ cascade_state' = "selecting"
+    /\ runtime_state' = "selecting"
     /\ UNCHANGED <<turn_live, turn_phase, decision_stage,
                     measurement_bound, selected_model_bound>>
 
@@ -362,7 +362,7 @@ NoLiveTurnClearsState ==
     ~turn_live =>
         /\ turn_phase = "idle"
         /\ decision_stage = "undecided"
-        /\ cascade_state = "idle"
+        /\ runtime_state = "idle"
         /\ ~measurement_bound
         /\ ~selected_model_bound
 
@@ -373,7 +373,7 @@ GateRejectedRequiresFinalizing ==
     decision_stage = "gate_rejected" => turn_phase = "finalizing"
 
 SelectingRequiresToolPolicy ==
-    cascade_state = "selecting" =>
+    runtime_state = "selecting" =>
         /\ turn_live
         /\ turn_phase = "prompting"
         /\ decision_stage = "tool_policy_selected"
@@ -381,17 +381,17 @@ SelectingRequiresToolPolicy ==
 ExecutingRequiresTrying ==
     turn_phase = "executing" =>
         /\ turn_live
-        /\ cascade_state = "trying"
+        /\ runtime_state = "trying"
         /\ decision_stage = "tool_policy_selected"
 
 CompactingRequiresTrying ==
     turn_phase = "compacting" =>
         /\ turn_live
-        /\ cascade_state = "trying"
+        /\ runtime_state = "trying"
         /\ decision_stage = "tool_policy_selected"
 
-TerminalCascadeRequiresFinalizing ==
-    cascade_state \in {"done", "exhausted"} =>
+TerminalRuntimeRequiresFinalizing ==
+    runtime_state \in {"done", "exhausted"} =>
         /\ turn_live
         /\ turn_phase = "finalizing"
         /\ decision_stage = "tool_policy_selected"
@@ -404,7 +404,7 @@ Safety ==
     /\ SelectingRequiresToolPolicy
     /\ ExecutingRequiresTrying
     /\ CompactingRequiresTrying
-    /\ TerminalCascadeRequiresFinalizing
+    /\ TerminalRuntimeRequiresFinalizing
 
 (* Wrapper for buggy cfg — must be defined AFTER the invariant it references. *)
 SelectingRequiresToolPolicyMustHold == SelectingRequiresToolPolicy

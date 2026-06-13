@@ -18,7 +18,7 @@ let create () = {
 
 (* Shared instances keyed by base_path; ensures multiple configs for the
    same directory share state (matching FileSystem backend semantics).
-   Used by tests that create multiple Coord.default_config for one tmpdir. *)
+   Used by tests that create multiple Workspace.default_config for one tmpdir. *)
 let shared_instances : (string, t) Hashtbl.t = Hashtbl.create 8
 
 let get_or_create ~base_path =

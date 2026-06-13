@@ -1,6 +1,6 @@
 open Alcotest
 
-module Gate = Masc_mcp.Tool_resource_gate
+module Gate = Masc.Tool_resource_gate
 
 let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
@@ -59,32 +59,52 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "SearchFiles public alias"
+    "Grep public alias"
     "filesystem_read"
     (classify
-       "SearchFiles"
+       "Grep"
        ~is_read_only:true
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
     string
-    "ReadFile public alias"
+    "Search public alias"
     "filesystem_read"
     (classify
-       "ReadFile"
+       "Search"
+       ~is_read_only:true
+       ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
+  check
+    string
+    "Read public alias"
+    "filesystem_read"
+    (classify
+       "Read"
        ~is_read_only:true
        ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
   check
     string
-    "WriteFile public alias"
-    "filesystem_write"
+    "Write public alias"
+    "workspace_write"
     (classify
-       "WriteFile"
+       "Write"
        ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   check
     string
-    "SearchWeb public alias"
+    "Edit public alias"
+    "workspace_write"
+    (classify
+       "Edit"
+       ~args:
+         (`Assoc
+           [ "file_path", `String "x"
+           ; "old_string", `String "a"
+           ; "new_string", `String "b"
+           ]));
+  check
+    string
+    "WebSearch public alias"
     "web"
-    (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
+    (classify "WebSearch" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
     "tool_search_files unsupported op skips shell gate"
@@ -107,7 +127,7 @@ let test_classifies_host_local_bottlenecks () =
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "bash" ]));
   check string "board write" "board_write" (classify "masc_board_post");
-  check string "transition" "coordination_write" (classify "masc_transition");
+  check string "transition" "workspace_write" (classify "masc_transition");
   check string "worker shell_exec" "shell" (classify "shell_exec");
   check
     string
@@ -119,7 +139,8 @@ let test_classifies_host_local_bottlenecks () =
     "unknown read-only fs-looking tool stays ungated"
     "ungated"
     (classify ~is_read_only:true "future_fs_reader");
-  check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status")
+  check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status");
+  check string "agent catalog metadata stays ungated" "ungated" (classify "masc_agents")
 ;;
 
 let test_gate_rejects_when_lane_is_saturated () =
@@ -262,18 +283,16 @@ let test_mixed_24_keeper_burst_stays_bounded () =
            ~shell:2
            ~github:2
            ~docker:1
-           ~filesystem_write:3
            ~board_write:2
-           ~coordination_write:2
+           ~workspace_write:3
            ();
          with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "3.0" (fun () ->
            let clock = Eio.Stdenv.clock env in
            let shell = lane_tracker "shell" 2 in
            let github = lane_tracker "github" 2 in
            let docker = lane_tracker "docker" 1 in
-           let fs_write = lane_tracker "filesystem_write" 3 in
            let board = lane_tracker "board_write" 2 in
-           let coord = lane_tracker "coordination_write" 2 in
+           let workspace = lane_tracker "workspace_write" 3 in
            let cases =
              []
              |> add_cases 4
@@ -295,11 +314,11 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                       ; "argv", `List [ `String "ps" ]
                       ] )
              |> add_cases 4
-                  ( fs_write
+                  ( workspace
                   , "tool_write_file"
                   , `Assoc [ "path", `String "x"; "content", `String "y" ] )
              |> add_cases 4 (board, "masc_board_post", `Assoc [])
-             |> add_cases 4 (coord, "masc_transition", `Assoc [])
+             |> add_cases 4 (workspace, "masc_transition", `Assoc [])
            in
            let successes = Atomic.make 0 in
            Eio.Switch.run (fun sw ->
@@ -332,7 +351,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                   (Atomic.get tracker.max_inflight <= tracker.limit);
                 check int (tracker.lane ^ " permit released") 0
                   (Atomic.get tracker.inflight))
-             [ shell; github; docker; fs_write; board; coord ])))
+             [ shell; github; docker; board; workspace ])))
 ;;
 
 let () =

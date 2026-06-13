@@ -1,7 +1,7 @@
 (** test_keeper_classifier_helper — coverage for the structured actionable
-    signal classifier used by the required-tool contract gate. *)
+    signal classifier used for advisory world-state labels. *)
 
-open Masc_mcp
+open Masc
 module C = Keeper_contract_classifier
 
 let s = Alcotest.testable
@@ -28,30 +28,6 @@ let test_board_takes_second_priority () =
   Alcotest.check s "board when no tasks"
     C.Has_board_activity
     (C.classify_actionable_signal (obs ~board:1 ()))
-
-let test_allowed_tools_preserve_fallback_precedence () =
-  Alcotest.check s "board wins when claim tools are hidden"
-    C.Has_board_activity
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_board_post" ]
-       (obs ~tasks:2 ~board:1 ()));
-  Alcotest.check s "no unwinnable signal without action tools"
-    C.No_actionable_signal
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_tasks_list"; "masc_status" ]
-       (obs ~tasks:2 ~board:1 ()))
-
-let test_allowed_tools_keep_top_priority_when_actionable () =
-  Alcotest.check s "unclaimed wins with claim tool visible"
-    C.Has_unclaimed_tasks
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ]
-       (obs ~tasks:2 ~board:1 ()));
-  Alcotest.check s "board wins with board tool visible"
-    C.Has_board_activity
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_board_comment"; "keeper_tasks_audit" ]
-       (obs ~board:1 ()))
 
 let test_zero_counts_are_inactive () =
   (* count = 0 must NOT promote to *_activity (boundary check on ">0"). *)
@@ -101,28 +77,6 @@ let test_is_actionable_matches_classify () =
         expected (C.is_actionable sig_))
     observations
 
-let test_tool_filtered_classifier_uses_visible_capability () =
-  Alcotest.check s "claim tool permits task signal"
-    C.Has_unclaimed_tasks
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_task_claim" ]
-       (obs ~tasks:1 ()));
-  Alcotest.check s "missing claim tool downgrades task signal"
-    C.No_actionable_signal
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_tasks_list" ]
-       (obs ~tasks:1 ()));
-  Alcotest.check s "falls through to board when task tool missing"
-    C.Has_board_activity
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_board_comment" ]
-       (obs ~tasks:1 ~board:1 ()));
-  Alcotest.check s "read/search tools do not create a signal"
-    C.No_actionable_signal
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "tool_search_files" ]
-       (obs ()))
-
 let () =
   Alcotest.run "keeper_classifier_helper"
     [
@@ -134,16 +88,10 @@ let () =
             test_unclaimed_tasks_take_top_priority;
           Alcotest.test_case "board signal" `Quick
             test_board_takes_second_priority;
-          Alcotest.test_case "allowed tools preserve fallback precedence" `Quick
-            test_allowed_tools_preserve_fallback_precedence;
-          Alcotest.test_case "allowed tools keep top actionable priority" `Quick
-            test_allowed_tools_keep_top_priority_when_actionable;
           Alcotest.test_case "zero counts are inactive" `Quick
             test_zero_counts_are_inactive;
           Alcotest.test_case "negative counts are inactive" `Quick
             test_negative_counts_are_inactive;
-          Alcotest.test_case "visible tools gate signals" `Quick
-            test_tool_filtered_classifier_uses_visible_capability;
         ] );
       ( "is_actionable",
         [

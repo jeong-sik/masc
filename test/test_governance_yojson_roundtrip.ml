@@ -4,7 +4,7 @@
     with the previous manual JSON construction, and that deserialization
     handles both complete and partial input correctly. *)
 
-open Masc_mcp
+open Masc
 
 let () =
   let open Alcotest in

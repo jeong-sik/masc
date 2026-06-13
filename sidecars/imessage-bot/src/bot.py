@@ -63,7 +63,6 @@ class IMessageBot:
     def _load_bindings(self) -> None:
         self._bindings = load_bindings(
             self.cfg.binding_store_path,
-            legacy_path=self.cfg.legacy_binding_store_path,
             logger=logger,
         )
 
@@ -128,7 +127,7 @@ class IMessageBot:
             keeper_name=keeper,
             content=msg.text,
             sender=msg.sender,
-            chat_id=msg.room_id,
+            chat_id=msg.workspace_id,
             message_rowid=msg.rowid,
         )
 

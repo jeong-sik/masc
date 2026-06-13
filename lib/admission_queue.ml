@@ -7,11 +7,11 @@
     {1 Status — 2026-05-05}
 
     [with_permit] is intentionally passthrough. Provider-level throttling
-    moved to OAS cascade per RFC-0026 (PR-E-1.6 + 1.7); MASC-layer
+    moved to OAS runtime per RFC-0026 (PR-E-1.6 + 1.7); MASC-layer
     gating couples request classification with local resource estimates
     and cannot express per-provider capacity. The
     [insert_sorted] / [waiter] / [global.waiters] machinery below is
-    observability scaffolding for the future cascade-layer admission
+    observability scaffolding for the future runtime-layer admission
     router and is not consumed by the current call path; do not delete.
     See docs/audit-responses/2026-05-05-dashboard-heuristic.md §3 for the
     full classification.
@@ -22,7 +22,7 @@
 
 type waiter_info =
   { keeper_name : string
-  ; cascade_name : Cascade_name.t
+  ; runtime_id : string
   ; enqueue_ts : float
   ; priority : Llm_provider.Request_priority.t
   }
@@ -51,7 +51,7 @@ type t =
 
 (* ── Sorted Insertion ──────────────────────────────────── *)
 
-(* RFC-0026 observability scaffolding: defined for future cascade-layer
+(* RFC-0026 observability scaffolding: defined for future runtime-layer
    admission router consumption; not invoked from the current passthrough
    [with_permit] path. Audit response 2026-05-05 §3.2. Do not delete. *)
 
@@ -78,7 +78,7 @@ let initial_max_concurrent_of_env getenv =
   | Some n -> max 1 n
   | None ->
     (* Default 3: with_permit is now passthrough (provider throttle
-         belongs in OAS cascade, not MASC).  This value is only used
+         belongs in OAS runtime, not MASC).  This value is only used
          for snapshot reporting; it does not gate anything. *)
     3
 ;;
@@ -100,16 +100,16 @@ let bump_active delta =
     global.active <- max 0 (global.active + delta))
 ;;
 
-let with_inflight_observation ~keeper_name ~cascade_name f =
+let with_inflight_observation ~keeper_name ~runtime_id f =
   bump_active 1;
-  (match Admission_queue_metrics.on_acquire ~keeper_name ~cascade_name ~wait_ms:0 with
+  (match Admission_queue_metrics.on_acquire ~keeper_name ~runtime_id ~wait_ms:0 with
    | () -> ()
    | exception exn ->
      bump_active (-1);
      raise exn);
   Eio_guard.protect
     ~finally:(fun () ->
-      (match Admission_queue_metrics.on_release ~keeper_name ~cascade_name with
+      (match Admission_queue_metrics.on_release ~keeper_name ~runtime_id with
        | () -> ()
        | exception exn ->
          bump_active (-1);
@@ -182,34 +182,41 @@ let check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold =
 ;;
 
 let check_host_resources ~surface ~keeper_name =
-  let fd_count = Prometheus_process.approximate_open_fd_count () in
-  let threshold = Prometheus_process.fd_warn_threshold in
+  let fd_count = Otel_metric_process.approximate_open_fd_count () in
+  let threshold = Otel_metric_process.fd_warn_threshold in
   check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
 ;;
 
-let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
-  match
-    check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
-  with
-  | Error _ as e -> e
-  | Ok () ->
-    (* Passthrough: provider-level throttling belongs in OAS (cascade),
-         not in MASC.  The cascade distributes requests across providers
-         and handles 429/timeout by falling to the next provider.
-         Gating here starves cloud-routed keepers behind a serial local
-         decode and cannot express per-provider capacity.
-         Metric and snapshot observation track real inflight even though
-         gating is off.
-         RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
-    Ok (with_inflight_observation ~keeper_name ~cascade_name f)
+let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~runtime_id f =
+  Otel_spans.with_span
+    ~name:"admission_queue"
+    ~attrs:[
+      "keeper.name", `String keeper_name;
+      "masc.runtime_id", `String runtime_id;
+    ]
+    (fun _trace_id ->
+      match
+        check_host_resources ~surface:Admission_queue_metrics.With_permit ~keeper_name
+      with
+      | Error _ as e -> e
+      | Ok () ->
+        (* Passthrough: provider-level throttling belongs in OAS (runtime),
+             not in MASC.  The runtime distributes requests across providers
+             and handles 429/timeout by falling to the next provider.
+             Gating here starves cloud-routed keepers behind a serial local
+             decode and cannot express per-provider capacity.
+             Metric and snapshot observation track real inflight even though
+             gating is off.
+             RFC-0026 PR-E-1.6/1.7; audit response 2026-05-05 §3.1. *)
+        Ok (with_inflight_observation ~keeper_name ~runtime_id f))
 ;;
 
-let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
+let try_with_permit ~priority:_ ~keeper_name ~runtime_id f =
   match
     check_host_resources ~surface:Admission_queue_metrics.Try_with_permit ~keeper_name
   with
   | Error _ -> None
-  | Ok () -> Some (with_inflight_observation ~keeper_name ~cascade_name f)
+  | Ok () -> Some (with_inflight_observation ~keeper_name ~runtime_id f)
 ;;
 
 let snapshot () =
@@ -226,8 +233,7 @@ let snapshot_json () =
   let s = snapshot () in
   let now = now_ts () in
   `Assoc
-    [ "mode", `String "passthrough"
-    ; "throttle_owner", `String "oas_cascade"
+    [ "throttle_owner", `String "oas_runtime"
     ; "local_tool_resource_gates", Tool_resource_gate.snapshot_json ()
     ; "max_concurrent", `Int s.max_concurrent
     ; "active", `Int s.active
@@ -239,9 +245,9 @@ let snapshot_json () =
              (fun (w : waiter_info) ->
                 `Assoc
                   [ "keeper_name", `String w.keeper_name
-                  ; ( "cascade_name"
+                  ; ( "runtime_id"
                     , `String
-                        (Cascade_name.to_string w.cascade_name) )
+                        (w.runtime_id) )
                   ; ( "priority"
                     , `String (Llm_provider.Request_priority.to_string w.priority) )
                   ; "wait_seconds", `Float (now -. w.enqueue_ts)

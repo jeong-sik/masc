@@ -11,14 +11,13 @@
       last line of the body (parsed by
       {!split_http_body_and_status}).
 
-    {b Include cascade:} starts with [include Tool_local_runtime_core]
+    {b Include runtime:} starts with [include Tool_local_runtime_core]
     so siblings ({!Tool_local_runtime_bench},
     {!Tool_local_runtime_verify}, {!Tool_local_runtime_probe})
     receive the core surface transitively via
     [include Tool_local_runtime_http].
 
-    Internal helpers ([split_http_body_and_status],
-    [append_headers]) stay private. *)
+    Internal helpers stay private. *)
 
 include module type of struct
   include Tool_local_runtime_core
@@ -43,9 +42,41 @@ val string_member : Yojson.Safe.t -> string -> string option
 
 (** {1 GET helpers} *)
 
+type http_get_response =
+  { http_status : int option
+  ; effective_url : string option
+  ; redirect_url : string option
+  ; content_type : string option
+  ; downloaded_bytes : int option
+  ; body : string
+  }
+(** Structured curl GET response metadata.  [body] is the response body with
+    curl's write-out metadata stripped.  [effective_url], [redirect_url],
+    [content_type], and [downloaded_bytes] are populated from curl write-out
+    fields when available. *)
+
+val http_get_text_response_with_headers :
+  ?timeout_sec:int ->
+  ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
+  string ->
+  (http_get_response, string) Result.t
+(** [http_get_text_response_with_headers ?timeout_sec ?headers url] issues a
+    [GET url] via curl and returns both body text and curl write-out metadata.
+
+    It is the metadata-preserving form of
+    {!http_get_text_with_status_with_headers}. *)
+
 val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
   string ->
   ((int option * string), string) Result.t
 (** [http_get_text_with_status_with_headers ?timeout_sec ?headers url]
@@ -59,8 +90,24 @@ val http_get_text_with_status_with_headers :
     [timeout_sec] defaults to 10 (floored at 1).
     [headers] defaults to [\[\]]; appended in left-to-right order
     (each pair becomes [-H "name: value"]).
+    [follow_redirects] defaults to [false]; when [true], curl follows
+    redirects up to [max_redirects] (default 3).
+    [compressed] enables curl's transparent compression handling.
+    [max_response_bytes], when set, asks curl to cap the response.
 
     Errors include curl exit code, signals, and stop reasons. *)
+
+val curl_get_argv_for_test :
+  ?timeout_sec:int ->
+  ?headers:(string * string) list ->
+  ?follow_redirects:bool ->
+  ?max_redirects:int ->
+  ?compressed:bool ->
+  ?max_response_bytes:int ->
+  string ->
+  string list
+
+(** Pure curl argv builder exposed for focused regression tests. *)
 
 val http_get_text_with_status :
   ?timeout_sec:int ->

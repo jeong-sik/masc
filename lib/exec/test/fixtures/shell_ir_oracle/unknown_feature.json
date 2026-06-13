@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "parser": "manual-unknown-feature-fixture",
+  "command": "echo hello",
+  "parse_status": "ok",
+  "features": {
+    "pipeline": false,
+    "redirect": false,
+    "heredoc": false,
+    "subshell": false,
+    "command_substitution": false,
+    "variable": false,
+    "glob": false,
+    "env_assignment": false,
+    "process_substitution": false,
+    "future_feature": true
+  },
+  "commands": [
+    { "name": "echo", "argv": ["echo", "hello"] }
+  ],
+  "error": null
+}

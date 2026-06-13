@@ -2,7 +2,7 @@ module Types = Masc_domain
 
 (** test_telemetry_unified — Tests for unified telemetry read aggregation. *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────── *)
 
@@ -80,8 +80,8 @@ let source_summary source_name = function
   | _ -> Alcotest.fail "expected summary object"
 
 let source_read_failure_metric source site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_telemetry_unified_source_read_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_telemetry_unified_source_read_failures
     ~labels:[ ("source", source); ("site", site) ]
     ()
 
@@ -189,10 +189,10 @@ let test_oas_event_source_and_scope_filter () =
     Alcotest.(check string) "event type preserved" "turn_completed" event_type
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_agent_tool_called_scope_promoted_for_filters () =
+let test_keeper_tool_called_scope_promoted_for_filters () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_agent_tool_scope" in
+  let dir = tmpdir "telem_keeper_tool_scope" in
   let telemetry_dir = Filename.concat dir ".masc/telemetry" in
   Fs_compat.mkdir_p telemetry_dir;
   write_jsonl telemetry_dir
@@ -206,7 +206,7 @@ let test_agent_tool_called_scope_promoted_for_filters () =
                 `String "Tool_called";
                 `Assoc
                   [
-                    ("tool_name", `String "masc_claim_next");
+                    ("tool_name", `String "keeper_task_claim");
                     ("success", `Bool true);
                     ("duration_ms", `Int 42);
                     ("agent_id", `String "agent_code-mcp-client");
@@ -228,7 +228,7 @@ let test_agent_tool_called_scope_promoted_for_filters () =
   match List.hd result.entries with
   | `Assoc fields ->
     let json = `Assoc fields in
-    Alcotest.(check string) "tool promoted" "masc_claim_next"
+    Alcotest.(check string) "tool promoted" "keeper_task_claim"
       (json_string_field "tool_name" json);
     Alcotest.(check string) "session promoted" "mcp-session-1"
       (json_string_field "session_id" json);
@@ -238,7 +238,7 @@ let test_agent_tool_called_scope_promoted_for_filters () =
       (json_string_field "worker_run_id" json)
   | _ -> Alcotest.fail "expected Assoc"
 
-let test_shadow_agent_tool_called_deduped_from_unified_view () =
+let test_shadow_keeper_tool_called_deduped_from_unified_view () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_shadow_tool_called" in
@@ -351,7 +351,7 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
       ~n:100 ()
   in
   Alcotest.(check int) "limited result" 100 (List.length result.entries);
-  Alcotest.(check int) "sentinel total" 101 result.total_matching_entries;
+  Alcotest.(check int) "marker total" 101 result.total_matching_entries;
   Alcotest.(check bool) "truncated" true result.truncated;
   let indices = List.map (json_int_field "i") result.entries in
   Alcotest.(check int) "newest hot entry first" 119 (List.hd indices);
@@ -360,10 +360,10 @@ let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
     (List.init 100 (fun _ -> "hot"))
     (List.map (json_string_field "name") result.entries)
 
-let test_keeper_metrics_fast_path_sets_truncated_with_sentinel () =
+let test_keeper_metrics_fast_path_sets_truncated_with_marker () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "telem_keeper_fast_sentinel" in
+  let dir = tmpdir "telem_keeper_fast_marker" in
   let write_keeper name ts =
     let metrics_dir = Filename.concat dir (".masc/keepers/" ^ name ^ "/metrics") in
     Fs_compat.mkdir_p metrics_dir;
@@ -386,7 +386,7 @@ let test_keeper_metrics_fast_path_sets_truncated_with_sentinel () =
       ~n:2 ()
   in
   Alcotest.(check int) "returned limit" 2 (List.length result.entries);
-  Alcotest.(check int) "sentinel total" 3 result.total_matching_entries;
+  Alcotest.(check int) "marker total" 3 result.total_matching_entries;
   Alcotest.(check bool) "truncated" true result.truncated;
   Alcotest.(check (list string)) "newest keepers"
     [ "alpha"; "beta" ]
@@ -516,6 +516,31 @@ let test_time_window_n_zero_disables_truncation () =
   Alcotest.(check int) "returns every matching entry" 3 (List.length result.entries);
   Alcotest.(check int) "total matching preserved" 3 result.total_matching_entries;
   Alcotest.(check bool) "unbounded result is not truncated" false result.truncated
+
+(* n=0 ("unlimited") with no time window must reach the tail-bounded reader
+   ([read_recent]), not the full-store [read_range] scan (1970->today) that
+   Yojson-parsed the whole store and starved keeper fibers, and not the empty
+   list the #20649 regression produced for fixed sources. With fewer entries
+   than [unbounded_window_scan_cap], all are returned. *)
+let test_n_zero_no_window_returns_bounded () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_n0_no_window" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  let now = Unix.gettimeofday () in
+  write_jsonl telemetry_dir [
+    `Assoc [("timestamp", `Float (now -. 900.0)); ("event", `String "a")];
+    `Assoc [("timestamp", `Float (now -. 600.0)); ("event", `String "b")];
+    `Assoc [("timestamp", `Float (now -. 300.0)); ("event", `String "c")];
+  ];
+  let result =
+    Telemetry_unified.read_unified_result ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ] ~n:0 ()
+  in
+  Alcotest.(check int) "n=0 no-window returns all via bounded reader" 3
+    (List.length result.entries)
 
 (* ── Summary with data ───────────────────────────── *)
 
@@ -1028,7 +1053,7 @@ let test_summary_surfaces_coverage_gaps () =
     ]
   in
   let before =
-    Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+    Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
       ~labels ()
   in
   Telemetry_coverage_gap.record
@@ -1041,8 +1066,8 @@ let test_summary_surfaces_coverage_gaps () =
     ~error:"disk full"
     ();
   Alcotest.(check (float 0.001))
-    "coverage gap Prometheus counter increments" (before +. 1.0)
-    (Prometheus.metric_value_or_zero Prometheus.metric_telemetry_coverage_gap
+    "coverage gap Otel_metric_store counter increments" (before +. 1.0)
+    (Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_coverage_gap
        ~labels ());
   let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
   match json with
@@ -1067,6 +1092,52 @@ let test_summary_surfaces_coverage_gaps () =
       (json_string_field "health" source_summary);
     Alcotest.(check string) "agent_event stale reason" "append_failed"
       (json_string_field "stale_reason" source_summary)
+  | _ -> Alcotest.fail "expected Assoc"
+
+let test_summary_ignores_recovered_coverage_gap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_summary_recovered_gap" in
+  let root = masc_root dir in
+  Telemetry_coverage_gap.record
+    ~masc_root:root
+    ~source:"tool_call_io"
+    ~producer:"keeper_hooks_oas"
+    ~durable_store:(Filename.concat root "tool_calls")
+    ~dashboard_surface:"/api/v1/keepers/:name/tool-calls"
+    ~stale_reason:"tool_call_io_append_failed"
+    ~error:"old fd pressure"
+    ();
+  let recovered_ts = Unix.gettimeofday () +. 10.0 in
+  write_jsonl
+    (Filename.concat root "tool_calls")
+    [
+      `Assoc
+        [
+          ("ts", `Float recovered_ts);
+          ("keeper", `String "alice");
+          ("tool", `String "masc_status");
+          ("success", `Bool true);
+        ];
+    ];
+  let json = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let tool_summary = source_summary "tool_call_io" json in
+  Alcotest.(check string) "recovered gap health" "ok"
+    (json_string_field "health" tool_summary);
+  Alcotest.(check string) "recovered gap stale reason cleared" ""
+    (json_string_field "stale_reason" tool_summary);
+  Alcotest.(check int) "historical gap count" 1
+    (json_int_field "coverage_gap_count" tool_summary);
+  Alcotest.(check int) "active gap count" 0
+    (json_int_field "active_coverage_gap_count" tool_summary);
+  match json with
+  | `Assoc fields ->
+    let gaps =
+      match List.assoc_opt "coverage_gaps" fields with
+      | Some (`List values) -> values
+      | _ -> Alcotest.fail "expected coverage_gaps"
+    in
+    Alcotest.(check int) "historical gap retained" 1 (List.length gaps)
   | _ -> Alcotest.fail "expected Assoc"
 
 let test_summary_counts_all_entries_beyond_recent_cap () =
@@ -1095,8 +1166,8 @@ let test_replay_retention_lists_selected_sources () =
   | `Assoc fields ->
     Alcotest.(check string) "scope" "dashboard_telemetry_replay"
       (json_string_field "scope" json);
-    Alcotest.(check string) "coordination root" root
-      (json_string_field "coordination_root" json);
+    Alcotest.(check string) "workspace root" root
+      (json_string_field "workspace_root" json);
     let selected_sources =
       match List.assoc_opt "selected_sources" fields with
       | Some (`List values) ->
@@ -1171,6 +1242,67 @@ let test_cluster_keeper_metrics () =
   in
   Alcotest.(check int) "cluster keeper metric found" 1 (List.length entries)
 
+(* ── Trajectory summary incremental cache ─────────── *)
+
+let trajectory_row ~ts ~tool_name =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("ts", `Float ts)
+       ; ("turn", `Int 1)
+       ; ("tool_name", `String tool_name)
+       ; ("args", `Assoc [])
+       ; ("result", `String "ok")
+       ])
+  ^ "\n"
+
+let thinking_row ~ts =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("type", `String "thinking")
+       ; ("ts", `Float ts)
+       ; ("content", `String "reasoning text")
+       ])
+  ^ "\n"
+
+(* The (count, latest_ts) summary must (a) count only tool-call rows,
+   (b) pick appended rows up on the next call without any cache reset —
+   the snapshot loop calls this every 2 s and must not re-parse the whole
+   store — and (c) agree with a cold-cache recomputation. *)
+let test_trajectory_summary_incremental () =
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let dir = tmpdir "telem_traj_summary_incr" in
+  let root = masc_root dir in
+  let keeper_dir = Filename.concat root "trajectories/alice" in
+  Fs_compat.mkdir_p keeper_dir;
+  let trace = Filename.concat keeper_dir "trace-1.jsonl" in
+  Fs_compat.append_file trace (trajectory_row ~ts:100.0 ~tool_name:"tool_a");
+  Fs_compat.append_file trace (thinking_row ~ts:150.0);
+  Fs_compat.append_file trace (trajectory_row ~ts:200.0 ~tool_name:"tool_b");
+  let count, latest =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "thinking rows excluded from count" 2 count;
+  Alcotest.(check (option (float 0.001))) "latest ts from tool rows only"
+    (Some 200.0) latest;
+  (* Append behind the warm cache: the delta must be picked up without a
+     reset (this is the property the 2 s snapshot loop depends on). *)
+  Fs_compat.append_file trace (trajectory_row ~ts:300.0 ~tool_name:"tool_c");
+  let count2, latest2 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "appended tool row visible without reset" 3 count2;
+  Alcotest.(check (option (float 0.001))) "latest ts advanced" (Some 300.0) latest2;
+  (* Cold cache must agree with the warm incremental result. *)
+  Telemetry_unified.For_testing.reset_trajectory_summary_cache_for_testing ();
+  let count3, latest3 =
+    Telemetry_unified.For_testing.trajectory_tool_call_summary_stats
+      ~masc_root:root
+  in
+  Alcotest.(check int) "cold recomputation agrees" count2 count3;
+  Alcotest.(check (option (float 0.001))) "cold latest agrees" latest2 latest3
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1188,14 +1320,14 @@ let () =
           Alcotest.test_case "oas events + scope filter" `Quick
             test_oas_event_source_and_scope_filter;
           Alcotest.test_case "agent tool_called scope promotion" `Quick
-            test_agent_tool_called_scope_promoted_for_filters;
+            test_keeper_tool_called_scope_promoted_for_filters;
           Alcotest.test_case "dedupe shadow agent tool_called" `Quick
-            test_shadow_agent_tool_called_deduped_from_unified_view;
+            test_shadow_keeper_tool_called_deduped_from_unified_view;
           Alcotest.test_case "keeper metrics" `Quick test_keeper_metrics_per_keeper;
           Alcotest.test_case "keeper metrics fast path keeps noisy top n" `Quick
             test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n;
-          Alcotest.test_case "keeper metrics fast path sentinel" `Quick
-            test_keeper_metrics_fast_path_sets_truncated_with_sentinel;
+          Alcotest.test_case "keeper metrics fast path marker" `Quick
+            test_keeper_metrics_fast_path_sets_truncated_with_marker;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
           Alcotest.test_case "time window reports total before limit" `Quick
@@ -1204,6 +1336,8 @@ let () =
             test_time_window_reads_matching_day_files;
           Alcotest.test_case "time window n=0 disables truncation" `Quick
             test_time_window_n_zero_disables_truncation;
+          Alcotest.test_case "n=0 no-window returns bounded (not full scan)"
+            `Quick test_n_zero_no_window_returns_bounded;
           Alcotest.test_case "trajectory and receipts" `Quick
             test_read_unified_reads_trajectory_and_execution_receipts;
           Alcotest.test_case "runtime contract scope filter" `Quick
@@ -1231,6 +1365,8 @@ let () =
             test_summary_includes_trajectory_and_execution_receipt_sources;
           Alcotest.test_case "surfaces coverage gaps" `Quick
             test_summary_surfaces_coverage_gaps;
+          Alcotest.test_case "ignores recovered coverage gaps" `Quick
+            test_summary_ignores_recovered_coverage_gap;
           Alcotest.test_case "goal_event missing reports not_yet" `Quick
             test_goal_event_missing_reports_not_yet;
           Alcotest.test_case "tool_call_io missing stays missing" `Quick
@@ -1239,6 +1375,8 @@ let () =
             test_summary_bad_trajectory_root_observed_once;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
+          Alcotest.test_case "trajectory summary cache is incremental" `Quick
+            test_trajectory_summary_incremental;
           Alcotest.test_case "replay retention selected sources" `Quick
             test_replay_retention_lists_selected_sources;
         ] );

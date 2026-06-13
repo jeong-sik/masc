@@ -5,7 +5,7 @@ module Types = Masc_domain
     Tests the integration: MASC JSON Schema -> Tool_bridge.params_of_json_schema
     -> Agent_sdk.Tool_input_validation.validate -> pre_hook_action mapping. *)
 
-open Masc_mcp
+open Masc
 
 (** Simple substring check — avoids Astring dependency. *)
 let string_contains haystack needle =
@@ -19,6 +19,37 @@ let string_contains haystack needle =
     done;
     !found
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "config/prompts/keeper.tool_hints.toml" in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
+    root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 anchor with
+     | Some root -> root
+     | None -> Alcotest.fail "could not locate repo source root")
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
+let assert_contains label haystack needle =
+  Alcotest.(check bool) label true (string_contains haystack needle)
+
+let assert_not_contains label haystack needle =
+  Alcotest.(check bool) label false (string_contains haystack needle)
+
 (* ================================================================ *)
 (* Helper: validate via the same pipeline as the pre-hook            *)
 (* ================================================================ *)
@@ -31,7 +62,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
   if parameters = [] then Pass
   else
     let oas_schema : Agent_sdk.Types.tool_schema =
-      { name = tool_name; description = ""; parameters }
+      { name = tool_name; description = ""; parameters; strict = None }
     in
     match Agent_sdk.Tool_input_validation.validate oas_schema args with
     | Agent_sdk.Tool_input_validation.Valid coerced ->
@@ -89,12 +120,12 @@ let test_required_present () =
       (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_required_missing () =
-  let schema = make_schema ~required:["name"; "room"] [("name", "string"); ("room", "string")] in
+  let schema = make_schema ~required:["name"; "workspace"] [("name", "string"); ("workspace", "string")] in
   let args = `Assoc [("name", `String "alice")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Reject r ->
     let msg = Yojson.Safe.to_string (Tool_result.data r) in
-    Alcotest.(check bool) "mentions room" true (string_contains msg "room")
+    Alcotest.(check bool) "mentions workspace" true (string_contains msg "workspace")
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing required field"
 
 let test_required_missing_multiple () =
@@ -441,10 +472,10 @@ let find_schema_exn name schemas =
   | None -> failwith ("missing schema: " ^ name)
 
 let masc_transition_schema =
-  find_schema_exn "masc_transition" Tool_task_schemas.schemas
+  find_schema_exn "masc_transition" Task.Schemas.schemas
 
 let masc_goal_list_schema =
-  find_schema_exn "masc_goal_list" Tool_schemas_coord_extra.schemas
+  find_schema_exn "masc_goal_list" Tool_schemas_workspace_extra.schemas
 
 let tool_edit_file_schema =
   find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
@@ -452,18 +483,49 @@ let tool_edit_file_schema =
 let keeper_board_post_schema =
   find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
 
+let keeper_board_list_schema =
+  find_schema_exn "keeper_board_list" Config.raw_all_tool_schemas
+
+let keeper_board_search_schema =
+  find_schema_exn "keeper_board_search" Config.raw_all_tool_schemas
+
+let keeper_board_post_get_schema =
+  find_schema_exn "keeper_board_post_get" Config.raw_all_tool_schemas
+
+let keeper_task_done_schema =
+  find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
+
+let keeper_task_claim_schema =
+  find_schema_exn "keeper_task_claim" Config.raw_all_tool_schemas
+
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
+
 
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
+let assert_policy_validation_payload ~label result =
+  let data = Tool_result.data result in
+  Alcotest.(check string)
+    (label ^ " reason")
+    "invalid_args"
+    (assoc_string "reason" data);
+  Alcotest.(check string)
+    (label ^ " failure_class payload")
+    "policy_rejection"
+    (assoc_string "failure_class" data);
+  Alcotest.(check bool)
+    (label ^ " typed failure_class")
+    true
+    (Tool_result.failure_class result = Some Tool_result.Policy_rejection)
+
 let test_registered_hook_tool_edit_file_patch_args () =
   let args =
     `Assoc
-      [ "path", `String "repos/masc-mcp/.worktrees/task/lib/foo.ml"
+      [ "path", `String "repos/masc/.worktrees/task/lib/foo.ml"
       ; "mode", `String "patch"
       ; "old_string", `String "let x = 1"
       ; "new_string", `String "let x = 2"
@@ -534,12 +596,75 @@ let test_registered_hook_keeper_board_post_accepts_sources_array () =
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   check_keeper_board_post_sources_preserved forwarded
 
+(* Regression: the board_list/search backends already read [compact]
+   (board_tool_post.ml handle_post_list_uncached, board_tool_handlers.ml
+   handle_search), but the keeper_board_* schemas omitted it, so
+   qa-king's keeper_board_list compact=true was rejected as an
+   unsupported field. Assert the keeper surface now accepts compact while
+   additionalProperties stays false (unknown fields still rejected). *)
+let test_validate_args_keeper_board_list_accepts_compact () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_list_schema
+      ~name:"keeper_board_list"
+      ~args:(`Assoc [ "limit", `Int 5; "compact", `Bool false ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_board_list compact arg to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+let test_validate_args_keeper_board_search_accepts_compact () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_search_schema
+      ~name:"keeper_board_search"
+      ~args:(`Assoc [ "query", `String "x"; "compact", `Bool false ])
+      ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected keeper_board_search compact arg to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* Guard the other direction: a genuinely unknown field must still be
+   rejected (additionalProperties:false not loosened). *)
+let test_validate_args_keeper_board_list_rejects_unknown_field () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_board_list_schema
+      ~name:"keeper_board_list"
+      ~args:(`Assoc [ "limit", `Int 5; "definitely_not_a_field", `Bool true ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected unknown field to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error _ -> ()
+
+(* The op enum (derived from Keeper_workspace_op.valid_strings) must accept
+   EVERY op the runtime dispatch handles. Guards the regression where the
+   enum is hand-listed with only the directory-listing ops, silently
+   breaking cat/pwd/find/head/tail/wc/git_log/git_diff. *)
 let param_by_name name params =
   List.find_opt
     (fun (param : Agent_sdk.Types.tool_param) -> String.equal param.name name)
     params
 
 let legacy_background_flag_name = "run_" ^ "in_background"
+
+let execute_async_lifecycle_field_names =
+  [ legacy_background_flag_name
+  ; "job_id"
+  ; "request_id"
+  ; "backgroundTaskId"
+  ; "poll"
+  ; "cancel"
+  ]
 
 let check_param_type name expected params =
   match param_by_name name params with
@@ -572,7 +697,35 @@ let test_tool_execute_schema_exposes_typed_boundary () =
   Alcotest.(check bool)
     "legacy background flag not exposed"
     true
-    (Option.is_none (param_by_name legacy_background_flag_name params))
+    (Option.is_none (param_by_name legacy_background_flag_name params));
+  List.iter
+    (fun field ->
+      Alcotest.(check bool)
+        (field ^ " async lifecycle field not exposed")
+        true
+        (Option.is_none (param_by_name field params)))
+    execute_async_lifecycle_field_names
+
+let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
+  let args = `Assoc [] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "empty Execute mentions exact-one-of"
+      true
+      (string_contains msg "exactly one of");
+    assert_policy_validation_payload ~label:"empty Execute" result
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected empty tool_execute args to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_tool_execute_rejects_cmd_string () =
   let args = `Assoc [ "cmd", `String "pwd" ] in
@@ -590,6 +743,7 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
       "validation error returned"
       true
       (String.length msg > 0);
+    assert_policy_validation_payload ~label:"cmd string" result;
     Alcotest.(check bool)
       "validation error points to typed argv"
       true
@@ -633,6 +787,38 @@ let test_validate_args_tool_execute_rejects_background_flag () =
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions legacy background flag" true
       (string_contains msg legacy_background_flag_name)
+
+let test_validate_args_tool_execute_rejects_async_lifecycle_fields () =
+  let cases =
+    [ legacy_background_flag_name, `Bool true
+    ; "job_id", `String "job-123"
+    ; "request_id", `String "req-123"
+    ; "backgroundTaskId", `String "bg-123"
+    ; "poll", `Bool true
+    ; "cancel", `Bool true
+    ]
+  in
+  List.iter
+    (fun (field, value) ->
+      let args = `Assoc [ "executable", `String "pwd"; field, value ] in
+      match
+        Tool_input_validation.validate_args
+          ~schema:tool_execute_schema
+          ~name:"tool_execute"
+          ~args
+          ()
+      with
+      | Ok _ ->
+          Alcotest.failf
+            "expected tool_execute async lifecycle field %s to be rejected"
+            field
+      | Error result ->
+          let msg = Yojson.Safe.to_string (Tool_result.data result) in
+          Alcotest.(check bool)
+            ("mentions async lifecycle field " ^ field)
+            true
+            (string_contains msg field))
+    cases
 
 let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
@@ -688,11 +874,55 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+let readonly_exec_input executable argv =
+  match
+    Keeper_tool_execute_typed_input.of_json
+      (`Assoc
+        [ "executable", `String executable
+        ; "argv", `List (List.map (fun arg -> `String arg) argv)
+        ; "cwd", `String "/tmp"
+        ])
+  with
+  | Ok input -> input
+  | Error msg ->
+    Alcotest.failf "expected typed Execute parse to pass, got %s" msg
+
+let readonly_pipeline_input stages =
+  match
+    Keeper_tool_execute_typed_input.of_json
+      (`Assoc
+        [ ( "pipeline"
+          , `List
+              (List.map
+                 (fun (executable, argv) ->
+                    `Assoc
+                      [ "executable", `String executable
+                      ; "argv", `List (List.map (fun arg -> `String arg) argv)
+                      ])
+                 stages) )
+        ; "cwd", `String "/tmp"
+        ])
+  with
+  | Ok input -> input
+  | Error msg ->
+    Alcotest.failf "expected typed Execute pipeline parse to pass, got %s" msg
+
+let test_tool_execute_write_validation_stays_structural () =
+  match
+    Keeper_tool_execute_typed_input.validate
+      (readonly_exec_input "python3" [ "-c"; "print(1)" ])
+  with
+  | Ok () -> ()
+  | Error e ->
+    Alcotest.failf
+      "write-capable structural validation should not reject executable: %s"
+      (Keeper_tool_execute_input.typed_validation_error_text e)
+
 let tool_execute_exec_stage args =
-  match Agent_tool_execute_typed_input.of_json args with
-  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
+  match Keeper_tool_execute_typed_input.of_json args with
+  | Ok (Keeper_tool_execute_typed_input.Exec { executable; argv; _ }) ->
     executable, argv
-  | Ok (Agent_tool_execute_typed_input.Pipeline _) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline _) ->
     Alcotest.fail "expected exec input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
@@ -741,7 +971,7 @@ let test_tool_execute_empty_executable_not_promoted () =
 
 let test_tool_execute_pipeline_find_expression_not_rewritten () =
   match
-    Agent_tool_execute_typed_input.of_json
+    Keeper_tool_execute_typed_input.of_json
       (`Assoc
         [ ( "pipeline"
           , `List
@@ -754,15 +984,15 @@ let test_tool_execute_pipeline_find_expression_not_rewritten () =
         ])
   with
   | Ok
-      (Agent_tool_execute_typed_input.Pipeline
-        { stages = { Agent_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
+      (Keeper_tool_execute_typed_input.Pipeline
+        { stages = { Keeper_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
     Alcotest.(check (list string))
       "pipeline find stage remains caller-authored"
       [ "-type"; "f" ]
       argv
-  | Ok (Agent_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
+  | Ok (Keeper_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
     Alcotest.fail "expected non-empty pipeline"
-  | Ok (Agent_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Ok (Keeper_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 
@@ -789,8 +1019,8 @@ let validation_labels ~tool ~result ~reason =
   [ "tool", tool; "result", result; "reason", reason ]
 
 let validation_metric_value ~tool ~result ~reason =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_tool_input_validation
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_tool_input_validation
     ~labels:(validation_labels ~tool ~result ~reason)
     ()
 
@@ -1118,6 +1348,193 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
   Alcotest.(check string) "required blank preserved for handler validation" ""
     (assoc_string "mode" forwarded)
 
+let schema_required_fields schema =
+  match Yojson.Safe.Util.member "required" schema with
+  | `List values ->
+    List.filter_map (function `String value -> Some value | _ -> None) values
+  | _ -> []
+
+let assert_schema_requires label schema field =
+  Alcotest.(check bool)
+    (label ^ " requires " ^ field)
+    true
+    (List.mem field (schema_required_fields schema))
+
+let schema_property_names schema =
+  match Yojson.Safe.Util.member "properties" schema with
+  | `Assoc props -> List.map fst props
+  | _ -> []
+
+let assert_validation_rejects ~label ~schema ~tool_name ~args ~snippets =
+  match Tool_input_validation.validate_args ~schema ~name:tool_name ~args () with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    List.iter
+      (fun snippet ->
+         assert_contains (label ^ " mentions " ^ snippet) msg snippet)
+      snippets
+  | Ok forwarded ->
+    Alcotest.failf
+      "%s: expected validation rejection, got %s"
+      label
+      (Yojson.Safe.to_string forwarded)
+
+let test_high_risk_tool_contract_rejection_corpus () =
+  List.iter
+    (fun (label, tool_name, schema, args, snippets) ->
+       assert_validation_rejects ~label ~tool_name ~schema ~args ~snippets)
+    [ ( "execute empty object"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc []
+      , [ "exactly one of" ] )
+    ; ( "execute raw cmd string"
+      , "tool_execute"
+      , tool_execute_schema
+      , `Assoc [ "cmd", `String "git status --short" ]
+      , [ "cmd"; "executable/argv" ] )
+    ; ( "keeper_task_done notes-only drift"
+      , "keeper_task_done"
+      , keeper_task_done_schema
+      , `Assoc [ "notes", `String "evidence" ]
+      , [ "task_id"; "result" ] )
+    ; ( "keeper_board_post_get missing post_id"
+      , "keeper_board_post_get"
+      , keeper_board_post_get_schema
+      , `Assoc []
+      , [ "post_id" ] )
+    ; ( "masc_transition retired alias fields"
+      , "masc_transition"
+      , masc_transition_schema
+      , `Assoc
+          [ "agent_name", `String "agent_code-local-admin"
+          ; "task_id", `String "task-239"
+          ; "action", `String "claim"
+          ; "to", `String "claimed"
+          ; "note", `String "PR #8308 Draft"
+          ]
+      , [ "to"; "note" ] )
+    ]
+
+let test_keeper_tool_hint_contracts_match_required_fields () =
+  Alcotest.(check bool)
+    "keeper_task_claim schema accepts optional task_id"
+    true
+    (List.mem "task_id" (schema_property_names keeper_task_claim_schema));
+  Alcotest.(check bool)
+    "keeper_task_claim schema does not require task_id"
+    false
+    (List.mem "task_id" (schema_required_fields keeper_task_claim_schema));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
+       ~args:(`Assoc [ "task_id", `String "task-123" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim task_id should validate: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
+  assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
+  assert_schema_requires
+    "keeper_board_post_get schema"
+    keeper_board_post_get_schema
+    "post_id";
+  assert_schema_requires "keeper_board_post schema" keeper_board_post_schema "content";
+  Alcotest.(check bool)
+    "keeper_board_post schema does not require hearth"
+    false
+    (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
+  let hints = read_source_file "config/prompts/keeper.tool_hints.toml" in
+  assert_contains
+    "keeper_task_claim hint names optional task_id"
+    hints
+    "task_id:";
+  assert_contains
+    "keeper_task_done hint names task_id"
+    hints
+    "`keeper_task_done` { task_id:";
+  assert_contains
+    "keeper_task_done hint names result"
+    hints
+    "result:";
+  assert_contains
+    "keeper_task_done hint names evidence"
+    hints
+    "completion evidence";
+  assert_not_contains
+    "keeper_task_done hint does not regress to notes-only"
+    hints
+    "`keeper_task_done` { notes: \"evidence\" }";
+  assert_contains
+    "board get hint uses current tool name"
+    hints
+    "name = \"keeper_board_post_get\"";
+  assert_contains
+    "board get hint names post_id"
+    hints
+    "post_id:";
+  assert_not_contains
+    "board get hint avoids retired name"
+    hints
+    "name = \"keeper_board_get\""
+
+let test_orchestrator_prompt_pins_start_transition () =
+  let prompt = read_source_file "config/prompts/system.orchestrator.md" in
+  assert_contains "orchestrator prompt claims first" prompt "action: \"claim\"";
+  assert_contains "orchestrator prompt starts before work" prompt "action: \"start\"";
+  assert_contains "orchestrator prompt marks done" prompt "action: \"done\""
+
+let test_task_lifecycle_guidance_is_externalized () =
+  let rule =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_rule.md"
+  in
+  let workflow =
+    read_source_file "config/prompts/tool_contract.task_lifecycle_workflow.md"
+  in
+  assert_contains
+    "external rule pins start before done"
+    rule
+    "action='start' before action='done'";
+  assert_contains
+    "external workflow includes start transition"
+    workflow
+    "masc_transition(start)";
+  assert_contains
+    "external workflow keeps worktree guidance"
+    workflow
+    "work in a repo-local worktree";
+  let schema_source = read_source_file "lib/task/tool_task_schemas.ml" in
+  let profile_source =
+    read_source_file "lib/mcp_server_eio_tool_profile.ml"
+  in
+  assert_not_contains
+    "task schema does not own lifecycle prose literal"
+    schema_source
+    "For normal task work, claim first";
+  assert_not_contains
+    "profile does not own workflow prose literal"
+    profile_source
+    "masc_status -> masc_transition(claim) -> masc_transition(start)"
+
+let test_board_prompt_does_not_require_optional_hearth () =
+  let prompt = read_source_file "config/prompts/keeper.capabilities.md" in
+  assert_contains
+    "board prompt says hearth optional"
+    prompt
+    "Hearth is optional";
+  assert_not_contains
+    "board prompt does not claim hearth required"
+    prompt
+    "hearth required";
+  assert_not_contains
+    "board prompt does not forbid omitted hearth"
+    prompt
+    "Never post without hearth"
+
 (* ================================================================ *)
 (* Test: oneOf with empty/null values (regression guard)             *)
 (* ================================================================ *)
@@ -1217,7 +1634,7 @@ let oneof_const_schema =
                 ( "properties"
                 , `Assoc
                     [
-                      ("kind", `Assoc [("const", `String "preset")])
+                      ("kind", `Assoc [("const", `String "alpha")])
                     ; ("value", `Assoc [("type", `String "string")])
                     ] )
               ; ("required", `List [`String "kind"; `String "value"])
@@ -1236,8 +1653,8 @@ let oneof_const_schema =
     ]
 ;;
 
-let test_oneof_const_discriminator_preset_branch () =
-  let args = `Assoc [("kind", `String "preset"); ("value", `String "minimal")] in
+let test_oneof_const_discriminator_alpha_branch () =
+  let args = `Assoc [("kind", `String "alpha"); ("value", `String "minimal")] in
   match
     Tool_input_validation.validate_args
       ~schema:oneof_const_schema
@@ -1249,7 +1666,7 @@ let test_oneof_const_discriminator_preset_branch () =
     Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
   | Error result ->
     Alcotest.failf
-      "expected preset branch to match, got %s"
+      "expected alpha branch to match, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
@@ -1283,8 +1700,8 @@ let test_oneof_const_discriminator_rejects_unknown_kind () =
     let msg = (Tool_result.message result) in
     Alcotest.(check bool) "error mentions exact-one-of" true
       (string_contains msg "exactly one of");
-    Alcotest.(check bool) "error mentions preset branch label" true
-      (string_contains msg "kind=\"preset\"");
+    Alcotest.(check bool) "error mentions alpha branch label" true
+      (string_contains msg "kind=\"alpha\"");
     Alcotest.(check bool) "error mentions custom branch label" true
       (string_contains msg "kind=\"custom\"")
   | Ok _ -> Alcotest.fail "expected rejection for unknown kind value"
@@ -1430,48 +1847,94 @@ let test_oneof_null_const_matches_non_null_branch () =
 (* Production schema regression: Keeper_schema.tool_access_schema   *)
 (* ================================================================ *)
 
-let test_keeper_schema_tool_access_preset () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "preset"); ("preset", `String "minimal")] in
+let keeper_tool_access_parent_schema () =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "properties",
+        `Assoc [ ("tool_access", Keeper_schema.tool_access_schema "test") ] );
+      ("required", `List [ `String "tool_access" ]);
+    ]
+;;
+
+let test_keeper_schema_tool_access_array () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args =
+    `Assoc
+      [ ("tool_access", `List [`String "masc_status"; `String "tool_execute"]) ]
+  in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> ()
   | Error result ->
     Alcotest.failf
-      "expected preset branch to pass: %s"
+      "expected tool_access array to pass: %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
-let test_keeper_schema_tool_access_custom () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "custom"); ("tools", `List [`String "rg"])] in
+let test_keeper_schema_tool_access_rejects_object () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args =
+    `Assoc [ ("tool_access", `Assoc [("tools", `List [`String "rg"])]) ]
+  in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> ()
-  | Error result ->
-    Alcotest.failf
-      "expected custom branch to pass: %s"
-      (Yojson.Safe.to_string (Tool_result.data result))
+  | Ok _ -> Alcotest.fail "expected object form to fail"
+  | Error _ -> ()
 ;;
 
-let test_keeper_schema_tool_access_rejects_missing_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("preset", `String "minimal")] in
+let test_keeper_schema_tool_access_rejects_string_value () =
+  let schema = keeper_tool_access_parent_schema () in
+  let args = `Assoc [ ("tool_access", `String "masc_status") ] in
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected missing kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions branches" true
-      (string_contains msg "exactly one of")
+  | Ok _ -> Alcotest.fail "expected string value to fail"
+  | Error _ -> ()
 ;;
 
-let test_keeper_schema_tool_access_rejects_unknown_kind () =
-  let schema = Keeper_schema.tool_access_schema "test" in
-  let args = `Assoc [("kind", `String "unknown"); ("preset", `String "minimal")] in
-  match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
-  | Ok _ -> Alcotest.fail "expected unknown kind to fail"
-  | Error result ->
-    let msg = (Tool_result.message result) in
-    Alcotest.(check bool) "error mentions preset/custom branches" true
-      (string_contains msg "preset" && string_contains msg "custom")
+let get_schema_property_description schema name =
+  match schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc props) ->
+       (match List.assoc_opt name props with
+        | Some (`Assoc prop_fields) ->
+          (match List.assoc_opt "description" prop_fields with
+           | Some (`String desc) -> Some desc
+           | _ -> None)
+        | _ -> None)
+     | _ -> None)
+  | _ -> None
+;;
+
+let test_keeper_schema_tool_access_description_no_allowlist () =
+  let schemas = Keeper_schema.keeper_schemas in
+  let check_schema tool_name =
+    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
+    | None -> Alcotest.failf "%s schema not found" tool_name
+    | Some schema ->
+      (match get_schema_property_description schema.Masc_domain.input_schema "tool_access" with
+       | None -> Alcotest.failf "%s: tool_access description missing" tool_name
+       | Some desc ->
+         if String_util.contains_substring desc "allowlist"
+         then Alcotest.failf "%s: tool_access description contains 'allowlist': %s" tool_name desc;
+         if not (String_util.contains_substring desc "candidate profiles for discovery")
+         then Alcotest.failf "%s: tool_access description missing expected text: %s" tool_name desc)
+  in
+  check_schema "masc_keeper_create_from_persona";
+  check_schema "masc_keeper_up"
+;;
+
+let test_keeper_schema_tool_denylist_description () =
+  let schemas = Keeper_schema.keeper_schemas in
+  let check_schema tool_name =
+    match List.find_opt (fun s -> s.Masc_domain.name = tool_name) schemas with
+    | None -> Alcotest.failf "%s schema not found" tool_name
+    | Some schema ->
+      (match get_schema_property_description schema.Masc_domain.input_schema "tool_denylist" with
+       | None -> Alcotest.failf "%s: tool_denylist description missing" tool_name
+       | Some desc ->
+         if not (String_util.contains_substring desc "Execution removal layer")
+         then Alcotest.failf "%s: tool_denylist description missing expected text: %s" tool_name desc)
+  in
+  check_schema "masc_keeper_up"
 ;;
 
 (* ================================================================ *)
@@ -1535,18 +1998,30 @@ let () =
         test_registered_hook_tool_edit_file_patch_args;
       Alcotest.test_case "keeper_board_post accepts sources array" `Quick
         test_registered_hook_keeper_board_post_accepts_sources_array;
+      Alcotest.test_case "keeper_board_list accepts compact" `Quick
+        test_validate_args_keeper_board_list_accepts_compact;
+      Alcotest.test_case "keeper_board_search accepts compact" `Quick
+        test_validate_args_keeper_board_search_accepts_compact;
+      Alcotest.test_case "keeper_board_list still rejects unknown field" `Quick
+        test_validate_args_keeper_board_list_rejects_unknown_field;
       Alcotest.test_case "tool_execute exposes typed boundary" `Quick
         test_tool_execute_schema_exposes_typed_boundary;
+      Alcotest.test_case "tool_execute rejects empty args with class" `Quick
+        test_validate_args_tool_execute_rejects_empty_object_with_policy_class;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
       Alcotest.test_case "tool_execute rejects command string" `Quick
         test_validate_args_tool_execute_rejects_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
         test_validate_args_tool_execute_rejects_background_flag;
+      Alcotest.test_case "tool_execute rejects async lifecycle fields" `Quick
+        test_validate_args_tool_execute_rejects_async_lifecycle_fields;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute write validation stays structural" `Quick
+        test_tool_execute_write_validation_stays_structural;
       Alcotest.test_case "tool_execute find expression not rewritten" `Quick
         test_tool_execute_find_expression_not_rewritten;
       Alcotest.test_case "tool_execute find global option not rewritten" `Quick
@@ -1582,9 +2057,21 @@ let () =
       Alcotest.test_case "required enum blanks are not stripped" `Quick
         test_registered_hook_required_enum_blank_is_not_stripped;
     ]);
+    ("high_risk_contract_harness", [
+      Alcotest.test_case "rejects live high-risk invalid call corpus" `Quick
+        test_high_risk_tool_contract_rejection_corpus;
+      Alcotest.test_case "keeper prompt hints match schema-required fields" `Quick
+        test_keeper_tool_hint_contracts_match_required_fields;
+      Alcotest.test_case "orchestrator prompt includes start transition" `Quick
+        test_orchestrator_prompt_pins_start_transition;
+      Alcotest.test_case "task lifecycle guidance is externalized" `Quick
+        test_task_lifecycle_guidance_is_externalized;
+      Alcotest.test_case "board prompt does not require optional hearth" `Quick
+        test_board_prompt_does_not_require_optional_hearth;
+    ]);
     ("oneof_const_discriminator", [
-      Alcotest.test_case "preset branch matches via const" `Quick
-        test_oneof_const_discriminator_preset_branch;
+      Alcotest.test_case "alpha branch matches via const" `Quick
+        test_oneof_const_discriminator_alpha_branch;
       Alcotest.test_case "custom branch matches via const" `Quick
         test_oneof_const_discriminator_custom_branch;
       Alcotest.test_case "unknown kind is rejected" `Quick
@@ -1599,13 +2086,15 @@ let () =
         test_oneof_null_const_matches_non_null_branch;
     ]);
     ("keeper_schema_tool_access", [
-      Alcotest.test_case "preset branch passes" `Quick
-        test_keeper_schema_tool_access_preset;
-      Alcotest.test_case "custom branch passes" `Quick
-        test_keeper_schema_tool_access_custom;
-      Alcotest.test_case "missing kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_missing_kind;
-      Alcotest.test_case "unknown kind rejected" `Quick
-        test_keeper_schema_tool_access_rejects_unknown_kind;
+      Alcotest.test_case "array passes" `Quick
+        test_keeper_schema_tool_access_array;
+      Alcotest.test_case "object rejected" `Quick
+        test_keeper_schema_tool_access_rejects_object;
+      Alcotest.test_case "string value rejected" `Quick
+        test_keeper_schema_tool_access_rejects_string_value;
+      Alcotest.test_case "description does not contain allowlist" `Quick
+        test_keeper_schema_tool_access_description_no_allowlist;
+      Alcotest.test_case "denylist description is execution removal layer" `Quick
+        test_keeper_schema_tool_denylist_description;
     ]);
   ]

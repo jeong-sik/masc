@@ -10,6 +10,28 @@ val contains_substring_ci : string -> string -> bool
     Returns [false] when [needle] is empty, matching the behavior
     of the original per-module [contains_ci] helpers. *)
 
+val string_contains_substring : needle:string -> string -> bool
+(** Labeled-arg wrapper around [contains_substring].
+    [string_contains_substring ~needle haystack] is equivalent to
+    [contains_substring haystack needle]. *)
+
+val string_contains_substring_ci : needle:string -> string -> bool
+(** Labeled-arg wrapper around [contains_substring_ci].
+    [string_contains_substring_ci ~needle haystack] is equivalent to
+    [contains_substring_ci haystack needle]. *)
+
+val query_tokens : string -> string list
+(** [query_tokens query] splits a free-text query on ASCII whitespace
+    (space, tab, CR, LF) into non-empty tokens. UTF-8 bytes pass
+    through opaquely. *)
+
+val contains_all_tokens_ci : string -> string -> bool
+(** [contains_all_tokens_ci haystack query] — token-AND containment:
+    every token of [query_tokens query] appears in [haystack] as a
+    case-insensitive substring, in any order. A query with no tokens
+    yields [false], matching [contains_substring_ci]'s empty-needle
+    behavior. *)
+
 val starts_with_ci : prefix:string -> string -> bool
 (** [starts_with_ci ~prefix s] is the ASCII case-insensitive variant of
     [String.starts_with]. Performs no allocation; lowercases each byte
@@ -69,6 +91,12 @@ val to_string : truncation -> string
 val was_truncated : truncation -> bool
 (** [true] iff the argument is the [Truncated] constructor. *)
 
+val utf8_prefix : max_bytes:int -> string -> string
+(** [utf8_prefix ~max_bytes s]: returns at most [max_bytes] bytes of [s],
+    cutting at a UTF-8 character boundary. Returns [""] when
+    [max_bytes <= 0]. Lighter than {!utf8_safe} when the caller does not
+    need the [truncation] metadata or suffix. *)
+
 val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)
@@ -81,6 +109,13 @@ val option_trim : string option -> string option
 (** [option_trim opt] maps [trim_nonempty] over an option.
     [None] stays [None]; [Some s] becomes [None] if all whitespace. *)
 
+val compact_text : ?max_len:int -> string -> string
+(** [compact_text ~max_len raw] normalizes [raw]: trims, joins lines,
+    filters empty lines, then truncates to [max_len] characters (UTF-8 safe).
+    Default [max_len] is 160. Returns [""] for empty/whitespace-only input. *)
+
+val strip_trailing_cr : string -> string
+(** [strip_trailing_cr s] removes a trailing ['\\r'] character if present. *)
 val escape_xml : string -> string
 (** Escape the five XML 1.0 predefined entities: ampersand,
     less-than, greater-than, double-quote, and apostrophe.

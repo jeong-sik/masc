@@ -10,10 +10,10 @@
 (* Mirage_crypto_rng is consumed by Verification.generate_id. *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-module V = Masc_mcp.Verification
-module D = Masc_mcp.Dashboard_verification
-module CU = Coord_utils
-module FD = Masc_mcp.Keeper_fd_pressure
+module V = Masc.Verification
+module D = Dashboard_verification
+module CU = Workspace_utils
+module FD = Keeper_fd_pressure
 
 (* ── Fixture helpers ────────────────────────────────── *)
 

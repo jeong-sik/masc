@@ -2,15 +2,15 @@
 
 (using menhir 3.0)
 
-(name masc_mcp)
-(version 0.19.35)
+(name masc)
+(version 0.19.43)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
 (executables_implicit_empty_intf false)
 
 (source
- (github jeong-sik/masc-mcp))
+ (github jeong-sik/masc))
 
 (authors "Jeongsik Yun")
 
@@ -18,12 +18,12 @@
 
 (license MIT)
 
-(documentation https://github.com/jeong-sik/masc-mcp)
+(documentation https://github.com/jeong-sik/masc)
 
 (package
- (name masc_mcp)
- (synopsis "Multi-Agent Streaming Coordination MCP Server in OCaml")
- (description "MASC Protocol: File-based coordination for Claude, Gemini, and Codex agents")
+ (name masc)
+ (synopsis "Multi-Agent Shared Context MCP Server in OCaml")
+ (description "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents")
  (depends
   (ocaml (>= 5.4))
   ; [dune] dependency is implicit from [(lang dune 3.22)] above —
@@ -43,6 +43,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
+  (websocket (>= 2.17))
   ; RFC-0107 Phase D — pooled keep-alive HTTP transport. piaf provides
   ; per-endpoint persistent client (Client.t) + h1/h2 + Eio integration;
   ; multi-host pool layer (Host_key map, idle eviction, TLS cache) is
@@ -52,7 +53,7 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  (agent_sdk (>= 0.200.6))
+  (agent_sdk (>= 0.206.6))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -58,7 +58,7 @@ const LogsResponseSchema = object({
 
 export interface LogsRetention {
   scope?: string
-  coordination_root?: string
+  workspace_root?: string
   buffer?: string
   capacity?: number
   durable_store?: string

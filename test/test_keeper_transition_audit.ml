@@ -3,10 +3,10 @@
 
 open Alcotest
 
-module Audit = Masc_mcp.Keeper_transition_audit
-module KTF = Masc_mcp.Keeper_turn_fsm
-module KSM = Masc_mcp.Keeper_state_machine
-module P = Masc_mcp.Prometheus
+module Audit = Masc.Keeper_transition_audit
+module KTF = Masc.Keeper_turn_fsm
+module KSM = Keeper_state_machine
+module P = Masc.Otel_metric_store
 
 let fail = Alcotest.fail
 
@@ -37,7 +37,47 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let ensure_test_runtime =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      let path = Filename.temp_file "keeper_transition_audit_runtime_" ".toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc test_runtime_toml);
+      Fun.protect
+        ~finally:(fun () ->
+          try Sys.remove path with
+          | Sys_error _ -> ())
+        (fun () ->
+          match Runtime.init_default ~config_path:path with
+          | Ok () -> initialized := true
+          | Error msg -> fail msg))
+
 let keeper_meta name =
+  ensure_test_runtime ();
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -46,7 +86,7 @@ let keeper_meta name =
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
           ("goal", `String "transition-audit-test");
-          ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
+          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with
   | Ok meta -> meta
@@ -65,7 +105,7 @@ let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
   }
 
 let transition_audit_failure_count site =
-  P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TransitionAuditFailures)
+  P.metric_value_or_zero Keeper_metrics.(to_string TransitionAuditFailures)
     ~labels:[("site", site)]
     ()
 
@@ -209,11 +249,11 @@ let test_runtime_trust_timeline_carries_transition_operator_signal () =
       let sink = Filename.concat base_dir "transition-audit.jsonl" in
       with_env "MASC_KEEPER_TRANSITION_LOG" sink (fun () ->
           let keeper_name = "runtime-trust-transition-signal" in
-          let config = Masc_mcp.Coord.default_config base_dir in
+          let config = Masc.Workspace.default_config base_dir in
           let meta = keeper_meta keeper_name in
           Audit.record_transition ~keeper_name (transition ());
           let snapshot =
-            Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+            Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
           in
           let open Yojson.Safe.Util in
           let event = snapshot |> member "latest_causal_event" in
@@ -254,6 +294,67 @@ let test_turn_fsm_emit_transition_appends_wal_row () =
               (row |> member "action" |> to_string)
           | rows ->
             failf "expected one turn_fsm_transition row, got %d" (List.length rows)))
+
+(* ── Async append queue ─────────────────────────────────────────── *)
+
+let default_store_dir base_dir =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path:base_dir)
+    "transition-audit"
+
+(* With enqueue mode on, recording must not write the store inline (that
+   inline write under shared locks is what parked 12 keepers in the
+   2026-06-10 freeze); the row lands only when the drain runs. *)
+let test_async_queue_defers_store_write_until_flush () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+          with_env "MASC_BASE_PATH" base_dir (fun () ->
+              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+                  Audit.For_testing.set_async_append_active true;
+                  KTF.emit_transition
+                    ~keeper_name:"async-queue-keeper"
+                    ~turn_id:7
+                    ~prev:KTF.Streaming
+                    KTF.Completing;
+                  check int "record queued, not yet flushed" 1
+                    (Audit.For_testing.queued_count ());
+                  check bool "store not written before flush" false
+                    (Sys.file_exists (default_store_dir base_dir));
+                  let written = Audit.flush_pending () in
+                  check int "flush writes the queued record" 1 written;
+                  check int "queue drained" 0 (Audit.For_testing.queued_count ());
+                  check int "nothing dropped" 0 (Audit.For_testing.dropped_count ());
+                  check bool "store materialized by flush" true
+                    (Sys.file_exists (default_store_dir base_dir))))))
+
+(* Synchronous fallback: before [start_flush_fiber] (tests, non-server
+   embedders) recording appends inline, preserving previous behavior. *)
+let test_sync_fallback_appends_inline () =
+  Audit.For_testing.reset_state ();
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+          with_env "MASC_BASE_PATH" base_dir (fun () ->
+              with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+                  KTF.emit_transition
+                    ~keeper_name:"sync-fallback-keeper"
+                    ~turn_id:8
+                    ~prev:KTF.Streaming
+                    KTF.Completing;
+                  check int "nothing queued in sync mode" 0
+                    (Audit.For_testing.queued_count ());
+                  check bool "store written inline" true
+                    (Sys.file_exists (default_store_dir base_dir))))))
 
 let test_default_transition_append_failure_is_observed_and_ring_retained () =
   Audit.For_testing.reset_state ();
@@ -404,6 +505,13 @@ let () =
             test_runtime_trust_timeline_carries_transition_operator_signal;
           test_case "turn FSM emit appends WAL row" `Quick
             test_turn_fsm_emit_transition_appends_wal_row;
+        ] );
+      ( "async_append_queue",
+        [
+          test_case "enqueue defers store write until flush" `Quick
+            test_async_queue_defers_store_write_until_flush;
+          test_case "sync fallback appends inline" `Quick
+            test_sync_fallback_appends_inline;
         ] );
       ( "append_failures",
         [

@@ -1,6 +1,6 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 
 let with_temp_config f =
   Eio_main.run @@ fun env ->
@@ -8,7 +8,7 @@ let with_temp_config f =
   let dir = Filename.temp_file "task_dispatch_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
-  let config = Coord.default_config dir in
+  let config = Workspace.default_config dir in
   Fun.protect ~finally:(fun () ->
       let rec rm path =
         if Sys.file_exists path then
@@ -22,16 +22,16 @@ let with_temp_config f =
       rm dir) (fun () -> f config)
 
 let test_default_backend_jsonl () =
-  Task_dispatch.reset_for_test ();
-  match Task_dispatch.backend () with
-  | Task_dispatch.Jsonl -> ()
+  Task.Dispatch.reset_for_test ();
+  match Task.Dispatch.backend () with
+  | Task.Dispatch.Jsonl -> ()
 
 let test_add_task_in_jsonl_mode () =
   with_temp_config (fun config ->
-      ignore (Coord.init config ~agent_name:(Some "tester"));
-      Task_dispatch.reset_for_test ();
-      Task_dispatch.init_jsonl ();
-      match Task_dispatch.add_task config ~title:"dispatch task" ~priority:3
+      ignore (Workspace.init config ~agent_name:(Some "tester"));
+      Task.Dispatch.reset_for_test ();
+      Task.Dispatch.init_jsonl ();
+      match Task.Dispatch.add_task config ~title:"dispatch task" ~priority:3
               ~description:"from task dispatch test"
       with
       | Error e -> Alcotest.fail (Masc_domain.show_masc_error e)
@@ -41,17 +41,17 @@ let test_add_task_in_jsonl_mode () =
 
 let test_update_status_and_delete_use_locked_jsonl_path () =
   with_temp_config (fun config ->
-      ignore (Coord.init config ~agent_name:(Some "tester"));
-      Task_dispatch.reset_for_test ();
-      Task_dispatch.init_jsonl ();
+      ignore (Workspace.init config ~agent_name:(Some "tester"));
+      Task.Dispatch.reset_for_test ();
+      Task.Dispatch.init_jsonl ();
       let task_id =
         match
-          Task_dispatch.add_task config ~title:"locked dispatch task" ~priority:3
+          Task.Dispatch.add_task config ~title:"locked dispatch task" ~priority:3
             ~description:"from task dispatch lock test"
         with
         | Error e -> Alcotest.fail (Masc_domain.show_masc_error e)
         | Ok _ ->
-            let backlog = Coord.read_backlog config in
+            let backlog = Workspace.read_backlog config in
             (match backlog.tasks with
              | [ task ] -> task.Masc_domain.id
              | tasks ->
@@ -62,10 +62,10 @@ let test_update_status_and_delete_use_locked_jsonl_path () =
         Masc_domain.Claimed
           { assignee = "tester"; claimed_at = Masc_domain.now_iso () }
       in
-      (match Task_dispatch.update_status config ~task_id ~status with
+      (match Task.Dispatch.update_status config ~task_id ~status with
        | Ok () -> ()
        | Error e -> Alcotest.fail (Masc_domain.show_masc_error e));
-      let updated = Coord.read_backlog config in
+      let updated = Workspace.read_backlog config in
       Alcotest.(check int) "version bumped by update" 3 updated.version;
       (match updated.tasks with
        | [ task ] ->
@@ -78,10 +78,10 @@ let test_update_status_and_delete_use_locked_jsonl_path () =
        | tasks ->
            Alcotest.failf "expected exactly one task after update, got %d"
              (List.length tasks));
-      (match Task_dispatch.delete_task config ~task_id with
+      (match Task.Dispatch.delete_task config ~task_id with
        | Ok () -> ()
        | Error e -> Alcotest.fail (Masc_domain.show_masc_error e));
-      let deleted = Coord.read_backlog config in
+      let deleted = Workspace.read_backlog config in
       Alcotest.(check int) "version bumped by delete" 4 deleted.version;
       Alcotest.(check int) "task deleted" 0 (List.length deleted.tasks))
 
@@ -93,10 +93,10 @@ let write_string path content =
 
 let test_update_status_and_delete_return_error_when_backlog_unreadable () =
   with_temp_config (fun config ->
-      ignore (Coord.init config ~agent_name:(Some "tester"));
-      Task_dispatch.reset_for_test ();
-      Task_dispatch.init_jsonl ();
-      let backlog_path = Filename.concat (Coord.tasks_dir config) "backlog.json" in
+      ignore (Workspace.init config ~agent_name:(Some "tester"));
+      Task.Dispatch.reset_for_test ();
+      Task.Dispatch.init_jsonl ();
+      let backlog_path = Filename.concat (Workspace.tasks_dir config) "backlog.json" in
       write_string backlog_path "{not-json";
       write_string (backlog_path ^ ".last-good") "{not-json";
       let status =
@@ -111,9 +111,9 @@ let test_update_status_and_delete_return_error_when_backlog_unreadable () =
               (Masc_domain.show_masc_error e)
       in
       expect_io_error "update_status"
-        (Task_dispatch.update_status config ~task_id:"missing" ~status);
+        (Task.Dispatch.update_status config ~task_id:"missing" ~status);
       expect_io_error "delete_task"
-        (Task_dispatch.delete_task config ~task_id:"missing");
+        (Task.Dispatch.delete_task config ~task_id:"missing");
       let ic = open_in backlog_path in
       let primary =
         Fun.protect
@@ -150,23 +150,23 @@ let test_task_dispatch_source_pins_backlog_lock () =
     if m = 0 then true else loop 0
   in
   Alcotest.(check bool)
-    "Task_dispatch mutations use Coord backlog lock"
+    "Task.Dispatch mutations use Workspace backlog lock"
     true
-    (contains source "Coord.with_file_lock config (backlog_lock_path config)");
+    (contains source "Workspace.with_file_lock config (backlog_lock_path config)");
   Alcotest.(check bool)
-    "Task_dispatch mutations read backlog as result under lock"
+    "Task.Dispatch mutations read backlog as result under lock"
     true
-    (contains source "Coord.read_backlog_r config")
+    (contains source "Workspace.read_backlog_r config")
 
 let test_reset_clears_pg_state_shape () =
-  Task_dispatch.reset_for_test ();
-  Task_dispatch.init_jsonl ();
-  Task_dispatch.reset_for_test ();
-  match Task_dispatch.backend () with
-  | Task_dispatch.Jsonl -> ()
+  Task.Dispatch.reset_for_test ();
+  Task.Dispatch.init_jsonl ();
+  Task.Dispatch.reset_for_test ();
+  match Task.Dispatch.backend () with
+  | Task.Dispatch.Jsonl -> ()
 
 let () =
-  Alcotest.run "Task_dispatch"
+  Alcotest.run "Task.Dispatch"
     [
       ( "backend",
         [

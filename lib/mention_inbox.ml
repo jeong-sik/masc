@@ -22,8 +22,7 @@ type mention_record = {
 (* RNG for mention-id generation.  [Random.State.t] is NOT fiber-safe —
    the previous doc comment claiming otherwise was incorrect.  Guard
    the shared state with an [Eio.Mutex] and route every RNG access
-   through [with_mention_rng].
-   ([a2a_rng] / [a2a_rng_mutex]). *)
+   through [with_mention_rng]. *)
 let mention_rng = Random.State.make_self_init ()
 let mention_rng_mutex = Eio.Mutex.create ()
 let with_mention_rng f =
@@ -70,12 +69,12 @@ let mention_record_of_json (json : Yojson.Safe.t) : mention_record option =
 
 (** {1 Path Resolution} *)
 
-let inbox_path (config : Coord.config) : string =
-  Filename.concat (Coord.masc_dir config) "mention_inbox.jsonl"
+let inbox_path (config : Workspace.config) : string =
+  Filename.concat (Workspace.masc_dir config) "mention_inbox.jsonl"
 
 (** {1 JSONL I/O} *)
 
-let append_mention ?task_id (config : Coord.config) (record : mention_record) : unit =
+let append_mention ?task_id (config : Workspace.config) (record : mention_record) : unit =
   (* Fleet-wide invariant (PR-C): if the mention is associated with a terminal
      task, skip the append and log the desync (issue #13397). *)
   let skip =
@@ -95,7 +94,7 @@ let append_mention ?task_id (config : Coord.config) (record : mention_record) : 
     let json = mention_record_to_json record in
     Fs_compat.append_jsonl path json)
 
-let load_all_mentions (config : Coord.config) : mention_record list =
+let load_all_mentions (config : Workspace.config) : mention_record list =
   let path = inbox_path config in
   if not (Sys.file_exists path) then []
   else
@@ -112,7 +111,7 @@ let load_all_mentions (config : Coord.config) : mention_record list =
             mention_record_of_json json
           with Yojson.Json_error _ -> None)
 
-let read_mentions (config : Coord.config) ~(target_agent : string) ~(limit : int)
+let read_mentions (config : Workspace.config) ~(target_agent : string) ~(limit : int)
     : mention_record list =
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent)
@@ -125,12 +124,12 @@ let read_mentions (config : Coord.config) ~(target_agent : string) ~(limit : int
     in
     take limit [] xs)
 
-let unread_count (config : Coord.config) ~(target_agent : string) : int =
+let unread_count (config : Workspace.config) ~(target_agent : string) : int =
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent && r.read_at = 0.0)
   |> List.length
 
-let mark_read (config : Coord.config) ~(mention_id : string) : unit =
+let mark_read (config : Workspace.config) ~(mention_id : string) : unit =
   let path = inbox_path config in
   let all = load_all_mentions config in
   let now = Time_compat.now () in

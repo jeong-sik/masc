@@ -144,9 +144,9 @@ function kpiIsFailureEvent(ev) {
     /\b(fail|failed|error|timeout)\b/i.test(kpiEventText(ev));
 }
 
-function kpiIsCascadeEvent(ev) {
+function kpiIsRuntimeEvent(ev) {
   const kind = kpiNorm(ev && ev.kind);
-  return kind === "cascade" || /\bcascade\b|hit@step|@step\s*=?\s*\d+/i.test(kpiEventText(ev));
+  return kind === "runtime" || /\bruntime\b|hit@step|@step\s*=?\s*\d+/i.test(kpiEventText(ev));
 }
 
 function kpiPassFail(events) {
@@ -162,32 +162,32 @@ function kpiPassFail(events) {
   return { pass, fail, total: pass + fail };
 }
 
-function kpiCascadeStats(D, events) {
-  const cascades = D.cascade ? (Array.isArray(D.cascade) ? D.cascade : [D.cascade]) : [];
+function kpiRuntimeStats(D, events) {
+  const runtimes = D.runtime ? (Array.isArray(D.runtime) ? D.runtime : [D.runtime]) : [];
   const hits = [];
-  cascades.forEach(cascade => {
-    const steps = kpiArray(cascade && cascade.steps);
+  runtimes.forEach(runtime => {
+    const steps = kpiArray(runtime && runtime.steps);
     steps.forEach((step, idx) => {
       if (kpiNorm(step && step.status) === "hit") {
         hits.push({ provider: kpiText(step && step.provider) || "provider", step: idx + 1 });
       }
     });
-    if (!steps.length && kpiNorm(cascade && cascade.status) === "hit") {
-      hits.push({ provider: kpiText(cascade && cascade.provider) || "cascade", step: null });
+    if (!steps.length && kpiNorm(runtime && runtime.status) === "hit") {
+      hits.push({ provider: kpiText(runtime && runtime.provider) || "runtime", step: null });
     }
   });
   if (hits.length) {
     return {
       count: hits.length,
-      note: kpiList(hits, hit => hit.provider + (hit.step ? " @step" + hit.step : ""), "structured cascade"),
+      note: kpiList(hits, hit => hit.provider + (hit.step ? " @step" + hit.step : ""), "structured runtime"),
     };
   }
-  const eventHits = events.filter(kpiIsCascadeEvent);
+  const eventHits = events.filter(kpiIsRuntimeEvent);
   return {
     count: eventHits.length,
     note: eventHits.length
       ? kpiList(eventHits, ev => kpiText(ev && ev.keeper) || kpiText(ev && ev.t), "recent events")
-      : "no cascade hits",
+      : "no runtime hits",
   };
 }
 
@@ -239,7 +239,7 @@ function kpiCollect(D) {
     live: tpsValues.length > 0,
   };
 
-  const cascade = kpiCascadeStats(D, events);
+  const runtime = kpiRuntimeStats(D, events);
 
   const openPrs = prs.filter(pr => {
     const state = kpiNorm(pr && (pr.state || pr.status));
@@ -286,8 +286,8 @@ function kpiCollect(D) {
     spot = { key: "fails", label: "Fails", value: failureValue, unit: failureUnit, tone: "err", note: failureNote, urgent: true };
   } else if (stalledKeepers.length > 0) {
     spot = { key: "stalled", label: "Stalled", value: stalledKeepers.length, unit: "", tone: "stalled", note: stalledMetric.note, urgent: true };
-  } else if (cascade.count > 0) {
-    spot = { key: "cascade", label: "Cascade Hits", value: cascade.count, unit: "", tone: "info", note: cascade.note, urgent: true };
+  } else if (runtime.count > 0) {
+    spot = { key: "runtime", label: "Runtime Hits", value: runtime.count, unit: "", tone: "info", note: runtime.note, urgent: true };
   }
 
   return {
@@ -295,7 +295,7 @@ function kpiCollect(D) {
     tps,
     passRate: { value: passRateValue, unit: passRateValue === empty ? "" : "%", note: passRateNote },
     fails: { value: failureValue, unit: failureUnit, note: failureNote },
-    cascade,
+    runtime,
     prs: prMetric,
     active: activeMetric,
     stalled: stalledMetric,
@@ -325,7 +325,7 @@ function KpiStrip() {
     { key: "tps", label: "Tokens/sec", metric: stats.tps, tone: "brass", className: stats.tps.live ? " live" : "" },
     { key: "passRate", label: "Pass Rate", metric: stats.passRate, tone: "ok" },
     { key: "fails", label: "Fails", metric: stats.fails, tone: "err" },
-    { key: "cascade", label: "Cascade Hits", metric: { value: stats.cascade.count, unit: "", note: stats.cascade.note }, tone: "info" },
+    { key: "runtime", label: "Runtime Hits", metric: { value: stats.runtime.count, unit: "", note: stats.runtime.note }, tone: "info" },
     { key: "active", label: "Active Keepers", metric: stats.active },
     { key: "stalled", label: "Stalled", metric: stats.stalled, valueStyle: { color: "var(--stalled-fg)" } },
     { key: "goals", label: "Goal Progress", metric: stats.goals },
@@ -381,8 +381,8 @@ function KpiStrip() {
 const normalizeLifeKind = kind => ({
   err: "fail",
   fail: "fail",
-  flag: "cascade",
-  cascade: "cascade",
+  flag: "runtime",
+  runtime: "runtime",
   tool: "nudge",
   note: "nudge",
   nudge: "nudge",
@@ -391,14 +391,14 @@ const normalizeLifeKind = kind => ({
 }[kind] || "nudge");
 const lifeKindY = kind => (
   kind === "fail" ? 2 :
-  kind === "cascade" ? 4 :
+  kind === "runtime" ? 4 :
   kind === "nudge" ? 6 :
   kind === "claim" || kind === "verify" ? 8 :
   6
 );
 const lifeKindColor = kind => (
   kind === "fail" ? "var(--err-fg)" :
-  kind === "cascade" ? "var(--info-fg)" :
+  kind === "runtime" ? "var(--info-fg)" :
   kind === "nudge" ? "var(--brass-1)" :
   "var(--ok-fg)"
 );

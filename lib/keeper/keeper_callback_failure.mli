@@ -6,7 +6,7 @@
 
 val record :
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   callback:string ->
   exn ->
   unit

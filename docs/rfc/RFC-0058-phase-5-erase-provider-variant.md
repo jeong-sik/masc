@@ -16,21 +16,21 @@ on `feat/rfc-0058-phase4`:
 
 | File | Symptom |
 |------|---------|
-| `lib/provider_adapter.ml` | `cascade_prefix = "cli-tool-d" / "cli-tool-a" / "cli-tool-c" / "cli-tool-b" / "provider-k-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
+| `lib/provider_adapter.ml` | `runtime_prefix = "cli-tool-d" / "cli-tool-a" / "cli-tool-c" / "cli-tool-b" / "provider-k-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
 | `lib/provider_tool_support.ml` | Closed variant `Claude_code | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
-| `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"cli-tool-a"` / `"cli-tool-d"` / `"provider-k-coding"` etc. |
-| `lib/cascade/cascade_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
-| `lib/cascade/cascade_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
-| `lib/cascade/cascade_error_classify.mli:147-168` | `cli-tool-a_prompt_preflight` type and helpers — preflight is provider-specific by design |
-| `lib/prometheus.ml:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
-| `lib/dashboard_cascade.mli` | Documentation literals (`cli:cli-tool-d`, `cli-tool-c`, …) — driven by runtime data but the contract surface still spells them out |
+| `lib/runtime/runtime_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"cli-tool-a"` / `"cli-tool-d"` / `"provider-k-coding"` etc. |
+| `lib/runtime/runtime_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
+| `lib/runtime/runtime_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
+| `lib/runtime/runtime_error_classify.mli:147-168` | `cli-tool-a_prompt_preflight` type and helpers — preflight is provider-specific by design |
+| `legacy metrics backend module:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
+| `lib/dashboard_runtime.mli` | Documentation literals (`cli:cli-tool-d`, `cli-tool-c`, …) — driven by runtime data but the contract surface still spells them out |
 
 The provider name leaks into call sites in three forms:
 
 1. **Closed variant** (`type provider_id = Claude_code | …`) — exhaustive
    match enforces that any new vendor needs a code change in every dispatch
    site.
-2. **Cascade prefix literal** (`"cli-tool-d"`, `"cli-tool-a"`, …) —
+2. **Runtime prefix literal** (`"cli-tool-d"`, `"cli-tool-a"`, …) —
    string compared against runtime config; adding a vendor means hunting
    for every match site.
 3. **Per-vendor configuration tables** baked into OCaml (`auto_register_for_candidates`,
@@ -39,9 +39,9 @@ The provider name leaks into call sites in three forms:
 ## 2. Goals
 
 - Remove closed `provider_id` variant types from public dispatch surfaces.
-- Eliminate every literal vendor cascade prefix from OCaml under `lib/`.
+- Eliminate every literal vendor runtime prefix from OCaml under `lib/`.
 - Move per-vendor capability/liveness/pricing/concurrency knobs out of
-  OCaml into `config/cascade.toml` (the Phase 4 SSOT).
+  OCaml into `config/runtime.toml` (the Phase 4 SSOT).
 - After Phase 5, adding a vendor that uses an existing `api_format` is
   TOML-only.
 
@@ -72,7 +72,7 @@ Phased to keep `main` green at every step. Each step is one PR.
 
 The provider-level liveness schema was superseded before productization.
 Do not add a provider liveness sub-table or provider liveness class field
-back to declarative cascade config.
+back to declarative runtime config.
 
 Runtime liveness now uses:
 
@@ -89,19 +89,19 @@ resolved budget used for the attempt.
 - Do not replace the old match with a provider-id keyed budget lookup;
   that still makes provider identity the budget taxonomy. Keeper dispatch
   should use a concrete provider/model candidate key.
-- The hardcoded `match cascade_prefix with "cli-tool-a" | "cli-tool-d" |
+- The hardcoded `match runtime_prefix with "cli-tool-a" | "cli-tool-d" |
   …` block is deleted without replacing it with static provider classes.
 - If validator rules are added, they should ensure no shipped provider
   declares a liveness class so future entries cannot silently regress.
 
-### Phase 5.3 — Erase `cascade_prefix` literals from `provider_adapter`
+### Phase 5.3 — Erase `runtime_prefix` literals from `provider_adapter`
 
 - `provider_adapter.ml` becomes a thin lookup over the TOML
   `[providers.<id>]` table — `aliases` synonyms move into TOML
   `aliases = [...]` field on each provider.
 - Removes the giant per-provider record list at the bottom of the file.
 
-### Phase 5.4 — Generalize Prometheus metric names
+### Phase 5.4 — Generalize legacy metrics backend metric names
 
 - `metric_cli-tool-a_mcp_tool_omission` becomes a labelled metric:
   `masc_provider_mcp_tool_omission_total{provider="<id>"}`. Dashboards
@@ -110,7 +110,7 @@ resolved budget used for the attempt.
 ### Phase 5.5 — Validator hardens R11 globally
 
 - Promote `validate_strict` (introduced in Phase 5.2a alongside R11)
-  to be the default validator used by every cascade.toml load site.
+  to be the default validator used by every runtime.toml load site.
   Legacy `validate` removed once test fixtures all carry
   `max-concurrent`.
 
@@ -120,10 +120,10 @@ Closed by an 8-PR sweep (2026-05-11):
 
 | PR | Site | Boundary helper / structural change |
 |----|------|-------------------------------------|
-| #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Cascade_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
-| #14710 | `cascade_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
+| #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Runtime_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
+| #14710 | `runtime_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
 | #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
-| #14721 | `cascade_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
+| #14721 | `runtime_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
 | #14729 | `keeper_turn_fsm.guard_transition` violation warn | dead-after-raise log line moved above `wrap_unit` — diagnostics reach operators |
 | #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | `Provider_adapter.timeout_bounds_of_kind` — last keeper-layer `match provider_cfg.kind` site closed |
 | #14745 | `keeper_bootstrap_stats.enabled` (producer-only field) | Removed; `should_start_supervisor_sweep` had already ignored it after the 2026-04-24 incident |
@@ -144,12 +144,12 @@ history notes) do not trip the invariant.
 The only `provider_cfg.kind` reads left in `lib/` outside
 `provider_adapter` are out of scope:
 
-- `cascade_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
+- `runtime_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
   registry key (lookup, not variant dispatch) — legitimate runtime
   registry, passes the workaround rejection bar.
-- `cascade_catalog_runtime.ml:511` matches `strategy_cfg.kind`, not a
+- `runtime_catalog_runtime.ml:511` matches `strategy_cfg.kind`, not a
   provider kind — strategy-side dispatch over a separate
-  `Cascade_strategy_config` type, unrelated to Phase 5.
+  `Runtime_strategy_config` type, unrelated to Phase 5.
 
 ## 5. Acceptance Gates
 
@@ -162,14 +162,14 @@ For each Phase 5.N PR:
   shrinks monotonically. Phase 5.3 must zero them out under `lib/` (test
   fixtures and migration tools excluded).
 - G3: `dune build --root .` and `dune test` pass. Test fixtures may be
-  amended in the same PR but production cascade.toml schema does not change.
+  amended in the same PR but production runtime.toml schema does not change.
 - G4: New TOML fields (`[providers.<p>.capabilities]`, provider `aliases`)
   ship with parser + R-rule validator coverage. Provider liveness classes
   remain absent.
 
 ## 6. Risks
 
-- **Build cascade**: 30+ files touch `provider_id` variant. Sequence the
+- **Build runtime**: 30+ files touch `provider_id` variant. Sequence the
   PRs so the variant survives in one place at a time. Use compiler
   exhaustiveness to enumerate the call sites instead of grep.
 - **TOML bloat**: per-provider capability sub-tables grow the file. Mitigation:
@@ -186,6 +186,6 @@ For each Phase 5.N PR:
 2. Per-provider preflight (`cli-tool-a_prompt_preflight`) — is the argv/prompt
    length check truly Agent-Code-specific, or a general constraint that should
    live as a TOML `[providers.<p>.preflight]` policy?
-3. Dashboard contract literals (`dashboard_cascade.mli` docstrings, JSON
+3. Dashboard contract literals (`dashboard_runtime.mli` docstrings, JSON
    shape examples) — leave them as documentation, or drive examples from
    the live config snapshot at doc-generation time?

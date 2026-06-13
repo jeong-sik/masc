@@ -34,7 +34,7 @@ val personality_field_diff_summary :
 (** {1 Boot meta materialization} *)
 
 type boot_meta_resolution = {
-  meta : Keeper_types.keeper_meta;
+  meta : Keeper_meta_contract.keeper_meta;
   materialized : bool;
       (** [true] when the meta was synthesised from defaults rather than
           loaded from disk. *)
@@ -48,21 +48,21 @@ type autoboot_exclusion = {
 (** Why a configured keeper is intentionally absent from
     {!bootable_keeper_names}. *)
 
-val bootable_keeper_names : Coord.config -> string list
+val bootable_keeper_names : Workspace.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
 
-val autoboot_excluded_keeper_reasons : Coord.config -> autoboot_exclusion list
+val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-val auto_recoverable_paused_keeper_names : ?now:float -> Coord.config -> string list
+val auto_recoverable_paused_keeper_names : ?now:float -> Workspace.config -> string list
 (** Configured, autoboot-enabled keepers that are currently paused but whose
     supervisor-owned auto-resume timer has elapsed.  These keepers remain
     excluded from {!bootable_keeper_names} until the supervisor clears
     [paused=false], but they are enough reason to start the supervisor sweep on
     cold boot. *)
 
-val canonicalize_if_keeper : Coord.config -> string -> string
+val canonicalize_if_keeper : Workspace.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured
     keeper, else returns [name] unchanged. Safe to apply at credential
@@ -84,26 +84,26 @@ val invalid_profile_defaults_error : keeper_name:string -> string -> string
 (** Render the structured error message for a profile-defaults parse
     failure. *)
 
-val effective_declarative_cascade_name :
+val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_types.keeper_meta -> string
-(** Resolve the cascade name for a keeper meta given its profile
+  Keeper_meta_contract.keeper_meta -> string
+(** Resolve the runtime id for a keeper meta given its profile
     defaults; falls back to the profile default when the meta omits one. *)
 
 val resynced_tool_access :
   Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_types.keeper_meta -> Keeper_types.tool_access
+  Keeper_meta_contract.keeper_meta -> string list
 (** Re-derive the tool-access record after merging profile defaults so
-    the meta-level [preset] and per-tool overrides stay consistent. *)
+    the meta-level [tool_access] and per-tool overrides stay consistent. *)
 
 val ensure_keeper_meta :
-  Coord.config ->
-  string -> (Keeper_types.keeper_meta, string) result
+  Workspace.config ->
+  string -> (Keeper_meta_contract.keeper_meta, string) result
 (** Load the keeper meta for [keeper_name], materialising defaults from
     the profile when the on-disk meta is missing fields. *)
 
 val load_or_materialize_boot_meta :
-  [> float Eio.Time.clock_ty ] Keeper_types.context ->
+  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
   string -> (boot_meta_resolution, string) result
 (** Eio-aware variant of [ensure_keeper_meta] used during server boot;
     surfaces whether the meta was materialised from defaults. *)
@@ -119,7 +119,7 @@ type keeper_bootstrap_stats = {
 (** Counts emitted by [bootstrap_existing_keepers] for telemetry. *)
 
 val bootstrap_existing_keepers :
-  [> float Eio.Time.clock_ty ] Keeper_types.context ->
+  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
   keeper_bootstrap_stats
 (** Walk every bootable keeper and start/recover its keepalive fiber.
     Returns counts for the boot summary log line. *)
@@ -149,7 +149,7 @@ val update_supervisor_sweep_interval : string -> float -> bool
     the keeper has no active sweep. *)
 
 val start_supervisor_sweep :
-  [> float Eio.Time.clock_ty ] Keeper_types.context -> unit
+  [> float Eio.Time.clock_ty ] Keeper_types_profile.context -> unit
 (** Spawn a supervisor sweep fiber for the keeper bound to [context];
     no-op when one is already running. *)
 
@@ -164,22 +164,22 @@ val existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t
     bootstrapped during this process lifetime; prevents duplicate
     spawns on hot-reload. *)
 
-val has_boot_entries : Coord.config -> bool
+val has_boot_entries : Workspace.config -> bool
 (** [true] when at least one bootable keeper exists for [config]. *)
 
 val should_start_supervisor_sweep :
-  config:Coord.config -> stats:keeper_bootstrap_stats -> bool
+  config:Workspace.config -> stats:keeper_bootstrap_stats -> bool
 (** Policy gate: should the supervisor sweep run given [config] and the
     bootstrap stats? *)
 
 val maybe_start_supervisor_sweep :
-  [> float Eio.Time.clock_ty ] Keeper_types.context ->
+  [> float Eio.Time.clock_ty ] Keeper_types_profile.context ->
   keeper_bootstrap_stats -> unit
 (** Start the supervisor sweep when [should_start_supervisor_sweep]
     returns [true]; otherwise no-op. *)
 
 val start_existing_keepalives :
-  [> float Eio.Time.clock_ty ] Keeper_types.context -> unit
+  [> float Eio.Time.clock_ty ] Keeper_types_profile.context -> unit
 (** Top-level entry: bootstrap every existing keeper's keepalive plus
     the supervisor sweep when applicable. *)
 

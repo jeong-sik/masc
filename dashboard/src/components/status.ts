@@ -1,5 +1,5 @@
 // MASC Dashboard — Status Surface
-// Monitor is keeper-fleet first. Tool, cascade/runtime, evidence, and
+// Monitor is keeper-fleet first. Tool, runtime/runtime, evidence, and
 // hidden diagnostic/deep-link routes remain routeable through this dispatcher.
 
 import { html } from 'htm/preact'
@@ -9,8 +9,8 @@ import { sectionItemsForTab } from '../config/navigation'
 import { LoadingState } from './common/feedback-state'
 
 export type StatusSection =
-  | 'observatory' | 'journey' | 'agents' | 'runtime' | 'cascade-config'
-  | 'fleet-health' | 'doctor' | 'transport-health'
+  | 'observatory' | 'journey' | 'agents' | 'runtime'
+  | 'fleet-health' | 'transport-health'
   | 'feature-health'
   | 'cognition'
 
@@ -38,14 +38,8 @@ const LazyAgentsUnified = lazy(async () => ({
 const LazyRuntimePanel = lazy(async () => ({
   default: (await import('./runtime-panel')).RuntimePanel,
 }))
-const LazyCascadeConfigPanel = lazy(async () => ({
-  default: (await import('./cascade-config-panel')).CascadeConfigPanel,
-}))
 const LazyFleetHealthPanel = lazy(async () => ({
   default: (await import('./fleet-health-panel')).FleetHealthPanel,
-}))
-const LazyDoctorPanel = lazy(async () => ({
-  default: (await import('./doctor-panel')).DoctorPanel,
 }))
 const LazyTransportHealthPanel = lazy(async () => ({
   default: (await import('./transport-health')).TransportHealthPanel,
@@ -79,12 +73,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyJourneyPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
-    case 'cascade-config':
-      return html`<${LazyCascadeConfigPanel} />`
     case 'fleet-health':
       return html`<${LazyFleetHealthPanel} />`
-    case 'doctor':
-      return html`<${LazyDoctorPanel} />`
     case 'transport-health':
       return html`<${LazyTransportHealthPanel} />`
     case 'feature-health':

@@ -1,18 +1,18 @@
 (* RFC-0004 Phase A0.1 PR-1 — byte-equal envelope test.
 
    Verifies that [Sse_event.agent_started] emits a JSON string that
-   is byte-identical to the [cascade_event_bridge.wrap_event] output
-   for the AgentStarted arm (lib/cascade/cascade_event_bridge.ml:
+   is byte-identical to the [runtime_event_bridge.wrap_event] output
+   for the AgentStarted arm (lib/runtime/runtime_event_bridge.ml:
    556-560 + wrap_event:507-531 + json_string_opt:25-27).
 
    The baseline is hand-replicated below using the same algorithm as
    wrap_event/json_string_opt — this avoids linking the heavy
-   cascade dependency chain (Agent_sdk, Eio, etc.) into the test
-   binary.  In PR-2 (cascade migration) we replace the cascade arm
+   runtime dependency chain (Agent_sdk, Eio, etc.) into the test
+   binary.  In PR-2 (runtime migration) we replace the runtime arm
    itself, at which point the wrap_event replica below is removed
-   and the test pins against the cascade output directly. *)
+   and the test pins against the runtime output directly. *)
 
-(* === Baseline replica: cascade_event_bridge.wrap_event + json_string_opt === *)
+(* === Baseline replica: runtime_event_bridge.wrap_event + json_string_opt === *)
 
 let baseline_json_string_opt = function
   | Some value when String.trim value <> "" -> `String value
@@ -87,7 +87,7 @@ let test_agent_started_byte_equal () =
   Printf.printf "  baseline: %s\n" baseline;
   Printf.printf "  typed:    %s\n" typed;
   Printf.printf "  equal: %b\n" (String.equal baseline typed);
-  Alcotest.(check string) "agent_started typed == cascade baseline" baseline typed
+  Alcotest.(check string) "agent_started typed == runtime baseline" baseline typed
 ;;
 
 (* === PR-3 byte-equal cases: tool_called, tool_completed, turn_started,
@@ -187,7 +187,7 @@ let baseline_turn_ready ~agent_name ~turn ~tool_names =
 let test_tool_called_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
-      (baseline_tool_called ~agent_name:"alpha" ~tool_name:"ReadFile")
+      (baseline_tool_called ~agent_name:"alpha" ~tool_name:"Read")
   in
   let typed =
     Yojson.Safe.to_string
@@ -196,7 +196,7 @@ let test_tool_called_byte_equal () =
          ~correlation_id:common_corr
          ~run_id:common_run
          ~agent_name:"alpha"
-         ~tool_name:"ReadFile")
+         ~tool_name:"Read")
   in
   Alcotest.(check string) "tool_called typed == baseline" baseline typed
 ;;
@@ -204,7 +204,7 @@ let test_tool_called_byte_equal () =
 let test_tool_completed_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
-      (baseline_tool_completed ~agent_name:"alpha" ~tool_name:"ReadFile")
+      (baseline_tool_completed ~agent_name:"alpha" ~tool_name:"Read")
   in
   let typed =
     Yojson.Safe.to_string
@@ -213,7 +213,7 @@ let test_tool_completed_byte_equal () =
          ~correlation_id:common_corr
          ~run_id:common_run
          ~agent_name:"alpha"
-         ~tool_name:"ReadFile")
+         ~tool_name:"Read")
   in
   Alcotest.(check string) "tool_completed typed == baseline" baseline typed
 ;;
@@ -251,7 +251,7 @@ let test_turn_completed_byte_equal () =
 ;;
 
 let test_turn_ready_byte_equal () =
-  let tool_names = [ "ReadFile"; "WriteFile"; "Execute"; "EditFile" ] in
+  let tool_names = [ "Read"; "Write"; "Execute"; "Edit" ] in
   let baseline =
     Yojson.Safe.to_string
       (baseline_turn_ready ~agent_name:"alpha" ~turn:3 ~tool_names)
@@ -624,7 +624,7 @@ let test_slot_scheduler_observed_byte_equal () =
 
    These three cases pin the caller-supplied-addendum splice path
    (Sse_event.merge_addendum_into_record) against the pre-PR-3b
-   inline `Assoc construction in cascade_event_bridge.ml.  Field
+   inline `Assoc construction in runtime_event_bridge.ml.  Field
    order is [base record (atd declaration order) @ addendum]. *)
 
 let baseline_agent_completed ~agent_name ~task_id ~elapsed_s ~result_fields =
@@ -668,7 +668,7 @@ let baseline_agent_failed ~agent_name ~task_id ~elapsed_s ~error_fields =
 ;;
 
 let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
-  (* Shape mirrors cascade_event_bridge.agent_completed_result_fields
+  (* Shape mirrors runtime_event_bridge.agent_completed_result_fields
      for the Ok branch, including the usage tail.  Concrete values are
      arbitrary -- the test pins the byte-equal property, not the
      business meaning. *)

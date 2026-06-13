@@ -2,7 +2,7 @@
 \* Boundary spec for keeper sandbox dispatch routing.
 \*
 \* Runtime truth (lib/keeper/keeper_tools_oas.ml +
-\* lib/keeper/agent_tool_command_runtime.ml):
+\* lib/keeper/keeper_tool_command_runtime.ml):
 \*
 \*   - [meta_profile] is the keeper's declared sandbox preference
 \*     (Local | Docker).

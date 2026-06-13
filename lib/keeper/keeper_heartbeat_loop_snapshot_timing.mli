@@ -1,8 +1,8 @@
 (** Heartbeat snapshot persistence and stage-timing ring-buffer helpers. *)
 
 val maybe_write_heartbeat_snapshot :
-  ctx:'a Keeper_types.context ->
-  meta_current:Keeper_types.keeper_meta ->
+  ctx:'a Keeper_types_profile.context ->
+  meta_current:Keeper_meta_contract.keeper_meta ->
   now_ts:float ->
   consecutive_hb_failures:int ->
   last_snapshot_ts:float ref ->

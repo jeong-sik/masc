@@ -4,8 +4,8 @@
     and audit bookkeeping cannot be bypassed. *)
 
 open Alcotest
-open Masc_mcp
-open Coord_types
+open Masc
+open Workspace_types
 
 let temp_dir () =
   let path = Filename.temp_file "goal_fsm_bypass_10247_" "" in
@@ -24,7 +24,7 @@ let rec rm_rf path =
     else Sys.remove path
 ;;
 
-let with_room f =
+let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -32,15 +32,15 @@ let with_room f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-       let config = Coord.default_config dir in
-       ignore (Coord.init config ~agent_name:(Some "planner"));
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "planner"));
        f config)
 ;;
 
-let coord_ctx config : Tool_coord.context = { Tool_coord.config; agent_name = "planner" }
+let workspace_ctx config : Tool_workspace.context = { Tool_workspace.config; agent_name = "planner" }
 
 let dispatch_upsert ctx args =
-  match Tool_coord.dispatch ctx ~name:"masc_goal_upsert" ~args:(`Assoc args) with
+  match Tool_workspace.dispatch ctx ~name:"masc_goal_upsert" ~args:(`Assoc args) with
   | Some result -> result
   | None -> fail "masc_goal_upsert not handled"
 ;;
@@ -94,23 +94,23 @@ let string_field json field =
          (Yojson.Safe.to_string other))
 ;;
 
-let principal_json ~kind ~id = `Assoc [ "kind", `String kind; "id", `String id ]
+let principal_json ~id = `Assoc [ "id", `String id ]
 
 let create_goal_id config ~title =
-  let body = dispatch_upsert_must_succeed (coord_ctx config) [ "title", `String title ] in
+  let body = dispatch_upsert_must_succeed (workspace_ctx config) [ "title", `String title ] in
   string_field body "goal_id"
 ;;
 
 let dispatch_transition_must_succeed ctx ~goal_id ~action =
   match
-    Tool_coord.dispatch
+    Tool_workspace.dispatch
       ctx
       ~name:"masc_goal_transition"
       ~args:
         (`Assoc
             [ "goal_id", `String goal_id
             ; "action", `String action
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   with
   | Some result when (Tool_result.is_success result) -> ()
@@ -143,7 +143,7 @@ let check_lifecycle_error ~field body =
 ;;
 
 let test_any_phase_field_rejected () =
-  with_room
+  with_workspace
   @@ fun config ->
   [ "executing"
   ; "awaiting_verification"
@@ -156,31 +156,31 @@ let test_any_phase_field_rejected () =
   |> List.iter (fun phase ->
     let body =
       dispatch_upsert_must_fail
-        (coord_ctx config)
+        (workspace_ctx config)
         [ "title", `String ("Bypass " ^ phase); "phase", `String phase ]
     in
     check_lifecycle_error ~field:"phase" body)
 ;;
 
 let test_any_status_field_rejected () =
-  with_room
+  with_workspace
   @@ fun config ->
   [ "active"; "done"; "dropped"; "paused" ]
   |> List.iter (fun status ->
     let body =
       dispatch_upsert_must_fail
-        (coord_ctx config)
+        (workspace_ctx config)
         [ "title", `String ("Bypass status " ^ status); "status", `String status ]
     in
     check_lifecycle_error ~field:"status" body)
 ;;
 
 let test_no_lifecycle_field_still_round_trips () =
-  with_room
+  with_workspace
   @@ fun config ->
   let body =
     dispatch_upsert_must_succeed
-      (coord_ctx config)
+      (workspace_ctx config)
       [ "title", `String "Default goal"; "horizon", `String "mid"; "priority", `Int 2 ]
   in
   check
@@ -193,14 +193,14 @@ let test_no_lifecycle_field_still_round_trips () =
 ;;
 
 let test_existing_blocked_cannot_resume_with_executing_phase () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal_id = create_goal_id config ~title:"Blocked goal" in
-  dispatch_transition_must_succeed (coord_ctx config) ~goal_id ~action:"operator_block";
+  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"operator_block";
   check string "fixture moved to blocked" "blocked" (saved_phase config goal_id);
   let body =
     dispatch_upsert_must_fail
-      (coord_ctx config)
+      (workspace_ctx config)
       [ "id", `String goal_id; "phase", `String "executing" ]
   in
   check_lifecycle_error ~field:"phase" body;
@@ -208,14 +208,14 @@ let test_existing_blocked_cannot_resume_with_executing_phase () =
 ;;
 
 let test_existing_paused_cannot_resume_with_active_status () =
-  with_room
+  with_workspace
   @@ fun config ->
   let goal_id = create_goal_id config ~title:"Paused goal" in
-  dispatch_transition_must_succeed (coord_ctx config) ~goal_id ~action:"pause";
+  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"pause";
   check string "fixture moved to paused" "paused" (saved_phase config goal_id);
   let body =
     dispatch_upsert_must_fail
-      (coord_ctx config)
+      (workspace_ctx config)
       [ "id", `String goal_id; "status", `String "active" ]
   in
   check_lifecycle_error ~field:"status" body;
@@ -223,11 +223,11 @@ let test_existing_paused_cannot_resume_with_active_status () =
 ;;
 
 let test_phase_violation_beats_status () =
-  with_room
+  with_workspace
   @@ fun config ->
   let body =
     dispatch_upsert_must_fail
-      (coord_ctx config)
+      (workspace_ctx config)
       [ "title", `String "Both fields violate"
       ; "phase", `String "completed"
       ; "status", `String "done"

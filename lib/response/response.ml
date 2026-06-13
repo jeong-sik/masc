@@ -275,7 +275,7 @@ let handoff_verified ~similarity : t =
 
     Issue #8364: previously emitted [status="in_progress"], which is the
     state AFTER the [Start] action. The [Claim] FSM transition is
-    [Todo -> Claimed] (see [lib/coord/coord_task.ml:752]); a separate
+    [Todo -> Claimed] (see [lib/workspace/task_state.ml:752]); a separate
     [Start] is required to reach [InProgress]. Routing through the
     Variant SSOT prevents this from drifting again. *)
 let task_claimed ~task_id ~agent : t =
@@ -301,8 +301,8 @@ let task_already_claimed ~task_id ~claimed_by : t =
       ("claimed_by", `String claimed_by);
     ])
     ~hints:[
-      Printf.sprintf "Coordinate with '%s' who owns this task" claimed_by;
-      "Use masc_claim_next to get the next available task";
+      Printf.sprintf "Align with '%s' who owns this task" claimed_by;
+      "Use keeper_task_claim to get the next available task";
       "Or create a new task with masc_add_task";
     ]
     ()

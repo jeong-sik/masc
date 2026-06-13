@@ -126,83 +126,18 @@ let empty_cost_latency_json ~window =
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
-let o5_agent_board_inputs (config : Coord.config) =
-  let queue_depth =
-    Prometheus.metric_value_or_zero Keeper_metrics.(to_string TurnQueueDepth)
-      ~labels:[("channel", "autonomous_queue")] ()
-    |> int_of_float
-    |> max 0
-  in
-  let now = Unix.gettimeofday () in
-  Keeper_types.keeper_names config
-  |> List.filter_map (fun name ->
-       match Keeper_types.read_meta config name with
-       | Ok (Some meta) ->
-           let blocked_on =
-             match meta.runtime.last_blocker with
-             | Some info ->
-               let value = String.trim info.detail in
-               if value = "" then
-                 Some (Keeper_types.blocker_class_to_string info.klass)
-               else Some value
-             | None -> None
-           in
-           Some {
-             Agent_stress.agent = meta.name;
-             ctx_pressure = Operator_control_snapshot.compute_context_ratio meta;
-             queue_depth = Some queue_depth;
-             blocked_on;
-             ts = Some now;
-           }
-       | Ok None | Error _ -> None)
-
-let dashboard_heuristics_json req =
-  let limit = int_query_param req "limit" ~default:100 in
-  let events = Heuristic_metrics.recent limit in
-  Heuristic_metrics.dashboard_feed_json ~limit events
-
-let dashboard_heuristics_coverage_json req =
-  let limit = int_query_param req "limit" ~default:100 in
-  Heuristic_metrics.recent_coverage limit
-  |> Heuristic_metrics.coverage_report_to_json
-
-let dashboard_stress_json ~config req =
-  let limit = int_query_param req "limit" ~default:100 in
-  let events = Agent_stress.recent limit in
-  let agents = o5_agent_board_inputs config in
-  Agent_stress.dashboard_feed_json ~limit ~agents events
-
-let respond_dashboard_heuristics request reqd =
-  with_public_read (fun _state req reqd ->
-    let json = dashboard_heuristics_json req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
-let respond_dashboard_heuristics_coverage request reqd =
-  with_public_read (fun _state req reqd ->
-    let json = dashboard_heuristics_coverage_json req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
-let respond_dashboard_stress request reqd =
-  with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.room_config in
-    let json = dashboard_stress_json ~config req in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  ) request reqd
-
 let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Dashboard_provider_runs.provider_inventory_json () in
+         let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:30 in
          let bucket_min = int_query_param req "bucket_min" ~default:0 in
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.workspace_config.base_path in
          let key =
            cache_key
              [ base_path; string_of_int window; string_of_int bucket_min ]
@@ -223,65 +158,14 @@ let add_routes ~sw router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.post "/api/v1/agent-runs" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
-         Http.Request.read_body_async reqd (fun body_str ->
-             try
-               let json = Yojson.Safe.from_string body_str in
-               let open Yojson.Safe.Util in
-               let provider = json |> member "provider" |> to_string in
-               let model_opt = json |> member "model" |> to_string_option in
-               let prompt = json |> member "prompt" |> to_string in
-               match
-                 Dashboard_provider_runs.start_run ~sw
-                   ~net:state.Mcp_server.net ~provider ~model_opt
-                   ~prompt
-               with
-               | Ok payload ->
-                   respond_json_value_with_cors ~status:`Created request reqd payload
-               | Error message ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (`Assoc [ ("error", `String message) ])
-             with
-             | Yojson.Json_error error ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (`Assoc
-                      [
-                        ( "error",
-                          `String ("invalid json: " ^ error) );
-                      ])
-             | Yojson.Safe.Util.Type_error (error, _) ->
-                 respond_json_value_with_cors ~status:`Bad_request request reqd
-                   (`Assoc
-                      [
-                        ( "error",
-                          `String ("invalid request shape: " ^ error) );
-                      ]))
-       ) request reqd)
-  |> Http.Router.prefix_get "/api/v1/agent-runs/" (fun request reqd ->
-       with_read_auth (fun _state req reqd ->
-         let req_path = Http.Request.path req in
-         match extract_path_param ~prefix:"/api/v1/agent-runs/" req_path with
-         | None ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc [ ("error", `String "run_id is required") ])
-         | Some run_id ->
-             (match Dashboard_provider_runs.run_status_json run_id with
-             | Ok payload ->
-                 respond_json_value_with_cors request reqd payload
-             | Error message ->
-                 respond_json_value_with_cors ~status:`Not_found request reqd
-                   (`Assoc [ ("error", `String message) ]))
-       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
-         let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let config = state.Mcp_server.workspace_config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -295,7 +179,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
-         let base_path = state.Mcp_server.room_config.base_path in
+         let base_path = state.Mcp_server.workspace_config.base_path in
          let json =
            cached_dashboard_json ~sw ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
@@ -309,11 +193,11 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let config = state.Mcp_server.workspace_config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -327,11 +211,11 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let config = state.Mcp_server.workspace_config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -345,11 +229,11 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.room_config in
-         let keeper_names = Keeper_types.keeper_names config in
+         let config = state.Mcp_server.workspace_config in
+         let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
-             match Keeper_types.read_meta config name with
+             match Keeper_meta_store.read_meta config name with
              | Ok (Some m) -> Some m
              | _ -> None
            ) keeper_names
@@ -360,11 +244,3 @@ let add_routes ~sw router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/heuristics" respond_dashboard_heuristics
-  |> Http.Router.get "/api/v1/heuristics" respond_dashboard_heuristics
-  |> Http.Router.get "/api/v1/dashboard/heuristics/coverage"
-       respond_dashboard_heuristics_coverage
-  |> Http.Router.get "/api/v1/heuristics/coverage"
-       respond_dashboard_heuristics_coverage
-  |> Http.Router.get "/api/v1/dashboard/stress" respond_dashboard_stress
-  |> Http.Router.get "/api/v1/agent_stress" respond_dashboard_stress

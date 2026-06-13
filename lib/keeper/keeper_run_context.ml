@@ -4,6 +4,8 @@
    Extracted from keeper_agent_run.ml. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** Resolved inference and session context needed before prompt construction. *)
 type run_context =
@@ -26,7 +28,7 @@ type run_context =
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
-  ; cascade_config_path : string option
+  ; runtime_config_path : string option
   ; gemini_mcp_disabled : bool
   ; approval_mode_effective : string option
   ; approval_mode_derived : bool
@@ -34,11 +36,11 @@ type run_context =
   }
 
 let prepare_run_context
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(base_dir : string)
       ~(max_context : int)
-      ~(cascade_name : Cascade_name.t)
+      ~(runtime_id : string)
       ?temperature
       ?max_tokens
       ?shared_context
@@ -47,25 +49,34 @@ let prepare_run_context
   =
   let receipt_started_at = Masc_domain.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
+  let validated_goal_ids =
+    Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ()
+  in
+  let meta =
+    if List.length validated_goal_ids <> List.length meta.active_goal_ids then
+      { meta with active_goal_ids = validated_goal_ids }
+    else
+      meta
+  in
   let profile_defaults = Keeper_types_profile.load_keeper_profile_defaults meta.name in
-  (* 0. Resolve inference parameters via Cascade_inference *)
+  (* 0. Resolve inference parameters via Runtime_inference *)
   let temperature =
     match temperature with
     | Some t -> t
     | None ->
-      Cascade_inference.resolve_temperature
-        ~cascade_name ~fallback:(fun () -> 0.3)
+      Runtime_inference.resolve_temperature
+        ~runtime_id ~fallback:(fun () -> 0.3)
   in
   let max_tokens =
     match max_tokens with
     | Some t ->
-      Cascade_inference.cap_max_tokens_to_cascade_ceiling
-        ~cascade_name
+      Runtime_inference.cap_max_tokens_to_runtime_ceiling
+        ~runtime_id
         ~source:"caller_override"
         t
     | None ->
-      Cascade_inference.resolve_max_tokens
-        ~cascade_name
+      Runtime_inference.resolve_max_tokens
+        ~runtime_id
           (* 8192 allows complex multi-tool reasoning per turn.
            Cloudflare tunnel 100s is no longer a constraint with
            streaming responses. *)
@@ -112,7 +123,7 @@ let prepare_run_context
     in
     resolution.Config_dir_resolver.config_root.path
   in
-  let cascade_config_path = Cascade_runtime.cascade_config_path () in
+  let runtime_config_path = Runtime.config_path () in
   let gemini_mcp_disabled = keeper_oas_context.gemini_mcp_disabled in
   let approval_mode_effective = keeper_oas_context.gemini_approval_mode in
   let approval_mode_derived = keeper_oas_context.gemini_approval_mode_derived in
@@ -137,20 +148,28 @@ let prepare_run_context
          | None -> None)
       meta.active_goal_ids
   in
+  let prompt_profile_default default current =
+    (* DET-OK: keeper TOML/persona profile defaults are the declarative
+       prompt-config boundary; persisted meta is the legacy fallback. *)
+    match default with
+    | Some value -> value
+    | None -> current
+  in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
-      ~goal:meta.goal
-      ~short_goal:meta.short_goal
-      ~mid_goal:meta.mid_goal
-      ~long_goal:meta.long_goal
-      ~will:(Option.value profile_defaults.will ~default:meta.will)
-      ~needs:(Option.value profile_defaults.needs ~default:meta.needs)
-      ~desires:(Option.value profile_defaults.desires ~default:meta.desires)
+      ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
+      ~short_goal:(prompt_profile_default profile_defaults.short_goal meta.short_goal)
+      ~mid_goal:(prompt_profile_default profile_defaults.mid_goal meta.mid_goal)
+      ~long_goal:(prompt_profile_default profile_defaults.long_goal meta.long_goal)
+      ~will:(prompt_profile_default profile_defaults.will meta.will)
+      ~needs:(prompt_profile_default profile_defaults.needs meta.needs)
+      ~desires:(prompt_profile_default profile_defaults.desires meta.desires)
       ~instructions:
-        (Option.value profile_defaults.instructions ~default:meta.instructions)
+        (prompt_profile_default profile_defaults.instructions meta.instructions)
       ~persona_extended
       ~keeper_name:meta.name
       ~active_goals
+      ~home_ground:config.base_path
       ()
   in
   (* 4. Create or restore working context, re-apply current prompt *)
@@ -173,7 +192,6 @@ let prepare_run_context
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           ~session
           ~agent_name:meta.agent_name
-          ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
           ~ctx:compacted_ctx
           ~generation)
       ctx_work
@@ -195,7 +213,7 @@ let prepare_run_context
   let pre_dispatch_checkpoint_error =
     match checkpoint_hygiene.save_error with
     | Some detail ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RunContextFailures)
         ~labels:[("keeper", meta.name)]
         ();
@@ -257,7 +275,7 @@ let prepare_run_context
   ; start_turn_count
   ; receipt_started_at
   ; config_root
-  ; cascade_config_path
+  ; runtime_config_path
   ; gemini_mcp_disabled
   ; approval_mode_effective
   ; approval_mode_derived

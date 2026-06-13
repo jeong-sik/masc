@@ -44,7 +44,7 @@ val yield_if_ready : unit -> unit
     No-op before {!enable} or when called from non-Eio initialization paths. *)
 val check_if_ready : unit -> unit
 
-(** Named cooperative yield for scheduler-fair keeper/cascade boundaries.
+(** Named cooperative yield for scheduler-fair keeper/runtime boundaries.
     Equivalent to {!yield_if_ready}. *)
 val fair_yield : unit -> unit
 

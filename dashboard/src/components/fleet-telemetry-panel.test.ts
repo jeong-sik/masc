@@ -333,7 +333,6 @@ describe('FleetTelemetryPanel', () => {
           active_goal_ids: ['goal-1'],
           short_goal: 'Ship safer keeper ops',
           sandbox_profile: 'docker',
-          effective_sandbox_image: 'ghcr.io/acme/keeper:latest',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
           runtime_blocker_continue_gate: true,
         },

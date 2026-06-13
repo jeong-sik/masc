@@ -60,7 +60,7 @@ VARIABLES
 vars == << counter, last_cause >>
 
 \* Subset of Keeper_state_machine.event that the Agent Modal counter
-\* `compaction_count` listens to.  "none" is the sentinel for "never
+\* `compaction_count` listens to.  "none" is the marker for "never
 \* bumped" and must not appear as a cause after the first bump.
 EventKind == {
     "Compaction_completed",

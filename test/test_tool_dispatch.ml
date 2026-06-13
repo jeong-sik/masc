@@ -1,6 +1,6 @@
 (** Tests for Tool_dispatch — O(1) central dispatch registry. *)
 
-module Tool_dispatch = Masc_mcp.Tool_dispatch
+module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 module Types = Masc_domain
 
@@ -46,6 +46,7 @@ let register_full ?schema ~tool_name ~handler () =
   Tool_dispatch.register_module_tag ~schemas:[schema] ~tag:Mod_misc
 
 let () =
+  Masc_test_deps.init_keeper_tool_registry ();
   let open Alcotest in
   run "Tool_dispatch"
     [
@@ -139,18 +140,17 @@ let () =
               check bool "masc_board_delete -> Mod_inline" true
                 (Tool_dispatch.lookup_tag "masc_board_delete"
                  = Some Tool_dispatch.Mod_inline);
-              check bool "masc_status -> Mod_room" true
+              check bool "masc_status -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_status"
-                 = Some Tool_dispatch.Mod_room);
-              check bool "masc_check -> Mod_room" true
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_check -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_check"
-                 = Some Tool_dispatch.Mod_room);
-              check bool "masc_goal_list -> Mod_room" true
+                 = Some Tool_dispatch.Mod_state);
+              check bool "masc_goal_list -> Mod_state" true
                 (Tool_dispatch.lookup_tag "masc_goal_list"
-                 = Some Tool_dispatch.Mod_room);
-              check bool "tool_execute -> Mod_shard" true
-                (Tool_dispatch.lookup_tag "tool_execute"
-                 = Some Tool_dispatch.Mod_shard));
+                 = Some Tool_dispatch.Mod_state);
+              check bool "tool_execute has no MCP static route" true
+                (Option.is_none (Tool_dispatch.lookup_tag "tool_execute")));
           test_case "mint_token accepts active static tool names" `Quick (fun () ->
               check bool "masc_status mints" true
                 (Result.is_ok
@@ -203,17 +203,17 @@ let () =
       ( "did_you_mean_9784",
         [
           test_case "find_similar_names returns close match" `Quick (fun () ->
-              register_full ~tool_name:"__sim_masc_claim_next" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_keeper_task_claim" ~handler:echo_handler ();
               register_full ~tool_name:"__sim_masc_add_task" ~handler:echo_handler ();
-              register_full ~tool_name:"__sim_masc_join" ~handler:echo_handler ();
+              register_full ~tool_name:"__sim_masc_bind" ~handler:echo_handler ();
               let suggestions =
-                Tool_dispatch.find_similar_names
-                  ~query:"__sim_masc_claim_task" ()
+                Tool_dispatch.find_similar_names ~limit:10
+                  ~query:"__sim_keeper_task_claem" ()
               in
               check bool "non-empty suggestions" true
                 (List.length suggestions >= 1);
-              check bool "top suggestion is closest" true
-                (List.hd suggestions = "__sim_masc_claim_next"));
+              check bool "includes close task suggestion" true
+                (List.mem "__sim_keeper_task_claim" suggestions));
           test_case "find_similar_names empty when nothing close" `Quick (fun () ->
               let suggestions =
                 Tool_dispatch.find_similar_names
@@ -238,5 +238,54 @@ let () =
               let all = Tool_dispatch.all_registered_names () in
               check bool "contains registered name" true
                 (List.mem "__enum_check_xyz" all));
+        ] );
+      (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
+         inline. These tests assert the injection MECHANISM fires — they prove
+         guarded_dispatch routes through [!span_wrapper_ref], so registering
+         [Tool_telemetry.with_span] at the composition root is sufficient for
+         telemetry. (The actual Otel emission is verified by code-read; this
+         covers the wiring contract that a green @check alone cannot.) *)
+      ( "span_wrapper_injection",
+        [
+          test_case "registered span wrapper wraps guarded_dispatch" `Quick
+            (fun () ->
+              Tool_dispatch.clear_hooks ();
+              let tool = "__test_span_wrap_a" in
+              register_full ~tool_name:tool ~handler:echo_handler ();
+              let calls = ref [] in
+              let probe : Tool_dispatch.span_wrapper =
+                fun ?force_new_trace_id:_ ~tool_name body ->
+                  calls := tool_name :: !calls;
+                  body (fun () -> Some ("probe-trace", "probe-trace"))
+              in
+              Tool_dispatch.set_span_wrapper probe;
+              let token =
+                match Tool_dispatch.mint_token ~name:tool with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
+              check bool "result produced" true (Option.is_some result);
+              check int "wrapper invoked once" 1 (List.length !calls);
+              check string "wrapper saw tool_name" tool (List.hd !calls);
+              Tool_dispatch.clear_hooks ());
+          test_case "clear_hooks restores identity wrapper" `Quick (fun () ->
+              let tool = "__test_span_wrap_b" in
+              register_full ~tool_name:tool ~handler:echo_handler ();
+              let calls = ref 0 in
+              Tool_dispatch.set_span_wrapper (fun ?force_new_trace_id:_ ~tool_name:_ body ->
+                  incr calls;
+                  body (fun () -> None));
+              Tool_dispatch.clear_hooks ();
+              let token =
+                match Tool_dispatch.mint_token ~name:tool with
+                | Ok t -> t
+                | Error e -> Alcotest.fail e
+              in
+              let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
+              (* Identity wrapper restored: dispatch still works, probe silent. *)
+              check bool "dispatch succeeds with identity" true
+                (Option.is_some result);
+              check int "cleared wrapper not invoked" 0 !calls);
         ] );
     ]

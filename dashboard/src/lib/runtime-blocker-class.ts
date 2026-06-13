@@ -32,7 +32,7 @@ export function asKeeperRuntimeBlockerClass(
 // additional dashboard-only synthetic classes (`synthetic_stall`,
 // `self_imposed_idle`) and the runtime trust pipeline emits
 // dashboard-conditioned ones (`provider_runtime_error`,
-// `tool_required_unsatisfied`, `stale_termination_storm`,
+// `stale_termination_storm`,
 // `heartbeat_failures`, `turn_failures`, `exception`,
 // `awaiting_operator`, `awaiting_sandbox_egress`, `supervisor_paused`).
 // These are NOT in `keeper_meta_contract` and so do not appear in this
@@ -48,16 +48,14 @@ export function asKeeperRuntimeBlockerClass(
 //     the drift at build time.
 
 const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
-  'cascade_exhausted',
+  'runtime_exhausted',
   'ambiguous_post_commit_timeout',
   'ambiguous_post_commit_failure',
-  'autonomous_slot_wait_timeout',
   'admission_queue_wait_timeout',
   'turn_timeout_after_queue_wait',
   'turn_timeout',
   'turn_livelock_blocked',
   'completion_contract_violation',
-  'no_tool_capable_provider',
   'stay_silent_loop',
   'fiber_unresolved',
   'stale_turn_timeout',
@@ -67,7 +65,6 @@ const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'sdk_cost_budget_exceeded',
   'sdk_unrecognized_stop_reason',
   'sdk_idle_detected',
-  'sdk_tool_retry_exhausted',
   'sdk_guardrail_violation',
   'sdk_tripwire_violation',
   'sdk_exit_condition_met',

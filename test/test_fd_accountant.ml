@@ -9,8 +9,16 @@
       [Fd_accountant.with_slot ~kind:Docker_spawn]. *)
 
 open Alcotest
-module FA = Masc_mcp.Fd_accountant
-module DST = Masc_mcp.Docker_spawn_throttle
+module FA = Fd_accountant
+module DST = Masc.Docker_spawn_throttle
+module DP = Domain_pool
+
+let bg_spawn_error_to_string = function
+  | Bg_task.Spawn_failed msg -> "Spawn_failed: " ^ msg
+  | Bg_task.Too_many_tasks { keeper; limit } ->
+      Printf.sprintf "Too_many_tasks: keeper=%s limit=%d" keeper limit
+  | Bg_task.Invalid_cwd cwd -> "Invalid_cwd: " ^ cwd
+;;
 
 let tmpdir prefix =
   Filename.concat
@@ -44,8 +52,8 @@ let test_configured_within_bounds () =
 let test_fd_limit_reuses_keeper_pressure_cache () =
   let expected = 4242 in
   Atomic.set
-    Masc_mcp.Keeper_fd_pressure.nofile_soft_limit_cache
-    (Masc_mcp.Keeper_fd_pressure.Resolved (Some expected));
+    Keeper_fd_pressure.nofile_soft_limit_cache
+    (Keeper_fd_pressure.Resolved (Some expected));
   let snapshot = FA.fd_snapshot () in
   check int "fd_limit from Keeper_fd_pressure cache" expected snapshot.fd_limit
 
@@ -60,7 +68,9 @@ let test_with_slot_releases_on_exception () =
   (try
      FA.with_slot ~kind:Provider_http (fun () -> raise exn) |> ignore
    with Failure _ -> ()) ;
-  (* Re-acquire should succeed — release happened via on_release. *)
+  (* Re-acquire should succeed — release happened via [Fun.protect]'s
+     [finally] (PR-C1 removed the [Eio.Switch.on_release] counter
+     callback, see plan sharded-swinging-mccarthy.md PR-C1). *)
   let v = FA.with_slot ~kind:Provider_http (fun () -> 7) in
   check int "slot reusable after exception" 7 v
 
@@ -122,9 +132,22 @@ let test_snapshot_shape () =
             (FA.kind_to_string k))
     FA.all_kinds ;
   (* pressure_active matches Keeper_fd_pressure.active *)
-  let expected = Masc_mcp.Keeper_fd_pressure.active () in
+  let expected = Keeper_fd_pressure.active () in
   check bool "pressure_active mirrors Keeper_fd_pressure" expected
     s.pressure_active
+
+let test_snapshot_safe_from_worker_domain () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = DP.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  let caller_domain = (Domain.self () :> int) in
+  let worker_domain, snapshot =
+    DP.submit_io pool (fun () -> ((Domain.self () :> int), FA.fd_snapshot ()))
+  in
+  check bool "snapshot ran off caller domain" true
+    (worker_domain <> caller_domain);
+  check int "worker snapshot covers all kinds" (List.length FA.all_kinds)
+    (List.length snapshot.per_kind)
 
 let log_writer_in_flight () =
   let snapshot = FA.fd_snapshot () in
@@ -156,11 +179,11 @@ let test_with_slot_reentrant_same_kind () =
 
 let test_with_slot_nested_cross_kind_under_fd_pressure () =
   Eio_main.run @@ fun _env ->
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
-    ~finally:Masc_mcp.Keeper_fd_pressure.reset_for_tests
+    ~finally:Keeper_fd_pressure.reset_for_tests
     (fun () ->
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       FA.with_slot ~kind:FA.Docker_spawn (fun () ->
           check int "outer docker slot held" 1
@@ -173,11 +196,11 @@ let test_with_slot_nested_cross_kind_under_fd_pressure () =
 
 let test_forked_child_reenters_pressure_gate_after_parent_slot () =
   Eio_main.run @@ fun env ->
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
-    ~finally:Masc_mcp.Keeper_fd_pressure.reset_for_tests
+    ~finally:Keeper_fd_pressure.reset_for_tests
     (fun () ->
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       let clock = Eio.Stdenv.clock env in
       let child_go = Atomic.make false in
@@ -292,20 +315,20 @@ let test_autonomy_exec_uses_sandbox_slot () =
   Eio_guard.enable () ;
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
       Eio_guard.disable ())
     (fun () ->
-      Masc_mcp_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
+      Masc_cdal_runtime.Autonomy_exec.reset_run_guard_for_testing () ;
       FA.install_autonomy_exec_sandbox_exec_guard () ;
       let clock = Eio.Stdenv.clock env in
       let () =
         Eio.Switch.run @@ fun sw ->
         Eio.Fiber.fork ~sw (fun () ->
             ignore
-              (Masc_mcp_cdal_runtime.Autonomy_exec.run
+              (Masc_cdal_runtime.Autonomy_exec.run
                  ~sw
                  ~clock
-                 ~config:Masc_mcp_cdal_runtime.Autonomy_exec.default_config
+                 ~config:Masc_cdal_runtime.Autonomy_exec.default_config
                  ~argv:[ "/bin/sleep"; "0.05" ]
                  ~timeout_s:2.0)) ;
         check bool "Autonomy_exec holds sandbox slot while child runs" true
@@ -332,7 +355,9 @@ let test_bg_task_uses_sandbox_lifetime_slot () =
             ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
         with
         | Ok tid -> tid
-        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+        | Error err ->
+            Alcotest.failf "Bg_task spawn failed: %s"
+              (bg_spawn_error_to_string err)
       in
       check int "Bg_task holds sandbox slot after spawn" 1
         (kind_in_flight FA.Sandbox_exec) ;
@@ -348,16 +373,16 @@ let test_bg_task_uses_sandbox_lifetime_slot () =
 let test_bg_task_lifetime_serializes_under_fd_pressure () =
   Eio_main.run @@ fun env ->
   Eio_guard.enable () ;
-  Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+  Keeper_fd_pressure.reset_for_tests () ;
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_fd_pressure.reset_for_tests () ;
+      Keeper_fd_pressure.reset_for_tests () ;
       Bg_task.reset_lifetime_guard_for_testing () ;
       Eio_guard.disable ())
     (fun () ->
       Bg_task.reset_lifetime_guard_for_testing () ;
       FA.install_bg_sandbox_exec_guard () ;
-      Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
+      Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       let clock = Eio.Stdenv.clock env in
       let first =
@@ -367,7 +392,9 @@ let test_bg_task_lifetime_serializes_under_fd_pressure () =
             ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
         with
         | Ok tid -> tid
-        | Error _ -> Alcotest.fail "first Bg_task spawn failed"
+        | Error err ->
+            Alcotest.failf "first Bg_task spawn failed: %s"
+              (bg_spawn_error_to_string err)
       in
       check int "first Bg_task holds sandbox slot" 1
         (kind_in_flight FA.Sandbox_exec) ;
@@ -386,7 +413,9 @@ let test_bg_task_lifetime_serializes_under_fd_pressure () =
                    match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
                    | Ok snapshot -> snapshot.closed
                    | Error _ -> false))
-          | Error _ -> Alcotest.fail "second Bg_task spawn failed") ;
+          | Error err ->
+              Alcotest.failf "second Bg_task spawn failed: %s"
+                (bg_spawn_error_to_string err)) ;
       Eio.Time.sleep clock 0.005 ;
       check bool "second Bg_task waits for pressure slot" false
         (Atomic.get second_started) ;
@@ -418,7 +447,9 @@ let test_bg_task_lifetime_releases_after_exit_without_read () =
             ~cwd:"" ~envp:(Unix.environment ()) ~timeout_sec:0.0 ()
         with
         | Ok tid -> tid
-        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+        | Error err ->
+            Alcotest.failf "Bg_task spawn failed: %s"
+              (bg_spawn_error_to_string err)
       in
       check int "Bg_task holds sandbox slot after spawn" 1
         (kind_in_flight FA.Sandbox_exec) ;
@@ -455,7 +486,9 @@ let test_bg_task_cancelled_lifetime_acquire_releases_pending_slot () =
         | Ok tid -> tid
         | Error (Bg_task.Too_many_tasks _) ->
             Alcotest.fail "cancelled lifetime acquire leaked pending slot"
-        | Error _ -> Alcotest.fail "Bg_task spawn failed"
+        | Error err ->
+            Alcotest.failf "Bg_task spawn failed: %s"
+              (bg_spawn_error_to_string err)
       in
       let clock = Eio.Stdenv.clock env in
       check bool "Bg_task closes after cancelled acquire recovery" true
@@ -496,7 +529,9 @@ let () =
             test_docker_delegation_consistent ;
         ] ) ;
       ( "snapshot",
-        [ test_case "shape" `Quick test_snapshot_shape ] ) ;
+        [
+          test_case "shape" `Quick test_snapshot_shape ;
+        ] ) ;
       ( "log writer",
         [
           test_case "Dated_jsonl append uses slot" `Quick
@@ -518,5 +553,10 @@ let () =
             test_bg_task_lifetime_releases_after_exit_without_read ;
           test_case "Bg_task cancelled lifetime acquire releases pending slot" `Quick
             test_bg_task_cancelled_lifetime_acquire_releases_pending_slot ;
+        ] ) ;
+      ( "domain snapshot",
+        [
+          test_case "safe from worker domain" `Quick
+            test_snapshot_safe_from_worker_domain ;
         ] ) ;
     ]

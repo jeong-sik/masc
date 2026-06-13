@@ -1,4 +1,4 @@
-(** test_keeper_turn_fsm_wired_sites — Step 4 wiring sentinel.
+(** test_keeper_turn_fsm_wired_sites — Step 4 wiring marker.
 
     [test_keeper_turn_fsm_emit] pins the [Keeper_turn_fsm.emit_transition]
     *type surface*: a future signature drift fails compile.
@@ -7,11 +7,11 @@
     [emit_transition] call sites in [keeper_unified_turn.ml]
     without breaking the build -- the build doesn't care if a
     function is called.  Result: the fleet observability stack
-    silently regresses (Prometheus counter loses a series, the
+    silently regresses (Otel_metric_store counter loses a series, the
     Grafana dashboard's panel goes flat, [bin/masc-trace]
     timeline jumps over a state).
 
-    This sentinel reads [lib/keeper/keeper_unified_turn.ml]
+    This marker reads [lib/keeper/keeper_unified_turn.ml]
     and asserts that the [Keeper_turn_fsm.emit_transition] call
     count meets the documented floor.  A delete fails this
     test with a clear message; an add (more emits) is a no-op
@@ -20,7 +20,7 @@
     Cross-reference: [docs/observability/keeper-turn-fsm-metrics.md]
     "Wiring sites" table lists every emit call with its PR. *)
 
-open Masc_mcp
+open Masc
 
 let read_file path =
   let ic = open_in path in
@@ -68,10 +68,10 @@ let count_substring haystack needle =
     | fix  | SupervisorRequestsStop at entry [Phase_gating -> Phase_gating] | 1 |
     | fix  | HonorStopSignal at entry [Phase_gating -> Cancelled supervisor_stop] | 1 |
     | 4b   | phase-gate skip [Phase_gating -> Done]                | 1     |
-    | 4g   | phase pass [Phase_gating -> Cascade_routing]          | 1     |
+    | 4g   | phase pass [Phase_gating -> Runtime_routing]          | 1     |
     | 4b   | ollama saturated failure                              | 1     |
-    | 4b   | cascade build error                                   | 1     |
-    | 4g   | livelock Started [Cascade_routing -> Awaiting_provider] | 1   |
+    | 4b   | runtime build error                                   | 1     |
+    | 4g   | livelock Started [Runtime_routing -> Awaiting_provider] | 1   |
     | 4b   | livelock Blocked                                      | 1     |
     | 4i   | run_turn pre-call [Awaiting_provider -> Streaming]    | 1     |
     | fix  | SupervisorRequestsStop in Eio.Cancel [Streaming -> Streaming] | 1 |

@@ -24,7 +24,7 @@
        Future producers may elide [None] fields; readers must remain
        tolerant. *)
 
-module Metrics_store_eio = Masc_mcp.Metrics_store_eio
+module Metrics_store_eio = Masc.Metrics_store_eio
 
 let opt_string =
   let open QCheck.Gen in

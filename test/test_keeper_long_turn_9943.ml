@@ -7,7 +7,7 @@
    different angles (#9982 trust pause, #10121 livelock).
 
    This test pins the observability surface that surfaces
-   such turns directly to Prometheus instead of leaving
+   such turns directly to Otel_metric_store instead of leaving
    the duration trapped in a single info log line:
 
      1. The bucket vocabulary is bounded to five labels
@@ -25,6 +25,8 @@
         a restart.
 *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -33,26 +35,26 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module M = Masc_mcp.Keeper_unified_metrics
-module Prom = Masc_mcp.Prometheus
+module M = Masc.Keeper_unified_metrics
+module Metrics = Masc.Otel_metric_store
 
 let bucket_count ~keeper ~bucket =
-  Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string TurnLatencyBucket)
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string TurnLatencyBucket)
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ()
 
 let model_bucket_count ~keeper ~channel ~provider_kind ~model_used
-    ~resolved_model_id ~cascade_profile ~bucket =
-  Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string TurnLatencyByModelBucket)
+    ~resolved_model_id ~runtime_profile ~bucket =
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", keeper)
       ; ("channel", channel)
       ; ("provider_kind", provider_kind)
       ; ("model_used", model_used)
       ; ("resolved_model_id", resolved_model_id)
-      ; ("cascade_profile", cascade_profile)
+      ; ("runtime_profile", runtime_profile)
       ; ("bucket", bucket)
       ]
     ()
@@ -168,13 +170,13 @@ let test_record_by_model_bucket () =
       ~provider_kind:"runtime"
       ~model_used:"runtime"
       ~resolved_model_id:"runtime"
-      ~cascade_profile:"primary"
+      ~runtime_profile:"primary"
       ~bucket:"over_1200s"
   in
   M.record_turn_latency_by_model_bucket
     ~keeper
     ~channel:"scheduled_autonomous"
-    ~cascade_profile:"primary"
+    ~runtime_profile:"primary"
     ~latency_ms:1_200_000;
   Alcotest.(check (float 0.0001))
     "by-model over_1200s bucket +1"
@@ -185,10 +187,10 @@ let test_record_by_model_bucket () =
        ~provider_kind:"runtime"
        ~model_used:"runtime"
        ~resolved_model_id:"runtime"
-       ~cascade_profile:"primary"
+       ~runtime_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
-    "different cascade unchanged"
+    "different runtime unchanged"
     0.0
     (model_bucket_count
        ~keeper
@@ -196,7 +198,7 @@ let test_record_by_model_bucket () =
        ~provider_kind:"runtime"
        ~model_used:"runtime"
        ~resolved_model_id:"runtime"
-       ~cascade_profile:"tool_use_strict"
+       ~runtime_profile:"tool_use_strict"
        ~bucket:"over_1200s")
 
 let () =
@@ -225,7 +227,7 @@ let () =
         ] );
       ( "provider-model",
         [
-          Alcotest.test_case "records by model/cascade bucket" `Quick
+          Alcotest.test_case "records by model/runtime bucket" `Quick
             test_record_by_model_bucket;
         ] );
     ]

@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
+from pathlib import Path
 
 from gate_shared.bindings_store import load_bindings, save_bindings
+from gate_shared.status_store import ConnectorRuntimeStatus, StatusStore
 
 from telegram import Message, Update
 from telegram.ext import (
@@ -29,7 +33,7 @@ from telegram.ext import (
 
 from .config import get_config
 from .formatters import chunk_text, format_footer, strip_state_blocks
-from .gate_client import GateClient, GateResponse
+from .gate_client import GateClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,11 +53,12 @@ class TelegramGateBot:
         self._messages_processed = 0
         self._messages_failed = 0
         self._last_message_at = ""
+        self._running = False
+        self.status_store = StatusStore(Path(self.cfg.status_path))
 
     def _load_bindings(self) -> None:
         self._bindings = load_bindings(
             self.cfg.binding_store_path,
-            legacy_path=self.cfg.legacy_binding_store_path,
             logger=logger,
         )
 
@@ -70,9 +75,45 @@ class TelegramGateBot:
             return True  # no admin restriction configured
         return user_id is not None and user_id in self._admin_ids
 
+    async def _write_status(self) -> None:
+        """Persist current status for dashboard consumption."""
+        gate_healthy: bool | None = None
+        gate_health_checked_at = ""
+        try:
+            gate_healthy = await self.gate.health_check()
+            gate_health_checked_at = datetime.now(tz=timezone.utc).isoformat()
+        except Exception:
+            gate_healthy = False
+
+        self.status_store.write(
+            ConnectorRuntimeStatus(
+                updated_at=datetime.now(tz=timezone.utc).isoformat(),
+                connected=True,
+                gate_base_url=self.cfg.gate_base_url,
+                gate_healthy=gate_healthy,
+                gate_health_checked_at=gate_health_checked_at,
+                last_message_at=self._last_message_at,
+                messages_processed=self._messages_processed,
+                messages_failed=self._messages_failed,
+                pid=os.getpid(),
+                runtime_bindings_count=len(self._bindings),
+                default_keeper=self.cfg.default_keeper,
+            )
+        )
+
+    async def status_loop(self) -> None:
+        while self._running:
+            try:
+                await self._write_status()
+            except Exception as exc:
+                logger.warning("Status write error: %s", exc)
+            await asyncio.sleep(10.0)
+
     # ── Command Handlers ───────────────────────────────────
 
-    async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def cmd_start(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /start command."""
         if update.effective_chat is None:
             return
@@ -89,13 +130,17 @@ class TelegramGateBot:
             parse_mode="Markdown",
         )
 
-    async def cmd_keepers(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def cmd_keepers(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /keepers command -- list available keepers."""
         if update.effective_chat is None:
             return
         names = await self.gate.list_keepers()
         if not names:
-            await update.effective_chat.send_message("No keepers available or gate unreachable.")
+            await update.effective_chat.send_message(
+                "No keepers available or gate unreachable."
+            )
             return
         lines = [f"- `{name}`" for name in sorted(names)]
         await update.effective_chat.send_message(
@@ -103,7 +148,9 @@ class TelegramGateBot:
             parse_mode="Markdown",
         )
 
-    async def cmd_bind(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def cmd_bind(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /bind <keeper> -- bind this chat to a keeper."""
         if update.effective_chat is None or update.effective_user is None:
             return
@@ -137,7 +184,9 @@ class TelegramGateBot:
             update.effective_user.id,
         )
 
-    async def cmd_unbind(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def cmd_unbind(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /unbind -- unbind this chat from a keeper."""
         if update.effective_chat is None or update.effective_user is None:
             return
@@ -159,7 +208,9 @@ class TelegramGateBot:
                 parse_mode="Markdown",
             )
 
-    async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def cmd_status(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle /status -- show keeper status."""
         if update.effective_chat is None:
             return
@@ -227,7 +278,10 @@ class TelegramGateBot:
                 streamed_any = True
                 now = time.monotonic()
                 new_chars = len(accumulated) - last_edit_len
-                if now - last_edit_time >= edit_interval and new_chars >= char_threshold:
+                if (
+                    now - last_edit_time >= edit_interval
+                    and new_chars >= char_threshold
+                ):
                     display = strip_state_blocks(accumulated)
                     if display:
                         try:
@@ -260,7 +314,9 @@ class TelegramGateBot:
 
         return True
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         """Handle incoming text messages -- route to keeper.
 
         Tries SSE streaming first for real-time response display.
@@ -370,22 +426,35 @@ async def main() -> None:
     else:
         logger.warning("Gate health check failed at %s", cfg.gate_base_url)
 
+    bot._running = True
+    status_task = asyncio.create_task(bot.status_loop())
+
     # Run with polling (simpler than webhooks for local dev)
-    async with app:
-        await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)  # type: ignore[union-attr]
-        logger.info("Telegram bot running. Press Ctrl+C to stop.")
+    try:
+        async with app:
+            await app.start()
+            await app.updater.start_polling(drop_pending_updates=True)  # type: ignore[union-attr]
+            logger.info("Telegram bot running. Press Ctrl+C to stop.")
 
-        # Block until stopped
-        stop_event = asyncio.Event()
-        loop = asyncio.get_event_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop_event.set)
+            # Block until stopped
+            stop_event = asyncio.Event()
+            loop = asyncio.get_event_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, stop_event.set)
 
-        await stop_event.wait()
+            await stop_event.wait()
 
-        await app.updater.stop()  # type: ignore[union-attr]
-        await app.stop()
+            await app.updater.stop()  # type: ignore[union-attr]
+            await app.stop()
+    finally:
+        bot._running = False
+        status_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await status_task
+        try:
+            await bot._write_status()
+        except Exception as exc:
+            logger.warning("Final status write error: %s", exc)
 
     await bot.gate.aclose()
     logger.info(

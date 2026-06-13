@@ -2,7 +2,7 @@
 
     Exponential backoff knobs for the keeper outer-loop transient
     retry path plus the productive slot-phase budget gate used by
-    [Keeper_turn_cascade_budget] when deciding whether a degraded
+    [Keeper_turn_runtime_budget] when deciding whether a degraded
     retry rotation may proceed.
 
     Verbatim extract from [Env_config_keeper.KeeperRetryBackoff];
@@ -40,18 +40,18 @@ let transient_backoff_sec (attempt : int) : float =
   Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
 ;;
 
-(** Productive slot-phase budget (seconds).  PR #13120: when a
-    cascade returns a recoverable error after the keeper has
-    already burned this many seconds inside the outer turn slot,
+(** Productive retry-phase budget (seconds).  PR #13120: when a
+    runtime returns a recoverable error after the keeper has
+    already burned this many seconds inside the current holder,
     degraded retry rotation is rejected (the rotation evidence is
-    still recorded in [cascade_rotation_attempts] for audit).  The
-    keeper releases the outer slot instead of holding it for a
+    still recorded in [runtime_rotation_attempts] for audit).  The
+    keeper releases the outer holder instead of holding it for a
     retry that may itself stall.  OAS timeout-budget failures may
-    still rotate to the next degraded cascade when retry budget remains,
+    still rotate to the next degraded runtime when retry budget remains,
     because the first attempt already consumed its bounded provider
     budget.  Floor 5s prevents accidental always-reject configs.
 
-    Declared here (not in keeper_turn_cascade_budget.ml) so the
+    Declared here (not in keeper_turn_runtime_budget.ml) so the
     env knob catalog generator at bin/env_knob_catalog.ml picks
     it up — the catalog only scans lib/config/env_config_*.ml.
 

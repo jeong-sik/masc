@@ -21,9 +21,9 @@ module Float = Stdlib.Float
     a single chronological timeline for a given agent.
 
     Data sources:
-    - Agent join status (Coord.get_agents_raw)
-    - Task state transitions (Coord.get_tasks_raw)
-    - Broadcast messages (Coord.get_messages_raw)
+    - Agent session status (Workspace.get_agents_raw)
+    - Task state transitions (Workspace.get_tasks_raw)
+    - Broadcast messages (Workspace.get_messages_raw)
 *)
 
 open Tool_args
@@ -31,7 +31,7 @@ open Tool_args
 type tool_result = Tool_result.result
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 
@@ -106,38 +106,51 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
       ("detail", e.detail);
     ]
 
-(* Collect agent join/status events *)
-let agent_events (config : Coord.config) ~agent_name :
+let keeper_actor_id agent_name = "keeper-" ^ agent_name ^ "-agent"
+
+let activity_event_matches_agent ~(agent_name : string) (e : Activity_graph.event) =
+  let actor_matches =
+    match e.actor with
+    | Some a ->
+        String.equal a.id agent_name
+        || String.equal a.id (keeper_actor_id agent_name)
+        || String.equal a.id ("keeper:" ^ agent_name)
+    | None -> false
+  in
+  actor_matches
+  || Safe_ops.json_string_opt "keeper_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "agent_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "name" e.payload = Some agent_name
+
+(* Collect agent session/status events *)
+let agent_events (config : Workspace.config) ~agent_name :
     timeline_event list =
-  let agents = Coord.get_active_agents config in
+  let agents = Workspace.get_active_agents config in
   agents
   |> List.filter (fun (a : Masc_domain.agent) -> String.equal a.name agent_name)
   |> List.filter_map (fun (a : Masc_domain.agent) ->
-         match parse_iso_timestamp a.joined_at with
+         match parse_iso_timestamp a.session_bound_at with
          | Some ts ->
              Some
                {
                  ts;
-                 ts_iso = a.joined_at;
-                 event_type = "joined";
+                 ts_iso = a.session_bound_at;
+                 event_type = "session_bound";
                  detail =
                    `Assoc
                      [
-                       ("room", `String "default");
+                       ("workspace", `String "default");
                        ( "status",
                          `String (Masc_domain.agent_status_to_string a.status) );
-                       ( "current_task",
-                         match a.current_task with
-                         | Some t -> `String t
-                         | None -> `Null );
+                       ( "current_task", Json_util.string_opt_to_json a.current_task );
                      ];
                }
          | None -> None)
 
 (* Collect task-related events for an agent *)
-let task_events (config : Coord.config) ~agent_name :
+let task_events (config : Workspace.config) ~agent_name :
     timeline_event list =
-  let tasks = Coord.get_tasks_safe config in
+  let tasks = Workspace.get_tasks_safe config in
   tasks
   |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
@@ -192,10 +205,7 @@ let task_events (config : Coord.config) ~agent_name :
                            ("task_id", `String task.id);
                            ("title", `String task.title);
                            ("priority", `Int task.priority);
-                           ( "notes",
-                             match notes with
-                             | Some n -> `String n
-                             | None -> `Null );
+                           ( "notes", Json_util.string_opt_to_json notes );
                          ];
                    }
              | None -> None)
@@ -213,20 +223,17 @@ let task_events (config : Coord.config) ~agent_name :
                          [
                            ("task_id", `String task.id);
                            ("title", `String task.title);
-                           ( "reason",
-                             match reason with
-                             | Some r -> `String r
-                             | None -> `Null );
+                           ( "reason", Json_util.string_opt_to_json reason );
                          ];
                    }
              | None -> None)
          | _ -> None)
 
 (* Collect broadcast messages from agent *)
-let message_events (config : Coord.config) ~agent_name ~limit :
+let message_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let messages =
-    Coord.get_messages_raw config ~since_seq:0 ~limit
+    Workspace.get_messages_raw config ~since_seq:0 ~limit
   in
   messages
   |> List.filter (fun (m : Masc_domain.message) ->
@@ -244,16 +251,13 @@ let message_events (config : Coord.config) ~agent_name ~limit :
                      [
                        ("content", `String m.content);
                        ("type", `String m.msg_type);
-                       ( "mention",
-                         match m.mention with
-                         | Some target -> `String target
-                         | None -> `Null );
+                       ( "mention", Json_util.string_opt_to_json m.mention );
                      ];
                }
          | None -> None)
 
 (* Collect tool call events from Activity Graph *)
-let tool_call_events (config : Coord.config) ~agent_name ~limit :
+let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -262,7 +266,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
     | n, x :: rest -> x :: take (n - 1) rest
   in
   (* `list_events` limits globally before we filter by actor, so fetch a
-     wider bounded window to reduce the chance that busy-room activity from
+     wider bounded window to reduce the chance that busy-workspace activity from
      other agents crowds out this agent's tool events. *)
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
@@ -273,10 +277,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
       ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        let tool_name =
@@ -300,13 +301,12 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
                  ("tool_name", `String tool_name);
                  ("success", `Bool success);
                  ("duration_ms", `Int duration_ms);
-                 ("error", match error_str with
-                           | Some s -> `String s | None -> `Null);
+                 ("error", Json_util.string_opt_to_json error_str);
                ];
          })
   |> take limit
 
-let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
+let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -324,10 +324,7 @@ let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
       ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.map (fun (e : Activity_graph.event) ->
        {
          ts = Float.of_int e.ts_ms /. 1000.0;
@@ -338,7 +335,7 @@ let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
   |> take limit
 
 (* Collect turn-completed events from Activity Graph *)
-let turn_completed_events (config : Coord.config) ~agent_name ~limit :
+let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
   let rec take n xs =
     match (n, xs) with
@@ -355,13 +352,9 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
       ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
-       let open Yojson.Safe.Util in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no
           performative [Cancelled] re-raise. Behavior parity with the prior
           [try ... |> to_X with _ -> default] pattern on missing/wrong-typed
@@ -385,30 +378,27 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
        in
        let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in
        let tools_used = Safe_ops.json_string_list "tools_used" e.payload in
+       let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key e.payload) in
        let optional_fields =
          let reasoning =
-           try match e.payload |> member "reasoning_tokens" with
-               | `Int n -> [("reasoning_tokens", `Int n)]
-               | _ -> []
-           with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+           match m "reasoning_tokens" with
+           | `Int n -> [("reasoning_tokens", `Int n)]
+           | _ -> []
          in
         let tps =
-          try match e.payload |> member "tokens_per_second" with
-              | `Float v -> [("tokens_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "tokens_per_second" with
+          | `Float v -> [("tokens_per_second", `Float v)]
+          | _ -> []
         in
         let prompt_tps =
-          try match e.payload |> member "prompt_per_second" with
-              | `Float v -> [("prompt_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "prompt_per_second" with
+          | `Float v -> [("prompt_per_second", `Float v)]
+          | _ -> []
         in
         let hw_decode_tps =
-          try match e.payload |> member "hw_decode_tokens_per_second" with
-              | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
-              | _ -> []
-          with Eio.Cancel.Cancelled _ as ex -> raise ex | _ -> []
+          match m "hw_decode_tokens_per_second" with
+          | `Float v -> [("hw_decode_tokens_per_second", `Float v)]
+          | _ -> []
         in
          reasoning @ tps @ prompt_tps @ hw_decode_tps
        in
@@ -436,7 +426,7 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
   |> take limit
 
 (* Build the full timeline *)
-let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
+let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
@@ -545,13 +535,7 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
         Float.round (diff /. 60.0)
     | _ -> 0.0
   in
-  let since_iso =
-    let tm = Unix.gmtime cutoff in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (tm.Unix.tm_year + 1900)
-      (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-      tm.Unix.tm_sec
-  in
+  let since_iso = Masc_domain.iso8601_of_unix_seconds cutoff in
   let now_iso = Masc_domain.now_iso () in
   `Assoc
     [
@@ -585,7 +569,7 @@ let schemas : Masc_domain.tool_schema list =
     {
       name = "masc_agent_timeline";
       description =
-        "Unified timeline of an agent's activity in the currently selected room \
+        "Unified timeline of an agent's activity in the currently selected workspace \
          across tasks, messages, and joins.";
       input_schema =
         `Assoc

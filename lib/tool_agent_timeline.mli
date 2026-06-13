@@ -24,7 +24,7 @@
 type tool_result = Tool_result.result
 
 type context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
 }
 (** Per-call context.  Concrete record because callers
@@ -34,7 +34,7 @@ type context = {
 (** {1 Timeline construction} *)
 
 val build_timeline :
-  Coord.config ->
+  Workspace.config ->
   agent_name:string ->
   since_hours:float ->
   limit:int ->

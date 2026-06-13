@@ -360,11 +360,11 @@
     <div>
       <h4>T3 · Observability</h4>
       <ol>
-        <li><b>O1</b><a href="#o1">Cascade Inspector</a></li>
+        <li><b>O1</b><a href="#o1">Runtime Inspector</a></li>
         <li><b>O2</b><a href="#o2">Audit Ledger</a></li>
         <li><b>O3</b><a href="#o3">Safe Autonomy</a></li>
         <li><b>O4</b><a href="#o4">Cost Ledger</a></li>
-        <li><b>O5</b><a href="#o5">Heuristic / Stress</a></li>
+        <li><b>O5</b><a href="#o5">Stress</a></li>
       </ol>
     </div>
     <div>
@@ -403,7 +403,7 @@
         </div>
         <div>
           <b>③ Cross-link 규약</b>
-          모든 ID — task / goal / post / cascade / decision — 는 <em>클릭 → drawer/inspector 연다</em>.
+          모든 ID — task / goal / post / runtime / decision — 는 <em>클릭 → drawer/inspector 연다</em>.
           IDE side에서 PR·commit·file 클릭은 board/audit으로 reverse-lookup 가능해야 한다.
         </div>
       </div>
@@ -544,12 +544,12 @@
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/messages/*_broadcast.json</b> · 909 entries<br/>
-          fields: <em>seq</em>, <em>room_id</em>, <em>mentions</em> (e.g. @nick0cave), <em>[STATE]…[/STATE]</em> blocks<br/>
-          keeper의 <em>last_seen_seq_by_room</em>로 미독 계산
+          fields: <em>seq</em>, <em>workspace_id</em>, <em>mentions</em> (e.g. @nick0cave), <em>[STATE]…[/STATE]</em> blocks<br/>
+          keeper의 <em>last_seen_message_seq</em>로 미독 계산
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Room Timeline</b>seq 정렬, broadcast vs DM 시각 구분</span></li>
+          <li><span><b>A · Workspace Timeline</b>seq 정렬, broadcast vs DM 시각 구분</span></li>
           <li><span><b>B · Mention Inbox</b>선택 keeper에 온 mention만</span></li>
           <li><span><b>C · State-Block Reader</b>[STATE] 블록을 별도 panel로</span></li>
         </ul>
@@ -565,7 +565,7 @@
           <h3 class="ztitle">Composer v2</h3>
           <span class="zkind">comms</span>
         </div>
-        <p class="lead">기존 Composer 확장. mention(@), [STATE] block, broadcast vs DM, room 선택 토글.</p>
+        <p class="lead">기존 Composer 확장. mention(@), [STATE] block, broadcast vs DM, workspace 선택 토글.</p>
         <p class="lbl">Real data</p>
         <p class="data">
           현 broadcast 메시지 패턴: 본문 + <em>[STATE]…[/STATE]</em> + <em>@nick0cave</em> 등<br/>
@@ -573,7 +573,7 @@
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Broadcast</b>모든 방에 송출, room chip 표시</span></li>
+          <li><span><b>A · Broadcast</b>모든 방에 송출, workspace chip 표시</span></li>
           <li><span><b>B · DM</b>특정 keeper에게 직접</span></li>
           <li><span><b>C · State Block</b>[STATE] 블록 편집 helper</span></li>
         </ul>
@@ -590,7 +590,7 @@
   <section class="track" id="t3">
     <header class="track-head">
       <div class="badge">T3</div>
-      <h2>Observability <small>cascade · audit · safety · cost · stress</small></h2>
+      <h2>Observability <small>runtime · audit · safety · cost · stress</small></h2>
       <div class="summary">5 zones · ~12 variants · <b>parallel-safe (split into 2 files)</b></div>
     </header>
 
@@ -599,25 +599,25 @@
       <div class="zone" id="o1">
         <div class="zhead">
           <span class="zid">O1</span>
-          <h3 class="ztitle">Cascade Inspector</h3>
+          <h3 class="ztitle">Runtime Inspector</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">현 Rail의 cascade trace 한 줄을 풀스크린 inspector로 격상. failover hop, 모델 후보, 실패 사유.</p>
+        <p class="lead">현 Rail의 runtime trace 한 줄을 풀스크린 inspector로 격상. failover hop, 모델 후보, 실패 사유.</p>
         <p class="lbl">Real data</p>
         <p class="data">
-          <b>.masc/cascade_audit/2026-04/*.jsonl</b><br/>
+          <b>.masc/runtime_audit/2026-04/*.jsonl</b><br/>
           fields: <em>configured_labels</em> (~13 model 후보), <em>primary_model</em>, <em>selected_model</em>, <em>fallback_hops</em>, <em>fallback_events.reason</em><br/>
-          decisions에서 본 cascade: <em>cascade_name=keeper_unified</em>, <em>candidate_models=[cli-tool-d:auto, cli-tool-c:model-c-coding]</em>, error <em>cascade_exhausted</em>
+          decisions에서 본 runtime: <em>runtime_id=keeper_unified</em>, <em>candidate_models=[runtime-adapter-a:auto, runtime-adapter-b:capability-tier-b-coding]</em>, error <em>runtime_exhausted</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
           <li><span><b>A · Hop Visualizer</b>primary → fallback chain, 각 hop의 latency·outcome</span></li>
-          <li><span><b>B · Model Matrix</b>cascade × model 격자, hit/miss 분포</span></li>
-          <li><span><b>C · Failure Inspector</b>cascade_exhausted 등 사유별 drill-down</span></li>
+          <li><span><b>B · Model Matrix</b>runtime × model 격자, hit/miss 분포</span></li>
+          <li><span><b>C · Failure Inspector</b>runtime_exhausted 등 사유별 drill-down</span></li>
         </ul>
         <div class="ide">
           <p class="lbl">IDE Hook</p>
-          cascade 정의 파일(<em>cascades/*.yaml</em> 등) 직접 열기.
+          runtime 정의 파일(<em>runtimes/*.yaml</em> 등) 직접 열기.
         </div>
       </div>
 
@@ -627,7 +627,7 @@
           <h3 class="ztitle">Audit Ledger</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">일자별 jsonl viewer — audit · activity-events · cascade_audit 모두 같은 패턴.</p>
+        <p class="lead">일자별 jsonl viewer — audit · activity-events · runtime_audit 모두 같은 패턴.</p>
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/audit/2026-04/*.jsonl</b><br/>
@@ -652,11 +652,11 @@
           <h3 class="ztitle">Cost Ledger</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">기존 KPI에만 있던 cost를 풀 ledger로 — provider × model × agent.</p>
+        <p class="lead">기존 KPI에만 있던 cost를 풀 ledger로 — runtime slot x capability tier × agent.</p>
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/costs.jsonl</b> · 1634 rows<br/>
-          fields: <em>agent</em>, <em>provider</em>, <em>model</em> (model-c-coding…), <em>input/output_tokens</em>, <em>cost_usd</em>, <em>request_latency_ms</em>
+          fields: <em>agent</em>, <em>provider</em>, <em>model</em> (capability-tier-b-coding…), <em>input/output_tokens</em>, <em>cost_usd</em>, <em>request_latency_ms</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
@@ -673,19 +673,16 @@
       <div class="zone" id="o5">
         <div class="zhead">
           <span class="zid">O5</span>
-          <h3 class="ztitle">Heuristic / Stress</h3>
+          <h3 class="ztitle">Stress</h3>
           <span class="zkind">observability</span>
         </div>
-        <p class="lead">시스템이 자기 자신에게 보내는 알람. threshold 위반 + agent 실패 streak.</p>
+        <p class="lead">시스템이 자기 자신에게 보내는 알람. agent 실패 streak.</p>
         <p class="lbl">Real data</p>
         <p class="data">
-          <b>.masc/heuristic_metrics.jsonl</b> · 52 rows<br/>
-          예: <em>module=keeper_hooks_oas</em>, <em>site=post_tool_use_failure</em>, <em>triggered=true</em><br/>
           <b>.masc/agent_stress.jsonl</b> · <em>kind.type=failure_streak</em>, <em>count=N</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
-          <li><span><b>A · Triggered Feed</b>위반 발화 라인 스트림</span></li>
           <li><span><b>B · Per-Agent Stress</b>failure_streak 배지, sidebar/topbar로 노출</span></li>
         </ul>
         <div class="ide">
@@ -717,13 +714,13 @@
         <p class="lbl">Real data</p>
         <p class="data">
           <b>.masc/keepers/&lt;name&gt;.json</b> (e.g. sangsu, nick0cave…)<br/>
-          fields: <em>will</em>, <em>needs</em>, <em>desires</em>, <em>cascade_name</em>, <em>tool_access</em>, <em>mention_targets</em>,
+          fields: <em>will</em>, <em>needs</em>, <em>desires</em>, <em>runtime_id</em>, <em>tool_access</em>, <em>mention_targets</em>,
           <em>compaction_*</em>, <em>auto_handoff</em>, <em>handoff_threshold</em>
         </p>
         <p class="lbl">Variants</p>
         <ul class="vars">
           <li><span><b>A · BDI Panel</b>will/needs/desires + short/mid/long goal</span></li>
-          <li><span><b>B · Tool & Cascade</b>preset, allow/deny, cascade_name</span></li>
+          <li><span><b>B · Tool & Runtime</b>preset, allow/deny, runtime_id</span></li>
           <li><span><b>C · Stats</b>token, latency, handoff, compaction</span></li>
         </ul>
         <div class="ide">
@@ -821,7 +818,7 @@
           <td>Observability (O1~O5)</td>
           <td class="mono">preview/<b>cb-group-f.jsx</b><br/>preview/<b>cb-group-g.jsx</b></td>
           <td class="mono">ui_kits/cockpit/<b>data-obs.js</b><br/>ui_kits/cockpit/<b>data-cost.js</b></td>
-          <td>Split for size — F: cascade+audit+safety, G: cost+stress</td>
+          <td>Split for size — F: runtime+audit+safety, G: cost+stress</td>
         </tr>
         <tr class="parallel">
           <td>T4 ∥</td>
@@ -849,7 +846,7 @@
       <li><b>IDE Backbone 적용</b> — 모든 신규 zone이 branch + keeper(s) 컨텍스트를 받고 가시적으로 반영해야 함.</li>
       <li><b>System fidelity</b> — 모든 zone은 기존 tokens / primitives / icon-less 규약을 위반하지 않음 (no emoji, mono-first, hairline borders, brass-only-for-active).</li>
       <li><b>Variant 수</b> — zone당 평균 2~3 variant; 12 zones × ~2.5 ≈ 30 artboards.</li>
-      <li><b>Cross-link</b> — 모든 ID(task / goal / post / cascade / decision)는 클릭 가능한 reference로 표현.</li>
+      <li><b>Cross-link</b> — 모든 ID(task / goal / post / runtime / decision)는 클릭 가능한 reference로 표현.</li>
       <li><b>Hub 갱신</b> — <code>preview/index.html</code>에 Phase 2 섹션 4개 추가, 기존 카드와 동일한 형식.</li>
       <li><b>문서</b> — README "Index" 섹션과 SKILL.md 컴포넌트 매니페스트에 12개 신규 zone 등재.</li>
     </ul>

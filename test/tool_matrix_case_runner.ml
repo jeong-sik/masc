@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 module Cases = Test_mcp_tool_matrix_cases
-module Mcp_eio = Masc_mcp.Mcp_server_eio
+module Mcp_eio = Masc.Mcp_server_eio
 
 let result_prefix = "__MCP_TOOL_MATRIX_RESULT__"
 
@@ -27,10 +27,11 @@ let emit_result ~base_path name = function
              ]))
 
 let find_schema name =
-  Masc_mcp.Config.raw_all_tool_schemas
+  Masc.Config.raw_all_tool_schemas
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
 
 let () =
+  Mirage_crypto_rng_unix.use_default ();
   Printexc.record_backtrace true;
   if Array.length Sys.argv <> 2 then begin
     prerr_endline "usage: tool_matrix_case_runner.exe <tool-name>";

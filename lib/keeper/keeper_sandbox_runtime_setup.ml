@@ -1,7 +1,7 @@
 (** See .mli for contract.
 
-    Extracted from [Agent_tool_command_runtime] (RFC-0006 Phase B-3b) so both
-    [Agent_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
+    Extracted from [Keeper_tool_command_runtime] (RFC-0006 Phase B-3b) so both
+    [Keeper_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
     sandbox) can preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)
@@ -50,7 +50,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
       ~actor:`System_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary
-      ~env:(Unix.environment ())
+      ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
       ~cwd:(Sys.getcwd ())
       ~timeout_sec
       argv)
@@ -100,7 +100,7 @@ let docker_info_security_options_with_class ~timeout_sec =
       match Yojson.Safe.from_string (String.trim out) with
       | `List items ->
         Ok
-          (List.filter_map Yojson.Safe.Util.to_string_option items
+          (List.filter_map (function `String s -> Some s | _ -> None) items
            |> List.map String.lowercase_ascii)
       | `Null -> Ok []
       | _ ->
@@ -132,8 +132,6 @@ type required_command_check =
 
 type docker_preflight =
   { ok : bool
-  ; credential_fallbacks_disabled : bool
-  ; git_egress : string
   ; image : string
   ; docker_runtime_ok : bool
   ; docker_runtime_error : string option
@@ -179,11 +177,6 @@ let required_commands =
   ; "dune"
   ; "ssh"
   ]
-;;
-
-let option_field name = function
-  | Some value -> name, `String value
-  | None -> name, `Null
 ;;
 
 type cleanup_result =
@@ -256,8 +249,8 @@ let docker_label_args
 ;;
 
 let docker_network_args = function
-  | Keeper_types.Network_none -> [ "--network"; "none" ], "none"
-  | Keeper_types.Network_inherit ->
+  | Keeper_types_profile_sandbox.Network_none -> [ "--network"; "none" ], "none"
+  | Keeper_types_profile_sandbox.Network_inherit ->
     (* Host network — matches the variant name and the docstring on
          [keeper_types_profile.ml:20-24]. Empty args
          (docker default) gives bridge mode (NAT, no host egress) which
@@ -352,30 +345,30 @@ let docker_config_mount_args ~base_path ~container_root =
     ]
 ;;
 
-type room_state_mount_kind =
-  | Room_state_file
-  | Room_state_dir
+type workspace_state_mount_kind =
+  | Workspace_state_file
+  | Workspace_state_dir
 
-let docker_room_state_mounts =
-  [ Room_state_dir, "tasks"
-  ; Room_state_file, "tasks.json"
-  ; Room_state_file, "backlog.json"
-  ; Room_state_file, "board_posts.jsonl"
-  ; Room_state_file, "board_comments.jsonl"
-  ; Room_state_file, "board_votes.jsonl"
-  ; Room_state_file, "board_reactions.jsonl"
-  ; Room_state_file, "current_task"
-  ; Room_state_file, "goals.json"
-  ; Room_state_file, "goal_events.jsonl"
-  ; Room_state_file, "goal_verifications.json"
+let docker_workspace_state_mounts =
+  [ Workspace_state_dir, "tasks"
+  ; Workspace_state_file, "tasks.json"
+  ; Workspace_state_file, "backlog.json"
+  ; Workspace_state_file, "board_posts.jsonl"
+  ; Workspace_state_file, "board_comments.jsonl"
+  ; Workspace_state_file, "board_votes.jsonl"
+  ; Workspace_state_file, "board_reactions.jsonl"
+  ; Workspace_state_file, "current_task"
+  ; Workspace_state_file, "goals.json"
+  ; Workspace_state_file, "goal_events.jsonl"
+  ; Workspace_state_file, "goal_verifications.json"
   ]
 ;;
 
-let room_state_path_available kind path =
+let workspace_state_path_available kind path =
   try
     match kind with
-    | Room_state_file -> Sys.file_exists path && not (Sys.is_directory path)
-    | Room_state_dir -> Sys.file_exists path && Sys.is_directory path
+    | Workspace_state_file -> Sys.file_exists path && not (Sys.is_directory path)
+    | Workspace_state_dir -> Sys.file_exists path && Sys.is_directory path
   with
   | Sys_error _ -> false
 ;;
@@ -391,16 +384,16 @@ let unique_preserving_order values =
   loop [] [] values
 ;;
 
-let docker_room_state_mount_specs ~base_path ~container_root =
+let docker_workspace_state_mount_specs ~base_path ~container_root =
   let host_masc_root = Common.masc_dir_from_base_path ~base_path in
-  (* [container_root] is itself a bind-mounted playground. Mounting room-state
+  (* [container_root] is itself a bind-mounted playground. Mounting workspace-state
      files inside it creates nested bind targets that Docker Desktop can resolve
      through /run/host_virtiofs and reject as outside the container rootfs. *)
   let container_masc_root = container_masc_dir ~container_root in
-  docker_room_state_mounts
+  docker_workspace_state_mounts
   |> List.concat_map (fun (kind, rel_path) ->
     let host_path = Filename.concat host_masc_root rel_path in
-    if not (room_state_path_available kind host_path)
+    if not (workspace_state_path_available kind host_path)
     then []
     else
       [ Printf.sprintf "%s:%s:ro" host_path (Filename.concat container_masc_root rel_path)
@@ -408,8 +401,8 @@ let docker_room_state_mount_specs ~base_path ~container_root =
   |> unique_preserving_order
 ;;
 
-let docker_room_state_mount_args ~base_path ~container_root =
-  docker_room_state_mount_specs ~base_path ~container_root
+let docker_workspace_state_mount_args ~base_path ~container_root =
+  docker_workspace_state_mount_specs ~base_path ~container_root
   |> List.concat_map (fun spec -> [ "-v"; spec ])
 ;;
 

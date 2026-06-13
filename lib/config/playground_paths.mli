@@ -7,7 +7,7 @@
     - [.masc/playground/<keeper>/mind/]   — notes, drafts, scratch
     - [.masc/playground/<keeper>/repos/]  — git clones (one dir per repo)
 
-    Both [masc_room] (worktree resolver) and the keeper modules
+    Both [masc_workspace] (worktree resolver) and the keeper modules
     ([Keeper_alerting_path.playground_*]) delegate here, so the
     literal [".masc/playground"] and the sanitization rules live in
     one place. *)

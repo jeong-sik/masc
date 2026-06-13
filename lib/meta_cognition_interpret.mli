@@ -27,7 +27,7 @@ val interpret :
 
     {2 Salience priority order (pinned)}
 
-    The signal cascade evaluates four predicates in order, returning
+    The signal runtime evaluates four predicates in order, returning
     the {b first} matching salience as primary; the rest become
     secondary.  When none match, {!Meta_cognition_types.Stable} is
     returned.
@@ -38,8 +38,8 @@ val interpret :
     3. {!Meta_cognition_types.Operator_desire} — [top_desire]
        [actionability] is one of:
        [operator] / [operator_or_platform] /
-       [operator_or_scheduler] / [room_or_operator]
-    4. {!Meta_cognition_types.Stagnant_room} — [stagnation_score >= 0.65]
+       [operator_or_scheduler] / [workspace_or_operator]
+    4. {!Meta_cognition_types.Stagnant_workspace} — [stagnation_score >= 0.65]
 
     {2 Threshold pinning}
 
@@ -51,7 +51,7 @@ val interpret :
     {2 Reason string locale}
 
     {!Meta_cognition_types.interpretation.reason} is rendered in
-    Korean (the operator-language convention for masc-mcp dashboard
+    Korean (the operator-language convention for masc dashboard
     surface cards).  Adding a non-Korean locale requires extending
     the contract, not silently switching at this layer. *)
 
@@ -68,7 +68,7 @@ val interpretation_to_json :
       the primary salience)
 
     The field names are the dashboard / API contract — do not
-    rename without coordinating with the meta-cognition surface card
+    rename without synchronizing with the meta-cognition surface card
     consumers. *)
 
 val summary_signature : Meta_cognition_types.summary_input -> string
@@ -93,6 +93,6 @@ val summary_signature : Meta_cognition_types.summary_input -> string
     The bucket-based collapse on [stagnation_score] is the only
     lossy field — every other field round-trips losslessly into
     the digest.  A future "let's use a finer bucket" change must
-    coordinate with the digest cache: existing cached digests
-    become invalid for the same room state and the dashboard
+    align with the digest cache: existing cached digests
+    become invalid for the same workspace state and the dashboard
     will see one round of digest churn. *)

@@ -200,8 +200,8 @@ type LiveEventKindTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' 
 export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
   const type = entry.eventType
   if (type === 'broadcast') return 'info'
-  if (type === 'agent_joined') return 'ok'
-  if (type === 'agent_left') return 'neutral'
+  if (type === 'agent_bound') return 'ok'
+  if (type === 'agent_unbound') return 'neutral'
   if (type === 'task_update') return 'ok'
   if (type === 'board_post') return 'info'
   if (type === 'board_comment') return 'info'
@@ -221,18 +221,14 @@ export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
  * Live-journal event kind 짧은 라벨. JournalEntry 의 eventType + kind
  * 조합을 보고 단일 식별자로 압축한다 (예: `'keeper_heartbeat'` → `'heartbeat'`).
  *
- * Distinct from `eventKindLabel(kind: string)` in `activity-graph-groups.ts`,
- * which is a *generic string → label* mapper for the activity graph. Same
- * function name but different input shape (JournalEntry object vs raw
- * string) was an import-site collision hazard. Renamed from `eventKindLabel`
- * to `journalEventKindLabel` on 2026-05-27 so the live-journal variant
- * carries its domain at the call site.
+ * Renamed from `eventKindLabel` to `journalEventKindLabel` on 2026-05-27
+ * so the live-journal variant carries its domain at the call site.
  */
 export function journalEventKindLabel(entry: JournalEntry): string {
   const type = entry.eventType
   if (type === 'broadcast') return 'broadcast'
-  if (type === 'agent_joined') return 'joined'
-  if (type === 'agent_left') return 'left'
+  if (type === 'agent_bound') return 'joined'
+  if (type === 'agent_unbound') return 'left'
   if (type === 'task_update') return 'task'
   if (type === 'board_post') return 'post'
   if (type === 'board_comment') return 'comment'

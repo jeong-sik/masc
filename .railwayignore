@@ -1,4 +1,4 @@
-# Railway ignore file - allows masc-mcp-linux-x64 binary for deployment
+# Railway ignore file - allows masc-linux-x64 binary for deployment
 # (This is a modified copy of .gitignore without the binary exclusion)
 
 # OCaml build artifacts
@@ -22,8 +22,8 @@ Thumbs.db
 .masc/
 .worktrees/
 
-# LLM cascade config (contains env var names for API keys)
-config/llm_cascade.json
+# LLM runtime config (contains env var names for API keys)
+config/llm_runtime.json
 
 # Database files
 *.db

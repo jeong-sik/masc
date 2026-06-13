@@ -40,24 +40,26 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
      @ task_id_field
      @ route_evidence_field)
 
+let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =
+  tool_calls
+  |> List.map (fun detail -> Keeper_tool_resolution.canonical_tool_name detail.tool_name)
+;;
+
 (** Result of a single Agent.run() keeper turn. *)
 type run_result =
   { response_text : string
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Cascade_observation.cascade_observation option
+  ; runtime_observation : Runtime_observation.runtime_observation option
   ; turn_count : int
-  ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
-  ; tools_used : string list
   ; tool_calls : tool_call_detail list
   ; checkpoint : Agent_sdk.Checkpoint.t option
-  ; proof : Masc_mcp_cdal_runtime.Cdal_proof.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option
-  ; stop_reason : Cascade_runner.stop_reason
+  ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
   ; pre_dispatch_compacted : bool
@@ -65,6 +67,9 @@ type run_result =
   ; pre_dispatch_compaction_before_tokens : int option
   ; pre_dispatch_compaction_after_tokens : int option
   }
+
+let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
+let tool_call_count (result : run_result) = List.length result.tool_calls
 
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
 let runtime_lane_label =

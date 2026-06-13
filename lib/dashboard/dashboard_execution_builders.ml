@@ -170,29 +170,29 @@ let worker_state_of_agent
           ("agent_name", `String agent.name);
           ("keeper_name",
             match agent.meta with
-            | Some meta -> json_string_option meta.keeper_name
+            | Some meta -> Json_util.string_opt_to_json meta.keeper_name
             | None -> `Null);
           ("keeper_id",
             match agent.meta with
-            | Some meta -> json_string_option meta.keeper_id
+            | Some meta -> Json_util.string_opt_to_json meta.keeper_id
             | None -> `Null);
           ("status", `String status_string);
           ("tone", `String (Dashboard_utils.string_of_tone tone));
           ("state", `String state);
           ("note", `String note);
           ("focus", `String focus);
-          ("last_signal_at", json_string_option last_signal_at);
+          ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
           ("last_signal_age_sec", if Float.is_finite signal_age_s then `Int (int_of_float signal_age_s) else `Null);
           ("signal_truth", `String signal_truth);
           ("evidence_source", `String evidence_source);
           ("active_task_count", `Int active_task_count);
-          ("related_session_id", json_string_option related_session_id);
-          ("related_operation_id", json_string_option related_operation_id);
+          ("related_session_id", Json_util.string_opt_to_json related_session_id);
+          ("related_operation_id", Json_util.string_opt_to_json related_operation_id);
           ("emoji", `String profile.emoji);
-          ("korean_name", `String profile.korean_name);
+          ("koreanName", `String profile.korean_name);
           ("model", `Null);
-          ("recent_output_preview", json_string_option recent_output_preview);
-          ("recent_event", json_string_option recent_output_preview);
+          ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
+          ("recent_event", Json_util.string_opt_to_json recent_output_preview);
         ];
   }
 
@@ -206,7 +206,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   in
   let audit = tool_audit_snapshot agent_name in
   let agent = member_assoc "agent" keeper in
-  let status = string_field ~default:"unknown" "status" keeper in
+  let status = string_field "status" keeper in
   let context_ratio =
     match member_assoc "context_ratio" keeper with
     | `Float value -> Some value
@@ -237,11 +237,12 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
     else infinity
   in
-  let autonomous_action_count = int_field "autonomous_action_count" keeper in
-  let autonomous_turn_count = int_field "autonomous_turn_count" keeper in
-  let noop_turn_count = int_field "noop_turn_count" keeper in
-  let turn_count = int_field "turn_count" keeper in
-  let generation = int_field "generation" keeper in
+  let int_field_default key json = Option.value ~default:0 (Json_util.assoc_int_opt key json) in
+  let autonomous_action_count = int_field_default "autonomous_action_count" keeper in
+  let autonomous_turn_count = int_field_default "autonomous_turn_count" keeper in
+  let noop_turn_count = int_field_default "noop_turn_count" keeper in
+  let turn_count = int_field_default "turn_count" keeper in
+  let generation = int_field_default "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
     if Dashboard_utils.is_keeper_offline status then Lc_offline
@@ -295,10 +296,6 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
     |> cap_string_list
   in
-  let allowed_tool_names =
-    let keeper_tools = string_list_of_field "allowed_tool_names" keeper in
-    if keeper_tools <> [] then keeper_tools else audit.allowed_tool_names
-  in
   let latest_tool_names =
     let keeper_tools = string_list_of_field "latest_tool_names" keeper in
     (if keeper_tools <> [] then keeper_tools else audit.latest_tool_names)
@@ -325,29 +322,26 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("state", `String (keeper_execution_state_to_string state));
            ("note", `String note);
            ("focus", `String focus);
-           ("last_signal_at", json_string_option last_signal_at);
-           ("last_autonomous_action_at", json_string_option last_signal_at);
+           ("last_signal_at", Json_util.string_opt_to_json last_signal_at);
+           ("last_autonomous_action_at", Json_util.string_opt_to_json last_signal_at);
            ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
-           ("related_session_id", json_string_option related_session_id);
-           ("recent_input_preview", json_string_option recent_input_preview);
-           ("recent_output_preview", json_string_option recent_output_preview);
+           ("related_session_id", Json_util.string_opt_to_json related_session_id);
+           ("recent_input_preview", Json_util.string_opt_to_json recent_input_preview);
+           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
            ("recent_tool_names", Json_util.json_string_list recent_tool_names);
            ("latest_tool_names", Json_util.json_string_list latest_tool_names);
-         ]
-        @ tool_preview_fields "allowed_tool" allowed_tool_names
-        @ [
             ("latest_tool_call_count", Json_util.option_to_yojson (fun value -> `Int value) audit.latest_tool_call_count);
-            ("latest_action_source", json_string_option latest_action_source);
-            ("tool_audit_source", json_string_option audit.tool_audit_source);
-            ("tool_audit_at", json_string_option audit.tool_audit_at);
+            ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
+            ("tool_audit_source", Json_util.string_opt_to_json audit.tool_audit_source);
+            ("tool_audit_at", Json_util.string_opt_to_json audit.tool_audit_at);
             ("autonomous_action_count", `Int autonomous_action_count);
             ("autonomous_turn_count", `Int autonomous_turn_count);
             ("noop_turn_count", `Int noop_turn_count);
-            ("last_heartbeat_at", json_string_option last_heartbeat_at);
+            ("last_heartbeat_at", Json_util.string_opt_to_json last_heartbeat_at);
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
             ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
             ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
@@ -368,14 +362,12 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
                   in
                   Printf.sprintf "자율 턴 %d회, 도구 행동 %d회, 턴 %d회, 세대 %d%s"
                     autonomous_turn_count autonomous_action_count turn_count generation noop_note));
-            ("skill_route_summary", json_string_option skill_route_summary);
+            ("skill_route_summary", Json_util.string_opt_to_json skill_route_summary);
             ( "model",
-              match String_util.trim_to_option (string_field "active_model" keeper) with
-              | Some value -> `String value
-              | None -> `Null );
+              Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
             ("emoji", `String profile.emoji);
-            ("korean_name", `String profile.korean_name);
-            ("skill_reason", json_string_option (String_util.trim_to_option (string_field "goal" keeper)));
+            ("koreanName", `String profile.korean_name);
+            ("skill_reason", Json_util.string_opt_to_json (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }
 
@@ -427,7 +419,6 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
            let operation_id = task_operation_id task in
            let updated_at = task_operation_updated_at task in
            let severity = task_operation_severity task in
-           let stage = Option.map Task_stage.to_string task.stage in
            let linked_session_id =
              Option.bind links.session_id (fun value -> String_util.trim_to_option value)
            in
@@ -447,13 +438,12 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("operation_id", `String operation_id);
                      ("status", `String status);
                      ("task_status", `String (Masc_domain.task_status_to_string task.task_status));
-                     ("stage", json_string_option stage);
                      ("objective", `String task.title);
                      ("updated_at", `String updated_at);
                      ("source", `String "task_contract");
                      ("task_id", `String task.id);
                      ("severity", `String (Dashboard_utils.string_of_tone severity));
-                     ("linked_session_id", json_string_option linked_session_id);
+                     ("linked_session_id", Json_util.string_opt_to_json linked_session_id);
                      ("linked_detachment_id", `Null);
                      ( "handoff",
                        handoff_json ~surface:"dashboard_execution"

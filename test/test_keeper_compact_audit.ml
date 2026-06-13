@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module KCA = Masc_mcp.Keeper_compact_audit
+module KCA = Masc.Keeper_compact_audit
 
 (* ── Helpers ──────────────────────────────────────────────────── *)
 
@@ -218,7 +218,7 @@ let test_pending_ttl_uses_receive_time () =
 
 (* ── Retention parse outcome ───────────────────────────────────── *)
 
-module KCARO = Masc_mcp.Keeper_compact_audit_retention_outcome
+module KCARO = Keeper_compact_audit_retention_outcome
 
 let env_var = "MASC_COMPACTION_AUDIT_RETENTION_DAYS"
 
@@ -241,7 +241,7 @@ let with_env_set v f =
   let restore () =
     match prev with
     | None ->
-      (* Best-effort: stdlib has no portable unset; set to a sentinel that
+      (* Best-effort: stdlib has no portable unset; set to a marker that
          the resolver itself treats as Parse_error, then leave it. Other
          tests in this binary do not depend on the env being absent. *)
       Unix.putenv env_var ""

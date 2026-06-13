@@ -21,7 +21,7 @@
 \* counterpart simply does not have an entry until [CreateArtifact]
 \* is called; we use a present flag here because TLC cannot
 \* fingerprint a state where a function returns heterogeneous types
-\* (record vs sentinel). All present=FALSE artifacts are equivalent
+\* (record vs marker). All present=FALSE artifacts are equivalent
 \* "not yet created" placeholders.
 \*
 \* OCaml <-> TLA+ mapping:

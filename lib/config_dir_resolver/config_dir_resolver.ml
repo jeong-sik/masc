@@ -3,9 +3,8 @@ module StringSet = Set_util.StringSet
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the
     codebase. Issue #8414. *)
-let cascade_toml_filename = "cascade.toml"
 let tool_policy_toml_filename = "tool_policy.toml"
-let keeper_runtime_toml_filename = "keeper_runtime.toml"
+let runtime_toml_filename = "runtime.toml"
 
 type source =
   | Env
@@ -29,8 +28,6 @@ type resolution = {
   status : status;
   warnings : string list;
   config_root : path_item;
-  cascade_authoring : path_item;
-  cascade : path_item;
   prompts : path_item;
   keepers : path_item;
   personas : path_item;
@@ -182,20 +179,20 @@ let to_json (resolution : resolution) =
       ( "warnings",
         `List (List.map (fun warning -> `String warning) resolution.warnings) );
       ("config_root", item_to_json resolution.config_root);
-      ("cascade_authoring", item_to_json resolution.cascade_authoring);
-      ("cascade", item_to_json resolution.cascade);
       ("prompts", item_to_json resolution.prompts);
       ("keepers", item_to_json resolution.keepers);
       ("personas", item_to_json resolution.personas);
     ]
 
 let config_signature_exists config_dir =
-  let cascade_toml = Filename.concat config_dir cascade_toml_filename in
+  let runtime_toml = Filename.concat config_dir runtime_toml_filename in
+  let tool_policy_toml = Filename.concat config_dir tool_policy_toml_filename in
   let prompts = Filename.concat config_dir "prompts" in
   let keepers = Filename.concat config_dir "keepers" in
   let personas = Filename.concat config_dir "personas" in
   existing_dir config_dir
-  && (existing_file cascade_toml
+  && (existing_file runtime_toml
+     || existing_file tool_policy_toml
      || existing_dir prompts || existing_dir keepers
      || existing_dir personas)
 
@@ -300,15 +297,11 @@ let inputs_from_env () =
 
 let resolve_with inputs =
   let config_root, root_warnings = config_root_resolution inputs in
-  let cascade_authoring = file_item config_root cascade_toml_filename in
-  let cascade = cascade_authoring in
   let prompts = child_item config_root "prompts" in
   let keepers = child_item config_root "keepers" in
   let personas, persona_warnings = personas_item inputs config_root in
   let missing_child_warnings =
-    (* RFC-0058 §9: [cascade.toml] is the only cascade source. *)
-    [ ("cascade.toml", cascade_authoring.exists)
-    ; ("prompts", prompts.exists)
+    [ ("prompts", prompts.exists)
     ; ("keepers", keepers.exists)
     ; ("personas", personas.exists)
     ]
@@ -332,8 +325,6 @@ let resolve_with inputs =
     status;
     warnings;
     config_root;
-    cascade_authoring;
-    cascade;
     prompts;
     keepers;
     personas;
@@ -351,21 +342,6 @@ let resolve () =
 
 let reset () =
   cached_resolution := None
-
-(* RFC-0058 §9: the on-disk cascade source is [cascade.toml]. *)
-let cascade_path_opt () =
-  let resolution = resolve () in
-  match resolution.config_root.source with
-  | Env | Local_masc when resolution.cascade_authoring.exists ->
-      Some resolution.cascade_authoring.path
-  | Env | Local_masc | Invalid_env | Missing ->
-      None
-
-let cascade_path_candidate () =
-  (resolve ()).cascade_authoring.path
-
-let cascade_toml_path_candidate () =
-  Filename.concat (resolve ()).config_root.path cascade_toml_filename
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -503,9 +479,6 @@ let auth_dir ~base_path =
 let credentials_dir ~base_path =
   Filename.concat (masc_root ~base_path) "credentials"
 
-let repo_cli_identities_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "repo-cli-identities"
-
 let agent_runtime_dir ~base_path =
   Filename.concat (masc_root ~base_path) "runtime/agent"
 
@@ -520,9 +493,6 @@ let locks_dir ~base_path =
 
 let data_dir ~base_path =
   Filename.concat base_path "data"
-
-let credentials_toml_path ~base_path =
-  Filename.concat (masc_root ~base_path) "config/credentials.toml"
 
 let repositories_toml_path ~base_path =
   Filename.concat (masc_root ~base_path) "config/repositories.toml"

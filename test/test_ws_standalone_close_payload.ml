@@ -1,5 +1,5 @@
 open Alcotest
-module WS = Masc_mcp.Server_ws_standalone.For_testing
+module WS = Server_ws_standalone.For_testing
 
 let truncation_suffix = "...<truncated>"
 let utf8_han = "\237\149\156"

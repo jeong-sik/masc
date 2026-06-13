@@ -8,29 +8,7 @@
     - T1-D: [nofile_soft_limit_cache] 3-state variant gives one [Resolved]
             answer regardless of concurrent first-touches *)
 
-module FD = Masc_mcp.Keeper_fd_pressure
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
-;;
-
-let file_contains file_rel needle =
-  let path = Filename.concat (source_root ()) file_rel in
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let content = In_channel.input_all ic in
-      let needle_len = String.length needle in
-      let content_len = String.length content in
-      let rec loop i =
-        i + needle_len <= content_len
-        && (String.equal (String.sub content i needle_len) needle || loop (i + 1))
-      in
-      String.equal needle "" || loop 0)
-;;
+module FD = Keeper_fd_pressure
 
 let test_fleet_default_at_or_above_12288 () =
   (* The rename ships with a 64-keeper-class default: 64 * 96 + 128 + margin.
@@ -167,15 +145,7 @@ let test_nofile_cache_single_flight_resolves_once () =
      Alcotest.fail "cache must be Resolved after concurrent first-touch");
   FD.reset_for_tests ()
 
-let test_nofile_probe_is_native_not_shell () =
-  Alcotest.(check bool)
-    "native nofile stub is wired"
-    true
-    (file_contains "lib/keeper_fd_pressure.ml" "masc_mcp_nofile_soft_limit");
-  Alcotest.(check bool)
-    "nofile soft-limit probe does not spawn a shell"
-    false
-    (file_contains "lib/keeper_fd_pressure.ml" "ulimit -n");
+let test_nofile_probe_resolves_on_unix () =
   if Sys.os_type = "Unix"
   then (
     FD.reset_for_tests ();
@@ -237,6 +207,101 @@ let test_engage_external_crit_extends_warn () =
     (after_crit > after_warn);
   FD.reset_for_tests ()
 
+(* F4 — system FD probe offloaded to a systhread.
+
+   [system_fd_snapshot] (reached via [admit_turn] with no [~system_fds]) runs the
+   darwin [sysctl] subprocess, which does a blocking [input_line] drain. The fix
+   offloads that detect via [Eio_guard.run_in_systhread] so the blocking read does
+   not freeze the owning Eio domain's event-loop thread, and drops the
+   [Stdlib.Mutex] that previously wrapped the detect (would be held across the
+   offload yield).
+
+   Test 1 is darwin-gated on the same predicate production uses
+   ([SystemVersion.plist]) because the freeze is darwin-only: the linux path uses a
+   non-spawning [read_first_line] and never reaches the subprocess guard. *)
+
+let darwin_host () =
+  Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist"
+
+(* A [With_process] guard whose [run] blocks the calling thread for [delay]
+   seconds before delegating. With the fix, the whole detect (guard + subprocess)
+   runs on a systhread, so this blocks the systhread, not the event loop. *)
+let blocking_process_guard ~delay : With_process.process_guard =
+  { run =
+      (fun f ->
+        Unix.sleepf delay;
+        f ())
+  }
+
+let test_probe_offload_keeps_domain_alive () =
+  if not (darwin_host ())
+  then
+    (* Linux short-circuits before the subprocess guard; freeze is darwin-only. *)
+    ()
+  else (
+    let blocking_delay = 1.5 in
+    Eio_main.run (fun _env ->
+      Eio_guard.enable ();
+      Fun.protect
+        ~finally:(fun () ->
+          With_process.reset_process_guard_for_testing ();
+          FD.reset_for_tests ();
+          Eio_guard.disable ())
+        (fun () ->
+          FD.reset_for_tests ();
+          With_process.set_process_guard (blocking_process_guard ~delay:blocking_delay);
+          let sentinel = Atomic.make 0 in
+          let stop = Atomic.make false in
+          Eio.Fiber.both
+            (fun () ->
+              (* Triggers the offloaded probe (no [~system_fds] supplied). With
+                 the offload, this fiber suspends on the systhread and yields the
+                 domain; without it, the domain is frozen for [blocking_delay]. *)
+              let _ : bool = FD.admit_turn ~active_keepers:1 () in
+              Atomic.set stop true)
+            (fun () ->
+              while not (Atomic.get stop) do
+                Atomic.incr sentinel;
+                Eio.Fiber.yield ()
+              done);
+          (* With the fix the sentinel spins freely while the probe blocks on the
+             systhread, so it advances well past a handful of iterations. With the
+             old (event-loop-thread) blocking probe it would be ~0. *)
+          let observed = Atomic.get sentinel in
+          Alcotest.(check bool)
+            (Printf.sprintf
+               "sentinel advanced during blocked probe (observed=%d > 10)"
+               observed)
+            true
+            (observed > 10))))
+
+let test_concurrent_snapshot_no_relock () =
+  (* Portable: after the mutex drop there is nothing to relock, so N concurrent
+     probes must complete without raising and each return a bool decision. With
+     the old [Stdlib.Mutex] held across a yielding guard this was the relock /
+     [Sys_error] hazard. *)
+  Eio_main.run (fun _env ->
+    Eio_guard.enable ();
+    Fun.protect
+      ~finally:(fun () ->
+        FD.reset_for_tests ();
+        Eio_guard.disable ())
+      (fun () ->
+        FD.reset_for_tests ();
+        let fan = 16 in
+        Eio.Switch.run (fun sw ->
+          let promises =
+            List.init fan (fun _ ->
+              Eio.Fiber.fork_promise ~sw (fun () ->
+                Eio.Fiber.yield ();
+                FD.admit_turn ~active_keepers:1 ()))
+          in
+          let results = List.map Eio.Promise.await_exn promises in
+          Alcotest.(check int)
+            "all concurrent probes returned a decision"
+            fan
+            (List.length results))))
+
 let () =
   Alcotest.run
     "keeper_fd_pressure_fleet"
@@ -257,8 +322,8 @@ let () =
     ; ( "nofile-single-flight"
       , [ Alcotest.test_case "concurrent first-touch returns one answer" `Quick
             test_nofile_cache_single_flight_resolves_once
-        ; Alcotest.test_case "nofile probe is native" `Quick
-            test_nofile_probe_is_native_not_shell
+        ; Alcotest.test_case "nofile probe resolves on Unix" `Quick
+            test_nofile_probe_resolves_on_unix
         ] )
     ; ( "external-engage"
       , [ Alcotest.test_case "CRIT advances cooldown to ~1800s" `Quick
@@ -267,5 +332,11 @@ let () =
             test_engage_external_stale_ts_is_noop
         ; Alcotest.test_case "CRIT extends WARN cooldown" `Quick
             test_engage_external_crit_extends_warn
+        ] )
+    ; ( "system-fd-probe-offload"
+      , [ Alcotest.test_case "blocked probe does not freeze the domain (darwin)" `Quick
+            test_probe_offload_keeps_domain_alive
+        ; Alcotest.test_case "concurrent probes do not relock after mutex drop" `Quick
+            test_concurrent_snapshot_no_relock
         ] )
     ]

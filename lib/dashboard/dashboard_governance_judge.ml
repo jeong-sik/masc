@@ -1,5 +1,3 @@
-open Yojson.Safe.Util
-
 type runtime_snapshot = {
   judge_online : bool;
   refreshing : bool;
@@ -20,6 +18,32 @@ type runtime_snapshot = {
   last_compute_reason : string option;
 }
 
+(** State of the in-flight compute cycle.
+
+    The previous [int] counter was a workaround: a single integer could
+    be over-decremented by a fired-too-late [Eio.Switch.on_release]
+    callback (or under-decremented when the callback never fired under
+    parent-fiber cancellation), and a [max 0] clamp had to ride
+    alongside to mask the underflow. PR #20479 attempted to replace the
+    clamp with [Eio.Switch.on_release] as the single source of truth,
+    but [on_release] is *not* a total correctness primitive under
+    parent-fibre cancellation in Eio 5.x — a parent switch failing
+    before child release callbacks run leaves the counter stuck at 1.
+    That is the failure mode observed in the fleet logs between
+    2026-06-08 07:00-08:48Z (57× [in_flight_after=1] stuck events).
+
+    The fix replaces the int counter with a typed state machine
+    ([compute_in_flight_state]) and derives the in-flight read from
+    that state under [with_lock]. [mark_compute_start] advances
+    [cycle_id] monotonically; a second [mark_compute_start] before
+    [mark_compute_finish] is a routine log + replace (not a panic),
+    preserving the typed invariant that the previous int counter could
+    not hold. *)
+type compute_in_flight_state =
+  | Idle
+  | In_flight of { started_at : float; cycle_id : int }
+
+
 type state = {
   mutex : Eio.Mutex.t;
   mutable started : bool;
@@ -33,7 +57,8 @@ type state = {
   mutable expires_at : string option;
   mutable model_used : string option;
   mutable last_error : string option;
-  mutable compute_in_flight : int;
+  mutable compute_state : compute_in_flight_state;
+  mutable next_cycle_id : int;
   mutable last_compute_duration_sec : float option;
   mutable last_compute_timeout_sec : float option;
   mutable last_compute_outcome : string option;
@@ -48,7 +73,7 @@ type state = {
    [masc_after_turn_response_model_empty_total] introduced by
    #10083; separate metric name keeps governance vs keeper
    attribution clean while sharing the [unknown_provider]
-   sentinel string so PromQL can union-aggregate across both. *)
+   marker string so metric queries can union-aggregate across both. *)
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 
@@ -62,26 +87,26 @@ let governance_compute_in_flight_metric =
   "masc_governance_judge_compute_in_flight"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:governance_response_model_empty_metric
     ~help:
       "Count of governance compute_judgments cycles where \
        [response.model] was empty.  Labels: \
-       [source=telemetry_resolved | unknown_sentinel]."
+       [source=telemetry_resolved | unknown_source]."
     ();
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:governance_compute_total_metric
     ~help:
       "Count of governance judge compute_judgments attempts. Labels: \
        [outcome=ok|error, reason=ok|timeout|error|cancelled]."
     ();
-  Prometheus.register_histogram
+  Otel_metric_store.register_histogram
     ~name:governance_compute_duration_metric
     ~help:
       "Observed governance judge compute_judgments duration in seconds. \
        Labels: [outcome=ok|error, reason=ok|timeout|error|cancelled]."
     ();
-  Prometheus.register_gauge
+  Otel_metric_store.register_gauge
     ~name:governance_compute_in_flight_metric
     ~help:"Current in-flight governance judge compute_judgments attempts."
     ()
@@ -89,12 +114,12 @@ let () =
 type governance_model_source =
   | Response_model
   | Telemetry_resolved
-  | Unknown_sentinel
+  | Unknown_source
 
 let governance_model_source_to_string = function
   | Response_model -> "response_model"
   | Telemetry_resolved -> "telemetry_resolved"
-  | Unknown_sentinel -> "unknown_sentinel"
+  | Unknown_source -> "unknown_source"
 
 let resolve_governance_model_used ~raw_model ~canonical_model_id =
   if String.trim raw_model <> "" then "runtime", Response_model
@@ -103,12 +128,12 @@ let resolve_governance_model_used ~raw_model ~canonical_model_id =
     | Some id ->
         let trimmed = String.trim id in
         if trimmed <> "" then "runtime", Telemetry_resolved
-        else "runtime", Unknown_sentinel
-    | None -> "runtime", Unknown_sentinel
+        else "runtime", Unknown_source
+    | None -> "runtime", Unknown_source
 
 let governance_dir base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "governance"
 
 (** Legacy single-file path (for fallback reads). *)
@@ -138,8 +163,6 @@ let get_judgments_store base_path : Dated_jsonl.t =
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-
-let now_iso () = Masc_domain.now_iso ()
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 
@@ -181,27 +204,6 @@ let degraded_reason_of_error message =
     "timeout"
   else
     "error"
-
-let timeout_sec_of_error message =
-  let marker = "timed out after " in
-  let lower = String.lowercase_ascii message in
-  match String_util.find_substring lower marker with
-  | None -> None
-  | Some marker_idx ->
-      let start = marker_idx + String.length marker in
-      let len = String.length lower in
-      let rec find_stop idx =
-        if idx >= len then idx
-        else
-          match lower.[idx] with
-          | '0' .. '9' | '.' -> find_stop (idx + 1)
-          | _ -> idx
-      in
-      let stop = find_stop start in
-      if stop <= start then None
-      else
-        String.sub lower start (stop - start)
-        |> float_of_string_opt
 
 let cached_judgments_still_fresh ~now_ts (st : state) =
   match st.expires_at_unix with
@@ -269,7 +271,8 @@ let get_state base_path =
             expires_at = None;
             model_used = None;
             last_error = None;
-            compute_in_flight = 0;
+            compute_state = Idle;
+            next_cycle_id = 0;
             last_compute_duration_sec = None;
             last_compute_timeout_sec = None;
             last_compute_outcome = None;
@@ -285,17 +288,17 @@ let get_state base_path =
 let key_of kind id = kind ^ ":" ^ id
 
 let judgment_key json =
-  let kind = json |> member "target_kind" |> to_string in
-  let id = json |> member "target_id" |> to_string in
+  let kind = Json_util.get_string_with_default json ~key:"target_kind" ~default:"" in
+  let id = Json_util.get_string_with_default json ~key:"target_id" ~default:"" in
   key_of kind id
 
 let judgment_generated_at json =
-  json |> member "generated_at" |> to_string_option |> Dashboard_utils.parse_iso_opt
+  Json_util.get_string json "generated_at" |> Dashboard_utils.parse_iso_opt
   |> Option.value ~default:0.0
 
 let normalize_disk_recommended_action judgment =
-  match judgment |> member "recommended_action" with
-  | `Assoc action_fields ->
+  match Json_util.assoc_member_opt "recommended_action" judgment with
+  | Some (`Assoc action_fields) ->
       let canonical_tool =
         match List.assoc_opt "resolved_tool" action_fields with
         | Some (`String tool) ->
@@ -330,7 +333,7 @@ let load_judgments_into_table jsons =
   let table = Hashtbl.create 32 in
   List.iter (fun json ->
     try
-      let status = json |> member "status" |> to_string_option in
+      let status = Json_util.get_string json "status" in
       if status = Some "active" then
         let key = judgment_key json in
         match Hashtbl.find_opt table key with
@@ -387,7 +390,7 @@ let fresh_judgments_json ~base_path ~limit =
   latest_judgments base_path
   |> List.map normalize_disk_recommended_action
   |> List.filter (fun j ->
-    match j |> member "expires_at" |> to_string_option with
+    match Json_util.get_string j "expires_at" with
     | Some iso ->
       (match Dashboard_utils.parse_iso_opt (Some iso) with
        | Some ts -> ts > now
@@ -396,6 +399,32 @@ let fresh_judgments_json ~base_path ~limit =
   |> List.sort (fun a b ->
     Float.compare (judgment_generated_at b) (judgment_generated_at a))
   |> List.filteri (fun i _ -> i < limit)
+
+(** Read the in-flight count derived from [compute_state].
+
+    The state machine in {!compute_in_flight_state} is the source of
+    truth: {!mark_compute_start} is the only site that transitions
+    [Idle] → [In_flight] (setting the gauge to 1.0) and
+    {!mark_compute_finish} is the only site that transitions
+    [In_flight] → [Idle] (setting the gauge to 0.0).  No probe of
+    [Eio.Switch] lifecycle is required — the cycle body's outcome
+    path (success / error / cancelled / exception) reaches
+    [mark_compute_finish] deterministically, so the read path is a
+    pure projection of [compute_state] onto [int].  PR #20479's
+    [Eio.Switch.on_release] callback is no longer required (and was
+    not total under parent-fibre cancellation, which is why 57×
+    [in_flight_after=1] events still appeared in the 2026-06-08 fleet
+    log after the PR merge).  The state machine replaces both the
+    [max 0 (... - 1)] clamp and the [Eio.Switch.on_release]
+    fire-and-forget bookkeeping: a transition is a typed
+    {!compute_in_flight_state} assignment, so the compiler enforces
+    that every site in the cycle body's outcome path lands on a
+    state that [read_in_flight] can project to the correct count. *)
+let read_in_flight (st : state) : int =
+  with_lock st (fun () ->
+      match st.compute_state with
+      | Idle -> 0
+      | In_flight _ -> 1)
 
 let runtime_status_at ~now_ts base_path =
   let st = get_state base_path in
@@ -443,7 +472,7 @@ let runtime_status_at ~now_ts base_path =
         model_used = None;
         keeper_name;
         last_error = st.last_error;
-        compute_in_flight = st.compute_in_flight;
+        compute_in_flight = (match st.compute_state with Idle -> 0 | In_flight _ -> 1);
         last_compute_duration_sec = st.last_compute_duration_sec;
         last_compute_timeout_sec = st.last_compute_timeout_sec;
         last_compute_outcome = st.last_compute_outcome;
@@ -454,8 +483,8 @@ let runtime_status base_path =
   runtime_status_at ~now_ts:(Unix.gettimeofday ()) base_path
 
 let parse_string_list json key =
-  match json |> member key with
-  | `List items ->
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) ->
       items
       |> List.filter_map (function
              | `String value ->
@@ -480,11 +509,11 @@ let allowed_tool tool =
     ]
 
 let parse_recommended_action json =
-  let action_json = json |> member "recommended_action" in
-  match action_json with
-  | `Assoc _ ->
+  let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in
+  match Json_util.assoc_member_opt "recommended_action" json with
+  | Some (`Assoc _ as action_json) ->
       let resolved_tool =
-        action_json |> member "resolved_tool" |> to_string_option
+        Json_util.get_string action_json "resolved_tool"
         |> Option.map normalize_allowed_tool_name
       in
       let resolved_tool =
@@ -495,16 +524,15 @@ let parse_recommended_action json =
       Some
         (`Assoc
           [
-            ("action_kind", action_json |> member "action_kind");
+            ("action_kind", m "action_kind" action_json);
             ("resolved_tool", Json_util.option_to_yojson (fun value -> `String value) resolved_tool);
-            ("target_type", action_json |> member "target_type");
-            ("target_id", action_json |> member "target_id");
+            ("target_type", m "target_type" action_json);
+            ("target_id", m "target_id" action_json);
             ( "reason",
               `String
                 (normalize_text
-                   (action_json |> member "reason" |> to_string_option
-                  |> Option.value ~default:"")) );
-            ("payload_preview", action_json |> member "payload_preview");
+                   (Json_util.get_string_with_default action_json ~key:"reason" ~default:"")) );
+            ("payload_preview", m "payload_preview" action_json);
           ])
   | _ -> None
 
@@ -530,8 +558,8 @@ let parse_lenient_governance_json raw_text =
   | _ -> Ok parsed
 
 let parse_required_guardrail_state json =
-  match json |> member "guardrail_state" with
-  | `Assoc fields ->
+  match Json_util.assoc_member_opt "guardrail_state" json with
+  | Some (`Assoc fields) ->
       let required_field name =
         match List.assoc_opt name fields with
         | Some value -> Ok value
@@ -557,27 +585,26 @@ let parse_required_guardrail_state json =
            Error
              "invalid guardrail_state: expected requires_human_gate bool, \
               pending_confirm_token string|null, ready_to_execute bool")
-  | `Null -> Error "missing guardrail_state"
+  | None | Some `Null -> Error "missing guardrail_state"
   | _ -> Error "invalid guardrail_state: expected object"
 
 let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
   let target_kind =
-    json |> member "kind" |> to_string_option |> Option.value ~default:""
+    Json_util.get_string_with_default json ~key:"kind" ~default:""
     |> String.lowercase_ascii
   in
-  let target_id = json |> member "id" |> to_string_option |> Option.value ~default:"" in
+  let target_id = Json_util.get_string_with_default json ~key:"id" ~default:"" in
   if target_kind = "" || target_id = "" then Ok None
   else
     let summary =
-      normalize_text (json |> member "summary" |> to_string_option |> Option.value ~default:"")
+      normalize_text (Json_util.get_string_with_default json ~key:"summary" ~default:"")
     in
     if summary = "" then Ok None
     else
       let confidence =
-        match json |> member "confidence" with
-        | `Float value -> max 0.0 (min 1.0 value)
-        | `Int value -> max 0.0 (min 1.0 (float_of_int value))
-        | _ -> 0.0
+        Json_util.get_float json "confidence"
+        |> Option.value ~default:0.0
+        |> fun v -> max 0.0 (min 1.0 v)
       in
       let evidence_refs = parse_string_list json "evidence_refs" in
       let recommended_action = parse_recommended_action json in
@@ -616,8 +643,8 @@ let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
   | Ok parsed -> (
       match parsed with
       | `Assoc _ -> (
-          match parsed |> member "items" with
-          | `List rows ->
+          match Json_util.assoc_member_opt "items" parsed with
+          | Some (`List rows) ->
               let rec loop acc = function
                 | [] -> Ok (List.rev acc)
                 | row :: rest -> (
@@ -653,9 +680,8 @@ let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts =
-  let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Governance_judge
+  let runtime_id =
+    Runtime.get_default_runtime_id ()
   in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
@@ -663,13 +689,13 @@ let compute_judgments
        than hanging the daemon fiber indefinitely (#8319).
        #9629: caller uses run_with_caller so this judge resolves its
        budget through Env_config_oas_bridge
-       and surfaces in the per-caller Prometheus counter. *)
+       and surfaces in the per-caller Otel_metric_store counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
-        ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
+        ~goal:prompt ~masc_tools ~dispatch 
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -677,11 +703,11 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Cascade_runner.response in
+      let response = result.Runtime_agent.response in
       try
         let raw_text = Agent_sdk_response.text_of_response response in
-        let generated_at = now_iso () in
-        let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        let generated_at = Masc_domain.now_iso () in
+        let expires_at = Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880: keep the internal fallback/counter for empty OAS model
            metadata, but do not project concrete model names into MASC-owned
            dashboard or judgment JSON. *)
@@ -697,9 +723,9 @@ let compute_judgments
         begin
           match model_source with
           | Response_model -> ()
-          | Telemetry_resolved | Unknown_sentinel ->
+          | Telemetry_resolved | Unknown_source ->
               let source = governance_model_source_to_string model_source in
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 governance_response_model_empty_metric
                 ~labels:[ ("source", source) ]
                 ();
@@ -738,36 +764,99 @@ let append_judgments base_path judgments =
   let store = get_judgments_store base_path in
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
-let should_backoff ~sw ~net =
-  let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Governance_judge
-  in
-  try
-    let capacity =
-      Cascade_runtime.local_capacity_for_selections ~sw ~net
-        [ cascade_name ]
-    in
-    capacity.all_discovered && capacity.endpoints_found > 0
-    && capacity.process_available <= 0
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Governance.warn
-      "capacity check failed in should_backoff: %s"
-      (Printexc.to_string exn);
-    false
+let should_backoff ~sw:_ ~net:_ =
+  (* RFC-0206 single-binding: the deleted
+     [Runtime_runtime.local_capacity_for_selections] probed local-runtime
+     endpoint queues live. Under single-binding the runtime pool tracks lease
+     saturation directly, so back off when every configured concurrency slot on
+     a healthy runtime is already leased.
+     NB: this reads MASC's own lease accounting ([allocated_slots]), not the
+     server-reported queue depth ([process_available]) the old probe used — a
+     documented semantic shift, not a removal. Restoring a true live server-queue
+     probe is RFC-shaped follow-up. *)
+  let configured = Local_runtime_pool.configured_capacity () in
+  configured > 0
+  && Local_runtime_pool.healthy_runtime_count () > 0
+  && Local_runtime_pool.allocated_slots () >= configured
 
-let mark_compute_start (st : state) =
-  (* Publish the gauge inside the lock so concurrent refresh_once runs
-     can't interleave the read/write and end with a stale value
-     overwriting the freshest count. *)
+(* Record a new in-flight cycle.
+
+   The state-machine invariant: this is the *only* site that
+   transitions [compute_state] to [In_flight _] (and sets the gauge
+   to 1.0).  [mark_compute_finish] is the *only* site that
+   transitions back to [Idle] (and sets the gauge to 0.0).  No
+   [Eio.Switch.on_release] callback is registered — the previous
+   design (PR #20479) relied on [Eio.Switch.on_release] to fire on
+   every cycle exit, but the 2026-06-08 fleet log shows 57× cycles
+   with [reason=exception duration=0.000s in_flight_after=1], which
+   is the signature of a cycle body that raises synchronously before
+   the on_release callback can fire (the parent switch stays alive
+   waiting for child fibers, so the [on_release] handler is delayed
+   past the cycle's [mark_compute_finish] log emission and the
+   counter never recovers to 0).
+
+   The previous [Idle → In_flight → In_flight] case (concurrent
+   start) is reduced to a routine log + force-overwrite: the new
+   cycle replaces the old one.  In production, [refresh_once] is
+   driven by a single sequential loop, so concurrent starts are
+   impossible; this branch exists to give a paper trail in the
+   anomaly case.
+
+   The ~sw argument is removed: the state machine no longer tracks
+   the switch identity (Eio 1.3 does not expose a public
+   is-closed probe, and we do not need one — see {!read_in_flight}). *)
+let mark_compute_start (st : state) : int =
   with_lock st (fun () ->
-      st.compute_in_flight <- st.compute_in_flight + 1;
-      Prometheus.set_gauge governance_compute_in_flight_metric
-        (float_of_int st.compute_in_flight);
-      st.compute_in_flight)
+      let cycle_id = st.next_cycle_id in
+      st.next_cycle_id <- st.next_cycle_id + 1;
+      (match st.compute_state with
+       | Idle -> ()
+       | In_flight { cycle_id = prev_id; _ } ->
+           Log.Governance.routine
+             "mark_compute_start: previous cycle_id=%d still live; replacing with cycle_id=%d"
+             prev_id cycle_id);
+      st.compute_state <- In_flight { started_at = Unix.gettimeofday (); cycle_id };
+      Otel_metric_store.set_gauge governance_compute_in_flight_metric 1.0;
+      cycle_id)
 
-let mark_compute_finish (st : state) ~started_at ~outcome ~reason
-    ~timeout_sec =
+(* docs/spec/18-log-severity-taxonomy.md § 3.6 (outcome-carrying line at a
+   static level): the compute-finish line embeds a runtime [outcome=%s], so its
+   severity must be derived from that outcome rather than hardcoded [Info] — an
+   errored compute logged at [Info] hides under the noise floor with no
+   companion WARN/ERROR. A genuine "error" outcome is degraded-with-auto-recovery
+   (the next [refresh_once] retries) → [Warn]. A graceful cancellation
+   (reason="cancelled", e.g. shutdown / superseded refresh) is not
+   operator-actionable → [Info]. Success → [Info]. *)
+let level_of_compute_outcome ~outcome ~reason : Log.level =
+  match outcome with
+  | "error" when reason <> "cancelled" -> Log.Warn
+  | _ -> Log.Info
+
+(** Reset in-flight state and emit telemetry.
+
+    The [compute_state] transition to [Idle] is the *only* state
+    mutation this function performs. The decrement that PR #20479
+    delegated to an [Eio.Switch.on_release] callback now lives
+    entirely in this function as an explicit state-machine
+    transition. The [Eio.Switch.on_release] callback is **not**
+    used here: Eio 1.3 does not expose a public is-closed probe,
+    and fire-and-forget callbacks are not a total correctness
+    primitive under parent cancellation — see
+    [lib/core/eio_guard.ml:60-67] for the project's existing
+    acknowledgement of that limitation. The state machine
+    ([mark_compute_start] / [mark_compute_finish]) is the
+    only writer, and a [Cancelled] re-raise that bypasses the
+    user-site handler still drops the in-flight count back to
+    its pre-start value, but now via an explicit reset at
+    outcome time rather than a callback whose firing is not
+    guaranteed.
+
+    The [last_compute_duration_sec] / [last_compute_outcome] /
+    [last_compute_reason] fields are *last observed*, not
+    *current* — they are read by the runtime snapshot and
+    represent the most recent terminal cycle, regardless of
+    whether a new cycle has since started. *)
+let mark_compute_finish (st : state) ~cycle_id ~started_at ~outcome ~reason =
   (* Clamp the elapsed time to >= 0 so a backwards system clock
      adjustment (NTP step, manual change) cannot inject a negative
      duration into the histogram or the [last_compute_duration_sec]
@@ -776,25 +865,41 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
   let labels = [ ("outcome", outcome); ("reason", reason) ] in
   let in_flight =
     with_lock st (fun () ->
-        st.compute_in_flight <- max 0 (st.compute_in_flight - 1);
         st.last_compute_duration_sec <- Some duration_sec;
-        st.last_compute_timeout_sec <- timeout_sec;
         st.last_compute_outcome <- Some outcome;
         st.last_compute_reason <- Some reason;
-        Prometheus.set_gauge governance_compute_in_flight_metric
-          (float_of_int st.compute_in_flight);
-        st.compute_in_flight)
+        (* Reset compute_state to Idle. The switch held by the cycle
+           may already be closed (parent cancellation) or still
+           open (we are the cycle finishing first); either way, the
+           cycle is done. *)
+        (match st.compute_state with
+         | Idle ->
+             (* mark_compute_finish called without a matching start.
+                Defensive log; not an error because the user-site
+                exception path can re-raise after partial teardown. *)
+             Log.Governance.routine
+               "mark_compute_finish: state already Idle (cycle ended by external path)"
+         | In_flight { cycle_id = current_cid; _ } ->
+             if current_cid = cycle_id then st.compute_state <- Idle
+             else
+               Log.Governance.routine
+                 "mark_compute_finish: stale finish cycle_id=%d ignored (current=%d)"
+                 cycle_id current_cid);
+        Otel_metric_store.set_gauge governance_compute_in_flight_metric 0.0;
+        0)
   in
-  Prometheus.inc_counter governance_compute_total_metric ~labels ();
-  Prometheus.observe_histogram governance_compute_duration_metric
+  Otel_metric_store.inc_counter governance_compute_total_metric ~labels ();
+  Otel_metric_store.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
-  Log.Governance.info
-    "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs compute_timeout=%s in_flight_after=%d"
-    outcome reason duration_sec
-    (match timeout_sec with
-     | Some value -> Printf.sprintf "%.1fs" value
-     | None -> "unknown")
-    in_flight;
+  (* Single emission at the outcome-derived level (never two lines).
+     [compute_timeout] is no longer reported because the governance
+     judge no longer carries a per-cycle budget; the OAS bridge
+     applies its own (or no-timeout) inside the wrapped computation. *)
+  Log.Governance.emit
+    (level_of_compute_outcome ~outcome ~reason)
+    (Printf.sprintf
+       "refresh_once: compute_judgments telemetry outcome=%s reason=%s duration=%.3fs in_flight_after=%d"
+       outcome reason duration_sec in_flight);
   (duration_sec, in_flight)
 
 let refresh_once ~sw ~net
@@ -854,29 +959,63 @@ let refresh_once ~sw ~net
         st.runtime_status <- status_refreshing;
         st.degraded_reason <- None);
     let started_at = Unix.gettimeofday () in
-    let compute_timeout_sec =
-      Some
-        (Env_config_oas_bridge.timeout_sec
-           ~caller:Env_config_oas_bridge.Governance_judge ())
-    in
-    ignore (mark_compute_start st);
+    (* The in-flight invariant is *not* maintained by an
+       [Eio.Switch.on_release] callback — PR #20479's approach,
+       which is not total under parent-fibre cancellation — but by
+       an explicit typed state-machine transition:
+
+         Idle  --[mark_compute_start]-->  In_flight
+         In_flight  --[mark_compute_finish]-->  Idle
+
+       [mark_compute_start] runs first inside the [Eio.Switch.run]
+       scope so the in-flight gauge is published *before* any
+       provider work begins.  [mark_compute_finish] is called in
+       every terminal branch of the cycle (success, error,
+       cancelled) to publish the Idle transition.  The typed
+       variant makes the illegal state ("In_flight but no running
+       cycle") unrepresentable at the type level, removing the need
+       for a runtime "is the Switch still alive?" probe (Eio 1.3
+       does not export such a probe in its public API anyway).
+
+       The no-timeout policy for the governance/operator judge
+       callers means the bridge no longer contributes a cycle
+       wrapper; the OAS provider keeps its own per-call timeout,
+       and any path that doesn't deliver a response simply runs to
+       the provider's natural budget. *)
+    let cycle_id = mark_compute_start st in
     let compute_result =
-      try compute_judgments ~masc_tools ~dispatch ~build_facts with
-      | Eio.Cancel.Cancelled _ as exn ->
-          ignore
-            (mark_compute_finish st ~started_at ~outcome:"error"
-               ~reason:"cancelled" ~timeout_sec:compute_timeout_sec);
-          raise exn
-      | exn ->
-          Error
-            (Printf.sprintf "compute_judgments raised: %s"
-               (Printexc.to_string exn))
+      try
+        Eio.Switch.run ~name:"governance_judge.compute" (fun _sw ->
+            try
+              Ok
+                (compute_judgments ~masc_tools ~dispatch ~build_facts)
+            with
+            | Eio.Cancel.Cancelled _ as exn ->
+                ignore
+                  (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+                     ~reason:"cancelled");
+                raise exn
+            | exn ->
+                ignore
+                  (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+                     ~reason:"exception");
+                Error
+                  (Printf.sprintf "compute_judgments raised: %s"
+                     (Printexc.to_string exn)))
+      with exn ->
+        (* Switch.run itself raised during cleanup (e.g. child-fibre exception
+           propagated after callback returned, or parent cancellation before
+           callback ran).  mark_compute_finish is idempotent on Idle — safe to
+           call even if the inner handler already cleared the state. *)
+        ignore
+          (mark_compute_finish st ~cycle_id ~started_at ~outcome:"error"
+             ~reason:"exception");
+        raise exn
     in
     match compute_result with
-    | Ok (model_used, generated_at, expires_at, judgments) ->
+    | Ok (Ok (model_used, generated_at, expires_at, judgments)) ->
         ignore
-          (mark_compute_finish st ~started_at ~outcome:"ok" ~reason:"ok"
-             ~timeout_sec:compute_timeout_sec);
+          (mark_compute_finish st ~cycle_id ~started_at ~outcome:"ok" ~reason:"ok");
         if judgments = [] then
           Log.Governance.routine
             "refresh_once: ok runtime=redacted judgments=%d"
@@ -902,24 +1041,14 @@ let refresh_once ~sw ~net
             List.iter
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
               judgments)
-    | Error message ->
+    | Ok (Error message) | Error message ->
         let reason = degraded_reason_of_error message in
-        let timeout_sec =
-          match timeout_sec_of_error message with
-          | Some value -> Some value
-          | None -> compute_timeout_sec
-        in
         let duration_sec, in_flight =
-          mark_compute_finish st ~started_at ~outcome:"error" ~reason
-            ~timeout_sec
+          mark_compute_finish st ~cycle_id ~started_at ~outcome:"error" ~reason
         in
         Log.Governance.warn
-          "refresh_once: compute_judgments failed: %s (duration=%.3fs compute_timeout=%s in_flight=%d)"
-          message duration_sec
-          (match timeout_sec with
-           | Some value -> Printf.sprintf "%.1fs" value
-           | None -> "unknown")
-          in_flight;
+          "refresh_once: compute_judgments failed: %s (duration=%.3fs in_flight=%d)"
+          message duration_sec in_flight;
         with_lock st (fun () ->
             mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
       end)

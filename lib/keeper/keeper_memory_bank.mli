@@ -16,27 +16,6 @@
 val state_start_re : Re.re
 val state_end_re : Re.re
 
-type keeper_policy_observation =
-  Keeper_memory_policy.keeper_policy_observation = {
-  source_kind : string;
-  room_id : string option;
-  from_agent : string;
-  message : string;
-  direct_mention : bool;
-  has_question : bool;
-  message_chars : int;
-  total_turns : int;
-  active_goal_count : int;
-  joined_room_count : int;
-  last_turn_ago_s : float;
-}
-(** @see [Keeper_memory_policy.keeper_policy_observation] *)
-
-val observation_has_question : string -> bool
-val keeper_policy_observation_of_room_message :
-  meta:Keeper_types.keeper_meta ->
-  room_id:string -> Masc_domain.message -> keeper_policy_observation
-
 type alert_channel_result =
   Keeper_memory_policy.alert_channel_result = {
   channel : string;
@@ -161,9 +140,9 @@ val prompt_memory_sections_of_snapshot :
   current_generation:int ->
   ?source_generation:int -> keeper_state_snapshot -> string list
 val read_progress_snapshot :
-  config:Coord.config -> name:string -> keeper_state_snapshot option
+  config:Workspace.config -> name:string -> keeper_state_snapshot option
 val read_progress_snapshot_cache :
-  config:Coord.config ->
+  config:Workspace.config ->
   name:string -> progress_snapshot_cache option
 val write_progress_snapshot_path :
   path:string ->
@@ -276,6 +255,13 @@ val memory_candidates_from_snapshot :
 (** Lift snapshot fields into candidate triples and run the cap +
     selection pipeline. *)
 
+val memory_candidates_from_snapshot_source :
+  state_snapshot_source:string ->
+  keeper_state_snapshot ->
+  candidate_selection_result
+(** Source-aware variant used by post-turn persistence. Runtime-synthesized
+    snapshots are resume aids, not model-authored durable memory. *)
+
 (** {1 Bank wire format} *)
 
 type keeper_memory_row_raw = {
@@ -341,8 +327,8 @@ val write_memory_bank_rows :
 
 val compact_memory_bank_if_needed :
   ?summarizer:memory_consolidation_summarizer ->
-  Coord.config ->
-  Keeper_types.keeper_meta -> memory_bank_compaction
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta -> memory_bank_compaction
 (** Run a compaction pass for the keeper if the file has crossed the
     byte trigger or note-count target; returns
     [no_memory_bank_compaction] when nothing happened. *)
@@ -350,9 +336,10 @@ val compact_memory_bank_if_needed :
 (** {1 Append-from-reply} *)
 
 val append_memory_notes_from_reply :
-  Coord.config ->
-  Keeper_types.keeper_meta ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
   ?snapshot:keeper_state_snapshot ->
+  ?state_snapshot_source:string ->
   turn:int -> reply:string -> unit -> int * string list
 (** Persist new memory rows derived from a turn's [reply] (and
     optional [snapshot]); returns [(rows_written, drop_reasons)]. *)
@@ -361,11 +348,25 @@ val append_memory_notes_from_reply :
     memory-bank rows. Only results carrying the existing
     [Multimodal.Tool_emission] reserved kind/id tags are eligible. *)
 val append_memory_notes_from_tool_results :
-  Coord.config ->
-  Keeper_types.keeper_meta ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
   turn:int ->
   results:Yojson.Safe.t list ->
   int
+
+val append_voice_output :
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
+  ?provider:string ->
+  execution:string ->
+  voice_priority:int ->
+  turn:int ->
+  message:string ->
+  unit ->
+  (int, string) result
+(** Persist a keeper voice output event as a short-term progress memory row.
+    Returns [Ok 1] when a row is written, [Ok 0] when the message is empty or
+    filtered as non-meaningful, and [Error _] on persistence failure. *)
 
 (** {1 Summary} *)
 

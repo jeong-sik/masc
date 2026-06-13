@@ -1,10 +1,10 @@
 (** Goal_verification — quorum-style verifier sign-off
     persisted alongside the goal store.
 
-    Holds the data model + persistence + workflow for "this
+    Holds the data contract + persistence + workflow for "this
     goal needs N approvals from these principals before it
     can move to [Goal_phase.Completed]".  The state file
-    lives at {!requests_path} under [Coord.masc_dir]; an
+    lives at {!requests_path} under [Workspace_utils.masc_dir]; an
     append-only audit trail goes to {!events_path}.
 
     The yojson [_to_yojson] / [_of_yojson] pairs are written
@@ -17,44 +17,28 @@
 
     {b Pinning rationale}: every type is exposed concretely
     because external callers
-    ([lib/goal/goal_store.ml], [lib/coord_goals.ml],
+    ([lib/goal/goal_store.ml], [lib/workspace_goals.ml],
     [lib/tool_goal_*]) pattern-match on the variants
     ([Approve] / [Reject] / [Open] / [Approved] / [Rejected]
-    / [Cancelled] / [Operator] / [Keeper] / [Extend] /
-    [Replace] / [Pending] / [Passed] / [Failed]) and access
-    record fields ([principal.kind], [policy.principals],
-    [request.goal_id], …) directly. *)
+    / [Cancelled] / [Extend] / [Replace] / [Pending] /
+    [Passed] / [Failed]) and access record fields
+    ([policy.principals], [request.goal_id], …) directly. *)
 
 (** {1 Principals} *)
 
-type principal_kind =
-  | Operator
-  | Keeper
-  (** Who's signing off.  [Operator] = a human-tier reviewer
-      acting through the operator surface.  [Keeper] = an
-      autonomous agent submitting a verdict. *)
-
 type goal_principal = {
-  kind : principal_kind;
   id : string;
   display_name : string option;
 }
 (** Identity of a principal eligible to vote on a request.
-    [id] is the canonical name (operator login or keeper
+    [id] is the canonical reviewer name (operator login or agent
     name); [display_name] is the human-readable label
     surfaced in events and dashboards. *)
-
-val principal_kind_to_yojson : principal_kind -> Yojson.Safe.t
-val principal_kind_of_yojson :
-  Yojson.Safe.t -> (principal_kind, string) result
-(** Lower-cased string round-trip
-    (["operator"] / ["keeper"]).  Whitespace and case are
-    normalised on read. *)
 
 val goal_principal_to_yojson : goal_principal -> Yojson.Safe.t
 val goal_principal_of_yojson :
   Yojson.Safe.t -> (goal_principal, string) result
-(** Object round-trip with required [kind] / [id] (non-empty)
+(** Object round-trip with required [id] (non-empty)
     and optional [display_name]. *)
 
 (** {1 Policy} *)
@@ -211,18 +195,18 @@ type quorum_result =
 
 (** {1 Persistence paths} *)
 
-val requests_path : Coord.config -> string
-(** [{!Coord.masc_dir} config / "goal_verifications.json"].
-    The single state file the coord backend persists. *)
+val requests_path : Workspace_utils.config -> string
+(** [{!Workspace_utils.masc_dir} config / "goal_verifications.json"].
+    The single state file the workspace backend persists. *)
 
-val events_path : Coord.config -> string
-(** [{!Coord.masc_dir} config / "goal_events.jsonl"].
+val events_path : Workspace_utils.config -> string
+(** [{!Workspace_utils.masc_dir} config / "goal_events.jsonl"].
     Append-only audit trail; each line is the JSON written by
     {!emit_event}. *)
 
 (** {1 State I/O} *)
 
-val read_state : Coord.config -> state
+val read_state : Workspace_utils.config -> state
 (** Reads {!requests_path}; returns the empty default state
     if the file does not exist or fails to parse.  Parse
     errors are silently absorbed — the JSONL events file is
@@ -255,7 +239,7 @@ val exclude_requester :
 (** {1 Audit trail} *)
 
 val emit_event :
-  Coord.config ->
+  Workspace_utils.config ->
   goal_id:string ->
   event_type:string ->
   payload:Yojson.Safe.t ->
@@ -267,7 +251,7 @@ val emit_event :
 (** {1 Workflow} *)
 
 val create_request :
-  Coord.config ->
+  Workspace_utils.config ->
   goal_id:string ->
   requested_by:goal_principal ->
   policy_snapshot:policy_snapshot ->
@@ -277,7 +261,7 @@ val create_request :
     duration so concurrent creates serialize cleanly. *)
 
 val find_request :
-  Coord.config -> request_id:string -> goal_verification_request option
+  Workspace_utils.config -> request_id:string -> goal_verification_request option
 (** Lock-free lookup.  Caller is expected to treat the result
     as a snapshot; for mutation use {!submit_vote} or
     {!cancel_request}. *)
@@ -292,7 +276,7 @@ val remaining_possible_votes : goal_verification_request -> int
     [Approve]s are reachable. *)
 
 val cancel_request :
-  Coord.config ->
+  Workspace_utils.config ->
   request_id:string ->
   (goal_verification_request, string) result
 (** Flips [status] from [Open] to [Cancelled] and stamps
@@ -301,7 +285,7 @@ val cancel_request :
     Errors when [request_id] is unknown. *)
 
 val submit_vote :
-  Coord.config ->
+  Workspace_utils.config ->
   request_id:string ->
   principal:goal_principal ->
   decision:vote_decision ->

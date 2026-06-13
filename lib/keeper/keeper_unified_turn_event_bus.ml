@@ -6,7 +6,7 @@ type t =
   ; tool_event_tracker : Keeper_unified_turn_types.turn_tool_event_tracker
   ; drain_cancel : Eio.Cancel.t option ref
   ; turn_event_bus_mu : Eio.Mutex.t
-  ; turn_event_bus : Keeper_turn_cascade_budget.turn_event_bus_summary ref
+  ; turn_event_bus : Keeper_turn_runtime_budget.turn_event_bus_summary ref
   }
 
 let create ~keeper_name () =
@@ -25,7 +25,7 @@ let create ~keeper_name () =
   ; tool_event_tracker = Keeper_unified_turn_types.create_turn_tool_event_tracker ()
   ; drain_cancel = ref None
   ; turn_event_bus_mu = Eio.Mutex.create ()
-  ; turn_event_bus = ref Keeper_turn_cascade_budget.empty_turn_event_bus_summary
+  ; turn_event_bus = ref Keeper_turn_runtime_budget.empty_turn_event_bus_summary
   }
 ;;
 
@@ -48,14 +48,14 @@ let drain ?(site = "unspecified") t =
       | _ -> []
     in
     let outcome = if events = [] then "empty" else "drained" in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string EventBusDrain)
       ~labels:[ "site", site; "outcome", outcome ]
       ();
     process_tool_events_for_side_effects t events;
-    let summary = Keeper_turn_cascade_budget.summarize_turn_event_bus events in
+    let summary = Keeper_turn_runtime_budget.summarize_turn_event_bus events in
     t.turn_event_bus
-    := Keeper_turn_cascade_budget.merge_turn_event_bus_summary
+    := Keeper_turn_runtime_budget.merge_turn_event_bus_summary
          !(t.turn_event_bus)
          summary;
     !(t.turn_event_bus))
@@ -90,7 +90,7 @@ let start_background_drain ~clock t =
               "%s: keeper_turn event-bus drain failed: %s"
               t.keeper_name
               (Printexc.to_string exn);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string EventBusDrain)
               ~labels:
                 [ ( "site"

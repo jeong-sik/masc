@@ -103,8 +103,8 @@ describe('monitoring navigation labels', () => {
 
     expect(labelFor('agents')).toBe('Keeper Fleet')
     expect(labelFor('fleet-health')).toBe('Tool Monitor')
-    expect(labelFor('runtime')).toBe('Cascade & Runtime')
-    expect(labelFor('observatory')).toBe('Evidence Timeline')
+    expect(labelFor('runtime')).toBe('Runtime')
+    expect(labelFor('observatory')).toBe('Observatory')
     expect(labelFor('transport-health')).toBeUndefined()
     expect(labelFor('feature-health')).toBeUndefined()
     expect(labelFor('cognition')).toBeUndefined()
@@ -118,7 +118,7 @@ describe('monitoring navigation labels', () => {
     expect(descriptions).toMatchObject({
       agents: 'Live and configured keeper roster.',
       'fleet-health': 'Tool quality and governance signals.',
-      runtime: 'Cascade and provider health.',
+      runtime: 'Runtime lane health.',
       observatory: 'Activity and runtime evidence.',
     })
 
@@ -136,7 +136,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('sessions')
   })
 
-  it('surfaces four primary Monitor lanes and keeps diagnostics routeable', () => {
+  it('surfaces four primary Monitor lanes and keeps remaining diagnostics routeable', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const allSections = sectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
@@ -150,14 +150,10 @@ describe('monitoring navigation labels', () => {
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('observatory')
-    expect(allIds).toContain('cascade-config')
-    expect(allIds).toContain('doctor')
     expect(allIds).toContain('transport-health')
     expect(allIds).toContain('feature-health')
     expect(allIds).toContain('cognition')
     expect(ids).not.toContain('journey')
-    expect(ids).not.toContain('cascade-config')
-    expect(ids).not.toContain('doctor')
     expect(ids).not.toContain('transport-health')
     expect(ids).not.toContain('feature-health')
     expect(ids).not.toContain('cognition')
@@ -166,7 +162,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('git-graph')
     expect(ids).not.toContain('safe-autonomy')
     expect(ids).not.toContain('cost')
-    expect(ids).not.toContain('cascade-inspector')
+    expect(ids).not.toContain('runtime-inspector')
     expect(ids).not.toContain('attribution')
     expect(ids).not.toContain('activity')
     expect(ids).not.toContain('tool-quality')
@@ -191,8 +187,6 @@ describe('monitoring navigation labels', () => {
     const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
 
     expect(hiddenIds).toEqual([
-      'cascade-config',
-      'doctor',
       'transport-health',
       'feature-health',
       'journey',
@@ -205,12 +199,10 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the word "Runtime" used to label both
-    // section[id=runtime] and section[id=agents], making it impossible
-    // to tell process-instance liveness apart from cascade routing by
-    // reading the sidebar alone.
-    const runtimeOccurrences = labels.filter(l => l === 'Runtime').length
-    expect(runtimeOccurrences).toBe(0)
+    // Regression guard: the Runtime label must not be overloaded across
+    // multiple sidebar items.
+    const runtimeOccurrences = labels.filter(l => l.includes('Runtime')).length
+    expect(runtimeOccurrences).toBe(1)
   })
 })
 
@@ -241,38 +233,28 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.view).toBe('event-log')
   })
 
-  it('redirects legacy activity URL to observatory and upgrades ag_range to range', () => {
+  it('falls back invalid activity section to default agents and upgrades ag_range to range', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       ag_range: '6h',
       keeper: 'nova',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.range).toBe('6h')
     expect(result.ag_range).toBeUndefined()
     expect(result.keeper).toBe('nova')
   })
 
-  it('redirects live collaboration to the observatory live view', () => {
+  it('falls back invalid live section to default agents', () => {
     const result = normalizeRouteParams('monitoring', { section: 'live' })
-    expect(result.section).toBe('observatory')
-    expect(result.view).toBe('live')
+    expect(result.section).toBe('agents')
+    expect(result.view).toBeUndefined()
   })
 
   it('redirects standalone runtime diagnostics into runtime views', () => {
-    expect(normalizeRouteParams('monitoring', { section: 'cascade-inspector' })).toMatchObject({
-      section: 'runtime',
-      view: 'inspector',
-    })
     expect(normalizeRouteParams('monitoring', { section: 'cost' })).toMatchObject({
       section: 'runtime',
       view: 'cost',
-    })
-  })
-
-  it('redirects legacy runtime cascade view to the dedicated cascade config surface', () => {
-    expect(normalizeRouteParams('monitoring', { section: 'runtime', view: 'cascade' })).toMatchObject({
-      section: 'cascade-config',
     })
   })
 
@@ -282,12 +264,12 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.view).toBe('attribution')
   })
 
-  it('drops unsupported legacy all-range when redirecting activity to observatory', () => {
+  it('falls back invalid activity with unsupported all-range to default agents', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       ag_range: 'all',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.range).toBeUndefined()
     expect(result.ag_range).toBeUndefined()
   })
@@ -296,10 +278,6 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
 describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
   it('exposes the sessions → agents redirect as reference contract', () => {
     expect(SECTION_REDIRECTS['monitoring:sessions']).toEqual({ section: 'agents' })
-  })
-
-  it('exposes the activity → observatory redirect as reference contract', () => {
-    expect(SECTION_REDIRECTS['monitoring:activity']).toEqual({ section: 'observatory' })
   })
 
   it('is the single source of truth for legacy section remaps', () => {
@@ -367,13 +345,13 @@ describe('normalizeRouteParams query param preservation', () => {
     expect(result.session_id).toBe('s-9')
   })
 
-  it('preserves keeper filter through the activity → observatory redirect', () => {
+  it('preserves keeper filter through invalid activity fallback to agents', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
       keeper: 'nova',
       ag_range: '24h',
     })
-    expect(result.section).toBe('observatory')
+    expect(result.section).toBe('agents')
     expect(result.keeper).toBe('nova')
     expect(result.range).toBe('24h')
   })
@@ -413,7 +391,6 @@ describe('consolidation redirects (Phase 1)', () => {
     ['fleet', {}, 'fleet-health', 'comparison', {}],
     ['fsm-hub', {}, 'agents', 'fsm', {}],
     ['metrics', {}, 'runtime', undefined, {}],
-    ['cascade', {}, 'cascade-config', undefined, {}],
   ])(
     'monitoring:%s → %s (view: %s) preserves params',
     (oldSection, extra, expectedSection, expectedView, preserved) => {

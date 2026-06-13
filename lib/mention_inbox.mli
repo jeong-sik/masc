@@ -11,8 +11,8 @@ type mention_record = {
   id: string;              (** Unique ID: "m-" prefix + timestamp + random *)
   target_agent: string;    (** Who was mentioned *)
   source_agent: string;    (** Who mentioned them *)
-  source_kind: string;     (** "room_message" | "board_post" | "board_comment" *)
-  source_id: string;       (** room_id or post_id *)
+  source_kind: string;     (** "broadcast_message" | "board_post" | "board_comment" *)
+  source_id: string;       (** workspace_id or post_id *)
   content_preview: string; (** First ~200 chars of the content *)
   created_at: float;       (** Unix timestamp *)
   read_at: float;          (** 0.0 = unread, otherwise Unix timestamp when read *)
@@ -27,21 +27,21 @@ val mention_record_to_json : mention_record -> Yojson.Safe.t
 val mention_record_of_json : Yojson.Safe.t -> mention_record option
 (** Deserialize a mention record from JSON. Returns None on parse failure. *)
 
-val inbox_path : Coord.config -> string
+val inbox_path : Workspace.config -> string
 (** Returns the path to `.masc/mention_inbox.jsonl`. *)
 
-val append_mention : ?task_id:string -> Coord.config -> mention_record -> unit
+val append_mention : ?task_id:string -> Workspace.config -> mention_record -> unit
 (** Append a mention record to the JSONL file.
 
     If [~task_id] is provided and the backlog reports the task as terminal
     (Done / Cancelled), the append is skipped and a [cache_desync.cleared]
     event is logged instead (fleet-wide invariant, issue #13397). *)
 
-val read_mentions : Coord.config -> target_agent:string -> limit:int -> mention_record list
+val read_mentions : Workspace.config -> target_agent:string -> limit:int -> mention_record list
 (** Read mentions for a target agent, newest first, up to [limit] items. *)
 
-val unread_count : Coord.config -> target_agent:string -> int
+val unread_count : Workspace.config -> target_agent:string -> int
 (** Count unread mentions (where read_at = 0.0) for a target agent. *)
 
-val mark_read : Coord.config -> mention_id:string -> unit
+val mark_read : Workspace.config -> mention_id:string -> unit
 (** Set read_at to current time for the given mention ID. *)

@@ -57,7 +57,7 @@ describe('TaskWall', () => {
           branch: 'feature/task-wall-long-branch',
           path: '/tmp/worktree',
           git_root: '/tmp/repo',
-          repo_name: 'masc-mcp',
+          repo_name: 'masc',
         },
       }),
       makeTask({

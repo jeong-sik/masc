@@ -1,6 +1,8 @@
 (** Input query helpers for keeper world observation. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val backlog_updated_since_last_scheduled_autonomous
   :  meta:keeper_meta
@@ -8,11 +10,14 @@ val backlog_updated_since_last_scheduled_autonomous
   -> bool
 
 val read_backlog_counts
-  :  allowed_tool_names:string list option
-  -> config:Coord.config
+  :  config:Workspace.config
   -> meta:keeper_meta
   -> int * int * int * int * bool
 
-val count_active_agents : config:Coord.config -> int
+val count_running_keeper_fibers : config:Workspace.config -> int
+(** Count live keeper fibers for [config.base_path].
+
+    This intentionally does not read the legacy [.masc/agents/] registry; that
+    registry may be empty while keeper fibers are healthy and running. *)
 val compute_idle_seconds : meta:keeper_meta -> int
-val read_context_ratio : config:Coord.config -> meta:keeper_meta -> float
+val read_context_ratio : config:Workspace.config -> meta:keeper_meta -> float

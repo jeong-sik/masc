@@ -13,25 +13,25 @@
 | scc_count | 1 | - |
 | largest_scc_size | 224 | - |
 
-## Room/Coordination Dependents
+## Workspace Dependents
 
 | Module | Dependents | Delta |
 | --- | --- | --- |
-| Coord | 193 | - |
+| Workspace | 193 | - |
 
 ## Top Hub Modules
 
 | Rank | Module | Dependents |
 | --- | --- | --- |
-| 1 | Prometheus | 230 |
+| 1 | Otel_metric_store | 230 |
 | 2 | Keeper_types | 224 |
-| 3 | Coord | 193 |
+| 3 | Workspace | 193 |
 | 4 | Keeper_metrics | 151 |
 | 5 | Keeper_registry | 81 |
 | 6 | Keeper_id | 66 |
 | 7 | Keeper_state_machine | 59 |
 | 8 | Mcp_server | 51 |
-| 9 | Keeper_cascade_profile | 48 |
+| 9 | Keeper_runtime_profile | 48 |
 | 10 | Tool_dispatch | 47 |
 
 ## Heaviest Importers
@@ -54,15 +54,15 @@
 | Prefix | Modules | Coupling | External Deps | Internal Edges |
 | --- | --- | --- | --- | --- |
 | model_inference | 6 | 0.889 | 1 | 8 |
-| prometheus_builtin | 7 | 0.833 | 2 | 10 |
+| otel_metric_store_builtin | 7 | 0.833 | 2 | 10 |
 | server_mcp | 13 | 0.690 | 9 | 20 |
 | keeper_state | 4 | 0.667 | 1 | 2 |
 | tool_board | 10 | 0.650 | 7 | 13 |
-| cascade_transport | 13 | 0.600 | 8 | 12 |
+| runtime_transport | 13 | 0.600 | 8 | 12 |
 | tool_shard | 18 | 0.583 | 5 | 7 |
 | meta_cognition | 7 | 0.583 | 5 | 7 |
-| cascade_config | 9 | 0.500 | 11 | 11 |
-| cascade_catalog | 8 | 0.500 | 11 | 11 |
+| runtime_config | 9 | 0.500 | 11 | 11 |
+| runtime_catalog | 8 | 0.500 | 11 | 11 |
 
 ## Regeneration
 

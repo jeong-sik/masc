@@ -10,13 +10,13 @@
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the bare identifier `Compaction_trigger`.
 ; Wave D RFC will migrate to (wrapped true) + -open Tezos pattern.
+
 (include_subdirs no)
 
 (library
- (name masc_mcp_compaction_trigger)
- (public_name masc_mcp.compaction_trigger)
+ (name masc_compaction_trigger)
+ (public_name masc.compaction_trigger)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  yojson
-  masc_log))
+ (flags
+  (:standard -w +4))
+ (libraries yojson masc_log))

@@ -30,7 +30,7 @@ Options:
                   $PWD/.masc/playground/docker.
   --days N        Candidate age threshold from last git commit. Default: 7.
   --keeper NAME   Limit to one keeper directory under the Docker playground.
-  --repo NAME     Limit to one repo under <keeper>/repos/. Example: masc-mcp.
+  --repo NAME     Limit to one repo under <keeper>/repos/. Example: masc.
   --apply         Remove candidates with git worktree remove.
   --include-broken
                   Also consider broken/non-git directories under

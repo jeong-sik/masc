@@ -1,0 +1,30 @@
+(include_subdirs no)
+
+;; Economy — pure agent token-ledger domain (earn / spend / balance,
+;; JSONL persistence). Carved out of the masc mega-library so the Board
+;; domain can call Economy.earn without forcing a Board<->mega-lib cycle.
+;; Dependency direction is one-way: consumers (board_core_persist, board_votes)
+;; depend on masc_economy; this lib depends only on the neutral libraries
+;; below. (wrapped false) keeps the bare `Economy` module name so call
+;; sites stay `Economy.earn`.
+;;
+;; NOTE: Thompson_sampling was NOT moved alongside Economy. It is NOT a
+;; clean leaf — it calls Health.is_healthy (lib/agent_health.ml, mega-lib
+;; root) and Otel_metric_store.inc_counter (lib/otel_metric_store.ml, mega-lib root). Board
+;; also calls Thompson_sampling.record_vote, so Board remains blocked until
+;; those two edges are inverted (callback injection). Tracked in PR-AE report.
+
+(library
+ (name masc_economy)
+ (public_name masc.masc_economy)
+ (wrapped false)
+ (libraries
+  masc_core
+  masc_config
+  masc_log
+  masc_workspace
+  masc_random_id
+  fs_compat
+  yojson
+  eio
+  unix))

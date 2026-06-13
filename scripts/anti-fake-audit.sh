@@ -41,7 +41,7 @@ if [ "$MODE" = "production-scan" ]; then
   # that aborts the script before any scan runs — exactly the wrong
   # failure mode for "no grandfathered sites means migration is done."
   # `|| true` keeps the empty-allow-list case as a valid baseline.
-  # (PR #15759 codex review P2.)
+  # (PR #15759 review P2.)
   ALLOW=$(grep -vE '^(#|$)' "$GRANDFATHER" | awk -F: '{print $1":"$2}' | sort -u || true)
 
   FAIL=0
@@ -80,7 +80,7 @@ if [ "$MODE" = "production-scan" ]; then
   # NOT skipped: lines that *end* with `*)`. A naive `\*\)\s*$` filter
   # would let `with _ -> () (* rationale *)` (real silent skip with an
   # inline rationale comment after it) bypass the lint — exactly the
-  # bypass class the reviewer flagged in PR #15759 codex P2. Decision:
+  # bypass class the reviewer flagged in PR #15759 P2. Decision:
   # prefer false positives (force grandfather entry) over false
   # negatives (silent skip slips through).
   T_HITS=$(rg -nU --type ocaml --multiline -e 'with[[:space:]]+_[[:space:]]+->[[:space:]]+\(\)' lib/ 2>/dev/null || true)

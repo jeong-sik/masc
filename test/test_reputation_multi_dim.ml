@@ -1,7 +1,7 @@
 (** Tests for multi-dimensional reputation scoring and dynamic autonomy. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 (* ── Reputation_autonomy tests ────────────────────────────────────── *)
 
@@ -106,10 +106,10 @@ let test_describe_constraints_non_empty () =
   ; Reputation_autonomy.Elevated
   ; Reputation_autonomy.Full ]
 
-(* ── Agent_reputation v2 field defaults ─────────────────────────── *)
+(* ── Reputation v2 field defaults ─────────────────────────── *)
 
 let test_default_reputation_v2_fields () =
-  let rep = Agent_reputation.default_reputation ~agent_name:"test-agent" in
+  let rep = Reputation.default_reputation ~agent_name:"test-agent" in
   check (float 0.0001) "execution_reliability default" 1.0
     rep.execution_reliability;
   check (float 0.0001) "goal_adherence default" 1.0
@@ -120,9 +120,9 @@ let test_default_reputation_v2_fields () =
     rep.autonomy_level
 
 let test_reputation_json_roundtrip_v2_fields () =
-  let rep = Agent_reputation.default_reputation ~agent_name:"json-test" in
-  let json = Agent_reputation.reputation_to_json rep in
-  match Agent_reputation.reputation_of_json json with
+  let rep = Reputation.default_reputation ~agent_name:"json-test" in
+  let json = Reputation.reputation_to_json rep in
+  match Reputation.reputation_of_json json with
   | Some r ->
     check (float 0.0001) "execution_reliability preserved" 1.0
       r.execution_reliability;
@@ -133,7 +133,7 @@ let test_reputation_json_roundtrip_v2_fields () =
 
 let test_compute_overall_score_pure () =
   let score =
-    Agent_reputation.compute_overall_score
+    Reputation.compute_overall_score
       ~completion_rate:1.0
       ~response_rate:1.0
       ~board_posts:10
@@ -144,7 +144,7 @@ let test_compute_overall_score_pure () =
 
 let test_compute_accountability_score_penalty () =
   let penalized =
-    Agent_reputation.compute_accountability_score
+    Reputation.compute_accountability_score
       ~evidence_coverage:0.5
       ~unsupported_completion_rate:0.5
       ~open_overdue_commitments:0

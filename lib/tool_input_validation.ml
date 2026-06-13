@@ -38,8 +38,8 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
 ;;
 
 let required_names schema =
-  match Yojson.Safe.Util.member "required" schema with
-  | `List items ->
+  match Json_util.assoc_member_opt "required" schema with
+  | Some (`List items) ->
     List.filter_map
       (function
         | `String name -> Some name
@@ -49,15 +49,15 @@ let required_names schema =
 ;;
 
 let has_enum schema =
-  match Yojson.Safe.Util.member "enum" schema with
-  | `List (_ :: _) -> true
+  match Json_util.assoc_member_opt "enum" schema with
+  | Some (`List (_ :: _)) -> true
   | _ -> false
 ;;
 
 let optional_enum_fields schema =
   let required = required_names schema in
-  match Yojson.Safe.Util.member "properties" schema with
-  | `Assoc props ->
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc props) ->
     List.filter_map
       (fun (name, prop_schema) ->
          if (not (List.mem name required)) && has_enum prop_schema
@@ -102,14 +102,14 @@ let schema_has_properties = function
 ;;
 
 let property_names schema =
-  match Yojson.Safe.Util.member "properties" schema with
-  | `Assoc props -> List.map fst props
+  match Json_util.assoc_member_opt "properties" schema with
+  | Some (`Assoc props) -> List.map fst props
   | _ -> []
 ;;
 
 let forbids_additional_properties schema =
-  match Yojson.Safe.Util.member "additionalProperties" schema with
-  | `Bool false -> true
+  match Json_util.assoc_member_opt "additionalProperties" schema with
+  | Some (`Bool false) -> true
   | _ -> false
 ;;
 
@@ -148,8 +148,8 @@ type one_of_branch = {
 }
 
 let one_of_branch_constraints schema =
-  match Yojson.Safe.Util.member "oneOf" schema with
-  | `List branches ->
+  match Json_util.assoc_member_opt "oneOf" schema with
+  | Some (`List branches) ->
     let constraints =
       List.filter_map
         (fun branch ->
@@ -158,8 +158,8 @@ let one_of_branch_constraints schema =
            then None
            else
              let consts =
-               match Yojson.Safe.Util.member "properties" branch with
-               | `Assoc props ->
+               match Json_util.assoc_member_opt "properties" branch with
+               | Some (`Assoc props) ->
                  List.filter_map
                    (fun (name, prop_schema) ->
                       match prop_schema with
@@ -172,8 +172,8 @@ let one_of_branch_constraints schema =
                | _ -> []
              in
              let forbidden_required =
-               match Yojson.Safe.Util.member "not" branch with
-               | `Assoc _ as not_schema -> required_names not_schema
+               match Json_util.assoc_member_opt "not" branch with
+               | Some (`Assoc _ as not_schema) -> required_names not_schema
                | _ -> []
              in
              Some { required; consts; forbidden_required })
@@ -270,8 +270,8 @@ let empty_tool_args = function
 ;;
 
 let emit_validation_telemetry ~tool ~result ~reason =
-  Prometheus.inc_counter
-    Prometheus.metric_tool_input_validation
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_tool_input_validation
     ~labels:[ "tool", tool; "result", result; "reason", reason ]
     ();
   Otel_spans.add_event
@@ -293,12 +293,16 @@ let pass_reason ~schema ~args ~prepared_args =
 ;;
 
 let validation_schema_of_json ~name json_schema : Agent_sdk.Types.tool_schema =
-  { name; description = ""; parameters = Tool_bridge.params_of_json_schema json_schema }
+  { name
+  ; description = ""
+  ; parameters = Tool_bridge.params_of_json_schema json_schema
+  ; strict = None
+  }
 ;;
 
 let reject_validation ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
-  Log.info "tool_input_validation rejected %s: %s" name message;
+  Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
     (Error
        { Tool_result.class_ = Tool_result.Policy_rejection
@@ -308,6 +312,10 @@ let reject_validation ~name ~reason ~message =
              [ "error", `String message
              ; "validation", `String "oas_tool_middleware"
              ; "reason", `String reason
+             ; ( "failure_class"
+               , `String
+                   (Tool_result.tool_failure_class_to_string
+                      Tool_result.Policy_rejection) )
              ]
        ; tool_name = name
        ; duration_ms = 0.0
@@ -323,7 +331,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
       error_text
   in
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
-  Log.error "%s" message;
+  Log.Tool_validation.error "%s" message;
   Tool_dispatch.Reject
     (Error
        { Tool_result.class_ = Tool_result.Runtime_failure
@@ -415,7 +423,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     | Agent_sdk.Tool_middleware.Pass when not (Yojson.Safe.equal prepared_args args) ->
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
-      Log.debug "tool_input_validation normalized args for %s" name;
+      Log.Tool_validation.debug "tool_input_validation normalized args for %s" name;
       Tool_dispatch.Proceed prepared_args
     | Agent_sdk.Tool_middleware.Pass ->
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
@@ -423,11 +431,11 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       Tool_dispatch.Pass
     | Agent_sdk.Tool_middleware.Proceed coerced ->
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
-      Log.debug "tool_input_validation coerced args for %s" name;
+      Log.Tool_validation.debug "tool_input_validation coerced args for %s" name;
       Tool_dispatch.Proceed coerced
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
-      Log.info "tool_input_validation rejected %s: %s" name message;
+      Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
       (* Input-schema / policy rejection — classify so the
          dispatch-level metric label (failure_class) reflects the
          actual category instead of bucketing as "unclassified". *)
@@ -439,6 +447,11 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                `Assoc
                  [ "error", `String message
                  ; "validation", `String "oas_tool_middleware"
+                 ; "reason", `String "invalid_args"
+                 ; ( "failure_class"
+                   , `String
+                       (Tool_result.tool_failure_class_to_string
+                          Tool_result.Policy_rejection) )
                  ]
            ; tool_name = name
            ; duration_ms = 0.0

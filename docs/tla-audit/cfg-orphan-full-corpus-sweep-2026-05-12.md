@@ -17,7 +17,7 @@ iter 45's R-F-2 sweep covered `specs/keeper-state-machine/` only (76 cfgs).  Thi
 | autonomous | varies |
 | boundary | varies |
 | bug-models | varies |
-| cascade | varies |
+| runtime | varies |
 | checkpoint-trim | varies |
 | closure | varies |
 | **keeper-state-machine** | 76 (iter 45 already scanned) |
@@ -41,7 +41,7 @@ Promoted the inline `/tmp/cfg-orphan-sweep2.sh` from iter 45 to a permanent audi
 3. Check each name against the parent `.tla` via `rg -q "\bname\b"`.
 4. Print orphans; exit 1 if any.
 
-The script's `awk` block reads from `INVARIANTS`/`PROPERTIES` until the next top-level keyword (`CONSTANTS`, `SPECIFICATION`, `CHECK_DEADLOCK`, `INIT`, `NEXT`).  Suffix-stripping handles `-buggy`, `-buggy-attempt`, `-buggy-cascade`, `-ci`, `-ci-buggy`, `-cap2`, `-cap2-buggy`, `-overflow`, `-overflow-buggy`, etc. iteratively.
+The script's `awk` block reads from `INVARIANTS`/`PROPERTIES` until the next top-level keyword (`CONSTANTS`, `SPECIFICATION`, `CHECK_DEADLOCK`, `INIT`, `NEXT`).  Suffix-stripping handles `-buggy`, `-buggy-attempt`, `-buggy-runtime`, `-ci`, `-ci-buggy`, `-cap2`, `-cap2-buggy`, `-overflow`, `-overflow-buggy`, etc. iteratively.
 
 ## Result
 

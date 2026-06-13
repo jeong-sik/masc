@@ -9,7 +9,7 @@
 
 open Alcotest
 
-module Bounded = Masc_mcp.Bounded
+module Bounded = Masc.Bounded
 
 (* ============================================================
    Default Config Tests

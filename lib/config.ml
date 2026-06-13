@@ -13,12 +13,36 @@ let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   in
   List.rev unique
 
+
+(* Tools that are keeper-only (called via public_name by the keeper agent)
+   and must NOT be exposed as operator MCP tool calls.
+   masc_web_search / masc_web_fetch are reached via WebSearch / WebFetch
+   public_names from keeper context; operator never calls them directly. *)
+let keeper_only_masc_names =
+  [ "masc_web_search"; "masc_web_fetch" ]
+
+let descriptor_owned_internal_tool_schemas : Masc_domain.tool_schema list =
+  Keeper_tool_descriptor.public_descriptors
+  |> List.filter_map (fun (descriptor : Keeper_tool_descriptor.t) ->
+    if String.starts_with ~prefix:"masc_" descriptor.internal_name
+       && not (List.mem descriptor.internal_name keeper_only_masc_names)
+    then
+      Some
+        { Masc_domain.name = descriptor.internal_name
+        ; description = descriptor.description
+        ; input_schema = descriptor.input_schema
+        }
+    else None)
+
 let raw_all_tool_schemas : Masc_domain.tool_schema list =
   dedupe_schemas
     (Tools.raw_schemas
      @ Tool_schemas_misc.schemas
-     @ Tool_board.tools
-     @ Keeper_types.schemas
+     @ descriptor_owned_internal_tool_schemas
+     (* Board MCP adapter schemas live outside neutral Tool substrate and
+        outside Board domain. *)
+     @ Board_tool.tools
+     @ Keeper_types_profile.schemas
      @ Tool_local_runtime.schemas
      @ Tool_agent_timeline.schemas
      @ Tool_shard.schemas
@@ -61,8 +85,8 @@ let validate_schemas (schemas : Masc_domain.tool_schema list) =
           else errors
         in
         let errors =
-          match Yojson.Safe.Util.member "type" schema.input_schema with
-          | `String "object" -> errors
+          match Json_util.assoc_member_opt "type" schema.input_schema with
+          | Some (`String "object") -> errors
           | _ ->
               Printf.sprintf "Tool %s: input_schema.type is not 'object'"
                 schema.name
@@ -86,7 +110,7 @@ let all_tool_schemas : Masc_domain.tool_schema list =
 let all_tool_names () : string list =
   List.map (fun (s : Masc_domain.tool_schema) -> s.name) all_tool_schemas
 
-let is_tool_visible tool_name =
+let is_tool_allowed tool_name =
   Tool_catalog.is_visible tool_name
 
 (* O(1) membership lookup for "is this name in raw_all_tool_schemas?".
@@ -108,14 +132,3 @@ let visible_tool_schemas ?(include_hidden = false) () :
     Masc_domain.tool_schema list =
   Capability_registry.visible_public_tool_schemas_from ~include_hidden
     front_door_tool_schemas
-
-let surface_tool_schemas ?(include_hidden = false) () :
-    Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden ()
-  |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Tool_scope.classify ~name:s.name = Tool_scope.Surface)
-
-let keeper_internal_tool_schemas () : Masc_domain.tool_schema list =
-  visible_tool_schemas ~include_hidden:true ()
-  |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Tool_scope.classify ~name:s.name = Tool_scope.Keeper_internal)

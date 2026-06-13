@@ -1,5 +1,20 @@
 (** Provider-attempt provenance and health helpers for keeper turn driver. *)
 
+(** {1 Provider SDK error classifiers}
+    Re-homed from the deleted runtime attempt FSM (RFC-0206); generic
+    provider-error classification, not runtime-specific. *)
+
+val message_looks_like_cli_wrapped_hard_quota : string -> bool
+val message_looks_like_capacity_backpressure : string -> bool
+val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+val sdk_error_is_terminal_provider_runtime_failure :
+  Agent_sdk.Error.sdk_error -> bool
+val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
+val sdk_error_soft_rate_limited :
+  Agent_sdk.Error.sdk_error -> float option option
+val sdk_error_runtime_fallback_class :
+  Agent_sdk.Error.sdk_error -> string option
+
 val provider_attempt_status_of_result :
   ('a, Agent_sdk.Error.sdk_error) result -> string
 
@@ -14,7 +29,7 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 val base_provider_attempt_provenance : provider_attempt_provenance
@@ -28,8 +43,6 @@ type provider_attempt_started_record =
   ; started_per_provider_timeout_s : float option
   ; started_attempt_timeout_source : string
   ; started_attempt_watchdog_source : string
-  ; started_liveness_mode : string
-  ; started_liveness_budget_source : string option
   }
 
 type provider_attempt_finished_record =
@@ -51,18 +64,17 @@ val client_capacity_full_decision :
   capacity_key:string -> Yojson.Safe.t
 
 val success_selected_model_raw :
-  Cascade_runtime_candidate.t -> string option
+  Runtime_candidate.t -> string option
 
-val error_selected_model_raw : string option
-val health_error_kind : string -> Cascade_health_tracker.error_kind
+val health_error_kind : string -> Keeper_binding_health.error_kind
 
 val record_candidate_health_success :
-  Cascade_runtime_candidate.t -> latency_ms:float -> unit
+  keeper_name:string -> Runtime_candidate.t -> latency_ms:float -> unit
 
 val record_candidate_health_rejected :
-  Cascade_runtime_candidate.t -> reason:string -> unit
+  keeper_name:string -> Runtime_candidate.t -> reason:string -> unit
 
 val record_candidate_health_error :
-  Cascade_runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
+  keeper_name:string -> Runtime_candidate.t -> Agent_sdk.Error.sdk_error -> unit
 
 val runtime_candidate_label : string

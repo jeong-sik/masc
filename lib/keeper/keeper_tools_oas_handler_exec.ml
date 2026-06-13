@@ -10,16 +10,94 @@ open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 open Keeper_tools_oas_handler_telemetry
 
+let is_execute_tool_name name =
+  match String.lowercase_ascii name with
+  | "execute" | "tool_execute" | "mcp__masc__execute" -> true
+  | _ -> false
+
+let string_assoc key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+
+let result_cwd raw_result =
+  try
+    match Yojson.Safe.from_string raw_result with
+    | `Assoc fields -> string_assoc "cwd" fields
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
+
+let directory_exists path =
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
+
+let take_lines max_lines lines =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc, false
+    | _ :: _ as rest when remaining <= 0 -> List.rev acc, rest <> []
+    | line :: rest -> loop (remaining - 1) (line :: acc) rest
+  in
+  loop max_lines [] lines
+
+let render_git_status_changes output =
+  let lines =
+    output
+    |> String.split_on_char '\n'
+    |> List.map String.trim
+    |> List.filter (fun line -> line <> "")
+  in
+  match lines with
+  | [] -> None
+  | _ ->
+    let lines, truncated = take_lines 40 lines in
+    let suffix =
+      if truncated then [ "... (git status output truncated)" ] else []
+    in
+    Some
+      ("--- Worktree changes (git status --short) ---\n"
+       ^ String.concat "\n" (lines @ suffix))
+
+let post_execute_git_status_change ~(tool_name : string) raw_result =
+  if not (is_execute_tool_name tool_name)
+  then None
+  else (
+    match result_cwd raw_result with
+    | None -> None
+    | Some cwd when not (directory_exists cwd) -> None
+    | Some cwd ->
+      try
+        let status, output =
+          Masc_exec.Exec_gate.run_argv_with_status
+            ~actor:(Masc_exec.Agent_id.of_string "workspace/git")
+            ~raw_source:
+              ("git -C " ^ Filename.quote cwd
+               ^ " --no-optional-locks status --short")
+            ~summary:"post-Execute git status delta"
+            ~timeout_sec:5.0
+            [ "git"; "-C"; cwd; "--no-optional-locks"; "status"; "--short" ]
+        in
+        match status with
+        | Unix.WEXITED 0 -> render_git_status_changes output
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> None)
+
 let execute_with_observers
       ~(name : string)
-      ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?turn_sandbox_factory
-      ?turn_sandbox_factory_git
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
       ?on_tool_called
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
       ~(failure_counts : failure_counts)
       ~(key : string)
       ~(input : Yojson.Safe.t)
@@ -30,14 +108,18 @@ let execute_with_observers
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
-        Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+        Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
           ~config
           ~meta
-          ~ctx_work:ctx_snapshot
-          ?turn_sandbox_factory
-          ?turn_sandbox_factory_git
-          ~exec_cache
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ~exec_cache
           ?search_fn
+          ?sw
+          ?clock
+          ?proc_mgr
+          ?net
+          ?mcp_session_id
           ~name
           ~input
           ())
@@ -73,16 +155,10 @@ let execute_with_observers
           | Some info ->
             let family_key = workflow_rejection_family_key ~tool_name:name info in
             let count = workflow_rejection_count_record failure_counts family_key in
-            if workflow_rejection_should_scope_block info
-            then (
-              match workflow_scope_key_of_input ~tool_name:name input with
-              | Some scope_key ->
-                ignore
-                  (workflow_rejection_scope_block_record
-                     failure_counts
-                     scope_key
-                     info)
-              | None -> ());
+            (* Workflow rejections are recovery guidance, not an execution
+               ban.  The former scope-block table turned a normal
+               self-correction hint into a 30-minute pre-dispatch gate for
+               the same task/action scope. *)
             workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
           | None -> [])
         else []
@@ -179,7 +255,7 @@ let execute_with_observers
         ~site:"error_result"
         ~ts
         ();
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
@@ -207,7 +283,7 @@ let execute_with_observers
             surface through [Keeper_tool_retry_state] so
             attempts 2+ within the same retry cycle and
             identical failures across cycles are demoted to
-            DEBUG, with one durable ERROR plus a Prometheus
+            DEBUG, with one durable ERROR plus a Otel_metric_store
             counter when the silence threshold trips.
 
             [WORKAROUND-CARRYOVER]: this is a noise-dedupe
@@ -252,7 +328,7 @@ let execute_with_observers
               name
               n
               detail;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string ToolsOasFailures)
               ~labels:
                 [ "tool", name
@@ -263,7 +339,7 @@ let execute_with_observers
          the human-readable WARN envelope is unified above. *)
       (match deterministic_reason with
        | Some reason ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ToolsOasFailures)
            ~labels:
              [ "tool", name
@@ -360,10 +436,7 @@ let execute_with_observers
       (match on_tool_called with
        | Some f -> f name
        | None -> ());
-      (* PR#814 Gap 1: Capture git status delta after successful tool execution.
-         If the working tree changed, log it so the keeper is aware of
-         file-system side effects from its tool calls. *)
-      let change_block = None in
+      let change_block = post_execute_git_status_change ~tool_name:name raw_result in
       let normalized = normalize_tool_result ~success:true raw_result in
       let final_result =
         match change_block with
@@ -450,7 +523,7 @@ let execute_with_observers
     in
     let is_edeadlk = edeadlk_backtrace <> None in
     (* #10567: EDEADLK is a transient mutex-contention race in shared
-       coord/keeper Stdlib.Mutex sites, not a real keeper-side failure.
+       workspace/keeper Stdlib.Mutex sites, not a real keeper-side failure.
        Counting it toward [failure_counts] burns the consecutive-failure
        budget (max 3) and ends the keeper turn even when the next call
        would succeed.  Skip the counter bump and downgrade the log to
@@ -503,7 +576,7 @@ let execute_with_observers
           max_consecutive_failures
           (Printexc.to_string exn)
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ToolsOasFailures)
       ~labels:[ "tool", name; "site", "exception" ]
       ();

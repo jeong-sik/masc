@@ -5,7 +5,7 @@
 \*   complete.ml -> http_client.ml -> Ollama.
 \*
 \* Both files live in the pinned `agent_sdk.llm_provider` library
-\* (see lib/dune for the dependency), not in masc-mcp:
+\* (see lib/dune for the dependency), not in masc:
 \*   <oas>/lib/llm_provider/complete.ml
 \*   <oas>/lib/llm_provider/http_client.ml
 \*

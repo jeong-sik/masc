@@ -13,7 +13,7 @@
 \* since that operation loaded (graph_version == load_version + 1).
 \*
 \* Current runtime reference (verified 2026-05-01):
-\*   lib/coord.ml:hebbian_on_task_done_fn emits hebbian activity events for
+\*   lib/workspace/workspace_hooks.ml:hebbian_on_task_done_fn emits hebbian activity events for
 \*   task completion. The old .masc/synapses graph read-modify-write path
 \*   is retired, so this model remains as a historical lost-update guard.
 

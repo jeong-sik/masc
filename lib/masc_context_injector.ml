@@ -13,6 +13,8 @@ type config = {
 let default_config () : config =
   { start_time = Unix.gettimeofday () }
 
+let iso8601_of_float ts = Masc_domain.iso8601_of_unix_seconds ts
+
 (* ================================================================ *)
 (* Context keys                                                      *)
 (* ================================================================ *)
@@ -28,13 +30,6 @@ let key_tool_error_count = "session:tool_error_count"
 (* ================================================================ *)
 (* ISO 8601 formatting                                               *)
 (* ================================================================ *)
-
-let iso8601_of_float (t : float) : string =
-  let open Unix in
-  let tm = gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
 
 (* ================================================================ *)
 (* Injector factory                                                  *)
@@ -54,7 +49,7 @@ let make ~(config : config) () : Agent_sdk.Hooks.context_injector =
     let elapsed = now -. config.start_time in
     Some Agent_sdk.Hooks.{
       context_updates = [
-        (key_wall_time, `String (iso8601_of_float now));
+        (key_wall_time, `String (Masc_domain.iso8601_of_unix_seconds now));
         (key_elapsed_seconds, `Float elapsed);
         (key_tool_call_count, `Int (Atomic.get call_count));
         (key_last_tool_name, `String tool_name);

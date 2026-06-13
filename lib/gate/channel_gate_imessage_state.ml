@@ -23,16 +23,6 @@ let default_status_path = ".gate/runtime/imessage/status.json"
 let default_binding_store_path = ".gate/runtime/imessage/bindings.json"
 let default_binding_audit_path = ".gate/runtime/imessage/binding_audit.jsonl"
 
-(* Legacy paths from the pre-v0.9.0 layout. Read-fallback picks these up
-   once so operators see a transparent migration on the next write — see
-   configured_read_path below. *)
-let legacy_status_path =
-  Filename.concat Common.masc_dirname "connectors/imessage/status.json"
-let legacy_binding_store_path =
-  Filename.concat Common.masc_dirname "connectors/imessage/bindings.json"
-let legacy_binding_audit_path =
-  Filename.concat Common.masc_dirname "connectors/imessage/binding_audit.jsonl"
-
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_IMESSAGE_STATUS_STALE_SEC"
 
@@ -56,23 +46,8 @@ let configured_write_path env_name ~default =
   | Some raw -> resolve_path raw
   | None -> resolve_path default
 
-(* Read priority: env var > new default (if file exists) > legacy (if file
-   exists) > new default (even if absent, so downstream code sees a stable
-   path for later creation). Matches the Discord resolver in
-   Channel_gate_discord_names.configured_read_path. *)
-let configured_read_path env_name ~default ~legacy =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
-  | Some raw -> resolve_path raw
-  | None ->
-      let default_abs = resolve_path default in
-      if Sys.file_exists default_abs then default_abs
-      else
-        let legacy_abs = resolve_path legacy in
-        if Sys.file_exists legacy_abs then legacy_abs else default_abs
-
 let status_path () =
-  configured_read_path "MASC_IMESSAGE_STATUS_PATH"
-    ~default:default_status_path ~legacy:legacy_status_path
+  configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
 
 let status_write_path () =
   configured_write_path "MASC_IMESSAGE_STATUS_PATH" ~default:default_status_path
@@ -82,16 +57,16 @@ let binding_store_path () =
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  configured_read_path "MASC_IMESSAGE_BINDING_STORE_PATH"
-    ~default:default_binding_store_path ~legacy:legacy_binding_store_path
+  configured_write_path "MASC_IMESSAGE_BINDING_STORE_PATH"
+    ~default:default_binding_store_path
 
 let binding_audit_path () =
   configured_write_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  configured_read_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path ~legacy:legacy_binding_audit_path
+  configured_write_path "MASC_IMESSAGE_BINDING_AUDIT_PATH"
+    ~default:default_binding_audit_path
 
 let read_json_file_opt path =
   try Some (Yojson.Safe.from_file path) with
@@ -210,16 +185,16 @@ let read_recent_audit ~limit =
         else rows |> drop_left (total - limit) |> List.rev)
 
 let string_member json key =
-  json |> U.member key |> U.to_string_option |> Option.value ~default:""
+  Json_util.get_string_with_default json ~key ~default:""
 
 let int_member json key =
-  json |> U.member key |> U.to_int_option |> Option.value ~default:0
+  Json_util.get_int json key |> Option.value ~default:0
 
 let bool_member json key =
-  json |> U.member key |> U.to_bool_option |> Option.value ~default:false
+  Json_util.get_bool json key |> Option.value ~default:false
 
 let bool_option_member json key =
-  json |> U.member key |> U.to_bool_option
+  Json_util.get_bool json key
 
 let stale_of_updated_at updated_at =
   match Gate_time_util.parse_iso8601_opt updated_at with
@@ -231,6 +206,27 @@ let connector_state_label ~available ~connected ~stale =
   else if stale then "stale"
   else if connected then "connected"
   else "disconnected"
+
+(* RFC-0223 P2: presence surface. Both recomputed per call — no cached
+   presence state. *)
+
+let bound_channels ~keeper_name =
+  let normalized = String.trim keeper_name in
+  if String.equal normalized "" then []
+  else
+    read_bindings ()
+    |> List.filter_map (fun (b : binding) ->
+           if String.equal b.keeper_name normalized then Some b.channel_id
+           else None)
+
+let connected () =
+  (* Same liveness reading as [status_json]: the sidecar heartbeats its
+     status file; a missing or stale file means not live. *)
+  match read_json_file_opt (status_path ()) with
+  | None -> false
+  | Some json ->
+      let updated_at = string_member json "updated_at" in
+      bool_member json "connected" && not (stale_of_updated_at updated_at)
 
 let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
@@ -278,7 +274,7 @@ let status_json ?(audit_limit = 10) () =
       ("messages_processed", `Int (status_field "messages_processed" int_member 0));
       ("messages_failed", `Int (status_field "messages_failed" int_member 0));
       ("cursor_rowid", `Int (status_field "cursor_rowid" int_member 0));
-      ("poll_interval_sec", `Float (status_field "poll_interval_sec" (fun j k -> j |> U.member k |> U.to_float_option |> Option.value ~default:2.0) 2.0));
+      ("poll_interval_sec", `Float (status_field "poll_interval_sec" (fun j k -> Json_util.get_float j k |> Option.value ~default:2.0) 2.0));
       ("gate_base_url", `String (status_field "gate_base_url" string_member ""));
       ( "gate_healthy",
         Option.value ~default:`Null

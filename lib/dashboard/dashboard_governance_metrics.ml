@@ -39,7 +39,7 @@ let record_failure_callback_label =
   "dashboard_governance_tool_skipped_record"
 
 let record_tool_skipped_failure exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ ("callback", record_failure_callback_label) ]
     ();
@@ -194,9 +194,7 @@ let approval_queue_summary () : approval_summary =
 
 (* ── JSON projection ─────────────────────────────────────── *)
 
-let json_of_float_opt = function
-  | None -> `Null
-  | Some f -> `Float f
+let json_of_float_opt = Json_util.float_opt_to_json
 
 let tool_rejections_json ?(top_n = 20)
     ~window_minutes ?(now_ts = Unix.gettimeofday ()) () : Yojson.Safe.t list =
@@ -214,9 +212,9 @@ let tool_rejections_json ?(top_n = 20)
 let approval_queue_json (summary : approval_summary) : Yojson.Safe.t =
   `Assoc [
     ("depth", `Int summary.depth);
-    ("p50_wait_sec", json_of_float_opt summary.p50_wait_sec);
-    ("p95_wait_sec", json_of_float_opt summary.p95_wait_sec);
-    ("oldest_pending_sec", json_of_float_opt summary.oldest_pending_sec);
+    ("p50_wait_sec", Json_util.float_opt_to_json summary.p50_wait_sec);
+    ("p95_wait_sec", Json_util.float_opt_to_json summary.p95_wait_sec);
+    ("oldest_pending_sec", Json_util.float_opt_to_json summary.oldest_pending_sec);
   ]
 
 (** Top-level endpoint payload. *)
@@ -230,3 +228,10 @@ let governance_tool_events_json ?(now_ts = Unix.gettimeofday ())
     ("tool_rejections", `List rejections);
     ("approval_queue", approval_queue_json approval);
   ]
+
+let () =
+  Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name ~tool_name ~reason_code ->
+    ignore (record_tool_skipped ~keeper_name ~tool_name ~reason_code)
+  )
+;;
+

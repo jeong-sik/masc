@@ -2,7 +2,7 @@
 
    Bridges atd-generated payload types (see [Sse_event_t],
    [Sse_event_j]) and the manual envelope wrap that replicates
-   [lib/cascade/cascade_event_bridge.wrap_event] (lines 507-531) +
+   [lib/runtime/runtime_event_bridge.wrap_event] (lines 507-531) +
    [json_string_opt] (lines 25-27) semantics.
 
    The envelope is intentionally hand-rolled in OCaml rather than
@@ -13,7 +13,7 @@
 
 (** Envelope metadata fields common to every SSE event.
 
-    Field semantics match [cascade_event_bridge.wrap_event]: optional
+    Field semantics match [runtime_event_bridge.wrap_event]: optional
     string fields use [json_string_opt] (empty string → null), and
     [turn] uses plain [option fold] (None → null). *)
 type envelope_meta =
@@ -27,7 +27,7 @@ type envelope_meta =
   ; tool_name : string option
   }
 
-(** Replicates [cascade_event_bridge_inference.json_string_opt]:
+(** Replicates [runtime_event_bridge_inference.json_string_opt]:
 
     - [Some "non-empty"] → [`String value]
     - [Some "" \| Some "<whitespace>"] → [`Null]
@@ -60,7 +60,7 @@ let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe
 
     [agent_name] and [task_id] in the envelope are populated from the
     same values as the payload — this matches the
-    [cascade_event_bridge] AgentStarted arm at lines 556-560 which
+    [runtime_event_bridge] AgentStarted arm at lines 556-560 which
     passes [~agent_name ~task_id] to [wrap_event] alongside the
     payload [`Assoc]. *)
 let agent_started
@@ -88,8 +88,8 @@ let agent_started
     payload_json
 ;;
 
-(** Emit a [tool_called] envelope.  Matches cascade arm at
-    lib/cascade/cascade_event_bridge.ml:599-603 (pre-PR-3): envelope
+(** Emit a [tool_called] envelope.  Matches runtime arm at
+    lib/runtime/runtime_event_bridge.ml:599-603 (pre-PR-3): envelope
     populates ~agent_name ~tool_name; payload mirrors the same two
     fields. *)
 let tool_called
@@ -198,7 +198,7 @@ let turn_completed
 (** Emit a [turn_ready] envelope.  The wrapper computes [count] from
     [List.length tool_names] and [names_hash] as the first 16 chars
     of [Digest.to_hex (Digest.string (String.concat "\n" tool_names))],
-    matching cascade arm at cascade_event_bridge.ml:615-624 (pre-PR-3). *)
+    matching runtime arm at runtime_event_bridge.ml:615-624 (pre-PR-3). *)
 let turn_ready
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -236,7 +236,7 @@ let turn_ready
 ;;
 
 (** Emit a [handoff_requested] envelope.  Envelope [agent_name] mirrors
-    the [from_agent] field, matching cascade arm at lines 641-649. *)
+    the [from_agent] field, matching runtime arm at lines 641-649. *)
 let handoff_requested
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -294,9 +294,9 @@ let handoff_completed
     payload_json
 ;;
 
-(** Emit a [context_compacted] envelope.  Cascade-side side effect
+(** Emit a [context_compacted] envelope.  Runtime-side side effect
     (Context_overflow_action_tracker.record_action) is retained in the
-    cascade arm and runs before this constructor. *)
+    runtime arm and runs before this constructor. *)
 let context_compacted
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -326,8 +326,8 @@ let context_compacted
     payload_json
 ;;
 
-(** Emit a [context_overflow_imminent] envelope.  Prometheus gauge +
-    tracker side effects stay in the cascade arm. *)
+(** Emit a [context_overflow_imminent] envelope.  Otel_metric_store gauge +
+    tracker side effects stay in the runtime arm. *)
 let context_overflow_imminent
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -388,7 +388,7 @@ let context_compact_started
 ;;
 
 (** Emit a [content_replacement_replaced] envelope.  Envelope
-    [agent_name] is None, matching cascade arm at lines 708-717. *)
+    [agent_name] is None, matching runtime arm at lines 708-717. *)
 let content_replacement_replaced
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -449,7 +449,7 @@ let content_replacement_kept
 ;;
 
 (** Emit a [slot_scheduler_observed] envelope.  The [state] variant
-    (Idle/Queued/Saturated) is stringified by the cascade arm before
+    (Idle/Queued/Saturated) is stringified by the runtime arm before
     invocation. *)
 let slot_scheduler_observed
       ~(ts_unix : float)
@@ -485,13 +485,13 @@ let slot_scheduler_observed
 (** Append a caller-supplied addendum to an atd-emitted record JSON.
 
     Used by [agent_completed] and [agent_failed] to splice the
-    cascade-local Result/Error projection ([result_fields] /
+    runtime-local Result/Error projection ([result_fields] /
     [error_fields]) onto the typed base record without forcing the
     leaf event library to depend on [Agent_sdk] variant types.
 
     Field order is [<base record fields in atd declaration order> @
     <addendum>], which matches the previous inline `Assoc path in
-    [cascade_event_bridge.ml] and is the property the byte-equal
+    [runtime_event_bridge.ml] and is the property the byte-equal
     tests in [test_sse_event.ml] pin against. *)
 let merge_addendum_into_record
       (record_json : Yojson.Safe.t)
@@ -505,9 +505,9 @@ let merge_addendum_into_record
       "Sse_event.merge_addendum_into_record: atdgen record JSON must be `Assoc"
 ;;
 
-(** Emit an [agent_completed] envelope.  The cascade arm in
-    [cascade_event_bridge.ml] retains its [observe_inference_cost]
-    side effect (Prometheus histogram) and invokes
+(** Emit an [agent_completed] envelope.  The runtime arm in
+    [runtime_event_bridge.ml] retains its [observe_inference_cost]
+    side effect (Otel_metric_store histogram) and invokes
     [agent_completed_result_fields result] to project the
     [Agent_sdk] [Result.t] into the [result_fields] addendum. *)
 let agent_completed
@@ -540,7 +540,7 @@ let agent_completed
     payload_json
 ;;
 
-(** Emit an [agent_failed] envelope.  The cascade arm invokes
+(** Emit an [agent_failed] envelope.  The runtime arm invokes
     [agent_failed_error_fields error] to project the [Agent_sdk]
     [Error.t] into the [error_fields] addendum. *)
 let agent_failed

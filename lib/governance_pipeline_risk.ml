@@ -23,6 +23,9 @@ let capability_classification : (string * capability_class list) list =
     ("keeper_memory_search", [ Sensitive_access ]);
     ("keeper_library_search", [ Sensitive_access ]);
     ("keeper_library_read", [ Sensitive_access ]);
+    ("keeper_surface_read", [ Sensitive_access ]);
+    ("keeper_surface_post", [ State_modification ]);
+    ("keeper_person_note_set", [ State_modification ]);
     ("tool_edit_file", [ State_modification ]);
     ("tool_write_file", [ State_modification ]);
   ]
@@ -81,24 +84,12 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
     Governance LEVEL (development/production/enterprise/paranoid) is the
     configurable dial — see [MASC_GOVERNANCE_LEVEL] env var. *)
 
-(** Explicit per-tool risk overrides.
-    Checked BEFORE pattern matching. Use this to correct misclassifications
-    caused by substring matching (e.g. "query_skill" matching "kill"). *)
-let risk_overrides : (string * risk_level) list =
-  [
-    ("masc_a2a_query_skill", Low); (* "skill" contains "kill" substring *)
-    ("masc_goal_upsert", Medium);
-    ("masc_goal_verify", Medium);
-    ("masc_keeper_msg", Low);
-    ("masc_claim_next", Medium);
-    ("keeper_task_create", Medium); (* routine keeper backlog expansion; force/delete stays gated *)
-    ("masc_keeper_reset", Medium); (* usage counter zeroing only; keeper_clear stays Critical *)
-    (* WORKAROUND: substring classifier false-positives (lib/governance_pipeline_risk.ml:101 high_patterns).
-       Removal target: RFC-0193 typed capability table (Issue #19032). Evidence: 11 approval_required/8.4h on 2026-05-27. *)
-    ("masc_plan_set_task", Low); (* "set" substring → High; payload is self-owned task plan metadata *)
-    ("keeper_memory_write", Low); (* "write" substring → High; scoped to own keeper memory *)
-    ("masc_worktree_create", Medium); (* "create" substring → High; meta tooling, no code mutation *)
-  ]
+(* Former [risk_overrides] (9 entries) is removed: eight were corrections
+   for substring false-positives on registered tools and are now folded
+   into [risk_of_*] typed tables (RFC-0193 / Issue #19032); the last
+   ([masc_a2a_query_skill]) was dead code for a non-existent feature.
+   [residual_risk_overrides] is now empty. The patterns below classify
+   transition-action verbs and unknown (non-[Tool_name]) names. *)
 
 let critical_patterns =
   [ "delete"; "remove"; "drop"; "force"; "reset"; "kill"; "destroy"; "purge" ]
@@ -136,6 +127,36 @@ let classify_name name =
   else if contains_pattern name high_patterns then High
   else if contains_pattern name medium_patterns then Medium
   else Low
+
+(* ── Keeper-native typed risk SSOT ────────────────────────────────
+
+   Public MASC tool names are owned by schema/descriptor registries, not by
+   [Tool_name]. Their risk comes from Tool_catalog metadata, explicit action
+   handling, and the fallback name patterns below. Keeper-native names still
+   have a closed local type and remain exhaustively classified here. *)
+
+let risk_of_keeper (k : Keeper_tool_name.t) : risk_level =
+  let open Keeper_tool_name in
+  match k with
+  | Execute -> Critical
+  | Board_comment | Board_comment_vote | Board_curation_read | Board_curation_submit
+  | Board_post_get | Board_list | Board_post | Board_search | Board_stats
+  | Board_sub_board_get | Board_sub_board_list | Board_vote | Broadcast
+  | Context_status | Handoff | Library_read | Library_search | Memory_search
+  | Memory_write | Search_files | Stay_silent | Surface_read | Tasks_audit
+  | Tasks_list | Time_now
+  | Tool_search | Tools_list | Voice_agent | Voice_listen
+  | Voice_session_end | Voice_session_start | Voice_sessions | Voice_speak -> Low
+  | Board_sub_board_create | Board_sub_board_update | Task_claim | Task_create | Task_done
+  | Surface_post | Person_note_set
+    -> Medium
+  | Fs_edit | Fs_write | Fs_read | Ide_annotate -> High
+  | Board_sub_board_delete | Task_force_done | Task_force_release -> Critical
+;;
+
+(* Non-typed names keep explicit overrides when substring matching would
+   misclassify them (e.g. "query_skill" contains "kill" -> Critical). *)
+let residual_risk_overrides : (string * risk_level) list = []
 
 let transition_action input =
   match input with
@@ -292,25 +313,33 @@ let classify_with_payload ~tool_name ~input =
       then Some Critical
       else None
 
+let pre_metadata_risk_overrides : (string * risk_level) list =
+  [ "masc_bind", Medium; "masc_unbind", Medium; "masc_goal_upsert", Medium; "masc_goal_verify", Medium ]
+
 let baseline_risk ~tool_name ~input =
-  match classify_with_metadata ~tool_name with
+  match List.assoc_opt tool_name pre_metadata_risk_overrides with
   | Some level -> level
-  | None -> (
-      if String.equal tool_name "masc_goal_transition"
-      then goal_transition_risk input
-      else
-        match List.assoc_opt tool_name risk_overrides with
-      | Some level -> level
-      | None ->
-          if
-            String.equal tool_name
-              (Tool_name.Masc.to_string Tool_name.Masc.Transition)
-          then
-            match transition_action input with
-            | Some action -> classify_name action
-            | None -> Low
-          else
-            classify_name tool_name)
+  | None ->
+    match classify_with_metadata ~tool_name with
+    | Some level -> level
+    | None ->
+      if String.equal tool_name "masc_goal_transition" then
+        goal_transition_risk input
+      else if
+        String.equal tool_name
+          (Tool_name.Task_name.to_string Tool_name.Task_name.Transition)
+      then (
+        (* transition risk depends on the action verb, not the tool name *)
+        match transition_action input with
+        | Some action -> classify_name action
+        | None -> Low)
+      else (
+        match Keeper_tool_name.of_string tool_name with
+        | Some typed -> risk_of_keeper typed
+        | None -> (
+            match List.assoc_opt tool_name residual_risk_overrides with
+            | Some level -> level
+            | None -> classify_name tool_name))
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with

@@ -143,6 +143,11 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
+    The misc facade also accepts [includeContent=true] to best-effort enrich
+    each result with raw [page_content] via [WebFetch] and add a top-level
+    keeper-readable [content_text] rendering, plus optional [contentMaxChars]
+    and [contentTimeout] controls. This module remains the search-provider
+    boundary to avoid depending on fetch.
 
     On success the payload [data] is wrapped as
     [`Assoc [ "text", `String json ]] where [json] is the
@@ -173,3 +178,16 @@ val simulate_for_test :
     Bypasses cache, rate-limit, and secret detection — those
     are tested separately at {!handle}.  Pinned in the .mli so
     tests cannot rely on internal state cells. *)
+
+val with_simulated_search_for_test :
+  outcomes:(string * simulated_provider_outcome) list ->
+  (unit -> 'a) ->
+  'a
+(** [with_simulated_search_for_test ~outcomes f] temporarily replaces
+    {!handle}'s provider boundary with the same deterministic simulator
+    used by {!simulate_for_test}, then restores the production provider
+    chain after [f] returns or raises.
+
+    Test-only: validation, cache, rate-limit, result construction, and
+    dispatch wrappers still run; only the external web provider calls are
+    replaced. *)

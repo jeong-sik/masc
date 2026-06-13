@@ -8,6 +8,8 @@
     @since God file decomposition *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let ambiguous_side_effect_error_prefix =
   "turn outcome ambiguous after committed mutating tool call(s)"
@@ -15,7 +17,7 @@ let ambiguous_side_effect_error_prefix =
 let committed_mutating_tools tool_names =
   tool_names
   |> dedupe_keep_order
-  |> List.filter Agent_tool_dispatch_runtime.has_mutating_side_effect
+  |> List.filter Keeper_tool_dispatch_runtime.has_mutating_side_effect
 
 let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
@@ -34,12 +36,11 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Agent_sdk.Error.Config _
       | Agent_sdk.Error.Serialization _
       | Agent_sdk.Error.Io _
-      | Agent_sdk.Error.Orchestration _
-      | Agent_sdk.Error.A2a _ -> false)
+      | Agent_sdk.Error.Orchestration _ -> false)
   (* All other MASC-internal classifications are unambiguous failures. *)
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
+
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -47,13 +48,41 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
-  (* RFC-0158: admission denial is an unambiguous failure. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
-      true
+      false
+
+let ambiguous_side_effect_error_tools (err : Agent_sdk.Error.sdk_error) =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Ambiguous_post_commit { tools; _ }) ->
+      committed_mutating_tools tools
+  | Some
+      ( Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None ->
+      []
+
+let ambiguous_side_effect_commit_tools ~(tool_names : string list)
+    (err : Agent_sdk.Error.sdk_error) : string list =
+  if not (is_ambiguous_side_effect_error err)
+  then []
+  else committed_mutating_tools (tool_names @ ambiguous_side_effect_error_tools err)
+
+let has_ambiguous_side_effect_commit ~(tool_names : string list)
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  ambiguous_side_effect_commit_tools ~tool_names err <> []
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -84,7 +113,6 @@ let reclassify_error_after_side_effect
       | Agent_sdk.Error.Serialization _
       | Agent_sdk.Error.Io _
       | Agent_sdk.Error.Orchestration _
-      | Agent_sdk.Error.A2a _
       | Agent_sdk.Error.Internal _ -> false
     in
     Keeper_turn_driver.sdk_error_of_masc_internal_error
@@ -114,7 +142,6 @@ let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> Keeper_registry.Post_commit_failure
 
 let summarize_post_commit_failure

@@ -1,0 +1,44 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_runtime)
+ (public_name masc.keeper_runtime)
+ (wrapped false)
+ (foreign_stubs
+  (language c)
+  (names nofile_stubs))
+ (modules
+  keeper_oas_timeout_message
+  keeper_sandbox_error
+  keeper_terminal_reason
+  keeper_synthetic_marker
+  keeper_runtime_config
+  keeper_disk_pressure
+  keeper_fd_pressure
+  keeper_livelock_state
+  keeper_binding_health_config
+  keeper_recording_error_state
+  keeper_internal_error
+  keeper_event_queue)
+ (libraries
+  agent_sdk
+  agent_sdk.llm_provider
+  eio
+  masc.config
+  masc.keeper_toml
+  masc.config_dir_resolver
+  masc.fs_compat
+  masc.bounded_event_dedupe
+  masc.json_field
+  masc.masc_core
+  masc.types_boundary
+  masc_cancel_safe
+  masc_core
+  masc_config
+  masc_log
+  masc_process
+  str
+  time_compat
+  uri
+  unix
+  yojson))

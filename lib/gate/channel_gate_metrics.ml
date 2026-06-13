@@ -10,7 +10,7 @@ type outcome =
   | Internal_error of string
 
 (* Closed sum mirroring the in-module producer surface (5 sites in this
-   file).  [Ek_none] replaces the [Error_kind ""] sentinel previously
+   file).  [Ek_none] replaces the [Error_kind ""] marker previously
    used to encode the no-error state for [Success] and [Duplicate]
    outcomes. *)
 type error_kind =
@@ -49,7 +49,7 @@ type channel_stats = {
   last_success_ts : float;
   last_error_ts : float;
   last_keeper : string;
-  last_room_id : string;
+  last_workspace_id : string;
   last_error : string;
   last_error_kind : error_kind;
   last_outcome : string;
@@ -57,12 +57,12 @@ type channel_stats = {
   timed_count : int;
   max_duration_ms : int;
   slow_count : int;
-  room_count : int;
+  workspace_count : int;
 }
 
 type binding_stats = {
   channel : string;
-  room_id : string;
+  workspace_id : string;
   keeper : string;
   message_count : int;
   success_count : int;
@@ -83,7 +83,7 @@ type gate_event = {
   seq : int;
   timestamp : float;
   channel : string;
-  room_id : string;
+  workspace_id : string;
   keeper : string;
   outcome : string;
   error_kind : error_kind;
@@ -121,7 +121,7 @@ type stats_acc = {
   mutable last_success_ts : float;
   mutable last_error_ts : float;
   mutable last_keeper : string;
-  mutable last_room_id : string;
+  mutable last_workspace_id : string;
   mutable last_error : string;
   mutable last_error_kind : error_kind;
   mutable last_outcome : string;
@@ -129,15 +129,15 @@ type stats_acc = {
   mutable timed_count : int;
   mutable max_dur_ms : int;
   mutable slow_count : int;
-  rooms : (string, unit) Hashtbl.t;
-  room_order : string Queue.t;
+  workspaces : (string, unit) Hashtbl.t;
+  workspace_order : string Queue.t;
   bindings : (string, binding_acc) Hashtbl.t;
   binding_order : string Queue.t;
 }
 
 let slow_threshold_ms () = 10_000
 
-let max_tracked_rooms = 256
+let max_tracked_workspaces = 256
 let max_recent_events = 128
 
 let make_binding_acc () =
@@ -172,7 +172,7 @@ let make_acc () =
     last_success_ts = 0.0;
     last_error_ts = 0.0;
     last_keeper = "";
-    last_room_id = "";
+    last_workspace_id = "";
     last_error = "";
     last_error_kind = Ek_none;
     last_outcome = "idle";
@@ -180,8 +180,8 @@ let make_acc () =
     timed_count = 0;
     max_dur_ms = 0;
     slow_count = 0;
-    rooms = Hashtbl.create 8;
-    room_order = Queue.create ();
+    workspaces = Hashtbl.create 8;
+    workspace_order = Queue.create ();
     bindings = Hashtbl.create 8;
     binding_order = Queue.create ();
   }
@@ -225,32 +225,32 @@ let update_binding_error_fields (acc : binding_acc) ~now ~kind ~message =
   acc.last_error_kind <- kind;
   acc.last_error <- message
 
-let remember_room acc room_id =
-  acc.last_room_id <- room_id;
-  if not (Hashtbl.mem acc.rooms room_id) then begin
-    if Hashtbl.length acc.rooms >= max_tracked_rooms
-       && not (Queue.is_empty acc.room_order)
+let remember_workspace acc workspace_id =
+  acc.last_workspace_id <- workspace_id;
+  if not (Hashtbl.mem acc.workspaces workspace_id) then begin
+    if Hashtbl.length acc.workspaces >= max_tracked_workspaces
+       && not (Queue.is_empty acc.workspace_order)
     then begin
-      let evicted = Queue.take acc.room_order in
-      Hashtbl.remove acc.rooms evicted
+      let evicted = Queue.take acc.workspace_order in
+      Hashtbl.remove acc.workspaces evicted
     end;
-    Hashtbl.replace acc.rooms room_id ();
-     Queue.add room_id acc.room_order
+    Hashtbl.replace acc.workspaces workspace_id ();
+     Queue.add workspace_id acc.workspace_order
    end
 
-let get_or_create_binding acc room_id =
-  match Hashtbl.find_opt acc.bindings room_id with
+let get_or_create_binding acc workspace_id =
+  match Hashtbl.find_opt acc.bindings workspace_id with
   | Some binding -> binding
   | None ->
-      if Hashtbl.length acc.bindings >= max_tracked_rooms
+      if Hashtbl.length acc.bindings >= max_tracked_workspaces
          && not (Queue.is_empty acc.binding_order)
       then begin
         let evicted = Queue.take acc.binding_order in
         Hashtbl.remove acc.bindings evicted
       end;
       let binding = make_binding_acc () in
-      Hashtbl.replace acc.bindings room_id binding;
-      Queue.add room_id acc.binding_order;
+      Hashtbl.replace acc.bindings workspace_id binding;
+      Queue.add workspace_id acc.binding_order;
       binding
 
 let outcome_error_details = function
@@ -261,7 +261,7 @@ let outcome_error_details = function
   | Internal_error message -> (Ek_internal, message)
   | Success | Duplicate -> (Ek_none, "")
 
-let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
+let append_event ~channel ~workspace_id ~keeper ~duration_ms outcome ~timestamp =
   let error_kind, error = outcome_error_details outcome in
   incr next_event_seq;
   if Queue.length recent_events >= max_recent_events then ignore (Queue.take recent_events);
@@ -270,7 +270,7 @@ let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
       seq = !next_event_seq;
       timestamp;
       channel;
-      room_id;
+      workspace_id;
       keeper;
       outcome = outcome_name outcome;
       error_kind;
@@ -279,7 +279,7 @@ let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
     }
     recent_events
 
-let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
+let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
   Eio_guard.with_mutex mu (fun () ->
       let trimmed_channel = String.trim channel in
       let channel_key =
@@ -293,12 +293,12 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
       acc.last_ts <- now;
       acc.last_outcome <- outcome_name outcome;
       if trimmed_keeper <> "" then acc.last_keeper <- trimmed_keeper;
-      let trimmed_room = String.trim room_id in
+      let trimmed_workspace = String.trim workspace_id in
       let binding =
-        if trimmed_room = "" then None
+        if trimmed_workspace = "" then None
         else begin
-          remember_room acc trimmed_room;
-          let binding = get_or_create_binding acc trimmed_room in
+          remember_workspace acc trimmed_workspace;
+          let binding = get_or_create_binding acc trimmed_workspace in
           binding.msg_count <- binding.msg_count + 1;
           binding.last_ts <- now;
           binding.last_outcome <- outcome_name outcome;
@@ -371,11 +371,11 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
                update_binding_error_fields binding ~now
                  ~kind:(Ek_internal) ~message
            | None -> ()));
-      append_event ~channel:channel_key ~room_id:trimmed_room ~keeper:trimmed_keeper
+      append_event ~channel:channel_key ~workspace_id:trimmed_workspace ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)
 
-let record_internal_error_exn ~channel ~room_id ~keeper ~duration_ms _exn =
-  record_attempt ~channel ~room_id ~keeper ~duration_ms
+let record_internal_error_exn ~channel ~workspace_id ~keeper ~duration_ms _exn =
+  record_attempt ~channel ~workspace_id ~keeper ~duration_ms
     (Internal_error "internal error")
 
 let snapshot () : channel_stats list =
@@ -396,7 +396,7 @@ let snapshot () : channel_stats list =
             last_success_ts = acc.last_success_ts;
             last_error_ts = acc.last_error_ts;
             last_keeper = acc.last_keeper;
-            last_room_id = acc.last_room_id;
+            last_workspace_id = acc.last_workspace_id;
             last_error = acc.last_error;
             last_error_kind = acc.last_error_kind;
             last_outcome = acc.last_outcome;
@@ -404,7 +404,7 @@ let snapshot () : channel_stats list =
             timed_count = acc.timed_count;
             max_duration_ms = acc.max_dur_ms;
             slow_count = acc.slow_count;
-            room_count = Hashtbl.length acc.rooms;
+            workspace_count = Hashtbl.length acc.workspaces;
           } : channel_stats)
           :: rows)
         table [])
@@ -422,7 +422,7 @@ let take_up_to limit rows =
   in
   loop limit [] rows
 
-let events_locked ?channel ?keeper ?room_id ~limit () =
+let events_locked ?channel ?keeper ?workspace_id ~limit () =
   let matches expected actual =
     match expected with
     | None -> true
@@ -435,7 +435,7 @@ let events_locked ?channel ?keeper ?room_id ~limit () =
            String.lowercase_ascii trimmed)
   in
   let normalized_keeper = keeper |> Option.map String.trim in
-  let normalized_room_id = room_id |> Option.map String.trim in
+  let normalized_workspace_id = workspace_id |> Option.map String.trim in
   let latest_seq = !next_event_seq in
   let filtered =
     Queue.fold
@@ -443,7 +443,7 @@ let events_locked ?channel ?keeper ?room_id ~limit () =
         if
           matches normalized_channel event.channel
           && matches normalized_keeper event.keeper
-          && matches normalized_room_id event.room_id
+          && matches normalized_workspace_id event.workspace_id
         then event :: acc
         else acc)
       [] recent_events
@@ -451,9 +451,9 @@ let events_locked ?channel ?keeper ?room_id ~limit () =
   in
   (latest_seq, filtered)
 
-let events ?channel ?keeper ?room_id ~limit () =
+let events ?channel ?keeper ?workspace_id ~limit () =
   Eio_guard.with_mutex_ro mu (fun () ->
-      events_locked ?channel ?keeper ?room_id ~limit ())
+      events_locked ?channel ?keeper ?workspace_id ~limit ())
 
 let total_messages () =
   Eio_guard.with_mutex_ro mu (fun () ->
@@ -526,7 +526,7 @@ let gate_event_to_json (event : gate_event) =
       ("seq", `Int event.seq);
       ("timestamp", `String (iso_of_ts event.timestamp));
       ("channel", `String event.channel);
-      ("room_id", `String event.room_id);
+      ("workspace_id", `String event.workspace_id);
       ("keeper", `String event.keeper);
       ("outcome", `String event.outcome);
       ("error_kind", `String (error_kind_to_string event.error_kind));
@@ -552,7 +552,7 @@ let snapshot_locked () =
           last_success_ts = acc.last_success_ts;
           last_error_ts = acc.last_error_ts;
           last_keeper = acc.last_keeper;
-          last_room_id = acc.last_room_id;
+          last_workspace_id = acc.last_workspace_id;
           last_error = acc.last_error;
           last_error_kind = acc.last_error_kind;
           last_outcome = acc.last_outcome;
@@ -560,7 +560,7 @@ let snapshot_locked () =
           timed_count = acc.timed_count;
           max_duration_ms = acc.max_dur_ms;
           slow_count = acc.slow_count;
-          room_count = Hashtbl.length acc.rooms;
+          workspace_count = Hashtbl.length acc.workspaces;
         } : channel_stats)
         :: rows)
       table []
@@ -573,10 +573,10 @@ let snapshot_locked () =
     Hashtbl.fold
       (fun channel acc rows ->
         Hashtbl.fold
-          (fun room_id binding binding_rows ->
+          (fun workspace_id binding binding_rows ->
             {
               channel;
-              room_id;
+              workspace_id;
               keeper = binding.keeper;
               message_count = binding.msg_count;
               success_count = binding.success_count;
@@ -601,7 +601,7 @@ let snapshot_locked () =
            else
              let by_channel = String.compare a.channel b.channel in
              if by_channel <> 0 then by_channel
-             else String.compare a.room_id b.room_id)
+             else String.compare a.workspace_id b.workspace_id)
   in
   let _latest_seq, recent = events_locked ~limit:max_recent_events () in
   (channels, bindings, recent)
@@ -650,7 +650,7 @@ let snapshot_json () =
         ("last_success", `String (iso_of_ts stats.last_success_ts));
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
         ("last_keeper", `String stats.last_keeper);
-        ("last_room_id", `String stats.last_room_id);
+        ("last_workspace_id", `String stats.last_workspace_id);
         ("last_error", `String stats.last_error);
         ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
         ("last_outcome", `String stats.last_outcome);
@@ -659,7 +659,7 @@ let snapshot_json () =
         ("slow_count", `Int stats.slow_count);
         ("slow_rate_pct", `Int (slow_rate_pct stats));
         ("success_rate_pct", `Int (success_rate_pct stats));
-        ("room_count", `Int stats.room_count);
+        ("workspace_count", `Int stats.workspace_count);
         ("health", `String (health_of_stats stats));
       ]
   in
@@ -671,7 +671,7 @@ let snapshot_json () =
     `Assoc
       [
         ("channel", `String stats.channel);
-        ("room_id", `String stats.room_id);
+        ("workspace_id", `String stats.workspace_id);
         ("keeper", `String stats.keeper);
         ("message_count", `Int stats.message_count);
         ("success_count", `Int stats.success_count);
@@ -706,8 +706,8 @@ let snapshot_json () =
       ("uptime_seconds", `Int (int_of_float (Unix.gettimeofday () -. start_time)));
     ]
 
-let events_json ?channel ?keeper ?room_id ~limit () =
-  let latest_seq, rows = events ?channel ?keeper ?room_id ~limit () in
+let events_json ?channel ?keeper ?workspace_id ~limit () =
+  let latest_seq, rows = events ?channel ?keeper ?workspace_id ~limit () in
   `Assoc
     [
       ("events", `List (List.map gate_event_to_json rows));

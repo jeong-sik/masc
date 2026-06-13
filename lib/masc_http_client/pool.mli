@@ -111,7 +111,7 @@ val request :
     [idle_timeout_sec] is cancelled.
 
     Progress fields are returned on both the [Ok] and [Error] branches
-    so cascade rotation receipts can attach them without a side-channel.
+    so runtime rotation receipts can attach them without a side-channel.
 
     Design rationale: docs/rfc/RFC-0129-http-idle-timeout-and-streaming-progress.md *)
 
@@ -161,7 +161,7 @@ val with_connection :
 
 (* ── Telemetry ─────────────────────────────────────────────────── *)
 
-(** Non-mutating pool snapshot for Prometheus / dashboard. Phase D.4
+(** Non-mutating pool snapshot for Otel_metric_store / dashboard. Phase D.4
     wires this to the metrics layer. *)
 type stats = {
   idle_per_host : (string * int) list;
@@ -172,7 +172,7 @@ type stats = {
   (** Increments when the periodic eviction fiber catches an
       exception while sweeping idle entries. Operator-visible signal
       that the pool's TTL cleanup is silently failing. Surfaced as
-      [masc_pool_evict_failure_total] in Prometheus. *)
+      [masc_pool_evict_failure_total] in Otel_metric_store. *)
   evict_failure_count_total : int;
   create_count_total : int;
 }

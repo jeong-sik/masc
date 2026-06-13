@@ -3,7 +3,7 @@
     RFC-0006 Phase B-1: pin the host-FS read guard for hardened keepers.
     The containment is no-op for local keepers. *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)
 
@@ -51,11 +51,10 @@ let make_meta ~name ~sandbox =
         ("trace_id", `String "test-trace-containment");
         ("policy_voice_enabled", `Bool false);
         ( "tool_access",
-          Keeper_types.tool_access_to_json
-            (Keeper_types.Preset
-               { preset = Keeper_types.Full; also_allow = [] }) );
+          Json_util.json_string_list
+            ([]) );
         ("sandbox_profile",
-         `String (Keeper_types.sandbox_profile_to_string sandbox));
+         `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox));
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -66,8 +65,8 @@ let make_meta ~name ~sandbox =
 
 let test_legacy_keeper_always_allowed () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"alice" ~sandbox:Keeper_types_profile_sandbox.Local in
   let outside = "/etc/passwd" in
   Alcotest.(check bool)
     "Local keeper bypasses containment"
@@ -78,8 +77,8 @@ let test_legacy_keeper_always_allowed () =
 
 let test_docker_keeper_blocks_outside () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   match
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target:outside
@@ -96,8 +95,8 @@ let test_docker_keeper_blocks_outside () =
 
 let test_docker_keeper_allows_inside_playground () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let bundle = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let inside = Filename.concat bundle "mind/scratch.md" in
   Alcotest.(check bool) "playground-internal path is allowed"
@@ -106,10 +105,10 @@ let test_docker_keeper_allows_inside_playground () =
        (Keeper_sandbox_containment.check_read_target
           ~config ~meta ~target:inside))
 
-let test_docker_git_creds_contained () =
+let test_docker_second_keeper_contained () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types.Docker in
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"poe" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let outside = "/etc/passwd" in
   Alcotest.(check bool) "Docker is also subject to containment"
     true
@@ -119,8 +118,8 @@ let test_docker_git_creds_contained () =
 
 let test_path_just_outside_playground_blocked () =
   with_tmp_base @@ fun base ->
-  let config = Coord.default_config base in
-  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types.Docker in
+  let config = Workspace.default_config base in
+  let meta = make_meta ~name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker in
   (* Sibling directory with a name that LOOKS like a prefix of the playground
      path; must still be blocked (prevents the classic prefix-without-slash
      containment bypass). *)
@@ -147,8 +146,8 @@ let () =
             test_docker_keeper_blocks_outside;
           Alcotest.test_case "docker keeper allows inside playground"
             `Quick test_docker_keeper_allows_inside_playground;
-          Alcotest.test_case "docker git-creds also contained" `Quick
-            test_docker_git_creds_contained;
+          Alcotest.test_case "docker second keeper also contained" `Quick
+            test_docker_second_keeper_contained;
           Alcotest.test_case "lookalike sibling path blocked" `Quick
             test_path_just_outside_playground_blocked;
         ] );

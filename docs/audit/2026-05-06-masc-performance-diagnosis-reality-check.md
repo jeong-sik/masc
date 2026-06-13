@@ -80,7 +80,7 @@ Run a live dashboard shell refresh against the patched binary and compare:
 ```sh
 scripts/dune-local.sh build test/test_operator_control.exe
 ./_build/default/test/test_operator_control.exe
-./start-masc-mcp.sh --base-path ~/me
+./start-masc.sh --base-path ~/me
 ```
 
 Then inspect dashboard logs for `keepers_json:* trust=...ms` and total

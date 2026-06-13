@@ -5,41 +5,10 @@
 
 include Dashboard_execution_helpers
 
-let session_payload_json session_json =
-  match member_assoc "status" session_json with
-  | `Assoc _ as payload -> payload
-  | _ -> session_json
-
-let session_meta_json session_json =
-  session_payload_json session_json |> member_assoc "session"
-
-let session_summary_json session_json =
-  session_payload_json session_json |> member_assoc "summary"
-
-let session_team_health_json session_json =
-  session_payload_json session_json |> member_assoc "team_health"
-
-let session_communication_json session_json =
-  session_payload_json session_json |> member_assoc "communication_metrics"
-
-let session_status_string session_json =
-  let summary = session_summary_json session_json in
-  let meta = session_meta_json session_json in
-  match String_util.trim_to_option (string_field "status" summary) with
-  | Some value -> value
-  | None -> (
-      match String_util.trim_to_option (string_field "status" meta) with
-      | Some value -> value
-      | None ->
-          String_util.trim_to_option (string_field "status" session_json)
-          |> Option.value
-               ~default:"<missing status field in summary / meta / session>")
-
-let session_recent_events session_json =
-  list_field "recent_events" session_json
-
-let event_detail_json event_json =
-  member_assoc "detail" event_json
+(* session_payload_json, session_meta_json, session_summary_json,
+   session_team_health_json, session_communication_json,
+   session_status_opt, session_recent_events, event_detail_json
+   are provided by Dashboard_utils (via include chain). *)
 
 let event_summary event_json =
   let detail = event_detail_json event_json in
@@ -154,9 +123,8 @@ let build_session_seed session_json _cards =
       String_util.trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
     in
-    let broadcast_count = int_field "broadcast_count" communication in
-    let portal_count = int_field "portal_count" communication in
-    let seen_count = int_field "seen_agents_count" summary in
+    let broadcast_count = Option.value ~default:0 (Json_util.assoc_int_opt "broadcast_count" communication) in
+    let seen_count = Option.value ~default:0 (Json_util.assoc_int_opt "seen_agents_count" summary) in
     let member_names =
       dedup_strings
         (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
@@ -185,8 +153,8 @@ let build_session_seed session_json _cards =
         namespace =
           (match String_util.trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
-          | None -> String_util.trim_to_option (string_field "room_id" meta));
-        status = session_status_string session_json;
+          | None -> String_util.trim_to_option (string_field "workspace_id" meta));
+        status = session_status_opt session_json;
         health =
           (match session_card with
           | Some card ->
@@ -208,12 +176,11 @@ let build_session_seed session_json _cards =
           | Some value -> event_summary value
           | None -> "최근 session event가 없습니다.");
         communication_summary =
-          Printf.sprintf "%s · broadcast %d · portal %d" mode broadcast_count
-            portal_count;
-        active_count = int_field "active_agents_count" team_health;
+          Printf.sprintf "%s · broadcast %d" mode broadcast_count;
+        active_count = Option.value ~default:0 (Json_util.assoc_int_opt "active_agents_count" team_health);
         seen_count;
         planned_count;
-        required_count = int_field ~default:1 "required_agents" team_health;
+        required_count = Option.value ~default:1 (Json_util.assoc_int_opt "required_agents" team_health);
         counts_basis;
         runtime_blocker;
         worker_gap_summary;
@@ -243,15 +210,20 @@ let build_session_contexts seeds operation_contexts : session_context list =
            | None -> (None, None)
          in
          let severity =
-           session_severity ~health:(Dashboard_utils.health_level_of_string seed.health) ~status:(Dashboard_utils.session_lifecycle_of_string seed.status)
+           let status =
+             match seed.status with
+             | Some value -> Dashboard_utils.session_lifecycle_of_string value
+             | None -> SL_unknown
+           in
+           session_severity ~health:(Dashboard_utils.health_level_of_string seed.health) ~status
              ~runtime_blocker:seed.runtime_blocker
          in
          let intervene_label =
            match seed.status with
-           | "completed" -> "세션 결과 보기"
-           | "interrupted" -> "중단 원인 보기"
-           | "failed" | "cancelled" -> "실패 원인 보기"
-           | _ -> "세션 개입 열기"
+           | Some "completed" -> "세션 결과 보기"
+           | Some "interrupted" -> "중단 원인 보기"
+           | Some ("failed" | "cancelled") -> "실패 원인 보기"
+           | Some _ | None -> "세션 개입 열기"
          in
          let intervene_handoff =
            handoff_json
@@ -294,16 +266,16 @@ let build_session_contexts seeds operation_contexts : session_context list =
                [
                  ("session_id", `String seed.session_id);
                  ("goal", `String seed.goal);
-                 ("namespace", json_string_option seed.namespace);
-                 ("status", `String seed.status);
+                 ("namespace", Json_util.string_opt_to_json seed.namespace);
+                 ("status", Json_util.string_opt_to_json seed.status);
                  ("health", `String seed.health);
                  ( "member_names",
                    `List (List.map (fun value -> `String value) seed.member_names) );
-                 ("linked_operation_id", json_string_option linked_operation_id);
-                 ("linked_detachment_id", json_string_option linked_detachment_id);
-                 ("runtime_blocker", json_string_option seed.runtime_blocker);
-                 ("worker_gap_summary", json_string_option seed.worker_gap_summary);
-                 ("last_activity_at", json_string_option seed.last_activity_at);
+                 ("linked_operation_id", Json_util.string_opt_to_json linked_operation_id);
+                 ("linked_detachment_id", Json_util.string_opt_to_json linked_detachment_id);
+                 ("runtime_blocker", Json_util.string_opt_to_json seed.runtime_blocker);
+                 ("worker_gap_summary", Json_util.string_opt_to_json seed.worker_gap_summary);
+                 ("last_activity_at", Json_util.string_opt_to_json seed.last_activity_at);
                  ("last_activity_summary", `String seed.last_activity_summary);
                  ("communication_summary", `String seed.communication_summary);
                  ("active_count", `Int seed.active_count);
@@ -400,7 +372,7 @@ let build_execution_queue session_contexts operation_contexts =
                      | None -> member_assoc "objective" operation.json );
                    ("target_type", `String "operation");
                    ("target_id", `String operation.operation_id);
-                   ("linked_session_id", json_string_option operation.linked_session_id);
+                   ("linked_session_id", Json_util.string_opt_to_json operation.linked_session_id);
                    ("linked_operation_id", `String operation.operation_id);
                    ("last_seen_at", member_assoc "updated_at" operation.json);
                    ("top_handoff", member_assoc "top_handoff" operation.json);

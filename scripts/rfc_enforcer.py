@@ -335,7 +335,70 @@ def check_numbering(base_ref: str, head_ref: str, pr_body: str) -> List[Violatio
             )
         )
 
+    violations.extend(_check_ledger_bumped(head_ref, added, optin))
     return violations
+
+
+def _ledger_value_at(ref: str) -> Optional[int]:
+    """Return .next-number parsed from the given ref, or None."""
+    try:
+        out = _git("show", f"{ref}:docs/rfc/.next-number")
+    except subprocess.CalledProcessError:
+        return None
+    value = out.strip()
+    if re.fullmatch(r"[0-9]{4}", value) is None:
+        return None
+    return int(value)
+
+
+def _check_ledger_bumped(
+    head_ref: str, added: List[str], optin: Set[str]
+) -> List[Violation]:
+    """Require a PR that claims a new RFC number to move the ledger past it.
+
+    Collision against base_ref only catches a race after one side merges.
+    When the claiming PR must also bump docs/rfc/.next-number in the same
+    PR, two concurrent claims of the frontier number both rewrite the
+    ledger line, so the second one surfaces at merge time (conflict or a
+    rerun collision) instead of landing silently (the #20764 / #20761
+    race, same class as #20717 / #20718).
+    """
+    claimed: List[int] = []
+    for path in added:
+        m = _RFC_FILENAME_RE.match(Path(path).name)
+        if m is None or m.group(1) in optin:
+            continue
+        claimed.append(int(m.group(1)))
+    if not claimed:
+        return []
+    highest = max(claimed)
+    ledger = _ledger_value_at(head_ref)
+    if ledger is None:
+        return [
+            Violation(
+                Path("docs/rfc/.next-number"),
+                0,
+                "RFC_LEDGER_UNREADABLE",
+                f"PR adds RFC-{highest:04d} but docs/rfc/.next-number on "
+                f"{head_ref} is missing or not a 4-digit number.",
+            )
+        ]
+    if ledger <= highest:
+        return [
+            Violation(
+                Path("docs/rfc/.next-number"),
+                0,
+                "RFC_LEDGER_NOT_BUMPED",
+                (
+                    f"PR adds RFC-{highest:04d} but .next-number is "
+                    f"{ledger:04d}. Bump docs/rfc/.next-number to at least "
+                    f"{highest + 1:04d} in the same PR (scripts/"
+                    "rfc-allocate-next.sh does both) so a concurrent claim "
+                    "of the same number conflicts instead of merging."
+                ),
+            )
+        ]
+    return []
 
 
 def main() -> int:

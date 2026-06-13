@@ -1,0 +1,815 @@
+open Alcotest
+open Masc
+
+let header_count name headers =
+  headers
+  |> List.filter (fun (k, _) -> String.equal k name)
+  |> List.length
+
+let normalized_header_count name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.filter (fun (k, _) -> String.equal name (String.lowercase_ascii k))
+  |> List.length
+
+let normalized_header_value name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (k, v) ->
+    if String.equal name (String.lowercase_ascii k) then Some v else None)
+
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
+let runpod_provider =
+  { Runtime_schema.id = "runpod_mtp"
+  ; display_name = "RunPod"
+  ; protocol = "openai-compatible-http"
+  ; api_format = Chat_completions_api
+  ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
+  ; is_non_interactive = true
+  ; credentials = Some (Inline "rp-test-token")
+  ; capabilities = None
+  ; headers = None
+  }
+
+let qwen_model =
+  { Runtime_schema.id = "qwen"
+  ; api_name = "qwen"
+  ; tools_support = true
+  ; max_context = 160000
+  ; thinking_support = true
+  ; preserve_thinking = false
+  ; max_thinking_budget = None
+  ; streaming = true
+  ; capabilities = None
+  ; match_prefixes = []
+  }
+
+let runpod_binding =
+  { Runtime_schema.provider_id = "runpod_mtp"
+  ; model_id = "qwen"
+  ; is_default = true
+  ; max_concurrent = 4
+  ; price_input = None
+  ; price_output = None
+  ; keep_alive = None
+  ; num_ctx = None
+  }
+
+let runtime_toml_with_credentials credentials =
+  Printf.sprintf
+    {|
+[runtime]
+default = "runpod_mtp.qwen"
+
+[providers.runpod_mtp]
+display-name = "RunPod"
+protocol = "openai-compatible-http"
+endpoint = "https://example-runpod.proxy.runpod.net/v1"
+
+%s
+
+[models.qwen]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+
+[runpod_mtp.qwen]
+is-default = true
+max-concurrent = 4
+|}
+    credentials
+
+let check_parse_error errors expected_path expected_message =
+  let matches =
+    List.exists
+      (fun (err : Runtime_toml.parse_error) ->
+         String.equal err.path expected_path
+         && String.equal err.message expected_message)
+      errors
+  in
+  check bool "expected parse error" true matches
+
+let test_runtime_toml_rejects_blank_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = ""
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_rejects_missing_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML credential parse error"
+  | Error errors ->
+    check_parse_error
+      errors
+      "providers.runpod_mtp.credentials.key"
+      "credential type 'env' requires non-empty 'key'"
+
+let test_runtime_toml_trims_env_credential_key () =
+  let content =
+    runtime_toml_with_credentials
+      {|
+[providers.runpod_mtp.credentials]
+type = "env"
+key = " OLLAMA_CLOUD_API_KEY "
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> fail "expected runtime TOML to parse"
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       (match provider.credentials with
+        | Some (Runtime_schema.Env key) ->
+          check string "trimmed env key" "OLLAMA_CLOUD_API_KEY" key
+        | Some _ -> fail "expected env credential"
+        | None -> fail "expected credential")
+     | _ -> fail "expected one provider")
+
+let test_runtime_toml_canonicalizes_legacy_protocol_alias () =
+  let content =
+    {|
+[runtime]
+default = "legacy_openai_compat.test_model"
+
+[providers.legacy_openai_compat]
+display-name = "Legacy OpenAI-Compatible"
+protocol = "provider_d-http"
+endpoint = "https://legacy-openai-compatible.example/v1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[legacy_openai_compat.test_model]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       check string "canonical protocol" "openai-compatible-http"
+         provider.Runtime_schema.protocol;
+       check bool "chat-completions api format" true
+         (match provider.Runtime_schema.api_format with
+          | Chat_completions_api -> true
+          | Messages_api | Ollama_api -> false)
+     | _ -> fail "expected one provider")
+
+let deepseek_runtime_toml =
+  {|
+[runtime]
+default = "deepseek.deepseek-v4-pro"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+|}
+
+let deepseek_runtime_config_or_fail () =
+  match Runtime_toml.parse_string deepseek_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected DeepSeek runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let deepseek_provider_config_or_fail () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
+  | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
+
+let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
+
+let glm_coding_runtime_toml =
+  {|
+[runtime]
+default = "glm-coding.glm-4-7-coding"
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_CODING_API_KEY"
+
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
+|}
+
+let glm_coding_runtime_config_or_fail () =
+  match Runtime_toml.parse_string glm_coding_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected GLM Coding Plan runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let glm_coding_provider_config_or_fail () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected GLM Coding Plan adapter error: %s" msg)
+  | bindings ->
+    failf "expected one GLM Coding Plan binding, got %d" (List.length bindings)
+
+let with_glm_coding_env general coding f =
+  with_env "ZAI_API_KEY" general (fun () -> with_env "ZAI_CODING_API_KEY" coding f)
+
+let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    (match model.capabilities with
+     | Some caps ->
+       check bool "reasoning effort parsed" true
+         (caps.thinking_control_format = Runtime_schema.Reasoning_effort);
+       check (option int) "max output" (Some 384000) caps.max_output_tokens
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_toml_accepts_chat_template_token_capability () =
+  let toml =
+    {|
+[runtime]
+default = "ollama.gemma4"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4.capabilities]
+thinking-control-format = "chat_template_token"
+
+[ollama.gemma4]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected Gemma4 runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models with
+     | [ model ] ->
+       (match model.capabilities with
+        | Some caps ->
+          check bool "chat template token parsed" true
+            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+        | None -> fail "expected model capabilities")
+     | models -> failf "expected one model, got %d" (List.length models))
+
+let test_runtime_adapter_materializes_deepseek_openai_compat () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+    check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
+    check string "api key" "ds-test-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_toml_accepts_glm_coding_capability () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    check bool "thinking enabled" true model.thinking_support;
+    check bool "preserve thinking" true model.preserve_thinking;
+    (match model.capabilities with
+     | Some caps ->
+       check (option int) "max output" (Some 128000) caps.max_output_tokens;
+       check bool "forced tool choice disabled" false caps.supports_tool_choice;
+       check bool "extended thinking" true caps.supports_extended_thinking
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_adapter_materializes_glm_coding_provider () =
+  with_glm_coding_env "general-key" "coding-key" (fun () ->
+    let provider_cfg = glm_coding_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.Glm);
+    check string "base_url" "https://api.z.ai/api/coding/paas/v4"
+      provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "glm-4.7" provider_cfg.model_id;
+    check string "api key uses coding lane" "coding-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 200000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
+    check (option bool) "tool choice override" (Some false)
+      provider_cfg.supports_tool_choice_override;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_adapter_keeps_auth_out_of_headers () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Error msg -> failf "unexpected adapter error: %s" msg
+  | Ok provider_cfg ->
+    check string "api key" "rp-test-token" provider_cfg.api_key;
+    check int "Authorization header count" 0
+      (header_count "Authorization" provider_cfg.headers);
+    check int "Content-Type header count" 1
+      (header_count "Content-Type" provider_cfg.headers)
+
+let test_runtime_adapter_filters_toml_auth_headers () =
+  let provider =
+    { runpod_provider with
+      headers =
+        Some
+          [ "Authorization", "Bearer from-toml"
+          ; "X-API-Key", "from-toml"
+          ; "Content-Type", "application/custom+json"
+          ; "X-Trace-Id", "trace-1"
+          ]
+    }
+  in
+  let cfg =
+    { Runtime_schema.providers = [ provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Error msg -> failf "unexpected adapter error: %s" msg
+  | Ok provider_cfg ->
+    check string "api key" "rp-test-token" provider_cfg.api_key;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers);
+    check int "x-api-key header count" 0
+      (normalized_header_count "x-api-key" provider_cfg.headers);
+    check int "Content-Type header count" 1
+      (normalized_header_count "Content-Type" provider_cfg.headers);
+    check
+      (option string)
+      "Content-Type override"
+      (Some "application/custom+json")
+      (normalized_header_value "Content-Type" provider_cfg.headers);
+    check
+      (option string)
+      "non-auth custom header"
+      (Some "trace-1")
+      (normalized_header_value "X-Trace-Id" provider_cfg.headers)
+
+let provider_cfg () =
+  let cfg =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    }
+  in
+  match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+  | Ok provider_cfg -> provider_cfg
+  | Error msg -> failf "unexpected adapter error: %s" msg
+
+let runtime_or_fail ?(provider = runpod_provider) () =
+  let cfg =
+    { Runtime_schema.providers = [ provider ]
+    ; models = [ qwen_model ]
+    ; bindings = [ runpod_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    }
+  in
+  match Runtime.of_binding cfg runpod_binding with
+  | Some runtime -> runtime
+  | None -> fail "expected runtime binding to materialize"
+
+let with_dashboard_probe_http_get hook f =
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+    hook;
+  Fun.protect
+    ~finally:(fun () ->
+      Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+    f
+
+let first_provider_probe json =
+  match Yojson.Safe.Util.(member "providers" json |> to_list) with
+  | provider :: _ -> provider
+  | [] -> fail "expected at least one provider probe"
+
+let dashboard_probe_missing_auth_calls = ref 0
+
+let assert_dashboard_runtime_probe_reachable runtime =
+  let reachable_json =
+    with_dashboard_probe_http_get
+      (fun ~url ~headers ~timeout_sec:_ ->
+         check string "models probe URL"
+           "https://example-runpod.proxy.runpod.net/v1/models"
+           url;
+         check bool "auth header present" true
+           (Option.is_some (normalized_header_value "authorization" headers));
+         check bool "auth header is bearer" true
+           (match normalized_header_value "authorization" headers with
+            | Some value -> String.starts_with ~prefix:"Bearer " value
+            | None -> false);
+         Ok
+           ( 200
+           , [ "content-type", "application/json" ]
+           , {|{"data":[{"id":"qwen"}]}|} ))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let reachable_provider = first_provider_probe reachable_json in
+  check string "provider status" "reachable"
+    Yojson.Safe.Util.(member "status" reachable_provider |> to_string);
+  check int "http status" 200
+    Yojson.Safe.Util.(member "http_status" reachable_provider |> to_int);
+  check int "model count" 1
+    Yojson.Safe.Util.(member "model_count" reachable_provider |> to_int);
+  let () =
+    check bool "payload redacts inline token" false
+      (String_util.contains_substring
+         (Yojson.Safe.to_string reachable_json)
+         "rp-test-token")
+  in
+  ()
+
+let assert_dashboard_runtime_probe_missing_auth runtime =
+  dashboard_probe_missing_auth_calls := 0;
+  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+    (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+       incr dashboard_probe_missing_auth_calls;
+       Ok (200, [], {|{"data":[]}|}));
+  let json =
+    Fun.protect
+      ~finally:(fun () ->
+        Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check int "missing auth does not execute HTTP" 0
+    !dashboard_probe_missing_auth_calls;
+  check string "provider status" "missing_auth"
+    (Yojson.Safe.Util.(member "status" provider |> to_string));
+  check bool "provider not reachable" false
+    (Yojson.Safe.Util.(member "reachable" provider |> to_bool));
+  let () =
+    check bool "probe not ok" false
+      (Yojson.Safe.Util.(member "probe_ok" json |> to_bool))
+  in
+  ()
+
+let assert_dashboard_runtime_probe_redacts_url_credentials () =
+  let provider =
+    { runpod_provider with
+      transport =
+        Runtime_schema.Http
+          "https://user:secret@example-runpod.proxy.runpod.net/v1?token=secret#frag"
+    }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+           ~default_id:"runpod_mtp.qwen" [ runtime ])
+  in
+  let provider = first_provider_probe json in
+  check bool "payload redacts URL secrets" false
+    (String_util.contains_substring (Yojson.Safe.to_string provider) "secret");
+  check string "redacted endpoint URL"
+    "https://example-runpod.proxy.runpod.net/v1"
+    (Yojson.Safe.Util.(member "endpoint_url" provider |> to_string))
+
+let test_dashboard_runtime_probe_reachability_contracts () =
+  let runtime = runtime_or_fail () in
+  assert_dashboard_runtime_probe_reachable runtime;
+  assert_dashboard_runtime_probe_redacts_url_credentials ();
+  let env_key = "MASC_TEST_RUNTIME_PROBE_TOKEN_MISSING_6F4C1D7A" in
+  Unix.putenv env_key "";
+  let provider =
+    { runpod_provider with credentials = Some (Runtime_schema.Env env_key) }
+  in
+  let runtime = runtime_or_fail ~provider () in
+  assert_dashboard_runtime_probe_missing_auth runtime
+
+let test_runtime_agent_terminal_observation_uses_runtime_identity () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+  in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_completed_config
+      ~total_duration_ms:42.9
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal"
+    observation.attempt_details_source
+
+let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config =
+    { config with description = Some "runtime:runpod_mtp.qwen/runtime" }
+  in
+  let error = "Not found: OpenAI-compatible endpoint returned 404" in
+  let observation =
+    Runtime_agent.For_testing.runtime_observation_for_terminal_config
+      ~total_duration_ms:31.2
+      ~error
+      config
+  in
+  check string "runtime id" "runpod_mtp.qwen" observation.runtime_id;
+  check (option string) "selected model" (Some "qwen")
+    observation.selected_model;
+  check int "attempt count" 1 (List.length observation.attempts);
+  check string "attempt detail source" "runtime_agent_terminal_error"
+    observation.attempt_details_source;
+  (match observation.attempts with
+   | [ attempt ] ->
+     check (option string) "attempt error" (Some error) attempt.error
+   | _ -> fail "expected one terminal attempt");
+  check string "runtime outcome" "failed"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          (Some observation)))
+
+let test_not_found_enrichment_includes_runtime_endpoint_model () =
+  let provider_cfg = provider_cfg () in
+  let enriched =
+    Keeper_runtime_attempt.enrich_sdk_error
+      ~runtime_id:"runpod_mtp.qwen"
+      ~provider_cfg
+      (Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message = "" }))
+  in
+  (match enriched with
+   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
+     check bool "mentions 404 marker" true
+       (String_util.contains_substring
+          message
+          "OpenAI-compatible endpoint returned 404");
+     check bool "mentions runtime id" true
+       (String_util.contains_substring message "runtime_id=runpod_mtp.qwen");
+     check bool "mentions model" true
+       (String_util.contains_substring message "model=qwen");
+     check bool "mentions endpoint" true
+       (String_util.contains_substring
+          message
+          "endpoint=https://example-runpod.proxy.runpod.net/v1")
+   | _ -> fail "expected enriched NotFound");
+  check bool "404 is terminal provider failure" true
+    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure
+       enriched)
+
+let test_runtime_agent_max_turns_is_continuation_checkpoint () =
+  let lifecycle =
+    Runtime_agent.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.MaxTurnsExceeded { turns = 24; limit = 24 })))
+  in
+  check string "event" "completed" lifecycle.event;
+  check string "status" "continuation_checkpoint" lifecycle.status;
+  check (option string) "no error" None lifecycle.error
+
+(* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
+   must fail loudly rather than silently disarm the only I2-legitimate
+   streaming timeout. *)
+let test_clock_failfast_raises_when_idle_set_without_clock () =
+  try
+    let _ =
+      Runtime_agent.For_testing.decide_clock_for_idle
+        ~stream_idle_timeout_s:(Some 120.0)
+        ~process_clock:(Error "process runtime not initialised")
+        ~ctx_clock:None
+    in
+    fail "expected failure when idle is configured but no clock resolves"
+  with
+  | Failure msg ->
+    check
+      bool
+      "message identifies the configured idle deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: stream_idle_timeout_s configured"
+         msg)
+
+let test_clock_failfast_opt_out_when_no_idle_no_clock () =
+  (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
+  let clock =
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~process_clock:(Error "no runtime")
+      ~ctx_clock:None
+  in
+  check bool "no idle + no clock -> None" true (Option.is_none clock)
+
+let () =
+  run "runtime_provider_auth_headers"
+    [ ( "provider_config"
+      , [ test_case
+            "runtime adapter carries auth in api_key only"
+            `Quick
+            test_runtime_adapter_keeps_auth_out_of_headers
+        ; test_case
+            "runtime adapter filters TOML auth headers"
+            `Quick
+            test_runtime_adapter_filters_toml_auth_headers
+        ; test_case
+            "runtime TOML rejects blank env credential key"
+            `Quick
+            test_runtime_toml_rejects_blank_env_credential_key
+        ; test_case
+            "runtime TOML rejects missing env credential key"
+            `Quick
+            test_runtime_toml_rejects_missing_env_credential_key
+        ; test_case
+            "runtime TOML trims env credential key"
+            `Quick
+            test_runtime_toml_trims_env_credential_key
+        ; test_case
+            "runtime TOML canonicalizes legacy protocol alias"
+            `Quick
+            test_runtime_toml_canonicalizes_legacy_protocol_alias
+        ; test_case
+            "runtime TOML accepts DeepSeek reasoning effort"
+            `Quick
+            test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime TOML accepts GLM Coding Plan capabilities"
+            `Quick
+            test_runtime_toml_accepts_glm_coding_capability
+        ; test_case
+            "runtime TOML accepts chat template token thinking"
+            `Quick
+            test_runtime_toml_accepts_chat_template_token_capability
+        ; test_case
+            "runtime adapter materializes DeepSeek OpenAI compat"
+            `Quick
+            test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
+            "runtime adapter materializes GLM Coding Plan provider"
+            `Quick
+            test_runtime_adapter_materializes_glm_coding_provider
+        ; test_case
+            "runtime agent terminal observation carries model identity"
+            `Quick
+            test_runtime_agent_terminal_observation_uses_runtime_identity
+        ; test_case
+            "runtime agent terminal error observation marks failed attempt"
+            `Quick
+            test_runtime_agent_terminal_error_observation_marks_failed_attempt
+        ; test_case
+            "NotFound enrichment includes runtime endpoint and model"
+            `Quick
+            test_not_found_enrichment_includes_runtime_endpoint_model
+        ; test_case
+            "max turns is continuation checkpoint"
+            `Quick
+            test_runtime_agent_max_turns_is_continuation_checkpoint
+        ; test_case
+            "dashboard runtime provider reachability contracts"
+            `Quick
+            test_dashboard_runtime_probe_reachability_contracts
+        ; test_case
+            "clock fail-fast raises when idle set without clock (RFC-OAS-026)"
+            `Quick
+            test_clock_failfast_raises_when_idle_set_without_clock
+        ; test_case
+            "clock fail-fast opt-out when no idle no clock"
+            `Quick
+            test_clock_failfast_opt_out_when_no_idle_no_clock
+        ] )
+    ]

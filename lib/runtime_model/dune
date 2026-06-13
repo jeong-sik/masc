@@ -1,0 +1,23 @@
+; Runtime_model — runtime/provider label resolution boundary.
+;
+; Bundles the model-label parser, provider-kind resolver, provider projection,
+; and provider default constants used by runtime/keeper/server call sites.
+;
+; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
+; (wrapped false) keeps the bare `Runtime_model_*`,
+; `Provider_kind_resolver`, `Provider_runtime_projection`,
+; `Runtime_provider_binding`, and `Runtime_provider_defaults` identifiers.
+
+(include_subdirs no)
+
+(library
+ (name masc_runtime_model)
+ (public_name masc.runtime_model)
+ (wrapped false)
+ (libraries
+  agent_sdk
+  agent_sdk.llm_provider
+  masc.config
+  masc_core
+  masc_log
+  uri))

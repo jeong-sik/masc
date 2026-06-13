@@ -18,7 +18,7 @@ type pre_dispatch_checkpoint_hygiene_result =
   }
 
 let prepare_resume_checkpoint_for_dispatch
-      ~(meta : Keeper_types.keeper_meta)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~(now_ts : float)
       ~(loaded_checkpoint_present : bool)
       ~(save_checkpoint :

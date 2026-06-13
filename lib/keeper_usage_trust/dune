@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_usage_trust)
+ (public_name masc.keeper_usage_trust)
+ (wrapped false)
+ (modules keeper_usage_trust)
+ (libraries agent_sdk yojson))

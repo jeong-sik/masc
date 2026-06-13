@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
 let test_confirm_rejects_expired_token () =
@@ -9,10 +9,10 @@ let test_confirm_rejects_expired_token () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Coord.masc_dir config) "operator" in
-      Coord_utils.mkdir_p pending_dir;
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
+      Workspace_utils.mkdir_p pending_dir;
       let path = Filename.concat pending_dir "pending_confirms.json" in
       let oc = open_out path in
       Fun.protect

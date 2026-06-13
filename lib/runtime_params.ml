@@ -137,12 +137,12 @@ let registry () =
 
 let params_file base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "runtime_params.json"
 
 let audit_file base_path =
   Filename.concat
-    (Coord_utils.masc_dir_from_base_path ~base_path)
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
     "param_audit.jsonl"
 
 let ensure_dir path =

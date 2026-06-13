@@ -609,7 +609,7 @@ function renderProviderLogPanel() {
         ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${catalog.error}</div>`
         : null}
       ${selectableProviders.length === 0 && catalogState.status === 'loaded'
-        ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">cascade.toml provider log tail is disabled.</div>`
+        ? html`<div class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">runtime.toml provider log tail is disabled.</div>`
         : null}
       ${tailState.status === 'error'
         ? html`<div class="px-3 py-3 text-xs text-[var(--err-fg)]">${tailState.message}</div>`

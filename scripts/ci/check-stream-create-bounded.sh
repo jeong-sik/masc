@@ -2,7 +2,7 @@
 # CI gate: every Eio.Stream.create N must have N > 0 and N != max_int.
 #
 # Background
-#   The actor pattern in masc-mcp uses Eio.Stream.t as message mailboxes
+#   The actor pattern in masc uses Eio.Stream.t as message mailboxes
 #   between producers and a single consumer fiber. An unbounded mailbox
 #   (Eio.Stream.create max_int) masks back-pressure: when the consumer
 #   slows or stalls, producers enqueue without limit and exhaust the

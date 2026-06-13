@@ -5,6 +5,9 @@ open Server_auth
 (* Re-export cache types and helpers from sub-module *)
 include Server_dashboard_http_cache
 
+let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
+let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
+
 type dashboard_compute_mode =
       Server_dashboard_http_runtime_support.dashboard_compute_mode =
   | Inline_shared
@@ -37,7 +40,7 @@ let _last_good_shell_light = Server_dashboard_http_core_cache._last_good_shell_l
 let with_dashboard_timeout = Server_dashboard_http_core_cache.with_dashboard_timeout
 let cache_partition_segment = Server_dashboard_http_core_cache.cache_partition_segment
 let dashboard_cache_key = Server_dashboard_http_core_cache.dashboard_cache_key
-let dashboard_mission_timeout_s = Server_dashboard_http_core_cache.dashboard_mission_timeout_s
+let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_briefing_timeout_s
 let attach_projection_diagnostics = Server_dashboard_http_core_cache.attach_projection_diagnostics
 let projection_diagnostics_json = Server_dashboard_http_core_cache.projection_diagnostics_json
 let with_projection_diagnostics = Server_dashboard_http_core_cache.with_projection_diagnostics
@@ -56,10 +59,6 @@ let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_
 let _operator_digest_cache = Server_dashboard_http_core_operator._operator_digest_cache
 let operator_refresh_interval_s = Server_dashboard_http_core_operator.operator_refresh_interval_s
 let operator_snapshot_extra = Server_dashboard_http_core_operator.operator_snapshot_extra
-let json_string_opt = Server_dashboard_http_core_json.json_string_opt
-let json_bool_opt = Server_dashboard_http_core_json.json_bool_opt
-let json_assoc_field_opt = Server_dashboard_http_core_json.json_assoc_field_opt
-let json_assoc_string_opt = Server_dashboard_http_core_json.json_assoc_string_opt
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
 let projection_diagnostics_fields = Server_dashboard_http_core_json.projection_diagnostics_fields
 let projection_diagnostics_field = Server_dashboard_http_core_json.projection_diagnostics_field
@@ -95,7 +94,7 @@ let mission_cache =
   create_cached_surface
     (`Assoc
         [ "generated_at", `String (Masc_domain.now_iso ())
-        ; "summary", `Assoc [ "room_health", `String "initializing" ]
+        ; "summary", `Assoc [ "workspace_health", `String "initializing" ]
         ; "incidents", `List []
         ; "recommended_actions", `List []
         ; "command_focus", `Assoc []
@@ -110,7 +109,7 @@ let mission_cache =
 let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
-  let room_config = state.Mcp_server.room_config in
+  let workspace_config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s = 60.0 in
@@ -124,11 +123,11 @@ let start_mission_refresh_loop ~state ~sw ~clock =
         ?mono_clock
         ~sw
         ~clock
-        ~config:room_config
+        ~config:workspace_config
       |> fun run_compute ->
       let result =
         run_compute (fun ~config ~sw ->
-          Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+          Dashboard_briefing.json ~config ~sw ~clock ~proc_mgr ())
       in
       let dt_total = Unix.gettimeofday () -. t0_mission in
       if dt_total >= 5.0 then Log.Dashboard.warn "[mission profile] total=%.1fs" dt_total;
@@ -152,10 +151,10 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     ~on_result:(mark_cached_surface_success mission_cache)
 ;;
 
-let dashboard_mission_http_json ~state ~sw ~clock request =
+let dashboard_briefing_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
   in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
@@ -165,9 +164,9 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
       ?mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.room_config
+      ~config:state.Mcp_server.workspace_config
       (fun ~config ~sw ->
-         Dashboard_mission.json
+         Dashboard_briefing.json
            ?actor
            ~config
            ~sw
@@ -185,24 +184,24 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
            when proactive warm-up misses its first build window. *)
       cached_surface_or_first_success_json
         mission_cache
-        ~cache_key:"mission:default"
-        ~ttl:120.0
+        ~cache_key:"briefing:default"
+        ~ttl:deep_surface_cache_ttl_s
         ~clock
-        ~timeout_sec:dashboard_mission_timeout_s
+        ~timeout_sec:dashboard_briefing_timeout_s
         (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
         dashboard_cache_key
-          state.Mcp_server.room_config
+          state.Mcp_server.workspace_config
           "mission"
           (Option.value ~default:"" actor)
       in
       Dashboard_cache.get_or_compute_with_timeout
         cache_key
-        ~ttl:120.0
+        ~ttl:deep_surface_cache_ttl_s
         ~clock
-        ~timeout_sec:dashboard_mission_timeout_s
+        ~timeout_sec:dashboard_briefing_timeout_s
         (compute ?actor)
   in
   full_json
@@ -210,19 +209,32 @@ let dashboard_mission_http_json ~state ~sw ~clock request =
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
-  | Some session_id when String.trim session_id <> "" ->
-    Dashboard_mission.session_json
-      ?actor:
-        (dashboard_actor_for_request
-           ~base_path:state.Mcp_server.room_config.base_path
-           request)
-      ~session_id:(String.trim session_id)
-      ~config:state.Mcp_server.room_config
-      ~sw
-      ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr
-      ()
-  | _ ->
+  | Some session_id ->
+    (match String_util.trim_to_option session_id with
+     | Some trimmed_id ->
+       Dashboard_briefing.session_json
+         ?actor:
+           (dashboard_actor_for_request
+              ~base_path:state.Mcp_server.workspace_config.base_path
+              request)
+         ~session_id:trimmed_id
+         ~config:state.Mcp_server.workspace_config
+         ~sw
+         ~clock
+         ~proc_mgr:state.Mcp_server.proc_mgr
+         ()
+     | None ->
+       `Assoc
+         [ "generated_at", `String (Masc_domain.now_iso ())
+         ; "session_id", `Null
+         ; "session", `Null
+         ; "timeline", `List []
+         ; "participants", `List []
+         ; "operations", `List []
+         ; "keepers", `List []
+         ; "error", `String "session_id is required"
+         ])
+  | None ->
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
       ; "session_id", `Null
@@ -235,16 +247,16 @@ let dashboard_session_http_json ~state ~sw ~clock request =
       ]
 ;;
 
-let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
+let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
-    Dashboard_mission_briefing.json
+    Dashboard_briefing_sections.json
       ?actor
       ~force
-      ~config:state.Mcp_server.room_config
+      ~config:state.Mcp_server.workspace_config
       ~sw
       ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr
@@ -255,15 +267,15 @@ let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   else (
     let cache_key =
       dashboard_cache_key
-        state.Mcp_server.room_config
+        state.Mcp_server.workspace_config
         "mission_briefing"
         (Option.value ~default:"" actor)
     in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
-      ~timeout_sec:dashboard_mission_timeout_s
+      ~timeout_sec:dashboard_briefing_timeout_s
       compute)
 ;;
 
@@ -275,7 +287,7 @@ let dashboard_task_json = Server_dashboard_http_core_entities.dashboard_task_jso
 let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 
-(* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
+(* dashboard_current_workspace_id removed — namespace retired (#unify-namespace). *)
 
 let dashboard_tasks_safe = Server_dashboard_http_core_entities.dashboard_tasks_safe
 let dashboard_agents_safe = Server_dashboard_http_core_entities.dashboard_agents_safe
@@ -306,12 +318,16 @@ let provider_capacity_json = Server_dashboard_http_core_entities.provider_capaci
 let dashboard_shell_timeout_s = Env_config_runtime.Dashboard.shell_timeout_sec
 let dashboard_shell_light_timeout_s = Env_config_runtime.Dashboard.shell_light_timeout_sec
 
+(* Grace period after shell timeout during startup — allows the first
+   snapshot to arrive before the dashboard reports "not ready". *)
+let startup_grace_period_s = 10.0
+
 let dashboard_shell_timeout_for ~light =
   if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
 ;;
 
 (* Meta_cognition.summary_json does a full board_posts.jsonl scan +
-   belief/tension/desire rule evaluation. On a room with 450+ posts this
+   belief/tension/desire rule evaluation. On a workspace with 450+ posts this
    regularly exceeds 8s, which was the previous shell timeout and caused
    repeat "cache compute timeout: shell:..." + "cache bg-revalidate failed"
    noise in the log. Give it its own cache with a longer TTL, and on a cold
@@ -423,7 +439,7 @@ let shell_projection_label_to_phase : string -> Server_timing.phase = function
 let dashboard_shell_payload_json
       ?timing
       ?(light = false)
-      (config : Coord.config)
+      (config : Workspace.config)
   : Yojson.Safe.t
   =
   let cluster = Env_config_core.cluster_name () in
@@ -467,7 +483,7 @@ let dashboard_shell_payload_json
         `Null)
   in
   match
-    (* Cold workspaces lazily materialize room/keeper state on first access.
+    (* Cold workspaces lazily materialize workspace/keeper state on first access.
        Keep those stateful reads sequential so one failing init path does not
        cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
        only for projection-style reads that are safe to drop to `Null`. *)
@@ -550,7 +566,7 @@ let dashboard_shell_payload_json
          ~started_at
          ~extra:
            ([ "cluster", `String cluster
-            ; "coordination_root", `String config.base_path
+            ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "keeper_count_source", `String "runtime_keepalive"
             ; "configured_keeper_count_source", `String "keeper_meta"
@@ -575,14 +591,9 @@ let dashboard_shell_payload_json
     raise exn
 ;;
 
-let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config)
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
   : Yojson.Safe.t
   =
-  let contains_substring haystack needle =
-    (* Empty-needle returns false here, unlike String_util.contains_substring's
-       Re.execp-compatible empty=true. Guard preserves the original contract. *)
-    String.length needle > 0 && String_util.contains_substring haystack needle
-  in
   let dashboard_auth_error_code = function
     | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Some "invalid_token"
     | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Some "token_expired"
@@ -591,15 +602,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
            { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
       Some "same_origin_blocked"
     | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Some "insufficient_role"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized reason) ->
-      let normalized = String.lowercase_ascii reason in
-      if contains_substring normalized "bearer token belongs to"
-      then Some "actor_mismatch"
-      else if
-        contains_substring normalized "token required"
-        || contains_substring normalized "authentication required"
-      then Some "missing_token"
-      else Some "unknown"
+    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; _ }) ->
+      Some (Masc_domain.Auth_error.unauthorized_reason_to_string reason)
     | _ -> Some "unknown"
   in
   let auth_cfg = Auth.load_auth_config config.base_path in
@@ -631,8 +635,10 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
         Error
           (Masc_domain.Auth
              (Masc_domain.Auth_error.Unauthorized
-                "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
-                 credential)"))
+                { reason = Missing_token
+                ; message = "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound \
+                             credential)"
+                }))
       else Ok "dashboard"
   in
   let effective_agent =
@@ -656,7 +662,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
            auth_cfg
        with
        | Ok _ -> Ok ()
-       | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized msg)))
+       | Error msg -> Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized
+           { reason = Generic; message = msg })))
   in
   let keeper_authorization_result =
     match endpoint_gate_result with
@@ -704,12 +711,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ; "effective_agent", Json_util.string_opt_to_json effective_agent
     ; "effective_role", Json_util.string_opt_to_json effective_role
     ; ( "auth_error_code"
-      , match auth_error with
-        | Some err ->
-          (match dashboard_auth_error_code err with
-           | Some code -> `String code
-           | None -> `Null)
-        | None -> `Null )
+      , Json_util.string_opt_to_json (Option.bind auth_error dashboard_auth_error_code) )
     ; ( "auth_error_detail"
       , match auth_error with
         | Some err -> `String (Masc_domain.masc_error_to_string err)
@@ -720,7 +722,7 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     ]
 ;;
 
-let dashboard_shell_with_request_auth_json ~request (config : Coord.config) payload =
+let dashboard_shell_with_request_auth_json ~request (config : Workspace.config) payload =
   match payload with
   | `Assoc fields ->
     `Assoc
@@ -734,7 +736,7 @@ let dashboard_shell_http_json
       ?request
       ?timing
       ?(light = false)
-      (config : Coord.config)
+      (config : Workspace.config)
   : Yojson.Safe.t
   =
   let cache_key = dashboard_shell_cache_key ~light config in
@@ -745,7 +747,7 @@ let dashboard_shell_http_json
        The payload compute runs status / agents / tasks / keepers /
        meta_cognition projections (the latter scans board_posts.jsonl and
        evaluates belief/tension/desire rules — frequently 8s+ on a hot
-       room).  Under cache miss this used to run inline on the calling
+       workspace).  Under cache miss this used to run inline on the calling
        fiber's Eio main domain, blocking every other HTTP fiber for the
        duration — the same Eio cooperative scheduling violation that
        PRs #18991 / #18993 / #18994 / #19007 / #19015 / #19023 / #19024 /
@@ -798,7 +800,7 @@ let dashboard_shell_http_json
     let current = Server_startup_state.(!state) in
     (not (Atomic.get shell_warmed))
     && current.state_ready
-    && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. 10.0
+    && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. startup_grace_period_s
   in
   let apply_startup_prewarm_guard = Option.is_some request in
   let startup_prewarm_pending =
@@ -811,11 +813,11 @@ let dashboard_shell_http_json
     | Some clock ->
       Dashboard_cache.get_or_compute_with_timeout
         cache_key
-        ~ttl:15.0
+        ~ttl:shell_surface_cache_ttl_s
         ~clock
         ~timeout_sec:(dashboard_shell_timeout_for ~light)
         compute
-    | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+    | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
   in
   let payload =
     if startup_prewarm_pending
@@ -835,4 +837,9 @@ let dashboard_shell_http_json
   match request with
   | None -> payload
   | Some request -> dashboard_shell_with_request_auth_json ~request config payload
+;;
+
+let () =
+  Dashboard_snapshot.register_dashboard_shell_payload_json (fun ?light config ->
+      dashboard_shell_payload_json ?light config)
 ;;

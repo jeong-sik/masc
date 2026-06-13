@@ -7,6 +7,8 @@
 
 type workflow_rejection_scope_policy =
   | Observe_scope
+  (* Legacy diagnostic value accepted for compatibility with older
+     payloads. Runtime scope blocking is not driven by this field. *)
   | Block_scope
 
 let workflow_rejection_scope_policy_to_string = function
@@ -29,16 +31,8 @@ type workflow_rejection_info =
   ; scope_policy : workflow_rejection_scope_policy
   }
 
-type workflow_rejection_block =
-  { count : int
-  ; rule_id : string option
-  ; tool_suggestion : string option
-  ; hint : string option
-  ; blocked_at : float
-  }
-
-let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
-let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt
+let json_assoc_field_opt = Json_util.assoc_member_opt
+let json_assoc_string_opt = Json_util.assoc_string_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
 let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
 let json_or_detail_bool_opt = Keeper_tools_oas_json.json_or_detail_bool_opt
@@ -237,12 +231,6 @@ let workflow_rejection_info_of_raw raw =
   | Yojson.Json_error _ -> None
 ;;
 
-let workflow_rejection_should_scope_block (info : workflow_rejection_info) =
-  match info.scope_policy with
-  | Block_scope -> true
-  | Observe_scope -> false
-;;
-
 let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
   Printf.sprintf
     "%s:%s:%s:%s"
@@ -262,8 +250,8 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
       next_tool
   | Some next_tool ->
     Printf.sprintf
-      "Do not retry this %s call. Call %s next and follow the hint/alternatives \
-       in detail."
+      "Revise your approach and retry this %s call, or call %s next and follow \
+       the hint/alternatives in detail."
       tool_name
       next_tool
   | None when count >= 2 ->
@@ -273,7 +261,7 @@ let workflow_rejection_recovery_instruction ~tool_name ~count (info : workflow_r
       tool_name
   | None ->
     Printf.sprintf
-      "Do not retry this %s call. Use the hint/alternatives in detail."
+      "Revise your approach and retry this %s call. Use the hint/alternatives in detail."
       tool_name
 ;;
 
@@ -297,7 +285,6 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
         ]
     in
     [ "self_correction_required", `Bool true
-    ; "do_not_retry_tool", `String tool_name
     ; "workflow_rejection_recovery", `Assoc recovery
     ]
     @ optional_string "required_next_tool" info.tool_suggestion
@@ -318,83 +305,16 @@ let json_has_nonempty_evidence_refs json =
 ;;
 
 let workflow_submit_evidence_marker json =
-  if Option.is_some (json_nonempty_string_opt "pr_url" json)
+  if Option.is_some (json_nonempty_string_opt "notes" json)
+     || (match json_assoc_field_opt "evidence_refs" json with
+         | Some (`List refs) ->
+           List.exists
+             (function
+               | `String value -> not (String.equal (String.trim value) "")
+               | _ -> false)
+             refs
+         | _ -> false)
      || json_has_nonempty_evidence_refs json
   then "has_evidence"
   else "missing_evidence"
-;;
-
-let workflow_scope_key_of_input ~tool_name input =
-  let task_id_part json = json_nonempty_string_opt "task_id" json in
-  match input with
-  | `Assoc _ as json ->
-    (match tool_name with
-     | "masc_transition" ->
-       (match json_nonempty_string_opt "action" json, task_id_part json with
-        | None, _ | _, None -> None
-        | Some action, Some task_id ->
-          let correction_marker =
-            if String.equal action "submit_for_verification"
-            then ":" ^ workflow_submit_evidence_marker json
-            else ""
-          in
-          Some
-            (Printf.sprintf
-               "%s:action=%s:task=%s%s"
-               tool_name
-               action
-               task_id
-               correction_marker))
-     | "keeper_task_done"
-     | "keeper_task_submit_for_verification" ->
-       (match task_id_part json with
-        | None -> None
-        | Some task_id ->
-          let correction_marker =
-            if String.equal tool_name "keeper_task_submit_for_verification"
-            then ":" ^ workflow_submit_evidence_marker json
-            else ""
-          in
-          Some (Printf.sprintf "%s:task=%s%s" tool_name task_id correction_marker))
-     | "keeper_task_claim" -> Some "keeper_task_claim"
-     | _ -> None)
-  | _ -> None
-;;
-
-let workflow_rejection_scope_block_fields ~tool_name block =
-  let optional_string key = function
-    | Some value -> [ key, `String value ]
-    | None -> []
-  in
-  let recovery =
-    [ "count", `Int (block.count + 1)
-    ; "instruction"
-      , `String
-          (workflow_rejection_recovery_instruction
-             ~tool_name
-             ~count:(block.count + 1)
-             ({ task_id = None
-              ; rule_id = block.rule_id
-              ; tool_suggestion = block.tool_suggestion
-              ; hint = block.hint
-              ; scope_policy = Block_scope
-              } : workflow_rejection_info)
-             )
-    ]
-    @ optional_string "rule_id" block.rule_id
-    @ optional_string "tool_suggestion" block.tool_suggestion
-    @ optional_string "hint" block.hint
-    @ [ "scope_policy", `String (workflow_rejection_scope_policy_to_string Block_scope) ]
-  in
-  [ "self_correction_required", `Bool true
-  ; "do_not_retry_tool", `String tool_name
-  ; "workflow_rejection_recovery", `Assoc recovery
-  ; "workflow_rejection_loop", `Bool true
-  ; "retry_skipped", `Bool true
-  ; "retry_skipped_reason", `String "deterministic_workflow_scope_blocked"
-  ; ( "retry_skipped_explanation"
-    , `String
-        "previous workflow_rejection for this task/action scope requires a different next step" )
-  ]
-  @ optional_string "required_next_tool" block.tool_suggestion
 ;;

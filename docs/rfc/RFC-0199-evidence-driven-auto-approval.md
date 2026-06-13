@@ -5,7 +5,43 @@
 **Builds on**: [RFC-0109](./RFC-0109-cdal-goal-integration-contract.md) (typed CDAL verdict gate)
 **Related**: [RFC-0088](./RFC-0088-counter-as-fix-result-propagation.md) §"String/Substring 분류기" anti-pattern (이 RFC 가 정확히 해소하는 영역)
 **Tracking issue**: #19129
-**Memory anchors**: `project_masc_mcp_cdal_evidence_gate_internal_antipatterns_2026_05_27`
+**Memory anchors**: `project_masc_cdal_evidence_gate_internal_antipatterns_2026_05_27`
+
+## Implementation status update (2026-06-03): Phase A `required_evidence_typed` field removed
+
+Phase A (below) added `task_contract.required_evidence_typed : Evidence_claim.t list`
+alongside the legacy `required_evidence : string list`. That parallel typed field
+has been **removed** from `task_contract` (`lib/types/types_core.ml`).
+
+Reason: fan-in was 0. No producer ever populated it — every record literal in
+`lib/` and `test/` wrote `required_evidence_typed = []`. No consumer ever read it
+(`.required_evidence_typed` appears only in doc comments). Phase B's
+`Deterministic_evidence_evaluator`, the sole intended consumer, was never
+implemented. Keeping a permanently-empty, never-read parallel field is itself the
+split-brain the RFC warns against (RFC-0088 §"String 분류기" lives on the *string*
+side, but an unwired typed twin invites drift and false "already typed" signals).
+
+What is retained: the `Evidence_claim` closed-sum schema module
+(`lib/types/evidence_claim.ml{,i}`) and its schema test
+(`test/test_evidence_claim_schema.ml`). The schema is correct and ready; only its
+unwired attachment point on `task_contract` was dropped.
+
+What stays live: `required_evidence : string list` remains the source of truth.
+It feeds `Cdal_evidence_gate.decide` (`lib/cdal_evidence_gate.ml`), which
+substring-matches each entry against completion notes / handoff refs. No gate
+behavior changed.
+
+**Phase B deferred.** When Phase B is built, it must re-introduce a typed field
+*together with* the migration that resolves the open question in §"미해결 질문"
+below (line: "codemod 가 기존 `required_evidence` string 을 자동 parse 할 수
+있는가?"). Re-adding an empty typed field ahead of a working evaluator + migration
+would just recreate the fan-in-0 scaffolding removed here. The free-form legacy
+strings (e.g. `completion_notes`, `reviewable_evidence_ref`, `board post`) have no
+lossless parse into the closed sum, so the migration is a real design task, not a
+mechanical codemod.
+
+The Phase A description below is kept for historical context; treat the
+`required_evidence_typed` field it introduces as removed.
 
 ## Context
 
@@ -116,11 +152,11 @@ val evaluate :
 - ❌ String 분류기: `gh_ci_check` 결과를 *substring match* 로 pass/fail 분기 금지 — typed variant 그대로 사용
 - ❌ N-of-M: PR_merged + CI_pass 두 evidence kind 만 구현하고 나머지 후속 PR 로 미루기 금지 — Phase B 첫 PR 에서 6 kind *전부* + Custom_check escape hatch
 
-### Phase C (P1): `coord_task_transitions` hook
+### Phase C (P1): `workspace_task_transitions` hook
 
-**Principle**: submit time 에만 평가. heartbeat / polling 추가 금지 (cascade budget pressure 방지).
+**Principle**: submit time 에만 평가. heartbeat / polling 추가 금지 (runtime budget pressure 방지).
 
-Hook point: `lib/coord/coord_task_transitions.ml` 의 submit_for_verification path.
+Hook point: `lib/workspace/workspace_task_transitions.ml` 의 submit_for_verification path.
 
 ```ocaml
 (* Pseudo-code *)
@@ -202,6 +238,6 @@ Phase A (typed schema)
 
 ## Memory & follow-up
 
-- `~/.masc/config/personas/verifier/profile.json` 의 denylist clear (2026-05-27) 는 본 RFC 와 *독립* 으로 즉시 효과
+- `<MASC_BASE>/.masc/config/personas/verifier/profile.json` 의 denylist clear (2026-05-27) 는 본 RFC 와 *독립* 으로 즉시 효과
 - 본 RFC 머지 후 `verifier` persona 의 expected throughput 이 *판단 task* 만으로 줄어듦 → goal/horizon redefinition 동반 필요 (별도 issue)
 - RFC-0109 의 `cdal_evidence_gate.evidence_entry_satisfied:94-129` 의 dead Inconclusive arm (3일 fleet 0건) — 본 RFC 의 evaluator 가 *그 arm 을 활성화* (deterministic Inconclusive 가 새 source) → Issue #18840 의 priority 재평가 필요

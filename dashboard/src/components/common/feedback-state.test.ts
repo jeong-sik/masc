@@ -86,11 +86,11 @@ describe('ErrorRecoverable', () => {
   })
 
   it('renders a role=alert section with title text', () => {
-    render(html`<${ErrorRecoverable} title="Cascade fallback exhausted" />`, container)
+    render(html`<${ErrorRecoverable} title="Runtime fallback exhausted" />`, container)
     const section = container.querySelector('section')!
     expect(section).toBeTruthy()
     expect(section.getAttribute('role')).toBe('alert')
-    expect(section.textContent).toContain('Cascade fallback exhausted')
+    expect(section.textContent).toContain('Runtime fallback exhausted')
     expect(section.textContent).toContain('복구 가능')
     expect(section.getAttribute('data-feedback-kind')).toBe('recoverable')
     expect(section.getAttribute('data-feedback-has-action')).toBe('false')

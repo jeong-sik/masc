@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 let read_stdin_all () =
   In_channel.input_all In_channel.stdin
@@ -20,9 +20,7 @@ let main_result () =
       2 )
   else
     let stdin_text = read_stdin_all () in
-    match
-      Yojson.Safe.from_string stdin_text |> Lib.Worker_execution_spec.of_yojson
-    with
+    match Yojson.Safe.from_string stdin_text |> Worker_execution_spec.of_yojson with
     | exception Yojson.Json_error msg ->
         ( Lib.Worker_runtime_helper_protocol.error_json
             {
@@ -65,7 +63,7 @@ let main_result () =
                 match
                   Lib.Worker_runtime.run_worker_oas ~sw
                     ~net:(Eio.Stdenv.net env)
-                    ~room_config:None spec ()
+                    ~workspace_config:None spec ()
                 with
                 | Ok run_result ->
                     ( Lib.Worker_runtime_helper_protocol.success_json run_result,

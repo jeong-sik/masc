@@ -6,7 +6,7 @@
 
 open Alcotest
 
-module R = Masc_mcp.Keeper_behavioral_regime
+module R = Masc.Keeper_behavioral_regime
 
 let now = 1_000_000.0
 

@@ -5,6 +5,9 @@
     policy validation, and keepalive restart. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 
@@ -38,12 +41,9 @@ let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
-let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result =
-  match p.tool_access_opt, old.tool_access, p.tool_preset_opt, p.tool_also_allow_opt with
-  | None, Custom _, None, Some _ ->
-      tool_result_error
-        "tool_also_allow requires a preset-based keeper policy; set tool_preset first"
-  | _ ->
+let update_keeper ?(force = false) ?(preserve_prompt_defaults = false)
+    (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
+    =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok active_goal_ids ->
@@ -57,14 +57,17 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     match p.goal_opt with
     | Some g -> normalize_goal_horizon_text g
     | None ->
-        profile_default_text p.profile_defaults.goal
-          (if String.trim old.goal <> "" then old.goal else "")
+        if preserve_prompt_defaults then old.goal
+        else
+          profile_default_text p.profile_defaults.goal
+            (if String.trim old.goal <> "" then old.goal else "")
   in
   let short_goal_default = if goal_provided then goal else old.short_goal in
   let mid_goal_default = if goal_provided then goal else old.mid_goal in
   let long_goal_default = if goal_provided then goal else old.long_goal in
   let horizon_default profile_opt old_default =
     if goal_provided then old_default
+    else if preserve_prompt_defaults then old_default
     else profile_default_text profile_opt old_default
   in
   let short_goal =
@@ -88,22 +91,30 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
   in
-  let sandbox_profile =
-    Option.value ~default:old.sandbox_profile p.sandbox_profile_opt
-  in
-  let network_mode =
+  match
+    match p.sandbox_profile_opt with
+    | None -> Ok old.sandbox_profile
+    | Some raw ->
+      match sandbox_profile_of_string raw with
+      | Some sp -> Ok sp
+      | None ->
+        Error
+          (Printf.sprintf "invalid sandbox_profile: %S (expected: local or docker)" raw)
+  with
+  | Error msg -> tool_result_error msg
+  | Ok sandbox_profile ->
+  match
     match p.network_mode_opt with
-    | Some mode -> mode
-    | None ->
-        if Option.is_some p.sandbox_profile_opt
-           && sandbox_profile <> old.sandbox_profile
-        then
-          (* Recompute the profile default on sandbox posture changes so
-             legacy egress does not silently carry into hardened mode. *)
-          default_network_mode_for_profile sandbox_profile
-        else
-          old.network_mode
-  in
+    | None -> Ok old.network_mode
+    | Some raw ->
+      match network_mode_of_string raw with
+      | Some nm -> Ok nm
+      | None ->
+        Error
+          (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
+  with
+  | Error msg -> tool_result_error msg
+  | Ok network_mode ->
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
     | Some value, _ -> value
@@ -129,53 +140,13 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback_message:old.compaction.message_gate
       ~fallback_token:old.compaction.token_gate
   in
-  let profile_tool_preset =
-    Option.bind p.profile_defaults.tool_preset tool_preset_of_string
-  in
   let tool_access =
     match p.tool_access_opt with
     | Some access -> access
     | None ->
-        match old.tool_access with
-        | Preset current ->
-            let preset =
-              match p.tool_preset_opt with
-              | Some preset -> preset
-              | None -> (
-                  match profile_tool_preset with
-                  | Some preset -> preset
-                  | None -> current.preset)
-            in
-            let also_allow =
-              resolve_tool_name_list
-                ~preferred:p.tool_also_allow_opt
-                ~fallback:
-                  (match p.profile_defaults.tool_also_allow with
-                   | Some _ as profile -> profile
-                   | None -> Some current.also_allow)
-            in
-            Preset { preset; also_allow }
-        | Custom names -> (
-            match Dashboard_utils.first_some p.tool_preset_opt profile_tool_preset with
-            | Some preset ->
-                let also_allow =
-                  resolve_tool_name_list
-                    ~preferred:p.tool_also_allow_opt
-                    ~fallback:p.profile_defaults.tool_also_allow
-                in
-                Preset { preset; also_allow }
-            | None -> Custom names)
-  in
-  let room_signal_prompt_enabled =
-    match keeper_room_signal_prompt_enabled_override () with
-    | Some value -> value
-    | None ->
-        Option.value
-          ~default:
-            (tool_access_default_room_signal_prompt_enabled
-               ~default:default_room_signal_prompt_enabled
-               tool_access)
-          p.profile_defaults.room_signal_prompt_enabled
+        (match p.profile_defaults.tool_access with
+         | Some tools -> normalize_tool_names tools
+         | None -> old.tool_access)
   in
   let tool_denylist =
     let profile_or_old =
@@ -190,25 +161,28 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       ~fallback:profile_or_old
   in
   let new_will =
-    Option.value
-      ~default:
-        (if String.trim old.will <> "" then old.will
-         else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will)
-      p.will_opt
+    match p.will_opt with
+    | Some w -> w
+    | None ->
+        if preserve_prompt_defaults then old.will
+        else if String.trim old.will <> "" then old.will
+        else Option.value ~default:(Env_config_core.keeper_will ()) p.profile_defaults.will
   in
   let new_needs =
-    Option.value
-      ~default:
-        (if String.trim old.needs <> "" then old.needs
-         else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs)
-      p.needs_opt
+    match p.needs_opt with
+    | Some n -> n
+    | None ->
+        if preserve_prompt_defaults then old.needs
+        else if String.trim old.needs <> "" then old.needs
+        else Option.value ~default:(Env_config_core.keeper_needs ()) p.profile_defaults.needs
   in
   let new_desires =
-    Option.value
-      ~default:
-        (if String.trim old.desires <> "" then old.desires
-         else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires)
-      p.desires_opt
+    match p.desires_opt with
+    | Some d -> d
+    | None ->
+        if preserve_prompt_defaults then old.desires
+        else if String.trim old.desires <> "" then old.desires
+        else Option.value ~default:(Env_config_core.keeper_desires ()) p.profile_defaults.desires
   in
   (* Layer 1 boundary check: warn (not truncate) when an update brings a
      persona field above the prompt-render cap.  Skip when the value
@@ -218,7 +192,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     if not (String.equal old_value new_value) then
       let len = String.length new_value in
       if len > Keeper_config.prompt_render_max_bytes then
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TurnUpUpdateFailures)
           ~labels:[("keeper", old.name); ("site", Keeper_turn_up_update_failure_site.(to_label Prompt_cap))]
           ();
@@ -268,37 +242,25 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     short_goal;
     mid_goal;
     long_goal;
-    cascade_ref =
-      (* RFC-0041 (post-step-4): cascade_ref is the SSOT.
-         An explicit tool arg is an operator reconfiguration request.
-         Otherwise TOML cascade_name takes precedence over runtime when
-         present; otherwise preserve the existing keeper's cascade_ref so
-         dashboard drift remains visible.  See #6747. *)
-      (let group =
-         match p.cascade_name_opt, p.profile_defaults.cascade_name with
-         | Some name, _ -> name
-         | None, Some name -> name
-         | None, None ->
-           let prev = cascade_name_of_meta old in
-           if String.trim prev <> "" then prev
-           else (Keeper_config.default_cascade_name ())
-       in
-       Some Cascade_ref.{ group = Cascade_name.of_string_exn group; item = None });
     will = new_will;
     needs = new_needs;
     desires = new_desires;
     instructions =
-      Option.value
-        ~default:
-          (if String.trim old.instructions <> "" then old.instructions
-           else Option.value ~default:"" p.profile_defaults.instructions)
-        p.instructions_opt;
+      (match p.instructions_arg with
+       | Some v -> v
+       | None ->
+           if preserve_prompt_defaults then old.instructions
+           else
+             Option.value
+               ~default:
+                 (if String.trim old.instructions <> "" then old.instructions
+                  else Option.value ~default:"" p.profile_defaults.instructions)
+               p.instructions_opt);
     allowed_paths;
     sandbox_profile;
     network_mode;
     tool_access;
     tool_denylist;
-    tool_preset_source = p.profile_defaults.tool_preset_source;
     autoboot_enabled;
     active_goal_ids;
     paused = if resume_paused_keeper then false else old.paused;
@@ -312,15 +274,12 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          }
        else old.runtime);
     mention_targets;
-    room_signal_prompt_enabled;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;
     telemetry_feedback_window_hours =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_window_hours
         old.telemetry_feedback_window_hours;
-    per_provider_timeout_s =
-      Dashboard_utils.first_some p.profile_defaults.per_provider_timeout old.per_provider_timeout_s;
     always_approve =
       Dashboard_utils.first_some p.profile_defaults.always_approve old.always_approve;
     proactive = {
@@ -360,8 +319,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
         |> normalize_continuity_compaction_cooldown_sec;
       max_checkpoint_messages = old.compaction.max_checkpoint_messages;
       keep_recent_tool_results = old.compaction.keep_recent_tool_results;
-      tool_heavy_msg_threshold = old.compaction.tool_heavy_msg_threshold;
-      tool_heavy_ratio_floor = old.compaction.tool_heavy_ratio_floor;
     };
     auto_handoff = Option.value ~default:old.auto_handoff p.auto_handoff_opt;
     handoff_threshold = Option.value ~default:old.handoff_threshold p.handoff_threshold_opt;
@@ -370,16 +327,10 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     updated_at = now_iso ();
   } in
   match
-    validate_sandbox_settings
-      ~config:ctx.config
-      ~keeper_name:p.name
-      ~repo_cli_identity:p.profile_defaults.repo_cli_identity
-      ~sandbox_profile
-      ~network_mode
-      ~allowed_paths
+    validate_sandbox_settings ~allowed_paths
   with
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string TurnUpUpdateFailures)
         ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_validation))]
         ();
@@ -389,10 +340,11 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   | Ok () ->
       (match
          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
+           ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
+           ~sandbox_profile
        with
        | Error err ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string TurnUpUpdateFailures)
              ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_preflight))]
              ();
@@ -400,14 +352,40 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
              p.name err;
            tool_result_error err
        | Ok () ->
-      (match write_meta ctx.config updated with
-       | Error e ->
-           Prometheus.inc_counter
-             Keeper_metrics.(to_string WriteMetaFailures)
-             ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-             ();
-           tool_result_error e
-       | Ok () ->
-         stop_keepalive ~base_path:ctx.config.base_path updated.name;
-         start_keepalive ctx updated;
-         tool_result_ok (Yojson.Safe.to_string (meta_to_json updated))))
+         let runtime_assignment_result =
+           match p.runtime_id_opt with
+           | None -> Ok ()
+           | Some runtime_id ->
+             Runtime.set_runtime_id_for_keeper
+               ~keeper_name:p.name
+               ~runtime_id
+               ()
+         in
+         (match runtime_assignment_result with
+          | Error err ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string TurnUpUpdateFailures)
+              ~labels:
+                [ ( "keeper", p.name )
+                ; ( "site"
+                  , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
+                  )
+                ]
+              ();
+            Log.Keeper.warn
+              "update_keeper failed runtime assignment for %s: %s"
+              p.name
+              err;
+            tool_result_error err
+          | Ok () ->
+            (match write_meta ~force ctx.config updated with
+             | Error e ->
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string WriteMetaFailures)
+                   ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+                   ();
+                 tool_result_error e
+             | Ok () ->
+               stop_keepalive ~base_path:ctx.config.base_path updated.name;
+               start_keepalive ctx updated;
+               tool_result_ok (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json updated)))))

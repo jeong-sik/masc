@@ -1,21 +1,21 @@
 (* test/test_keeper_tool_use_failure_counter.ml
 
    #9919: verify that [post_tool_use_failure] in keeper_hooks_oas
-   emits a proper Prometheus counter with [keeper] and [tool]
-   labels instead of the degenerate [Heuristic_metrics.record]
+   emits a proper Otel_metric_store counter with [keeper] and [tool]
+   labels instead of the degenerate legacy heuristic metric
    that produced 51 identical 1-bit rows in production. *)
 
-module H = Masc_mcp.Keeper_hooks_oas
-module Prom = Masc_mcp.Prometheus
+module H = Masc.Keeper_hooks_oas
+module Metrics = Masc.Otel_metric_store
 
 let counter_for ~keeper ~tool =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     H.tool_use_failure_metric
     ~labels:[ ("keeper", keeper); ("tool", tool) ]
     ()
 
 let test_metric_name_matches_convention () =
-  (* Prometheus _total suffix + masc_ prefix follow the existing
+  (* Otel_metric_store _total suffix + masc_ prefix follow the existing
      counter naming in keeper_hooks_oas.  A rename would break
      dashboards and #9880 governance readers. *)
   Alcotest.(check string)

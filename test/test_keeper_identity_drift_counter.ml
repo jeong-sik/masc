@@ -1,7 +1,7 @@
 open Alcotest
 
-module KES = Masc_mcp.Agent_tool_shared_runtime
-module Keeper_registry = Masc_mcp.Keeper_registry
+module KES = Masc.Keeper_tool_shared_runtime
+module Keeper_registry = Masc.Keeper_registry
 
 let temp_dir () =
   let d = Filename.temp_file "keeper_identity_drift_" "" in
@@ -38,8 +38,8 @@ let make_meta name =
 ;;
 
 let counter_value ~source_layer ~field =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string PathResolverIdentityMismatch)
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string PathResolverIdentityMismatch)
     ~labels:[ ("source_layer", source_layer); ("field", field) ]
     ()
 ;;

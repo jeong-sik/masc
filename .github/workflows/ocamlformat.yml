@@ -85,7 +85,30 @@ jobs:
       - name: Install ocamlformat
         if: steps.changed.outputs.no_files != 'true'
         run: |
-          opam install -y "ocamlformat.${{ steps.pin.outputs.ocamlformat_version }}"
+          # Formatter-only CI. Install with checksum verification first so the
+          # whole formatter toolchain (ocamlformat included) is integrity-checked
+          # in the normal path. GitLab-generated archives for the fix/menhir
+          # date tags can drift or be served as a non-archive by GitLab; only
+          # when that actually fails do we pin those exact tags via git and
+          # retry, leaving ocamlformat itself checksum-verified from opam.
+          fmt_pkgs=(
+            "fix.20250428"
+            "menhir.20250912"
+            "ocamlformat.${{ steps.pin.outputs.ocamlformat_version }}"
+          )
+          install_from_opam_archives() {
+            opam install -y "${fmt_pkgs[@]}"
+          }
+          install_from_git_tags() {
+            opam pin add -n -y fix.20250428 \
+              "git+https://gitlab.inria.fr/fpottier/fix.git#20250428"
+            for pkg in menhir menhirCST menhirLib menhirSdk; do
+              opam pin add -n -y "${pkg}.20250912" \
+                "git+https://gitlab.inria.fr/fpottier/menhir.git#20250912"
+            done
+            opam install -y "${fmt_pkgs[@]}"
+          }
+          if ! install_from_opam_archives; then install_from_git_tags; fi
 
       - name: Check formatting (changed files only)
         if: steps.changed.outputs.no_files != 'true'

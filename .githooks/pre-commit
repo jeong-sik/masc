@@ -1,6 +1,55 @@
 #!/bin/sh
 set -e
 
+# Issue #19345: Path-scoped skip for docs/asset-only commits.
+#
+# `dune build --root .` is the source-of-truth type-check gate, but
+# on a fresh worktree it eats 5-15 min of cold cache before any
+# commit can land — even when the staged set is just `.md` or
+# `docs/`. The skip set below is explicitly enumerated (closed set,
+# default-safe): anything outside the listed extensions/prefixes
+# still triggers the full build, so unknown file types cannot
+# silently bypass type-check.
+#
+# Anti-pattern guardrails (CLAUDE.md §워크어라운드 거부 기준):
+#   §1 telemetry-as-fix: not applicable — actually changes scope.
+#   §2 string classifier: closed extension/prefix allowlist, not a
+#       free-form substring match on commit message or content.
+#   §3 N-of-M: single file change, no caller migration needed.
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [ -z "$staged" ]; then
+  exit 0  # nothing staged (e.g. amend with no content changes)
+fi
+
+build_needed=0
+for f in $staged; do
+  case "$f" in
+    # Documentation / prose.
+    *.md|*.markdown|*.txt|*.rst|*.adoc)            ;;
+    # Image / asset binaries.
+    *.png|*.jpg|*.jpeg|*.gif|*.svg|*.ico|*.webp)   ;;
+    # Top-level meta files.
+    LICENSE|LICENSE.*|CHANGELOG|CHANGELOG.*)       ;;
+    NOTICE|NOTICE.*|AUTHORS|AUTHORS.*|CONTRIBUTORS) ;;
+    # Doc / GitHub workflow directories.
+    docs/*|.github/*|.githooks/README*)            ;;
+    # Git metadata that never affects OCaml build.
+    .gitignore|.gitattributes|.gitmessage)         ;;
+    # Anything else: build needed.
+    *)
+      build_needed=1
+      break
+      ;;
+  esac
+done
+
+if [ "$build_needed" = "0" ]; then
+  echo "pre-commit: docs/asset-only staged set, skipping dune build (#19345)"
+  exit 0
+fi
+
 # Type-check all OCaml code without producing binaries.
 # Fails fast on type errors before they reach CI.
-dune build --root . @check
+dune build --root .

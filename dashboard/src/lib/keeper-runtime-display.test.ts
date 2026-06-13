@@ -102,6 +102,34 @@ describe('keeperDisplayStatus', () => {
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
+
+    it('uses lifecycle_phase when heartbeat is alive but status is offline', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        phase: 'Running',
+        lifecycle_phase: 'Stopped',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('stopped')
+    })
+
+    it('does not turn exact Offline lifecycle into idle just because heartbeat is recent', () => {
+      const keeper = makeKeeper({
+        status: 'offline',
+        lifecycle_phase: 'Offline',
+        last_heartbeat: new Date().toISOString(),
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('unbooted')
+    })
+
+    it('lets terminal lifecycle override stale active status', () => {
+      const keeper = makeKeeper({
+        status: 'active',
+        phase: 'Running',
+        lifecycle_phase: 'Dead',
+      })
+      expect(keeperDisplayStatus(keeper)).toBe('dead')
+    })
   })
 })
 
@@ -199,11 +227,9 @@ describe('keeperPauseDisplay', () => {
 describe('keeperRuntimeBlockerLabel', () => {
   it('labels backend-emitted terminal keeper failure classes', () => {
     expect(keeperRuntimeBlockerLabel('provider_runtime_error')).toBe(
-      'Provider 런타임 오류',
+      '런타임 호출 오류',
     )
-    expect(keeperRuntimeBlockerLabel('tool_required_unsatisfied')).toBe(
-      '필수 도구 미충족',
-    )
+    expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
   })
 
   it('labels the 9 RFC-0062 SDK blocker variants', () => {
@@ -212,7 +238,6 @@ describe('keeperRuntimeBlockerLabel', () => {
     expect(keeperRuntimeBlockerLabel('sdk_cost_budget_exceeded')).toBe('SDK 비용 예산 초과')
     expect(keeperRuntimeBlockerLabel('sdk_unrecognized_stop_reason')).toBe('SDK 미식별 정지 사유')
     expect(keeperRuntimeBlockerLabel('sdk_idle_detected')).toBe('SDK Idle 감지')
-    expect(keeperRuntimeBlockerLabel('sdk_tool_retry_exhausted')).toBe('SDK 도구 재시도 소진')
     expect(keeperRuntimeBlockerLabel('sdk_guardrail_violation')).toBe('SDK 가드레일 위반')
     expect(keeperRuntimeBlockerLabel('sdk_tripwire_violation')).toBe('SDK Tripwire 위반')
     expect(keeperRuntimeBlockerLabel('sdk_exit_condition_met')).toBe('SDK 종료 조건 충족')
@@ -226,22 +251,22 @@ describe('keeperRuntimeBlockerLabel', () => {
 })
 
 describe('keeperRuntimeBlockerHint', () => {
-  it('explains provider runtime terminal failures when no summary is available', () => {
+  it('explains runtime terminal failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
         runtime_blocker_class: 'provider_runtime_error',
         runtime_blocker_summary: 'provider_runtime_error',
       })),
-    ).toBe('Provider, adapter, or cascade가 keeper 진행 전에 실패했습니다.')
+    ).toBe('런타임 호출 경계가 keeper 진행 전에 실패했습니다.')
   })
 
-  it('explains unsatisfied required tool terminal failures when no summary is available', () => {
+  it('explains recoverable tool-route failures when no summary is available', () => {
     expect(
       keeperRuntimeBlockerHint(makeKeeper({
-        runtime_blocker_class: 'tool_required_unsatisfied',
-        runtime_blocker_summary: 'tool_required_unsatisfied',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime_exhausted',
       })),
-    ).toBe('액션 가능한 신호에 필요한 keeper 도구 호출이 충족되지 않았습니다.')
+    ).toBe('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
   })
 
   it('explains admission queue waits as keeper FIFO waits, not OAS waits', () => {
@@ -327,6 +352,29 @@ describe('keeperActivityDisplay', () => {
       timestamp: '2026-04-24T17:54:00Z',
       ageSeconds: 360,
     })
+  })
+
+  it('uses live activity source labels for tool and approval activity', () => {
+    expect(
+      keeperActivityDisplay({
+        last_activity_at: '2026-04-24T17:59:30Z',
+        last_activity_source: 'approval_pending',
+        last_heartbeat: '2026-04-24T17:54:00Z',
+      }),
+    ).toEqual({
+      source: 'approval_pending',
+      label: '승인 대기',
+      timestamp: '2026-04-24T17:59:30Z',
+      ageSeconds: 30,
+    })
+
+    const toolActivity = keeperActivityDisplay({
+      last_activity_at: '2026-04-24T17:58:00Z',
+      last_activity_source: 'tool_call',
+      last_turn_ago_s: 180,
+    })
+    expect(toolActivity.source).toBe('tool_call')
+    expect(toolActivity.label).toBe('도구 활동')
   })
 
   it('does not let agent last_seen override keeper runtime signals', () => {

@@ -24,7 +24,7 @@
     into this lightweight record. *)
 type observation_context = {
   context_ratio : float;          (** [0.0, 1.0] — current context window utilization *)
-  active_agent_count : int;       (** Agents currently active in the room *)
+  active_agent_count : int;       (** Agents currently active in the workspace *)
   unclaimed_task_count : int;     (** Pending tasks in the backlog *)
   is_single_focused_task : bool;  (** Keeper working on exactly one task *)
   context_window : int;           (** Model context window in tokens *)
@@ -53,6 +53,11 @@ type strategy =
 let memory_summary_prefix = "[MEMORY_SUMMARY]"
 
 let goal_prefix = "[GOAL]"
+
+(** Identity anchor tag injected by [Keeper_prompt.build_keeper_system_prompt].
+    Messages containing this tag are never dropped or summarized — they anchor
+    the keeper's self-identity and survive compaction intact. *)
+let identity_anchor_tag = "<identity_anchor>"
 
 let first_sentence (s : string) =
   let s = String.trim s in
@@ -175,6 +180,20 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
       Float.max score anchor_boost
     else score
   in
+  (* Identity anchor and System messages are never dropped.
+     - Identity anchor: explicit <identity_anchor> tag in system prompt.
+     - System role: the system prompt carries identity, goals, and policy
+       that cannot be reconstructed from conversation context.
+     Without this floor, System messages at index 0 score ~0.425 due to
+     zero recency, which can fall below the drop threshold. *)
+  let score =
+    if String.contains msg_text '<'
+       && String_util.contains_substring msg_text identity_anchor_tag then
+      Float.max score anchor_boost
+    else if match m.role with Agent_sdk.Types.System -> true | _ -> false then
+      Float.max score anchor_boost
+    else score
+  in
   Float.min 1.0 (Float.max 0.0 score)
 
 let score_messages (msgs : Agent_sdk.Types.message list) : (int * float) list =
@@ -257,7 +276,7 @@ let oas_strategy_of (s : strategy) : Agent_sdk.Context_reducer.t =
     OAS Dynamic is turn-scoped and message-scoped — it answers
     "given this conversation state, which single reduction to apply?".
     MASC Dynamic is world-scoped — it answers "given the multi-agent
-    room state, which {i combination} of reductions is appropriate?".
+    workspace state, which {i combination} of reductions is appropriate?".
 
     They operate at different abstraction levels:
     - OAS Dynamic:  per-conversation, single strategy, inside [reduce]
@@ -285,7 +304,7 @@ let resolve_strategies
           (* Fallback: minimal observation when none provided. *)
           { context_ratio = 0.5; active_agent_count = 1;
             unclaimed_task_count = 0; is_single_focused_task = true;
-            context_window = Cascade_runtime.fallback_context_window;
+            context_window = Runtime_constants.fallback_context_window;
             is_local_model = false }
       in
       (* Resolve once — no recursive Dynamic *)
@@ -305,13 +324,13 @@ let observation_summary = function
   | None -> "obs=none"
   | Some obs ->
       Printf.sprintf
-        "obs=ratio=%.2f agents=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
+        "obs=ratio=%.2f keepers=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
         obs.context_ratio obs.active_agent_count obs.unclaimed_task_count
         obs.is_single_focused_task (obs.context_window / 1000) obs.is_local_model
 
 (** Default dynamic strategy selector.
     Chooses strategies based on observation context:
-    - High context + multi-agent: aggressive compaction (preserve coordination)
+    - High context + multi-agent: aggressive compaction (preserve workspace)
     - High context + single task: summarize old + drop low importance
     - Small local model: prefer pruning (cheaper, faster)
     - Large-context cloud (>= 500K): quality-preserving with summarization
@@ -341,7 +360,7 @@ let small_local_ctx_floor = Env_config.ContextCompact.small_local_floor
 
 let default_dynamic_selector (obs : observation_context) : strategy list =
   if obs.context_ratio >= dynamic_multi_agent_ctx && obs.active_agent_count > 1 then
-    (* Dense coordination: preserve recent turns, aggressive pruning *)
+    (* Dense workspace: preserve recent turns, aggressive pruning *)
     [PruneToolOutputs; DropLowImportance; MergeContiguous]
   else if obs.context_ratio >= dynamic_focused_ctx && obs.is_single_focused_task then
     (* Focused work near budget: summarize old context *)
@@ -386,6 +405,18 @@ let compact
   Log.Compact.info "[compact] strategies=[%s] %s"
     (String.concat "," strategy_names)
     (observation_summary observation);
+  (* Deterministic guard: separate System messages from the compaction
+     pipeline. System messages carry identity anchors, goals, and policy
+     that must never be dropped or lossily summarized. This is a hard
+     mechanical guarantee — not a score-based heuristic. The OAS reducer
+     operates only on non-System messages; System messages are prepended
+     back verbatim after reduction. *)
+  let system_msgs, other_msgs = List.partition
+      (fun (m : Agent_sdk.Types.message) ->
+         match m.role with Agent_sdk.Types.System -> true | _ -> false)
+      messages
+  in
   let oas_strategies = List.map oas_strategy_of resolved in
   let reducer = Agent_sdk.Context_reducer.compose oas_strategies in
-  Agent_sdk.Context_reducer.reduce reducer messages
+  let reduced = Agent_sdk.Context_reducer.reduce reducer other_msgs in
+  system_msgs @ reduced

@@ -10,14 +10,14 @@ type turn_span_stat
 val empty_scheduled_stat : scheduled_stat
 
 val scheduled_stats :
-  config:Coord.config ->
+  config:Workspace.config ->
   string ->
   scheduled_stat
 
 val scheduled_evidence_json : scheduled_stat -> Yojson.Safe.t
 
 val turn_span_stats :
-  config:Coord.config ->
+  config:Workspace.config ->
   string ->
   turn_span_stat
 

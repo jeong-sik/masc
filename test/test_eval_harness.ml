@@ -1,6 +1,6 @@
 (** Unit tests for Eval_harness module — Scenario-based evaluation. *)
 
-open Masc_mcp
+open Masc
 
 (* ================================================================ *)
 (* Test: apply_deterministic_grader                                  *)
@@ -98,9 +98,17 @@ let test_regex_no_match () =
 (* Test: check_tool_expectations                                     *)
 (* ================================================================ *)
 
+let tool_expect ?max_calls ?(required = true) tool_name =
+  { Eval_harness.tool_name
+  ; selector = Eval_tool_selector.Tool_name tool_name
+  ; required
+  ; max_calls
+  ; args_contain = None
+  }
+
 let test_tool_expect_required_met () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
+    tool_expect "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -109,7 +117,7 @@ let test_tool_expect_required_met () =
 
 let test_tool_expect_required_missing () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
+    tool_expect "tool_execute";
   ] in
   let actual = ["tool_read_file"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -119,7 +127,7 @@ let test_tool_expect_required_missing () =
 
 let test_tool_expect_max_calls_ok () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = Some 3; args_contain = None };
+    tool_expect ~max_calls:3 "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
@@ -128,13 +136,46 @@ let test_tool_expect_max_calls_ok () =
 
 let test_tool_expect_max_calls_exceeded () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "tool_execute"; required = true; max_calls = Some 2; args_contain = None };
+    tool_expect ~max_calls:2 "tool_execute";
   ] in
   let actual = ["tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check bool) "exceeded penalty" true (r.Eval_harness.score < 1.0);
-  Alcotest.(check bool) "has warning" true (String.length r.Eval_harness.detail > 0)
+  Alcotest.(check bool) "has max detail" true
+    (String_util.contains_substring r.Eval_harness.detail "max: 2")
+
+let test_tool_expect_descriptor_selector () =
+  let expectations : Eval_harness.tool_expectation list = [
+    { tool_name = "agent profile lookup"
+    ; selector = Eval_tool_selector.Descriptor_id "masc.agent.card"
+    ; required = false
+    ; max_calls = Some 0
+    ; args_contain = None
+    };
+  ] in
+  let actual =
+    [
+      ({ tool_name = "masc_agent_card"
+       ; route_evidence =
+           Some
+             (`Assoc
+                [
+                  ("descriptor_id", `String "masc.agent.card");
+                  ("runtime_handler", `String "Tool_masc_agent_dispatch");
+                ])
+       } : Eval_tool_selector.call);
+    ]
+  in
+  let results =
+    Eval_harness.check_tool_expectations_with_evidence expectations actual
+  in
+  let r = List.hd results in
+  Alcotest.(check (float 0.01)) "descriptor selector exceeded max" 0.0
+    r.Eval_harness.score;
+  Alcotest.(check bool) "detail names selector" true
+    (String_util.contains_substring r.Eval_harness.detail
+       "descriptor_id:masc.agent.card")
 
 (* ================================================================ *)
 (* Test: compute_pass_at_k                                           *)
@@ -224,6 +265,28 @@ let test_parse_regex_grader () =
        | _ -> Alcotest.fail "Expected Deterministic grader")
   | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
 
+let test_parse_tool_expectation_tool_name_fallback () =
+  let json = Yojson.Safe.from_string {|{
+    "id": "tool-name-fallback",
+    "goal": "Test legacy tool_name fallback",
+    "tool_expectations": [
+      {"tool_name": "keeper_task_claim", "required": true}
+    ]
+  }|} in
+  match Eval_harness.scenario_of_json json with
+  | Ok s ->
+      (match s.Eval_harness.tool_expectations with
+       | [ expectation ] ->
+           Alcotest.(check string) "legacy label" "keeper_task_claim"
+             expectation.Eval_harness.tool_name;
+           (match expectation.Eval_harness.selector with
+            | Eval_tool_selector.Tool_name tool_name ->
+                Alcotest.(check string) "selector fallback" "keeper_task_claim"
+                  tool_name
+            | _ -> Alcotest.fail "Expected Tool_name selector")
+       | _ -> Alcotest.fail "Expected exactly one tool expectation")
+  | Error e -> Alcotest.fail (Printf.sprintf "Parse failed: %s" e)
+
 let test_parse_model_grader () =
   let json = Yojson.Safe.from_string {|{
     "id": "model-test",
@@ -272,6 +335,9 @@ let test_report_to_string () =
     mean_score = 0.75;
     consistency = 0.9;
     total_cost_usd = 0.05;
+    ci95_low = 0.75;
+    ci95_high = 0.75;
+    min_runs_met = false;
     runs = [];
   } in
   let suite : Eval_harness.eval_suite_result = {
@@ -312,6 +378,8 @@ let () =
       Alcotest.test_case "required missing" `Quick test_tool_expect_required_missing;
       Alcotest.test_case "max_calls ok" `Quick test_tool_expect_max_calls_ok;
       Alcotest.test_case "max_calls exceeded" `Quick test_tool_expect_max_calls_exceeded;
+      Alcotest.test_case "descriptor selector" `Quick
+        test_tool_expect_descriptor_selector;
     ]);
     ("pass_at_k", [
       Alcotest.test_case "all pass" `Quick test_pass_at_k_all_pass;
@@ -323,6 +391,8 @@ let () =
       Alcotest.test_case "minimal" `Quick test_parse_minimal_scenario;
       Alcotest.test_case "full scenario" `Quick test_parse_full_scenario;
       Alcotest.test_case "regex grader" `Quick test_parse_regex_grader;
+      Alcotest.test_case "tool_name fallback" `Quick
+        test_parse_tool_expectation_tool_name_fallback;
       Alcotest.test_case "model grader" `Quick test_parse_model_grader;
     ]);
     ("file_loading", [

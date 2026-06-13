@@ -4,4 +4,4 @@
  (action
   (setenv MASC_BASE_PATH /tmp/test-keeper-supervisor-obs-10125
    (run %{test})))
- (libraries masc_mcp alcotest unix))
+ (libraries masc masc.keeper_metrics alcotest unix))

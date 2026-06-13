@@ -13,28 +13,28 @@ withdrawn_reason: "Godmode tier never implemented. Env knob work proceeded in di
 - **Author**: yousleepwhen (vincent)
 - **Created**: 2026-05-05
 - **Audit reference**: `docs/audit-responses/2026-05-05-integrated-improvement-design.md` §2-3, §3-1
-- **Related**: RFC-0030 (`masc create` CLI), RFC-0027 (typed cascade)
+- **Related**: RFC-0030 (`masc create` CLI), RFC-0027 (typed runtime)
 
 ## 1. Problem
 
-Today's TOML schema (keeper persona, cascade profile, env knobs) treats
+Today's TOML schema (keeper persona, runtime profile, env knobs) treats
 all fields as equally visible. The 5 hand-written persona TOMLs are
 already minimal — `sangsu.toml` is 8 lines including the `[keeper]`
 header — but the *parseable surface* is much wider:
 
 - `keeper_types_profile.ml` lists ~40 fields the parser accepts,
   including `sandbox_profile`, `network_mode`, `keepalive_interval_sec`,
-  `git_identity_mode`, `keeper_assignable`, `max_context_tokens`, etc.
-- `cascade_toml_materializer.ml:356` lists ~20 valid cascade fields
+  `retired_git_author_config`, `keeper_assignable`, `max_context_tokens`, etc.
+- `runtime_toml_materializer.ml:356` lists ~20 valid runtime fields
   including `sticky_ttl_ms`, `latency_baseline_ms`,
   `rate_limit_recency_window_s`, `server_error_decay_base`, etc.
-- `cascade_client_capacity.ml` exposes 6+ env knobs around capacity
+- `runtime_client_capacity.ml` exposes 6+ env knobs around capacity
   layering.
 
 The audit framed this as operator confusion ("operator가 36개 keeper를
 관리할 수 없다"). At today's 5-persona scale operators rarely touch
 advanced fields, but the *discoverability* problem is real: an
-operator reading a `cascade_toml_materializer.ml` error sees 20 valid
+operator reading a `runtime_toml_materializer.ml` error sees 20 valid
 field names with no hint about which 3 they actually need.
 
 The goal is **progressive disclosure**: show the small set 95% of
@@ -45,7 +45,7 @@ operators ever touch, gate the rest behind explicit opt-in.
 Three disclosure tiers, with metadata at the field level driving the
 behaviour:
 
-- **Basic**: ~6 fields per asset (persona / cascade / keeper). Default
+- **Basic**: ~6 fields per asset (persona / runtime / keeper). Default
   CLI output, default validation hint set.
 - **Advanced**: ~20 fields. Visible only with `--advanced` flag or
   explicit opt-in env var.
@@ -75,7 +75,7 @@ change; existing TOML files keep working unchanged.
 ### 4.1 Field-tier metadata
 
 Each schema-bearing module (currently `keeper_types_profile.ml`,
-`cascade_toml_materializer.ml`, `env_config_core.ml`) gains a
+`runtime_toml_materializer.ml`, `env_config_core.ml`) gains a
 companion `*_tiers.ml` file with a single mapping:
 
 ```ocaml
@@ -84,7 +84,7 @@ type tier = Basic | Advanced | Godmode
 
 let field_tier : string -> tier = function
   | "name" | "persona" | "tier" | "tools" | "work_source"
-  | "git_identity_mode" -> Basic
+  | "retired_git_author_config" -> Basic
   | "sandbox_profile" | "network_mode" | "keepalive_interval_sec"
   | "max_retries" | "max_context_tokens"
   | "keeper_assignable" -> Advanced
@@ -133,7 +133,7 @@ break-glass header. This is the audit's "Progressive Disclosure" — the
 help text grows with the operator's stated expertise.
 
 The full schema (all tiers) is always available via `masc schema dump
-[persona|cascade]`, JSON output. This is for tooling; humans use
+[persona|runtime]`, JSON output. This is for tooling; humans use
 the tiered CLI.
 
 ### 4.5 No tier on existing TOML files
@@ -172,7 +172,7 @@ yet — this just establishes the metadata.
 PR-2: wire `masc create persona` (assuming RFC-0030 PR-2.1 is merged)
 to consult the tier mapping. Add `--advanced` / `--godmode` flags.
 
-PR-3: same for `masc create cascade`.
+PR-3: same for `masc create runtime`.
 
 PR-4: same for `masc create keeper`.
 

@@ -21,11 +21,8 @@ let cors_preflight_headers origin =
   ]
 
 (** JSON-RPC error response helper *)
-let json_rpc_error code message =
-  Printf.sprintf
-    {|{"jsonrpc":"2.0","error":{"code":%d,"message":"%s"},"id":null}|}
-    code
-    (String.escaped message)
+let json_rpc_error (code : Mcp_error_code.t) message =
+  Mcp_error_code.jsonrpc_error_body code ~message
 
 let is_http_error_response = function
   | `Assoc fields ->
@@ -42,7 +39,17 @@ let is_http_error_response = function
              | _ -> None)
         | _ -> None
       in
-      id_is_null && (code = Some (-32700) || code = Some (-32600))
+      let is_parse_or_invalid = function
+        | Mcp_error_code.Parse_error | Invalid_request -> true
+        | _ -> false
+      in
+      id_is_null
+      && (match code with
+          | Some c ->
+              (match Mcp_error_code.of_wire_code c with
+               | Some ec -> is_parse_or_invalid ec
+               | None -> false)
+          | None -> false)
   | _ -> false
 
 (** Server start time for uptime calculation *)
@@ -87,8 +94,8 @@ let agent_card_json request =
   `Assoc
     [
       ("schema", `String "masc.agent_card.v1");
-      ("name", `String "MASC-MCP");
-      ("description", `String "MASC multi-agent coordination MCP server");
+      ("name", `String "MASC");
+      ("description", `String "MASC multi-agent workspace MCP server");
       ("url", `String base_url);
       ("version", `String build.release_version);
       ( "build",
@@ -121,7 +128,7 @@ let agent_card_json request =
       ( "capabilities",
         `Assoc
           [
-            ("coordination", `Bool true);
+            ("workspace", `Bool true);
             ("task_backlog", `Bool true);
             ("keeper_runtime", `Bool true);
             ("dashboard", `Bool true);
@@ -137,17 +144,103 @@ let health_uptime_secs = Server_routes_http_runtime_health_helpers.health_uptime
 let health_uptime_string = Server_routes_http_runtime_health_helpers.health_uptime_string
 let protocol_json = Server_routes_http_runtime_health_helpers.protocol_json
 let quick_gc_json = Server_routes_http_runtime_health_helpers.quick_gc_json
+
+let internal_keeper_token_hash_opt ~base_path =
+  let hash_file = Auth.internal_keeper_token_hash_file base_path in
+  if Sys.file_exists hash_file then
+    try
+      let hash =
+        In_channel.with_open_bin hash_file In_channel.input_all |> String.trim
+      in
+      if String.equal hash "" then None else Some hash
+    with Sys_error _ -> None
+  else
+    None
+
+let internal_mcp_auth_json ~base_path =
+  let env_key = Auth.internal_keeper_token_env_key in
+  let env_token =
+    match Sys.getenv_opt env_key with
+    | Some raw ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed "" then None else Some trimmed
+    | None -> None
+  in
+  let env_token_present = Option.is_some env_token in
+  let token_hash = internal_keeper_token_hash_opt ~base_path in
+  let token_hash_file_present = Option.is_some token_hash in
+  let env_token_verifies =
+    match env_token, token_hash with
+    | Some token, Some hash -> String.equal hash (Auth.sha256_hash token)
+    | _ -> false
+  in
+  let ready = env_token_present && token_hash_file_present && env_token_verifies in
+  let missing =
+    [ (not env_token_present, "env_token")
+    ; (not token_hash_file_present, "token_hash_file")
+    ; ( env_token_present && token_hash_file_present && not env_token_verifies
+      , "token_hash_mismatch" )
+    ]
+    |> List.filter_map (fun (missing, name) -> if missing then Some name else None)
+  in
+  let status = if ready then "ok" else "degraded" in
+  let operator_next_action =
+    if ready then "none" else "sync_internal_keeper_token_and_restart_runtime"
+  in
+  `Assoc
+    [ "schema", `String "masc.internal_mcp_auth.v1"
+    ; "status", `String status
+    ; "source", `String "running_process_env_and_auth_hash"
+    ; "env_key", `String env_key
+    ; "env_token_present", `Bool env_token_present
+    ; "token_hash_file_present", `Bool token_hash_file_present
+    ; "env_token_verifies", `Bool env_token_verifies
+    ; "keeper_internal_runtime_mcp_ready", `Bool ready
+    ; "missing", `List (List.map (fun name -> `String name) missing)
+    ; "operator_action_required", `Bool (not ready)
+    ; "operator_next_action", `String operator_next_action
+    ]
+
+let otel_health_json () =
+  let enabled = Otel_config.enabled in
+  let degraded = Otel_spans.is_exporter_degraded () in
+  let exporter_active = Otel_spans.is_exporter_active () in
+  let status =
+    if not enabled
+    then "disabled"
+    else if degraded
+    then "degraded"
+    else if exporter_active
+    then "ok"
+    else "inactive"
+  in
+  `Assoc
+    [ "enabled", `Bool enabled
+    ; "status", `String status
+    ; "endpoint", `String Otel_config.endpoint
+    ; "service_name", `String Otel_config.service_name
+    ; "exporter_active", `Bool exporter_active
+    ; "exporter_degraded", `Bool degraded
+    ; "consecutive_failures", `Int (Otel_spans.consecutive_failures ())
+    ; ( "last_successful_export_unix",
+        Json_util.float_opt_to_json (Otel_spans.last_successful_export ()) )
+    ; ( "last_degradation_error",
+        Json_util.string_opt_to_json (Otel_spans.last_degradation_error ()) )
+    ]
+;;
+
 let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
     ?(health_detail = "probe") request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
+  let path_diagnostics = health_path_diagnostics () in
   let full_health_url_fields =
     match full_health_url with
     | Some url -> [ ("full_health_url", `String url) ]
     | None -> []
   in
   [
-      ("server", `String "masc-mcp");
+      ("server", `String "masc");
       ("version", `String build.release_version);
       ("release_version", `String build.release_version);
       ("build", Build_identity.to_yojson build);
@@ -158,7 +251,10 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("protocol", protocol_json ~listener);
       ("transport", transport_json request);
       ("http_listener", Transport_metrics.http_listener_json ());
-      ("paths", Server_base_path_diagnostics.to_yojson (health_path_diagnostics ()));
+      ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
+      ( "internal_mcp_auth"
+      , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
+      ("otel", otel_health_json ());
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
@@ -264,11 +360,27 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   in
   let key_paused_keepers = "paused_keepers" in
   let path_diagnostics = health_path_diagnostics () in
-  let base_path = current_room_base_path_opt () in
-  let phase_counts = keeper_phase_counts ?base_path () in
+  let base_path = runtime_base_path_opt () in
+  let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
+  (* Single-pass fleet meta scan: reads each keeper meta file once,
+     shared by paused-keepers and fleet-safety sections. *)
+  let fleet_meta_scan =
+    match current_server_state_opt () with
+    | Some state ->
+      Some (keeper_fleet_meta_scan state.Mcp_server.workspace_config)
+    | None -> None
+  in
   let paused_keepers_json =
-    compute_section ~name:"paused_keepers" ?section_timings_ref paused_keepers_health_json
+    compute_section ~name:"paused_keepers" ?section_timings_ref
+      (fun () ->
+        match fleet_meta_scan with
+        | Some scan ->
+          paused_keepers_health_json_of_scan
+            ~running_names:(running_paused_keeper_names ())
+            scan.paused_scan
+        | None -> paused_keepers_health_json ())
   in
   let reaction_ledger_json =
     compute_section ~name:"keeper_reaction_ledger" ?section_timings_ref
@@ -279,13 +391,23 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   in
   let keeper_fleet_safety =
     compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
-      (fun () -> keeper_fleet_safety_health_json ~phase_counts ~paused_keepers_json ())
-  in
-  let cdal_health_json =
-    compute_section ~name:"cdal" ?section_timings_ref cdal_health_json
+      (fun () ->
+        match fleet_meta_scan with
+        | Some scan ->
+          keeper_fleet_safety_health_json
+            ~bootable_names:scan.bootable_names
+            ~autoboot_scan:scan.autoboot_scan
+            ~phase_counts
+            ~paused_keepers_json
+            ()
+        | None ->
+          keeper_fleet_safety_health_json
+            ~phase_counts
+            ~paused_keepers_json
+            ())
   in
   Tool_args.ok_assoc [
-    ("server", `String "masc-mcp");
+    ("server", `String "masc");
     ("version", `String build.release_version);
     ("release_version", `String build.release_version);
     ("build", Build_identity.to_yojson build);
@@ -294,6 +416,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("transport", transport_json request);
     ("http_listener", Transport_metrics.http_listener_json ());
     ("paths", Server_base_path_diagnostics.to_yojson path_diagnostics);
+    ( "internal_mcp_auth"
+    , internal_mcp_auth_json ~base_path:path_diagnostics.effective_base_path );
+    ("otel", otel_health_json ());
     ( "runtime_truth"
     , runtime_truth_json ~build ~path_diagnostics ~keeper_fibers
         ~fd_accountant:fd_accountant_json );
@@ -319,10 +444,9 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
        run turns, and auto-paused keepers may no longer have a live registry
        entry. The dashboard "깨우기" button now auto-resumes paused keepers,
-       but ops still need a quick count without scraping /metrics. List names
+       but ops still need a quick count without external telemetry. List names
        so an operator can correlate with the structured blocker cause. *)
     (key_paused_keepers, paused_keepers_json);
-    ("cdal", cdal_health_json);
     ("keeper_config_parse_error_count",
      `Int keeper_config_parse_error_count);
     ( "keeper_config_parse_errors",
@@ -345,14 +469,14 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
       `Bool keeper_config_schema_blocking );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
-       The Prometheus counter `masc_lazy_task_boot_guard_fired_total`
+       The Otel_metric_store counter `masc_lazy_task_boot_guard_fired_total`
        was already incremented but `/health` did not surface it, so an
        operator hitting /health would see "ok" while keepers had
        silently failed to start.  Exposing the cumulative count here
        lets dashboards / health probes alert on a non-zero value. *)
     ("lazy_task_boot_guard_fires_total",
      `Int (int_of_float
-             (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
+             (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
@@ -474,7 +598,19 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
   ]
 
 let cached_full_health_fields = function
-  | `Assoc fields -> List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+  | `Assoc fields ->
+      let cached =
+        List.filter (fun (name, _) -> full_health_field_is_cached name) fields
+      in
+      let has_cached name =
+        List.exists (fun (cached_name, _) -> String.equal cached_name name) cached
+      in
+      let missing_placeholders =
+        full_health_placeholder_fields ~status:"unavailable" ()
+        |> List.filter (fun (name, _) ->
+            full_health_field_is_cached name && not (has_cached name))
+      in
+      cached @ missing_placeholders
   | json ->
       [
         ( "full_health_payload",
@@ -603,7 +739,7 @@ let mark_full_health_snapshot_error exn =
       full_health_refresh_started_at := None;
       full_health_refresh_requested := false;
       (* Increment the consecutive-failure counter and emit the
-         Prometheus critical-edge signal ONLY when we cross the
+         Otel_metric_store critical-edge signal ONLY when we cross the
          configured threshold on this exact failure.  Subsequent
          failures past the threshold do not re-emit — operators
          get one structural alert per outage, not a noisy stream
@@ -612,7 +748,7 @@ let mark_full_health_snapshot_error exn =
       if !full_health_consecutive_failures
          = full_health_critical_failure_threshold
       then
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           "masc_full_health_refresh_critical_total"
           ~labels:[ "reason", "consecutive_failures" ]
           ())
@@ -694,14 +830,12 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
           `Float snapshot.computed_at,
           `Int snapshot.duration_ms,
-          (match snapshot.error with Some error -> `String error | None -> `Null),
+          (Json_util.string_opt_to_json snapshot.error),
           stale_since_ts_json,
           status )
   in
   let stale_reason =
-    match full_health_snapshot_stale_reason ~now snapshot with
-    | Some reason -> `String reason
-    | None -> `Null
+    Json_util.string_opt_to_json (full_health_snapshot_stale_reason ~now snapshot)
   in
   let stale_age_ms = full_health_snapshot_stale_age_ms ~now snapshot in
   let section_timings_json =

@@ -1,7 +1,7 @@
 open Alcotest
 
 module Metrics = Channel_gate_metrics
-module Gate_routes = Masc_mcp.Server_routes_http_routes_channel_gate
+module Gate_routes = Server_routes_http_routes_channel_gate
 module U = Yojson.Safe.Util
 
 let unique_channel prefix =
@@ -31,12 +31,12 @@ let test_error_kind_round_trip () =
 let test_record_attempt_tracks_connector_diagnostics () =
   with_eio (fun () ->
       let channel = unique_channel "discord-metrics" in
-      Metrics.record_attempt ~channel:("  " ^ channel ^ "  ") ~room_id:"room-a" ~keeper:"  luna  "
+      Metrics.record_attempt ~channel:("  " ^ channel ^ "  ") ~workspace_id:"workspace-a" ~keeper:"  luna  "
         ~duration_ms:1200 Metrics.Success;
-      Metrics.record_attempt ~channel ~room_id:"room-b" ~keeper:"luna"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
-      Metrics.record_attempt ~channel ~room_id:"room-b" ~keeper:"luna"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"luna"
         ~duration_ms:0 Metrics.Duplicate;
       let stats =
         Metrics.snapshot ()
@@ -48,18 +48,18 @@ let test_record_attempt_tracks_connector_diagnostics () =
       check int "error_count excludes duplicates" 1 stats.error_count;
       check int "duplicate_count" 1 stats.duplicate_count;
       check int "validation_error_count" 1 stats.validation_error_count;
-      check int "room_count counts unique rooms" 2 stats.room_count;
+      check int "workspace_count counts unique workspaces" 2 stats.workspace_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
       check_error_kind "last_error_kind" "validation" stats.last_error_kind;
       check string "last_outcome" "duplicate" stats.last_outcome;
-      check string "last_room_id" "room-b" stats.last_room_id)
+      check string "last_workspace_id" "workspace-b" stats.last_workspace_id)
 
 let test_record_internal_error_exn_tracks_internal_failures () =
   with_eio (fun () ->
       let channel = unique_channel "discord-internal" in
       Metrics.record_internal_error_exn
         ~channel
-        ~room_id:"room-z"
+        ~workspace_id:"workspace-z"
         ~keeper:"  sangsu  "
         ~duration_ms:42
         (Failure "boom");
@@ -84,7 +84,7 @@ let test_record_validation_error_metric_tracks_request_metadata () =
           (`Assoc
             [
               ("channel", `String channel);
-              ("channel_room_id", `String "room-route");
+              ("channel_workspace_id", `String "workspace-route");
               ("keeper_name", `String "luna");
             ])
       in
@@ -96,7 +96,7 @@ let test_record_validation_error_metric_tracks_request_metadata () =
       in
       check int "message_count" 1 stats.message_count;
       check int "validation_error_count" 1 stats.validation_error_count;
-      check string "last_room_id" "room-route" stats.last_room_id;
+      check string "last_workspace_id" "workspace-route" stats.last_workspace_id;
       check string "last_keeper" "luna" stats.last_keeper;
       check string "last_error" "invalid payload" stats.last_error)
 
@@ -127,9 +127,9 @@ let test_record_validation_error_metric_falls_back_for_invalid_json () =
 let test_snapshot_json_reports_health_and_latency () =
   with_eio (fun () ->
       let channel = unique_channel "discord-json" in
-      Metrics.record_attempt ~channel ~room_id:"room-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
         ~duration_ms:10_500 Metrics.Success;
-      Metrics.record_attempt ~channel ~room_id:"room-1" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-1" ~keeper:"sangsu"
         ~duration_ms:11_500
         (Metrics.Keeper_error "upstream timeout");
       let json = Metrics.snapshot_json () in
@@ -149,12 +149,12 @@ let test_snapshot_json_reports_health_and_latency () =
        check string "last_error" "upstream timeout"
          (row |> U.member "last_error" |> U.to_string))
 
-let test_snapshot_json_includes_room_bindings () =
+let test_snapshot_json_includes_workspace_bindings () =
   with_eio (fun () ->
       let channel = unique_channel "discord-bindings" in
-      Metrics.record_attempt ~channel ~room_id:"room-alpha" ~keeper:"luna"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-alpha" ~keeper:"luna"
         ~duration_ms:120 Metrics.Success;
-      Metrics.record_attempt ~channel ~room_id:"room-beta" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-beta" ~keeper:"sangsu"
         ~duration_ms:0
         (Metrics.Keeper_error "keeper offline");
       let json = Metrics.snapshot_json () in
@@ -166,12 +166,12 @@ let test_snapshot_json_includes_room_bindings () =
       let alpha =
         bindings
         |> List.find (fun item ->
-               String.equal (item |> U.member "room_id" |> U.to_string) "room-alpha")
+               String.equal (item |> U.member "workspace_id" |> U.to_string) "workspace-alpha")
       in
       let beta =
         bindings
         |> List.find (fun item ->
-               String.equal (item |> U.member "room_id" |> U.to_string) "room-beta")
+               String.equal (item |> U.member "workspace_id" |> U.to_string) "workspace-beta")
       in
       check string "alpha keeper" "luna"
         (alpha |> U.member "keeper" |> U.to_string);
@@ -185,12 +185,12 @@ let test_snapshot_json_includes_room_bindings () =
 let test_events_json_filters_newest_first () =
   with_eio (fun () ->
       let channel = unique_channel "discord-events" in
-      Metrics.record_attempt ~channel ~room_id:"room-a" ~keeper:"luna"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-a" ~keeper:"luna"
         ~duration_ms:77 Metrics.Success;
-      Metrics.record_attempt ~channel ~room_id:"room-a" ~keeper:"luna"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-a" ~keeper:"luna"
         ~duration_ms:0
         (Metrics.Keeper_error "upstream timeout");
-      Metrics.record_attempt ~channel ~room_id:"room-b" ~keeper:"sangsu"
+      Metrics.record_attempt ~channel ~workspace_id:"workspace-b" ~keeper:"sangsu"
         ~duration_ms:0
         (Metrics.Validation_error "content is required");
       let json = Metrics.events_json ~channel ~keeper:"luna" ~limit:5 () in
@@ -198,8 +198,8 @@ let test_events_json_filters_newest_first () =
       check int "filtered count" 2 (List.length rows);
       let newest = List.hd rows in
       let older = List.nth rows 1 in
-      check string "newest room" "room-a"
-        (newest |> U.member "room_id" |> U.to_string);
+      check string "newest workspace" "workspace-a"
+        (newest |> U.member "workspace_id" |> U.to_string);
       check string "newest outcome" "keeper_error"
         (newest |> U.member "outcome" |> U.to_string);
       check string "older outcome" "success"
@@ -208,12 +208,12 @@ let test_events_json_filters_newest_first () =
         ((json |> U.member "latest_seq" |> U.to_int) >=
          (newest |> U.member "seq" |> U.to_int)))
 
-let test_room_tracking_is_bounded () =
+let test_workspace_tracking_is_bounded () =
   with_eio (fun () ->
-      let channel = unique_channel "discord-rooms" in
+      let channel = unique_channel "discord-workspaces" in
       for i = 1 to 300 do
         Metrics.record_attempt ~channel
-          ~room_id:(Printf.sprintf "room-%03d" i)
+          ~workspace_id:(Printf.sprintf "workspace-%03d" i)
           ~keeper:"luna" ~duration_ms:0 Metrics.Success
       done;
       let stats =
@@ -221,8 +221,8 @@ let test_room_tracking_is_bounded () =
         |> List.find (fun (row : Metrics.channel_stats) ->
                String.equal row.channel channel)
       in
-      check int "room_count capped" 256 stats.room_count;
-      check string "last_room_id still updates" "room-300" stats.last_room_id)
+      check int "workspace_count capped" 256 stats.workspace_count;
+      check string "last_workspace_id still updates" "workspace-300" stats.last_workspace_id)
 
 let () =
   Alcotest.run "Channel_gate_metrics"
@@ -240,11 +240,11 @@ let () =
             test_record_validation_error_metric_falls_back_for_invalid_json;
            test_case "serializes health and latency" `Quick
              test_snapshot_json_reports_health_and_latency;
-           test_case "serializes room bindings" `Quick
-             test_snapshot_json_includes_room_bindings;
+           test_case "serializes workspace bindings" `Quick
+             test_snapshot_json_includes_workspace_bindings;
            test_case "serializes filtered recent events" `Quick
              test_events_json_filters_newest_first;
-           test_case "bounds tracked rooms" `Quick
-             test_room_tracking_is_bounded;
+           test_case "bounds tracked workspaces" `Quick
+             test_workspace_tracking_is_bounded;
          ] );
     ]

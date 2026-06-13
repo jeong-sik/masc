@@ -361,7 +361,7 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             log_path = root / "server.log"
             artifact_dir = root / "artifacts"
             log_path.write_text(
-                "[WARN] [Keeper] executor: alive-but-stuck detected\n",
+                "[WARN] [Auth] archived credential executor.json after starvation\n",
                 encoding="utf-8",
             )
 
@@ -420,7 +420,7 @@ class GoalLoopLiveReplayTest(unittest.TestCase):
             log_path = root / "server.log"
             artifact_dir = root / "artifacts"
             log_path.write_text(
-                "[WARN] [Keeper] executor: alive-but-stuck detected\n",
+                "[WARN] [Auth] archived credential executor.json after starvation\n",
                 encoding="utf-8",
             )
 

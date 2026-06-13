@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-05-12
 code_refs:
   - lib/cdal/
-  - lib/cdal/proof_artifact_reader.ml
   - lib/keeper/keeper_agent_run.ml
 ---
 
@@ -44,12 +43,11 @@ Reason:
 
 Cross-run windows require at least:
 
-- `Proof_store.resolve_ref`
-- `Proof_store.read_json`
-- `Proof_store.read_jsonl`
-- `Proof_store.load_contract`
-- `Proof_store.load_manifest`
-- `Proof_store.list_runs`
+- `Runtime_store.list_runs`
+- `Runtime_store.Last_n_runs`
+- `Runtime_store.Session`
+- `Runtime_store.Rolling_seconds`
+- `Runtime_replay.sync_windows_from_store`
 
 `list_runs` must define:
 
@@ -72,7 +70,7 @@ Cross-run windows require at least:
 Cross-run aggregation must declare both:
 
 - scope
-  - for example keeper, task, room, benchmark cohort, or explicit run set
+  - for example keeper, task, workspace, benchmark cohort, or explicit run set
 - ordering basis
   - for example `ended_at`, evaluator completion time, or manifest creation time
 
@@ -165,68 +163,34 @@ Runs may use different proof manifest schema versions. The loader must handle ve
 
 Since the current schema remains at version 1 (with optional fields added via `[@yojson.default]`), normalization is handled by the existing `Cdal_proof.of_json` decoder. A separate `normalize_manifest` function is not needed at this time. If a future schema v2 introduces breaking field changes, an explicit normalizer should be added.
 
-## 11. Proof_store Read-Side API (OAS, Implemented)
+## 11. Runtime_store / Runtime_replay Read-Side API (OAS, Current)
 
-OAS now owns the `proof-store://` read side through `Agent_sdk.Proof_store`.
-MASC must consume that public surface through `lib/cdal/proof_artifact_reader.ml`
-instead of reconstructing proof-store paths.
+OAS now owns the runtime replay/run-window surface through `Agent_sdk.Runtime_store`
+and `Agent_sdk.Runtime_replay`.  The historical `proof-store://` read side
+(`Agent_sdk.Proof_store`) was removed; MASC should not reference it.
 
-Current public read surface in OAS `proof_store.mli`:
+Current public read surface in OAS:
 
-- `resolve_ref`
-- `read_json`
-- `read_jsonl`
-- `load_manifest`
-- `load_contract`
-- `list_runs`
-- `list_runs_ordered`
-- `load_window`
+- `Runtime_store.list_runs`
+- `Runtime_store.Last_n_runs`
+- `Runtime_store.Session`
+- `Runtime_store.Rolling_seconds`
+- `Runtime_replay.sync_windows_from_store`
+- checkpoint delta projection helpers
 
-The cross-run window APIs use the following public types:
+MASC consumes these through `lib/cdal_runtime/` evidence writers and runtime
+adapters rather than through a separate `proof_artifact_reader.ml` module.
 
-```ocaml
-(** Run metadata for ordering and filtering. *)
-type run_info = {
-  run_id: string;
-  ended_at: float;         (** from Cdal_proof.t.ended_at *)
-  schema_version: int;     (** proof manifest schema version *)
-  scope: string option;    (** opaque scope label set by producer *)
-}
-
-type window_bounds = {
-  max_runs: int;           (** hard limit on run count, default 50 *)
-  max_bytes: int;          (** hard limit on total bytes scanned, default 50MB *)
-}
-
-(** List runs with metadata, ordered by [ended_at] ascending,
-    tie-broken by [run_id].
-    Corrupted manifests are excluded and reported in the errors list. *)
-val list_runs_ordered :
-  config ->
-  ?scope:string ->
-  ?bounds:window_bounds ->
-  unit ->
-  (run_info list * string list, string) result
-
-(** Load manifests for a window of runs.
-    Readable runs returned; unreadable runs reported as errors. *)
-val load_window :
-  config ->
-  run_ids:string list ->
-  ?bounds:window_bounds ->
-  unit ->
-  ((Cdal_proof.t * Yojson.Safe.t) list * string list, string) result
-```
-
-These signatures keep the existing `list_runs` backward compatible and add
-structured alternatives for deterministic window queries. Implementation and
-layout validation stay in OAS `proof_store.ml`; MASC adapters only delegate.
+These signatures replace the historical `list_runs_ordered` / `load_window`
+Proof_store API with a replay-oriented window model.  Implementation and layout
+validation stay in OAS `runtime_store.ml` / `runtime_replay.ml`; MASC adapters
+only delegate.
 
 ## 12. Regression Checklist
 
 Future cross-run reader changes must preserve:
 
-- `list_runs_ordered` is implemented with stable ordering
+- `Runtime_store.list_runs` / `Runtime_replay.sync_windows_from_store` are implemented with stable ordering
 - scope and ordering rules are explicit
 - late-arrival policy is enforced (snapshot semantics, no retroactive mutation)
 - retention is documented and enforced

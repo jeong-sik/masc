@@ -24,23 +24,18 @@ let rate_limit_config_to_yojson c =
   ]
 
 let rate_limit_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let field name = json |> member name in
     let int_field name default =
-      match field name with
-      | `Null -> default
-      | value -> to_int value
+      Json_util.get_int json name |> Option.value ~default
     in
     let float_field name default =
-      match field name with
-      | `Null -> default
-      | value -> to_float value
+      Json_util.get_float json name |> Option.value ~default
     in
     let string_list_field name default =
-      match field name with
-      | `Null -> default
-      | value -> value |> to_list |> filter_string
+      match Json_util.get_array json name with
+      | Some (`List values) ->
+          List.filter_map (function `String s -> Some s | _ -> None) values
+      | _ -> default
     in
     let per_minute = int_field "per_minute" default_rate_limit.per_minute in
     let burst_allowed = int_field "burst_allowed" default_rate_limit.burst_allowed in
@@ -71,7 +66,6 @@ let limit_for_category config = function
 let category_for_tool_opt = function
   | "masc_broadcast" -> Some BroadcastLimit
   | "masc_add_task"
-  | "masc_claim_next"
   | "masc_update_priority"
   | "masc_plan_set_task"
   | "masc_plan_clear_task"
@@ -117,49 +111,39 @@ end
 module Agent_error = struct
   type t =
     | NotFound of string
-    | NotJoined of string
-    | AlreadyJoined of string
     | InvalidName of string
 
   let to_string = function
     | NotFound name -> Printf.sprintf "[AgentError] Agent not found: %s" name
-    | NotJoined name ->
-        Printf.sprintf "[AgentError] Agent not joined: %s. Use masc_join first." name
-    | AlreadyJoined name -> Printf.sprintf "[AgentError] Agent already joined: %s" name
     | InvalidName reason -> Printf.sprintf "[AgentError] Invalid agent name: %s" reason
 end
 
 module Auth_error = struct
+  (** Typed classification of [Unauthorized] reasons.  Replaces substring
+      matching in dashboard auth JSON rendering.  Each variant maps to a
+      stable dashboard error code string. *)
+  type unauthorized_reason =
+    | Actor_mismatch   (** Token owner ≠ requested agent *)
+    | Missing_token    (** No bearer token provided *)
+    | Generic          (** Catch-all for other unauthorized causes *)
+
   type t =
-    | Unauthorized of string
+    | Unauthorized of { reason: unauthorized_reason; message: string }
     | Forbidden of { agent: string; action: string }
     | TokenExpired of string
     | InvalidToken of string
 
+  let unauthorized_reason_to_string = function
+    | Actor_mismatch -> "actor_mismatch"
+    | Missing_token -> "missing_token"
+    | Generic -> "unknown"
+
   let to_string = function
-    | Unauthorized reason -> Printf.sprintf "[AuthError] Unauthorized: %s" reason
+    | Unauthorized { message; _ } -> Printf.sprintf "[AuthError] Unauthorized: %s" message
     | Forbidden { agent; action } -> Printf.sprintf "[AuthError] Forbidden: %s cannot %s" agent action
     | TokenExpired agent ->
         Printf.sprintf "[AuthError] Token expired for %s. Use masc_auth_refresh." agent
     | InvalidToken reason -> Printf.sprintf "[AuthError] Invalid token: %s" reason
-end
-
-module Portal_error = struct
-  type t =
-    | NotOpen of string
-    | AlreadyOpen of { agent: string; target: string }
-    | Closed of string
-
-  let to_string = function
-    | NotOpen agent ->
-        Printf.sprintf
-          "[PortalError] No portal open for %s. Use masc_portal_open first."
-          agent
-    | AlreadyOpen { agent; target } -> Printf.sprintf "[PortalError] Portal already open: %s <-> %s" agent target
-    | Closed agent ->
-        Printf.sprintf
-          "[PortalError] Portal is closed for %s. Use masc_portal_open to reopen."
-          agent
 end
 
 module System_error = struct
@@ -197,7 +181,6 @@ type t =
   | Task of Task_error.t
   | Agent of Agent_error.t
   | Auth of Auth_error.t
-  | Portal of Portal_error.t
   | System of System_error.t
   | RateLimitExceeded of rate_limit_error
   | CacheError of cache_error
@@ -206,7 +189,6 @@ let to_string = function
   | Task e -> Task_error.to_string e
   | Agent e -> Agent_error.to_string e
   | Auth e -> Auth_error.to_string e
-  | Portal e -> Portal_error.to_string e
   | System e -> System_error.to_string e
   | RateLimitExceeded e ->
       Printf.sprintf "[RateLimit] Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
@@ -233,12 +215,7 @@ let code = function
          | Task_error.NotClaimed _
          | Task_error.InvalidState _
          | Task_error.InvalidId _) -> 400
-  | Agent (Agent_error.NotJoined _
-          | Agent_error.AlreadyJoined _
-          | Agent_error.InvalidName _) -> 400
-  | Portal (Portal_error.NotOpen _
-           | Portal_error.AlreadyOpen _
-           | Portal_error.Closed _) -> 400
+  | Agent (Agent_error.InvalidName _) -> 400
   | System (System_error.NotInitialized
            | System_error.AlreadyInitialized
            | System_error.InvalidJson _
@@ -258,7 +235,7 @@ let code = function
    2026-04-29 OAS↔MASC Implementation Quality Audit
    §"Re-tryability". *)
 let is_retryable = function
-  | Task _ | Agent _ | Portal _ -> false
+  | Task _ | Agent _ -> false
   | Auth (Auth_error.TokenExpired _) -> true
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
          | Auth_error.InvalidToken _) -> false

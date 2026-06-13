@@ -9,7 +9,7 @@ import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { asNullableString, asRecord, extractCodeLocation, type CodeLocation } from '../common/normalize'
-import { formatCost, formatMsCompact } from '../../lib/format-number'
+import { deriveTokPerSec, formatCost, formatMsCompact, formatTokPerSec } from '../../lib/format-number'
 import { toolCategory, durationColor, formatArgs as sharedFormatArgs } from '../tool-call-shared'
 import { SectionHeader } from '../common/section-header'
 import {
@@ -334,9 +334,9 @@ function hasTraceRouteContext(context: MutableTraceRouteContext): boolean {
 
 function traceRouteSurface(event: UnifiedTraceEvent): string {
   if (event.kind === 'tool_call') return 'Tool'
-  if (event.kind === 'oas_tool') return 'OAS Tool'
-  if (event.kind === 'oas_turn') return 'OAS Turn'
-  if (event.kind === 'oas_context') return 'OAS Context'
+  if (event.kind === 'oas_tool') return 'Tool'
+  if (event.kind === 'oas_turn') return 'Turn'
+  if (event.kind === 'oas_context') return 'Context'
   return KIND_STYLES[event.kind]?.label ?? event.kind
 }
 
@@ -585,7 +585,7 @@ function ThinkingDetail({ event }: { event: UnifiedTraceEvent }) {
 function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   const d = event.detail
 
-  // ── OAS tool call ──
+  // ── Tool call ──
   if (event.kind === 'oas_tool') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const toolName = typeof d.tool_name === 'string' ? d.tool_name : 'unknown'
@@ -605,7 +605,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
     `
   }
 
-  // ── OAS turn ──
+  // ── Turn ──
   if (event.kind === 'oas_turn') {
     const phase = typeof d.phase === 'string' ? d.phase : ''
     const turn = d.turn
@@ -669,18 +669,20 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
   }
 
   if (durableKind === 'llm_response') {
-    const outputTokens = typeof d.output_tokens === 'number' ? d.output_tokens : 0
+    const outputTokens = typeof d.output_tokens === 'number' ? d.output_tokens : null
     const stopReason = typeof d.stop_reason === 'string' ? d.stop_reason : ''
     const durationMs = typeof d.duration_ms === 'number' ? d.duration_ms : null
+    const tokPerSec = deriveTokPerSec(outputTokens, durationMs)
     const turn = d.turn
     const responseText = typeof d.response_text === 'string' ? d.response_text : ''
     const stopColor = stopReason === 'end_turn' || stopReason === 'stop' ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'
     return html`
       <div class="mt-2 px-3 py-2 rounded-[var(--r-1)] ${TRACE_TONE.infoPanel} space-y-1">
         <div class="flex items-center gap-3 text-xs flex-wrap">
-          <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${outputTokens.toLocaleString()}tok</span></span>
+          <span><span class="text-[var(--color-fg-disabled)]">출력:</span> <span class="font-mono">${(outputTokens ?? 0).toLocaleString()}tok</span></span>
           <span><span class="text-[var(--color-fg-disabled)]">종료:</span> <span class="font-mono ${stopColor}">${stopReason}</span></span>
           ${durationMs != null ? html`<span><span class="text-[var(--color-fg-disabled)]">소요:</span> <span class="font-mono ${durationColor(durationMs)}">${formatMsCompact(durationMs)}</span></span>` : null}
+          ${tokPerSec != null ? html`<span><span class="text-[var(--color-fg-disabled)]">속도:</span> <span class="font-mono text-[var(--color-status-ok)]">${formatTokPerSec(tokPerSec)}</span></span>` : null}
           ${turn != null ? html`<span><span class="text-[var(--color-fg-disabled)]">턴:</span> <span class="font-mono">${String(turn)}</span></span>` : null}
         </div>
         ${responseText ? html`

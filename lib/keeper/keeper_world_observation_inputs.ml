@@ -1,6 +1,8 @@
 (** See [keeper_world_observation_inputs.mli] for the contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
 let backlog_updated_since_last_scheduled_autonomous
@@ -12,25 +14,20 @@ let backlog_updated_since_last_scheduled_autonomous
   if last_ts <= 0.0
   then backlog.tasks <> []
   else (
-    match Coord_resilience.Time.parse_iso8601_opt backlog.last_updated with
+    match Workspace_resilience.Time.parse_iso8601_opt backlog.last_updated with
     | Some updated_at -> updated_at > last_ts
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ?agent_tool_names ~(config : Coord.config)
-    ~(meta : keeper_meta) () =
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let scope =
-    Keeper_runtime_contract.resolve_observation_claim_goal_scope
-      ?agent_tool_names
-      ~config
-      ~meta
-      ()
+    Keeper_runtime_contract.resolve_observation_claim_goal_scope ~config ~meta ()
   in
   scope.task_filter
 ;;
 
-let actionable_verification_request_ids ~(config : Coord.config) : string list =
-  Verification.list_requests config.Coord.base_path
+let actionable_verification_request_ids ~(config : Workspace.config) : string list =
+  Verification.list_requests config.Workspace.base_path
   |> List.filter Verification.request_is_actionable
   |> List.map (fun (req : Verification.verification_request) -> req.id)
 ;;
@@ -47,42 +44,31 @@ let task_has_actionable_verification actionable_request_ids
   | Masc_domain.Cancelled _ -> false
 ;;
 
-(** Read room backlog counts. *)
-let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : keeper_meta)
+(** Read workspace backlog counts. *)
+let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   : int * int * int * int * bool
   =
   try
-    let backlog = Coord.read_backlog config in
+    let backlog = Workspace.read_backlog config in
     let unclaimed_tasks =
       List.filter
         (fun (t : Masc_domain.task) -> t.task_status = Masc_domain.Todo)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in
-    let claim_scope_filter =
-      claim_goal_scope_filter ?agent_tool_names:allowed_tool_names ~config ~meta ()
-    in
-    (* Build the allowed-set once and reuse across all candidates in
-       the [unclaimed_tasks] filter below -- see PR #14826 for the
-       O(R+A) rationale. *)
-    let required_tools_allowed =
-      Coord_task_schedule.make_required_tools_predicate
-        ?agent_tool_names:allowed_tool_names
-        ()
-    in
+    let claim_scope_filter = claim_goal_scope_filter ~config ~meta () in
     let claimable =
       List.length
         (List.filter
            (fun task ->
-              Coord_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task
-              && required_tools_allowed (Coord_task_schedule.task_required_tools task))
+              Workspace_task_schedule.task_is_claim_pool_candidate task
+              && claim_scope_filter task)
            unclaimed_tasks)
     in
     let failed =
       (* "Failed" here means still-auditable active work. Terminal Cancelled
          tasks are historical evidence, not a reason to wake every keeper. *)
-      Coord.audit_orphan_tasks config
+      Workspace.audit_orphan_tasks config
       |> List.map fst
       |> List.filter claim_scope_filter
       |> List.length
@@ -105,26 +91,34 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Keeper_observation_query_operation.(to_label Read_backlog_counts)) ]
+        [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
     Log.Keeper.warn "read_backlog_counts failed: %s" (Printexc.to_string ex);
     0, 0, 0, 0, false
 ;;
 
-(** Count active agents in room. *)
-let count_active_agents ~(config : Coord.config) : int =
-  try List.length (Coord.get_agents_raw config) with
+(** Count live keeper fibers for keeper world state.
+
+    Keepers do not write the legacy [.masc/agents/] registry.  That registry may
+    be empty while keepers are running normally, so keeper observations must use
+    the live keeper registry instead. *)
+let count_running_keeper_fibers ~(config : Workspace.config) : int =
+  try Keeper_registry.count_running ~base_path:config.base_path () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
-        [ ("operation", Keeper_observation_query_operation.(to_label Count_active_agents)) ]
+        [
+          ( "operation",
+            Runtime_observation_query_operation.(
+              to_label Count_running_keeper_fibers) );
+        ]
       ();
-    Log.Keeper.warn "count_active_agents failed: %s" (Printexc.to_string ex);
+    Log.Keeper.warn "count_running_keeper_fibers failed: %s" (Printexc.to_string ex);
     0
 ;;
 
@@ -132,21 +126,18 @@ let count_active_agents ~(config : Coord.config) : int =
 let compute_idle_seconds ~(meta : keeper_meta) : int =
   let now_ts = Time_compat.now () in
   let created_ts =
-    Coord_resilience.Time.parse_iso8601_opt meta.created_at |> Option.value ~default:0.0
+    Workspace_resilience.Time.parse_iso8601_opt meta.created_at |> Option.value ~default:0.0
   in
   let activity_ts = List.fold_left max created_ts [ meta.runtime.proactive_rt.last_ts ] in
   if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
 ;;
 
 (** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
+let read_context_ratio ~(config : Workspace.config) ~(meta : keeper_meta) : float =
   try
-    let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
     let primary_max_context =
       let resolution =
-        Keeper_context_runtime.resolve_max_context_resolution
-          ~requested_override:meta.max_context_override
-          cascade_models
+        Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
       in
       resolution.effective_budget
     in

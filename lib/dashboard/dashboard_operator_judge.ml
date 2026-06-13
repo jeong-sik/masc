@@ -1,5 +1,3 @@
-open Yojson.Safe.Util
-
 type runtime_snapshot = {
   enabled : bool;
   judge_online : bool;
@@ -10,6 +8,16 @@ type runtime_snapshot = {
   keeper_name : string;
   last_error : string option;
 }
+
+let record_operator_judgment_ref =
+  ref (fun _config ~surface:_ ~target_type_str:_ ~target_id:_ ~summary:_ ~confidence:_
+           ?model_name:_ ?recommended_action:_ ~evidence_refs:_ ~disagreement_with_truth:_
+           ~generated_at:_ ~generated_at_unix:_ ~fresh_until:_ ~fresh_until_unix:_
+           ~keeper_name:_ () ->
+    ())
+
+let register_record_operator_judgment fn =
+  record_operator_judgment_ref := fn
 
 type state = {
   mutex : Eio.Mutex.t;
@@ -89,7 +97,7 @@ let enabled () = Env_config.Operator.judge_enabled
 
 let interval_sec () = Env_config.Operator.judge_interval_sec
 
-let room_ttl_sec () = Env_config.Operator.room_ttl_sec
+let workspace_ttl_sec () = Env_config.Operator.workspace_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
@@ -110,8 +118,8 @@ let runtime_status base_path =
 let normalize_text = Dashboard_http_helpers.normalize_text
 
 let parse_string_list json key =
-  match json |> member key with
-  | `List items ->
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) ->
       items
       |> List.filter_map (function
              | `String value ->
@@ -128,21 +136,20 @@ let build_recommended_action ~actor ~target_type ~target_id json =
   match json with
   | `Assoc _ ->
       let action_type =
-        json |> member member_action_type |> to_string_option |> Option.map String.trim
+        Json_util.get_string json member_action_type |> Option.map String.trim
       in
       (match action_type with
       | Some action_type when action_type <> "" && allowed_action_type action_type ->
           let severity =
-            json |> member member_severity |> to_string_option
-            |> Option.value ~default:severity_warn
+            Json_util.get_string_with_default json ~key:member_severity ~default:severity_warn
           in
           let reason =
             normalize_text
-              (json |> member member_reason |> to_string_option |> Option.value ~default:"")
+              (Json_util.get_string_with_default json ~key:member_reason ~default:"")
           in
           let suggested_payload =
-            match json |> member member_suggested_payload with
-            | `Assoc _ as value -> value
+            match Json_util.assoc_member_opt member_suggested_payload json with
+            | Some (`Assoc _ as value) -> value
             | _ -> `Assoc []
           in
           let preview =
@@ -180,38 +187,36 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt prompt_dashboard_operator_judge
 
-let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
+let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
   match json with
   | `Assoc _ ->
       let summary =
         normalize_text
-          (json |> member member_summary |> to_string_option |> Option.value ~default:"")
+          (Json_util.get_string_with_default json ~key:member_summary ~default:"")
       in
       if summary = "" then None
       else
         let confidence =
-          match json |> member member_confidence with
-          | `Float value -> value
-          | `Int value -> float_of_int value
-          | _ -> 0.0
+          Json_util.get_float json member_confidence
+          |> Option.value ~default:0.0
         in
         let fresh_until_unix =
-          generated_at_unix +. float_of_int (room_ttl_sec ())
+          generated_at_unix +. float_of_int (workspace_ttl_sec ())
         in
-        Some
-          (Operator_judgment.record config ~surface:"command.namespace"
-             ~target_type:Operator_judgment.Coord ~target_id:None ~summary
+        (!record_operator_judgment_ref) config ~surface:"command.namespace"
+             ~target_type_str:"workspace" ~target_id:None ~summary
              ~confidence ?model_name:None
              ?recommended_action:
-               (build_recommended_action ~actor:keeper_name ~target_type:"root"
-                  ~target_id:None (json |> member member_recommended_action))
+               (build_recommended_action ~actor:keeper_name ~target_type:"workspace"
+                  ~target_id:None (Option.value ~default:`Null (Json_util.assoc_member_opt member_recommended_action json)))
              ~evidence_refs:(parse_string_list json "evidence_refs")
              ~disagreement_with_truth:
-               (json |> member member_disagreement_with_truth |> to_bool_option
+               (Json_util.get_bool json member_disagreement_with_truth
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
-             ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)
-             ~fresh_until_unix ~keeper_name ())
+             ~fresh_until:(Masc_domain.iso8601_of_unix_seconds fresh_until_unix)
+             ~fresh_until_unix ~keeper_name ();
+        Some ()
   | _ -> None
 
 let compute_judgments
@@ -219,18 +224,17 @@ let compute_judgments
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
-  let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Operator_judge
+  let runtime_id =
+    Runtime.get_default_runtime_id ()
   in
   match
     (* #9629: caller uses run_with_caller so this judge inherits
        Operator_judge's 300s default and surfaces in the per-caller
-       Prometheus counter. *)
+       Otel_metric_store counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
-      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~cascade_name
-        ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
+        ~goal:prompt ~masc_tools ~dispatch 
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -238,7 +242,7 @@ let compute_judgments
   with
   | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
-      let response = result.Cascade_runner.response in
+      let response = result.Runtime_agent.response in
       try
         (* See dashboard_governance_judge.ml for rationale: LLMs frequently
            wrap JSON in ```json … ``` markdown fences. Lenient_json strips
@@ -262,28 +266,25 @@ let compute_judgments
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
-let should_backoff ~sw ~net =
-  let cascade_name =
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Operator_judge
-  in
-  try
-    let capacity =
-      Cascade_runtime.local_capacity_for_selections ~sw ~net
-        [ cascade_name ]
-    in
-    capacity.all_discovered && capacity.endpoints_found > 0
-    && capacity.process_available <= 0
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    Log.Dashboard.warn
-      "operator: capacity check failed in should_backoff: %s"
-      (Printexc.to_string exn);
-    false
+let should_backoff ~sw:_ ~net:_ =
+  (* RFC-0206 single-binding: the deleted
+     [Runtime_runtime.local_capacity_for_selections] probed local-runtime
+     endpoint queues live. Under single-binding the runtime pool tracks lease
+     saturation directly, so back off when every configured concurrency slot on
+     a healthy runtime is already leased.
+     NB: this reads MASC's own lease accounting ([allocated_slots]), not the
+     server-reported queue depth ([process_available]) the old probe used — a
+     documented semantic shift, not a removal. Restoring a true live server-queue
+     probe is RFC-shaped follow-up. *)
+  let configured = Local_runtime_pool.configured_capacity () in
+  configured > 0
+  && Local_runtime_pool.healthy_runtime_count () > 0
+  && Local_runtime_pool.allocated_slots () >= configured
 
 let refresh_once ~sw ~net
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ~(config : Coord.config) ~build_facts =
+    ~(config : Workspace.config) ~build_facts =
   let st = get_state config.base_path in
   if should_backoff ~sw ~net then
     let was_online =
@@ -306,15 +307,15 @@ let refresh_once ~sw ~net
             st.last_error <- Some message)
     | Ok (model_used, result_json) ->
         let generated_at_unix = Unix.gettimeofday () in
-        let generated_at = Dashboard_utils.iso_of_unix generated_at_unix in
+        let generated_at = Masc_domain.iso8601_of_unix_seconds generated_at_unix in
         let expires_at =
-          Dashboard_utils.iso_of_unix (generated_at_unix +. float_of_int (room_ttl_sec ()))
+          Masc_domain.iso8601_of_unix_seconds (generated_at_unix +. float_of_int (workspace_ttl_sec ()))
         in
-        let room_judgment =
-          parse_room_judgment ~config ~generated_at ~generated_at_unix
+        let workspace_judgment =
+          parse_workspace_judgment ~config ~generated_at ~generated_at_unix
             ~model_used result_json
         in
-        let has_any = Option.is_some room_judgment in
+        let has_any = Option.is_some workspace_judgment in
         with_lock st (fun () ->
             st.refreshing <- false;
             st.judge_online <- has_any;
@@ -324,7 +325,7 @@ let refresh_once ~sw ~net
             st.last_error <- None)
   end
 
-let start ~sw ~clock ~net ~(config : Coord.config)
+let start ~sw ~clock ~net ~(config : Workspace.config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~build_facts () =

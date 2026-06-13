@@ -16,7 +16,7 @@
     The tests use a unique env-var prefix per case to avoid
     cross-contamination when run in parallel. *)
 
-open Masc_mcp
+open Masc
 module C = Env_config_core
 
 let with_env name value f =

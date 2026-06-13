@@ -1,6 +1,6 @@
 (** Server_dashboard_http — Dashboard HTTP handlers (facade).
 
-    Cascade-includes 5 sub-modules so callers reach the
+    Runtime-includes 5 sub-modules so callers reach the
     dashboard surface through a single namespace:
     - {!Server_dashboard_http_core}
     - {!Server_dashboard_http_runtime_info}
@@ -17,7 +17,7 @@
     routing modules (server_routes_http_routes_dashboard,
     server_h2_gateway), via dotted call from
     server_runtime_bootstrap, and via the
-    [module SDH = Masc_mcp.Server_dashboard_http] alias
+    [module SDH = Masc.Server_dashboard_http] alias
     in [test/test_hitl_approval]. *)
 
 include module type of struct
@@ -48,7 +48,7 @@ val approval_resolve_http_error_to_string :
 (** {1 Board / memory / governance HTTP entries} *)
 
 val dashboard_board_json :
-  ?config:Coord.config ->
+  ?config:Workspace.config ->
   ?hearth:string ->
   ?author_filter:string ->
   ?sort_by:Board_dispatch.sort_order ->
@@ -62,13 +62,13 @@ val dashboard_board_json :
   Yojson.Safe.t
 
 val dashboard_memory_http_json :
-  ?config:Coord.config -> Httpun.Request.t -> Yojson.Safe.t
+  ?config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_memory_subsystems_include_entries :
   Httpun.Request.t -> bool
 
 val dashboard_memory_subsystems_http_json :
-  config:Coord_utils.config ->
+  config:Workspace_utils.config ->
   ?include_memory_entries:bool ->
   Httpun.Request.t ->
   Yojson.Safe.t
@@ -80,7 +80,7 @@ val dashboard_governance_tool_events_http_json :
   Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_proof_http_json :
-  config:Coord.config -> Httpun.Request.t -> Yojson.Safe.t
+  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_governance_approval_resolve_http_json :
   base_path:string ->
@@ -95,32 +95,35 @@ val dashboard_governance_approval_rule_delete_http_json :
 (** {1 Verification + planning + goals} *)
 
 val dashboard_verification_resolve_http_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   verifier:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
 val dashboard_planning_http_json :
-  config:Coord.config -> Yojson.Safe.t
+  config:Workspace.config -> Yojson.Safe.t
 
 val dashboard_goals_tree_http_json :
-  config:Coord.config -> Yojson.Safe.t
+  config:Workspace.config -> Yojson.Safe.t
 
 val dashboard_goals_snapshot_json :
-  config:Coord.config -> Yojson.Safe.t
+  config:Workspace.config -> Yojson.Safe.t
+
+val dashboard_ide_snapshot_json :
+  config:Workspace.config -> Yojson.Safe.t
 
 val dashboard_goal_detail_http_json :
-  config:Coord.config -> goal_id:string -> Yojson.Safe.t
+  config:Workspace.config -> goal_id:string -> Yojson.Safe.t
 
 (** {1 Keeper / fleet composite} *)
 
 val dashboard_keeper_composite_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   Keeper_registry.registry_entry ->
   Yojson.Safe.t
 
 val dashboard_fleet_composite_json :
-  config:Coord.config -> unit -> Yojson.Safe.t
+  config:Workspace.config -> unit -> Yojson.Safe.t
 
 (** {1 Operator action / confirm} *)
 

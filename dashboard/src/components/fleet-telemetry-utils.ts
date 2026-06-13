@@ -37,7 +37,7 @@ export interface FleetRow {
   activity_label: string
   activity_source: KeeperActivitySource
   model: string
-  cascade_label: string | null
+  runtime_label: string | null
   provider_label: string | null
   fallback_label: string | null
   tool_calls: number
@@ -58,7 +58,6 @@ export interface FleetRow {
   active_goal_count: number
   sandbox_profile: string | null
   sandbox_last_error: string | null
-  effective_sandbox_image: string | null
   decision_required: boolean
   budget_source: 'override' | 'override_invalid' | 'env' | null
   provider_health_status: 'healthy' | 'degraded' | 'unhealthy' | null
@@ -105,7 +104,7 @@ export function emptyState(): FleetTelemetryState {
 }
 
 // Error -> message conversion with a literal 'unknown error' fallback for
-// non-Error inputs. Distinct from errorToString (cascade-config) which uses
+// non-Error inputs. Distinct from errorToString (runtime-config) which uses
 // String(reason) instead, and from errorMessageOr (keeper-detail-hooks)
 // which takes a caller-supplied fallback.
 export function errorMessageOrUnknown(reason: unknown): string {
@@ -145,16 +144,16 @@ function keeperModel(_keeper: Keeper): string {
   return 'runtime'
 }
 
-function latestCascadeMetric(keeper: Keeper) {
+function latestRuntimeMetric(keeper: Keeper) {
   const series = keeper.metrics_series ?? []
   for (let index = series.length - 1; index >= 0; index -= 1) {
     const point = series[index]
     if (!point) continue
     if (
-      normalizeText(point.cascade_name)
-      || normalizeText(point.cascade_selected_model)
-      || normalizeText(point.cascade_outcome)
-      || typeof point.cascade_attempt_count === 'number'
+      normalizeText(point.runtime_id)
+      || normalizeText(point.runtime_selected_model)
+      || normalizeText(point.runtime_outcome)
+      || typeof point.runtime_attempt_count === 'number'
       || point.fallback_applied
       || normalizeText(point.fallback_from)
       || normalizeText(point.fallback_to)
@@ -165,18 +164,18 @@ function latestCascadeMetric(keeper: Keeper) {
   return null
 }
 
-function keeperCascadeLabel(keeper: Keeper): string | null {
-  const raw = normalizeText(keeper.cascade_name)
-  const canonical = normalizeText(keeper.cascade_canonical ?? keeper.selected_cascade_canonical)
+function keeperRuntimeLabel(keeper: Keeper): string | null {
+  const raw = normalizeText(keeper.runtime_id)
+  const canonical = normalizeText(keeper.runtime_canonical ?? keeper.selected_runtime_canonical)
   if (raw && canonical && raw !== canonical) return `${raw} -> ${canonical}`
   return raw ?? canonical
 }
 
 function keeperProviderLabel(keeper: Keeper): string | null {
   const summary = keeper.trust?.execution_summary ?? null
-  const latest = latestCascadeMetric(keeper)
-  const outcome = normalizeText(summary?.cascade_outcome) ?? normalizeText(latest?.cascade_outcome)
-  const attempts = summary?.provider_attempt_count ?? latest?.cascade_attempt_count ?? null
+  const latest = latestRuntimeMetric(keeper)
+  const outcome = normalizeText(summary?.runtime_outcome) ?? normalizeText(latest?.runtime_outcome)
+  const attempts = summary?.provider_attempt_count ?? latest?.runtime_attempt_count ?? null
   const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
   const parts = [
     outcome,
@@ -187,7 +186,7 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 }
 
 function keeperFallbackLabel(keeper: Keeper): string | null {
-  const latest = latestCascadeMetric(keeper)
+  const latest = latestRuntimeMetric(keeper)
   if (!latest || latest.fallback_applied !== true) return null
   const reason = normalizeText(latest.fallback_reason)
   const hops =
@@ -293,11 +292,20 @@ export function buildToolQualityMap(toolQuality: ToolQualityResponse): Map<strin
 
 type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 
+// Fleet offline status tokens — shared by `fleetBand()` and `statusClass()`.
+// Overlaps with `OFFLINE_DISPLAY_STATUSES` in keeper-classifiers.ts but
+// excludes `'inactive'`: fleet treats inactive as an attention signal
+// (line below), not a hard offline. This is an intentional semantic
+// divergence, not drift.
+const FLEET_OFFLINE_STATUSES: ReadonlySet<string> = new Set([
+  'offline', 'unbooted', 'stopped', 'dead', 'crashed',
+])
+
 function normalizedDiagnosticHealthState(row: FleetRow): string | null {
   return normalizeText(row.diagnostic_health_state)?.toLowerCase() ?? null
 }
 
-function isOfflineDiagnosticHealthState(state: string | null): boolean {
+export function isOfflineDiagnosticHealthState(state: string | null): boolean {
   return state === 'offline' || state === 'dead'
 }
 
@@ -311,11 +319,7 @@ export function fleetBand(row: FleetRow): FleetBand {
   if (
     !row.keepalive_running
     || isOfflineDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'offline'
-    || normalizedStatus === 'unbooted'
-    || normalizedStatus === 'stopped'
-    || normalizedStatus === 'dead'
-    || normalizedStatus === 'crashed'
+    || FLEET_OFFLINE_STATUSES.has(normalizedStatus)
   ) {
     return 'offline'
   }
@@ -425,7 +429,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             activity_label: activity.label,
             activity_source: activity.source,
             model: keeperModel(keeper),
-            cascade_label: keeperCascadeLabel(keeper),
+            runtime_label: keeperRuntimeLabel(keeper),
             provider_label: keeperProviderLabel(keeper),
             fallback_label: keeperFallbackLabel(keeper),
             tool_calls: toolCalls,
@@ -458,7 +462,6 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             active_goal_count: keeper.active_goal_ids?.length ?? 0,
             sandbox_profile: keeper.sandbox_profile ?? null,
             sandbox_last_error: keeper.sandbox_last_error ?? null,
-            effective_sandbox_image: keeper.effective_sandbox_image ?? null,
             decision_required: keeper.runtime_blocker_continue_gate === true,
             budget_source:
               keeper.turn_budget?.reactive.source === 'override' ||
@@ -503,11 +506,7 @@ export function statusClass(row: FleetRow): string {
   if (
     !row.keepalive_running
     || isOfflineDiagnosticHealthState(diagnosticHealthState)
-    || normalizedStatus === 'offline'
-    || normalizedStatus === 'stopped'
-    || normalizedStatus === 'unbooted'
-    || normalizedStatus === 'dead'
-    || normalizedStatus === 'crashed'
+    || FLEET_OFFLINE_STATUSES.has(normalizedStatus)
   ) {
     return 'text-[var(--bad-light)]'
   }
@@ -651,17 +650,9 @@ export function buildRuntimeWarnings(rows: FleetRow[]): string[] {
     )
   }
 
-  const slotBlocked = rows.filter(row => row.runtime_blocker_class === 'autonomous_slot_wait_timeout')
-  if (slotBlocked.length > 0) {
-    warnings.push(
-      `${slotBlocked.length} keepers skipped their autonomous cycle while waiting for a local keeper slot.`,
-    )
-  }
-
   const otherBlocked = rows.filter(row =>
     row.runtime_blocker_class != null
-    && row.runtime_blocker_class !== 'admission_queue_wait_timeout'
-    && row.runtime_blocker_class !== 'autonomous_slot_wait_timeout',
+    && row.runtime_blocker_class !== 'admission_queue_wait_timeout',
   )
   if (otherBlocked.length > 0) {
     warnings.push(
@@ -734,8 +725,7 @@ export function summaryCounts(rows: FleetRow[]): FleetSummaryCounts {
   // provider_tool_capability_missing, completion_contract_violation, …).
   // These are alive-but-blocked keepers that
   // the live/stale gauges miss — fiber is up, but the next turn cannot
-  // start.  Pairs with the `Semaphore_wait_timeout` typing fix
-  // (#12855) and the cascade fallback-cycle detector (#12866) so
+  // start.  Pairs with runtime fallback-cycle detection so
   // operators have a single panel that surfaces "alive but stuck".
   const blocked = rows.filter(row =>
     row.keepalive_running

@@ -1,20 +1,20 @@
 (** GC stats sampler. Polls [Gc.quick_stat] every [interval] seconds and
-    exports runtime heap gauges via {!Prometheus}. See [.mli] for contract. *)
+    exports runtime heap gauges via {!Otel_metric_store}. See [.mli] for contract. *)
 
 let word_size_bytes = float_of_int (Sys.word_size / 8)
 
 let sample_once () =
   let s = Gc.quick_stat () in
-  Prometheus.set_gauge Prometheus.metric_gc_minor_words s.minor_words;
-  Prometheus.set_gauge Prometheus.metric_gc_major_words s.major_words;
-  Prometheus.set_gauge Prometheus.metric_gc_promoted_words s.promoted_words;
-  Prometheus.set_gauge Prometheus.metric_gc_heap_words
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_minor_words s.minor_words;
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_major_words s.major_words;
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_promoted_words s.promoted_words;
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_heap_words
     (float_of_int s.heap_words);
-  Prometheus.set_gauge Prometheus.metric_gc_live_words
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_live_words
     (float_of_int s.live_words);
-  Prometheus.set_gauge Prometheus.metric_memory_usage_bytes
+  Otel_metric_store.set_gauge Otel_metric_store.metric_memory_usage_bytes
     (float_of_int s.live_words *. word_size_bytes);
-  Prometheus.set_gauge Prometheus.metric_gc_compactions
+  Otel_metric_store.set_gauge Otel_metric_store.metric_gc_compactions
     (float_of_int s.compactions)
 
 let run ~sw ~clock ~interval =

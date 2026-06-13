@@ -43,7 +43,7 @@ min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
-# Ambient local checkouts are not authoritative for doctor runs.
+# Ambient local checkouts are not authoritative for diagnostics runs.
 # Only validate a local OAS checkout when the caller explicitly opts in.
 local_oas_checkout="${AGENT_SDK_LOCAL_REPO:-}"
 
@@ -94,15 +94,15 @@ fi
 
 # Accept both bare floor [(agent_sdk (>= X.Y.Z))] and capped floor
 # [(agent_sdk (and (>= X.Y.Z) (< W.V.U)))]. Cap is allowed because the
-# OAS pin SHA may transiently exceed the previous minor while masc-mcp
+# OAS pin SHA may transiently exceed the previous minor while masc
 # opts into a forward upper bound. Floor must remain exact.
 if ! grep -Eq "\\(agent_sdk (\\(>= ${min_version_re}\\)|\\(and \\(>= ${min_version_re}\\))" "${REPO_ROOT}/dune-project"; then
   echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   exit 1
 fi
 
-if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc_mcp.opam"; then
-  echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc.opam"; then
+  echo "masc.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
   exit 1
 fi
 
@@ -240,6 +240,8 @@ verify_agent_sdk_switch_artifacts() {
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmxa"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.a"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider__Provider_config.cmi"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider__Provider_kind.cmi"
 }
 
 if command -v opam >/dev/null 2>&1; then
@@ -304,9 +306,9 @@ else
 fi
 
 # API surface summary (non-fatal). A full drift diff with repair
-# guidance is available via `make doctor-oas-drift` or
+# guidance is available via `make diagnostics-oas-drift` or
 # `bash scripts/oas-drift-check.sh`. Here we emit one line so that
-# every doctor-oas-pin run surfaces surface-level drift without
+# every diagnostics-oas-pin run surfaces surface-level drift without
 # requiring the operator to remember a second command.
 #
 # Skip the surface check entirely under --local-only: oas-drift-check.sh
@@ -324,7 +326,7 @@ if [[ "${LOCAL_ONLY}" -eq 0 && -x "${SCRIPT_DIR}/oas-drift-check.sh" ]]; then
       metadata_n="$(printf '%s\n' "${drift_output}" | grep -c '^      ~ ' || true)"
       added_n="$(printf '%s\n' "${drift_output}" | grep -c '^      + ' || true)"
       removed_n="$(printf '%s\n' "${drift_output}" | grep -c '^      - ' || true)"
-      echo "OAS API surface: ⚠ drift (metadata ${metadata_n}, added ${added_n}, removed ${removed_n}) — run 'make doctor-oas-drift' for detail"
+      echo "OAS API surface: ⚠ drift (metadata ${metadata_n}, added ${added_n}, removed ${removed_n}) — run 'make diagnostics-oas-drift' for detail"
     else
       echo "OAS API surface: (could not compute — ${drift_exit}; run 'bash scripts/oas-drift-check.sh' for detail)"
     fi

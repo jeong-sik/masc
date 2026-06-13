@@ -433,66 +433,21 @@ let telemetry_report_to_json (report : telemetry_report) =
                   ; "ts", `Float step.ts
                   ; "event_name", `String step.event_name
                   ; "kind", `String step.kind
-                  ; ( "participant"
-                    , match step.participant with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "detail"
-                    , match step.detail with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "actor"
-                    , match step.actor with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "role"
-                    , match step.role with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "provider"
-                    , match step.provider with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "model"
-                    , match step.model with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "raw_trace_run_id"
-                    , match step.raw_trace_run_id with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "stop_reason"
-                    , match step.stop_reason with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "artifact_id"
-                    , match step.artifact_id with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "artifact_name"
-                    , match step.artifact_name with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "artifact_kind"
-                    , match step.artifact_kind with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "checkpoint_label"
-                    , match step.checkpoint_label with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "outcome"
-                    , match step.outcome with
-                      | Some value -> `String value
-                      | None -> `Null )
-                  ; ( "dropped_output_deltas"
-                    , match step.dropped_output_deltas with
-                      | Some value -> `Int value
-                      | None -> `Null )
-                  ; ( "persistence_failure_phase"
-                    , match step.persistence_failure_phase with
-                      | Some value -> `String value
-                      | None -> `Null )
+                  ; ( "participant", Json_util.string_opt_to_json step.participant )
+                  ; ( "detail", Json_util.string_opt_to_json step.detail )
+                  ; ( "actor", Json_util.string_opt_to_json step.actor )
+                  ; ( "role", Json_util.string_opt_to_json step.role )
+                  ; ( "provider", Json_util.string_opt_to_json step.provider )
+                  ; ( "model", Json_util.string_opt_to_json step.model )
+                  ; ( "raw_trace_run_id", Json_util.string_opt_to_json step.raw_trace_run_id )
+                  ; ( "stop_reason", Json_util.string_opt_to_json step.stop_reason )
+                  ; ( "artifact_id", Json_util.string_opt_to_json step.artifact_id )
+                  ; ( "artifact_name", Json_util.string_opt_to_json step.artifact_name )
+                  ; ( "artifact_kind", Json_util.string_opt_to_json step.artifact_kind )
+                  ; ( "checkpoint_label", Json_util.string_opt_to_json step.checkpoint_label )
+                  ; ( "outcome", Json_util.string_opt_to_json step.outcome )
+                  ; ( "dropped_output_deltas", Json_util.int_opt_to_json step.dropped_output_deltas )
+                  ; ( "persistence_failure_phase", Json_util.string_opt_to_json step.persistence_failure_phase )
                   ])
              report.steps) )
     ]

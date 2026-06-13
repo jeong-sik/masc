@@ -3,8 +3,8 @@
 
 open Alcotest
 
-module CT = Masc_mcp.Chronicle_types
-module CI = Masc_mcp.Chronicle_index
+module CT = Chronicle_types
+module CI = Masc.Chronicle_index
 
 (* --- Chronicle_types tests --- *)
 
@@ -18,7 +18,7 @@ let sample_causation () =
 let sample_epoch () =
   { CT.id = "2026-Q1-chronicle-types"
   ; CT.label = "Project Chronicle Types"
-  ; CT.repo = "masc-mcp"
+  ; CT.repo = "masc"
   ; CT.start_date = "2026-05-01"
   ; CT.end_date = "2026-05-01"
   ; CT.start_commit = "abc1234"
@@ -140,14 +140,14 @@ let sample_summary () =
   }
 
 let test_empty_index () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   check int "schema_version" CI.current_schema_version idx.CI.schema_version;
-  check string "repo" "masc-mcp" idx.CI.repo;
+  check string "repo" "masc" idx.CI.repo;
   check int "epochs empty" 0 (List.length idx.CI.epochs);
   check string "last_commit empty" "" idx.CI.last_commit_indexed
 
 let test_find_epoch () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   let summary = sample_summary () in
   let idx = CI.add_or_replace_epoch idx summary in
   check int "has 1 epoch" 1 (List.length idx.CI.epochs);
@@ -156,13 +156,13 @@ let test_find_epoch () =
   | None -> fail "epoch not found"
 
 let test_find_epoch_missing () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   match CI.find_epoch idx "nonexistent" with
   | Some _ -> fail "should not find missing epoch"
   | None -> ()
 
 let test_active_epochs () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   let active = sample_summary () in
   let completed =
     { (sample_summary ()) with
@@ -175,7 +175,7 @@ let test_active_epochs () =
   check int "1 active" 1 (List.length actives)
 
 let test_add_or_replace_replaces () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   let s1 = sample_summary () in
   let idx = CI.add_or_replace_epoch idx s1 in
   let s2 = { s1 with CI.status = CT.Completed } in
@@ -234,7 +234,7 @@ let test_evaporate_active_epochs_preserves_inactive () =
     }
   in
   let idx =
-    { (CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z") with
+    { (CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z") with
       CI.epochs = [ active; completed ];
     }
   in
@@ -247,7 +247,7 @@ let test_evaporate_active_epochs_preserves_inactive () =
   | _ -> fail "expected both epochs after evaporation"
 
 let test_json_roundtrip_index () =
-  let idx = CI.empty ~repo:"masc-mcp" ~now:"2026-05-01T00:00:00Z" in
+  let idx = CI.empty ~repo:"masc" ~now:"2026-05-01T00:00:00Z" in
   let summary = sample_summary () in
   let idx = CI.add_or_replace_epoch idx summary in
   let json = CI.index_to_yojson idx in

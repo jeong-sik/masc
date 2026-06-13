@@ -3,7 +3,6 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/cdal/
-  - lib/keeper/keeper_cdal_contract.ml
   - lib/keeper/keeper_accountability.ml
 ---
 
@@ -91,23 +90,23 @@ Implications:
 The dependency direction is strictly unidirectional:
 
 ```text
-MCP Protocol SDK  <--  OAS (Agent SDK)  <--  MASC (Coordinator)
+MCP Protocol SDK  <--  OAS (Agent SDK)  <--  MASC (Agent stream)
      (wire)              (execution)           (supervision)
 ```
 
 - MCP SDK does not know OAS or MASC exist. It owns wire protocol semantics only.
-- OAS does not know MASC exists. It is a general-purpose agent execution SDK. Any coordinator can consume its proof bundles.
+- OAS does not know MASC exists. It is a general-purpose agent execution SDK. Any agent stream can consume its proof bundles.
 - MASC depends on OAS (via opam `agent_sdk`) and MCP SDK (via `mcp_protocol`). It is the consumer, not the definition authority for execution or protocol semantics.
 
 Module ownership:
 
 - `Cdal_loader`, `Cdal_judge`, `Cdal_friction`, `Cdal_advice` belong to MASC.
-- `Proof_store`, `Proof_capture`, `Mode_enforcer`, `Contract_runner` belong to OAS.
+- `Runtime_store`, `Runtime_replay`, `Proof_capture`, `Mode_enforcer`, `Contract_runner` belong to OAS.
 - Wire types and transport belong to MCP Protocol SDK.
 
 Anti-patterns:
 
-- OAS code referencing MASC domain concepts (keeper, room, supervisor, friction, verdict)
+- OAS code referencing MASC domain concepts (keeper, workspace, supervisor, friction, verdict)
 - MASC hardcoding OAS internal storage layout without an adapter interface
 - MCP SDK embedding workload or domain semantics into wire types
 - string substring/suffix matching to classify proof artifacts (use typed artifact kinds or structured ref parsing)
@@ -152,10 +151,12 @@ It is not acceptable as part of a deterministic contract kernel unless the parti
 
 ### 3.4 Proof Integrity and Loading Boundaries
 
-`proof-store://` is an OAS-owned read/write scheme. OAS exposes the public
-read surface through `Agent_sdk.Proof_store`; MASC uses
-`lib/proof_artifact_reader.ml` as a narrow adapter and must not mirror the
-directory layout.
+`runtime-store://` is the OAS-owned read/write scheme for runtime replay and
+run-window queries.  OAS exposes the public read surface through
+`Agent_sdk.Runtime_store` and `Agent_sdk.Runtime_replay`; MASC consumes these
+through `lib/cdal_runtime/` adapters and must not mirror the directory layout.
+The historical `proof-store://` scheme and `Agent_sdk.Proof_store` surface were
+removed.
 
 Remaining deterministic-kernel gap:
 
@@ -716,19 +717,20 @@ Cdal_advice
 
 ### 11.2 OAS Reader API Status
 
-OAS owns the read side for the `proof-store://` scheme. MASC readers should
-delegate to `Agent_sdk.Proof_store` through the local adapter, preserving OAS as
-the authority for scheme parsing, traversal rejection, and filesystem layout.
+OAS owns the read side for the `runtime-store://` scheme.  MASC readers should
+delegate to `Agent_sdk.Runtime_store` / `Agent_sdk.Runtime_replay` through the
+local adapter, preserving OAS as the authority for run-window semantics and
+replay layout.
 
 Current public APIs:
 
-- `Proof_store.resolve_ref`
-- `Proof_store.read_json`
-- `Proof_store.read_jsonl`
-- `Proof_store.load_manifest`
-- `Proof_store.load_contract`
+- `Runtime_store.list_runs`
+- `Runtime_store.Last_n_runs`
+- `Runtime_store.Session`
+- `Runtime_store.Rolling_seconds`
+- `Runtime_replay.sync_windows_from_store`
 
-This keeps the proof-store scheme and layout authoritative in OAS rather than
+This keeps the runtime-store scheme and layout authoritative in OAS rather than
 MASC.
 
 ## 12. Regression Checklist
@@ -780,8 +782,8 @@ Phase-1B exit criteria:
 
 ### Phase 2: OAS Read API
 
-- upstream `Proof_store` read-side APIs
-- switch MASC loader to OAS-owned ref resolution
+- upstream `Runtime_store` / `Runtime_replay` read-side APIs
+- switch MASC loader to OAS-owned run-window resolution
 - keep schema v1 compatibility
 
 ### Phase 3: Typed Evidence v2 and Check Expansion

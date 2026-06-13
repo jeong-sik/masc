@@ -72,11 +72,24 @@ echo "Head: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 section "Typed Boundary Metadata"
 legacy_helper_pattern='is_main_''worktree_''boundary_''exempt'
 legacy_phrase_pattern='main-''worktree ''boundary|worktree ''boundary'
-legacy_boundary_matches="$(
-  rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
-    lib/tool_catalog.ml lib/tool_catalog.mli lib/keeper/keeper_tool_registry.ml \
-    lib/keeper/keeper_tool_registry.mli 2>/dev/null || true
-)"
+tool_catalog_candidates=(
+  lib/tool/tool_catalog.ml
+  lib/tool/tool_catalog.mli
+  lib/tool_catalog.ml
+  lib/tool_catalog.mli
+)
+tool_catalog_files=()
+for file in "${tool_catalog_candidates[@]}"; do
+  [ -f "$file" ] && tool_catalog_files+=("$file")
+done
+
+legacy_boundary_matches=""
+if [ "${#tool_catalog_files[@]}" -gt 0 ]; then
+  legacy_boundary_matches="$(
+    rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
+      "${tool_catalog_files[@]}" 2>/dev/null || true
+  )"
+fi
 if [ -n "$legacy_boundary_matches" ]; then
   mark_confirmed "legacy checkout follow-up helper surface still exists"
   printf '%s\n' "$legacy_boundary_matches"
@@ -84,7 +97,8 @@ else
   echo "PASS: legacy checkout follow-up helper surface is absent."
 fi
 
-if rg -q 'type effect_domain' lib/tool_catalog.ml lib/tool_catalog.mli; then
+if [ "${#tool_catalog_files[@]}" -gt 0 ] \
+  && rg -q 'type effect_domain' "${tool_catalog_files[@]}"; then
   echo "PASS: Tool_catalog exposes typed effect_domain metadata."
 else
   mark_confirmed "Tool_catalog lacks typed effect_domain metadata"

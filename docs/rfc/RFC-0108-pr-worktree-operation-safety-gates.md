@@ -171,7 +171,7 @@ P2 ~ P4 는 1 PR 씩 분리. P5 는 *opt-in* 환경 변수 (`PR_SAFETY_HOOK_ENAB
 
 - *Push 전 lint/test* 자동화 (이미 workflow-pr.md §1 에서 *작성자 의무*; 이 RFC 는 push protocol 안전만).
 - *RFC 본문 §1 completeness* 검증 (`rfc_enforcer.py` 가 담당).
-- *Cross-repo* PR 안전 (이 RFC 는 masc-mcp 한정. kidsnote 등은 별도).
+- *Cross-repo* PR 안전 (이 RFC 는 masc 한정. kidsnote 등은 별도).
 - *Git commit signing* (별도 RFC 후보).
 
 ## §7 Risk & rollback

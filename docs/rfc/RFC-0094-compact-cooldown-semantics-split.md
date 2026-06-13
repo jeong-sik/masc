@@ -59,7 +59,7 @@ can re-trigger compact every cycle. PR #15682's fix:
 
 ```ocaml
 | None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string StateSnapshotSkippedNoState)
       ~labels:[("keeper", meta.name)] ();
     { meta with runtime = { meta.runtime with
@@ -243,7 +243,7 @@ cadence pattern).
 |---|---|
 | Adding a field to [keeper_meta] forces a meta-json schema bump and risks parse failures on old persisted blobs | Backfill rule + existing [Safe_ops.json_float ~default:0.0] pattern handles missing field gracefully. Round-trip test covers both directions. |
 | Two-field representation invites future writers to update only one and silently regress | Add a typed helper [advance_post_turn_anchors : runtime -> snapshot:bool -> float -> runtime] that is the only call site; ban direct field writes via dune lint or comment + grep test. |
-| Dashboard panels that read [last_continuity_update_ts] as cooldown anchor will visibly shift | Audit dashboard queries in [features/masc-cockpit-solidjs-poc] and any Prometheus rule that derives cooldown state from the field name. Update those to consume the new field. |
+| Dashboard panels that read [last_continuity_update_ts] as cooldown anchor will visibly shift | Audit dashboard queries in [features/masc-cockpit-solidjs-poc] and any legacy metrics backend rule that derives cooldown state from the field name. Update those to consume the new field. |
 | TLA+ spec [KeeperOASAdvanced.tla] models the field abstractly; if the spec asserts properties that rely on cooldown advance being observable, the spec must be updated | Add a Phase 2 task to re-run TLC against the spec with the renamed cooldown variable. |
 
 ## 8. Alternatives considered
@@ -252,9 +252,9 @@ cadence pattern).
 
 Rejected. Concrete failure mode: operator on-call escalates "state
 snapshot looks current per dashboard" when the underlying continuity
-write has been stuck for hours. We have a recent precedent — masc-mcp
+write has been stuck for hours. We have a recent precedent — masc
 2026-05-08~09 PR sweep flagged 14 read-drop counter PRs as the same
-telemetry-as-fix anti-pattern (memory: [[reference_masc_mcp_lib_types_agent_sdk_collision]]).
+telemetry-as-fix anti-pattern (memory: [[reference_masc_lib_types_agent_sdk_collision]]).
 
 ### 8.2 Single field with derived "actual write" timestamp from messages
 
@@ -289,7 +289,7 @@ storm under failure."
    compact gate's cooldown variable by name? Phase 2 audit step.
 2. **Cross-cycle migration cadence** — running services with old-shape
    meta-json blobs need at least one read-with-backfill cycle before
-   Phase 3 removes the backfill. Coordinate with deployment cadence.
+   Phase 3 removes the backfill. Align with deployment cadence.
 3. **Dashboard cutover** — do we batch the dashboard-panel rename with
    Phase 2 or as a follow-up after Phase 2 stabilizes? Inclined toward
    follow-up to keep the Phase 2 PR small.

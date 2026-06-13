@@ -29,23 +29,12 @@ let channel_of_string raw =
   | _ -> None
 ;;
 
-let clamp ~min_v ~max_v value = max min_v (min max_v value)
-let clamp_limit limit = clamp ~min_v:1 ~max_v:200 limit
-let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 10)
+let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
+let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 10)
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
+let take = List.take
 
-let assoc_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
+let assoc_opt = Json_util.assoc_member_opt
 
 let string_member key json =
   match assoc_opt key json with
@@ -106,7 +95,7 @@ let fallback_targets (msg : Masc_domain.message) =
 let nudge_id (msg : Masc_domain.message) = Printf.sprintf "n-%09d" msg.seq
 
 let decode_message_for_parsing content =
-  (* Restore JSON syntax escaped by Coord.sanitize_message. Decode structural
+  (* Restore JSON syntax escaped by Workspace.sanitize_message. Decode structural
      quotes before [&amp;] so body text that originally contained [&quot;]
      stays as an entity until after JSON parsing. *)
   content
@@ -280,7 +269,7 @@ let entry_of_message (msg : Masc_domain.message) =
 
 let recent ~config ~limit =
   let limit = clamp_limit limit in
-  Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
+  Workspace.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
   |> List.filter_map entry_of_message
   |> take limit
 ;;

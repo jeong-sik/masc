@@ -8,8 +8,8 @@
     to read [disposition] directly; this PR establishes the
     invariant. *)
 
-module T = Masc_mcp.Keeper_turn_terminal
-module D = Masc_mcp.Keeper_turn_disposition
+module T = Masc.Keeper_turn_terminal
+module D = Masc.Keeper_turn_disposition
 
 let check_invariant label (t : T.t) =
   let expected = D.of_wire (T.code t) in
@@ -27,8 +27,8 @@ let constructor_cases : (string * T.t) list =
   [ "success", T.success ()
   ; "of_code/explicit", T.of_code "post_commit_ambiguous"
   ; "of_code/legacy_persisted/completed", T.of_code "completed"
-  ; ( "of_code/sdk_error/contract_violation_require_tool_use"
-    , T.of_code "completion_contract_violation:require_tool_use" )
+  ; ( "of_code/sdk_error/contract_violation"
+    , T.of_code "completion_contract_violation:completion_contract" )
   ; "of_code/sdk_error/api_error_timeout", T.of_code "api_error_timeout"
   ; "of_code/sdk_error/api_error_overloaded", T.of_code "api_error_overloaded"
   ; ( "of_code/sdk_error/agent_error_max_turns"
@@ -38,7 +38,7 @@ let constructor_cases : (string * T.t) list =
   ; "of_code/turn_wall_clock", T.of_code "turn_wall_clock_timeout"
   ; "of_code/turn_overflow_pause", T.of_code "turn_overflow_pause"
   ; "of_code/turn_livelock_pause", T.of_code "turn_livelock_pause"
-  ; "of_code/require_tool_use", T.of_code "required_tool_use_no_tool_call"
+  ; "of_code/completion_contract", T.of_code "completion_contract_no_progress"
   ]
 ;;
 

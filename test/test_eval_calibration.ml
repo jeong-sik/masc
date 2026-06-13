@@ -5,8 +5,8 @@
     Dated_jsonl mutex safety. *)
 
 open Alcotest
-module Cal = Masc_mcp.Eval_calibration
-module AR = Masc_mcp.Anti_rationalization
+module Cal = Masc.Eval_calibration
+module AR = Masc.Task.Anti_rationalization
 
 let test_counter = ref 0
 
@@ -36,10 +36,10 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
   { task_title = title; task_description = desc;
     completion_notes = notes; agent_name = agent; task_id = "test-task-eval" }
 
-let make_result ?(verdict = AR.Approve) ?(cascade = "verifier")
-    ?gen_cascade ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
-  { verdict; evaluator_cascade = cascade;
-    generator_cascade = gen_cascade; gate; fallback_reason }
+let make_result ?(verdict = AR.Approve) ?(runtime = "verifier")
+    ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
+  { verdict; evaluator_runtime = runtime;
+    generator_runtime = gen_runtime; gate; fallback_reason }
 
 (* ================================================================ *)
 (* Hashing tests                                                     *)
@@ -280,15 +280,15 @@ let test_calibration_stats () =
   check int "total = 3" 3 total;
   check int "approves = 2" 2 approves;
   check int "rejects = 1" 1 rejects;
-  (* None of the above passed ~gen_cascade, so the cross-model
+  (* None of the above passed ~gen_runtime, so the cross-model
      counters should be zero and the rate degenerate to 0.0. *)
   let with_gen =
-    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_runtime" |> to_int) in
   let cross_match =
     Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
   let cross_rate =
     Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
-  check int "verdicts_with_generator_cascade = 0 when not recorded" 0 with_gen;
+  check int "verdicts_with_generator_runtime = 0 when not recorded" 0 with_gen;
   check int "cross_model_match_count = 0 when no generator" 0 cross_match;
   check (float 1e-6) "cross_model_rate = 0.0 when no generator" 0.0 cross_rate;
   Cal.reset_store_for_testing ()
@@ -299,22 +299,22 @@ let test_calibration_stats_cross_model_mix () =
   let dir = tmpdir () in
   Cal.set_store_for_testing ~base_dir:dir;
   (* Four verdicts:
-     - same cascade (generator = evaluator)     → NOT cross-model
-     - distinct cascade (generator ≠ evaluator) → cross-model
-     - distinct cascade                          → cross-model
+     - same runtime (generator = evaluator)     → NOT cross-model
+     - distinct runtime (generator ≠ evaluator) → cross-model
+     - distinct runtime                          → cross-model
      - no generator recorded                     → excluded from denominator
      Expected: denominator=3, cross_match=2, rate=2/3 ≈ 0.667. *)
-  let same_cascade =
-    make_result ~cascade:"verifier" ~gen_cascade:"verifier" () in
+  let same_runtime =
+    make_result ~runtime:"verifier" ~gen_runtime:"verifier" () in
   let cross_a =
-    make_result ~cascade:"verifier"
-      ~gen_cascade:(Masc_mcp.Keeper_config.default_cascade_name ()) () in
+    make_result ~runtime:"verifier"
+      ~gen_runtime:(Masc.Keeper_config.default_runtime_id ()) () in
   let cross_b =
-    make_result ~cascade:"cross_verifier" ~gen_cascade:"local_only" () in
-  let no_generator = make_result ~cascade:"verifier" () in
+    make_result ~runtime:"cross_verifier" ~gen_runtime:"local_only" () in
+  let no_generator = make_result ~runtime:"verifier" () in
   let req = make_req () in
   Cal.record_verdict ~task_id:"cm1"
-    ~req:(make_req ~title:"a" ~notes:"na" ()) ~result:same_cascade ();
+    ~req:(make_req ~title:"a" ~notes:"na" ()) ~result:same_runtime ();
   Cal.record_verdict ~task_id:"cm2"
     ~req:(make_req ~title:"b" ~notes:"nb" ()) ~result:cross_a ();
   Cal.record_verdict ~task_id:"cm3"
@@ -322,12 +322,12 @@ let test_calibration_stats_cross_model_mix () =
   Cal.record_verdict ~task_id:"cm4" ~req ~result:no_generator ();
   let stats = Cal.calibration_stats () in
   let with_gen =
-    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_cascade" |> to_int) in
+    Yojson.Safe.Util.(stats |> member "verdicts_with_generator_runtime" |> to_int) in
   let cross_match =
     Yojson.Safe.Util.(stats |> member "cross_model_match_count" |> to_int) in
   let cross_rate =
     Yojson.Safe.Util.(stats |> member "cross_model_rate" |> to_number) in
-  check int "verdicts_with_generator_cascade = 3 (one was Null)" 3 with_gen;
+  check int "verdicts_with_generator_runtime = 3 (one was Null)" 3 with_gen;
   check int "cross_model_match_count = 2 (two distinct)" 2 cross_match;
   check (float 1e-3) "cross_model_rate ≈ 0.667" (2.0 /. 3.0) cross_rate;
   Cal.reset_store_for_testing ()
@@ -341,8 +341,8 @@ let test_to_harness_verdict_approve () =
     record_type = Cal.Verdict_record; notes_hash = "abc";
     task_id = "t1"; task_title = "Fix login";
     agent_name = "dreamer"; verdict = AR.Approve;
-    gate = AR.Structured_tool; evaluator_cascade = "glm5";
-    generator_cascade = Some "agent_llm_a"; fallback_reason = None;
+    gate = AR.Structured_tool; evaluator_runtime = "glm5";
+    generator_runtime = Some "agent_llm_a"; fallback_reason = None;
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in
@@ -357,8 +357,8 @@ let test_to_harness_verdict_reject () =
     record_type = Cal.Verdict_record; notes_hash = "def";
     task_id = "t2"; task_title = "Deploy fix";
     agent_name = "coder"; verdict = AR.Reject "too short";
-    gate = AR.Length; evaluator_cascade = "local";
-    generator_cascade = None; fallback_reason = None;
+    gate = AR.Length; evaluator_runtime = "local";
+    generator_runtime = None; fallback_reason = None;
     timestamp = 0.0;
   } in
   let hv = Cal.to_harness_verdict record in

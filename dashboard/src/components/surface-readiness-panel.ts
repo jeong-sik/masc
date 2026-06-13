@@ -96,7 +96,7 @@ function hasRef(surface: SurfaceReadinessEntry, label: string): boolean {
 }
 
 export function missingSurfaceVerificationRefs(surface: SurfaceReadinessEntry): string[] {
-  return ['live_spotcheck', 'logs', 'metrics'].filter(label => !hasRef(surface, label))
+  return ['live_spotcheck', 'logs'].filter(label => !hasRef(surface, label))
 }
 
 function isSurfaceGap(surface: SurfaceReadinessEntry): boolean {

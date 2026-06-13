@@ -40,7 +40,16 @@ let strip_reserved_keys (result : Yojson.Safe.t) : Yojson.Safe.t =
       `Assoc (List.filter (fun (k, _) -> not (List.mem k reserved)) kv)
   | other -> other
 
+type emitter =
+  working_context:Yojson.Safe.t option ->
+  id:string ->
+  kind_tag:Artifact.kind_tag ->
+  payload_json:Yojson.Safe.t ->
+  metadata:Yojson.Safe.t ->
+  Yojson.Safe.t option
+
 let emit_from_tool_result
+    ~(emit : emitter)
     ~(working_context : Yojson.Safe.t option)
     ~(result : Yojson.Safe.t) : Yojson.Safe.t option =
   match extract_kind_from_result result with
@@ -55,12 +64,13 @@ let emit_from_tool_result
             | _ -> `Assoc []
           in
           let payload_json = strip_reserved_keys result in
-          Keeper_emitter.emit ~working_context ~id ~kind_tag
-            ~payload_json ~metadata)
+          emit ~working_context ~id ~kind_tag ~payload_json ~metadata)
 
 let emit_from_tool_results
+    ~(emit : emitter)
     ~(working_context : Yojson.Safe.t option)
     (results : Yojson.Safe.t list) : Yojson.Safe.t option =
   List.fold_left
-    (fun wc result -> emit_from_tool_result ~working_context:wc ~result)
+    (fun wc result ->
+      emit_from_tool_result ~emit ~working_context:wc ~result)
     working_context results

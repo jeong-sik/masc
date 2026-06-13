@@ -3,12 +3,11 @@
     Audit P2 follow-up (2026-04-29 §3.1.2) — second of the four
     briefing_*.ml modules in the "테스트 완전 부재" group.
 
-    [Briefing_gaps] turns sentinel strings ("unassigned",
-    "unknown", "not_recorded") in briefing fact JSON into
+    [Briefing_gaps] turns missing or unknown briefing fact JSON into
     structured gap records and buckets them per briefing section
     (Communication / Alignment / Watch).  Properties pinned:
 
-    1. {b Sentinel detection} — each documented sentinel produces
+    1. {b Missing-value detection} — each documented missing value produces
        the right kind of gap record with the right scope_type.
     2. {b Cap on gap count} — collect_metadata_gaps returns at
        most 8 records (mli §22).
@@ -21,7 +20,7 @@
        agents are skipped.
     5. {b evidence_of_metadata_gaps caps at 2} per section. *)
 
-module G = Masc_mcp.Briefing_gaps
+module G = Briefing_gaps
 
 let json_string s = `String s
 
@@ -66,10 +65,10 @@ let scope_type_of j =
       | _ -> "")
   | _ -> ""
 
-(* ── (1) Sentinel detection ────────────────────────────────── *)
+(* ── (1) Missing-value detection ───────────────────────────── *)
 
-let test_session_goal_unassigned () =
-  let s = session ~goal:"unassigned" () in
+let test_session_goal_missing () =
+  let s = session ~goal:"   " () in
   let gaps = G.collect_metadata_gaps ~sessions:[ s ] ~keepers:[] ~agents:[] in
   assert (List.length gaps = 1);
   let g = List.hd gaps in
@@ -84,8 +83,32 @@ let test_session_communication_mode_unknown () =
   assert (kind_of g = "session_communication_mode_missing");
   assert (scope_type_of g = "session")
 
-let test_keeper_last_reply_not_recorded () =
-  let k = keeper ~status:"not_recorded" () in
+let test_session_communication_mode_blank_or_absent () =
+  let blank = session ~comm:"   " () in
+  let null =
+    `Assoc
+      [
+        ("session_id", json_string "s-null");
+        ("goal", json_string "x");
+        ("communication_mode", `Null);
+      ]
+  in
+  let absent =
+    `Assoc
+      [
+        ("session_id", json_string "s-missing");
+        ("goal", json_string "x");
+      ]
+  in
+  let gaps =
+    G.collect_metadata_gaps ~sessions:[ blank; null; absent ] ~keepers:[]
+      ~agents:[]
+  in
+  assert (List.length gaps = 3);
+  assert (List.for_all (fun g -> kind_of g = "session_communication_mode_missing") gaps)
+
+let test_keeper_last_reply_missing () =
+  let k = keeper ~status:"   " () in
   let gaps = G.collect_metadata_gaps ~sessions:[] ~keepers:[ k ] ~agents:[] in
   assert (List.length gaps = 1);
   let g = List.hd gaps in
@@ -100,7 +123,7 @@ let test_agent_focus_missing_when_active () =
   assert (kind_of g = "agent_focus_missing");
   assert (scope_type_of g = "agent")
 
-let test_no_gaps_when_no_sentinels () =
+let test_no_gaps_when_no_missing_values () =
   let s = session ~goal:"finished" ~comm:"async" () in
   let k = keeper ~status:"replied" () in
   let a = agent ~status:"active" ~assignment:"task-1" () in
@@ -117,7 +140,7 @@ let test_session_id_omitted_when_blank () =
     `Assoc
       [
         ("session_id", `String "");
-        ("goal", `String "unassigned");
+        ("goal", `Null);
         ("communication_mode", `String "x");
       ]
   in
@@ -133,13 +156,13 @@ let test_session_id_omitted_when_blank () =
 (* ── (2) take 8 cap ──────────────────────────────────────── *)
 
 let test_collect_caps_at_eight () =
-  (* Build > 8 sessions, each with 2 sentinel gaps (goal +
+  (* Build > 8 sessions, each with 2 metadata gaps (goal +
      comm).  collect should cap at 8. *)
   let many_sessions =
     List.init 6 (fun i ->
         session
           ~session_id:(Printf.sprintf "s%d" i)
-          ~goal:"unassigned" ~comm:"unknown" ())
+          ~goal:"" ~comm:"unknown" ())
   in
   let gaps =
     G.collect_metadata_gaps ~sessions:many_sessions ~keepers:[]
@@ -149,19 +172,19 @@ let test_collect_caps_at_eight () =
 
 let test_collect_caps_with_mixed_sources () =
   (* Cap is global across sessions+keepers+agents.  Build 6
-     sessions × 2 sentinels = 12 candidates, plus keeper + agent
+     sessions × 2 metadata gaps = 12 candidates, plus keeper + agent
      gaps that should still bring total to 8 (not 12+2). *)
   let many_sessions =
     List.init 6 (fun i ->
         session
           ~session_id:(Printf.sprintf "s%d" i)
-          ~goal:"unassigned" ~comm:"unknown" ())
+          ~goal:"" ~comm:"unknown" ())
   in
   let many_keepers =
     List.init 3 (fun i ->
         keeper
           ~name:(Printf.sprintf "k%d" i)
-          ~status:"not_recorded" ())
+          ~status:"" ())
   in
   let many_agents =
     List.init 3 (fun i ->
@@ -287,11 +310,12 @@ let test_evidence_filters_by_section () =
 (* ── runner ──────────────────────────────────────────────── *)
 
 let () =
-  test_session_goal_unassigned ();
+  test_session_goal_missing ();
   test_session_communication_mode_unknown ();
-  test_keeper_last_reply_not_recorded ();
+  test_session_communication_mode_blank_or_absent ();
+  test_keeper_last_reply_missing ();
   test_agent_focus_missing_when_active ();
-  test_no_gaps_when_no_sentinels ();
+  test_no_gaps_when_no_missing_values ();
   test_session_id_omitted_when_blank ();
   test_collect_caps_at_eight ();
   test_collect_caps_with_mixed_sources ();

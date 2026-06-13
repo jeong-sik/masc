@@ -10,6 +10,7 @@ import {
   BudgetSourceBadge,
   RuntimeLensSection,
   RuntimeSignals,
+  KeeperSecretProjectionPanel,
   budgetSourceLabel,
   budgetSourceTone,
   filterSignalGroups,
@@ -134,8 +135,7 @@ describe('resolveKeeperObservedToolAudit', () => {
 
     const missionBrief = {
       name: 'sangsu',
-      allowed_tool_names: ['compat_only_allowlist'],
-    } as DashboardMissionKeeperBrief & { allowed_tool_names: string[] }
+    } as DashboardMissionKeeperBrief
 
     expect(resolveKeeperObservedToolAudit(keeper, missionBrief)).toEqual({
       source: 'dashboard_summary',
@@ -464,37 +464,15 @@ describe('RuntimeLensSection', () => {
             turn_finished_count: 1,
             terminal_status: 'finished',
           },
-          tool_surface: {
-            requested_tools: ['read_file'],
-            required_tools: ['keeper_task_done'],
-            materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
-            turn_lane: 'tool_required',
-            tool_surface_class: 'runtime_mcp',
-            tool_requirement: 'required',
-            visible_tool_count: 1,
-            tool_gate_enabled: true,
-            tool_surface_fallback_used: false,
-            terminal_status: 'missing_required_tool',
-          },
           provider_lane: {
             resolved: true,
             status: 'error',
             resolved_lane: 'inline',
-            effective_tool_count: 1,
-            runtime_mcp_policy_present: false,
-            required_tools: ['keeper_task_done'],
-            materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
           },
           provider_attempt: {
             started_count: 1,
             finished_count: 1,
             terminal_status: 'timeout',
-          },
-          tool_lineage: {
-            recorded: false,
-            decision: null,
           },
           payload_role: {
             counts: {},
@@ -522,29 +500,13 @@ describe('RuntimeLensSection', () => {
             status: 'ok',
             error: null,
             has_live_override: false,
-            cascade_override: false,
+            runtime_override: false,
             override_fields: [],
-            default_cascade_name: null,
-            live_cascade_name: null,
+            default_runtime_id: null,
+            live_runtime_id: null,
             active_config_root: null,
             active_config_root_source: null,
             default_manifest_path: null,
-          },
-          runtime_proof: {
-            source: 'keeper_tool_call_log',
-            status: 'pass',
-            matched_tool_call_count: 2,
-            successful_tool_call_count: 2,
-            failed_tool_call_count: 0,
-            tools: ['Execute', 'SearchFiles'],
-            successful_tools: ['Execute', 'SearchFiles'],
-            failed_tools: [],
-            sandbox_profiles: ['docker'],
-            network_modes: ['inherit'],
-            docker_visible: true,
-            git_credentials_enabled: true,
-            repo_cli_identity_materialized: true,
-            latest_at: '2026-05-13T00:00:01Z',
           },
           context: {
             context_injected_count: 1,
@@ -570,10 +532,10 @@ describe('RuntimeLensSection', () => {
         },
         swimlanes: {
           keeper: lane('keeper', 'Keeper', 2, 'finished'),
-          masc_policy_cascade: lane('masc_policy_cascade', 'MASC Cascade', 1, 'error'),
+          masc_policy_runtime: lane('masc_policy_runtime', 'MASC Runtime', 1, 'error'),
           oas_agent: lane('oas_agent', 'OAS', 2, 'checkpoint_saved'),
           provider: lane('provider', 'Provider', 2, 'timeout'),
-          tool_runtime: lane('tool_runtime', 'Tool Runtime', 1, 'missing_required_tool', ['required_tool_not_materialized']),
+          tool_runtime: lane('tool_runtime', 'Tool Runtime', 0, 'not_observed'),
           memory_context: lane('memory_context', 'Memory/Context', 3, 'flushed'),
         },
         clock_edges: [
@@ -593,7 +555,6 @@ describe('RuntimeLensSection', () => {
             tool_batch_id: null,
             checkpoint_id: null,
             compaction_id: null,
-            memory_injection_id: null,
             event_bus_correlation_id: 'corr-1',
             event_bus_run_id: 'run-1',
             event_bus_event_count: 2,
@@ -626,14 +587,7 @@ describe('RuntimeLensSection', () => {
             event_bus_payload_kinds: ['tool_called', 'tool_completed'],
           },
         ],
-        gaps: [
-          {
-            code: 'required_tool_not_materialized',
-            severity: 'bad',
-            lane: 'tool_runtime',
-            detail: 'missing required tools: keeper_task_done',
-          },
-        ],
+        gaps: [],
       },
       health: 'partial',
       linked_artifacts: {
@@ -677,13 +631,13 @@ describe('RuntimeLensSection', () => {
       phase: 'running',
       turn_phase: 'idle',
       decision: { stage: 'undecided' },
-      cascade: { state: 'idle' },
+      runtime: { state: 'idle' },
       compaction: { stage: 'accumulating' },
       circuit_breaker: { state: 'clean' },
       measurement: { captured: false },
       invariants: {
         phase_turn_alignment: true,
-        no_cascade_before_measurement: true,
+        no_runtime_before_measurement: true,
         compaction_atomicity: true,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
@@ -727,16 +681,9 @@ describe('RuntimeLensSection', () => {
         operator_disposition_reason: 'healthy',
         model_used: null,
         stop_reason: 'completed',
-        tool_contract_result: 'needs_execution_progress',
         duration_ms: 16000,
         error: null,
-        cascade: null,
-        tool_surface: {
-          tool_requirement: 'optional',
-          tool_gate_enabled: false,
-          missing_required_tools: [],
-          required_tools: [],
-        },
+        runtime: null,
       },
       runtime_attention: {
         state: 'blocked',
@@ -759,7 +706,7 @@ describe('RuntimeLensSection', () => {
     render(h(RuntimeLensSection, { trace: runtimeTraceFixture() }))
 
     expect(screen.getByTestId('runtime-lens')).toBeInTheDocument()
-    expect(screen.getByText('keeper / OAS turn')).toBeInTheDocument()
+    expect(screen.getByText('keeper / agent turn')).toBeInTheDocument()
     expect(screen.getByText('7 / 3')).toBeInTheDocument()
     expect(screen.getByText('trace id')).toBeInTheDocument()
     expect(screen.getByText('trace-lens')).toBeInTheDocument()
@@ -774,16 +721,6 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('tool log artifacts')).toBeInTheDocument()
     expect(screen.getAllByText('1/1').length).toBeGreaterThan(1)
     expect(screen.getByText('0/1')).toBeInTheDocument()
-    expect(screen.getByText('runtime proof')).toBeInTheDocument()
-    expect(screen.getByText('pass / 2 calls')).toBeInTheDocument()
-    expect(screen.getByText('sandbox proof')).toBeInTheDocument()
-    expect(screen.getByText('docker')).toBeInTheDocument()
-    expect(screen.getByText('repo CLI proof')).toBeInTheDocument()
-    expect(screen.getByText('git creds / identity materialized')).toBeInTheDocument()
-    expect(screen.getByText('proof tools')).toBeInTheDocument()
-    expect(screen.getByText('Execute, SearchFiles')).toBeInTheDocument()
-    expect(screen.getByText('network proof')).toBeInTheDocument()
-    expect(screen.getByText('inherit')).toBeInTheDocument()
     expect(screen.getByText('working loops')).toBeInTheDocument()
     expect(screen.getAllByText('2').length).toBeGreaterThan(0)
     expect(screen.getByText('provider attempts')).toBeInTheDocument()
@@ -802,10 +739,8 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('memory evidence')).toBeInTheDocument()
     expect(screen.getByText('inj 1/1 · flush success 1 · error 0 · ep/proc ep 2 · proc 1')).toBeInTheDocument()
-    expect(screen.getAllByText('keeper_task_done').length).toBeGreaterThan(0)
     expect(screen.getByText('Provider')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
-    expect(screen.getAllByText('required_tool_not_materialized').length).toBeGreaterThan(0)
   })
 
   it('renders an empty state while runtime trace is unavailable', () => {
@@ -827,12 +762,10 @@ describe('RuntimeLensSection', () => {
     })
 
     expect(summary.headline).toBe('조치 필요')
-    expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('tool needs_execution_progress')
     expect(summary.rows.find(row => row.label === '동기화')?.detail).toContain('KSM running')
     expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
     expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
     expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
-    expect(summary.rows.find(row => row.label === '차단')?.detail).toContain('needs_execution_progress')
     // RFC-0046 §4.3 partial closure: the FSM lane is now rendered exclusively
     // by FsmHub mode='detail' under this panel. Asserting the absence here
     // prevents regressing back to dual-rendering of KSM/KTC.
@@ -847,8 +780,8 @@ describe('RuntimeLensSection', () => {
         name: 'sangsu',
         status: 'active',
         keepalive_running: true,
-        runtime_blocker_class: 'cascade_exhausted',
-        runtime_blocker_summary: 'previous turn exhausted cascade',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'previous turn exhausted runtime',
       },
       compositeSnapshot: compositeFixture({
         is_live: true,
@@ -916,6 +849,36 @@ describe('RuntimeLensSection', () => {
     expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
     expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
     expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
+  })
+
+  it('renders secret projection status without secret values', () => {
+    render(h(KeeperSecretProjectionPanel, {
+      projection: {
+        status: 'ready',
+        configured: true,
+        root: '/Users/dancer/me/.masc/secrets/sangsu',
+        source: 'workspace_masc_secrets',
+        env_count: 1,
+        file_count: 1,
+        env_names: ['GH_TOKEN'],
+        file_mounts: [
+          {
+            host_path: '/Users/dancer/me/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
+            container_path: '/home/keeper/.ssh/id_ed25519',
+          },
+        ],
+        values_validated: true,
+        error: null,
+        next_action: 'none',
+      },
+    }))
+
+    expect(screen.getByTestId('keeper-secret-projection')).toBeInTheDocument()
+    expect(screen.getByText('ready')).toBeInTheDocument()
+    expect(screen.getByText('1 env · 1 files')).toBeInTheDocument()
+    expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
+    expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
+    expect(screen.queryByText(/ghs_/)).toBeNull()
   })
 })
 

@@ -4,11 +4,11 @@
 #
 # Why this gate exists:
 #   `fundamental_roadmap.md` Phase 2 calls out 40+ model-prefix matches
-#   in lib/cascade/capabilities.ml (e.g. "gpt-4o" | "claude-3.5-sonnet" |
+#   in lib/runtime/capabilities.ml (e.g. "gpt-4o" | "claude-3.5-sonnet" |
 #   "gemini-1.5-pro"). The 2026-05-05 reality-check audit
 #   (docs/audit/2026-05-05-fundamental-roadmap-reality-check.md) found
 #   capabilities.ml gone and remaining instances near-zero. PR #12990
-#   (refactor(cascade): externalize scoring magic numbers) cleaned
+#   (refactor(runtime): externalize scoring magic numbers) cleaned
 #   adjacent magic numbers. This gate prevents the prefix-match style
 #   from creeping back via copy-paste.
 #

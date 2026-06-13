@@ -108,7 +108,7 @@ const SNIPPETS = [
     html:
 `<p style="font-family:var(--font-sans);font-size:12px;color:var(--color-fg-secondary);line-height:1.5;max-width:320px">
   Keeper <span class="tk is-brass">@nick0cave</span> claimed task
-  <span class="tk">t-4012</span> on branch <span class="tk">feat/cascade-v3</span>;
+  <span class="tk">t-4012</span> on branch <span class="tk">feat/runtime-v3</span>;
   drift score <span class="tk is-err">0.84</span> exceeded threshold.
 </p>`,
   },
@@ -119,7 +119,7 @@ const SNIPPETS = [
     html:
 `<div style="display:flex;flex-direction:column;gap:1px;width:280px">
   <div class="kv-row"><span class="k">claim_holder</span><span class="v">@nick0cave</span></div>
-  <div class="kv-row"><span class="k">branch</span><span class="v">feat/cascade-v3</span></div>
+  <div class="kv-row"><span class="k">branch</span><span class="v">feat/runtime-v3</span></div>
   <div class="kv-row"><span class="k">drift</span><span class="v">0.84</span></div>
   <div class="kv-row"><span class="k">tok/sec</span><span class="v">142</span></div>
 </div>`,
@@ -154,7 +154,7 @@ const SNIPPETS = [
     <div class="h">
       <span class="au">@nick0cave</span>
       <span class="kk direct">DIRECT</span>
-      <span class="he">cascade-v3</span>
+      <span class="he">runtime-v3</span>
       <span class="at">12:04</span>
     </div>
     <div class="ttl">Drift threshold tripped on t-4012 — handing off.</div>
@@ -175,7 +175,7 @@ const SNIPPETS = [
     <span class="kpr">@nick0cave</span>
     <span class="out success">OK</span>
     <div class="body">
-      <span class="act">claim · t-4012 · cascade-v3</span>
+      <span class="act">claim · t-4012 · runtime-v3</span>
       <span class="bel">belief: drift &lt; 0.5 · plan: extend probe</span>
       <span class="lat">latency 142ms</span>
     </div>
@@ -186,7 +186,7 @@ const SNIPPETS = [
     <span class="out failure">FAIL</span>
     <div class="body">
       <span class="act">probe · k-merge-blockers</span>
-      <span class="blk">blocked: cascade hop 3 missed</span>
+      <span class="blk">blocked: runtime hop 3 missed</span>
       <span class="lat">latency 880ms</span>
     </div>
   </div>
@@ -202,7 +202,7 @@ const SNIPPETS = [
     <span class="ts">11:58</span>
     <span class="kpr">@nick0cave</span>
     <span class="tag verified">VERIFIED</span>
-    <span class="body">cascade-v3 hop 4 returns null when probe times out — confirmed across 6 runs.</span>
+    <span class="body">runtime-v3 hop 4 returns null when probe times out — confirmed across 6 runs.</span>
   </div>
   <div class="mem-row">
     <span class="ts">12:02</span>
@@ -214,7 +214,7 @@ const SNIPPETS = [
     <span class="ts">12:08</span>
     <span class="kpr">@keeper-merge</span>
     <span class="tag plan">PLAN</span>
-    <span class="body">extend probe window to 4s before falling back to cascade hop 5.</span>
+    <span class="body">extend probe window to 4s before falling back to runtime hop 5.</span>
   </div>
 </div>`,
   },
@@ -238,21 +238,21 @@ const SNIPPETS = [
   <div class="lns">
     <div class="ln">claim released by @nick0cave at 12:05</div>
     <div class="ln">probe extended to 4s by @sangsu at 12:08</div>
-    <div class="ln">decision logged: extend window in cascade-v3</div>
+    <div class="ln">decision logged: extend window in runtime-v3</div>
   </div>
 </div>`,
   },
   {
     id: 'audit-row', group: 'phase2', src: 'preview/components.css',
     title: 'Audit ledger row',
-    desc: 'Streaming audit entry. Kind chip: .board / .cascade / .keeper / .message / .operator / .suite / .task / .tool / .verdict.',
+    desc: 'Streaming audit entry. Kind chip: .board / .runtime / .keeper / .message / .operator / .suite / .task / .tool / .verdict.',
     html:
 `<div style="display:flex;flex-direction:column">
   <div class="aud-row">
     <span class="ts">12:04</span>
     <span class="ac">@nick0cave</span>
-    <span class="kn cascade">CASCADE</span>
-    <div class="sb">probe timeout on hop 4<span class="pl">cascade-v3 · run r-7782</span></div>
+    <span class="kn runtime">RUNTIME</span>
+    <div class="sb">probe timeout on hop 4<span class="pl">runtime-v3 · run r-7782</span></div>
     <span class="du">1.84s</span>
   </div>
   <div class="aud-row">
@@ -272,42 +272,18 @@ const SNIPPETS = [
 </div>`,
   },
   {
-    id: 'cascade-hop', group: 'phase2', src: 'preview/components.css',
-    title: 'Cascade hop list',
+    id: 'runtime-hop', group: 'phase2', src: 'preview/components.css',
+    title: 'Runtime hop list',
     desc: 'Per-hop step list. Hit / miss / skip modifiers on .step.',
     html:
-`<div class="cb-cascade">
-  <div class="id">cascade-v3 · r-7782</div>
+`<div class="cb-runtime">
+  <div class="id">runtime-v3 · r-7782</div>
   <div class="step hit"><span class="ix">1</span><span class="name">parse_intent</span><span class="ms">42ms</span></div>
   <div class="step hit"><span class="ix">2</span><span class="name">resolve_holder</span><span class="ms">88ms</span></div>
   <div class="step hit"><span class="ix">3</span><span class="name">probe_branch</span><span class="ms">1.84s</span></div>
   <div class="step miss"><span class="ix">4</span><span class="name">extract_diff</span><span class="ms">timeout</span></div>
   <div class="step skip"><span class="ix">5</span><span class="name">apply_patch</span><span class="ms">—</span></div>
   <div class="total">total <span class="n">2.04s</span> · 3 hit · 1 miss · 1 skip</div>
-</div>`,
-  },
-  {
-    id: 'heuristic-row', group: 'phase2', src: 'preview/components.css',
-    title: 'Heuristic firing row',
-    desc: 'Stress / heuristic firing entry. Add .fired class for left-accent + soft red bg.',
-    html:
-`<div style="display:flex;flex-direction:column">
-  <div class="hr-row fired">
-    <span class="ts">12:04</span>
-    <span class="mod">drift_threshold</span>
-    <span class="det">claim_holder churn &gt; 3 in 5min on t-4012</span>
-    <span class="site">cascade.py:412</span>
-    <span class="num over">0.84</span>
-    <span class="fl t">FIRED</span>
-  </div>
-  <div class="hr-row">
-    <span class="ts">12:06</span>
-    <span class="mod">probe_latency</span>
-    <span class="det">p95 above 1.5s on hop 4</span>
-    <span class="site">cascade.py:380</span>
-    <span class="num">1.62</span>
-    <span class="fl f">arm</span>
-  </div>
 </div>`,
   },
   {
@@ -332,8 +308,8 @@ const SNIPPETS = [
     html:
 `<div class="ki-bdi">
   <div class="row"><span class="lbl">will</span><div class="v">resolve t-4012 by EOD without ceding claim to drift &gt; 0.5</div></div>
-  <div class="row"><span class="lbl">needs</span><div class="v">stable probe latency on cascade-v3 hop 4 · operator approval for window extension</div></div>
-  <div class="row"><span class="lbl">desires</span><div class="v">verified patch in trunk · ep-882 closed · drift heuristic re-armed</div></div>
+  <div class="row"><span class="lbl">needs</span><div class="v">stable probe latency on runtime-v3 hop 4 · operator approval for window extension</div></div>
+  <div class="row"><span class="lbl">desires</span><div class="v">verified patch in trunk · ep-882 closed · drift monitor re-armed</div></div>
   <div class="hz">
     <span class="lbl">horizon</span><span class="v">3 turns</span>
     <span class="lbl">commit</span><span class="v">soft</span>
@@ -348,7 +324,7 @@ const SNIPPETS = [
 `<div class="br-list">
   <div class="row on">
     <span class="glyph">⎇</span>
-    <span class="nm">feat/cascade-v3</span>
+    <span class="nm">feat/runtime-v3</span>
     <span class="tag PRIMARY">PRIMARY</span>
     <span class="st dirty">dirty</span>
     <span class="ahbh"><span class="ah">+12</span><span class="bh">−2</span></span>
@@ -394,7 +370,7 @@ const SNIPPETS = [
   <label class="check"><input type="checkbox" checked /><span class="box"></span>auto-claim stale tasks</label>
   <label class="check"><input type="checkbox" checked /><span class="box"></span>broadcast nudges to channel</label>
   <label class="check"><input type="checkbox" /><span class="box"></span>open episodes by default</label>
-  <label class="check"><input type="checkbox" /><span class="box"></span>verbose cascade logs</label>
+  <label class="check"><input type="checkbox" /><span class="box"></span>verbose runtime logs</label>
 </div>`,
   },
   {
@@ -405,7 +381,7 @@ const SNIPPETS = [
 `<div style="display:flex;flex-direction:column;gap:10px">
   <label class="toggle"><input type="checkbox" checked /><span class="track"></span>auto-merge</label>
   <label class="toggle"><input type="checkbox" checked /><span class="track"></span>broadcast to #ops</label>
-  <label class="toggle"><input type="checkbox" /><span class="track"></span>experimental cascade-v3</label>
+  <label class="toggle"><input type="checkbox" /><span class="track"></span>experimental runtime-v3</label>
 </div>`,
   },
   {
@@ -424,7 +400,7 @@ const SNIPPETS = [
 
 const GROUPS = [
   { id: 'atoms',  name: 'Atoms',                  desc: 'Smallest reusable building blocks — chips, bars, sparks, buttons.' },
-  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, audit, cascade, heuristic, nudge, keeper, branch.' },
+  { id: 'phase2', name: 'Phase 2 row primitives', desc: 'Reusable rows from board, decisions, memory, audit, runtime, nudge, keeper, branch.' },
   { id: 'forms',  name: 'Form controls',          desc: 'Inputs, checkboxes, toggles, segmented controls.' },
 ];
 

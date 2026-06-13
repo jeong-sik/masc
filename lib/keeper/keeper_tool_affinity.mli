@@ -9,7 +9,7 @@
     on a fresh generation.
 
     @since 2.251.0
-    @see <https://github.com/jeong-sik/masc-mcp/issues/5566> *)
+    @see <https://github.com/jeong-sik/masc/issues/5566> *)
 
 type affinity_entry = {
   tool_name : string;

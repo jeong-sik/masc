@@ -89,7 +89,7 @@ Phase 1b it keeps the Async/Eio/Fut interop out of the view code.
 
 ### End-to-end smoke test (2026-04-19)
 
-Built the masc-mcp server binary from the worktree and ran it against a
+Built the masc server binary from the worktree and ran it against a
 disposable `--base-path=/tmp/bonsai-smoke --port=18935`, then curled the
 relevant paths.
 
@@ -212,7 +212,7 @@ backend API all respond correctly.
 
 - Bundle gzip > 10× Preact equivalent: **triggered** (same as Phase 0).
 - Chart-binding failures ≥ 3: not yet applicable.
-- Compiler/dune/opam forcing masc-mcp rebuild: not triggered.
+- Compiler/dune/opam forcing masc rebuild: not triggered.
 - 9 months to Phase 2 target: not elapsed.
 
 One of four triggered. Plan requires two for auto-halt. Continue.

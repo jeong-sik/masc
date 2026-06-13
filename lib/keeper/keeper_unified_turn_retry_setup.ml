@@ -9,7 +9,6 @@ type retry_setup =
   ; keeper_profile : Keeper_types_profile.keeper_profile_defaults
   ; max_idle_turns : int
   ; max_turns : int
-  ; initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement
   }
 
 let build ~now ~keeper_name ~channel ~turn_affordances =
@@ -38,11 +37,7 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
       , Keeper_types_profile.effective_max_turns_per_call_scheduled_autonomous
           keeper_profile )
   in
-  let initial_tool_requirement =
-    if Keeper_agent_run.should_require_tools_for_initial_turn ~max_turns ~turn_affordances
-    then Keeper_agent_tool_surface.Required
-    else Keeper_agent_tool_surface.Optional
-  in
+  ignore turn_affordances;
   { timeout_sec
   ; turn_started_at
   ; turn_deadline
@@ -53,5 +48,4 @@ let build ~now ~keeper_name ~channel ~turn_affordances =
   ; keeper_profile
   ; max_idle_turns
   ; max_turns
-  ; initial_tool_requirement
   }

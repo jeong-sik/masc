@@ -18,7 +18,7 @@ let render_dashboard (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Dashboard  %s[%s]%s  %s  %s"
-    Ansi.cyan state.room Ansi.reset timestamp
+    Ansi.cyan state.workspace Ansi.reset timestamp
     (match state.connection_status with
      | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
      | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset

@@ -33,7 +33,7 @@
 \*
 \* Domain boundary (HISTORICAL):
 \*   lib/keeper/keeper_manual_reconcile.ml (data — REMOVED) x
-\*   lib/keeper/keeper_state_machine.ml (FSM conditions — manual_reconcile_required REMOVED)
+\*   lib/keeper_registry/keeper_state_machine.ml (FSM conditions — manual_reconcile_required REMOVED)
 \* Orchestrator (HISTORICAL):
 \*   lib/keeper/keeper_keepalive.ml (recovery sequence — replaced by KeeperContinueGate)
 

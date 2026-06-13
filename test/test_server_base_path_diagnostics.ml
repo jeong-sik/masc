@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let with_env name value f =
   let saved = Sys.getenv_opt name in
@@ -56,7 +56,6 @@ let test_divergent_cwd_is_observational_only () =
   let effective_masc = Filename.concat effective Common.masc_dirname in
   Unix.mkdir cwd_masc 0o755;
   Unix.mkdir effective_masc 0o755;
-  Unix.mkdir (Filename.concat cwd_masc "perpetual") 0o755;
   let diag =
     Server_base_path_diagnostics.detect ~cwd
       ~input_base_path:effective
@@ -164,11 +163,7 @@ let test_to_yojson_exposes_effective_paths () =
   Alcotest.(check string) "effective masc root" "/tmp/workspace/.masc"
     (json |> member "effective_masc_root" |> to_string);
   Alcotest.(check bool) "roots diverge field" true
-    (json |> member "roots_diverge" |> to_bool);
-  Alcotest.(check bool) "cwd legacy dirs removed" true
-    (match json |> member "cwd_legacy_dirs" with `Null -> true | _ -> false);
-  Alcotest.(check int) "effective legacy dirs exposed" 0
-    (json |> member "effective_legacy_dirs" |> to_list |> List.length)
+    (json |> member "roots_diverge" |> to_bool)
 
 let test_to_yojson_exposes_resolution_source () =
   let diag =
@@ -263,7 +258,7 @@ let test_current_task_directory_rejects_startup () =
 let test_default_base_path_ignores_parent_base_path_override_in_tests () =
   with_temp_dir "base-path-default" @@ fun root ->
   let base_path = Filename.concat root "base" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
   mkdir_p repo;
   Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
@@ -279,7 +274,7 @@ let test_default_base_path_ignores_parent_base_path_override_in_tests () =
 let test_default_base_path_preserves_base_path_override_with_opt_in () =
   with_temp_dir "base-path-default-optin" @@ fun root ->
   let base_path = Filename.concat root "base" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
   mkdir_p repo;
   Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   Unix.mkdir (Filename.concat repo Common.masc_dirname) 0o755;
@@ -294,7 +289,7 @@ let test_default_base_path_preserves_base_path_override_with_opt_in () =
 let test_default_base_path_ignores_base_path_override_without_local_masc () =
   with_temp_dir "base-path-default-no-local-masc" @@ fun root ->
   let base_path = Filename.concat root "base" in
-  let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
+  let repo = Filename.concat base_path "workspace/yousleepwhen/masc" in
   mkdir_p repo;
   Unix.mkdir (Filename.concat base_path Common.masc_dirname) 0o755;
   with_cwd repo @@ fun () ->

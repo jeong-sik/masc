@@ -3,48 +3,17 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 
-vi.mock('../../api/git-graph', () => ({
-  fetchGitGraph: vi.fn(() => Promise.resolve({
-    generated_at: '2026-05-06T00:00:00Z',
-    repos: [{
-      id: 'masc-mcp',
-      root: '/workspace/masc-mcp',
-      label: 'masc-mcp',
-      current_branch: 'main',
-      head: 'abc123',
-      dirty: false,
-      conflict_count: 0,
-      branch_count: 2,
-      commit_count: 8,
-      worktree_count: 1,
-    }],
-    agents: [],
-    nodes: [],
-    edges: [],
-    stats: {
-      repo_count: 1,
-      agent_count: 0,
-      branch_count: 2,
-      commit_count: 8,
-      conflict_count: 0,
-      dirty_count: 0,
-    },
-    warnings: [],
-  })),
-}))
-
 vi.mock('../../api/repositories', () => ({
   discoverRepositories: vi.fn(() => Promise.resolve([])),
   fetchRepositoriesList: vi.fn(() => Promise.resolve([{
-    id: 'masc-mcp',
-    name: 'masc-mcp',
+    id: 'masc',
+    name: 'masc',
     url: '',
-    local_path: '/workspace/masc-mcp',
+    local_path: '/workspace/masc',
     default_branch: 'main',
     status: 'active',
     auto_sync: false,
     sync_interval: 300,
-    credential_id: null,
     created_at: null,
     updated_at: null,
   }])),
@@ -275,24 +244,23 @@ describe('IdeShell', () => {
         keeper: 'sangsu',
       },
       repositories: [{
-        id: 'masc-mcp',
-        name: 'masc-mcp',
+        id: 'masc',
+        name: 'masc',
         url: '',
-        local_path: '/workspace/masc-mcp',
+        local_path: '/workspace/masc',
         default_branch: 'main',
         status: 'active',
         auto_sync: false,
         sync_interval: 300,
-        credential_id: null,
         created_at: null,
         updated_at: null,
       }],
-      activeRepositoryId: 'masc-mcp',
-      workspaceSource: { kind: 'repository', repoId: 'masc-mcp' },
+      activeRepositoryId: 'masc',
+      workspaceSource: { kind: 'repository', repoId: 'masc' },
       dashboardConnected: true,
     })
 
-    expect(model.workspaceLabel).toBe('masc-mcp')
+    expect(model.workspaceLabel).toBe('masc')
     expect(model.connectionLabel).toBe('runtime · live')
     expect(model.connectionTone).toBe('ok')
     expect(model.chips.map(chip => chip.label)).toEqual([
@@ -347,14 +315,14 @@ describe('IdeShell', () => {
             id: 'pr:15035',
             label: 'PR',
             tab: 'workspace',
-            params: { section: 'repositories', view: 'graph', pr: '15035' },
+            params: { section: 'repositories', pr: '15035' },
             evidence: 'PR 15035',
           },
           {
             id: 'git:main',
             label: 'Git',
             tab: 'workspace',
-            params: { section: 'repositories', view: 'graph', ref: 'main' },
+            params: { section: 'repositories', ref: 'main' },
             evidence: 'Git main',
           },
           {
@@ -431,7 +399,7 @@ describe('IdeShell', () => {
     render(h(IdeShell, {}), container)
 
     await waitFor(() => expect(activeIdeFile.value).toBe('lib/runtime.ml'))
-    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc-mcp'))
+    await waitFor(() => expect(container.querySelector('[data-testid="ide-statusbar-workspace"]')?.textContent).toBe('masc'))
 
     const statusbar = container.querySelector('[data-testid="ide-statusbar"]')
     expect(statusbar?.getAttribute('aria-label')).toBe('IDE operational status')
@@ -590,20 +558,20 @@ describe('IdeShell', () => {
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('true')
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('false')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('false')
   })
 
   it('lets explicit review-focus layers override the default review bundle', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'cascade' },
+      params: { section: 'ide-shell', view: 'unified', focus: 'review', layers: 'runtime' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
     expect(container.querySelector('[data-testid="ide-review-focus"]')).not.toBeNull()
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
     expect(buttonByText(container, 'Trace').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Approve').getAttribute('aria-pressed')).toBe('false')
     expect(buttonByText(container, 'Notes').getAttribute('aria-pressed')).toBe('false')
@@ -684,12 +652,12 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
     const input = ideCommandInput(container)
-    input.value = 'cascade'
+    input.value = 'runtime'
     fireEvent.input(input)
     await waitFor(() => expect(container.querySelector('[role="listbox"]')).not.toBeNull())
     fireEvent.keyDown(input, { key: 'Enter' })
 
-    expect(route.value.params.layers).toBe('cascade')
+    expect(route.value.params.layers).toBe('runtime')
   })
 
   it('runs the rails command from the IDE command bar', async () => {
@@ -745,7 +713,7 @@ describe('IdeShell', () => {
     expect(container.querySelector('[data-testid="ide-find-panel"]')).not.toBeNull()
   })
 
-  it('renders the Cascade layer button and toggles it via URL', () => {
+  it('renders the Runtime layer button and toggles it via URL', () => {
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -754,29 +722,16 @@ describe('IdeShell', () => {
 
     render(h(IdeShell, {}), container)
 
-    const btn = buttonByText(container, 'Cascade')
+    const btn = buttonByText(container, 'Runtime')
     expect(btn.getAttribute('aria-pressed')).toBe('false')
 
     fireEvent.click(btn)
-    expect(route.value.params.layers).toBe('cascade')
+    expect(route.value.params.layers).toBe('runtime')
     expect(btn.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(btn)
     expect(route.value.params.layers).toBeUndefined()
     expect(btn.getAttribute('aria-pressed')).toBe('false')
-  })
-
-  it('renders IDE branch graph context in the review rail', async () => {
-    route.value = {
-      tab: 'code',
-      params: { section: 'ide-shell', view: 'source' },
-      postId: null,
-    }
-
-    render(h(IdeShell, {}), container)
-
-    expect(container.textContent).toContain('BRANCH GRAPH')
-    await waitFor(() => expect(container.textContent).toContain('masc-mcp'))
   })
 
   it('keeps the right diagnostics bounded above the primary conversation rail', () => {
@@ -834,18 +789,18 @@ describe('IdeShell', () => {
     expect(route.value.params.rails).toBeUndefined()
   })
 
-  it('hydrates cascade layer button from the ?layers=cascade URL param', () => {
+  it('hydrates runtime layer button from the ?layers=runtime URL param', () => {
     route.value = {
       tab: 'code',
-      params: { section: 'ide-shell', view: 'source', layers: 'cascade' },
+      params: { section: 'ide-shell', view: 'source', layers: 'runtime' },
       postId: null,
     }
 
     render(h(IdeShell, {}), container)
 
-    expect(buttonByText(container, 'Cascade').getAttribute('aria-pressed')).toBe('true')
+    expect(buttonByText(container, 'Runtime').getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('Active overlays')
-    expect(container.textContent).toContain('Cascade')
+    expect(container.textContent).toContain('Runtime')
   })
 
   it('mounts the OverlayKeeperTrace overlay when the keeper-trace layer is toggled on', () => {

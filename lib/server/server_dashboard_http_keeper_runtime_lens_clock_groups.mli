@@ -1,7 +1,7 @@
 (** Runtime-lens clock-group projection and gap detection.
 
     Derives grouped clock edges (turns, batches, attempts, checkpoints,
-    compactions, memory injections, event-bus correlations) from the edge
+    compactions and event-bus correlations) from the edge
     stream produced by {!Server_dashboard_http_keeper_runtime_lens_clock_edges}. *)
 
 val runtime_lens_clock_groups_json :

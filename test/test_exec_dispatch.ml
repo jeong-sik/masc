@@ -64,6 +64,27 @@ let () =
   assert (stdout = "hello world");
   assert (result.status = Unix.WEXITED 0)
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let ir =
+      { bin
+      ; args = [ Lit ("-c", default_meta); Lit ("printf %s \"$MASC_TEST_BASE_HOST_ENV\"", default_meta) ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_simple
+      ~base_host_env:[| "PATH=/bin:/usr/bin"; "MASC_TEST_BASE_HOST_ENV=from-base" |]
+      ir
+  in
+  assert (result.stdout = "from-base");
+  assert (result.status = Unix.WEXITED 0)
+
 (* --- dispatch_simple captures stderr --- *)
 
 let () =
@@ -100,6 +121,44 @@ let () =
   assert (stdout = "HELLO WORLD");
   assert (result.status = Unix.WEXITED 0)
 
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let stages =
+    [
+      Simple
+        { bin = sh_bin
+        ; args =
+            [ Lit ("-c", default_meta)
+            ; Lit ("printf %s \"$MASC_TEST_PIPE_BASE_HOST_ENV\"", default_meta)
+            ]
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = host_sandbox
+        };
+      Simple
+        { bin = cat_bin
+        ; args = []
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = host_sandbox
+        };
+    ]
+  in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~base_host_env:
+        [| "PATH=/bin:/usr/bin"; "MASC_TEST_PIPE_BASE_HOST_ENV=from-pipeline-base" |]
+      stages
+  in
+  assert (result.stdout = "from-pipeline-base");
+  assert (result.status = Unix.WEXITED 0)
+
 (* --- host pipeline streams between stages --- *)
 
 let () =
@@ -114,9 +173,60 @@ let () =
       Simple { bin = head_bin; args = [Lit ("-n", default_meta); Lit ("1", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
     ]
   in
-  let result = Masc_exec.Exec_dispatch.dispatch_pipeline ~timeout_sec:2.0 stages in
+  let result = Masc_exec.Exec_dispatch.dispatch_pipeline stages in
   assert (String.trim result.stdout = "y");
   assert (result.status <> Unix.WEXITED 124)
+
+(* --- dispatch_decided forwards pipeline captured output chunks --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let sh_stage =
+    Simple
+      {
+        bin = sh_bin;
+        args =
+          [
+            Lit ("-c", default_meta);
+            Lit ("printf out; printf err >&2", default_meta);
+          ];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let cat_stage =
+    Simple
+      {
+        bin = cat_bin;
+        args = [];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let envelope =
+    { Masc_exec.Shell_ir_risk.ir = Pipeline [ sh_stage; cat_stage ]
+    ; risk = Masc_exec.Shell_ir_risk.R0_Read
+    }
+  in
+  let chunks = ref [] in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_decided
+      ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
+      envelope
+  in
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "out");
+  assert (result.stderr = "err");
+  assert (List.mem (`Stdout "out") !chunks);
+  assert (List.mem (`Stderr "err") !chunks)
 
 (* --- dispatch pipeline exit code: last nonzero wins --- *)
 
@@ -197,7 +307,7 @@ let () =
   let a_bin = Masc_exec.Exec_program.of_string "a" |> Result.get_ok in
   let b_bin = Masc_exec.Exec_program.of_string "b" |> Result.get_ok in
   let c_bin = Masc_exec.Exec_program.of_string "c" |> Result.get_ok in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     match argv, stdin_content with
     | [ "a" ], None -> Unix.WEXITED 7, "a-out", "a-err;"
     | [ "b" ], Some "a-out" -> Unix.WEXITED 0, "b-out", "b-err;"
@@ -304,7 +414,7 @@ let () =
   let runner_argv = ref [] in
   let runner_env = ref [||] in
   let runner_cwd = ref (Some "should_be_none") in
-  let mock_runner ~stdin_content:_ ~argv ~env ~cwd ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv ~env ~cwd =
     runner_called := true;
     runner_argv := argv;
     runner_env := env;
@@ -346,7 +456,7 @@ let () =
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
@@ -379,7 +489,7 @@ let () =
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     Unix.WEXITED 0, "stdout", "stderr"
   in
   let docker_sandbox =
@@ -414,7 +524,7 @@ let () =
   let unsupported_target =
     Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-out" ~cwd:"/tmp"
   in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     runner_called := true;
     Unix.WEXITED 0, "stdout", "stderr"
   in
@@ -453,7 +563,7 @@ let () =
   let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
   let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let runner_calls = ref [] in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd =
     runner_calls := (argv, cwd, stdin_content) :: !runner_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
@@ -496,14 +606,18 @@ let () =
 	      assert (second_cwd = "/tmp/pipeline")
 	  | _ -> assert false
 
+(* Per-caller timeout was removed; this test no longer models a deadline
+   decrement. We keep the streaming check (slow → typed → ok) to confirm
+   that the pipeline runner still threads the previous stage's stdout into
+   the next call regardless of how long the stage takes. *)
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let slow_bin = Masc_exec.Exec_program.of_string "slow" |> Result.get_ok in
   let next_bin = Masc_exec.Exec_program.of_string "next" |> Result.get_ok in
   let runner_calls = ref [] in
-  let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec =
-    runner_calls := (argv, stdin_content, timeout_sec) :: !runner_calls;
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
+    runner_calls := (argv, stdin_content) :: !runner_calls;
     match argv, stdin_content with
     | [ "slow" ], None ->
         Unix.sleepf 0.12;
@@ -527,18 +641,12 @@ let () =
       }
   in
   let result =
-    Masc_exec.Exec_dispatch.dispatch_pipeline
-      ~timeout_sec:0.5
-      [ stage slow_bin; stage next_bin ]
+    Masc_exec.Exec_dispatch.dispatch_pipeline [ stage slow_bin; stage next_bin ]
   in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "ok");
   match List.rev !runner_calls with
-  | [ ([ "slow" ], None, first_timeout); ([ "next" ], Some "typed", second_timeout) ] ->
-      assert (first_timeout <= 0.5);
-      assert (first_timeout > 0.45);
-      assert (second_timeout < first_timeout);
-      assert (second_timeout < 0.45)
+  | [ ([ "slow" ], None); ([ "next" ], Some "typed") ] -> ()
   | _ -> assert false
 
 (* --- dispatch_pipeline prefers Docker streaming pipeline runner --- *)
@@ -550,11 +658,11 @@ let () =
   let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let simple_runner_called = ref false in
   let pipeline_runner_calls = ref [] in
-  let simple_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     simple_runner_called := true;
     Unix.WEXITED 3, "", "simple runner should not be used"
   in
-  let pipeline_runner ~stages ~timeout_sec:_ =
+  let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages =
     pipeline_runner_calls := stages :: !pipeline_runner_calls;
     Unix.WEXITED 0, "5\n", "pipeline-stderr"
   in
@@ -613,23 +721,23 @@ let () =
   let second_simple_calls = ref [] in
   let first_pipeline_called = ref false in
   let second_pipeline_called = ref false in
-  let first_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let first_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     first_simple_calls := (argv, stdin_content) :: !first_simple_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", ""
     | _ -> Unix.WEXITED 2, "", "unexpected first runner call"
   in
-  let second_simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let second_simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     second_simple_calls := (argv, stdin_content) :: !second_simple_calls;
     match argv, stdin_content with
     | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
     | _ -> Unix.WEXITED 2, "", "unexpected second runner call"
   in
-  let first_pipeline_runner ~stages:_ ~timeout_sec:_ =
+  let first_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     first_pipeline_called := true;
     Unix.WEXITED 3, "", "first pipeline runner should not be used"
   in
-  let second_pipeline_runner ~stages:_ ~timeout_sec:_ =
+  let second_pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     second_pipeline_called := true;
     Unix.WEXITED 3, "", "second pipeline runner should not be used"
   in
@@ -687,14 +795,14 @@ let () =
   in
   let simple_runner_calls = ref [] in
   let pipeline_runner_called = ref false in
-  let simple_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let simple_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content ~argv ~env:_ ~cwd:_ =
     simple_runner_calls := (argv, stdin_content) :: !simple_runner_calls;
     match argv, stdin_content with
     | [ "printf"; "typed" ], None -> Unix.WEXITED 0, "typed", "hidden"
     | [ "wc"; "-c" ], Some "typed" -> Unix.WEXITED 0, "5\n", ""
     | _ -> Unix.WEXITED 2, "", "unexpected mock runner call"
   in
-  let pipeline_runner ~stages:_ ~timeout_sec:_ =
+  let pipeline_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stages:_ =
     pipeline_runner_called := true;
     Unix.WEXITED 3, "", "pipeline runner should not be used for redirects"
   in
@@ -746,7 +854,7 @@ let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
-  let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+  let mock_runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
     failwith "mock docker failure"
   in
   let docker_sandbox =

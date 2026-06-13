@@ -5,7 +5,7 @@
 #   Audits posted by keepers / external reports often state quantitative
 #   claims like "16 silent-empty antipatterns in lib/keeper/keeper_tool_policy.ml"
 #   or "3 sites in lib/relay.ml".  Without independent measurement those
-#   numbers cascade through cross-citation.  Real measurements observed
+#   numbers runtime through cross-citation.  Real measurements observed
 #   2026-05-06: claimed 16 → actual 2 (8x drift); claimed 3 → actual 1.
 #
 # This script forces measurement against the working tree before the

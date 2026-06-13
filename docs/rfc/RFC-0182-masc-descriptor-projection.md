@@ -1,5 +1,5 @@
 ---
-title: masc_* Coordination Tool Descriptor Projection + Tool_spec SSOT Consolidation
+title: masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation
 rfc: "0182"
 status: Draft
 created: 2026-05-26
@@ -11,24 +11,24 @@ related: ["0064", "0179"]
 implementation_prs: []
 ---
 
-# RFC-0182 — masc_* Coordination Tool Descriptor Projection + Tool_spec SSOT Consolidation
+# RFC-0182 — masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation
 
 Status: Draft · Architectural framing, no code yet
 Related: RFC-0064 (LLM-native two-surface tool model), RFC-0179 (keeper_* descriptor coverage)
 
-> Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based cascade SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
+> Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based runtime SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
 
 ## 0. Problem framing
 
-RFC-0179 (PR #18710, 2026-05-26 merged) brought `keeper_*` coordination tools — 39 entries — under the `Agent_tool_descriptor.t` projection layer. `internal_descriptors` grew from 1 to 39, `Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` lost its legacy match chain (12 arms → 0), and 38 additional tools began emitting `route_evidence_json` per call.
+RFC-0179 (PR #18710, 2026-05-26 merged) brought `keeper_*` workspace collaboration tools — 39 entries — under the `Agent_tool_descriptor.t` projection layer. `internal_descriptors` grew from 1 to 39, `Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` lost its legacy match chain (12 arms → 0), and 38 additional tools began emitting `route_evidence_json` per call.
 
-A 2026-05-26 audit found that `masc_*` MCP-public coordination tools — the surface MASC agents call most heavily (`masc_join`, `masc_broadcast`, `masc_heartbeat`, `masc_messages`, `masc_board_*`) — have **0 descriptor coverage**:
+A 2026-05-26 audit found that `masc_*` MCP-public workspace collaboration tools — the surface MASC agents call most heavily (`masc_bind`, `masc_broadcast`, `masc_heartbeat`, `masc_messages`, `masc_board_*`) — have **0 descriptor coverage**:
 
 | Layer | Count | Descriptor-backed |
 |---|---|---|
 | LLM-native public (RFC-0064) | 7 | 7 (100%) |
-| `keeper_*` coordination (RFC-0179) | 39 | 39 (100%) |
-| `masc_*` MCP-public coordination | **124** | **0 (0%)** |
+| `keeper_*` workspace collaboration (RFC-0179) | 39 | 39 (100%) |
+| `masc_*` MCP-public workspace collaboration | **124** | **0 (0%)** |
 | **Total ecosystem (audited)** | **~286** | **46 (~16%)** |
 
 The 124 figure comes from a registration-matrix audit (`/.tmp/masc-tool-registration-matrix-2026-05-26.md`) that cross-checked `Tool_spec.register` call sites against `tool_catalog.ml` metadata entries. It is 3 more than the 121 surfaced by match-arm grep — the gap is the audit anomaly this RFC also addresses.
@@ -67,11 +67,11 @@ This RFC adds the second layer to `masc_*`, *and* consolidates the first layer w
 
 The registration matrix audit found 21 of 124 `masc_*` tools live as metadata-only entries in `tool_catalog.ml` without a corresponding `Tool_spec.register` call. They include high-traffic surface tools:
 
-- Coordination: `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate`
+- Workspace: `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`
 - Execution: `masc_execute`, `masc_execute_dry_run`
 - Portal: `masc_portal_open`, `masc_portal_close`, `masc_portal_send`
-- Approval: `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve`
-- Admin/destructive: `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_room_delete`, `masc_force_leave`, `masc_set_param`, `masc_spawn`, `masc_tool_revoke`
+- Approval queue access is no longer a MASC tool surface.
+- Admin/destructive: `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind`, `masc_set_param`, `masc_spawn`, `masc_tool_revoke`
 
 Three observations:
 
@@ -89,9 +89,9 @@ After the body merged (PR #18726 → renumber #18731), a 5-prong dead/live audit
 
 | Verdict | Tools | Decision |
 |---|---|---|
-| **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_room_delete`, `masc_force_leave` | delete tool_catalog metadata; do not migrate |
-| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `tool_inline_dispatch.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
-| **live** | `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve`, `masc_set_param`, `masc_tool_revoke` (10 tools) | migrate to `Tool_spec.register`; descriptor projection added |
+| **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind` | delete tool_catalog metadata; do not migrate |
+| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
+| **live** | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_set_param`, `masc_tool_revoke` (7 tools) | migrate to `Tool_spec.register`; descriptor projection added |
 | **deferred** (separate RFC) | `masc_portal_open`, `masc_portal_close`, `masc_portal_send` | live, but dispatch is at `mcp_server_eio_protocol.ml` protocol level — not in-process. This RFC's cluster-variant pattern does not fit. Tracked for a separate RFC (RFC-0183 candidate). Excluded from this RFC's scope. |
 
 Q2 (`channel_gate`) and Q3 (`masc_set_param`) — initially flagged for removal in §11 open questions — are now confirmed live by the audit (HTTP subsystem dispatch at `server_routes_http_routes_channel_gate.ml` and `server_routes_http_routes_activity.ml:with_tool_auth` respectively). They are migrated to `Tool_spec.register`, not removed. `masc_set_param` retains its current `Hidden` visibility (`hidden_active` semantics preserved through `Tool_spec.create ~visibility:Hidden`).
@@ -111,38 +111,44 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | `masc_board_*` (incl. sub_board) | ~20 | `Tool_masc_board_dispatch` |
 | `masc_keeper_*` / `masc_persona_*` | ~19 | `Tool_masc_keeper_dispatch` |
 | `masc_plan_*` / `masc_note_*` | ~8 | `Tool_masc_plan_dispatch` |
-| `masc_room_*` (coord status/heartbeat/goal) | ~8 | `Tool_masc_room_dispatch` |
+| `masc_workspace_*` (workspace status/heartbeat/goal) | ~8 | `Tool_masc_workspace_dispatch` |
 | `masc_task_*` | ~7 | `Tool_masc_task_dispatch` |
 | `masc_operator_*` | ~6 | `Tool_masc_operator_dispatch` |
-| `masc_run_*` | ~6 | `Tool_masc_run_dispatch` |
+| `masc_run_*` | ~4 | `Tool_masc_run_dispatch` |
 | `masc_agent_*` | ~5 | `Tool_masc_agent_dispatch` |
 | `masc_library_*` | ~5 | `Tool_masc_library_dispatch` |
 | `masc_control_*` (pause/resume) | ~3 | `Tool_masc_control_dispatch` |
 | `masc_shard_*` (tool_grant/revoke) | ~2 | `Tool_masc_shard_dispatch` |
 | `masc_local_runtime_*` | ~2 | `Tool_masc_local_runtime_dispatch` |
 | `masc_agent_timeline` | 1 | `Tool_masc_agent_timeline` |
-| Singletons (`masc_join`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
+| Singletons (`masc_bind`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
 
 Net new `runtime_handler` variants: ~14 cluster + ~25 singletons = **~39**. Net new descriptor entries: **113**. After this RFC: `internal_descriptors` = 39 + 113 = **152**.
 
+> Update (2026-06-09): the `masc_run_*` cluster dropped from 6 to 4
+> tools — `masc_run_log` and `masc_run_deliverable` were removed (0
+> recorded writes in fleet logs; the surviving `init`/`plan`/`get`/`list`
+> cover run tracking). The `~N` per-cluster counts above are live
+> approximations; the net-new totals are the point-in-time projection
+> at RFC authoring and are left as the historical record.
+
 The In_process handler for each cluster routes to the existing typed dispatcher — no logic is moved out of `tool_board_dispatch.ml`, `tool_task.ml`, etc. The descriptor layer is a *projection*, not a relocation.
 
-### 3.2 Tool_spec consolidation (10 live tools)
+### 3.2 Tool_spec consolidation (7 live tools)
 
-> Scope updated from 21 to 10 per §2a audit. Dead tools handled in §3.3; portal trio deferred to RFC-0183 candidate.
+> Scope updated from 21 to 7 per §2a audit and the 2026-06-04 approval surface removal. Dead tools handled in §3.3; portal trio deferred to RFC-0183 candidate.
 
 Each of the 10 live metadata-only tools gets a corresponding `Tool_spec.register` call placed in the most semantically-appropriate `tool_*.ml` module:
 
 | Tool | Proposed module | Q3 visibility |
 |---|---|---|
-| `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate` | `tool_inline_dispatch.ml` (Mod_inline) | `Default` (preserved) |
-| `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve` | `tool_inline_dispatch.ml` (Mod_inline) — existing approval dispatch lives here at `tool_inline_dispatch.ml:177,180,191` | `Default` (preserved) |
-| `masc_set_param` | `tool_inline_dispatch.ml` or new `tool_admin.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
+| `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate` | `mcp_tool_runtime.ml` (Mod_inline) | `Default` (preserved) |
+| `masc_set_param` | `mcp_tool_runtime.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
 | `masc_tool_revoke` | `tool_shard.ml` (Mod_shard) — existing `masc_tool_grant` is registered here | `Default` (preserved) |
 
-All 10 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata (`required_permission = Some Masc_domain.CanXxx`) is preserved as-is — moved from raw `tool_catalog.ml` entries to `Tool_spec.create ~required_permission`.
+All 7 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata (`required_permission = Some Masc_domain.CanXxx`) is preserved as-is — moved from raw `tool_catalog.ml` entries to `Tool_spec.create ~required_permission`.
 
-Q1 (module layout) resolution: **hybrid — no new tool_admin.ml module**. Audit found existing dispatchers (`tool_inline_dispatch.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New module would proliferate single-purpose files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` placement is implementer's choice between `tool_inline_dispatch.ml` and a new `tool_admin.ml`; if only `masc_set_param` needs it, prefer existing.
+Q1 (module layout) resolution: existing dispatchers only. Audit found existing dispatchers (`mcp_tool_runtime.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New single-purpose modules would proliferate files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` stays with `mcp_tool_runtime.ml`.
 
 ### 3.3 Dead tool metadata + test cleanup (8 tools)
 
@@ -156,9 +162,9 @@ masc_execute_dry_run    — no handler, no dispatch, no live caller
 masc_admin_cleanup      — no handler, no dispatch, no live caller
 masc_admin_reset        — no handler, no dispatch, no live caller
 masc_gc_force           — no handler, no dispatch, no live caller
-masc_room_delete        — no handler, no dispatch, no live caller
-masc_force_leave        — no handler, no dispatch, no live caller
-masc_spawn              — dispatch explicitly removed (tool_inline_dispatch.ml:287
+masc_workspace_delete        — no handler, no dispatch, no live caller
+masc_force_unbind        — no handler, no dispatch, no live caller
+masc_spawn              — dispatch explicitly removed (mcp_tool_runtime.ml:287
                           comment `"masc_spawn removed: vendor-specific agent
                           spawning belongs to OAS domain"`), metadata+test left
                           behind. This RFC completes the cleanup.
@@ -205,7 +211,7 @@ After: 113 emit per-call descriptor_id, executor=in_process (cluster passthrough
 | Risk | Detection | Mitigation |
 |---|---|---|
 | Cluster variant misroutes (descriptor.internal_name mismatched against runtime_handler dispatch table) | Compiler exhaustiveness on each Tool_*_dispatch handler match | Per-cluster unit test verifies every tool in the cluster resolves to the cluster handler and dispatches to the right typed function |
-| 10 migration introduces handler_binding semantics mismatch | `dune build --root . lib/` + existing tool_catalog invariant tests | All 10 use `Tag_dispatch` matching the existing 103 norm. Audit confirmed 100% Tag_dispatch across all live registrations |
+| 7-tool migration introduces handler_binding semantics mismatch | `dune build --root . lib/` + existing tool_catalog invariant tests | All 7 use `Tag_dispatch` matching the existing 103 norm. Audit confirmed 100% Tag_dispatch across all live registrations |
 | `internal_name` collision between `keeper_*` and `masc_*` | Test assertion: `List.sort_uniq String.compare (List.map (fun d -> d.internal_name) (all_descriptors ()))` length equals total list length | Resolve any collision by renaming the masc_* entry to its true canonical (the keeper_* set is fixed by RFC-0179) |
 | PR size (estimated 1200-1800 LoC after dead-tool delete reduces additions) makes review hard | PR body has cluster-by-cluster diff summary; cluster handlers are mechanically isomorphic | Diff size is intentional per `[feedback_radical_improvement_over_diff_size]` for a user-of-one codebase. Single PR, single rebase, single CI pass |
 | 8 dead-tool delete removes a row that some forgotten consumer relies on | `rg <tool_name>` audit (§2a 5-prong) — all 5 paths empty except for tool_catalog.ml self-row | Audit results pinned in `.tmp/masc-21-metadata-only-dead-audit-2026-05-26.md`; impl PR re-runs the same grep before delete to guard against drift since 2026-05-26 |
@@ -240,19 +246,19 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 | 3 | Closeout: flip RFC-0182 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
 | 4 (separate) | RFC-0183 candidate: portal trio descriptor model (protocol-level dispatch layer). |
 
-Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, `tool_catalog.ml` (delete 8 dead rows), `tool_inline_dispatch.ml` (add 9-10 registrations), `tool_shard.ml` (add masc_tool_revoke), test files affected by dead-tool cleanup).
+Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, `tool_catalog.ml` (delete 8 dead rows), `mcp_tool_runtime.ml` (add 9-10 registrations), `tool_shard.ml` (add masc_tool_revoke), test files affected by dead-tool cleanup).
 
 ## 11. Open questions — resolved
 
 The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
 
-- **Q1 (module layout)** — *resolved*: hybrid. No new `tool_admin.ml` or `tool_approval.ml` modules; reuse `tool_inline_dispatch.ml` (existing approval dispatch lives there) and `tool_shard.ml` (existing `masc_tool_grant` lives there). `masc_set_param` may either reuse `tool_inline_dispatch.ml` or get a new single-purpose module — implementer's choice with preference for the former. Rationale in §3.2.
+- **Q1 (module layout)** — *resolved*: existing dispatchers only. Keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`) and reuse `tool_shard.ml` for shard tools (existing `masc_tool_grant` lives there). `masc_set_param` stays with `mcp_tool_runtime.ml`. Rationale in §3.2.
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 
 ## 12. Phase 5 — Eio plumbing for remaining 10 tools (post-#18823)
 
-After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 10 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Coord_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
+After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 10 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Workspace_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
 
 ### 12.1 Tools blocked on Eio context
 
@@ -262,7 +268,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 | `masc_keeper_msg` | `Keeper_msg_async.submit ~clock ~sw` + Turn dispatch | `Tool_keeper_ops.handle_keeper_msg` (lib/tool_keeper_ops.ml:438) |
 | `masc_keeper_sandbox_status` | `load_or_materialize_boot_meta` (clock-aware) | `Tool_keeper.handle_keeper_sandbox_status` |
 | `masc_keeper_create_from_persona` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_persona` |
-| `masc_persona_generate` | LLM call via Eio fiber | `Keeper_persona_authoring.handle_persona_generate` (line 812) |
+| `masc_persona_generate` | retired on main | no backing function |
 | `masc_operator_snapshot` | `Operator_control.context` (sw/clock/proc_mgr/net/mcp_session_id) | `Tool_operator.dispatch` |
 | `masc_operator_digest` | same | same |
 | `masc_operator_action` | same | same |
@@ -289,16 +295,15 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 - Caller (`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome`) constructs the full ctx from the existing keeper Eio context.
 - `Agent_tool_in_process_runtime.handle_masc_keeper` (and new `handle_masc_operator`) receive these via the existing handler signature pattern: `~config ~meta ~sw ~clock ~proc_mgr ~net ~name ~args`.
 - Cycle-safety preserved: `Agent_tool_runtime.ctx` already imports Eio types — adding fields adds no new module deps.
-- Pro: one structural change unlocks 10 tools.  Con: signature ripple across all 11 handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
+- Pro: one structural change unlocks the remaining keeper/operator tools.  Con: signature ripple across the affected handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
 
-**Recommendation: Option B.**  Single ctx extension, hits OCaml record-update sites once.  Persona_generate and operator cluster naturally use this without dispatch-ref indirection (their backing modules are in lib/ late enough to import directly).
+**Recommendation: Option B.**  Single ctx extension, hits OCaml record-update sites once.  The operator cluster can use this without dispatch-ref indirection if its backing modules stay late enough to import directly.
 
 ### 12.3 Per-cluster wiring after ctx extension
 
 | Cluster | Mechanism | Notes |
 |---|---|---|
 | `masc_keeper_{up,msg,sandbox_status,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
-| `masc_persona_generate` | Persona_dispatch_ref signature extension OR direct extraction of generate body to ctx-free | LLM call via Eio fiber — natural choice is dispatch-ref since LLM provider sits late |
 | `masc_operator_*` (5) | New `Operator_dispatch_ref` OR direct `Tool_operator.dispatch` import | Tool_operator is in lib/, sits LATE.  Direct import from Agent_tool_in_process_runtime closes cycle (Tool_operator → Operator_control → Keeper_runtime → ...).  Use dispatch-ref. |
 
 ### 12.4 Estimated PR sizes
@@ -307,8 +312,7 @@ After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverag
 |---|---|---|---|
 | PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Agent_tool_dispatch_runtime caller) | low (compile-error-driven ripple) |
 | PR-B: keeper Eio cluster (4 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
-| PR-C: persona_generate | ~80 | 3 (Persona_dispatch_ref extend + Tool_keeper register + descriptor) | medium |
-| PR-D: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
+| PR-C: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
 
 Each sub-PR independently mergeable, gated by PR-A.
 
@@ -329,7 +333,7 @@ Each sub-PR independently mergeable, gated by PR-A.
 From the 17-iter /loop session that built PR #18823:
 
 1. `Eio_guard.with_mutex` (Eio.Mutex.create) — pure inside [`Keeper_status_detail`](../../lib/keeper/keeper_status_detail.ml).  Did NOT block status projection.
-2. `Keeper_persona_authoring → Keeper_turn_driver` transitive cycle (line 880) — resolved via [`Persona_dispatch_ref`](../../lib/persona_dispatch_ref.ml).
+2. Persona authoring schema/save/generate surfaces are retired on main; persona creation now routes through `masc_keeper_create_from_persona`, and the former persona-generate turn-driver cycle has no backing function.
 3. `Keeper_turn_up.handle_keeper_up` surface ctx.config-only BUT `start_keepalive` transitively requires Eio.  Cannot ctx-free.
 4. `handle_keeper_repair` carried `ignore (ctx.sw, ctx.clock, ctx.config)` warning-suppression scaffolding — was phantom dependency, real body returns stub.
 
@@ -337,7 +341,7 @@ From the 17-iter /loop session that built PR #18823:
 
 - RFC-0183 (portal trio): protocol-level dispatch design.
 - `masc_set_param` (HTTP route only — not internal-callable).
-- `masc_mcp_session` (Tool_inline_dispatch with `load/save_mcp_sessions` callbacks — caller-injected closures, not ctx Eio fields).
+- `masc_session` (Mcp_tool_runtime with `load/save_mcp_sessions` callbacks — caller-injected closures, not ctx Eio fields).
 
 ---
 

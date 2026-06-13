@@ -5,22 +5,6 @@ let assoc_opt = function
   | _ -> None
 ;;
 
-let assoc_member_opt name = function
-  | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
-;;
-
-let assoc_string_opt name json =
-  match assoc_member_opt name json with
-  | Some (`String value) when String.trim value <> "" -> Some value
-  | _ -> None
-;;
-
-let assoc_bool_opt name json =
-  match assoc_member_opt name json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
 
 let route_candidate_has_fields json =
   match assoc_opt json with
@@ -32,10 +16,8 @@ let route_candidate_has_fields json =
            name
            [ "via"
            ; "sandbox_profile"
-           ; "git_creds_enabled"
            ; "network_mode"
            ; "status"
-           ; "effective_sandbox_image"
            ])
       fields
 ;;
@@ -44,10 +26,10 @@ let route_candidate_of_output json =
   if route_candidate_has_fields json
   then Some json
   else (
-    match assoc_member_opt "result" json with
+    match Json_util.assoc_member_opt "result" json with
     | Some result when route_candidate_has_fields result -> Some result
     | _ ->
-      (match assoc_member_opt "detail" json with
+      (match Json_util.assoc_member_opt "detail" json with
        | Some detail when route_candidate_has_fields detail -> Some detail
        | _ -> None))
 ;;
@@ -74,9 +56,9 @@ let assoc_fields = function
 ;;
 
 let descriptor_evidence_fields tool_name =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> []
-  | Some descriptor -> Agent_tool_descriptor.route_evidence_json descriptor |> assoc_fields
+  | Some descriptor -> Keeper_tool_descriptor.route_evidence_json descriptor |> assoc_fields
 ;;
 
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
@@ -92,18 +74,13 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | None -> None
   in
   let command =
-    match assoc_string_opt "cmd" input with
+    match Json_util.assoc_string_opt "cmd" input with
     | Some cmd -> Some cmd
-    | None -> assoc_string_opt "op" input
+    | None -> Json_util.assoc_string_opt "op" input
   in
   let add_string name value fields =
     match value with
     | Some value -> (name, `String value) :: fields
-    | None -> fields
-  in
-  let add_bool name value fields =
-    match value with
-    | Some value -> (name, `Bool value) :: fields
     | None -> fields
   in
   let add_json name value fields =
@@ -123,16 +100,12 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
            "status"
            (Option.map
               (Observability_redact.preview_json_strings ~max_len:max_output_len)
-              (assoc_member_opt "status" output_json))
-      |> add_string
-           "effective_sandbox_image"
-           (assoc_string_opt "effective_sandbox_image" output_json)
-      |> add_string "network_mode" (assoc_string_opt "network_mode" output_json)
-      |> add_bool "git_creds_enabled" (assoc_bool_opt "git_creds_enabled" output_json)
-      |> add_string "sandbox_profile" (assoc_string_opt "sandbox_profile" output_json)
-      |> add_string "via" (assoc_string_opt "via" output_json)
-      |> add_string "path" (safe_input_string (assoc_string_opt "path" input))
-      |> add_string "cwd" (safe_input_string (assoc_string_opt "cwd" input))
+              (Json_util.assoc_member_opt "status" output_json))
+      |> add_string "network_mode" (Json_util.assoc_string_opt "network_mode" output_json)
+      |> add_string "sandbox_profile" (Json_util.assoc_string_opt "sandbox_profile" output_json)
+      |> add_string "via" (Json_util.assoc_string_opt "via" output_json)
+      |> add_string "path" (safe_input_string (Json_util.assoc_string_opt "path" input))
+      |> add_string "cwd" (safe_input_string (Json_util.assoc_string_opt "cwd" input))
       |> add_string "command" (safe_input_string command)
       |> add_string "tool_name" (Some tool_name)
     in

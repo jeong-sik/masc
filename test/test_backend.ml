@@ -120,7 +120,7 @@ let test_key_validation () =
 (** Test nested keys *)
 let test_nested_keys () =
   with_eio_env @@ fun backend ->
-  let key = "rooms:room1:messages:msg001" in
+  let key = "workspaces:workspace1:messages:msg001" in
   let value = "nested value" in
 
   (* Set nested key *)

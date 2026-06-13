@@ -14,7 +14,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentJoinedOrLeft
+  | KeeperFiberStartedOrStopped
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
@@ -26,7 +26,7 @@ let deliberation_trigger_to_string = function
   | DirectMention -> "direct_mention"
   | NewUnclaimedTask -> "new_unclaimed_task"
   | FailedTask -> "failed_task"
-  | AgentJoinedOrLeft -> "agent_joined_or_left"
+  | KeeperFiberStartedOrStopped -> "keeper_fiber_started_or_stopped"
   | GoalDeadline -> "goal_deadline"
   | BoardActivity detail -> "board_activity:" ^ detail
   | IdleTimeout -> "idle_timeout"
@@ -41,7 +41,6 @@ let deliberation_trigger_to_json trigger =
 
 type deliberation_action =
   | Noop of string
-  | ReplyInRoom of { room_id: string; content: string }
   | BoardPost of { content: string; hearth: string option }
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
@@ -52,7 +51,6 @@ type deliberation_action =
 
 let rec deliberation_action_to_string = function
   | Noop reason -> "noop:" ^ reason
-  | ReplyInRoom _ -> "reply_in_room"
   | BoardPost _ -> "board_post"
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
@@ -67,7 +65,6 @@ let rec deliberation_action_to_string = function
 (** Map typed action to stable policy labels used by policy logging and reward models. *)
 let deliberation_action_to_policy_label = function
   | Noop _ -> "noop"
-  | ReplyInRoom _ -> "reply_in_room"
   | BoardPost _ -> "board_post"
   | BoardComment _ -> "board_comment"
   | BoardVote _ -> "board_vote"
@@ -79,22 +76,12 @@ let deliberation_action_to_policy_label = function
 let rec deliberation_action_to_json = function
   | Noop reason ->
       `Assoc [ ("type", `String "noop"); ("reason", `String reason) ]
-  | ReplyInRoom { room_id; content } ->
-      `Assoc
-        [
-          ("type", `String "reply_in_room");
-          ("room_id", `String room_id);
-          ("content", `String content);
-        ]
   | BoardPost { content; hearth } ->
       `Assoc
         [
           ("type", `String "board_post");
           ("content", `String content);
-          ( "hearth",
-            match hearth with
-            | Some h -> `String h
-            | None -> `Null );
+          ( "hearth", Json_util.string_opt_to_json hearth );
         ]
   | BoardComment { post_id; content } ->
       `Assoc
@@ -142,8 +129,8 @@ type world_observation = {
   message_content: string;
   unclaimed_task_count: int;
   failed_task_count: int;
-  active_agent_count: int;
-  agent_count_changed: bool;
+  running_keeper_fiber_count: int;
+  keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
   idle_gate: int;
@@ -159,8 +146,8 @@ let empty_world_observation ~keeper_name =
     message_content = "";
     unclaimed_task_count = 0;
     failed_task_count = 0;
-    active_agent_count = 0;
-    agent_count_changed = false;
+    running_keeper_fiber_count = 0;
+    keeper_fiber_count_changed = false;
     active_goal_count = 0;
     idle_seconds = 0;
     idle_gate = 300;
@@ -177,8 +164,8 @@ let world_observation_to_json (obs : world_observation) : Yojson.Safe.t =
       ("message_content_len", `Int (String.length obs.message_content));
       ("unclaimed_task_count", `Int obs.unclaimed_task_count);
       ("failed_task_count", `Int obs.failed_task_count);
-      ("active_agent_count", `Int obs.active_agent_count);
-      ("agent_count_changed", `Bool obs.agent_count_changed);
+      ("running_keeper_fiber_count", `Int obs.running_keeper_fiber_count);
+      ("keeper_fiber_count_changed", `Bool obs.keeper_fiber_count_changed);
       ("active_goal_count", `Int obs.active_goal_count);
       ("idle_seconds", `Int obs.idle_seconds);
       ("idle_gate", `Int obs.idle_gate);
@@ -216,7 +203,7 @@ let triage (obs : world_observation) : triage_result =
   if obs.direct_mention then add DirectMention;
   if obs.unclaimed_task_count > 0 then add NewUnclaimedTask;
   if obs.failed_task_count > 0 then add FailedTask;
-  if obs.agent_count_changed then add AgentJoinedOrLeft;
+  if obs.keeper_fiber_count_changed then add KeeperFiberStartedOrStopped;
 
   (* L2 Proactive triggers — goal-directed *)
   if obs.board_mention_count > 0 then
@@ -291,11 +278,10 @@ let deliberation_meta_of_json (json : Yojson.Safe.t) : deliberation_meta =
 
 (* ---------- Baseline action: typed replacement for the 2-line heuristic ---------- *)
 
-(** Deterministic baseline using the typed action space.
-    Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
+(** Deterministic baseline using the typed action space. *)
 let deterministic_baseline_action (obs : world_observation) : deliberation_action =
   if obs.direct_mention then
-    ReplyInRoom { room_id = ""; content = "" }
+    Noop "direct mention requires explicit board/task action"
   else
     Noop "no_trigger"
 
@@ -309,10 +295,13 @@ let deterministic_baseline_action (obs : world_observation) : deliberation_actio
 let daily_budget_usd () : float =
   Env_config.KeeperRuntime.deliberation_daily_budget_usd ()
 
-(** Check whether the keeper has remaining budget for another deliberation call.
-    Returns [true] if [cost_today_usd < daily_budget_usd]. *)
+(** Advisory cost telemetry for deliberation.
+
+    Deliberation must not be blocked by a daily cost threshold. *)
 let deliberation_budget_check ~daily_budget_usd ~cost_today_usd : bool =
-  cost_today_usd < daily_budget_usd
+  ignore daily_budget_usd;
+  ignore cost_today_usd;
+  true
 
 (* ---------- Prompt builder ---------- *)
 
@@ -327,8 +316,8 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     "World state:\n\
     \  - Unclaimed tasks: %d\n\
     \  - Failed tasks: %d\n\
-    \  - Active agents: %d\n\
-    \  - Agent count changed: %b\n\
+    \  - Running keeper fibers: %d\n\
+    \  - Keeper fiber count changed: %b\n\
     \  - Active goals: %d\n\
     \  - Idle seconds: %d (gate: %d)\n\
     \  - Board new posts: %d\n\
@@ -337,8 +326,8 @@ let world_observation_to_prompt_section (obs : world_observation) : string =
     \  - Has question: %b"
     obs.unclaimed_task_count
     obs.failed_task_count
-    obs.active_agent_count
-    obs.agent_count_changed
+    obs.running_keeper_fiber_count
+    obs.keeper_fiber_count_changed
     obs.active_goal_count
     obs.idle_seconds obs.idle_gate
     obs.board_new_post_count
@@ -418,14 +407,14 @@ let rec policy_labels_of_action = function
 let has_board_signal (obs : world_observation) =
   obs.board_new_post_count > 0 || obs.board_mention_count > 0
 
-let has_room_signal (obs : world_observation) =
+let has_workspace_signal (obs : world_observation) =
   obs.direct_mention || obs.has_question
 
 let has_operational_signal (obs : world_observation) =
-  has_room_signal obs
+  has_workspace_signal obs
   || obs.failed_task_count > 0
   || obs.unclaimed_task_count > 0
-  || obs.agent_count_changed
+  || obs.keeper_fiber_count_changed
   || has_board_signal obs
 
 (** Self-directed context: keeper is idle with no goals.
@@ -438,9 +427,6 @@ let is_self_directed (obs : world_observation) =
 
 let rec legality_error (obs : world_observation) = function
   | Noop _ -> None
-  | ReplyInRoom _ ->
-      if has_room_signal obs then None
-      else Some "reply_in_room requires direct mention or a question"
   | BoardPost _ ->
       if has_board_signal obs || obs.active_goal_count > 0
          || is_self_directed obs then None
@@ -510,10 +496,7 @@ let execution_result_to_json (result : execution_result) : Yojson.Safe.t =
       ("selected_action", deliberation_action_to_json result.selected_action);
       ("action_source", action_source_to_json result.action_source);
       ("fallback_used", `Bool result.fallback_used);
-      ( "fallback_reason",
-        match result.fallback_reason with
-        | Some reason -> `String reason
-        | None -> `Null );
+      ( "fallback_reason", Json_util.string_opt_to_json result.fallback_reason );
       ("policy_labels", `List (List.map (fun label -> `String label) result.policy_labels));
       ("reasoning", `String result.reasoning);
       ("confidence", `Float result.confidence);
@@ -578,11 +561,6 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
   | "noop" ->
       let reason = Safe_ops.json_string ~default:"no reason" "reason" params in
       Ok (Noop reason)
-  | "reply_in_room" ->
-      let room_id = Safe_ops.json_string ~default:"default" "room_id" params in
-      let content = Safe_ops.json_string ~default:"" "content" params in
-      if content = "" then Error "reply_in_room requires non-empty content"
-      else Ok (ReplyInRoom { room_id; content })
   | "task_claim" ->
       let task_id = Safe_ops.json_string ~default:"" "task_id" params in
       let reason = Safe_ops.json_string ~default:"" "reason" params in
@@ -692,7 +670,7 @@ let structured_result_schema : structured_result Agent_sdk.Structured.schema =
       [
         {
           Agent_sdk.Types.name = "action";
-          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
+          description = "One of: noop, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
           param_type = Agent_sdk.Types.String;
           required = true;
         };

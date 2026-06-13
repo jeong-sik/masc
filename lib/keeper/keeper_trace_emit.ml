@@ -36,7 +36,7 @@ let enabled () =
 
 let trace_path ~base_path ~keeper_name =
   Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+    (Common.keepers_runtime_dir_of_base ~base_path)
     (keeper_name ^ ".tla-trace.jsonl")
 
 let emit_transition
@@ -65,7 +65,7 @@ let emit_transition
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TraceEmitFailures)
           ~labels:[("keeper", keeper_name)]
           ();

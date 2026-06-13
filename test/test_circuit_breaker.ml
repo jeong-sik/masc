@@ -1,8 +1,9 @@
 open Alcotest
 
-module CB = Masc_mcp.Keeper_failure_circuit_breaker
-module KAP = Masc_mcp.Keeper_alerting_path
-module PCE = Masc_mcp.Keeper_path_check_error
+module CB = Masc.Keeper_failure_circuit_breaker
+module KSR = Masc.Keeper_tool_shared_runtime
+module KAP = Masc.Keeper_alerting_path
+module PCE = Keeper_path_check_error
 
 let path_not_found_msg raw =
   KAP.rejection_to_user_message (KAP.Not_found_relative { raw })
@@ -76,8 +77,24 @@ let test_hint_at_threshold () =
   let r3 = CB.maybe_enrich_error ~keeper_name:"t2" ~error_msg:(path_not_found_msg "/c") in
   check bool "3rd: HAS hint" true (contains r3 "CIRCUIT BREAKER");
   check bool "mentions playground" true (contains r3 "playground");
-  check bool "mentions typed public Execute ls" true
-    (contains r3 "Execute executable='ls' argv=['.']")
+  check bool "mentions visible path inspection" true
+    (contains r3 "Inspect visible paths");
+  check bool "does not mention Execute" false (contains r3 "Execute");
+  check bool "does not invent Grep op syntax" false (contains r3 "Grep op=")
+
+let test_actionable_path_not_found_hint () =
+  let action =
+    KSR.actionable_path_action_for_class
+      ~playground:".masc/playground/taskmaster/"
+      ~raw_path:"repos/masc/.worktrees/task-676/lib"
+      CB.Path_not_found
+  in
+  check bool "mentions visible path inspection" true
+    (contains action "Inspect visible paths");
+  check bool "mentions task/context tools for .masc" true
+    (contains action "keeper task/context tools");
+  check bool "does not mention Execute" false (contains action "Execute");
+  check bool "does not invent Grep op syntax" false (contains action "Grep op=")
 
 let test_reset_on_success () =
   CB.record_success ~keeper_name:"t3";
@@ -406,6 +423,8 @@ let () =
     "threshold", [
       test_case "no hint under threshold" `Quick test_no_hint_under_threshold;
       test_case "hint at threshold" `Quick test_hint_at_threshold;
+      test_case "actionable path hint uses visible listing"
+        `Quick test_actionable_path_not_found_hint;
       test_case "reset on success" `Quick test_reset_on_success;
       test_case "class change resets" `Quick test_class_change_resets;
     ];

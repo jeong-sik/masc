@@ -1,7 +1,7 @@
-(** Coord-level meta-cognition read model.
+(** Workspace-level meta-cognition read model.
 
     Derives high-signal beliefs, tensions, desires, and discourse edges
-    from existing room artifacts without mutating state. *)
+    from existing workspace artifacts without mutating state. *)
 
 type belief_summary = {
   id : string option;
@@ -47,7 +47,7 @@ type salience =
   | Contested_belief
   | Operator_tension
   | Operator_desire
-  | Stagnant_room
+  | Stagnant_workspace
 
 type interpretation = {
   primary_salience : salience;
@@ -68,10 +68,10 @@ type digest_ref = {
 }
 
 val snapshot_json :
-  ?hearth:string -> limit:int -> Coord.config -> Yojson.Safe.t
+  ?hearth:string -> limit:int -> Workspace.config -> Yojson.Safe.t
 
 val summary_json :
-  ?hearth:string -> Coord.config -> Yojson.Safe.t
+  ?hearth:string -> Workspace.config -> Yojson.Safe.t
 
 val parse_summary : Yojson.Safe.t -> (summary_input, string) result
 val interpret : summary_input -> interpretation

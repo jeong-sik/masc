@@ -1,13 +1,13 @@
 (** Tests for the autonomy liberation refactoring (Phases 2-5). *)
 
-module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
-module Keeper_deliberation = Masc_mcp.Keeper_deliberation
-module Prometheus = Masc_mcp.Prometheus
+module Keeper_tool_surfaces = Masc.Keeper_tool_surfaces
+module Keeper_deliberation = Masc.Keeper_deliberation
+module Otel_metric_store = Masc.Otel_metric_store
 
-(* New modules may not be visible via Masc_mcp wrapper in large libraries
+(* New modules may not be visible via Masc wrapper in large libraries
    due to dune's incremental wrapper compilation. Use internal names. *)
-module Team_context = Masc_mcp__Team_context
-module Prompt_composer = Masc_mcp__Prompt_composer
+module Team_context = Masc__Team_context
+module Prompt_composer = Masc__Prompt_composer
 
 (** Substring search helper. *)
 let contains_s haystack needle =
@@ -24,25 +24,21 @@ let contains_s haystack needle =
 (* ── Phase 2: Tool Discovery ──────────────────────────────────── *)
 
 let test_build_tool_catalog_worker () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has heartbeat" true
-    (List.mem "masc_heartbeat" tools);
-  Alcotest.(check bool) "no admin tool" false
-    (List.mem "masc_tool_admin_snapshot" tools)
+    (List.mem "masc_heartbeat" tools)
 
-let test_build_tool_catalog_coordinator () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"coordinator" () in
+let test_build_tool_catalog_workspace_lead () =
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"workspace_lead" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
   Alcotest.(check bool) "has broadcast" true
     (List.mem "masc_broadcast" tools)
 
 let test_build_tool_catalog_autonomous () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
   Alcotest.(check bool) "non-empty" true (tools <> []);
-  Alcotest.(check bool) "excludes admin" false
-    (List.mem "masc_tool_admin_snapshot" tools);
-  let worker_tools = Agent_tool_surfaces.build_tool_catalog ~role:"worker" () in
+  let worker_tools = Keeper_tool_surfaces.build_tool_catalog ~role:"worker" () in
   Alcotest.(check bool) "more tools than worker" true
     (List.length tools >= List.length worker_tools)
 
@@ -110,7 +106,7 @@ let write_file path content =
     (fun () -> output_string oc content)
 
 let team_context_drop_value reason =
-  Prometheus.metric_value_or_zero Prometheus.metric_persistence_read_drops
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", "team_context_findings"); ("reason", reason)]
     ()
 
@@ -188,10 +184,10 @@ let test_compose_available_tools () =
 (* ── Phase 2 Integration: End-to-End Wiring ─────────────────── *)
 
 let test_autonomous_tool_count () =
-  let tools = Agent_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
+  let tools = Keeper_tool_surfaces.build_tool_catalog ~role:"autonomous" () in
   let count = List.length tools in
   Alcotest.(check bool) "at least 15 tools" true (count >= 15);
-  let prefixed = Agent_tool_surfaces.prefixed_tool_names tools in
+  let prefixed = Keeper_tool_surfaces.prefixed_tool_names tools in
   List.iter
     (fun name ->
       Alcotest.(check bool)
@@ -202,46 +198,26 @@ let test_autonomous_tool_count () =
     prefixed
 
 let test_finding_accumulation () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_al"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
-  let session_dir = Filename.concat masc_dir "session_test_al" in
-  (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-  (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
-  (try Sys.mkdir session_dir 0o755 with Sys_error _ -> ());
-  Team_context.add_finding ~base_path ~worker_name:"w1"
-    ~finding:"found issue A";
-  Team_context.add_finding ~base_path ~worker_name:"w2"
-    ~finding:"found issue B";
-  let findings = Team_context.load_findings ~base_path in
-  Alcotest.(check int) "two findings" 2 (List.length findings);
-  Alcotest.(check bool) "has issue A" true
-    (List.exists (fun f -> contains_s f "found issue A") findings);
-  Alcotest.(check bool) "has issue B" true
-    (List.exists (fun f -> contains_s f "found issue B") findings);
-  (* Cleanup *)
-  let findings_file =
-    Filename.concat session_dir "shared_findings.jsonl"
-  in
-  (try Sys.remove findings_file with Sys_error _ -> ());
-  (try Sys.rmdir session_dir with Sys_error _ -> ());
-  (try Sys.rmdir masc_dir with Sys_error _ -> ());
-  (try Sys.rmdir base_path with Sys_error _ -> ())
+  let base_path = temp_base_path "test-findings-al" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      Team_context.add_finding ~base_path ~worker_name:"w1"
+        ~finding:"found issue A";
+      Team_context.add_finding ~base_path ~worker_name:"w2"
+        ~finding:"found issue B";
+      let findings = Team_context.load_findings ~base_path in
+      Alcotest.(check int) "two findings" 2 (List.length findings);
+      Alcotest.(check bool) "has issue A" true
+        (List.exists (fun f -> contains_s f "found issue A") findings);
+      Alcotest.(check bool) "has issue B" true
+        (List.exists (fun f -> contains_s f "found issue B") findings))
 
 let test_finding_accumulation_json_escaping () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_escape"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
+  let base_path = temp_base_path "test-findings-escape" in
   Fun.protect
-    ~finally:(fun () ->
-      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
-      (try Sys.rmdir masc_dir with Sys_error _ -> ());
-      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
       Team_context.add_finding ~base_path ~worker_name:"w\"1"
         ~finding:"quote \" and slash \\\\ and newline\nok";
       let findings = Team_context.load_findings ~base_path in
@@ -252,18 +228,10 @@ let test_finding_accumulation_json_escaping () =
            findings))
 
 let test_team_context_build_renders_findings_without_goal () =
-  let base_path =
-    Filename.concat (Filename.get_temp_dir_name ()) "test_findings_prompt"
-  in
-  let masc_dir = Filename.concat base_path Common.masc_dirname in
+  let base_path = temp_base_path "test-findings-prompt" in
   Fun.protect
-    ~finally:(fun () ->
-      (try Sys.remove (Filename.concat masc_dir "shared_findings.jsonl") with Sys_error _ -> ());
-      (try Sys.rmdir masc_dir with Sys_error _ -> ());
-      (try Sys.rmdir base_path with Sys_error _ -> ()))
+    ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-      (try Sys.mkdir base_path 0o755 with Sys_error _ -> ());
-      (try Sys.mkdir masc_dir 0o755 with Sys_error _ -> ());
       Team_context.add_finding ~base_path ~worker_name:"w1"
         ~finding:"render me";
       let ctx = Team_context.build ~base_path in
@@ -274,7 +242,7 @@ let test_team_context_build_renders_findings_without_goal () =
 let test_scope_default_unchanged () =
   (* Worker tools should remain a small focused set *)
   let worker_tools =
-    Agent_tool_surfaces.build_tool_catalog ~role:"worker" ()
+    Keeper_tool_surfaces.build_tool_catalog ~role:"worker" ()
   in
   Alcotest.(check bool) "worker tools < 20" true
     (List.length worker_tools < 20)
@@ -288,8 +256,8 @@ let () =
         [
           Alcotest.test_case "worker catalog" `Quick
             test_build_tool_catalog_worker;
-          Alcotest.test_case "coordinator catalog" `Quick
-            test_build_tool_catalog_coordinator;
+          Alcotest.test_case "workspace_lead catalog" `Quick
+            test_build_tool_catalog_workspace_lead;
           Alcotest.test_case "autonomous catalog" `Quick
             test_build_tool_catalog_autonomous;
         ] );

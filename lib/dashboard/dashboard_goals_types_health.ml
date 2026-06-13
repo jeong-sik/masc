@@ -9,7 +9,6 @@
     record + the [human_duration] helper. Re-included by
     [Dashboard_goals_types] so the public surface is unchanged. *)
 
-open Yojson.Safe.Util
 open Dashboard_goals_types_accessor
 
 let goal_phase_to_health = function
@@ -22,7 +21,7 @@ let goal_phase_to_health = function
       None
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
-    ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
+    ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
     ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
     ~activity_observation ~stagnation_status =
   match goal_phase_to_health goal_phase with
@@ -43,8 +42,8 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
           pending_approvals
       else if sandbox_risk then
         "Linked keeper is constrained by the current sandbox or scope."
-      else if cascade_risk then
-        "Latest keeper run fell back within the configured cascade."
+      else if runtime_risk then
+        "Latest keeper run fell back within the configured runtime."
       else if fsm_risk then
         "Linked task is waiting on FSM verification or remediation."
       else if Option.is_some linkage_warning_reason then
@@ -77,30 +76,27 @@ let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
       else if at_risk then "at_risk"
       else "on_track"
 
-let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
+let tree_badges ~pending_approvals ~sandbox_risk ~runtime_risk ~fsm_risk ~stalled
     ~activity_unobserved =
   let badges = ref [] in
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
-  if cascade_risk then badges := "cascade" :: !badges;
+  if runtime_risk then badges := "runtime" :: !badges;
   if fsm_risk then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
   if activity_unobserved then badges := "activity_unobserved" :: !badges;
   List.rev !badges
 
 let approval_matches_goal goal_id approval_json =
-  let goal_ids =
-    approval_json |> member "goal_ids" |> to_list
-    |> List.filter_map to_string_option
-  in
+  let goal_ids = Json_util.get_string_list approval_json "goal_ids" in
   List.mem goal_id goal_ids
   ||
-  match approval_json |> member "goal_id" |> to_string_option with
+  match Json_util.get_string approval_json "goal_id" with
   | Some pending_goal_id -> String.equal pending_goal_id goal_id
   | None -> false
 
 let keeper_name_matches_meta metas name =
-  List.exists (fun (meta : Keeper_types.keeper_meta) -> String.equal meta.name name) metas
+  List.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> String.equal meta.name name) metas
 
 let keeper_name_of_assignee metas assignee =
   match Keeper_identity.canonical_keeper_name_from_agent_name assignee with
@@ -159,25 +155,25 @@ let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
 
 let display_disposition_of_receipt_json receipt =
   (* Previously this defaulted to the literal "unknown", which then hit
-     the [| "unknown" -> "Alert"/"unmapped_cascade_state"] arm below.
+     the [| "unknown" -> "Alert"/"unmapped_runtime_state"] arm below.
      That conflated two distinct producer-side failure modes:
      (1) missing [operator_disposition] field — the receipt was emitted
          without the disposition at all (producer bug);
      (2) [operator_disposition = "unknown"] — the producer explicitly
-         declared the state unmapped at the cascade layer.
+         declared the state unmapped at the runtime layer.
 
-     Using a bracketed sentinel as the default lets the match below
+     Using a bracketed marker as the default lets the match below
      fall through to the [_ -> "Alert"/"unmapped_operator_disposition"]
      catch-all, which is the more accurate classification for case (1).
      Both cases still surface as "Alert" severity (no operator-visible
      regression in alerting), but the reason label now distinguishes
      them so the operator can chase the right producer fix. *)
   let operator_disposition =
-    receipt |> member "operator_disposition" |> to_string_option
+    Json_util.get_string receipt "operator_disposition"
     |> Option.value ~default:"<missing operator_disposition field>"
   in
   let operator_disposition_reason =
-    receipt |> member "operator_disposition_reason" |> to_string_option
+    Json_util.get_string receipt "operator_disposition_reason"
     |> Option.value ~default:""
   in
   let reason fallback =
@@ -190,7 +186,7 @@ let display_disposition_of_receipt_json receipt =
   | "skipped" ->
       ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
   | "pass_next_model" ->
-      ("Pass", "cascade_fallback", operator_disposition, operator_disposition_reason)
+      ("Pass", "runtime_fallback", operator_disposition, operator_disposition_reason)
   | "blocked" | "blocked_runtime" ->
       ( "Blocked",
         reason "runtime_blocked",
@@ -201,7 +197,7 @@ let display_disposition_of_receipt_json receipt =
         reason "needs_human_attention",
         operator_disposition,
         operator_disposition_reason )
-  | "fail_open_next_cascade" ->
+  | "fail_open_next_runtime" ->
       ( "Blocked",
         reason "degraded_retry",
         operator_disposition,
@@ -209,10 +205,10 @@ let display_disposition_of_receipt_json receipt =
   | "user_cancelled" ->
       ("Blocked", reason "cancelled", operator_disposition, operator_disposition_reason)
   | "alert_exhausted" ->
-      ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
+      ("Alert", reason "runtime_exhausted", operator_disposition, operator_disposition_reason)
   | "unknown" ->
       ( "Alert",
-        reason "unmapped_cascade_state",
+        reason "unmapped_runtime_state",
         operator_disposition,
         operator_disposition_reason )
   | _ ->

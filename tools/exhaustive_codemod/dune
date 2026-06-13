@@ -10,7 +10,7 @@
 ; Dependencies:
 ;   - compiler-libs.common: Cmt_format.read, Typedtree (stdlib distribution)
 ;   - str: regex for path filters
-; PR-2 adds ppxlib (already in masc_mcp.opam as transitive dep).
+; PR-2 adds ppxlib (already in masc.opam as transitive dep).
 
 (executable
  (name exhaustive_codemod)

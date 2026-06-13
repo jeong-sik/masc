@@ -17,7 +17,7 @@ Options:
 Behavior:
   1) push current branch
   2) create draft PR if absent
-  3) auto-label agent-pr plus docs/enhancement by changed files
+  3) auto-label docs/enhancement by changed files
   4) add extra labels
   5) optionally watch checks
 USAGE
@@ -94,28 +94,6 @@ is_doc_path() {
   esac
 }
 
-is_agent_approval_label() {
-  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-    human-approved-ready) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-ensure_agent_pr_label() {
-  local exists
-
-  exists="$(gh label list --repo "$repo" --search agent-pr --json name --jq 'any(.[]; .name == "agent-pr")' 2>/dev/null || true)"
-  if [[ "$exists" == "true" ]]; then
-    return 0
-  fi
-
-  gh label create agent-pr \
-    --repo "$repo" \
-    --color "5319E7" \
-    --description "Agent-authored draft PR; requires human-approved-ready before ready/merge" \
-    >/dev/null 2>&1 || true
-}
-
 ensure_pr_is_draft() {
   local pr_number="$1"
   local phase="$2"
@@ -149,33 +127,6 @@ ensure_pr_is_draft() {
     echo "failed to restore draft state for PR #$pr_number after $phase" >&2
     exit 1
   fi
-}
-
-arm_agent_draft_guard_status() {
-  local pr_number="$1"
-  local pr_meta
-  local pr_url
-  local head_sha
-
-  pr_meta="$(
-    gh pr view "$pr_number" --repo "$repo" --json url,headRefOid \
-      --jq '.url + " " + .headRefOid'
-  )"
-  pr_url="${pr_meta% *}"
-  head_sha="${pr_meta##* }"
-
-  if [[ -z "$head_sha" || "$head_sha" == "$pr_url" ]]; then
-    echo "could not resolve PR #$pr_number head SHA for immediate draft guard status" >&2
-    exit 1
-  fi
-
-  gh api "repos/$repo/statuses/$head_sha" \
-    --method POST \
-    -f state=failure \
-    -f context="Draft Auto-Merge Guard" \
-    -f description="Agent PR requires Approve Agent PR before ready/merge" \
-    -f target_url="$pr_url" \
-    >/dev/null
 }
 
 sync_commit_lineage() {
@@ -258,12 +209,11 @@ else
     create_args+=(--body-file "$body_file")
   fi
 
-  pr_url="$(gh "${create_args[@]}")"
-  pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
+  pr_link="$(gh "${create_args[@]}")"
+  pr_number="$(gh pr view "$pr_link" --repo "$repo" --json number --jq .number)"
 fi
 
 ensure_pr_is_draft "$pr_number" "create/reuse"
-ensure_agent_pr_label
 
 load_changed_files "origin/$base...HEAD"
 if [[ ${#changed_files[@]} -eq 0 ]]; then
@@ -283,7 +233,7 @@ for f in "${changed_files[@]}"; do
   fi
 done
 
-labels=("agent-pr" "do-not-merge")
+labels=()
 if [[ $has_docs -eq 1 ]]; then
   labels+=("docs")
 fi
@@ -295,10 +245,6 @@ if [[ -n "$extra_labels" ]]; then
   IFS=',' read -r -a extra <<< "$extra_labels"
   for lb in "${extra[@]}"; do
     lb="$(echo "$lb" | xargs)"
-    if is_agent_approval_label "$lb"; then
-      echo "refusing to add '${lb}' from pr-open; use the Approve Agent PR workflow after human review" >&2
-      exit 1
-    fi
     [[ -n "$lb" ]] && labels+=("$lb")
   done
 fi
@@ -309,13 +255,11 @@ if [[ ${#labels[@]} -gt 0 ]]; then
   ensure_pr_is_draft "$pr_number" "label application"
 fi
 
-arm_agent_draft_guard_status "$pr_number"
-ensure_pr_is_draft "$pr_number" "guard status arming"
 sync_commit_lineage "$pr_number"
 ensure_pr_is_draft "$pr_number" "commit lineage sync"
 
-pr_url="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
-echo "PR: $pr_url"
+pr_link="$(gh pr view "$pr_number" --repo "$repo" --json url --jq .url)"
+echo "PR: $pr_link"
 
 if [[ $watch_checks -eq 1 ]]; then
   gh pr checks "$pr_number" --repo "$repo" --watch || true

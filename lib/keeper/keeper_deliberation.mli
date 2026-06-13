@@ -9,7 +9,7 @@ type deliberation_trigger =
   | DirectMention
   | NewUnclaimedTask
   | FailedTask
-  | AgentJoinedOrLeft
+  | KeeperFiberStartedOrStopped
   | GoalDeadline
   | BoardActivity of string
   | IdleTimeout
@@ -24,7 +24,6 @@ val deliberation_trigger_to_json : deliberation_trigger -> Yojson.Safe.t
 
 type deliberation_action =
   | Noop of string
-  | ReplyInRoom of { room_id: string; content: string }
   | BoardPost of { content: string; hearth: string option }
   | BoardComment of { post_id: string; content: string }
   | BoardVote of { post_id: string; direction: string }
@@ -58,8 +57,8 @@ type world_observation = {
   message_content: string;
   unclaimed_task_count: int;
   failed_task_count: int;
-  active_agent_count: int;
-  agent_count_changed: bool;
+  running_keeper_fiber_count: int;
+  keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
   idle_gate: int;
@@ -130,8 +129,7 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
 
 (** {1 Baseline action} *)
 
-(** Deterministic baseline using the typed action space.
-    Equivalent to the old [if direct_mention then "reply_in_room" else "noop"]. *)
+(** Deterministic baseline using the typed action space. *)
 val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)
@@ -140,8 +138,9 @@ val deterministic_baseline_action : world_observation -> deliberation_action
     ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
 val daily_budget_usd : unit -> float
 
-(** Check whether the keeper has remaining budget for deliberation.
-    Returns [true] when [cost_today_usd < daily_budget_usd]. *)
+(** Advisory cost telemetry for deliberation.
+
+    Always returns [true]; daily cost thresholds must not gate deliberation. *)
 val deliberation_budget_check :
   daily_budget_usd:float -> cost_today_usd:float -> bool
 

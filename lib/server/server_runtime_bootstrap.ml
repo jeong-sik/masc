@@ -42,15 +42,37 @@ let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
    Only apply defaults when OCAMLRUNPARAM is not set, so operators
    can override at launch without code changes. *)
 let () =
+  ignore (Dashboard.force_link, Operator_tool.force_link);
+  Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
+  Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
+  Transport_read_model.register_webrtc_status (fun () ->
+    { ice_server_urls = Server_webrtc_transport.configured_ice_server_urls ()
+    ; pending_offers = Server_webrtc_transport.pending_offer_count ()
+    ; active_peers = Server_webrtc_transport.active_peer_count ()
+    ; live_connections = Server_webrtc_transport.live_webrtc_count ()
+    ; connected_channels = Server_webrtc_transport.connected_channel_count ()
+    });
+  Dashboard_snapshot.register_dashboard_tools_http_json Server_dashboard_http_runtime_info.dashboard_tools_http_json;
+  Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
     let open Gc in
+    let gc_space_overhead =
+      try int_of_string (Sys.getenv "MASC_GC_SPACE_OVERHEAD")
+      with Not_found -> 100
+    in
     let ctrl = get () in
     set { ctrl with
       minor_heap_size = 2 * 1024 * 1024;  (* 2M words = 16MB on 64-bit; reduces minor->major promotion rate *)
-      space_overhead = 200;               (* default 120; less frequent major GC slices *)
+      space_overhead = gc_space_overhead;  (* default 120. Configurable via MASC_GC_SPACE_OVERHEAD.
+                                             100 = triggers major GC when free > live (was 200/3x).
+                                             Lower = shorter individual pauses, more frequent slices.
+                                             P0 allocation fixes (PR #20965) reduced broadcast hot-path
+                                             allocation by ~97%, so the increased frequency has negligible
+                                             throughput impact. *)
       max_overhead = 500;                 (* compaction triggers when free memory exceeds 500% of live data *)
     }
   end
+
 
 let init_runtime_context env =
   let clock = Eio.Stdenv.clock env in
@@ -59,16 +81,48 @@ let init_runtime_context env =
   let domain_mgr = Eio.Stdenv.domain_mgr env in
   let proc_mgr = Eio.Stdenv.process_mgr env in
   let fs = Eio.Stdenv.fs env in
+  (* MASC_MODEL_CATALOG as convenience alias for OAS_MODEL_CATALOG.
+     OAS auto-discovers from ~/.masc/config/models.toml, cwd parents,
+     and $OAS_MODEL_CATALOG. Setting MASC_MODEL_CATALOG forwards it
+     so masc operators don't need to know OAS internals.
+     OAS lazily loads the catalog on first model capability query. *)
+  (match Sys.getenv_opt "MASC_MODEL_CATALOG" with
+   | Some path when Sys.getenv_opt "OAS_MODEL_CATALOG" = None ->
+     Unix.putenv "OAS_MODEL_CATALOG" path;
+     Log.Misc.info "model_catalog: MASC_MODEL_CATALOG=%s forwarded to OAS" path
+   | Some _ ->
+     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG already set, MASC_MODEL_CATALOG ignored"
+   | None ->
+     ());
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
-let record_tool_policy_init_failure ~base_path msg =
-  Prometheus.inc_counter Prometheus.metric_tool_policy_init_failed
-    ~labels:[("base_path", base_path)]
-    ();
-  Prometheus.inc_counter Prometheus.metric_error_events
-    ~labels:[("type", Error_event_type.(to_label Missing_config))]
-    ();
-  Log.Server.error "Fatal tool policy config load failure: %s" msg
+let metric_keeper_runtime_config_load_failures =
+  "masc_keeper_runtime_config_load_failures_total"
+
+let () =
+  Otel_metric_store.register_counter
+    ~name:metric_keeper_runtime_config_load_failures
+    ~help:
+      "Total Keeper_runtime_config.load_and_apply failures. Bootstrap logs WARN; \
+       this counter exposes the same event to monitoring aggregation. Labels: \
+       reason in {read_error | parse_error}."
+    ()
+
+let record_runtime_toml_load_failure msg =
+  let reason =
+    if String.starts_with ~prefix:"read " msg
+    then Some "read_error"
+    else if String.starts_with ~prefix:"parse " msg
+    then Some "parse_error"
+    else None
+  in
+  Option.iter
+    (fun reason ->
+       Otel_metric_store.inc_counter
+         metric_keeper_runtime_config_load_failures
+         ~labels:[ "reason", reason ]
+         ())
+    reason
 
 let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     ?env ()
@@ -100,31 +154,18 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Unix.putenv Env_config_core.base_path_env_key base_path;
   bootstrap_base_path_config_root ~base_path;
   (* Apply keeper runtime overrides from the resolved config root's
-     keeper_runtime.toml. Must run before any module that reads
+     runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
      process env vars take precedence — TOML only fills unset slots. *)
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Ok 0 -> ()
    | Ok n ->
-       Log.Server.info "keeper_runtime.toml: applied %d override(s)" n
+       Log.Server.info "runtime.toml: applied %d override(s)" n
    | Error msg ->
-       Log.Server.warn "keeper_runtime.toml load failed: %s (continuing with env defaults)" msg);
+       record_runtime_toml_load_failure msg;
+       Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
   Keeper_runtime_resolved.init ();
-  (* #9919: active Heuristic_metrics recording moved to Prometheus/Thompson
-     paths, but the dashboard still reads the legacy JSONL via
-     /api/v1/dashboard/heuristics. Keep storage initialized so existing
-     rows remain visible while no new degenerate rows are emitted. *)
-  Heuristic_metrics.init ~base_path;
-  Agent_stress.init ~base_path;
-  (* Load tool policy presets from config/tool_policy.toml *)
-  (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
-   | Ok () -> ()
-   | Error msg ->
-       record_tool_policy_init_failure ~base_path msg;
-       exit 1);
-  (* Validate Tool_spec <-> TOML coverage *)
-  let validation = Tool_registration_check.validate () in
-  Tool_registration_check.log_validation_result validation;
+  Keeper_task_owner_backend.install_hooks ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net
@@ -137,18 +178,18 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-      ~effective_base_path:state.room_config.base_path
-      ~effective_masc_root:(Coord.masc_root_dir state.room_config)
+      ~effective_base_path:state.workspace_config.base_path
+      ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
-  (* RFC-0107 Phase D.4 — wire piaf connection pool Prometheus exporter.
-     Metric registration itself runs at [Prometheus] module load; this
+  (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.
+     Metric registration itself runs at [Otel_metric_store] module load; this
      call is the explicit dependency-order anchor and warms the snapshot
      accessor so a misconfigured pool surfaces here rather than at first
-     [/metrics] scrape. *)
+     telemetry export. *)
   Pool_metrics.register ();
   state
 
@@ -156,19 +197,19 @@ let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) 
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:state.room_config.base_path
-    ~effective_masc_root:(Coord.masc_root_dir state.room_config)
+    ~effective_base_path:state.workspace_config.base_path
+    ~effective_masc_root:(Workspace.masc_root_dir state.workspace_config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
-    ~agents_path:(Coord.agents_dir state.room_config)
+    ~agents_path:(Workspace.agents_dir state.workspace_config)
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Prometheus.reconcile_active_agents_gauge (Coord.masc_dir state.room_config)
+  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir state.workspace_config)
 
 
-(* Legacy directory migration extracted to
+(* Startup maintenance extracted to
    [Server_runtime_startup_maintenance] (godfile decomp). *)
 include Server_runtime_startup_maintenance
 
@@ -177,20 +218,11 @@ include Server_runtime_startup_maintenance
 include Server_runtime_startup_credentials
 
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
-  (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
-     Otherwise state.json/backlog.json can be created in the destination first
-     and valid legacy data gets quarantined as a conflict on upgrade. *)
-  migrate_room_to_flat state;
-  (* Promote legacy keeper metadata before any startup readers scan .masc/keepers.
-     Keeper autoboot and other bootstrap readers should see the canonical paths
-     on their first pass, not rely on a later lazy migration task. *)
-  migrate_legacy_keeper_dirs_blocking state;
   (* [create_server_state] normally resets this after config bootstrap, but
      direct state constructors used by tests and execute contexts can leave a
      stale process-global config resolution in place. *)
   Config_dir_resolver.reset ();
-  let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
-  audit_keeper_egress_policies state;
+  let (_init_msg : string) = Workspace.init state.workspace_config ~agent_name:None in
   Mcp_server.set_sse_callback state Sse.broadcast
 
 
@@ -204,7 +236,7 @@ type lazy_startup_group = {
   task_names : string list;
 }
 
-let lazy_startup_plan ~has_legacy_traces =
+let lazy_startup_plan () =
   let initial_groups =
     [
       {
@@ -225,18 +257,6 @@ let lazy_startup_plan ~has_legacy_traces =
       };
     ]
   in
-  let legacy_groups =
-    if has_legacy_traces then
-      [
-        {
-          group_name = "legacy_trace_migration";
-          execution = Serial;
-          task_names = [ "legacy_trace_dir_migration" ];
-        };
-      ]
-    else
-      []
-  in
   let cleanup_groups =
     [
       {
@@ -250,20 +270,53 @@ let lazy_startup_plan ~has_legacy_traces =
       };
     ]
   in
-  initial_groups @ legacy_groups @ cleanup_groups
+  initial_groups @ cleanup_groups
 
-let lazy_startup_task_names ~has_legacy_traces =
-  lazy_startup_plan ~has_legacy_traces
+let lazy_startup_task_names () =
+  lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
+
+(* Cap the per-boot file list in the sync log line; full counts are always
+   logged, names are illustrative. *)
+let max_logged_prompt_sync_entries = 10
+
+let sync_prompt_assets_from_binary () =
+  let sync =
+    Prompt_defaults.sync_prompt_assets
+      ~read:Embedded_config.read
+      ~files:Embedded_config.file_list
+      ~prompts_dir:(Config_dir_resolver.prompts_dir ())
+      ()
+  in
+  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
+   | [], [] -> ()
+   | copied, overwritten ->
+       let names = copied @ overwritten in
+       let shown =
+         List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
+       in
+       Log.Misc.info
+         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
+         (List.length copied) (List.length overwritten)
+         (String.concat ", " shown)
+         (if List.length names > max_logged_prompt_sync_entries then ", …"
+          else ""));
+  List.iter
+    (fun (rel, msg) -> Log.Misc.warn "prompt asset sync failed: %s: %s" rel msg)
+    sync.Prompt_defaults.failed
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
+  (* Converge runtime prompt markdown onto the binary-embedded assets
+     before the registry scans the directory (#20929: merged prompt edits
+     never reached the runtime dir otherwise). *)
+  sync_prompt_assets_from_binary ();
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
-      ~workspace_path:state.room_config.workspace_path
-      ~base_path:state.room_config.base_path
+      ~workspace_path:state.workspace_config.workspace_path
+      ~base_path:state.workspace_config.base_path
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   if prompt_markdown_dir <> expected_prompt_dir then
@@ -273,7 +326,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "required prompt files missing: %s"
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
@@ -282,7 +335,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
   if invalid_prompt_templates <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
@@ -292,10 +345,27 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
 let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
   (try
      let summary =
-       Telemetry_eio.summarize_tool_usage state.room_config
+       Telemetry_eio.summarize_tool_usage state.workspace_config
      in
      if summary.telemetry_available then
-       let n = Tool_registry.warm_up summary in
+       (* PR-S3: project the persisted Telemetry_eio summary into the registry's
+          neutral [warm_up_stats] shape at the composition root, so
+          [Tool_registry] (lib/tool/, masc_tool_dispatch) does not code-depend
+          on the telemetry persistence layer. *)
+       let stats_by_tool =
+         Hashtbl.fold
+           (fun tool_name (stats : Telemetry_eio.tool_usage_stats) acc ->
+              ( tool_name
+              , { Tool_registry.count = stats.count
+                ; success_count = stats.success_count
+                ; failure_count = stats.failure_count
+                ; last_used_at = stats.last_used_at
+                } )
+              :: acc)
+           summary.stats_by_tool
+           []
+       in
+       let n = Tool_registry.warm_up stats_by_tool in
        Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
          n summary.total_calls
    with
@@ -307,7 +377,7 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
-       ~base_path:state.room_config.base_path in
+       ~base_path:state.workspace_config.base_path in
      if n > 0 then
        Log.Misc.info "tool metrics: restored %d records from disk" n
    with
@@ -336,11 +406,37 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
      and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
   (* PR-0.2.D: OCaml runtime GC sampler.  Polls Gc.quick_stat every
-     30s and writes six masc_gc_* gauges so /metrics can answer GC
-     pressure questions without a separate dump endpoint.
+     30s and writes six masc_gc_* gauges so the telemetry backend can
+     answer GC pressure questions without a separate dump endpoint.
      quick_stat does not walk the heap, so the call cost stays
      bounded next to the request path. *)
   Gc_sampler.run ~sw ~clock ~interval:30.0;
+  (* Background fiber: flush dirty tool-usage persistence every 5 seconds.
+     Avoids per-tool-call disk I/O in the hot path. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 5.0;
+      (try Keeper_registry_tool_usage_persistence.flush_all_dirty ()
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "tool_usage flush_all_dirty failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  (* Background fiber: flush pending trajectory entries every 2 seconds.
+     Batches per-tool-call JSONL writes to reduce disk I/O. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      (try Trajectory.flush_all_pending ()
+       with Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Keeper.warn "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
@@ -375,19 +471,34 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          that might issue an LLM call.  Placed here — before server
          state creation — so it is impossible for an init-time LLM
          call (e.g. a warmup probe, early keeper fiber) to capture
-         the default noop sink instead of the Prometheus-backed one. *)
+         the default noop sink instead of the Otel_metric_store-backed one. *)
       Llm_metric_bridge.install ();
-      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total)";
+      Llm_metric_bridge.init ~base_path;
+      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
       (* #13885: install backend mutex observers from the top-level
-         masc_mcp layer.  Backend/coord sub-libraries cannot depend on
-         Prometheus without creating dependency cycles, but the global
+         masc layer.  Backend/workspace sub-libraries cannot depend on
+         Otel_metric_store without creating dependency cycles, but the global
          observer refs can be wired before any FileSystem backend writes. *)
-      Backend_mutex_metrics.install ();
+      Backend.FileSystem.set_mutex_observers
+        ~acquire:(fun ~op ~seconds ->
+          Otel_metric_store.observe_histogram
+            Otel_metric_store.metric_backend_mutex_acquire_sec
+            ~labels:[ ("op", op) ]
+            seconds)
+        ~held:(fun ~op ~seconds ->
+          Otel_metric_store.observe_histogram
+            Otel_metric_store.metric_backend_mutex_held_sec
+            ~labels:[ ("op", op) ]
+            seconds);
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
+      Fd_accountant.set_pressure_hooks
+        ~active:Keeper_fd_pressure.active
+        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit;
+      Log.Server.info "Fd_accountant pressure hooks installed";
       (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
-         any subsequent structured emits) into the masc-mcp log ring so
+         any subsequent structured emits) into the masc log ring so
          they land in <base_path>/.masc/logs/system_log_*.jsonl alongside
-         masc-mcp's own records.  Without this, OAS's structured Log
+         masc's own records.  Without this, OAS's structured Log
          global sink registry is empty and every Log.info inside
          agent_sdk is a silent drop. *)
       Agent_sdk_log_bridge.install ();
@@ -396,53 +507,29 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
           ~fs ~env ()
       in
-      let provider_health = Provider_health.create state.room_config in
-      Provider_health.set_active provider_health;
-      Provider_health.start_probe_fiber ~sw ~env provider_health;
-      let format_catalog_validation_error label rejection =
-        Printf.sprintf
-          "%s: %s"
-          label
-          (Yojson.Safe.to_string
-             (Cascade_catalog_runtime.rejection_to_yojson rejection))
-      in
-      let catalog_validation_error =
-        match Cascade_catalog_runtime.inspect_active ~sw ~net ~clock () with
-        | Ok (Cascade_catalog_runtime.Validated snapshot) ->
-            Log.Server.info
-              "Validated active cascade catalog: %s"
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot));
-            None
-        | Ok
-            (Cascade_catalog_runtime.Validated_with_rejections
-               { snapshot; rejected_update }) ->
-            Log.Server.warn
-              "Validated active cascade catalog with rejected profiles: snapshot=%s rejected_update=%s"
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.snapshot_to_yojson snapshot))
-              (Yojson.Safe.to_string
-                 (Cascade_catalog_runtime.rejection_to_yojson rejected_update));
-            None
-        | Ok
-            (Cascade_catalog_runtime.Serving_last_known_good
-               { rejected_update; _ }) ->
-            Some
-              (format_catalog_validation_error
-                 "startup rejected active cascade catalog"
-                 rejected_update)
-        | Error rejection ->
-            Some
-              (format_catalog_validation_error
-                 "startup catalog validation failed"
-                 rejection)
-      in
-      (match catalog_validation_error with
-       | Some detail ->
-           Log.Server.error
-             "Startup continuing in degraded mode because cascade catalog validation failed: %s"
-             detail
-       | None -> ());
+      (* Initialize the default Runtime singleton from runtime TOML.
+         Must happen after Config_dir_resolver is set up (inside
+         create_server_state) and before any runtime name resolution.
+
+         fail-fast: a missing config path or a missing/broken [runtime].default
+         is fatal — the server cannot route turns without a default Runtime, so
+         booting into a half-configured state only defers the failure to the
+         first turn (runtime→Runtime vision: no silent fallback). *)
+      (match Runtime.config_path () with
+       | Some config_path ->
+         (match Runtime.init_default ~config_path with
+          | Ok () ->
+            Log.Server.info "Runtime default initialized: %s"
+              (Runtime.get_default_runtime_id ())
+          | Error msg ->
+            Log.Server.error
+              "Runtime.init_default failed (fatal, refusing to boot): %s" msg;
+            exit 1)
+       | None ->
+         Log.Server.error
+           "No runtime config path; cannot initialize default Runtime \
+            (fatal, refusing to boot)";
+         exit 1);
       let t1 = Eio.Time.now clock in
       Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
       bootstrap_server_state_blocking state;
@@ -495,14 +582,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Fs_compat.cleanup_atomic_orphans ~base_path ()
           in
           if deleted > 0 then
-            Prometheus.inc_counter
-              Prometheus.metric_fs_atomic_orphans_cleaned
+            Otel_metric_store.inc_counter
+              Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
               ~delta:(float_of_int deleted)
               ();
           if preserved > 0 then
-            Prometheus.inc_counter
-              Prometheus.metric_fs_atomic_orphans_cleaned
+            Otel_metric_store.inc_counter
+              Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
               ~delta:(float_of_int preserved)
               ();
@@ -528,8 +615,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          let groups = Auth.audit_token_uniqueness base_path in
          List.iter
            (fun (token_hash_prefix, agent_names) ->
-             Prometheus.inc_counter
-               Prometheus.metric_auth_credential_token_duplicate
+             Otel_metric_store.inc_counter
+               Otel_metric_store.metric_auth_credential_token_duplicate
                ~labels:[ ("token_hash_prefix", token_hash_prefix) ]
                ();
              Log.Server.warn
@@ -568,7 +655,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
        | _ -> ());
       Server_bootstrap_loops.install_tooling ~governance_level state;
       Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
-      (state, path_diagnostics, catalog_validation_error)
+      (state, path_diagnostics)
     in
     let run_lazy_task (task_name, task_fn) =
       Log.Server.info "lazy_task: starting %s" task_name;
@@ -584,10 +671,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Server_startup_state.fail_lazy_task ~task:task_name ~error
     in
     let start_lazy_startup state =
-      let masc_root = Coord.masc_root_dir state.Mcp_server.room_config in
-      let has_legacy_traces =
-        Sys.file_exists (Filename.concat masc_root "perpetual")
-      in
       let task_fn = function
         | "restore_sessions" -> fun () -> restore_persisted_sessions state
         | "reconcile_active_agents" -> fun () ->
@@ -599,8 +682,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             warm_tool_registry_from_telemetry state
         | "tool_metrics_restore" -> fun () ->
             restore_tool_metrics_from_disk state
-        | "legacy_trace_dir_migration" -> fun () ->
-            migrate_legacy_trace_dirs state
         | "jsonl_prune" -> fun () -> startup_prune_jsonl state
         | "auth_archive_prune" -> fun () -> startup_prune_auth_archive state
         | task_name ->
@@ -608,9 +689,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               (Invalid_argument
                  (Printf.sprintf "unknown lazy startup task: %s" task_name))
       in
-      let task_names = lazy_startup_task_names ~has_legacy_traces in
+      let task_names = lazy_startup_task_names () in
       let task_groups =
-        lazy_startup_plan ~has_legacy_traces
+        lazy_startup_plan ()
         |> List.map (fun group ->
                (group, List.map (fun name -> (name, task_fn name)) group.task_names))
       in
@@ -633,21 +714,26 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         Log.Server.info "lazy_task_group: finished %s" group.group_name
       in
       Server_startup_state.activate_lazy
-        ~backend_mode:(Coord.backend_name state.room_config)
+        ~backend_mode:(Workspace.backend_name state.workspace_config)
         ~tasks:task_names;
       Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
     in
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state, path_diagnostics, catalog_validation_error =
+      let state, path_diagnostics =
         init_state_blocking ()
       in
       server_state := Some state;
       Server_startup_state.mark_state_ready
-        ~backend_mode:(Coord.backend_name state.room_config);
+        ~backend_mode:(Workspace.backend_name state.workspace_config);
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
+      (* RFC-0203 Phase 3: in-process Discord gateway replaces the
+         deleted sidecars/discord-bot/ Python connector. Always-on:
+         if DISCORD_BOT_TOKEN is unset the start function logs a
+         warning and skips, leaving the server otherwise unaffected. *)
+      Server_discord_in_process_gateway.start ~sw ~env ~clock ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
       (* Create the shared Domain_pool for dashboard compute and optional
@@ -668,7 +754,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       (* Start auxiliary transports before optional warmups and keeper loops.
          Otherwise HTTP can report ready while gRPC/WS startup is still stuck
          behind heavier startup work. *)
-      (* gRPC coordination transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
+      (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
           try Yojson.Safe.from_string args_json
@@ -686,14 +772,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             tool_name (String.length result_str);
         if success then Ok result_str else Error result_str
       in
-      Masc_grpc_server.start ~sw ~env ~room_config:state.room_config
+      Masc_grpc_server.start ~sw ~env ~workspace_config:state.workspace_config
         ~tool_dispatcher;
       (* Initialize gRPC client for keeper heartbeat when transport is gRPC *)
       (match Masc_grpc_transport.from_env () with
        | Masc_grpc_transport.Grpc ->
            (try
               let client = Masc_grpc_client.create_from_env ~sw ~env in
-              Keeper_keepalive.set_grpc_client ~env client;
+              Keeper_grpc_heartbeat.set_grpc_client ~env client;
               Log.Server.info "gRPC keeper client initialized"
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
@@ -703,7 +789,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "shell" ->
             Some
               (Server_dashboard_http.dashboard_shell_payload_json ~light:true
-                 state.Mcp_server.room_config)
+                 state.Mcp_server.workspace_config)
         | "execution" ->
             Some (Server_dashboard_http.dashboard_execution_snapshot_json ())
         | "operator" ->
@@ -724,7 +810,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "composite" ->
             Some
               (Server_dashboard_http.dashboard_fleet_composite_json
-                 ~config:state.Mcp_server.room_config ())
+                 ~config:state.Mcp_server.workspace_config ())
         | "board" ->
             Some
               (Server_dashboard_http.dashboard_board_json
@@ -733,7 +819,11 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "goals" ->
             Some
               (Server_dashboard_http.dashboard_goals_snapshot_json
-                 ~config:state.Mcp_server.room_config)
+                 ~config:state.Mcp_server.workspace_config)
+        | "ide" ->
+            Some
+              (Server_dashboard_http.dashboard_ide_snapshot_json
+                 ~config:state.Mcp_server.workspace_config)
         | _ ->
             None);
       (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
@@ -884,9 +974,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
            cold-start diagnostics do not contend with the shell's first render. *)
         Server_routes_http_runtime.start_full_health_snapshot_refresh_loop ~sw ~clock);
       start_lazy_startup state;
-      (match catalog_validation_error with
-       | Some detail -> Server_startup_state.mark_degraded ~error:detail
-       | None -> ());
+      (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
+         already fail-fasts on an invalid runtime config at boot. *)
       Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

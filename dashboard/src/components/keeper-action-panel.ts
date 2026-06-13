@@ -1,8 +1,8 @@
-// Keeper Action Panel — fleet-level pause/resume/restart/boot controls.
+// Keeper lifecycle button group — reusable single-keeper action controls.
 //
-// Surfaces per-keeper lifecycle actions that previously required
-// navigating into the keeper detail view. Designed for the Ops tab
-// so operators can intervene quickly without losing fleet context.
+// Used by Monitor → Keeper Fleet (AgentRoster rows + keeper detail page).
+// Fleet-level grid was removed when Command → Operations stopped duplicating
+// the Monitor roster (2026-05-28).
 //
 // Actions available per keeper:
 //   pause     → POST /api/v1/keepers/:name/directive  { action: "pause" }
@@ -10,43 +10,26 @@
 //   wakeup    → POST /api/v1/keepers/:name/directive  { action: "wakeup" }
 //   boot      → POST /api/v1/keepers/:name/boot
 //   shutdown  → POST /api/v1/keepers/:name/shutdown
-//
-// All action functions are already in api/keeper.ts; this component
-// wires them to a fleet grid without touching the detail view.
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { useEffect } from 'preact/hooks'
-import { CARD_STANDARD } from './common/card'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
-import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import {
   bootKeeper,
-  bulkKeeperDirective,
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
-import type { BulkKeeperDirectiveAction } from '../api/keeper'
 import {
   applyOptimisticKeeperDirective,
-  applyOptimisticKeeperDirectives,
   invalidateDashboardCache,
   refreshDashboard,
-  refreshExecution,
-  executionLoaded,
-  executionLoading,
-  keepers,
 } from '../store'
 import type { Keeper } from '../types'
-import {
-  keeperActionVisibility,
-  isKeeperOperatorTargetable,
-} from '../lib/keeper-predicates'
-import { keeperPauseDisplay } from '../lib/keeper-runtime-display'
+import { keeperActionVisibility } from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -224,7 +207,7 @@ export function KeeperActionButtons({
             size=${size}
             disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'wakeup')}
-            title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
+            title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 runtime/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
           >${text('wakeup')}<//>`
         : null}
       ${vis.canShutdown
@@ -240,204 +223,3 @@ export function KeeperActionButtons({
   `
 }
 
-// ── Per-keeper row ────────────────────────────────────────────────────────
-
-function KeeperActionRow({ keeper }: { keeper: Keeper }) {
-  const pauseDisplay = keeperPauseDisplay(keeper)
-
-  return html`
-    <article
-      class="flex flex-wrap items-start gap-2 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
-      data-testid="keeper-action-row"
-      aria-label="${keeper.name} 액션${pauseDisplay ? `: ${pauseDisplay.detail}` : ''}"
-    >
-      <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2 min-w-0">
-          <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate max-w-28">${keeper.name}</span>
-          <${KeeperPhaseBadge} phase=${keeper.phase} compact />
-        </div>
-        <!--
-          RFC-0135 §1.2: the previous auxiliary "일시정지" <span> at this
-          position duplicated KeeperPhaseBadge's "⏸ 일시정지" output and
-          colocated the *state noun* "일시정지" with the *verb button*
-          "일시정지" later in the row — the user reported this as
-          confusing on 2026-05-19. The badge already renders the state;
-          the line below carries reason/next-action evidence, not a
-          second paused-state noun. Verb buttons keep the "하기" suffix.
-        -->
-        ${pauseDisplay
-          ? html`
-            <div
-              class="mt-1 max-w-full truncate text-3xs leading-[1.35] text-[var(--color-fg-muted)]"
-              title=${pauseDisplay.title}
-              data-testid="keeper-pause-detail"
-            >
-              ${pauseDisplay.detail}
-            </div>
-          `
-          : null}
-      </div>
-      <${KeeperActionButtons} keeper=${keeper} size="sm" />
-    </article>
-  `
-}
-
-// ── Bulk action helpers ───────────────────────────────────────────────────
-
-/** Apply a directive to N keepers in one round-trip via the bulk endpoint
-    and surface the result as a single toast (with partial-failure detail). */
-async function runBulkKeeperDirective(
-  names: string[],
-  action: BulkKeeperDirectiveAction,
-): Promise<void> {
-  if (names.length === 0) return
-  // `BulkKeeperDirectiveAction` is a subset of `KeeperActionKey`, so the
-  // single SSOT covers both. Subset-cast here keeps the type-narrow without
-  // duplicating the label map.
-  const noun = KEEPER_ACTION_LABELS[action as KeeperActionKey].noun
-  // Optimistic: apply patch to every requested name. If the server
-  // reports partial failure we revert only the failed names.
-  const reverts = applyOptimisticKeeperDirectives(names, action)
-  const revertAll = (): void => {
-    for (const revert of reverts.values()) revert()
-  }
-  try {
-    const res = await bulkKeeperDirective(names, action)
-    if (res.ok && res.succeeded === res.requested) {
-      showToast(`${res.succeeded}개 keeper ${noun}됨`, 'success')
-      afterAction()
-    } else if (res.ok && res.succeeded > 0) {
-      const failedRows = res.results.filter(r => !r.ok)
-      for (const row of failedRows) reverts.get(row.name)?.()
-      const failed = failedRows.map(r => r.name).join(', ')
-      showToast(
-        `${res.succeeded}/${res.requested} ${noun}됨 — 실패: ${failed}`,
-        'warning',
-      )
-      afterAction()
-    } else {
-      revertAll()
-      showToast(`전체 ${noun} 실패`, 'error')
-    }
-  } catch {
-    revertAll()
-    showToast(`전체 ${noun} 실패`, 'error')
-  }
-}
-
-// ── Public panel ──────────────────────────────────────────────────────────
-
-/**
- * Fleet-level keeper action panel.
- * Renders one row per online keeper with inline lifecycle action buttons.
- * Intended to be placed in the Ops section alongside QuickIntervene.
- */
-export function KeeperActionPanel() {
-  const keeperList = keepers.value
-  const loaded = executionLoaded.value
-  const loading = executionLoading.value
-
-  useEffect(() => {
-    if (loaded || loading) return
-    void refreshExecution({ force: true }).catch(err => {
-      const message = err instanceof Error ? err.message : 'execution refresh failed'
-      showToast(message, 'warning')
-    })
-  }, [loaded, loading])
-
-  // RFC-0135 PR-9b: route the "should we show this keeper in the action
-  // panel?" filter through the typed predicates instead of an inline OR
-  // chain — paused keepers should still appear (so operator can resume)
-  // even when their status appears offline.
-  const online = keeperList.filter(isKeeperOperatorTargetable)
-  const bulkBusy = useSignal(false)
-
-  // Partition online keepers by which bulk action is applicable. The
-  // typed predicate is authoritative — never derive bulk eligibility from
-  // a status string.
-  const pausableNames = online
-    .filter(k => keeperActionVisibility(k).canPause)
-    .map(k => k.name)
-  const resumableNames = online
-    .filter(k => keeperActionVisibility(k).canResume)
-    .map(k => k.name)
-
-  const runBulk = async (
-    names: string[],
-    action: BulkKeeperDirectiveAction,
-  ): Promise<void> => {
-    if (bulkBusy.value || names.length === 0) return
-    bulkBusy.value = true
-    try {
-      await runBulkKeeperDirective(names, action)
-    } finally {
-      bulkBusy.value = false
-    }
-  }
-
-  if (keeperList.length === 0 && loaded) {
-    return null
-  }
-
-  return html`
-    <section
-      class="${CARD_STANDARD} flex flex-col gap-3"
-      data-testid="keeper-action-panel"
-      aria-label="키퍼 액션 패널"
-    >
-      <div class="flex items-start justify-between gap-3">
-        <div>
-          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Keeper Actions</h3>
-          <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">
-            Fleet-level lifecycle controls. Pause, resume, wake, boot, or shut down individual keepers.
-          </p>
-        </div>
-        <div class="flex flex-wrap justify-end gap-1.5" data-testid="keeper-action-panel-bulk">
-          ${resumableNames.length > 0
-            ? html`<${ActionButton}
-                variant="ok"
-                size="sm"
-                class="whitespace-nowrap"
-                disabled=${bulkBusy.value}
-                onClick=${async () => {
-                  const ok = await requestConfirm({
-                    title: `${resumableNames.length}개 keeper 전체 ${KEEPER_ACTION_LABELS.resume.noun}`,
-                    message: 'paused → running 으로 전환합니다.',
-                    confirmText: KEEPER_ACTION_LABELS.resume.noun,
-                  })
-                  if (ok) await runBulk(resumableNames, 'resume')
-                }}
-                title="현재 paused 인 ${resumableNames.length}개 keeper 를 한 번에 ${KEEPER_ACTION_LABELS.resume.verb}."
-              >전체 ${KEEPER_ACTION_LABELS.resume.noun} (${resumableNames.length})<//>`
-            : null}
-          ${pausableNames.length > 0
-            ? html`<${ActionButton}
-                variant="ghost"
-                size="sm"
-                class="whitespace-nowrap"
-                disabled=${bulkBusy.value}
-                onClick=${async () => {
-                  const ok = await requestConfirm({
-                    title: `${pausableNames.length}개 keeper 전체 ${KEEPER_ACTION_LABELS.pause.noun}`,
-                    message: 'running → paused 로 전환합니다. 현재 turn 은 정상 종료됩니다.',
-                    confirmText: KEEPER_ACTION_LABELS.pause.noun,
-                  })
-                  if (ok) await runBulk(pausableNames, 'pause')
-                }}
-                title="현재 running 인 ${pausableNames.length}개 keeper 를 한 번에 ${KEEPER_ACTION_LABELS.pause.verb}."
-              >전체 ${KEEPER_ACTION_LABELS.pause.noun} (${pausableNames.length})<//>`
-            : null}
-        </div>
-      </div>
-      ${keeperList.length === 0
-        ? html`<div class="text-2xs text-[var(--color-fg-muted)]">Execution SSOT 로딩 중</div>`
-        : online.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">온라인 키퍼 없음</div>`
-        : html`
-          <div class="flex flex-col gap-1.5" role="list">
-            ${online.map(k => html`<${KeeperActionRow} keeper=${k} key=${k.name} />`)}
-          </div>
-        `}
-    </section>
-  `
-}

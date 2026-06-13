@@ -1,4 +1,4 @@
-module M = Masc_mcp.Keeper_runtime_manifest
+module M = Masc.Keeper_runtime_manifest
 
 let manifest ~event ~decision ~links =
   { M.schema_version = 1
@@ -11,7 +11,7 @@ let manifest ~event ~decision ~links =
   ; M.oas_turn_count = Some 1
   ; M.logical_seq = None
   ; M.event
-  ; M.cascade_name = None
+  ; M.runtime_id = None
   ; M.status = "ok"
   ; M.decision
   ; M.links

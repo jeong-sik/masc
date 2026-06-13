@@ -1,15 +1,35 @@
 ---
 rfc: "0151"
 title: "4-metric monotone-decrease ratchet for code-smell metrics"
-status: Implemented
+status: Withdrawn
 created: 2026-05-20
-updated: 2026-05-22
+updated: 2026-05-29
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0126"]
 implementation_prs: [16929, 17316, 17336]
 ---
+
+> **Withdrawn 2026-05-29** — the 4-metric monotone ratchet was removed
+> because its maintenance cost exceeded its signal value. The
+> `godfile_loc_1000plus` metric grew on natural code/test expansion
+> (shell-ir GADT coverage, #19283→#19387), and every increase required a
+> paired baseline regenerate PR (#19231, #19433). The recurring
+> baseline-drift false-fails blocked every open PR until a regenerate PR
+> landed — the ratchet became a workspace collaboration tax rather than a guard.
+>
+> Removed: `scripts/code-smell/measure.sh`,
+> `scripts/lint/godfile-size-regression.sh`, `ci/code-smell-baseline.json`,
+> and the `Godfile size` job in `.github/workflows/fundamental-check.yml`.
+>
+> Trade-off (accepted): `catch_all_arms` and `contains_substring_defs` had
+> no enforcement other than this ratchet, so they are no longer tracked by
+> an automated gate. They are now handled at PR review per the CLAUDE.md
+> workaround-rejection bar and RFC-0088. `ignore_no_comment` remains
+> partially covered by the `ignore-without-comment-new` diff job.
+> `godfile-size-regression.sh`'s absolute new-file cap shared the same CI
+> job and was removed with it.
 
 # RFC-0151 — 4-metric monotone-decrease ratchet for code-smell metrics
 
@@ -24,7 +44,7 @@ implementation_prs: [16929, 17316, 17336]
 
 ## 1. Goal
 
-masc-mcp 코드베이스의 4 개 *code-smell* 지표를 CI 에서
+masc 코드베이스의 4 개 *code-smell* 지표를 CI 에서
 monotone-decreasing baseline 으로 ratchet 한다. 새 PR 은 baseline 위로
 지표를 *증가*시킬 수 없다. *감소*시키는 PR 은 baseline 을 자동으로
 갱신한다. 절대 임계치 (예: `LoC < 1000`) 가 아니라 *방향성* (recent commit
@@ -34,8 +54,8 @@ elimination 작업이 자연스럽게 baseline 을 끌어내린다.
 이 접근은 AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 중 #2
 (string/substring 분류기) + #3 (N-of-M 패치) 의 누적을 사후가 아니라
 *PR 게이트 단계에서* 감지하는 것을 목적으로 한다. 기존 godfile cap 식
-(`prometheus.ml` 등의 LoC 상한) 은 cap 자체가 PR-evasion 을 유도했기에
-(memory feedback `feedback_prometheus_extract_too_evasive.md` 참조),
+(`legacy metrics backend module` 등의 LoC 상한) 은 cap 자체가 PR-evasion 을 유도했기에
+(legacy metrics backend extraction feedback 참조),
 *상한* 이 아닌 *증가 금지* 로 전환한다.
 
 ## 2. Non-goals
@@ -94,9 +114,8 @@ godfile 이 ratchet 도입 *이전* 부터 존재하던 dead surface 를 RFC 분
 RATCHET-WAIVED: <metric_id> <reason>
 ```
 
-CI 는 `RATCHET-WAIVED` 라인을 *count* 하고 `do-not-merge` 라벨을
-자동 부착하지 *않는다* (이 RFC 는 강제 차단이 아니라 *명시 트래킹*
-이 목적). 단, `RATCHET-WAIVED` 가 한 PR 에 2+ metric 동시 사용 시
+CI 는 `RATCHET-WAIVED` 라인을 *count* 만 한다 (이 RFC 는 강제 차단이
+아니라 *명시 트래킹* 이 목적). 단, `RATCHET-WAIVED` 가 한 PR 에 2+ metric 동시 사용 시
 adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 
 ## 6. Override 3-요건 (AGENT-LLM-A.md §"Override 조건" 정합)
@@ -135,8 +154,8 @@ adversarial-reviewer agent invoke 를 트리거 (impl PR 에서 wiring).
 
 - 사전 attempt: PR #16833 (CLOSED, "DIRTY + CI/RFC policy surfaces").
 - AGENT-LLM-A.md §"워크어라운드 거부 기준" 시그니처 3종 + 체크리스트 7항.
-- `memory/feedback_prometheus_extract_too_evasive.md` (godfile cap 의
-  evasion 패턴 → ratchet 으로 전환 근거).
+- Legacy metrics backend extraction feedback (godfile cap 의 evasion 패턴 →
+  ratchet 으로 전환 근거).
 - RFC-0085 keeper godfile decomp track.
 - RFC-0088 telemetry-as-fix umbrella.
 - RFC-0126 lint stack sprint.

@@ -62,13 +62,13 @@ check_rule() {
   fi
 }
 
-# SSOT-R1 — .masc path concat bypasses Coord_utils.masc_dir helper.
+# SSOT-R1 — .masc path concat bypasses Workspace_utils.masc_dir helper.
 # Tracked: #8355 (37 files at filing; current ratchet from main).
 # Excluded: the helper impl + backend setters where the literal IS the SSOT.
 check_rule "R1-masc-path" 11 \
-  "Coord_utils.masc_dir <config>" \
+  "Workspace_utils.masc_dir <config>" \
   'Filename\.concat\s+[a-zA-Z_]+\s+"\.masc"' \
-  'coord_utils_paths_backend|coord_utils_backend_setup|coord_eio' \
+  'workspace_utils_paths_backend|workspace_utils_backend_setup|workspace_eio' \
   lib
 
 # SSOT-R2 — loopback literal bypasses Masc_network_defaults.masc_http_default_host.
@@ -85,7 +85,7 @@ check_rule "R2-loopback-literal" 1 \
 # No exclusion — every site should eventually route through the helper.
 check_rule "R4-config-filename" 11 \
   "Config_filenames.<name> (add helper per #8414)" \
-  '"(cascade\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
+  '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
   '' \
   lib
 
@@ -100,11 +100,32 @@ check_rule "R5-health-path" 0 \
 
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
-check_rule "R6-home-masc-root" 0 \
+check_rule "R6-home-masc-root" 9 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \
   '' \
   bin lib scripts docs
+
+# SSOT-R7 — OTel metric label key for keeper identity is "keeper".
+# "keeper_name" in a metric label list splits the label vocabulary: Grafana
+# template variables and panel group-bys query "keeper", so keeper_name-keyed
+# series render as 0/No data (masc-keeper-full broke this way; the $keeper
+# variable sourced label_values(masc_keeper_turns_total, keeper) and got an
+# empty list). JSON codec fields named "keeper_name" are NOT affected — this
+# rule only matches inside ~labels:[...] lists and let <name>labels = [...] bindings.
+# Needs -U (multiline): label lists wrap across lines.
+r7_pattern='(~labels:|let [a-z_]*labels\s*=\s*)\[[^\]]{0,400}"keeper_name"'
+r7_count="$({ rg -U -c --no-heading "$r7_pattern" bin lib test 2>/dev/null || true; } \
+  | awk -F: '{sum += $2} END {print sum+0}')"
+if [ "$r7_count" -gt 0 ]; then
+  echo "ERROR[R7-metric-label-keeper-name]: $r7_count occurrences (baseline 0)." >&2
+  echo "  Replace with: \"keeper\" — the canonical metric label key (cf. Keeper_hooks_oas_types.label_keeper)." >&2
+  echo "  Offending sites:" >&2
+  rg -U -l "$r7_pattern" bin lib test 2>/dev/null | sed 's/^/    /' >&2
+  fail=1
+else
+  echo "OK[R7-metric-label-keeper-name]: 0 occurrences (baseline 0)."
+fi
 
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant

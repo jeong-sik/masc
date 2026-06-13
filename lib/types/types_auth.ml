@@ -77,42 +77,41 @@ let agent_credential_to_yojson (c : agent_credential) =
     ("role", `String (agent_role_to_string c.role));
     ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
-    ("expires_at", match c.expires_at with Some s -> `String s | None -> `Null);
+    ("expires_at", Json_util.string_opt_to_json c.expires_at);
   ]
 
 let agent_credential_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let agent_name = json |> member "agent_name" |> to_string in
-    let token = json |> member "token" |> to_string in
+    let agent_name = Json_util.get_string_with_default json ~key:"agent_name" ~default:"" in
+    let token = Json_util.get_string_with_default json ~key:"token" ~default:"" in
     let role =
-      match json |> member "role" |> to_string_option with
+      match Json_util.get_string json "role" with
       | Some s -> agent_role_of_string s
       | None ->
-        let is_admin = json |> member "admin" |> to_bool_option |> Option.value ~default:false in
+        let is_admin = Json_util.get_bool json "admin" |> Option.value ~default:false in
         Ok (if is_admin then Admin else Worker)
     in
     (match role with
      | Error e -> Error e
      | Ok role ->
-       let created_at = json |> member "created_at" |> to_string in
-       let expires_at = json |> member "expires_at" |> to_string_option in
-       let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
-       let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
+       let created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"" in
+       let expires_at = Json_util.get_string json "expires_at" in
+       let id = Json_util.get_string json "id" |> Option.map Credential_id.of_string in
+       let agent_id = Json_util.get_string json "agent_id" |> Option.map Agent_id.of_string in
        Ok { id; agent_id; agent_name; token; role; created_at; expires_at })
   with e -> Error (Printexc.to_string e)
 
 (** Auth configuration *)
 type auth_config = {
   enabled: bool;
-  room_secret_hash: string option; [@default None]
+  workspace_secret_hash: string option; [@default None]
   require_token: bool; [@default false]
   token_expiry_hours: int; [@default 24]
 } [@@deriving show]
 
 let default_auth_config = {
   enabled = true;
-  room_secret_hash = None;
+  workspace_secret_hash = None;
   require_token = true;
   token_expiry_hours = 24;
 }
@@ -120,34 +119,29 @@ let default_auth_config = {
 let auth_config_to_yojson c =
   `Assoc [
     ("enabled", `Bool c.enabled);
-    ("room_secret_hash", match c.room_secret_hash with Some s -> `String s | None -> `Null);
+    ("workspace_secret_hash", Json_util.string_opt_to_json c.workspace_secret_hash);
     ("require_token", `Bool c.require_token);
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]
 
 let auth_config_of_yojson json =
-  let open Yojson.Safe.Util in
   try
-    let enabled = json |> member "enabled" |> to_bool in
-    let room_secret_hash = json |> member "room_secret_hash" |> to_string_option in
-    let require_token = json |> member "require_token" |> to_bool in
-    let token_expiry_hours = json |> member "token_expiry_hours" |> to_int in
-    Ok { enabled; room_secret_hash; require_token; token_expiry_hours }
+    let enabled = Json_util.get_bool json "enabled" |> Option.value ~default:true in
+    let workspace_secret_hash = Json_util.get_string json "workspace_secret_hash" in
+    let require_token = Json_util.get_bool json "require_token" |> Option.value ~default:false in
+    let token_expiry_hours = Json_util.get_int json "token_expiry_hours" |> Option.value ~default:24 in
+    Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours }
   with e -> Error (Printexc.to_string e)
 
 (** Permission matrix - what each role can do *)
 type permission =
   | CanInit
   | CanReset
-  | CanJoin
-  | CanLeave
   | CanReadState
   | CanAddTask
   | CanClaimTask
   | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal
-  | CanSendPortal
   | CanVote
   | CanAdmin
 [@@deriving show { with_path = false }]
@@ -162,39 +156,33 @@ type permission =
 let permission_to_string = function
   | CanInit -> "CanInit"
   | CanReset -> "CanReset"
-  | CanJoin -> "CanJoin"
-  | CanLeave -> "CanLeave"
   | CanReadState -> "CanReadState"
   | CanAddTask -> "CanAddTask"
   | CanClaimTask -> "CanClaimTask"
   | CanCompleteTask -> "CanCompleteTask"
   | CanBroadcast -> "CanBroadcast"
-  | CanOpenPortal -> "CanOpenPortal"
-  | CanSendPortal -> "CanSendPortal"
   | CanVote -> "CanVote"
   | CanAdmin -> "CanAdmin"
 
 (** Get permissions for a role *)
 let permissions_for_role = function
   | Worker -> [
-      CanReadState; CanJoin; CanLeave;
+      CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
-      CanOpenPortal; CanSendPortal;
       CanVote;
     ]
   | Admin -> [
       CanInit; CanReset;
-      CanReadState; CanJoin; CanLeave;
+      CanReadState;
       CanAddTask; CanClaimTask; CanCompleteTask;
       CanBroadcast;
-      CanOpenPortal; CanSendPortal;
       CanVote; CanAdmin;
     ]
 
 (* Direct (role, permission) variant match — O(1), no per-call list
    allocation.  Hot path: [Auth.check_permission] runs this on every
-   protected operation; [Auth_doctor] runs it 10+ times per snapshot.
+   protected operation; [auth diagnostics] runs it 10+ times per snapshot.
    The previous [List.mem permission (permissions_for_role role)] form
    built a fresh 12-element (Worker) / 15-element (Admin) list each
    call.
@@ -207,9 +195,8 @@ let has_permission role permission =
   match role, permission with
   | Admin, _ -> true
   | Worker, (CanInit | CanReset | CanAdmin) -> false
-  | Worker, ( CanJoin | CanLeave | CanReadState | CanAddTask
-            | CanClaimTask | CanCompleteTask | CanBroadcast
-            | CanOpenPortal | CanSendPortal | CanVote ) -> true
+  | Worker, ( CanReadState | CanAddTask | CanClaimTask | CanCompleteTask | CanBroadcast
+            | CanVote ) -> true
 
 (* ============================================ *)
 (* Rate limit role integration                  *)

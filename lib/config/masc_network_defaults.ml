@@ -47,7 +47,7 @@ let ollama_port_needle =
   Printf.sprintf ":%d" ollama_default_port
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint.  Used by both {!Cascade_http_probe} (cascade-level
+    endpoint.  Used by both {!Runtime_http_probe} (runtime-level
     capacity probe) and {!Tool_local_runtime_probe} (tool-level KV
     assessment); anchoring the suffix in one place prevents the two
     call sites from drifting if Ollama ever renames the route. *)
@@ -73,19 +73,19 @@ let is_ollama_url url =
     in
     loop 0
 
-(** Sentinel prefix marking a CLI-backed transport (e.g. [cli:agent_code]).
+(** Transport prefix marking a CLI-backed endpoint (e.g. [cli:agent_code]).
     Used by capacity classifiers to distinguish CLI endpoints from HTTP
     ones. *)
-let cli_sentinel_prefix = "cli:"
+let cli_transport_prefix = "cli:"
 
-(** [is_cli_sentinel_url url] returns [true] when [url] starts with
-    {!cli_sentinel_prefix}.  The check is a strict prefix match rather
+(** [is_cli_transport_url url] returns [true] when [url] starts with
+    {!cli_transport_prefix}.  The check is a strict prefix match rather
     than a substring scan because [cli:] is meaningful only at the
-    start of the sentinel string. *)
-let is_cli_sentinel_url url =
-  let plen = String.length cli_sentinel_prefix in
+    start of the transport string. *)
+let is_cli_transport_url url =
+  let plen = String.length cli_transport_prefix in
   String.length url > plen
-  && String.sub url 0 plen = cli_sentinel_prefix
+  && String.sub url 0 plen = cli_transport_prefix
 
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)

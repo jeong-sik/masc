@@ -1,5 +1,5 @@
 ; RFC-0056 Phase 1E — extract Dashboard_eval_feed leaf module from flat
-; masc_mcp namespace. Stacked on Phase 1D (briefing_compactors).
+; masc namespace. Stacked on Phase 1D (briefing_compactors).
 ;
 ; Dashboard_eval_feed is dependency-leaf: stdlib + Yojson + Agent_sdk
 ; (external) + Eio cancellation + dashboard logging + Json_util/Safe_ops
@@ -9,16 +9,13 @@
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
 ; (wrapped false) keeps the top-level identifier `Dashboard_eval_feed`.
+
 (include_subdirs no)
 
 (library
- (name masc_mcp_dashboard_eval_feed)
- (public_name masc_mcp.dashboard_eval_feed)
+ (name masc_dashboard_eval_feed)
+ (public_name masc.dashboard_eval_feed)
  (wrapped false)
- (flags (:standard -w +4))
- (libraries
-  yojson
-  eio
-  agent_sdk
-  masc_log
-  masc_core))
+ (flags
+  (:standard -w +4))
+ (libraries yojson eio agent_sdk masc_log masc_core))

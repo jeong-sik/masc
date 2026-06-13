@@ -1,11 +1,13 @@
 (** In-turn liveness pulse helpers for the keeper heartbeat loop,
     extracted from keeper_heartbeat_loop.ml.
 
-    Drives a side-fiber that emits Coord.heartbeat + SSE broadcasts at
+    Drives a side-fiber that emits Workspace.heartbeat + SSE broadcasts at
     a bounded interval while a keeper turn is executing, so operators
     see continued presence and the registry can detect stuck turns. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_execution
 
 let in_turn_liveness_pulse_interval_sec () =
@@ -43,7 +45,7 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
                    Log.Keeper.warn
                      "in-turn liveness pulse failed: %s"
                      (Printexc.to_string exn);
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string HeartbeatFailures)
                      ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
                      ());
@@ -66,7 +68,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
   match Keeper_registry.get ~base_path:ctx.config.base_path meta.name with
   | Some entry when Option.is_some entry.current_turn_observation ->
     (try
-       let _heartbeat = Coord.heartbeat ctx.config ~agent_name:meta.agent_name in
+       let _heartbeat = Workspace.heartbeat ctx.config ~agent_name:meta.agent_name in
        ()
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
@@ -75,7 +77,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
          "in-turn heartbeat failed for %s: %s"
          meta.name
          (Printexc.to_string exn);
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string HeartbeatFailures)
          ~labels:[ "keeper", meta.name; "phase", "in_turn_heartbeat" ]
          ());
@@ -96,7 +98,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string SseBroadcastFailures)
          ~labels:[ "keeper", meta.name ]
          ();

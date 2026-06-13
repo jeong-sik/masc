@@ -11,10 +11,10 @@
 
    Supported ids:
      sidebar              the full Sidebar (Fleet/Filter/Goals)
-     rail                 the full Rail (Activity/Nudges/Cascade)
+     rail                 the full Rail (Activity/Nudges/Runtime)
      kpi                  KPI strip
      lifeline             Lifeline 60s trace
-     deck                 Deck (board/cascade/providers/goals)
+     deck                 Deck (board/runtime/providers/goals)
      swimlanes            Keeper swimlanes
      plane-work           Work plane
      plane-comms          Comms plane
@@ -24,7 +24,7 @@
      plane-dashboard      Dashboard (swimlanes + deck)
      drawer-terminal      Terminal drawer panel
      drawer-output        Output drawer panel
-     drawer-cascade       Cascade drawer panel
+     drawer-runtime       Runtime drawer panel
      drawer-audit         Audit drawer panel
      drawer-cost          Cost drawer panel
 */
@@ -46,7 +46,7 @@ const _WS_DEFS = {
   "plane-ide":       { name: "IDE plane",        kind: "plane-ide"        },
   "drawer-terminal": { name: "Terminal drawer",  kind: "drawer", drawer: "terminal" },
   "drawer-output":   { name: "Output drawer",    kind: "drawer", drawer: "output"   },
-  "drawer-cascade":  { name: "Cascade drawer",   kind: "drawer", drawer: "cascade"  },
+  "drawer-runtime":  { name: "Runtime drawer",   kind: "drawer", drawer: "runtime"  },
   "drawer-audit":    { name: "Audit drawer",     kind: "drawer", drawer: "audit"    },
   "drawer-cost":     { name: "Cost drawer",      kind: "drawer", drawer: "cost"     },
 };
@@ -115,7 +115,7 @@ function WidgetSolo({ id }) {
       );
       break;
     case "rail":
-      body = <window.Rail events={D.events || []} cascade={D.cascade || {steps:[],total_ms:0}} />;
+      body = <window.Rail events={D.events || []} runtime={D.runtime || {steps:[],total_ms:0}} />;
       break;
     case "kpi":
       body = <window.KpiStrip />;
@@ -129,7 +129,7 @@ function WidgetSolo({ id }) {
           tasks={D.tasks || []}
           goals={D.goals || []}
           providers={D.providers || []}
-          cascade={D.cascade || {steps:[],total_ms:0}} />
+          runtime={D.runtime || {steps:[],total_ms:0}} />
       );
       break;
     case "swimlanes":
@@ -140,7 +140,7 @@ function WidgetSolo({ id }) {
         <div className="center" style={{display:"flex",flexDirection:"column",height:"100%"}}>
           <window.Swimlanes keepers={D.keepers || []} laneEvents={D.laneEvents || {}} />
           <window.Deck tasks={D.tasks || []} goals={D.goals || []}
-                       providers={D.providers || []} cascade={D.cascade || {steps:[],total_ms:0}} />
+                       providers={D.providers || []} runtime={D.runtime || {steps:[],total_ms:0}} />
         </div>
       );
       break;

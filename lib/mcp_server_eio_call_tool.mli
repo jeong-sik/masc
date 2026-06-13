@@ -21,7 +21,6 @@
     [classify_tool_failure_severity],
     [parse_status_from_message], [quality_issue],
     [nonempty_string_opt], [json_nonempty_string_opt],
-    [runtime_mcp_tool_surface_class],
     [runtime_mcp_keeper_error_preview],
     [runtime_mcp_keeper_tool_call_sse_payload],
     [runtime_mcp_masc_root],
@@ -29,7 +28,6 @@
     [record_runtime_mcp_keeper_trajectory],
     [read_only_retry_limit], [read_only_retry_wait],
     [call_tool_with_readonly_retry],
-    timeout policy delegated to [Mcp_server_eio_tool_timeout],
     [resolve_managed_agent_call]).
 
     [tool_profile] is referenced by {!handle_call_tool_eio}
@@ -63,6 +61,13 @@ val quality_from_result :
     / generic) and emits a single issue entry with
     [severity], [code], [message], [attempts]. *)
 
+val record_mcp_server_operation_duration_sample :
+  tool_name:string -> success:bool -> duration_seconds:float -> unit
+(** Records one [mcp.server.operation.duration] sample for [tools/call].
+    Used by the protocol layer for rejected calls that never enter
+    {!handle_call_tool_eio}. Requires an active
+    {!Otel_dispatch_hook.with_request_context}. *)
+
 module For_testing : sig
   val activity_tool_called_payload :
     tool_name:string ->
@@ -73,26 +78,13 @@ module For_testing : sig
     ?tool_args_preview:string ->
     Yojson.Safe.t ->
     Yojson.Safe.t
+
+  val record_mcp_server_operation_duration :
+    Tool_result.result -> duration_ms:int -> unit
+
+  val record_mcp_server_operation_duration_sample :
+    tool_name:string -> success:bool -> duration_seconds:float -> unit
 end
-
-(** {1 Per-tool timeout} *)
-
-val tool_timeout_sec_opt :
-  tool_name:string ->
-  _arguments:Yojson.Safe.t ->
-  float option
-(** Returns the timeout (seconds) the dispatcher should
-    apply to the call, [None] for tools that opt out
-    (e.g. [masc_keeper_msg], which gates on its own
-    [max_turns] / [max_cost_usd]). Board write tools use
-    [MASC_TOOL_TIMEOUT_BOARD_SEC] (default 90s, clamped
-    5s..300s). This includes keeper/masc board post/comment/vote,
-    comment_vote, delete, cleanup, curation_submit, and
-    [masc_board_reaction]. [masc_persona_generate] uses a fixed
-    outer timeout above its internal OAS worker budget. Other bounded tools use
-    [MASC_TOOL_TIMEOUT_DEFAULT_SEC] (default 60s, same
-    clamp). [_arguments] is accepted for parity with future
-    per-arg overrides but currently unused. *)
 
 (** {1 Runtime-MCP keeper trace context} *)
 
@@ -112,11 +104,7 @@ type keeper_runtime_mcp_log_context = {
   allowed_paths : string list option;
   network_mode : string option;
   approval_mode : string option;
-  tool_surface_class : string option;
-  visible_tool_count : int option;
-  required_tools : string list option;
-  missing_required_tools : string list option;
-  cascade_profile : string option;
+  runtime_profile : string option;
 }
 (** Snapshot of the keeper-bound runtime-MCP context
     captured at tool-call time.  Threaded into telemetry +
@@ -189,11 +177,10 @@ val handle_call_tool_eio :
     when the call is known to alter the tool catalogue
     (long-running mutations, etc).
 
-    The dispatcher applies the per-tool timeout from
-    {!tool_timeout_sec_opt}, retries read-only failures
-    (subject to [Env_config.Tools.readonly_retry_limit]),
-    times the execution for telemetry, and on the
-    keeper-runtime path threads
+    The dispatcher retries read-only failures (subject to
+    [Env_config.Tools.readonly_retry_limit]), times the
+    execution for telemetry, and on the keeper-runtime
+    path threads
     {!record_runtime_mcp_keeper_tool_trace} into the
     success / failure branches.
 

@@ -1,0 +1,48 @@
+;; RFC-0056 Phase 2 / LANE 6 — Tool surface leaf extracted from the flat masc
+;; mega-library. These are the pure tool-surface modules (schema / vocabulary /
+;; policy / shard-type) with ZERO mega-outbound: they reference only the already
+;; -extracted Tool spine (masc_tool_dispatch / tool_types / tool_catalog_surfaces),
+;; masc_core / masc_types / masc_exec, and stdlib. The compiler now enforces that
+;; this layer cannot reference keeper / runtime / goal / task / board / server:
+;; none of them appear in (libraries) below, so a re-coupling is a dune cycle.
+;;
+;; (wrapped false) keeps bare [Tool_spec.X] / [Tool_capability.X] / ... working in
+;; the mega-lib and tests without a Masc. prefix (RFC-0056 G3).
+
+(include_subdirs no)
+
+(library
+ (name masc_tool_surface)
+ (public_name masc.masc_tool_surface)
+ (wrapped false)
+ (private_modules
+  tool_shard_types_core
+  tool_shard_types_enum_mirrors
+  tool_shard_types_schemas_base
+  tool_shard_types_schemas_board
+  tool_shard_types_schemas_execute
+  tool_shard_types_schemas_filesystem
+  tool_shard_types_schemas_library
+  tool_shard_types_schemas_surface
+  tool_shard_types_schemas_search_files
+  tool_shard_types_schemas_taskboard
+  tool_shard_types_schemas_voice)
+ (libraries
+  masc_types
+  masc_core
+  masc_config
+  masc_log
+  masc.tool_types
+  masc.tool_catalog_surfaces
+  masc.masc_tool_dispatch
+  masc.masc_exec
+  agent_sdk
+  agent_sdk.base
+  mcp_protocol
+  time_compat
+  fs_compat
+  yojson
+  eio
+  unix)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

@@ -300,7 +300,7 @@ let await_if_needed promise =
 
 let start_loop registry ~sw =
   if Atomic.compare_and_set registry.loop_started false true then
-  Eio.Fiber.fork ~sw (fun () ->
+  Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop state =
       let msg = Eio.Stream.take registry.mailbox in
       let state' =
@@ -430,11 +430,10 @@ let status_string registry =
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
 
     List.iter (fun status ->
-      let module U = Yojson.Safe.Util in
-      let name = status |> U.member "name" |> U.to_string in
-      let icon = status |> U.member "status" |> U.to_string in
-      let idle = status |> U.member "idle_seconds" |> U.to_int in
-      let listening = status |> U.member "listening" |> U.to_bool in
+      let name = Json_util.get_string status "name" |> Option.value ~default:"" in
+      let icon = Json_util.get_string status "status" |> Option.value ~default:"" in
+      let idle = Json_util.get_int status "idle_seconds" |> Option.value ~default:0 in
+      let listening = Json_util.get_bool status "listening" |> Option.value ~default:false in
       let idle_info = if idle > 30 then Printf.sprintf "(idle %ds)" idle else "" in
       let listen_info = if listening then "리스닝중" else "" in
       Printf.bprintf buf "  %s %s %s %s\n" icon name listen_info idle_info
@@ -443,7 +442,7 @@ let status_string registry =
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
     Buffer.add_string buf "🎧=리스닝 🔨=작업중 💤=졸고있음(60s+)";
 
-    let inactive = get_inactive_agents registry ~threshold:Coord_resilience.default_warning_threshold in
+    let inactive = get_inactive_agents registry ~threshold:Workspace_resilience.default_warning_threshold in
     if inactive <> [] then begin
       Buffer.add_string buf "\n\n**INACTIVE AGENTS**: ";
       Buffer.add_string buf (String.concat ", " inactive);
@@ -495,7 +494,7 @@ module McpSessionStore = struct
   let state_mutex = Mutex.create ()
   let loop_started = Atomic.make false
 
-  let max_age = ref Env_config.Session.max_age_seconds
+  let max_age = Env_config.Session.max_age_seconds
 
   let process_msg state msg =
     match msg with
@@ -600,7 +599,7 @@ module McpSessionStore = struct
 
   let cleanup_stale () =
     let p, r = Eio.Promise.create () in
-    dispatch (Cleanup_stale (Time_compat.now (), !max_age, r));
+    dispatch (Cleanup_stale (Time_compat.now (), max_age, r));
     await_if_needed p
 
   let to_json (s : mcp_session) : Yojson.Safe.t =

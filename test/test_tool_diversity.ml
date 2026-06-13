@@ -1,4 +1,4 @@
-(** Test_tool_diversity — QCheck + Alcotest for Masc_mcp.Keeper_tool_diversity.
+(** Test_tool_diversity — QCheck + Alcotest for Masc.Keeper_tool_diversity.
 
     Tests the information-theoretic invariants:
     1. Entropy is non-negative
@@ -12,28 +12,28 @@ open Alcotest
 (* ── Unit tests ──────────────────────────────────────────────── *)
 
 let test_shannon_entropy_uniform () =
-  let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy [10; 10; 10; 10] in
+  let h = Masc.Keeper_tool_diversity.shannon_entropy [10; 10; 10; 10] in
   check (float 0.001) "log2(4) = 2.0" 2.0 h
 
 let test_shannon_entropy_single () =
-  let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy [100] in
+  let h = Masc.Keeper_tool_diversity.shannon_entropy [100] in
   check (float 0.001) "single tool = 0" 0.0 h
 
 let test_shannon_entropy_empty () =
-  let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy [] in
+  let h = Masc.Keeper_tool_diversity.shannon_entropy [] in
   check (float 0.001) "empty = 0" 0.0 h
 
 let test_normalized_uniform () =
-  let raw = Masc_mcp.Keeper_tool_diversity.shannon_entropy [10; 10; 10; 10] in
-  let h = Masc_mcp.Keeper_tool_diversity.normalized_entropy ~n_categories:4 raw in
+  let raw = Masc.Keeper_tool_diversity.shannon_entropy [10; 10; 10; 10] in
+  let h = Masc.Keeper_tool_diversity.normalized_entropy ~n_categories:4 raw in
   check (float 0.001) "uniform = 1.0" 1.0 h
 
 let test_stats_of_registry () =
-  let entries : (string * Masc_mcp.Keeper_types.tool_call_entry) list = [
+  let entries : (string * Keeper_types.tool_call_entry) list = [
     ("tool_a", { count = 50; successes = 45; failures = 5; last_used_at = 0.0 });
     ("tool_b", { count = 10; successes = 10; failures = 0; last_used_at = 0.0 });
   ] in
-  let stats = Masc_mcp.Keeper_tool_diversity.stats_of_registry_entries entries in
+  let stats = Masc.Keeper_tool_diversity.stats_of_registry_entries entries in
   check int "two stats" 2 (List.length stats);
   let first = List.hd stats in
   check string "first name" "tool_a" first.name;
@@ -45,7 +45,7 @@ let test_underused_tool_metrics_flag_unused_web_search () =
   let stats =
     [
       {
-        Masc_mcp.Keeper_tool_diversity.name = "keeper_board_post";
+        Masc.Keeper_tool_diversity.name = "keeper_board_post";
         count = 100;
         successes = 100;
         failures = 0;
@@ -53,23 +53,23 @@ let test_underused_tool_metrics_flag_unused_web_search () =
     ]
   in
   let summary =
-    Masc_mcp.Keeper_tool_diversity.compute_diversity
+    Masc.Keeper_tool_diversity.compute_diversity
       ~available_tools stats
   in
-  Masc_mcp.Keeper_tool_diversity.record_underused_tool_metrics
+  Masc.Keeper_tool_diversity.record_underused_tool_metrics
     ~keeper_name ~available_tools summary;
   check (float 0.001) "one underused allowed tool" 1.0
-    (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string ToolUnderusedAllowedCount)
+    (Masc.Otel_metric_store.metric_value_or_zero
+       Keeper_metrics.(to_string ToolUnderusedAllowedCount)
        ~labels:[ ("keeper", keeper_name) ] ());
   check (float 0.001) "web search flagged underused" 1.0
-    (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string ToolUnderusedAllowed)
+    (Masc.Otel_metric_store.metric_value_or_zero
+       Keeper_metrics.(to_string ToolUnderusedAllowed)
        ~labels:[ ("keeper", keeper_name); ("tool", "masc_web_search") ]
        ());
   check (float 0.001) "used board post cleared" 0.0
-    (Masc_mcp.Prometheus.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.(to_string ToolUnderusedAllowed)
+    (Masc.Otel_metric_store.metric_value_or_zero
+       Keeper_metrics.(to_string ToolUnderusedAllowed)
        ~labels:[ ("keeper", keeper_name); ("tool", "keeper_board_post") ]
        ())
 
@@ -84,7 +84,7 @@ let qc_entropy_non_negative =
     ~count:200
     (int_list_gen ~min_len:1 ~max_len:10 ~min_val:0 ~max_val:1000)
     (fun counts ->
-      let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy counts in
+      let h = Masc.Keeper_tool_diversity.shannon_entropy counts in
       h >= 0.0)
 
 let qc_entropy_bounded =
@@ -92,7 +92,7 @@ let qc_entropy_bounded =
     ~count:200
     (int_list_gen ~min_len:2 ~max_len:20 ~min_val:1 ~max_val:100)
     (fun counts ->
-      let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy counts in
+      let h = Masc.Keeper_tool_diversity.shannon_entropy counts in
       let n = List.length counts in
       h <= Float.log2 (Float.of_int n) +. 0.001)
 
@@ -101,15 +101,15 @@ let qc_normalized_in_unit =
     ~count:200
     (int_list_gen ~min_len:2 ~max_len:20 ~min_val:1 ~max_val:100)
     (fun counts ->
-      let h = Masc_mcp.Keeper_tool_diversity.shannon_entropy counts in
+      let h = Masc.Keeper_tool_diversity.shannon_entropy counts in
       let n = List.length counts in
-      let nh = Masc_mcp.Keeper_tool_diversity.normalized_entropy ~n_categories:n h in
+      let nh = Masc.Keeper_tool_diversity.normalized_entropy ~n_categories:n h in
       nh >= -0.001 && nh <= 1.001)
 
 (* ── Test registration ──────────────────────────────────── *)
 
 let () =
-  run "Masc_mcp.Keeper_tool_diversity"
+  run "Masc.Keeper_tool_diversity"
     [
       ( "unit",
         [

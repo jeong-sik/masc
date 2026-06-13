@@ -1,0 +1,28 @@
+; RFC-0056 Phase 1 — extract the Dashboard_tla_specs leaf from the flat masc
+; mega-library. Mirrors lib/cdal/dune (RFC-0056 §3.3 Phase 0 PoC) and the
+; sibling lib/dashboard_eval_feed/dune: the parent lib/dune uses
+; (include_subdirs unqualified) which would otherwise absorb this .ml into the
+; main masc library; (include_subdirs no) opts out so this directory compiles
+; as its own unit. (wrapped false) keeps the bare Dashboard_tla_specs
+; identifier visible to callers — the prod consumer
+; (lib/server/server_routes_http_routes_verification.ml, in flat masc ns) and
+; tests do not rewrite imports. This is the Phase 0/1 G3/G5 budget.
+;
+; Outbound deps are all already-extracted sub-libraries or external:
+;   Fs_compat              -> fs_compat   (Fs_compat.load_file)
+;   Json_util, String_util -> masc_core   (wrapped false)
+;   Masc_domain            -> masc_types  (wrapped false; iso8601/now helpers)
+;   Yojson, Unix           -> external
+; No flat-ns masc module appears below, so a future re-coupling becomes a dune
+; cycle that audit-sublib-cycle.py / dune build rejects (RFC-0056 G1).
+
+(include_subdirs no)
+
+(library
+ (name masc_dashboard_tla_specs)
+ (public_name masc.dashboard_tla_specs)
+ (wrapped false)
+ ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
+ (flags
+  (:standard -w +4))
+ (libraries fs_compat masc_core masc_types unix yojson))

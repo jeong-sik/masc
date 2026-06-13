@@ -1,18 +1,16 @@
 // Typed fiber-alive decision for a keeper.
 //
 // Background: `keeper-detail-runtime.ts` derived `fiberAlive` from a
-// 4-fallback chain that mixed four *semantically distinct* signals:
+// 3-fallback chain that mixed semantically distinct signals:
 //
 //   composite?.phase_diagnosis?.conditions.fiber_alive
 //   ?? keeper.keepalive_running
-//   ?? keeper.presence_keepalive
 //   ?? (linkedState !== 'offline')
 //
 // Each signal answers a slightly different question:
 //   1. composite truth         — "what did the observer record?"
 //   2. keepalive_running       — "is the keepalive thread alive?"
-//   3. presence_keepalive      — "did the presence ping arrive?"
-//   4. link-state inference    — "do we even believe the keeper exists?"
+//   3. link-state inference    — "do we even believe the keeper exists?"
 //
 // Collapsing them into one OR-chain loses provenance: when the dashboard
 // shows "fiber alive" or "fiber dead", an operator cannot trace which
@@ -25,7 +23,6 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 export type FiberAliveSource =
   | 'composite_phase_diagnosis'
   | 'keepalive_running'
-  | 'presence_keepalive'
   | 'link_state_inference'
 
 export interface FiberAliveDecision {
@@ -34,11 +31,11 @@ export interface FiberAliveDecision {
 }
 
 interface FiberAliveInput {
-  readonly keeper: Pick<Keeper, 'keepalive_running' | 'presence_keepalive'>
+  readonly keeper: Pick<Keeper, 'keepalive_running'>
   readonly composite: KeeperCompositeSnapshot | null
   /** Result of `linkedRuntimeState(keeper)` — a string state ('offline'
    *  or other). Pass through as-is; this module only checks the
-   *  offline sentinel to inform the lowest-priority fallback. */
+   *  offline marker to inform the lowest-priority fallback. */
   readonly linkedState: string
 }
 
@@ -53,9 +50,6 @@ export function deriveFiberAlive({
   }
   if (typeof keeper.keepalive_running === 'boolean') {
     return { alive: keeper.keepalive_running, source: 'keepalive_running' }
-  }
-  if (typeof keeper.presence_keepalive === 'boolean') {
-    return { alive: keeper.presence_keepalive, source: 'presence_keepalive' }
   }
   return { alive: linkedState !== 'offline', source: 'link_state_inference' }
 }

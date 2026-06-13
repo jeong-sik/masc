@@ -1,7 +1,7 @@
 (** Tests for Reputation_ledger_v2 — append-only event ledger. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let path =
@@ -30,21 +30,21 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let with_room f =
+let with_workspace f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:(Some "test-agent"));
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "test-agent"));
       f config)
 
 (* ── Tool outcome emit / read ─────────────────────────────────────── *)
 
 let test_emit_and_read_tool_outcome () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_tool_outcome config
       ~agent_id:"agent-alpha"
       ~tool_name:"tool_execute"
@@ -72,7 +72,7 @@ let test_emit_and_read_tool_outcome () =
     check int "one success" 1 (List.length successes))
 
 let test_emit_goal_completion () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_goal_completion config
       ~agent_id:"agent-beta"
       ~task_id:"task-001"
@@ -95,7 +95,7 @@ let test_emit_goal_completion () =
     check int "two goal events" 2 (List.length events))
 
 let test_emit_safety_violation () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_safety_violation config
       ~agent_id:"agent-gamma"
       ~violation_kind:"scope_violation"
@@ -113,7 +113,7 @@ let test_emit_safety_violation () =
      | _ -> fail "expected Safety_violation"))
 
 let test_empty_agent_id_is_no_op () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     (* An empty agent_id must not crash and must not write to the ledger. *)
     Reputation_ledger_v2.emit_tool_outcome config
       ~agent_id:"" ~tool_name:"some_tool" ~success:true ();
@@ -124,7 +124,7 @@ let test_empty_agent_id_is_no_op () =
     check int "no events for empty agent" 0 (List.length events))
 
 let test_agent_isolation () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_tool_outcome config
       ~agent_id:"agent-a" ~tool_name:"tool1" ~success:true ();
     Reputation_ledger_v2.emit_tool_outcome config
@@ -149,7 +149,7 @@ let test_default_metrics_neutral () =
   check (float 0.0001) "safety_compliance neutral" 1.0 m.safety_compliance
 
 let test_compute_metrics_all_success () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     for _ = 1 to 5 do
       Reputation_ledger_v2.emit_tool_outcome config
         ~agent_id:"perfect-agent" ~tool_name:"tool" ~success:true ()
@@ -170,7 +170,7 @@ let test_compute_metrics_all_success () =
     check (float 0.0001) "safety_compliance" 1.0 m.safety_compliance)
 
 let test_compute_metrics_partial_failure () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_tool_outcome config
       ~agent_id:"partial-agent" ~tool_name:"tool" ~success:true ();
     Reputation_ledger_v2.emit_tool_outcome config
@@ -186,7 +186,7 @@ let test_compute_metrics_partial_failure () =
       m.execution_reliability)
 
 let test_safety_compliance_penalty () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     Reputation_ledger_v2.emit_safety_violation config
       ~agent_id:"violator" ~violation_kind:"scope_violation" ();
     Reputation_ledger_v2.emit_safety_violation config
@@ -200,7 +200,7 @@ let test_safety_compliance_penalty () =
     check (float 0.0001) "safety_compliance" 0.6 m.safety_compliance)
 
 let test_safety_compliance_floors_at_zero () =
-  with_room (fun config ->
+  with_workspace (fun config ->
     (* Emit 10 violations; penalty would be 2.0 but must clamp at 1.0. *)
     for _ = 1 to 10 do
       Reputation_ledger_v2.emit_safety_violation config

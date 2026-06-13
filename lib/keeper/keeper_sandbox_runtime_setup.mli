@@ -25,8 +25,6 @@ val docker_info_security_options :
 type required_command_check = { command : string; available : bool; }
 type docker_preflight = {
   ok : bool;
-  credential_fallbacks_disabled : bool;
-  git_egress : string;
   image : string;
   docker_runtime_ok : bool;
   docker_runtime_error : string option;
@@ -43,7 +41,6 @@ val docker_preflight_min_sec : float
 val docker_preflight_max_sec : float
 val docker_preflight_timeout : timeout_sec:float -> float
 val required_commands : string list
-val option_field : 'a -> 'b option -> 'a * [> `Null | `String of 'b ]
 type cleanup_result = { scanned : int; removed : int; errors : string list; }
 val sandbox_component_label_key : string
 val sandbox_component_label_value : string
@@ -91,7 +88,7 @@ val docker_label_args :
   keeper_name:string ->
   container_kind:string -> network_label:string -> unit -> string list
 val docker_network_args :
-  Keeper_types.network_mode -> string list * string
+  Keeper_types_profile_sandbox.network_mode -> string list * string
 val docker_nofile_args : unit -> string list
 val container_masc_runtime_base : container_root:'a -> string
 val container_masc_dir : container_root:'a -> string
@@ -111,13 +108,13 @@ val docker_config_container_root : container_root:'a -> string
 val docker_config_available : string -> bool
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
-type room_state_mount_kind = Room_state_file | Room_state_dir
-val docker_room_state_mounts : (room_state_mount_kind * string) list
-val room_state_path_available : room_state_mount_kind -> string -> bool
+type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
+val docker_workspace_state_mounts : (workspace_state_mount_kind * string) list
+val workspace_state_path_available : workspace_state_mount_kind -> string -> bool
 val unique_preserving_order : 'a list -> 'a list
-val docker_room_state_mount_specs :
+val docker_workspace_state_mount_specs :
   base_path:string -> container_root:'a -> string list
-val docker_room_state_mount_args :
+val docker_workspace_state_mount_args :
   base_path:string -> container_root:'a -> string list
 val docker_config_env_args :
   base_path:string -> container_root:'a -> string list

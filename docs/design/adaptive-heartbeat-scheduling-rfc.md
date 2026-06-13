@@ -2,18 +2,17 @@
 status: reference
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_config.ml
-  - lib/keeper/keeper_cascade_routing.ml
 ---
 
-# Adaptive Heartbeat and Cascade Scheduling RFC
+# Adaptive Heartbeat and Runtime Scheduling RFC
 
 **Status**: Draft
 **Date**: 2026-03-29
-**Scope**: Keeper keepalive, Keeper supervisor, Keeper registry, Room resilience, Cascade inference
-**Tracking**: [#3635](https://github.com/jeong-sik/masc-mcp/issues/3635)
-**One sentence**: 키퍼 하트비트를 work-as-heartbeat 기반 적응형으로 전환하고, restart 경로에 mass-failure 억제를 추가하며, cascade 레벨 스케줄링 방향을 제시한다.
+**Scope**: Keeper keepalive, Keeper supervisor, Keeper registry, Workspace resilience, Runtime inference
+**Tracking**: [#3635](https://github.com/jeong-sik/masc/issues/3635)
+**One sentence**: 키퍼 하트비트를 work-as-heartbeat 기반 적응형으로 전환하고, restart 경로에 mass-failure 억제를 추가하며, runtime 레벨 스케줄링 방향을 제시한다.
 
 ## Related Documents
 
@@ -45,7 +44,7 @@ code_refs:
 - Phase 1 (Work-as-Heartbeat): `Go with caveats` — Phase 0 측정 결과에 따라 scope 조정
 - Phase 2 (Restart Resilience): `Go` — self-preservation은 supervisor 경로만 수정
 - Phase 2b (Phi Accrual): `No-Go` — gRPC heartbeat가 production에서 활성화된 후에만 착수
-- Phase 3 (Cascade Scheduler): `No-Go` — Phase 0-2 baseline 2주 이상 확보 후 별도 RFC
+- Phase 3 (Runtime Scheduler): `No-Go` — Phase 0-2 baseline 2주 이상 확보 후 별도 RFC
 
 ## 1. Problem Statement
 
@@ -77,16 +76,16 @@ keepalive fiber: unhandled exception (run_heartbeat_loop에서 catch 안 된 예
 
 Storm 조건: **Path A-1이 주요 storm 경로다.** underlying cause(filesystem 장애 등)가 지속되면 self-stop → reconcile → 재기동 → 즉시 self-stop 루프가 N개 keeper에서 동시 발생한다. reconcile에는 backoff도 없고 mass failure 감지도 없다. Path A-2(Crashed → backoff)는 backoff로 자연 감속되지만, Path A-1(Stopped → reconcile)은 감속 메커니즘이 없다.
 
-**Path B: Room Zombie Cleanup (room_gc 경로)**
+**Path B: Workspace Zombie Cleanup (workspace_gc 경로)**
 
 ```
 agent JSON의 last_seen ISO timestamp
   → now - last_seen > threshold (resilience.ml:46)
   → threshold: 300s (agent), 3600s (keeper) — 하드코딩 (resilience.ml:5, 60)
-  → room_gc.ml:61: cleanup_zombies → stale agent file 삭제
+  → workspace_gc.ml:61: cleanup_zombies → stale agent file 삭제
 ```
 
-이 경로는 keeper restart와 무관하다. Room에서 오래된 agent JSON 파일을 정리하는 hygiene 작업이다.
+이 경로는 keeper restart와 무관하다. Workspace에서 오래된 agent JSON 파일을 정리하는 hygiene 작업이다.
 
 **Config SSOT 문제**: `resilience.ml`의 300.0/3600.0이 하드코딩되어 있고, `env_config_runtime.ml`의 env var surface와 연결되지 않음. 이 불일치가 Phase 0에서 먼저 정비되어야 한다.
 
@@ -102,9 +101,9 @@ agent JSON의 last_seen ISO timestamp
 
 다음은 per-stage profiling 전까지 가설이다:
 
-- 30s loop에서 `ensure_keeper_room_presence`가 지배적 I/O 비용인지?
+- 30s loop에서 `ensure_keeper_workspace_presence`가 지배적 I/O 비용인지?
 - `collect_board_events`, `maybe_tick_from_keepalive` 비용은 무시 가능한지?
-- Room scope가 현재 single room (All == Current, keeper_coordination.ml:41-45)이므로 multi-room fan-out 비용은 0인지?
+- Workspace scope가 현재 single workspace (All == Current, keeper_workspace collaboration.ml:41-45)이므로 multi-workspace fan-out 비용은 0인지?
 
 Phase 0에서 측정한다.
 
@@ -117,7 +116,7 @@ Keepalive fiber는 단일 fiber다. `run_keeper_cycle` 호출(keeper_keepalive.m
 - Eio runtime을 다른 concurrency 모델로 교체하지 않는다.
 - Fiber memory 최적화 (50 keeper = ~200KB, LLM context 5GB 대비 무의미).
 - 범용 workflow engine을 만들지 않는다 (CDAL RFC 범위).
-- Room zombie cleanup(Path B) 알고리즘을 이 RFC에서 교체하지 않는다.
+- Workspace zombie cleanup(Path B) 알고리즘을 이 RFC에서 교체하지 않는다.
 - Multi-domain scaling (single domain에서 50 keeper 운영에 충분).
 
 ## 3. Current State
@@ -128,7 +127,7 @@ Keepalive fiber는 단일 fiber다. `run_keeper_cycle` 호출(keeper_keepalive.m
 
 | Stage | Code | Cadence | I/O |
 |-------|------|---------|-----|
-| Room presence sync | `ensure_keeper_room_presence` (keeper_coordination.ml:47) | Every 30s | File read + write (single room) |
+| Workspace presence sync | `ensure_keeper_workspace_presence` (keeper_workspace collaboration.ml:47) | Every 30s | File read + write (single workspace) |
 | Snapshot collection | JSONL append + SSE broadcast + OAS event | Every `snapshot_interval_sec` (300s) | File write + HTTP |
 | Board event scan | `collect_board_events` (keeper_world_observation.ml) | Every 30s | Directory scan |
 | Unified turn | `run_keeper_cycle` (conditional) | Proactive gate | LLM inference (blocking) |
@@ -147,7 +146,7 @@ Keepalive fiber는 단일 fiber다. `run_keeper_cycle` 호출(keeper_keepalive.m
 | Detection Method | Layer | Latency | Used For |
 |-----------------|-------|---------|----------|
 | `Promise.peek done_p` | In-process | Instant (cooperative yield) | Fiber crash/stop |
-| Room `last_seen` threshold | Filesystem | Fixed 300s/3600s | Stale agent file cleanup |
+| Workspace `last_seen` threshold | Filesystem | Fixed 300s/3600s | Stale agent file cleanup |
 | gRPC HeartbeatAck | Network | Configurable | Remote keeper health (optional) |
 
 ### 3.4 Smart Heartbeat (heartbeat_smart.ml)
@@ -180,7 +179,7 @@ type config = {
 let timing_ring = Ring_buffer.create 100 in  (* 최근 100 cycles *)
 
 (* 각 stage를 Timer.measure로 감싸되 결과는 메모리에만 *)
-let presence_ms = Timer.measure (fun () -> ensure_keeper_room_presence ...) in
+let presence_ms = Timer.measure (fun () -> ensure_keeper_workspace_presence ...) in
 let board_ms = Timer.measure (fun () -> collect_board_events ...) in
 Ring_buffer.push timing_ring { presence_ms; board_ms; ... };
 
@@ -211,8 +210,8 @@ let default_zombie_threshold =
 
 | File | Change |
 |------|--------|
-| `lib/room/resilience.ml:5` | 하드코딩 `300.0` → `Env_config_runtime.Zombie.threshold_seconds` |
-| `lib/room/resilience.ml:60` | 하드코딩 `3600.0` → `Env_config_runtime.Zombie.keeper_threshold_seconds` |
+| `lib/workspace/resilience.ml:5` | 하드코딩 `300.0` → `Env_config_runtime.Zombie.threshold_seconds` |
+| `lib/workspace/resilience.ml:60` | 하드코딩 `3600.0` → `Env_config_runtime.Zombie.keeper_threshold_seconds` |
 | `lib/config/env_config_runtime.ml` | 변경 없음 (이미 `MASC_ZOMBIE_THRESHOLD_SEC`, `MASC_KEEPER_ZOMBIE_THRESHOLD_SEC` 존재) |
 
 ### Phase 1: Work-as-Heartbeat (2-3주, LOW risk)
@@ -224,16 +223,16 @@ let default_zombie_threshold =
 | 속성 | 값 |
 |------|-----|
 | Lease owner | Keepalive fiber (유일한 writer) |
-| Renew point (a) | `ensure_keeper_room_presence` 호출 시 (기존) |
-| Renew point (b) | Turn 완료 후 `Room.heartbeat_in_room` **성공** 시 (신규) |
+| Renew point (a) | `ensure_keeper_workspace_presence` 호출 시 (기존) |
+| Renew point (b) | Turn 완료 후 `Workspace.heartbeat_in_workspace` **성공** 시 (신규) |
 | Max silence budget | `MASC_KEEPER_MAX_SILENCE_SEC` (default 120s) |
 | Turn 중 갱신 | 불가 (fiber blocking). max silence = max turn duration |
 | Freshness skip | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip |
-| Failure reset | `Room.heartbeat_in_room` **성공** 시에만 `consecutive_failures := 0` (room I/O 건강 증거) |
+| Failure reset | `Workspace.heartbeat_in_workspace` **성공** 시에만 `consecutive_failures := 0` (workspace I/O 건강 증거) |
 
 **Scope boundary (필수)**:
 
-`last_successful_heartbeat_ts`는 **room-level freshness** (presence sync skip)에만 사용한다. 이 timestamp는 `Room.heartbeat_in_room`이 **성공**한 시점에만 갱신된다. Turn 완료 시점이 아니다 — turn이 성공해도 room heartbeat가 실패하면 timestamp는 갱신되지 않고, presence sync skip도 발동하지 않는다. 이렇게 해야 filesystem/room 장애가 turn 성공으로 가려지지 않는다.
+`last_successful_heartbeat_ts`는 **workspace-level freshness** (presence sync skip)에만 사용한다. 이 timestamp는 `Workspace.heartbeat_in_workspace`이 **성공**한 시점에만 갱신된다. Turn 완료 시점이 아니다 — turn이 성공해도 workspace heartbeat가 실패하면 timestamp는 갱신되지 않고, presence sync skip도 발동하지 않는다. 이렇게 해야 filesystem/workspace 장애가 turn 성공으로 가려지지 않는다.
 
 Supervisor의 fiber liveness 판정(`done_p` Promise)과 완전 독립이다. fiber가 `Crashed`면 `last_successful_heartbeat_ts`와 무관하게 dead이다.
 
@@ -245,9 +244,9 @@ done_p: None (alive) ──>│  skip                 │
 
                           ┌─ Keepalive Loop ────────────────┐
 last_successful_heartbeat │  skip presence sync             │
- < MAX_SILENCE_SEC ──────>│  (room heartbeat already done)  │
+ < MAX_SILENCE_SEC ──────>│  (workspace heartbeat already done)  │
                           └─────────────────────────────────┘
-                          ↑ 갱신 조건: Room.heartbeat_in_room 성공
+                          ↑ 갱신 조건: Workspace.heartbeat_in_workspace 성공
                           ↑ turn 완료만으로는 갱신 안 됨
 ```
 
@@ -258,10 +257,10 @@ last_successful_heartbeat │  skip presence sync             │
 | Step | File | Change |
 |------|------|--------|
 | 1.1 | `lib/keeper/keeper_keepalive.ml` | `let last_successful_heartbeat_ts = ref 0.0` (loop 시작 시 local ref 선언) |
-| 1.2 | `lib/keeper/keeper_keepalive.ml` (unified turn 블록) | Turn 완료 후: (a) `Room.heartbeat_in_room` 호출 (facade 경유, keeper_coordination.ml:65과 동일 경로), (b) heartbeat **성공** 시에만 `last_successful_heartbeat_ts := Time_compat.now ()` + `consecutive_failures := 0`, (c) heartbeat 실패 시 timestamp 갱신 안 함 (presence sync skip 미발동) |
-| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip (room-I/O 기반 lease) |
+| 1.2 | `lib/keeper/keeper_keepalive.ml` (unified turn 블록) | Turn 완료 후: (a) `Workspace.heartbeat_in_workspace` 호출 (facade 경유, keeper_workspace collaboration.ml:65과 동일 경로), (b) heartbeat **성공** 시에만 `last_successful_heartbeat_ts := Time_compat.now ()` + `consecutive_failures := 0`, (c) heartbeat 실패 시 timestamp 갱신 안 함 (presence sync skip 미발동) |
+| 1.3 | `lib/keeper/keeper_keepalive.ml:126` | `now - !last_successful_heartbeat_ts < MAX_SILENCE_SEC`이면 presence sync skip (workspace-I/O 기반 lease) |
 | 1.4 | `lib/config/env_config_keeper.ml` | `MASC_KEEPER_WORK_AS_HEARTBEAT` (bool, default true), `MASC_KEEPER_MAX_SILENCE_SEC` (int, default 120) |
-| 1.5 | `test/test_work_as_heartbeat.ml` | (a) Turn 완료가 presence sync를 대체하는지, (b) heartbeat 실패 시 consecutive_failures가 유지되는지, (c) room I/O 실패가 turn 성공으로 가려지지 않는지 |
+| 1.5 | `test/test_work_as_heartbeat.ml` | (a) Turn 완료가 presence sync를 대체하는지, (b) heartbeat 실패 시 consecutive_failures가 유지되는지, (c) workspace I/O 실패가 turn 성공으로 가려지지 않는지 |
 
 **삭제된 Step**: 기존 1.5 (supervisor에서 `last_turn_completion_ts`로 alive 보완 판정) — `done_p`가 SSOT이므로 override 금지.
 
@@ -464,7 +463,7 @@ sweep_and_recover에서:
 | Detection Need | Method | Change |
 |---------------|--------|--------|
 | In-process fiber death | Promise.peek (기존) | 변경 없음 |
-| Room file staleness | Fixed threshold (Phase 0에서 configurable) | 변경 없음 |
+| Workspace file staleness | Fixed threshold (Phase 0에서 configurable) | 변경 없음 |
 | Network heartbeat loss | **Phi Accrual (신규)** | gRPC ack 도착 간격 기반 |
 
 **Shadow Mode 요구사항**:
@@ -481,7 +480,7 @@ sweep_and_recover에서:
 | 2b.3 | Shadow mode 로깅 | phi 값 + 실제 상태 병기 |
 | 2b.4 | `test/test_phi_accrual.ml` | 순수 단위 테스트 |
 
-### Phase 3: Cascade Scheduler (별도 RFC)
+### Phase 3: Runtime Scheduler (별도 RFC)
 
 이 RFC에서는 방향만 기술한다. 상세 설계는 Phase 0-2 baseline 2주 이상 확보 후 별도 RFC로 작성한다.
 
@@ -489,15 +488,15 @@ sweep_and_recover에서:
 
 1. **Priority queue**: Reactive(user message, @mention) > Proactive(idle warmup) > Background(improve loop)
    - 근거: Agent.xpu (arXiv:2506.24045) — priority preemption으로 91%+ reactive latency 감소
-2. **Task DAG analysis**: 같은 room의 keeper 간 dependency 분석 (Independent / Sequential / Pipeline)
+2. **Task DAG analysis**: 같은 workspace의 keeper 간 dependency 분석 (Independent / Sequential / Pipeline)
    - 근거: arXiv:2504.07347 — interconnected agent network에서는 work-conserving만으로 불충분
 3. **Collaboration mode routing**: MasRouter (arXiv:2502.11133) 패턴 — model 선택과 collaboration mode를 동시 결정
-4. **Cache-aware scheduling**: Helium (arXiv:2603.16104) 패턴 — same-room keeper 간 context prefix 공유
+4. **Cache-aware scheduling**: Helium (arXiv:2603.16104) 패턴 — same-workspace keeper 간 context prefix 공유
 
 Phase 3 착수 조건:
-- Phase 0 측정 데이터에서 cascade 레벨 비효율이 확인됨
+- Phase 0 측정 데이터에서 runtime 레벨 비효율이 확인됨
 - Phase 1+2 배포 후 2주 이상 baseline 확보
-- Cascade scheduler 별도 RFC 작성 + 리뷰
+- Runtime scheduler 별도 RFC 작성 + 리뷰
 
 ## 5. Boundary Health
 
@@ -507,10 +506,10 @@ Phase 3 착수 조건:
 | Phase 1 | LOW | keeper_keepalive 내부 (local ref, 모듈 경계 변경 없음) | Feature flag로 즉시 복원 |
 | Phase 2 | MEDIUM | keeper_supervisor 내부 수정 | 1 cycle 억제만 (30s), 다음 cycle에서 재평가 |
 | Phase 2b | MEDIUM | gRPC heartbeat ↔ phi detector (new module) | Shadow mode + kill switch |
-| Phase 3 | HIGH | cascade ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
+| Phase 3 | HIGH | runtime ↔ keeper (new scheduler layer) | 별도 RFC로 분리 |
 
 **가장 큰 위험들**:
-1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Room.heartbeat_in_room`을 명시적으로 호출하여 방지.
+1. Phase 1에서 presence skip이 downstream consumer(dashboard, SSE)가 기대하는 `last_seen` 갱신을 누락시킬 수 있음. Step 1.2에서 turn 완료 시 `Workspace.heartbeat_in_workspace`을 명시적으로 호출하여 방지.
 2. Phase 1에서 `last_successful_heartbeat_ts`가 supervisor의 `done_p` SSOT를 침범하지 않도록 scope를 엄격히 분리. freshness(presence skip)와 liveness(fiber death)는 독립 관심사.
 
 ## 5.1 Keeper State Machine
@@ -565,10 +564,10 @@ stateDiagram-v2
 - [ ] Phase 0.2: Config SSOT (resilience.ml 하드코딩 → env_config)
 - [ ] Phase 0: 1주 측정 + 결과 기록
 - [ ] Phase 1.1: `last_successful_heartbeat_ts` local ref in keepalive loop
-- [ ] Phase 1.2: Turn 완료 후 `Room.heartbeat_in_room` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0`
+- [ ] Phase 1.2: Turn 완료 후 `Workspace.heartbeat_in_workspace` 호출, **성공 시에만** timestamp 갱신 + `consecutive_failures := 0`
 - [ ] Phase 1.3: Presence sync conditional skip (`MAX_SILENCE_SEC` 기반 lease)
 - [ ] Phase 1.4: Config (feature flag + max silence)
-- [ ] Phase 1.5: Tests (freshness skip + room I/O failure 독립 검증)
+- [ ] Phase 1.5: Tests (freshness skip + workspace I/O failure 독립 검증)
 - [ ] Phase 2.0a: `keeper_state`에 `Crashed` + `Dead` variant 추가 + `is_registered` 함수
 - [ ] Phase 2.0b: `launch_supervised_fiber` body에서 structured catch + `set_state Crashed` + resolve
 - [ ] Phase 2.0c: Exhausted keeper를 unregister 대신 `Dead` state 유지 (tombstone) + TTL 후 cleanup

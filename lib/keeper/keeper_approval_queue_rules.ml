@@ -49,6 +49,20 @@
 
 include Keeper_approval_queue_rules_types
 
+let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:[ "keeper", keeper_name; "site", site ]
+    ();
+  Log.Keeper.warn
+    "approval_queue: %s failed keeper=%s id=%s event=%s err=%s"
+    site
+    keeper_name
+    id
+    event_type
+    (Printexc.to_string exn)
+;;
+
 (* ── Global queue (Lock-free Atomic.t) ───────────────────── *)
 
 module SMap = Set_util.StringMap
@@ -92,7 +106,7 @@ let rules_path ?base_path () =
     | Some base_path -> base_path
     | None -> Env_config_core.base_path ()
   in
-  Filename.concat (Coord_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
+  Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "approval-rules.json"
 ;;
 
 let stable_request_key_blocklist =
@@ -139,6 +153,23 @@ let sandbox_profile_of_runtime_contract runtime_contract =
 
 let backend_of_runtime_contract runtime_contract =
   Option.bind runtime_contract (string_opt_member "backend")
+;;
+
+let nonempty_string_opt = function
+  | Some value when String.trim value <> "" -> Some (String.trim value)
+  | _ -> None
+;;
+
+let sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract =
+  match nonempty_string_opt sandbox_profile with
+  | Some _ as value -> value
+  | None -> sandbox_profile_of_runtime_contract runtime_contract
+;;
+
+let backend_of_runtime_context ?backend runtime_contract =
+  match nonempty_string_opt backend with
+  | Some _ as value -> value
+  | None -> backend_of_runtime_contract runtime_contract
 ;;
 
 let load_rules_unlocked ?base_path () =
@@ -196,6 +227,8 @@ let upsert_rule
       ~tool_name
       ~input
       ~risk_level
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?created_by
       ?source_approval_id
@@ -208,8 +241,8 @@ let upsert_rule
       { id = make_generated_id "rule"
       ; keeper_name
       ; tool_name
-      ; sandbox_profile = sandbox_profile_of_runtime_contract runtime_contract
-      ; backend = backend_of_runtime_contract runtime_contract
+      ; sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
+      ; backend = backend_of_runtime_context ?backend runtime_contract
       ; request_fingerprint
       ; request_fingerprint_preview = request_fingerprint_preview request_fingerprint
       ; max_risk = risk_level
@@ -226,7 +259,7 @@ let upsert_rule
       (match save_rules_unlocked ?base_path (candidate :: rules) with
        | Ok () -> ()
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ]
            ();
@@ -252,14 +285,16 @@ let find_matching_rule
       ~tool_name
       ~input
       ~risk_level
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ()
   =
   with_rules_lock (fun () ->
     let rules = load_rules_unlocked ?base_path () in
     let request_fingerprint = request_fingerprint input in
-    let sandbox_profile = sandbox_profile_of_runtime_contract runtime_contract in
-    let backend = backend_of_runtime_contract runtime_contract in
+    let sandbox_profile = sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract in
+    let backend = backend_of_runtime_context ?backend runtime_contract in
     match
       List.find_opt
         (fun rule ->
@@ -289,7 +324,7 @@ let find_matching_rule
       (match save_rules_unlocked ?base_path updated_rules with
        | Ok () -> ()
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Matching_rule_save) ]
            ();

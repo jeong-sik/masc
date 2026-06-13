@@ -11,12 +11,12 @@ const fetchIdeRegionsMock = vi.mocked(fetchIdeRegions)
 describe('createCodeDocumentStore', () => {
   it('parses code content into stable one-indexed lines', () => {
     const store = createCodeDocumentStore({
-      file_path: 'runtime/cascade/router.ts',
+      file_path: 'runtime/runtime/router.ts',
       language: 'typescript',
       content: 'const a = 1\r\n\r\nexport const b = 2\n',
     })
 
-    expect(store.document().file_path).toBe('runtime/cascade/router.ts')
+    expect(store.document().file_path).toBe('runtime/runtime/router.ts')
     expect(store.document().language).toBe('typescript')
     expect(store.lines()).toEqual([
       { num: 1, text: 'const a = 1', is_blank: false },

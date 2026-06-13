@@ -146,7 +146,7 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
       (try writer line with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.error "exec_tap writer failed: %s" (Printexc.to_string exn))
+           Log.Exec_tap.error "exec_tap writer failed: %s" (Printexc.to_string exn))
 
 let record ~kind ~argv ?env ?cwd () =
   write_line ~kind ~argv ?env ?cwd []
@@ -207,7 +207,7 @@ let install_from_env () =
                   write_all fd line 0 len)
            in
            enable ~writer;
-           Log.info "exec_tap enabled: %s" out_path
+           Log.Exec_tap.info "exec_tap enabled: %s" out_path
        | Error msg ->
-           Log.warn "exec_tap disabled: cannot open %s: %s" out_path msg)
+           Log.Exec_tap.warn "exec_tap disabled: cannot open %s: %s" out_path msg)
   | None | Some _ -> ()

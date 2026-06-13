@@ -19,6 +19,8 @@
        along with structured [docker_mount_failure_details]. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let status_label = function
   | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
@@ -47,8 +49,8 @@ let docker_failure_message_internal
       String_util.contains_substring output "bash: cd:"
       && String_util.contains_substring output "No such file or directory"
     then
-      " hint=cwd_not_directory: create or repair the sandbox repo/worktree first, \
-       then retry with cwd=repos/<repo>/.worktrees/<task>)."
+      " hint=cwd_not_directory: create or repair the sandbox repo checkout first, \
+       then retry with cwd=repos/<repo>."
     else ""
   in
   let mount_failure_context =
@@ -95,7 +97,7 @@ let docker_failure_message_with_context
 ;;
 
 let record_docker_failure
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~image
       ~container_kind

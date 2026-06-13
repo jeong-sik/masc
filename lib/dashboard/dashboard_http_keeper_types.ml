@@ -11,12 +11,13 @@ let runtime_warning_ctx_ratio =
   Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
 
 (* RFC-0149 §3.3 — typed Result resolver for dashboard call sites.  The
-   legacy [live_keeper_cascade_name] facade + its silent-fallback carrier
-   ([Keeper_cascade_profile.resolve_live]) were removed in the §3.3
+   legacy live runtime-id facade + its silent-fallback carrier
+   ([Keeper_runtime_profile.resolve_live]) were removed in the §3.3
    sunset closeout. *)
-let live_keeper_cascade_name_result (raw : string) :
-    (Cascade_name.t, [ `Unresolved of string ]) result =
-  Keeper_cascade_profile.resolve_live_result raw
+let live_keeper_runtime_id_result (raw : string) :
+    (string, [ `Unresolved of string ]) result =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then Error (`Unresolved raw) else Ok trimmed
 
 let compute_health_score
     ~restart_count ~max_restarts ~recent_crash_count
@@ -65,29 +66,13 @@ let tokens_per_sec_json ~tokens ~latency_ms =
 let last_latency_ms_json latency_ms =
   if latency_ms <= 0 then `Null else `Int latency_ms
 
-let json_string_list_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-    items
-    |> List.filter_map (function
-         | `String value ->
-           let trimmed = String.trim value in
-           if trimmed = "" then None else Some trimmed
-         | _ -> None)
-  | _ -> []
-
-let json_string_member_opt key json =
-  match Yojson.Safe.Util.member key json with
-  | `String value when String.trim value <> "" -> Some value
-  | _ -> None
-
 let terminal_reason_code_of_decision_json json =
-  match json_string_member_opt "terminal_reason_code" json with
+  match Json_util.assoc_string_opt "terminal_reason_code" json with
   | Some _ as value -> value
   | None ->
-    (match Yojson.Safe.Util.member "terminal_reason" json with
-     | `Assoc _ as terminal_reason ->
-       json_string_member_opt "code" terminal_reason
+    (match Json_util.assoc_member_opt "terminal_reason" json with
+     | Some (`Assoc _ as terminal_reason) ->
+       Json_util.assoc_string_opt "code" terminal_reason
      | _ -> None)
 
 let execution_trust_source = "execution_receipt"
@@ -105,8 +90,8 @@ let latest_receipt_ts_of_keeper_rows rows =
   |> List.fold_left
        (fun acc row ->
          match
-           Yojson.Safe.Util.member "trust" row
-           |> Yojson.Safe.Util.member "last_receipt_at"
+           Option.value ~default:`Null (Json_util.assoc_member_opt "trust" row)
+           |> (fun v -> Option.value ~default:`Null (Json_util.assoc_member_opt "last_receipt_at" v))
          with
          | `String iso -> (
              match Masc_domain.parse_iso8601_opt iso with
@@ -174,7 +159,7 @@ let string_member_nonempty key json =
   Option.bind (Safe_ops.json_string_opt key json) nonempty_string_opt
 
 let int_member_fallback key json =
-  let usage = Yojson.Safe.Util.member "usage" json in
+  let usage = Option.value ~default:`Null (Json_util.assoc_member_opt "usage" json) in
   match Safe_ops.json_int_opt key usage with
   | Some value -> Some value
   | None -> Safe_ops.json_int_opt key json
@@ -231,11 +216,7 @@ let keeper_decisions_retention_json ~per_keeper_limit ~keeper_count =
 
 let k2_iso8601_of_unix ts_unix =
   if ts_unix <= 0.0 then ""
-  else
-    let t = Unix.gmtime ts_unix in
-    Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-      (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
-      t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+  else Masc_domain.iso8601_of_unix_seconds ts_unix
 
 let k2_stable_id ~prefix ~keeper_name ~ts_unix ~raw =
   let ms = Int64.of_float (ts_unix *. 1000.0) in

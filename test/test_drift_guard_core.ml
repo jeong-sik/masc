@@ -1,7 +1,7 @@
 open Alcotest
 
-module Drift_guard = Masc_mcp.Drift_guard
-module Coord = Masc_mcp.Coord
+module Drift_guard = Masc.Drift_guard
+module Workspace = Masc.Workspace
 
 let rec rm_rf path =
   if Sys.file_exists path then
@@ -21,11 +21,11 @@ let with_temp_masc_dir f =
          (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
   in
   Unix.mkdir base 0o755;
-  let config = Coord.default_config base in
-  ignore (Coord.init config ~agent_name:None);
+  let config = Workspace.default_config base in
+  ignore (Workspace.init config ~agent_name:None);
   Fun.protect
     ~finally:(fun () ->
-      let _ = Coord.reset config in
+      let _ = Workspace.reset config in
       rm_rf base)
     (fun () -> f config)
 

@@ -31,7 +31,7 @@ ERROR Keeper keeper:tech_glutton tool_error: Bash —
    /Users/dancer/me/.masc/playground/docker/tech_glutton is not a git
    repository and multiple sandbox repos exist. Set cwd explicitly before
    retrying. Example next call: Bash { executable: "gh", argv: [...], cwd: "repos/deepclaude" }.
-   Available repos: deepclaude, masc-mcp. Do not retry the same git/gh request from
+   Available repos: deepclaude, masc. Do not retry the same git/gh request from
    sandbox root."
 ```
 
@@ -84,7 +84,7 @@ type task = {
 }
 ```
 
-`title` 또는 `description` 본문에 `"in masc-mcp"`, `"on repos/deepclaude"`
+`title` 또는 `description` 본문에 `"in masc"`, `"on repos/deepclaude"`
 같은 *string hint* 가 들어가지만 *typed binding 은 없음*.
 
 keeper 가 task 를 claim 하면 sandbox 시작 시 cwd 를 *어디로 set 할지* 의
@@ -94,7 +94,7 @@ keeper 가 task 를 claim 하면 sandbox 시작 시 cwd 를 *어디로 set 할�
 
 worktree 매핑 추정 후보 — 그러나 모두 *symptom 억제* 시그니처:
 
-1. **title 의 substring 분류기** — `String.contains title "masc-mcp"` →
+1. **title 의 substring 분류기** — `String.contains title "masc"` →
    RFC-0089 분류기 anti-pattern.
 2. **goal description 의 prose parse** — *string-as-protocol* (RFC-0091
    keeper-bash typed-argv 와 동일 anti-pattern).
@@ -230,7 +230,7 @@ RFC-0088 § Counter-as-Fix + RFC-0089 § String-Classifier audit:
 ## §7 결정 evidence
 
 - 2026-05-17 08:33 sandbox root cannot run git/gh — 단일 sample, 다중
-  repo (deepclaude + masc-mcp) tech_glutton keeper.
+  repo (deepclaude + masc) tech_glutton keeper.
 - 24h log audit 권장 — 같은 error pattern 의 빈도 측정 후 본 RFC §1.1
   업데이트. Phase 1 시작 *전* baseline 수집 의무.
 

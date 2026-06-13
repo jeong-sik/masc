@@ -51,12 +51,6 @@ class ScanReport:
 
 PATTERNS: tuple[PatternSpec, ...] = (
     PatternSpec(
-        "keeper_skipping_turn",
-        r"skipping turn.*semaphore wait",
-        "critical",
-        "Keeper turn skipped after semaphore wait.",
-    ),
-    PatternSpec(
         "keeper_keepalive_only",
         r"keepalive turn scheduled",
         "warning",
@@ -79,12 +73,6 @@ PATTERNS: tuple[PatternSpec, ...] = (
         r"archived credential.*starvation",
         "critical",
         "Keeper credential archived because of starvation recovery.",
-    ),
-    PatternSpec(
-        "alive_but_stuck",
-        r"alive-but-stuck detected",
-        "critical",
-        "Supervisor detected alive-but-stuck keeper state.",
     ),
     PatternSpec(
         "governance_unparseable",

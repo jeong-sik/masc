@@ -1,17 +1,14 @@
 (** Pin the {!Env_config_keeper.KeeperPollIntervals} default table and
-    env override behaviour. Mirrors the pattern used for
-    {!Env_config_keeper.KeeperWatchdog} after #10740 — hardcoded
-    timing inside fiber loops becomes operator-visible config when
-    extracted into a typed module.
+    env override behaviour. Hardcoded timing inside fiber loops becomes
+    operator-visible config when extracted into a typed module.
 
     Three properties:
 
     1. Hardcoded defaults preserve current literals (regression guard
-       against silent cadence shifts that would change CPU floor or
-       drain latency).
+       against silent cadence shifts that would change drain latency).
     2. Per-knob env override wins over hardcoded default.
     3. Floor clamp: invalid env values cannot push the cadence below
-       the documented minimum (1ms autonomous queue, 100ms drain). *)
+       the documented minimum (100ms drain). *)
 
 open Alcotest
 
@@ -41,14 +38,6 @@ let test_default_drain_interval () =
     check approx "crash_persistence_drain_sec default = 2.0"
       2.0 P.crash_persistence_drain_sec)
 
-let test_default_autonomous_queue_poll () =
-  (* Pre-extraction value at [keeper_keepalive.ml:171]
-     (literal 0.05). Reducing this lowers ticket-grant latency under
-     contention; raising it lowers idle CPU. *)
-  with_env "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC" None (fun () ->
-    check approx "autonomous_queue_poll_sec default = 0.05"
-      0.05 P.autonomous_queue_poll_sec)
-
 (* --- 2. Env override wins ------------------------------------------- *)
 
 let test_env_override_drain () =
@@ -64,16 +53,6 @@ let test_env_override_drain () =
     in
     check approx "env override drain interval" 5.5 v)
 
-let test_env_override_autonomous_poll () =
-  with_env "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC" (Some "0.25") (fun () ->
-    let v =
-      Float.max 0.001
-        (match Sys.getenv_opt "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC" with
-         | Some s -> (try float_of_string s with _ -> 0.05)
-         | None -> 0.05)
-    in
-    check approx "env override autonomous poll" 0.25 v)
-
 (* --- 3. Floor clamps prevent pathological values ------------------- *)
 
 let test_drain_floor_clamp () =
@@ -86,16 +65,6 @@ let test_drain_floor_clamp () =
     in
     check approx "drain interval floor (0.1s)" 0.1 v)
 
-let test_autonomous_poll_floor_clamp () =
-  with_env "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC" (Some "0.0") (fun () ->
-    let v =
-      Float.max 0.001
-        (match Sys.getenv_opt "MASC_KEEPER_AUTONOMOUS_QUEUE_POLL_SEC" with
-         | Some s -> (try float_of_string s with _ -> 0.05)
-         | None -> 0.05)
-    in
-    check approx "autonomous poll floor (1ms)" 0.001 v)
-
 let () =
   run "env_config_keeper_poll_intervals"
     [
@@ -103,19 +72,13 @@ let () =
         [
           test_case "crash_persistence_drain_sec = 2.0"
             `Quick test_default_drain_interval;
-          test_case "autonomous_queue_poll_sec = 0.05"
-            `Quick test_default_autonomous_queue_poll;
         ] );
       ( "env override wins",
         [
           test_case "drain override" `Quick test_env_override_drain;
-          test_case "autonomous poll override"
-            `Quick test_env_override_autonomous_poll;
         ] );
       ( "floor clamps",
         [
           test_case "drain floor 0.1s" `Quick test_drain_floor_clamp;
-          test_case "autonomous poll floor 1ms"
-            `Quick test_autonomous_poll_floor_clamp;
         ] );
     ]

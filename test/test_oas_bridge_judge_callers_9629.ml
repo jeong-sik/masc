@@ -8,19 +8,30 @@
    below the observed p50 of LLM-via-OAS-worker calls — and produced
    the "Execution timed out after 60.0s" warnings reported in the
    issue.  Governance_judge had a 300s default but lived outside the
-   per-caller Prometheus counter.
+   per-caller Otel_metric_store counter.
 
    #13113 follow-up: live /Users/dancer/me evidence showed the opposite
    failure mode once both judges shared the 300s worker default: a dashboard
    governance judge can pin a CLI-backed child for minutes and make operator
    surfaces / health checks stale.  Dashboard judges are advisory, so their
-   checked-in default is now bounded separately while env overrides stay
+   checked-in default is bounded separately while env overrides stay
    available.
+
+   2026-06-08 follow-up (#20082): fleet-wide idle root cause was the
+   45s per-judge wrapper firing before the OAS provider's first
+   response (boot race + lane saturation).  Both dashboard judge
+   callers now resolve to [Float.infinity] via
+   [governance_judge_no_timeout] — the bridge applies no wrapper
+   timeout to advisory dashboard judge cycles; real protection lives
+   at the OAS provider boundary.  Per-caller env overrides
+   ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) still win
+   for operators who want a finite budget.
 
    This test pins:
 
-     1. Both judges resolve to [dashboard_judge_default_sec] by default,
-        instead of inheriting the generic 300s worker budget.
+     1. Both judges resolve to [governance_judge_no_timeout] (i.e.
+        [Float.infinity]) by default, so the bridge never wraps an
+        advisory dashboard judge cycle in a timer.
      2. Removed pre-SSOT env vars
         ([MASC_OPERATOR_JUDGE_TIMEOUT_SEC],
         [MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC]) are ignored.
@@ -51,44 +62,53 @@ let clear_all_envs () =
     (Cfg.known_callers ());
   List.iter (fun name -> Unix.putenv name "") legacy_envs
 
-(* The PR's stated invariant is "dashboard judges resolve to a
-   bounded 45.0s default, not the 300s worker budget".  Pin the
-   numeric value of [dashboard_judge_default_sec] explicitly.
-   Without this anchor, a future widen back toward the worker
-   budget would still pass the existing
-   [judge resolves to dashboard_judge_default_sec] checks because
-   both sides of the comparison would shift in lockstep. *)
+(* [dashboard_judge_default_sec] is the LEGACY pin (45.0s) that #9629
+   originally bounded both judges to.  It is no longer the active
+   default for either judge — both resolve to
+   [governance_judge_no_timeout] = [Float.infinity] (2026-06-08
+   #20082: 45s wrapper was firing before the OAS provider's first
+   response, propagating fleet-wide idle).  The value is retained
+   only so historical test fixtures that asserted on 45.0 keep a
+   stable reference.  The active no-timeout pin lives in
+   [Cfg.governance_judge_no_timeout]. *)
 let test_dashboard_judge_default_is_45s () =
   Alcotest.(check (float 0.0001))
-    "dashboard_judge_default_sec is bounded at 45.0s; widening it \
-     back toward the 300s worker budget reintroduces the operator-\
-     surface stall this PR is meant to prevent — see #13113 follow-up"
+    "dashboard_judge_default_sec is the legacy 45.0s pin; \
+     governance_judge_no_timeout is the active no-timeout value"
     45.0
     Cfg.dashboard_judge_default_sec
 
-let test_judge_defaults_are_bounded () =
+let test_judge_defaults_have_no_timeout () =
   clear_all_envs ();
+  Alcotest.(check bool)
+    "Governance_judge defaults to Float.infinity (governance_judge_no_timeout)"
+    true
+    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Governance_judge ()));
+  Alcotest.(check bool)
+    "Operator_judge defaults to Float.infinity (governance_judge_no_timeout)"
+    true
+    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Operator_judge ()));
   Alcotest.(check (float 0.0001))
-    "Governance_judge defaults to dashboard_judge_default_sec"
-    Cfg.dashboard_judge_default_sec
+    "Governance_judge default equals governance_judge_no_timeout pin"
+    Cfg.governance_judge_no_timeout
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
   Alcotest.(check (float 0.0001))
-    "Operator_judge defaults to dashboard_judge_default_sec"
-    Cfg.dashboard_judge_default_sec
+    "Operator_judge default equals governance_judge_no_timeout pin"
+    Cfg.governance_judge_no_timeout
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
 
 let test_removed_envs_are_ignored () =
   clear_all_envs ();
   Unix.putenv "MASC_OPERATOR_JUDGE_TIMEOUT_SEC" "75.0";
   Unix.putenv "MASC_DASHBOARD_GOVERNANCE_JUDGE_TIMEOUT_SEC" "90.0";
-  Alcotest.(check (float 0.0001))
-    "Operator_judge ignores removed env"
-    Cfg.dashboard_judge_default_sec
-    (Cfg.timeout_sec ~caller:Cfg.Operator_judge ());
-  Alcotest.(check (float 0.0001))
-    "Governance_judge ignores removed env"
-    Cfg.dashboard_judge_default_sec
-    (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
+  Alcotest.(check bool)
+    "Operator_judge ignores removed env (still infinite)"
+    true
+    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Operator_judge ()));
+  Alcotest.(check bool)
+    "Governance_judge ignores removed env (still infinite)"
+    true
+    (Float.is_infinite (Cfg.timeout_sec ~caller:Cfg.Governance_judge ()));
   clear_all_envs ()
 
 let test_canonical_env_overrides_judge_default () =
@@ -98,7 +118,7 @@ let test_canonical_env_overrides_judge_default () =
     (Cfg.per_caller_env_var ~caller:Cfg.Operator_judge)
     "55.0";
   Alcotest.(check (float 0.0001))
-    "canonical per-caller env wins"
+    "canonical per-caller env wins (finite budget overrides infinite default)"
     55.0
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ());
   clear_all_envs ()
@@ -121,10 +141,10 @@ let () =
     [
       ( "defaults",
         [
-          Alcotest.test_case "dashboard_judge_default_sec is 45s"
+          Alcotest.test_case "dashboard_judge_default_sec is the legacy 45.0s pin"
             `Quick test_dashboard_judge_default_is_45s;
-          Alcotest.test_case "judge defaults are bounded"
-            `Quick test_judge_defaults_are_bounded;
+          Alcotest.test_case "judge defaults have no wrapper timeout"
+            `Quick test_judge_defaults_have_no_timeout;
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );

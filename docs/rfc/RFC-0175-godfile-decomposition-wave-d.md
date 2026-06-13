@@ -54,21 +54,21 @@ let run_named config tools prompt =
   let health_tracker = ... in
   let budget = ... in
   (* 500 lines of setup *)
-  let try_cascade candidates =
+  let try_runtime candidates =
     (* uses provider, health_tracker, budget directly *)
     ...
   in
-  try_cascade initial_candidates
+  try_runtime initial_candidates
 
 (* After: explicit state record + top-level function *)
-type cascade_context = {
+type runtime_context = {
   provider : Provider.t;
   health_tracker : Health.tracker;
   budget : Budget.t;
   (* ... other captured fields *)
 }
 
-let try_cascade (ctx : cascade_context) candidates =
+let try_runtime (ctx : runtime_context) candidates =
   (* all state via ctx parameter *)
   ...
 ```
@@ -84,7 +84,7 @@ independent testing and parallel editing.
 | **P1** | `keeper_run_tools.ml` | Extract Hook Configuration (490 lines) → `keeper_hooks_builder.ml` + Tool Surface Computation (419 lines) → `keeper_tool_surface_compute.ml` | Medium — nested functions capture setup state |
 | **P2** | `keeper_unified_turn.ml` | Extract Execution & Retry Loop (701 lines) → `keeper_turn_retry.ml` | Medium-High — retry_loop captures turn state |
 | **P3** | `keeper_agent_run.ml` | Extract sub-functions from `run_turn` by domain | High — 95% single function |
-| **P4** | `keeper_turn_driver.ml` | Extract `try_cascade` (873 lines) → `keeper_cascade_try.ml` + `cycle_loop` → `keeper_cascade_cycle.ml` | Highest — deepest nesting, most captured state |
+| **P4** | `keeper_turn_driver.ml` | Extract `try_runtime` (873 lines) → `keeper_runtime_try.ml` + `cycle_loop` → `keeper_runtime_cycle.ml` | Highest — deepest nesting, most captured state |
 
 ## §3 P0: keeper_registry decomposition
 
@@ -97,8 +97,8 @@ Extract these functions (all top-level, no closure issues):
 
 - `update_current_turn`, `stamp_turn_progress`, `mark_turn_started`,
   `record_turn_progress`, `mark_sdk_turn_started`, `mark_turn_measurement`,
-  `set_turn_decision_stage`, `set_turn_cascade_state`,
-  `mark_turn_cascade_exhausted`, `mark_turn_cascade_done`,
+  `set_turn_decision_stage`, `set_turn_runtime_state`,
+  `mark_turn_runtime_exhausted`, `mark_turn_runtime_done`,
   `mark_turn_provider_attempt_started`, `set_turn_phase`,
   `set_turn_selected_model`, `prepare_turn_retry_after_compaction`,
   `mark_turn_gate_rejected_by_name`, `mark_turn_finished`,

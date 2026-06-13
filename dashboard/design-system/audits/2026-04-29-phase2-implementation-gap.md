@@ -22,7 +22,7 @@ For each in-scope zone:
 |------|------------------|---------------------|------------------|------------------|--------|----------------|
 | G1 Goal Zone | 3 (Horizon / Tree / Snapshot) | 1 (`GoalTree`) + horizon strip in `Planning` | 1 of 3 | partial (no `progress`/`total`) | **High** | needs backend metric fields + 2 new variants |
 | G2 Task Zone | 3 (Backlog / StaleAlert / Wall) | 1 (`TaskBacklog` kanban) | 1 of 3 (different layout) | partial (no `claim_age`/`drift`) | **Mid** | one new component each for Stale + Wall |
-| O1 Cascade Inspector | 3 (List / DeepDive / Compare) | adjacent (`StrategyTraceTable` rows) inside `CascadeConfigPanel` | 0 of 3 zone-shape | partial — strategy trace ≠ `cascade_audit.jsonl` hop schema | **High** | new surface; deep-dive/compare absent; backend audit-feed needed |
+| O1 Runtime Inspector | 3 (List / DeepDive / Compare) | adjacent (`StrategyTraceTable` rows) inside `RuntimeConfigPanel` | 0 of 3 zone-shape | partial — strategy trace ≠ `runtime_audit.jsonl` hop schema | **High** | new surface; deep-dive/compare absent; backend audit-feed needed |
 | O3 Safe Autonomy | 3 (Dashboard / ByKeeper / Trend) | 1 (`SafeAutonomyPanel`) | 1.5 of 3 (Dashboard fully, ByKeeper merged into KeeperCard) | mostly aligned | **Low–Mid** | Trend variant missing; Dashboard layout ≈ matches |
 | K1 Keeper Inspector v2 | 3 (BDI / ToolAccess / TokenStats) | inline fragments inside `KeeperDetailPage` + `KeeperConfigPanel` | 0.5 of 3 (BDI fields exist, no zone) | matches per-keeper; cross-keeper aggregate absent | **Mid** | BDI is fragments not panel; cross-keeper TokenStats absent |
 | K4 Autoresearch | 3 (LoopList / FindingCard / HypothesisFlow) | 1 (`Autoresearch` w/ `LoopSelector`/`LoopDetailView`) | 1 of 3 (different mental model) | **conflict** — production = self-improvement loop (cycles, keep/discard, score), preview = research loop (hypothesis/evidence/conclusion, confidence) | **High** | data-model conflict; not just UI gap |
@@ -110,30 +110,30 @@ Effort: **Mid**.
 
 ---
 
-## O1 · Cascade Inspector
+## O1 · Runtime Inspector
 
 ### Preview spec — `cb-root.jsx:194-198`, `cb-group-f.jsx:15-89`
 
 | Variant | Slot id | Component | LOC | Vocabulary |
 |---------|---------|-----------|-----|------------|
-| A · Cascade list (multi-run) | `cs-list` | `CascadeList` (uses `CascadeCard`) | 9 | list of cascade-run cards; each card = header (`id`, `cascade`, `trigger`, `at`, outcome pill) + ordered `hops` (`step/model/status/ms/reason`) + footer (`primary/hops/total/selected`). |
-| B · Failed run · deep dive | `cs-deep` | `CascadeDeepDive` | 9 | single-run `CascadeCard` with `showPool`: adds `configured pool` strip with hit/tried highlight. |
-| C · Failure vs success compare | `cs-cmp` | `CascadeCompare` | 11 | 2-col grid with one ok + one error card, `compactModel` mode. |
+| A · Runtime list (multi-run) | `cs-list` | `RuntimeList` (uses `RuntimeCard`) | 9 | list of runtime-run cards; each card = header (`id`, `runtime`, `trigger`, `at`, outcome pill) + ordered `hops` (`step/model/status/ms/reason`) + footer (`primary/hops/total/selected`). |
+| B · Failed run · deep dive | `cs-deep` | `RuntimeDeepDive` | 9 | single-run `RuntimeCard` with `showPool`: adds `configured pool` strip with hit/tried highlight. |
+| C · Failure vs success compare | `cs-cmp` | `RuntimeCompare` | 11 | 2-col grid with one ok + one error card, `compactModel` mode. |
 
-Mock data (`window.MASC_P2.cascadeAudit`): `{id, cascade, trigger, at, outcome, error_category, configured[], primary, selected, total_ms, hops:[{i, model, status, ms, reason?}]}` — i.e. `cascade_audit.jsonl` post-decode.
+Mock data (`window.MASC_P2.runtimeAudit`): `{id, runtime, trigger, at, outcome, error_category, configured[], primary, selected, total_ms, hops:[{i, model, status, ms, reason?}]}` — i.e. `runtime_audit.jsonl` post-decode.
 
-### Production — `dashboard/src/components/cascade-config-panel.ts` (1385 LOC)
+### Production — `dashboard/src/components/runtime-config-panel.ts` (1385 LOC)
 
-`CascadeConfigPanel` (line 1225) is the only cascade surface, mounted at `monitoring?section=runtime`. It renders:
+`RuntimeConfigPanel` (line 1225) is the only runtime surface, mounted at `monitoring?section=runtime`. It renders:
 
-- `CascadeValidationBanner` + 3-stat header (`profiles / 키퍼 / 드리프트`).
-- `ProfileCard` grid (one per cascade profile).
+- `RuntimeValidationBanner` + 3-stat header (`profiles / 키퍼 / 드리프트`).
+- `ProfileCard` grid (one per runtime profile).
 - `OrphanKeeperList`.
-- `CascadeRawConfigEditor` (raw TOML).
+- `RuntimeRawConfigEditor` (raw TOML).
 - `HealthTable` (rolling provider health, search box).
 - `ClientCapacityTable`, `ClientCapacityHistoryTable`.
 - `SloCard`.
-- `StrategyTraceTable` (line 1379) — closest cousin of preview O1: a row-per-event table over `fetchCascadeStrategyTrace` (`limit:50`). Uses `CascadeStrategyTraceEvent` not `cascade_audit.jsonl` hops.
+- `StrategyTraceTable` (line 1379) — closest cousin of preview O1: a row-per-event table over `fetchRuntimeStrategyTrace` (`limit:50`). Uses `RuntimeStrategyTraceEvent` not `runtime_audit.jsonl` hops.
 
 There is no per-run card, no hop visualization, no failure/success compare.
 
@@ -144,12 +144,12 @@ There is no per-run card, no hop visualization, no failure/success compare.
 | Variant A | per-run cards w/ ordered hops | `StrategyTraceTable` flat rows | layout differs; no hop ordering or `step/model/status/ms` per row |
 | Variant B | single-card hop trace + configured pool overlay | absent | full miss |
 | Variant C | side-by-side ok vs error | absent | full miss |
-| Data layer | `cascade_audit.jsonl` hop schema | `CascadeStrategyTraceEvent` (different shape — no `hops[]`) | likely needs new endpoint or schema enrichment |
-| Routing | `#cascade` | `monitoring?section=runtime` | OK if reused but not isolated |
+| Data layer | `runtime_audit.jsonl` hop schema | `RuntimeStrategyTraceEvent` (different shape — no `hops[]`) | likely needs new endpoint or schema enrichment |
+| Routing | `#runtime` | `monitoring?section=runtime` | OK if reused but not isolated |
 
 ### Recommendation — O1
 
-The preview's "Cascade Inspector" is a **separate observation surface** distinct from `CascadeConfigPanel`'s configuration role. They should not be conflated. New zone with a new endpoint (or new endpoint shape on the existing trace) is needed.
+The preview's "Runtime Inspector" is a **separate observation surface** distinct from `RuntimeConfigPanel`'s configuration role. They should not be conflated. New zone with a new endpoint (or new endpoint shape on the existing trace) is needed.
 
 Effort: **High**.
 
@@ -210,17 +210,17 @@ Effort: **Low–Mid**.
 | Variant | Slot id | Component | LOC | Vocabulary |
 |---------|---------|-----------|-----|------------|
 | A · BDI panel (will / needs / desires / goals) | `ki-bdi` | `KeeperBDIPanel` | 30 | `KeeperTabs` selector + `<dl class="ki-bdi">` rows: `will`, `needs`, `desires`, then horizon block (`short/mid/long` goals); header shows `role`, `social_model`. |
-| B · Tool access + cascade config | `ki-acc` | `KeeperToolAccess` | 30 | `<dl>` of `cascade`, `tools_preset`, `sandbox`, `network`, `auto_handoff`, `handoff_threshold`, `proactive_idle`, `mention targets`. |
+| B · Tool access + runtime config | `ki-acc` | `KeeperToolAccess` | 30 | `<dl>` of `runtime`, `tools_preset`, `sandbox`, `network`, `auto_handoff`, `handoff_threshold`, `proactive_idle`, `mention targets`. |
 | C · Token / handoff stats (all keepers) | `ki-stats` | `KeeperTokenStats` | 42 | aggregate: `<table>` rows per keeper with `in tok / out tok / in distribution bar`; bottom 3-cell totals (`Total In / Total Out / Keepers`). |
 
-Mock data (`window.MASC_P2.keepersFull`): `{id, role, social_model, will, needs, desires, short_goal, mid_goal, long_goal, cascade, tools_preset, sandbox, network, auto_handoff, handoff_threshold, proactive_idle_sec, mention[], tokens:{in,out}}`.
+Mock data (`window.MASC_P2.keepersFull`): `{id, role, social_model, will, needs, desires, short_goal, mid_goal, long_goal, runtime, tools_preset, sandbox, network, auto_handoff, handoff_threshold, proactive_idle_sec, mention[], tokens:{in,out}}`.
 
 ### Production — `dashboard/src/components/keeper-detail*.ts` + `keeper-config-panel.ts`
 
 - `keeper-detail.ts` (1194 LOC) — `KeeperDetailPage` (mounted via overlay or detail route). Renders identity strip with `will / needs / desires` (lines 1080-1085) — labels: `의지`, `필요`, `열망`. Plus `social_model_recognized` / `configured_social_model` / `social_model_fallback` (lines 950-967). Goals rendered separately under `active_goal_ids`.
 - `keeper-detail-panels.ts` (1264 LOC) — `KpiGrid`, `ContextChart`, `TokenTrendChart`, `PromptTelemetryPanel`, `CtxCompositionPanel`, `InferenceTelemetryPanel`, `MetricsCharts`, `RawDataDebug`, `EquipmentList`, `RelationshipList`, `TraitsList`. Per-turn token trend (`TokenTrendChart` line 560).
 - `keeper-detail-runtime.ts` (682 LOC) — runtime stats: `auto_handoff_rate` (line 399), `mention_reactive_turn_count` (line 401).
-- `keeper-config-panel.ts` (1186 LOC) — editable config: `sandbox_profile`, `network_mode`, `proactive_idle_sec`, `auto_handoff`, `handoff_threshold`, `cascade_name` (lines 144-198). Mounted within keeper detail tabs.
+- `keeper-config-panel.ts` (1186 LOC) — editable config: `sandbox_profile`, `network_mode`, `proactive_idle_sec`, `auto_handoff`, `handoff_threshold`, `runtime_id` (lines 144-198). Mounted within keeper detail tabs.
 - `keeper-chat-panel.ts` (270 LOC) — keeper chat surface.
 - `keeper-badge.ts` (211 LOC) — `KEEPER_REGISTRY`, `kSlot`, `kSigil`, `KeeperBadge`, `KeeperStack` (preview's `cb-shared.jsx` has the JSX twin).
 
@@ -304,7 +304,7 @@ A decision is required before any UI work. **Effort blocked on product decision*
 3. **F3 (Mid)** — G2 Stale + Wall: 2 new components in `goals/`. Backend may need to surface `claim_age`/`drift`.
 4. **F4 (Decision)** — K4: product call (a) vs (b). No code until resolved.
 5. **F5 (Decision)** — G1 metric source: add `progress`/`total` to `Goal` or derive from tasks. No code until resolved.
-6. **F6 (Large, defer)** — O1 Cascade Inspector as a new surface separate from `CascadeConfigPanel`. Likely Phase 3 territory.
+6. **F6 (Large, defer)** — O1 Runtime Inspector as a new surface separate from `RuntimeConfigPanel`. Likely Phase 3 territory.
 
 15 zones not covered here (G3, C1-C3, O2, O4, O5, K2, K3, I0, E1-E5) need an independent inventory before Phase F sizing is complete.
 
@@ -322,7 +322,7 @@ Production:
 - `dashboard/src/components/goals/planning.ts:193-309` — `Planning`.
 - `dashboard/src/components/goals/goal-tree.ts:945` — `GoalTree`.
 - `dashboard/src/components/goals/kanban-components.ts:211` — `TaskBacklog` (kanban).
-- `dashboard/src/components/cascade-config-panel.ts:1225` — `CascadeConfigPanel`.
+- `dashboard/src/components/runtime-config-panel.ts:1225` — `RuntimeConfigPanel`.
 - `dashboard/src/components/safe-autonomy.ts:337` — `SafeAutonomyPanel`.
 - `dashboard/src/components/keeper-detail.ts:726`, `:1080-1085` — `KeeperDetailPage` + BDI fragment.
 - `dashboard/src/components/keeper-config-panel.ts:577` — `KeeperConfigPanel`.
@@ -350,7 +350,7 @@ These zones have **zero dedicated production surface** or a **misaligned partial
 |------|-------|------------------|------------------|-----|--------|
 | G3 Accountability | Work | 2 (ledger, matrix) | None | Zero | High |
 | C1 Board Zone | Comms | 3 (feed, thread, hot/auto) | None | Zero | Mid |
-| C2 Messages / Broadcast | Comms | 3 (room, inbox, state block) | None | Zero | High |
+| C2 Messages / Broadcast | Comms | 3 (workspace, inbox, state block) | None | Zero | High |
 | C3 Composer v2 | Comms | 3 (broadcast, mention, state) | None | Zero | High |
 | O2 Audit Ledger | Observability | 3 (ledger, by actor, summary) | None | Zero | High |
 | O4 Cost & Latency | Observability | 3 (per-agent, heatmap, latency) | `cost-dashboard.ts` (per-**model**, not per-agent) | Misaligned | Mid |
@@ -394,13 +394,13 @@ These zones have **zero dedicated production surface** or a **misaligned partial
 
 ### C2 · Messages / Broadcast
 
-**Preview** (`cb-root.jsx:180-184`): Room timeline, mention inbox (@keeper), [STATE] block focus.
+**Preview** (`cb-root.jsx:180-184`): Workspace timeline, mention inbox (@keeper), [STATE] block focus.
 
-**Production search**: `rg -i "broadcast|message.*room|mention.*inbox|state.*block" src/components/` returned zero hits. The `masc_broadcast` MCP tool exists but no dashboard surface consumes it.
+**Production search**: `rg -i "broadcast|message.*workspace|mention.*inbox|state.*block" src/components/` returned zero hits. The `masc_broadcast` MCP tool exists but no dashboard surface consumes it.
 
 **Gap**: Zero.
 
-**Effort**: **High** — needs SSE or polling endpoint for room messages + 3 new components.
+**Effort**: **High** — needs SSE or polling endpoint for workspace messages + 3 new components.
 
 ---
 
@@ -538,7 +538,7 @@ These zones have **zero dedicated production surface** or a **misaligned partial
 
 ### E5 · Terminal / Search
 
-**Preview** (`cb-root.jsx:147-151`): Cascade-aware terminal pane, project search (rg-style), find/replace in file.
+**Preview** (`cb-root.jsx:147-151`): Runtime-aware terminal pane, project search (rg-style), find/replace in file.
 
 **Production search**: Zero hits for terminal or search surfaces in dashboard.
 
@@ -565,7 +565,7 @@ Including the 6 zones from the main audit + these 15 zones:
 3. **F3 (Mid)** — G2 stale + wall.
 4. **F4 (Decision)** — K4 product call.
 5. **F5 (Decision)** — G1 metric source.
-6. **F6 (Large)** — O1 Cascade Inspector surface (Phase 3 territory).
+6. **F6 (Large)** — O1 Runtime Inspector surface (Phase 3 territory).
 7. **F7 (Decision)** — O4: per-agent vs per-model scope call.
 8. **F8 (Mid)** — K2 decisions stream or defer.
 9. **F9–F15 (High)** — IDE track (I0 + E1–E5) is a separate epic, not Phase F.

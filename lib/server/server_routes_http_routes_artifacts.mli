@@ -3,7 +3,7 @@
 
     Tool outputs externalised by [Tool_bridge.maybe_externalize]
     live in [${MASC_BASE_PATH}/.masc/tool_blobs/<sha[0..1]>/<sha>];
-    the dashboard UI displays the sentinel-marker preview by
+    the dashboard UI displays the marker preview by
     default and lazy-fetches the full bytes via:
 
     {v GET /api/v1/artifacts/<sha256> v}
@@ -25,7 +25,7 @@ val is_valid_sha256 : string -> bool
     rejects requests whose path parameter fails this check with
     400 before touching the blob store, so the validation
     surfaces as a contract guard for path-traversal and
-    fixed-length sentinels. *)
+    fixed-length markers. *)
 
 val blob_response :
   sha256:string ->
@@ -49,7 +49,7 @@ val add_routes :
   Http_server_eio.Router.t
 (** Register the [GET /api/v1/artifacts/<sha256>] route on
     [router] using {!Server_auth.with_public_read} (the
-    artifacts endpoint is public-read by design — sentinel
+    artifacts endpoint is public-read by design — marker
     sha256 values do not leak in the dashboard's preview, so
     full-byte fetch needs no auth). Returns the augmented
     router. *)

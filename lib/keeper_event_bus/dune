@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_event_bus)
+ (public_name masc.keeper_event_bus)
+ (wrapped false)
+ (modules keeper_event_bus)
+ (libraries agent_sdk))

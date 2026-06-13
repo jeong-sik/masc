@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type continuity_judgment = {
   json : Yojson.Safe.t;
@@ -18,7 +20,6 @@ let identity_fields : (string * (keeper_meta -> string)) list =
     ("instructions", (fun m -> m.instructions));
   ]
 
-let string_list_to_json = Json_util.json_string_list
 
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id
@@ -64,9 +65,9 @@ let inheritance_delta_json ~(parent : keeper_meta) ~(child : keeper_meta) =
   `Assoc
     [
       ("mode", `String "identity_only");
-      ("inherited_fields", string_list_to_json inherited_fields);
-      ("changed_fields", string_list_to_json changed_fields);
-      ("dropped_fields", string_list_to_json dropped_fields);
+      ("inherited_fields", Json_util.json_string_list inherited_fields);
+      ("changed_fields", Json_util.json_string_list changed_fields);
+      ("dropped_fields", Json_util.json_string_list dropped_fields);
     ]
 
 let continuity_judgment ~(original : string) ~(received : string) =
@@ -199,14 +200,14 @@ let index_entry_json
       ("to_model", `String model);
       ("continuity_verdict", `String continuity.verdict);
       ("continuity_similarity", Json_util.float_opt_to_json continuity.similarity);
-      ("identity_inherited_fields", string_list_to_json inherited_fields);
-      ("identity_changed_fields", string_list_to_json changed_fields);
-      ("identity_dropped_fields", string_list_to_json dropped_fields);
+      ("identity_inherited_fields", Json_util.json_string_list inherited_fields);
+      ("identity_changed_fields", Json_util.json_string_list changed_fields);
+      ("identity_dropped_fields", Json_util.json_string_list dropped_fields);
       ("manifest_path", `String manifest_path);
     ]
 
 let record_handoff_artifacts
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(parent : keeper_meta)
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
@@ -236,21 +237,21 @@ let record_handoff_artifacts
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string GenerationLineageFailures)
              ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))]
              ();
-           Log.Keeper.warn
-             "keeper:%s failed to append generation index %s: %s"
-             child.name index_path (Printexc.to_string exn))
+           Log.Keeper.warn ~keeper_name:child.name
+             "failed to append generation index %s: %s"
+             index_path (Printexc.to_string exn))
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GenerationLineageFailures)
         ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Manifest_save))]
         ();
-      Log.Keeper.warn
-        "keeper:%s failed to save generation manifest %s: %s"
-        child.name manifest_path err
+      Log.Keeper.warn ~keeper_name:child.name
+        "failed to save generation manifest %s: %s"
+        manifest_path err
 
 let load_json_file_opt path =
   if not (Fs_compat.file_exists path) then None
@@ -259,7 +260,7 @@ let load_json_file_opt path =
     let report_drop ~reason ~detail =
       Safe_ops.report_persistence_read_drop
         ~on_drop:(fun () ->
-          Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+          Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
             ~labels:[("surface", surface); ("reason", reason)]
             ())
         ~surface
@@ -298,7 +299,7 @@ let rec take n xs =
     | [] -> []
     | x :: tl -> x :: take (n - 1) tl
 
-let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
+let surface_json (config : Workspace.config) (meta : keeper_meta) ~recent_limit =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let manifest_path = Keeper_types_support.keeper_generation_manifest_path config trace_id in
   let index_path = Keeper_types_support.keeper_generation_index_path config meta.name in

@@ -1,5 +1,5 @@
 ---- MODULE AuthIdentityFSM ----
-\* Models the masc-mcp request authentication FSM:
+\* Models the masc request authentication FSM:
 \*   transport bytes -> identify(token) -> policy(principal) -> decision
 \*
 \* Forensic root being modelled (PR #9657 / commit 277aa2698b, 2026-04-23):

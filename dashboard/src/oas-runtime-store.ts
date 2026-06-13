@@ -5,6 +5,7 @@ import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import { OAS_TELEMETRY_REPLAY_LIMIT } from './config/constants'
 import {
   oasTotalEvents,
+  oasAgentEvents,
   noteOasReplayWindow,
   pushOasAgentEvent,
   recordOasError,
@@ -606,6 +607,17 @@ export function hydrateOasRuntimeFromTelemetryEntries(entries: TelemetryEntry[])
   })
 }
 
+export function appendOasRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
+  const ordered = [...entries].sort((a, b) => {
+    const left = coerceOasRuntimeEnvelope(a)
+    const right = coerceOasRuntimeEnvelope(b)
+    return (left ? (eventReportedUnixSeconds(left) ?? 0) : 0) - (right ? (eventReportedUnixSeconds(right) ?? 0) : 0)
+  })
+  for (const entry of ordered) {
+    applyOasRuntimeEvent(entry, { origin: 'replay' })
+  }
+}
+
 export async function replayOasRuntimeTelemetry(signal?: AbortSignal): Promise<void> {
   const generation = ++replayGeneration
   const response = await fetchTelemetry({
@@ -618,6 +630,22 @@ export async function replayOasRuntimeTelemetry(signal?: AbortSignal): Promise<v
   noteOasReplayWindow({
     loadedEvents: oasTotalEvents.value,
     totalMatchingEvents: response.total_matching_entries ?? response.count,
-    truncated: response.truncated ?? false,
+    truncated: response.has_more ?? response.truncated ?? false,
+  })
+}
+
+export async function loadMoreOasEvents(signal?: AbortSignal): Promise<void> {
+  const currentOffset = oasAgentEvents.value.length
+  const response = await fetchTelemetry({
+    source: 'oas_event',
+    n: OAS_TELEMETRY_REPLAY_LIMIT,
+    offset: currentOffset,
+    signal,
+  })
+  appendOasRuntimeFromTelemetryEntries(response.entries)
+  noteOasReplayWindow({
+    loadedEvents: oasTotalEvents.value,
+    totalMatchingEvents: response.total_matching_entries ?? response.count,
+    truncated: response.has_more ?? response.truncated ?? false,
   })
 }

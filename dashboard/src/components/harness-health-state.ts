@@ -34,8 +34,8 @@ interface HarnessOverview {
   handoff_last_event_at: number | null
   fallback_ratio: number
   // Added by lib/dashboard/dashboard_harness_health.ml as part of #6565.
-  // Ratio of verdicts whose generator_cascade ≠ evaluator_cascade among
-  // verdicts that carried a generator_cascade. undefined when the backend
+  // Ratio of verdicts whose generator_runtime ≠ evaluator_runtime among
+  // verdicts that carried a generator_runtime. undefined when the backend
   // had zero eligible verdicts to compute the ratio.
   cross_model_rate?: number
   latest_pre_compact_ratio: number | null
@@ -49,10 +49,10 @@ export interface HarnessVerdictItem {
   agent_name: string
   gate: string
   verdict: string
-  evaluator_cascade: string
+  evaluator_runtime: string
   // Added by lib/tool_task.ml#build_verdict_sse_payload as part of #6565.
-  generator_cascade?: string | null
-  cross_model?: boolean
+  generator_runtime?: string | null
+  cross_runtime?: boolean
   fallback_reason?: string | null
 }
 
@@ -167,7 +167,9 @@ function processHarnessEvent(evt: unknown): void {
       agent_name: asString(payload.agent_name, ''),
       gate: asString(payload.gate, ''),
       verdict: asString(payload.verdict, ''),
-      evaluator_cascade: asString(payload.evaluator_cascade, ''),
+      evaluator_runtime: asString(payload.evaluator_runtime, ''),
+      generator_runtime: asString(payload.generator_runtime) ?? null,
+      cross_runtime: payload.cross_runtime === true,
       fallback_reason: asString(payload.fallback_reason) ?? null,
     }
     updateHarnessData(data => ({

@@ -6,8 +6,9 @@ Plan - 2026-05-18.html`, PR-A).
 Each row in `baseline.jsonl` is one fixture used by
 `test_exec_shell_command_gate.ml` to pin both:
 
-- The `Worker_dev_tools.validate_command_tool_execute_with_allowlist`
-  verdict (`worker_verdict`).
+- The `Exec_policy.validate_command_tool_execute`
+  verdict (`policy_verdict`; stored under the legacy JSONL key
+  `expected_worker_verdict`).
 - The Phase 1 SSOT `Masc_exec_command_gate.Shell_command_gate.gate`
   verdict (`ir_verdict`).
 
@@ -32,24 +33,23 @@ Each line is a single object:
 
 `category` is one of:
 
-- `successful` — worker gate and IR both allow.
-- `rejected` — worker gate and IR both reject (or both classify outside
-  the allowlist) for the same root reason.
-- `false_positive` — worker gate rejects a benign command that IR
+- `successful` — Exec policy and IR both allow.
+- `rejected` — Exec policy and IR both reject for the same root reason.
+- `false_positive` — Exec policy rejects a benign command that IR
   correctly allows. This is the bucket the quoted-pipe regex fix
   (#16110) and follow-ups continue to drain.
 - `too_complex` — IR classifies as `too_complex` (heredoc, cmd_subst,
-  proc_subst, logic_op, …); worker gate may allow or reject depending on
+  proc_subst, logic_op, …); Exec policy may allow or reject depending on
   metachar scan.
 - `quoted_pipe`, `regex_alternation`, `literal_pipe`, `real_pipeline`,
   `redirection`, `glob`, `path_traversal` — feature buckets for the
   Plan's "Phase 0 minimum set".
 
-## Worker verdict tags
+## Policy verdict tags
 
 `block_reason_to_string` cases map to short tags here:
 
-- `ok` — `validate_command_tool_execute_with_allowlist` returned `Ok ()`.
+- `ok` — `validate_command_tool_execute` returned `Ok ()`.
 - `empty_command` — `Error Empty_command`.
 - `chain_or_redirect` — `Error Chain_or_redirect`.
 - `injection` — `Error Injection`.
@@ -67,7 +67,6 @@ Each line is a single object:
 `ir_detail` carries the sub-reason tag:
 
 - For `reject`: see `reject_reason_tag` —
-  `command_not_in_allowlist` / `pipeline_segment_disallowed` /
   `pipes_not_allowed` / `redirect_disallowed_in_caller` /
   `path_outside_policy`.
 - For `cannot_parse`: see `parse_reason_tag` — `parse_error` /
@@ -85,8 +84,5 @@ row), update the JSONL and reference the PR/RFC in the
 commit. Mechanical drift is what this corpus is built to detect —
 do not "fix" rows without an explicit reason.
 
-Allowlist used for the IR verdict in tests:
-`[ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]`
-(superset of the categories needed to differentiate
-`command_not_in_allowlist` from `cannot_parse` for the rejection
-fixtures).
+IR verdicts now use syntax/path policy only; executable-name admission is not
+part of this corpus.

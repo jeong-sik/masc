@@ -80,7 +80,7 @@ type institution =
   ; alumni : string list
   }
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** {1 Default Values} *)
 
@@ -189,16 +189,24 @@ let rec episode_to_json (e : episode) : Yojson.Safe.t =
     ]
 
 and episode_of_json json =
-  let open Yojson.Safe.Util in
-  { id = json |> member "id" |> to_string
-  ; timestamp = json |> member "timestamp" |> json_to_float
-  ; participants = json |> member "participants" |> to_list |> List.map to_string
-  ; event_type = json |> member "event_type" |> to_string
-  ; summary = json |> member "summary" |> to_string
-  ; outcome = json |> member "outcome" |> to_string |> outcome_of_string
-  ; learnings = json |> member "learnings" |> to_list |> List.map to_string
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; timestamp = Json_util.get_float json "timestamp" |> Option.value ~default:0.0
+  ; participants = Json_util.get_string_list json "participants"
+  ; event_type = Json_util.get_string_with_default json ~key:"event_type" ~default:""
+  ; summary = Json_util.get_string_with_default json ~key:"summary" ~default:""
+  ; outcome =
+      Json_util.get_string_with_default json ~key:"outcome" ~default:""
+      |> outcome_of_string
+  ; learnings = Json_util.get_string_list json "learnings"
   ; context =
-      json |> member "context" |> to_assoc |> List.map (fun (k, v) -> k, to_string v)
+      (match m "context" with
+       | `Assoc pairs ->
+         List.filter_map
+           (fun (k, v) ->
+              match v with `String s -> Some (k, s) | _ -> None)
+           pairs
+       | _ -> [])
   }
 
 and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
@@ -214,15 +222,14 @@ and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
     ]
 
 and knowledge_of_json json =
-  let open Yojson.Safe.Util in
-  { id = json |> member "id" |> to_string
-  ; topic = json |> member "topic" |> to_string
-  ; content = json |> member "content" |> to_string
-  ; confidence = json |> member "confidence" |> json_to_float
-  ; source = json |> member "source" |> to_string
-  ; created_at = json |> member "created_at" |> json_to_float
-  ; last_verified = json |> member "last_verified" |> json_to_float
-  ; references = json |> member "references" |> to_list |> List.map to_string
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; topic = Json_util.get_string_with_default json ~key:"topic" ~default:""
+  ; content = Json_util.get_string_with_default json ~key:"content" ~default:""
+  ; confidence = Json_util.get_float json "confidence" |> Option.value ~default:0.0
+  ; source = Json_util.get_string_with_default json ~key:"source" ~default:""
+  ; created_at = Json_util.get_float json "created_at" |> Option.value ~default:0.0
+  ; last_verified = Json_util.get_float json "last_verified" |> Option.value ~default:0.0
+  ; references = Json_util.get_string_list json "references"
   }
 
 and pattern_to_json (p : pattern) : Yojson.Safe.t =
@@ -242,28 +249,19 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
     ]
 
 and pattern_of_json json =
-  let open Yojson.Safe.Util in
-  { id = json |> member "id" |> to_string
-  ; name = json |> member "name" |> to_string
-  ; description = json |> member "description" |> to_string
-  ; trigger = json |> member "trigger" |> to_string
-  ; steps = json |> member "steps" |> to_list |> List.map to_string
-  ; success_rate = json |> member "success_rate" |> json_to_float
-  ; usage_count = json |> member "usage_count" |> to_int
-  ; last_used = json |> member "last_used" |> json_to_float
-  ; evolved_from = json |> member "evolved_from" |> to_string_option
-  ; effectiveness_used =
-      (match json |> member "effectiveness_used" with
-       | `Int n -> n
-       | _ -> 0)
-  ; effectiveness_unused =
-      (match json |> member "effectiveness_unused" with
-       | `Int n -> n
-       | _ -> 0)
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; description = Json_util.get_string_with_default json ~key:"description" ~default:""
+  ; trigger = Json_util.get_string_with_default json ~key:"trigger" ~default:""
+  ; steps = Json_util.get_string_list json "steps"
+  ; success_rate = Json_util.get_float json "success_rate" |> Option.value ~default:0.0
+  ; usage_count = Json_util.get_int json "usage_count" |> Option.value ~default:0
+  ; last_used = Json_util.get_float json "last_used" |> Option.value ~default:0.0
+  ; evolved_from = Json_util.get_string json "evolved_from"
+  ; effectiveness_used = Json_util.get_int json "effectiveness_used" |> Option.value ~default:0
+  ; effectiveness_unused = Json_util.get_int json "effectiveness_unused" |> Option.value ~default:0
   ; effectiveness_last_check =
-      (match json |> member "effectiveness_last_check" with
-       | `Null -> 0.0
-       | other -> json_to_float other)
+      Json_util.get_float json "effectiveness_last_check" |> Option.value ~default:0.0
   }
 
 and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
@@ -278,14 +276,13 @@ and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
     ]
 
 and cultural_value_of_json json =
-  let open Yojson.Safe.Util in
-  { id = json |> member "id" |> to_string
-  ; name = json |> member "name" |> to_string
-  ; description = json |> member "description" |> to_string
-  ; weight = json |> member "weight" |> json_to_float
-  ; examples = json |> member "examples" |> to_list |> List.map to_string
-  ; anti_patterns = json |> member "anti_patterns" |> to_list |> List.map to_string
-  ; adopted_at = json |> member "adopted_at" |> json_to_float
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; description = Json_util.get_string_with_default json ~key:"description" ~default:""
+  ; weight = Json_util.get_float json "weight" |> Option.value ~default:0.0
+  ; examples = Json_util.get_string_list json "examples"
+  ; anti_patterns = Json_util.get_string_list json "anti_patterns"
+  ; adopted_at = Json_util.get_float json "adopted_at" |> Option.value ~default:0.0
   }
 
 and succession_to_json (s : succession_policy) : Yojson.Safe.t =
@@ -298,15 +295,13 @@ and succession_to_json (s : succession_policy) : Yojson.Safe.t =
     ]
 
 and succession_of_json json =
-  let open Yojson.Safe.Util in
-  { onboarding_steps = json |> member "onboarding_steps" |> to_list |> List.map to_string
-  ; required_knowledge =
-      json |> member "required_knowledge" |> to_list |> List.map to_string
+  { onboarding_steps = Json_util.get_string_list json "onboarding_steps"
+  ; required_knowledge = Json_util.get_string_list json "required_knowledge"
   ; mentor_assignment =
-      json |> member "mentor_assignment" |> to_string |> mentor_of_string
-  ; probation_period = json |> member "probation_period" |> json_to_float
-  ; graduation_criteria =
-      json |> member "graduation_criteria" |> to_list |> List.map to_string
+      Json_util.get_string_with_default json ~key:"mentor_assignment" ~default:"best_fit"
+      |> mentor_of_string
+  ; probation_period = Json_util.get_float json "probation_period" |> Option.value ~default:0.0
+  ; graduation_criteria = Json_util.get_string_list json "graduation_criteria"
   }
 
 and identity_to_json (i : identity) : Yojson.Safe.t =
@@ -319,12 +314,11 @@ and identity_to_json (i : identity) : Yojson.Safe.t =
     ]
 
 and identity_of_json json =
-  let open Yojson.Safe.Util in
-  { id = json |> member "id" |> to_string
-  ; name = json |> member "name" |> to_string
-  ; mission = json |> member "mission" |> to_string
-  ; founded_at = json |> member "founded_at" |> json_to_float
-  ; generation = json |> member "generation" |> to_int
+  { id = Json_util.get_string_with_default json ~key:"id" ~default:""
+  ; name = Json_util.get_string_with_default json ~key:"name" ~default:""
+  ; mission = Json_util.get_string_with_default json ~key:"mission" ~default:""
+  ; founded_at = Json_util.get_float json "founded_at" |> Option.value ~default:0.0
+  ; generation = Json_util.get_int json "generation" |> Option.value ~default:0
   }
 
 and memory_to_json (m : long_term_memory) : Yojson.Safe.t =
@@ -335,10 +329,19 @@ and memory_to_json (m : long_term_memory) : Yojson.Safe.t =
     ]
 
 and memory_of_json json =
-  let open Yojson.Safe.Util in
-  { episodic = json |> member "episodic" |> to_list |> List.map episode_of_json
-  ; semantic = json |> member "semantic" |> to_list |> List.map knowledge_of_json
-  ; procedural = json |> member "procedural" |> to_list |> List.map pattern_of_json
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
+  { episodic =
+      (match m "episodic" with
+       | `List items -> List.map episode_of_json items
+       | _ -> [])
+  ; semantic =
+      (match m "semantic" with
+       | `List items -> List.map knowledge_of_json items
+       | _ -> [])
+  ; procedural =
+      (match m "procedural" with
+       | `List items -> List.map pattern_of_json items
+       | _ -> [])
   }
 
 and institution_to_json (inst : institution) : Yojson.Safe.t =
@@ -352,20 +355,23 @@ and institution_to_json (inst : institution) : Yojson.Safe.t =
     ]
 
 and institution_of_json json =
-  let open Yojson.Safe.Util in
-  { identity = json |> member "identity" |> identity_of_json
-  ; memory = json |> member "memory" |> memory_of_json
-  ; culture = json |> member "culture" |> to_list |> List.map cultural_value_of_json
-  ; succession = json |> member "succession" |> succession_of_json
-  ; current_agents = json |> member "current_agents" |> to_list |> List.map to_string
-  ; alumni = json |> member "alumni" |> to_list |> List.map to_string
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key json) in
+  { identity = m "identity" |> identity_of_json
+  ; memory = m "memory" |> memory_of_json
+  ; culture =
+      (match m "culture" with
+       | `List items -> List.map cultural_value_of_json items
+       | _ -> [])
+  ; succession = m "succession" |> succession_of_json
+  ; current_agents = Json_util.get_string_list json "current_agents"
+  ; alumni = Json_util.get_string_list json "alumni"
   }
 ;;
 
 (** {1 Persistence (Eio Native)} *)
 
 let institution_file (config : config) =
-  Filename.concat (Coord_utils.masc_dir config) "institution.json"
+  Filename.concat (Workspace_utils.masc_dir config) "institution.json"
 ;;
 
 let load_institution ~fs (config : config) : institution option =
@@ -430,13 +436,13 @@ module Pure = struct
     { inst with memory = { inst.memory with procedural } }
   ;;
 
-  let agent_join inst ~agent_id =
+  let agent_session_bound inst ~agent_id =
     if List.mem agent_id inst.current_agents
     then inst
     else { inst with current_agents = agent_id :: inst.current_agents }
   ;;
 
-  let agent_leave inst ~agent_id =
+  let agent_session_ended inst ~agent_id =
     if List.mem agent_id inst.current_agents
     then
       { inst with
@@ -571,13 +577,13 @@ let codify_pattern ~fs config inst ~name ~description ~trigger ~steps =
 ;;
 
 let join ~fs config inst ~agent_id =
-  let inst' = Pure.agent_join inst ~agent_id in
+  let inst' = Pure.agent_session_bound inst ~agent_id in
   save_institution ~fs config inst';
   inst'
 ;;
 
 let leave ~fs config inst ~agent_id =
-  let inst' = Pure.agent_leave inst ~agent_id in
+  let inst' = Pure.agent_session_ended inst ~agent_id in
   save_institution ~fs config inst';
   inst'
 ;;
@@ -681,7 +687,7 @@ let load_and_format_for_spawn ~fs (config : config) : string =
   | None -> ""
 ;;
 
-(** Short welcome format for masc_join response.
+(** Short welcome format for agent startup response.
     Concise cultural inheritance - mission + values + one tip.
     @param inst The institution to format
     @return Formatted string for join welcome
@@ -792,7 +798,7 @@ let record_episode_jsonl ~event_type ~summary ~participants ~outcome ~learnings 
 ;;
 
 (** Load recent episodes from JSONL (last N entries) via a bounded
-    [Queue] ring — O(limit) resident memory regardless of file size,
+    [Queue] ring — O(limit) memory regardless of file size,
     one pass over the JSONL via [Fs_compat.fold_jsonl_lines]. *)
 let load_recent_episodes_jsonl ~limit : episode list =
   let path = episodes_jsonl_path () in

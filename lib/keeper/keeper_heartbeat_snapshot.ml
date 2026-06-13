@@ -7,17 +7,10 @@
    appending to the metrics ledger. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
-
-(* #10008 fm3: canonical metric name for proactive-scheduler skip
-   reasons.  Labels: [("keeper", <name>); ("reason", <skip_reason>)].
-   [reason] is derived from
-   [Keeper_world_observation.verdict_reasons_to_strings], which
-   produces one of {keeper_paused, approval_pending,
-   scheduled_autonomous_disabled, provider_cooldown_pending,
-   idle_gate_pending, cooldown_pending, no_signal}. *)
-let proactive_skip_reason_metric = Keeper_metrics.(to_string ProactiveSkip)
 
 let keepalive_interval_sec () =
   Runtime_params.get Governance_registry.keeper_keepalive_interval_sec
@@ -31,7 +24,7 @@ let heartbeat_history_persistence_surface = "keeper_heartbeat_history"
 let report_heartbeat_history_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
         ~labels:[("surface", heartbeat_history_persistence_surface); ("reason", reason)]
         ())
     ~surface:heartbeat_history_persistence_surface
@@ -78,15 +71,15 @@ let write_heartbeat_snapshot
   let metrics_store =
     Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
   in
-  let cascade_models =
-    Cascade_runtime.models_of_cascade_name
-      (Cascade_name.of_string_exn (Keeper_types.cascade_name_of_meta meta_current))
+  let runtime_models =
+    Provider_runtime_projection.default_execution_model_strings
+      ((Keeper_meta_contract.runtime_id_of_meta meta_current))
   in
-  let max_cascade_context =
+  let max_runtime_context =
     let resolution =
       Keeper_context_runtime.resolve_max_context_resolution
         ~requested_override:meta_current.max_context_override
-        cascade_models
+        runtime_models
     in
     resolution.effective_budget
   in
@@ -96,7 +89,7 @@ let write_heartbeat_snapshot
     load_context_from_checkpoint
       ~max_checkpoint_messages:meta_current.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
-      ~primary_model_max_tokens:max_cascade_context
+      ~primary_model_max_tokens:max_runtime_context
       ~base_dir
   in
   (* Fallback: when OAS checkpoint is absent (e.g. after server restart
@@ -173,7 +166,7 @@ let write_heartbeat_snapshot
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string HeartbeatFailures)
              ~labels:[("keeper", meta_current.name); ("site", "history_load")]
              ();
@@ -182,7 +175,7 @@ let write_heartbeat_snapshot
            []
        in
        if !parse_errors > 0 then begin
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
            ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
            ();
@@ -225,7 +218,7 @@ let write_heartbeat_snapshot
         jaccard_similarity user_message assistant_message
       | _ ->
         (* Unmeasurable (status_tick, heartbeat, empty reply): use the
-           sentinel [1.0] so the plan gate [<= 0.100] and guardrail gate
+           marker [1.0] so the plan gate [<= 0.100] and guardrail gate
            [<= floor] do NOT fire. [0.0] was a permissive default that
            conflated "no alignment measurable" with "no alignment at
            all", triggering auto_plan on every status_tick (#10012).
@@ -233,7 +226,7 @@ let write_heartbeat_snapshot
         1.0
     in
     (* status_tick / heartbeat turns lack a user/assistant pair, so the 0.0
-       fallbacks above are sentinels, not measurements. Mark the snapshot
+       fallbacks above are markers, not measurements. Mark the snapshot
        non-measurable and let Keeper_guard fail-closed on similarity gates. *)
     let similarity_measurable =
       Option.is_some latest_user_message
@@ -278,7 +271,7 @@ let write_heartbeat_snapshot
       ; handoff_cooldown_sec = meta_current.handoff_cooldown_sec
       ; auto_handoff_enabled = meta_current.auto_handoff
       ; reflect_repetition_threshold =
-          Keeper_config.keeper_rule_reflect_repetition_threshold ()
+          0.86
       ; plan_goal_alignment_threshold =
           Keeper_config.keeper_rule_plan_goal_alignment_threshold ()
       ; plan_response_alignment_threshold =
@@ -313,7 +306,7 @@ let write_heartbeat_snapshot
         ~max_tokens:
           (match ctx_opt with
            | Some c -> Keeper_context_core.max_tokens_of_context c
-           | None -> max_cascade_context)
+           | None -> max_runtime_context)
         ~repetition_risk
         ~goal_alignment
         ~response_alignment
@@ -365,7 +358,7 @@ let write_heartbeat_snapshot
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
            ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
            ();
@@ -385,9 +378,8 @@ let write_heartbeat_snapshot
              emitting it on every heartbeat made
              per-provider latency histograms and dashboards show
              ghost provider names long after the binary that wrote
-             them was rebuilt (observed qa-king / nick0cave stuck on
-             "deterministic_required_tool_fallback" across
-             post-#9967 rebuild).  Emit empty string here so
+             them was rebuilt (observed stale synthetic provider
+             labels across post-#9967 rebuild).  Emit empty string here so
              downstream per-provider aggregation ignores heartbeat
              records.  `last_model_used_label` on the keeper state
              JSON still reflects the last real turn for dashboard
@@ -412,7 +404,7 @@ let write_heartbeat_snapshot
           `Int
             (match ctx_opt with
              | Some c -> Keeper_context_core.max_tokens_of_context c
-             | None -> max_cascade_context)
+             | None -> max_runtime_context)
         ; "message_count", `Int message_count_v
         ; ( "continuity_state"
           , match continuity_snapshot with
@@ -433,8 +425,6 @@ let write_heartbeat_snapshot
           "compaction_before_tokens", `Int 0
         ; "compaction_after_tokens", `Int 0
         ; "work_kind", `String "status_tick"
-        ; "tool_call_count", `Int 0
-        ; "tools_used", `List []
         ; "snapshot_source", `String "keeper_context_status"
         ; "memory_check", memory_check_default_json ()
         ; "auto_rules", keeper_auto_rule_eval_to_json auto_rules
@@ -449,9 +439,7 @@ let write_heartbeat_snapshot
         ; "goal_drift", `Float auto_rules.goal_drift
         ; "guardrail_stop", `Bool auto_rules.guardrail_stop
         ; ( "guardrail_stop_reason"
-          , match auto_rules.guardrail_reason with
-            | Some reason -> `String reason
-            | None -> `Null )
+          , Json_util.string_opt_to_json auto_rules.guardrail_reason )
         ; "handoff", `Assoc [ "performed", `Bool false ]
         ; "stage_timing", Keeper_keepalive_signal.stage_timing_to_json ~ring:timing_ring ~count:timing_filled
         ]
@@ -472,12 +460,12 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string SseBroadcastFailures)
          ~labels:[("keeper", meta_current.name)]
          ();
        Log.Keeper.error "heartbeat SSE broadcast failed: %s" (Printexc.to_string exn));
-    Cascade_events.publish_keeper_snapshot
+    Keeper_event_publisher.publish_keeper_snapshot
       ~keeper_name:meta_current.name
       ~generation:meta_current.runtime.generation
       ~context_ratio:context_ratio_v
@@ -487,10 +475,10 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string HeartbeatFailures)
          ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
          ();
-       Log.Keeper.warn "keeper:%s flush_tool_usage failed: %s"
-         meta_current.name (Printexc.to_string exn))
+       Log.Keeper.warn ~keeper_name:meta_current.name "flush_tool_usage failed: %s"
+         (Printexc.to_string exn))
 ;;

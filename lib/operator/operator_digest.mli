@@ -38,9 +38,9 @@ val summary_of_recommendations : actor:string -> recommended_action list -> Yojs
 
 val health_from_attention_items : attention_item list -> string
 
-val build_room_attention_items : Coord.config -> attention_item list
+val build_workspace_attention_items : Workspace.config -> attention_item list
 
-val room_recommendations : Coord.config -> recommended_action list
+val workspace_recommendations : Workspace.config -> recommended_action list
 
 val normalize_digest_target_type :
   string option -> (string, string) result

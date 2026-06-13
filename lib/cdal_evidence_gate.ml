@@ -7,90 +7,26 @@ type decision =
       ; payload_json : Yojson.Safe.t
       }
 
-let rule_id_violated = "cdal_verdict_violated"
-let rule_id_inconclusive = "cdal_verdict_inconclusive_incomplete"
-let rule_id_missing_verdict = "cdal_verdict_missing"
+let rule_id_evidence_incomplete = "cdal_evidence_incomplete"
 
-let string_list_to_json xs = `List (List.map (fun s -> `String s) xs)
+let hint_evidence_incomplete =
+  "Supply task-completion evidence: notes >= 20 chars summarising what \
+   changed AND every contract.required_evidence entry mentioned verbatim, \
+   OR at least one handoff_context.evidence_refs reference (file path, PR \
+   number, commit hash, trace id, or any reference URL). Pure-placeholder \
+   notes ('done', 'ok', etc.) with no required_evidence mention and no \
+   handoff evidence_refs keep this gate closed."
 
-(* Project a contract_verdict to a JSON envelope for the operator. The
-   shape is stable so log/dashboard consumers can match on it. *)
-let payload_of_violated_verdict ~task_id (v : Cdal_types.contract_verdict) =
-  `Assoc
-    [ "task_id", `String task_id
-    ; "verdict_status", `String (Cdal_types.contract_status_to_string v.status)
-    ; "run_id", `String v.run_id
-    ; "contract_id", `String v.contract_id
-    ; "judgment_hash", `String v.judgment_hash
-    ; ( "findings"
-      , `List (List.map Cdal_types.contract_finding_to_json v.findings) )
-    ; ( "completeness_gaps"
-      , `List (List.map Cdal_types.completeness_gap_to_json v.completeness_gaps) )
-    ]
-
-let payload_of_inconclusive_verdict ~task_id ~required_evidence
-    (v : Cdal_types.contract_verdict)
-  =
-  `Assoc
-    [ "task_id", `String task_id
-    ; "verdict_status", `String (Cdal_types.contract_status_to_string v.status)
-    ; "run_id", `String v.run_id
-    ; "contract_id", `String v.contract_id
-    ; "judgment_hash", `String v.judgment_hash
-    ; "required_evidence_unsatisfied", string_list_to_json required_evidence
-    ; ( "completeness_gaps"
-      , `List (List.map Cdal_types.completeness_gap_to_json v.completeness_gaps) )
-    ]
-
-let reason_of_findings (findings : Cdal_types.contract_finding list) =
-  match findings with
-  | [] -> "verdict reports Violated with no per-finding detail"
-  | _ ->
-    let check_ids =
-      List.map (fun (f : Cdal_types.contract_finding) -> f.check_id) findings
-    in
-    Printf.sprintf
-      "CDAL verdict is Violated. Failed checks: %s"
-      (String.concat ", " check_ids)
-
-let reason_of_inconclusive ~required_evidence
-    (v : Cdal_types.contract_verdict)
-  =
-  let gap_count = List.length v.completeness_gaps in
+let reason_evidence_incomplete ~required_evidence =
   Printf.sprintf
-    "CDAL verdict is Inconclusive: %d completeness gap(s), %d required \
-     evidence entry/entries unsatisfied"
-    gap_count
+    "Task-completion evidence is insufficient: %d required evidence \
+     entry/entries unsatisfied and no substantive notes or handoff \
+     reference supplied"
     (List.length required_evidence)
-
-let hint_violated =
-  "Address the listed findings in [payload.findings]. Once the underlying \
-   checks pass, re-run the contract evaluator before retrying \
-   submit_for_verification."
-
-let hint_inconclusive =
-  "Supply the entries listed in [payload.required_evidence_unsatisfied] (or \
-   close the entries in [payload.completeness_gaps]) and re-run the \
-   contract evaluator."
-
-let reason_missing_verdict =
-  "CDAL verdict is missing for a contracted task; submit_for_verification \
-   requires a typed verdict before workflow evidence is accepted."
-
-let hint_missing_verdict =
-  "Two recovery paths: (1) retry keeper_task_done with notes >= 20 chars \
-   summarising what changed AND every contract.required_evidence entry \
-   mentioned verbatim (this triggers the evidence-based fallback in \
-   Cdal_evidence_gate); (2) retry with handoff_context.evidence_refs \
-   listing at least one concrete artefact reference (file path, PR \
-   number, commit hash, trace id).  Pure-placeholder notes ('done', \
-   'ok', etc.) with no required_evidence mention and no handoff \
-   evidence_refs keep this gate closed."
 
 (* Heuristic: an "evidence entry" is satisfied when the notes or
    handoff_context.evidence_refs mention a non-placeholder string that
-   names it. Only used for the Inconclusive arm of the decision matrix;
-   Satisfied/Violated/missing-verdict decisions do not consult this. *)
+   names it. *)
 let evidence_entry_satisfied
     ~notes
     ~(handoff_context : Masc_domain.task_handoff_context option)
@@ -178,24 +114,15 @@ let handoff_supplies_evidence
       (fun ref_ -> String.trim ref_ |> String.length > 0)
       hc.evidence_refs
 
-(* Evidence-based fallback (RFC-0109 Phase E-1 / B-lite): when the CDAL
-   verdict ledger has no entry for a contracted task but the keeper has
-   supplied substantive evidence (all required_evidence entries mentioned,
-   plus either non-placeholder notes or a handoff pr_url / evidence_refs),
-   treat the gate as Pass.  Rationale: the upstream LLM may have failed
-   to emit a typed [Cdal_proof.t] in the turn result (the only path that
-   triggers [Cdal_eval_v1.persist] in {!Keeper_agent_run_finalize_response}),
-   but the human-readable evidence the keeper *did* attach is sufficient
-   for the verifier keeper / human reviewer to inspect downstream.  This
-   replaces the prior dead-end where keeper_task_done → Submit redirect
-   → verdict missing Reject formed an unrecoverable loop with no
-   keeper-actionable path forward (logged 2026-05-27 fleet runtime).
-
-   Returns [true] only when *every* required_evidence entry from the
-   contract is mentioned in notes/handoff AND the keeper supplied at
-   least one of: substantive notes, handoff.pr_url, handoff.evidence_refs.
-   Empty notes with empty required_evidence still rejects, since that
-   carries no evidence at all. *)
+(* Evidence-substantiveness gate for explicit verification submissions. Normal
+   task completion is LLM-reviewed before it reaches [Done]; this gate only
+   checks that a caller putting a task into AwaitingVerification supplied
+   evidence a reviewer can inspect downstream. A contracted task passes when
+   *every* required_evidence entry is mentioned in notes/handoff AND the caller
+   supplied at least one of: substantive notes, or a handoff evidence reference
+   (file path, PR number, commit hash, trace id, or any reference URL). Empty
+   notes with empty required_evidence still rejects, since that carries no
+   evidence at all. *)
 let evidence_is_substantive
     ~notes
     ~(handoff_context : Masc_domain.task_handoff_context option)
@@ -223,79 +150,39 @@ let evidence_summary_payload
            | Some hc -> List.length hc.evidence_refs) )
     ]
 
-let default_lookup ~task_id =
-  Cdal_verdict_gate.lookup_latest_verdict ~warn_on_missing:false ~task_id ()
-
-let decide
-    ?(lookup = default_lookup)
-    ~task_id
-    ~task_opt
-    ~notes
-    ~handoff_context
-    ()
-  =
-  match lookup ~task_id with
-  | Some (v : Cdal_types.contract_verdict) ->
-    (match v.status with
-     | Cdal_types.Satisfied -> Pass
-     | Cdal_types.Violated ->
-       let payload_json = payload_of_violated_verdict ~task_id v in
-       Reject
-         { reason = reason_of_findings v.findings
-         ; rule_id = rule_id_violated
-         ; hint = hint_violated
-         ; payload_json
-         }
-     | Cdal_types.Inconclusive ->
-       let task_contract =
-         match (task_opt : Masc_domain.task option) with
-         | Some t -> t.contract
-         | None -> None
-       in
-       let unsatisfied =
-         unsatisfied_required_evidence
-           ~notes
-           ~handoff_context
-           task_contract
-       in
-       let has_completeness_gaps = v.completeness_gaps <> [] in
-       if (not has_completeness_gaps) && unsatisfied = []
-       then Pass
-       else
-         let payload_json =
-           payload_of_inconclusive_verdict
-             ~task_id
-             ~required_evidence:unsatisfied
-             v
-         in
-         Reject
-           { reason = reason_of_inconclusive ~required_evidence:unsatisfied v
-           ; rule_id = rule_id_inconclusive
-           ; hint = hint_inconclusive
-           ; payload_json
-           })
-  | None ->
-    (match (task_opt : Masc_domain.task option) with
-     | Some t when Option.is_some t.contract ->
-       if evidence_is_substantive ~notes ~handoff_context t.contract
-       then Pass
-       else
-         Reject
-           { reason = reason_missing_verdict
-           ; rule_id = rule_id_missing_verdict
-           ; hint = hint_missing_verdict
-           ; payload_json =
-               `Assoc
-                 [ "task_id", `String task_id
-                 ; "contract_required", `Bool true
-                 ; "verdict_status", `String "missing"
-                 ; ( "evidence_summary"
-                   , evidence_summary_payload ~notes ~handoff_context )
-                 ]
-           }
-     | _ ->
-       (* Analysis-only task bypass: a task with no contract has nothing to
-          verify, so the gate must not block keeper_task_done. This is the
-          RFC-0109 §6.5.2 row that directly fixes the operator-visible
-          open-loop block for masc-improver-style keepers. *)
-       Pass)
+let decide ~task_id ~task_opt ~notes ~handoff_context () =
+  match (task_opt : Masc_domain.task option) with
+  | Some t when Option.is_some t.contract ->
+    if evidence_is_substantive ~notes ~handoff_context t.contract
+    then begin
+      Log.Task.info "cdal_evidence_gate PASS task=%s notes_len=%d handoff_refs=%d"
+        task_id (String.length (String.trim notes))
+        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs);
+      Pass
+    end
+    else
+      let unsatisfied =
+        unsatisfied_required_evidence ~notes ~handoff_context t.contract
+      in
+      Log.Task.warn "cdal_evidence_gate REJECT task=%s unsatisfied=%d notes_len=%d handoff_refs=%d rule=%s"
+        task_id (List.length unsatisfied) (String.length (String.trim notes))
+        (match handoff_context with None -> 0 | Some hc -> List.length hc.evidence_refs)
+        rule_id_evidence_incomplete;
+      Reject
+        { reason = reason_evidence_incomplete ~required_evidence:unsatisfied
+        ; rule_id = rule_id_evidence_incomplete
+        ; hint = hint_evidence_incomplete
+        ; payload_json =
+            `Assoc
+              [ "task_id", `String task_id
+              ; "contract_required", `Bool true
+              ; ( "required_evidence_unsatisfied"
+                , Json_util.json_string_list unsatisfied )
+              ; ( "evidence_summary"
+                , evidence_summary_payload ~notes ~handoff_context )
+              ]
+        }
+  | _ ->
+    (* Analysis-only task bypass: a task with no contract has nothing to
+       verify, so the gate must not block keeper_task_done. *)
+    Pass

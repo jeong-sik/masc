@@ -20,7 +20,7 @@ let ensure_dir (path : string) : string =
      then re-raise after release. Escaping an exception from
      Eio.Mutex.use_rw poisons the mutex and breaks all subsequent
      ensure_dir calls in the same process (Issue #8475: fleet-test
-     isolation cascade failures). *)
+     isolation runtime failures). *)
   let deferred_exn = ref None in
   Eio_guard.with_mutex dir_mu (fun () ->
     if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
@@ -31,7 +31,7 @@ let ensure_dir (path : string) : string =
           Ok ()
         with
         | Eio.Cancel.Cancelled _ as exn ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
               ();
@@ -44,7 +44,7 @@ let ensure_dir (path : string) : string =
             Keeper_disk_pressure.note_exception
               ~site:"filesystem_runtime.ensure_dir"
               exn;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
               ();
@@ -89,7 +89,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
         Keeper_disk_pressure.note_if_disk_exhaustion
           ~site:"filesystem_runtime.save_atomic"
           msg;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string FsFailures)
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
           ();
@@ -105,7 +105,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
       Keeper_disk_pressure.note_exception
         ~site:"filesystem_runtime.save_atomic"
         exn;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string FsFailures)
         ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]
         ();
@@ -120,13 +120,13 @@ let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) res
 (* Standard Keeper Paths                                            *)
 (* ================================================================ *)
 
-let keeper_dir (config : Coord.config) : string =
-  let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
+let keeper_dir (config : Workspace.config) : string =
+  let d = Workspace.keepers_runtime_dir config in
   ensure_dir d
 
-let session_base_dir (config : Coord.config) : string =
-  let d = Filename.concat (Coord.masc_root_dir config) "traces" in
+let session_base_dir (config : Workspace.config) : string =
+  let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
   ensure_dir d
 
-let keeper_session_dir (config : Coord.config) (trace_id : string) : string =
+let keeper_session_dir (config : Workspace.config) (trace_id : string) : string =
   Filename.concat (session_base_dir config) trace_id

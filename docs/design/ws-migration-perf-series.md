@@ -5,7 +5,7 @@ code_refs:
   - lib/server/server_mcp_transport_ws.ml
   - lib/sse.ml
   - lib/transport_metrics.ml
-  - lib/grpc/masc_grpc_service.ml
+  - lib/server/masc_grpc_service.ml
   - dashboard/src/dashboard-ws.ts
   - dashboard/src/sse.ts
   - dashboard/src/components/transport-health.ts
@@ -56,7 +56,7 @@ Three categories of cost were identified:
 | Byte-copy amplification | Same shape as parse amplification, but at the `Bytes.of_string sse_event` layer for the raw-forward path. | GC pressure scales with `sessions × events/s × event_size`. |
 | Unbounded client buffer growth | The server had no way to know when a client was falling behind.  A slow tab accumulated deltas in `WebSocket.bufferedAmount` without any backpressure. | Browser OOM / connection drops under chronic slowness. |
 | Duplicate delivery | Parallel SSE + WS means the same data lands on the client twice. | Wasted bandwidth, double store hydration. |
-| Opaque operational state | Every optimisation and backpressure signal was invisible except via `/metrics`. | Operators could not tell the optimisations from a fresh idle server. |
+| Opaque operational state | Every optimisation and backpressure signal was invisible except via external telemetry. | Operators could not tell the optimisations from a fresh idle server. |
 
 ## 3. The seven PRs
 
@@ -215,7 +215,7 @@ Two format helpers (`formatHitRate`, `formatAvgBufferedBytes`) return
 ### 3.8 #10112 — gRPC events_dropped counter (server, observability)
 
 Mirrors #10104's drop signal for the gRPC subscriber path.  The
-gRPC callback in `lib/grpc/masc_grpc_service.ml:484` already drops
+gRPC callback in `lib/server/masc_grpc_service.ml:484` already drops
 events when its output stream's buffer is near capacity, but the
 drop was visible only in logs.
 
@@ -326,7 +326,7 @@ bounded client staleness is the safer failure mode.
 ### Literal-name metric reads at surface boundaries
 
 #10106 reads the WS delivery counters by string constant rather than
-by `Prometheus.metric_*` module-level constants.  This decouples the
+by backend module-level constants.  This decouples the
 consumer (transport-health) from the producers (the various WS PRs)
 so they can merge in any order.  If a metric has not been registered
 yet, `metric_value_or_zero` returns 0.0 — a semantically honest "no
@@ -387,7 +387,7 @@ No timeline; depends on production confidence in the WS path.
 
 ### gRPC subscriber symmetry (addressed in #10112, #10114, #10117)
 
-The gRPC subscriber in `lib/grpc/masc_grpc_service.ml:477` had a
+The gRPC subscriber in `lib/server/masc_grpc_service.ml:477` had a
 similar fan-out shape to WS but no drop signal.  This is now
 covered:
 
@@ -453,7 +453,7 @@ All seven PRs are additive and flagged.  Emergency rollback steps:
   cache, bytes cache, delta construction, backpressure gate.
 - `lib/server/server_ws_standalone.ml` — handshake and subscriber
   registration for the standalone WS port.
-- `lib/transport_metrics.ml` — Prometheus metric helpers and the
+- `lib/transport_metrics.ml` — transport metric helpers and the
   `transport_health_json` payload.
 - `dashboard/src/dashboard-ws.ts` — client WS handshake, ack,
   subscribe/delta handling.
@@ -467,4 +467,4 @@ All seven PRs are additive and flagged.  Emergency rollback steps:
 | Date | Change |
 |------|--------|
 | 2026-04-25 | Initial draft, covers #10089 through #10107. |
-| 2026-04-25 | Add §3.8–§3.12 for the four post-draft PRs (gRPC observability triple #10112/#10114/#10117, the slice-indexed RFC #10119, and the dashboard_snapshot chore #10120).  Update §5 deferred decisions: slice-indexed fan-out has an RFC (#10119); gRPC subscriber symmetry has landed.  Add `lib/grpc/masc_grpc_service.ml` to `code_refs`. |
+| 2026-04-25 | Add §3.8–§3.12 for the four post-draft PRs (gRPC observability triple #10112/#10114/#10117, the slice-indexed RFC #10119, and the dashboard_snapshot chore #10120).  Update §5 deferred decisions: slice-indexed fan-out has an RFC (#10119); gRPC subscriber symmetry has landed.  Add `lib/server/masc_grpc_service.ml` to `code_refs`. |

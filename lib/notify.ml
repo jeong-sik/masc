@@ -5,7 +5,6 @@
 type event =
   | Mention of { from_agent: string; target_agent: string option; message: string }
   | Interrupt of { agent: string; action: string }
-  | PortalMessage of { from_agent: string; target_agent: string option; message: string }
   | TaskCompleted of { agent: string; task_id: string }
   | Custom of { title: string; subtitle: string; message: string }
 
@@ -28,7 +27,7 @@ let run_argv_line argv =
       ~actor:(Masc_exec.Agent_id.of_string "system/notify")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"notify argv"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
       argv
   in
   match String.split_on_char '\n' output with
@@ -47,7 +46,7 @@ let run_argv_ignore argv =
          ~actor:(Masc_exec.Agent_id.of_string "system/notify")
          ~raw_source:(exec_gate_raw_source argv)
          ~summary:"notify argv"
-         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+
          argv
      in
      match status with
@@ -281,20 +280,6 @@ let notify event =
         ~sound:true  (* Sound for interrupts! *)
         ()
 
-  | PortalMessage { from_agent; target_agent; message } ->
-      let emoji = agent_emoji from_agent in
-      let focus_cmd = build_focus_command {
-        target_agent;
-        from_agent = Some from_agent;
-        task_id = None;
-      } in
-      send_notification
-        ~title:(Printf.sprintf "%s MASC Portal" emoji)
-        ~subtitle:(Printf.sprintf "From: %s" from_agent)
-        ~message
-        ?focus_cmd
-        ()
-
   | TaskCompleted { agent; task_id } ->
       let emoji = agent_emoji agent in
       let focus_cmd = build_focus_command {
@@ -320,9 +305,6 @@ let notify event =
 (** Convenience functions for common notifications *)
 let notify_mention ?target_agent ~from_agent ~message () =
   notify (Mention { from_agent; target_agent; message })
-
-let notify_portal ?target_agent ~from_agent ~message () =
-  notify (PortalMessage { from_agent; target_agent; message })
 
 let notify_task_done ~agent ~task_id =
   notify (TaskCompleted { agent; task_id })

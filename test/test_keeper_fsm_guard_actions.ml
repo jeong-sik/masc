@@ -6,7 +6,7 @@
     [keeper_turn_fsm.ml:118] (Cycle 12 / Tier I3); this file pins the
     surrounding policy contract:
 
-    1. The Prometheus counter constant matches the documented series.
+    1. The Otel_metric_store counter constant matches the documented series.
     2. An honest thunk (no assert raised) leaves the counter alone.
     3. A buggy thunk (raises [Assert_failure], simulating a PPX-injected
        guard that observed a spec violation) bumps the counter by one
@@ -15,8 +15,8 @@
     5. Non-[Assert_failure] exceptions propagate unchanged — only the
        spec-violation channel is intercepted. *)
 
-module P = Masc_mcp.Prometheus
-module G = Masc_mcp.Keeper_fsm_guard_runtime
+module P = Masc.Otel_metric_store
+module G = Masc.Keeper_fsm_guard_runtime
 
 let counter_name = P.metric_fsm_guard_violation
 
@@ -27,7 +27,7 @@ let read_count ~action ~stage =
 
 let test_counter_constant_is_stable () =
   Alcotest.(check string)
-    "metric name matches the documented Prometheus series"
+    "metric name matches the documented Otel_metric_store series"
     "masc_fsm_guard_violation_total"
     counter_name
 
@@ -104,7 +104,7 @@ let test_buggy_thunk_reraises () =
 
 let test_non_assert_exception_propagates_unchanged () =
   (* RFC-0072 Phase 5 widened the catch to all exceptions so typed
-     transition violations (Cascade_transition_violation /
+     transition violations (Runtime_transition_violation /
      Turn_phase_transition_violation, which would otherwise create a
      Keeper_registry → this-module dependency cycle if named) are also
      captured. That means any exception escaping the thunk bumps the

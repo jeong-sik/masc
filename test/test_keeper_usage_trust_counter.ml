@@ -1,7 +1,7 @@
 (* test/test_keeper_usage_trust_counter.ml
 
    #9959 defensive layer test: verify the new [record_usage_trust]
-   helper increments the right Prometheus counters for each
+   helper increments the right Otel_metric_store counters for each
    [usage_trust] variant and isolates labels across keepers.
 
    The upstream root cause (accumulated values leaking into
@@ -9,18 +9,18 @@
    counters here surface the anomaly rate so operators can alert
    while that fix is in-flight. *)
 
-module UM = Masc_mcp.Keeper_unified_metrics
-module UT = Masc_mcp.Keeper_usage_trust
-module Prom = Masc_mcp.Prometheus
+module UM = Masc.Keeper_unified_metrics
+module UT = Keeper_usage_trust
+module Metrics = Masc.Otel_metric_store
 
 let outcome_for ~keeper ~outcome =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     UM.usage_trust_outcome_metric
     ~labels:[ ("keeper", keeper); ("outcome", outcome) ]
     ()
 
 let reason_for ~keeper ~reason =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     UM.usage_anomaly_reason_metric
     ~labels:[ ("keeper", keeper); ("reason", reason) ]
     ()

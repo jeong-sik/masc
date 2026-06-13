@@ -15,8 +15,8 @@ type MockOperatorSnapshot = {
 
 const {
   fetchPauseStatus,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   runGarbageCollection,
   cleanupZombies,
   flowState,
@@ -27,8 +27,8 @@ const {
   operatorSnapshot,
 } = vi.hoisted(() => ({
   fetchPauseStatus: vi.fn().mockResolvedValue(undefined),
-  pauseRoom: vi.fn().mockResolvedValue(undefined),
-  resumeRoom: vi.fn().mockResolvedValue(undefined),
+  pauseWorkspace: vi.fn().mockResolvedValue(undefined),
+  resumeWorkspace: vi.fn().mockResolvedValue(undefined),
   runGarbageCollection: vi.fn().mockResolvedValue(undefined),
   cleanupZombies: vi.fn().mockResolvedValue(undefined),
   flowState: { value: 'running' as 'running' | 'paused' | 'initializing' | 'unknown' },
@@ -46,8 +46,8 @@ vi.mock('./flow-control-state', () => ({
   flowState,
   maintenanceLoading,
   maintenanceResult,
-  pauseRoom,
-  resumeRoom,
+  pauseWorkspace,
+  resumeWorkspace,
   runGarbageCollection,
 }))
 
@@ -109,7 +109,7 @@ describe('FlowControlPanel', () => {
     operatorSnapshot.value = {
       admission_queue: {
         mode: 'passthrough',
-        throttle_owner: 'oas_cascade',
+        throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
         available: 2,
@@ -123,7 +123,8 @@ describe('FlowControlPanel', () => {
     const status = container.querySelector('[data-testid="flow-admission-mode"]')
     expect(status).not.toBeNull()
     expect(status!.textContent).toContain('passthrough')
-    expect(status!.textContent).toContain('OAS cascade')
+    expect(status!.textContent).toContain('OAS runtime')
     expect(status!.textContent).toContain('1/3')
   })
+
 })

@@ -32,7 +32,7 @@ Team KKK observation (24h window): **205 `Reason_internal_error` events
 across 22+ distinct keepers**. The arm is a §2 string-classifier hot path
 — `String.equal terminal_reason "internal_error"` plus a fallback over
 `error_kind = Some "internal"`. Every uncaught exception, every
-`None`-returning cascade classifier, every turn-budget overrun, and every
+`None`-returning runtime classifier, every turn-budget overrun, and every
 FSM precondition trip ends up indistinguishable downstream.
 
 This RFC splits `Reason_internal_error` into four typed sub-variants —
@@ -44,7 +44,7 @@ moment of `Disp_pause_human` resolution.
 
 Acceptance (Phase 4 + 24h sustained): plain `Reason_internal_error`
 occurrence = 0. All 205/24h routed to one of the four sub-variants. New
-prometheus label `reason_kind="internal_*"` makes the breakdown directly
+legacy metrics backend label `reason_kind="internal_*"` makes the breakdown directly
 inspectable.
 
 ## §1 Motivation
@@ -67,7 +67,7 @@ budget overruns, or by FSM invariant trips. Each of the four has a
 
 - **exception**: stack trace + fix the throw site (or wrap in `Result.t`)
 - **classifier unmapped**: extend classifier domain (RFC-0148 territory)
-- **timeout**: budget tune or cascade rotation
+- **timeout**: budget tune or runtime rotation
 - **invariant violation**: FSM bug; not a transient — needs code fix
 
 Bundling them inflates the apparent severity of "internal" and starves
@@ -141,7 +141,7 @@ and new co-exist via a deprecated alias to enable per-site migration.
 | Variant | Trigger | `source` example | `detail` example |
 |---|---|---|---|
 | `Reason_internal_exception` | uncaught exception or `Eio.Cancel.Cancelled` not absorbed | `"keeper_turn:exec"` | `"Failure: bad_argv"` |
-| `Reason_internal_classifier_unmapped` | cascade classifier returned `None` / `Other` | `"cascade.classify_attempt_outcome"` | `"unknown_error_kind"` |
+| `Reason_internal_classifier_unmapped` | runtime classifier returned `None` / `Other` | `"runtime.classify_attempt_outcome"` | `"unknown_error_kind"` |
 | `Reason_internal_timeout` | turn / phase exceeded budget without dispatch | `"keeper_turn:budget"` | `"phase_budget=30s"` |
 | `Reason_internal_invariant_violation` | FSM precondition or `assert false` | `"keeper_registry.validate_decision_transition"` | `"unknown_pair(Awaiting,Cancelling)"` |
 
@@ -158,7 +158,7 @@ distinct byte form:
 ```
 
 Existing string "internal_error" is retired in phase 3. Downstream JSON /
-prometheus readers must accept the four new forms before phase 3 ships.
+legacy metrics backend readers must accept the four new forms before phase 3 ships.
 
 ### 3.4 No catch-all replacement
 
@@ -166,13 +166,13 @@ The current arm `String.equal terminal_reason "internal_error" || ...`
 is replaced by direct typed emission at each call site. There is **no**
 new `else` arm that classifies on `terminal_reason` string content. If
 phase 4 acceptance fails (i.e. some 205/24h site still emits via the
-generic path), the residue routes to `Reason_unmapped_cascade_state`
+generic path), the residue routes to `Reason_unmapped_runtime_state`
 (existing fallthrough) and surfaces as a test failure, not a silent
 re-collapse.
 
 ## §4 Observability
 
-- **Prometheus**: new label `reason_kind` on the existing
+- **legacy metrics backend**: new label `reason_kind` on the existing
   `keeper_disposition_total` counter, taking values
   `internal_exception | internal_classifier_unmapped | internal_timeout
   | internal_invariant_violation` (and the existing non-internal values).
@@ -186,7 +186,7 @@ re-collapse.
 
 ## §5 Workaround self-check (software-development.md 3 signatures)
 
-1. **Telemetry-as-fix**: this RFC does add a prometheus label, but only
+1. **Telemetry-as-fix**: this RFC does add a legacy metrics backend label, but only
    *because* the typed split is the substrate. Without §3, the label
    would just be a string. With §3, the label is a projection of a
    closed-sum, which is the established fix pattern (cf. RFC-0155
@@ -203,9 +203,9 @@ re-collapse.
 | Phase | Scope | Verification |
 |---|---|---|
 | 1. **Typed substrate** | Add `internal_error_reason` record + 4 sub-variants alongside the existing `Reason_internal_error`. `to_string` for sub-variants emits new byte forms. | `dune build`; unit test enumerates 4 byte forms. |
-| 2. **Classify-then-emit** | At each known producer (`keeper_turn`, `keeper_registry` invariant sites, `cascade.classify_*`, budget-exceed paths) replace `terminal_reason := "internal_error"` with direct sub-variant construction. | Per-keeper unit test that synthetic input triggers the expected sub-variant. |
+| 2. **Classify-then-emit** | At each known producer (`keeper_turn`, `keeper_registry` invariant sites, `runtime.classify_*`, budget-exceed paths) replace `terminal_reason := "internal_error"` with direct sub-variant construction. | Per-keeper unit test that synthetic input triggers the expected sub-variant. |
 | 3. **Swap consumer arm** | Delete lines 615-621 (`String.equal ... "internal_error"` arm). Add explicit match on the four sub-variants. Retire `Reason_internal_error` (with breaking-change note). | `dune build` red on first uncovered call site; green once §2 phase covers all. |
-| 4. **24h soak** | Observe prometheus `reason_kind` distribution. Confirm plain `internal_error` byte form count = 0. | Grafana panel + `rg "internal_error" log/` returns 0 for new emissions. |
+| 4. **24h soak** | Observe legacy metrics backend `reason_kind` distribution. Confirm plain `internal_error` byte form count = 0. | Grafana panel + `rg "internal_error" log/` returns 0 for new emissions. |
 
 Each phase is a separate PR. Phase 2 may need 2–3 PRs if producer sites
 exceed one reviewer chunk; phase 3 must be one PR (single source of

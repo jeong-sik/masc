@@ -16,40 +16,20 @@
     transparent record alias + 8 value aliases. *)
 
 
-let take n xs =
-  let rec loop acc remaining xs =
-    if remaining <= 0
-    then List.rev acc
-    else (
-      match xs with
-      | [] -> List.rev acc
-      | x :: tl -> loop (x :: acc) (remaining - 1) tl)
-  in
-  loop [] n xs
-;;
+let take = List.take
 
 ;;
 
-let opt_string_json = function
-  | None -> `Null
-  | Some value -> `String value
-;;
+let opt_string_json = Json_util.string_opt_to_json
 
-let opt_bool_json = function
-  | None -> `Null
-  | Some value -> `Bool value
-;;
+let opt_bool_json = Json_util.bool_opt_to_json
 
 let opt_commit_equal left right =
   match left, right with
   | Some left, Some right -> Some (String.equal left right)
   | _ -> None
-;;
 
-let opt_int_json = function
-  | None -> `Null
-  | Some value -> `Int value
-;;
+let opt_int_json = Json_util.int_opt_to_json
 
 type git_upstream_status =
   { branch : string option

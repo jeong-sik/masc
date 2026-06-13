@@ -2,9 +2,11 @@
     keeper_unified_metrics.ml.
 
     Largest cluster in this godfile — writes the per-turn decision
-    record JSONL (event bus + Prometheus + receipt). *)
+    record JSONL (event bus + Otel_metric_store + receipt). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 module Social = Keeper_social_model
 
@@ -12,14 +14,14 @@ include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 
 let append_decision_record
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(meta : keeper_meta)
+    ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
-    ?(semaphore_wait_ms : int = 0)
     ~(outcome : string)
     ?(degraded_retry_applied = false)
-    ?degraded_retry_cascade
+    ?degraded_retry_runtime
     ?fallback_reason
     ?turn_mode
     ?social_state
@@ -31,9 +33,9 @@ let append_decision_record
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
   let affordances = observed_affordances_of_observation ~meta observation in
-  let tools_used =
+  let tool_names =
     match result with
-    | Some r -> r.tools_used
+    | Some r -> Keeper_agent_result.tool_names r
     | None -> []
   in
   let response_preview =
@@ -41,16 +43,6 @@ let append_decision_record
     | Some r when String.trim r.response_text <> "" ->
         Some (short_preview r.response_text)
     | _ -> None
-  in
-  let tool_call_count =
-    match result with
-    | Some r -> r.tool_calls_made
-    | None -> 0
-  in
-  let tool_calls =
-    match result with
-    | Some r -> r.tool_calls
-    | None -> []
   in
   let ( _turn_lane
       , _turn_tool_choice
@@ -66,7 +58,7 @@ let append_decision_record
       , _sandbox_profile
       , _network_mode
       , approval_mode ) =
-    Keeper_tool_call_log.get_turn_context ~keeper_name:meta.name ()
+    Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
   in
   let turn_id =
     Option.value ~default:meta.runtime.usage.total_turns turn_id_opt
@@ -87,29 +79,25 @@ let append_decision_record
     | [] -> None
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json ~config meta
+    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
   in
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
   let claim_executed =
-    List.exists Keeper_tool_progress.is_claim_tool_name tools_used
+    List.exists Keeper_tool_progress.is_claim_tool_name tool_names
   in
   let social_fields =
     match social_state with
     | None -> []
     | Some state ->
-        let option_field key = function
-          | Some value -> (key, `String value)
-          | None -> (key, `Null)
-        in
         [
           ("social_model", `String state.Social.social_model);
           ("belief_summary", `String state.belief_summary);
-          option_field "active_desire" state.active_desire;
-          option_field "current_intention" state.current_intention;
-          option_field "blocker" state.blocker;
-          option_field "need" state.need;
+          Json_util.string_opt_field "active_desire" state.active_desire;
+          Json_util.string_opt_field "current_intention" state.current_intention;
+          Json_util.string_opt_field "blocker" state.blocker;
+          Json_util.string_opt_field "need" state.need;
           ("speech_act", `String (Social.speech_act_to_string state.speech_act));
           ( "delivery_surface",
             `String
@@ -164,19 +152,18 @@ let append_decision_record
                terminal_reason.Keeper_turn_terminal.severity) );
         ("terminal_reason_source", `String terminal_reason.source);
         ("provider_context", provider_context_json ~meta result);
-        ("tool_contract", tool_contract_json ~tool_call_count ~tools_used result);
+        ("tool_surface", tool_surface_json result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
-        ( "degraded_retry_cascade",
-          Json_util.string_opt_to_json degraded_retry_cascade );
+        ( "degraded_retry_runtime",
+          Json_util.string_opt_to_json degraded_retry_runtime );
         ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
         ("turn_mode", Json_util.string_opt_to_json turn_mode_label);
         ("latency_ms", `Int latency_ms);
         ("duration_ms", `Int latency_ms);
-        ("semaphore_wait_ms", `Int semaphore_wait_ms);
         ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
         ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
         ( "observation",
@@ -199,11 +186,8 @@ let append_decision_record
                       - observation.claimable_task_count)) );
               ("failed_task_count", `Int observation.failed_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
-              ("active_agent_count", `Int observation.active_agent_count);
+              ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
-        ("tool_call_count", `Int tool_call_count);
-        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
-        ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
         ("claim_was_available", `Bool (observation.claimable_task_count > 0));
@@ -219,10 +203,7 @@ let append_decision_record
           | Some execution ->
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
-        ( "response_preview",
-          match response_preview with
-          | Some preview -> `String preview
-          | None -> `Null );
+        ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with
           | Some r when String.trim r.response_text <> "" ->
@@ -233,10 +214,7 @@ let append_decision_record
             (match result with
              | Some r -> response_requests_confirmation r.response_text
              | None -> false) );
-        ( "error",
-          match error with
-          | Some reason -> `String reason
-          | None -> `Null );
+        ( "error", Json_util.string_opt_to_json error );
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
@@ -246,17 +224,6 @@ let append_decision_record
           match result with
           | Some { run_validation = Some validation; _ } ->
               Agent_sdk.Raw_trace.run_validation_to_yojson validation
-          | _ -> `Null );
-        ( "cdal_proof",
-          match result with
-          | Some { proof = Some p; _ } ->
-              `Assoc
-                [
-                  ("run_id", `String p.Masc_mcp_cdal_runtime.Cdal_proof.run_id);
-                  ( "result_status",
-                    Masc_mcp_cdal_runtime.Cdal_proof.result_status_to_yojson p.result_status );
-                  ("tool_trace_count", `Int (List.length p.tool_trace_refs));
-                ]
           | _ -> `Null );
         ( "telemetry",
           match result with
@@ -275,22 +242,28 @@ let append_decision_record
                 | Some b -> [("thinking_enabled", `Bool b)]
                 | None -> []
               in
-              let cascade_fields =
-                match r.cascade_observation with
+              let runtime_fields =
+                match r.runtime_observation with
                 | Some co ->
-                    let cascade_name =
-                      Cascade_name.to_string
-                        co.cascade_name
+                    let runtime_id =
+                      co.runtime_id
+                    in
+                    let streaming_fields =
+                      [
+                        ("streaming_ttfrc_ms", Json_util.float_opt_to_json co.streaming_ttfrc_ms);
+                        ("streaming_inter_chunk_count", `Int co.streaming_inter_chunk_count);
+                        ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json co.streaming_inter_chunk_avg_ms);
+                      ]
                     in
                     [
-                      ("cascade_name", `String cascade_name);
+                      ("runtime_id", `String runtime_id);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
                       ("primary_model", `Null);
                       ("selected_model", `Null);
                       ("fallback_applied", `Bool co.fallback_applied);
                       ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
                       ("candidate_models", `List []);
-                    ]
+                    ] @ streaming_fields
                 | None -> []
               in
               let tool_surface_fields =
@@ -298,43 +271,21 @@ let append_decision_record
                   ( "turn_lane"
                   , Keeper_agent_tool_surface.turn_lane_to_yojson
                       r.tool_surface.turn_lane );
-                  ( "tool_surface_class"
-                  , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                      r.tool_surface.tool_surface_class );
-                  ("tool_requirement", Keeper_agent_tool_surface.tool_requirement_to_yojson r.tool_surface.tool_requirement);
-                  ("visible_tool_count", `Int r.tool_surface.visible_tool_count);
-                  ("tool_gate_enabled", `Bool r.tool_surface.tool_gate_enabled);
-                  ( "tool_surface_fallback_used",
-                    `Bool r.tool_surface.tool_surface_fallback_used );
-                  ( "required_tool_names",
-                    `List
-                      (List.map
-                         (fun name -> `String name)
-                         r.tool_surface.required_tool_names) );
-                  ( "missing_required_tool_names",
-                    `List
-                      (List.map
-                         (fun name -> `String name)
-                         r.tool_surface.missing_required_tool_names) );
                   ("config_root", `String r.tool_surface.config_root);
-                  ( "cascade_config_path",
-                    match r.tool_surface.cascade_config_path with
-                    | Some path -> `String path
-                    | None -> `Null );
+                  ( "runtime_config_path",
+                    Json_util.string_opt_to_json r.tool_surface.runtime_config_path );
                   ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
                   ( "approval_mode_effective",
-                    match r.tool_surface.approval_mode_effective with
-                    | Some mode -> `String mode
-                    | None -> `Null );
+                    Json_util.string_opt_to_json r.tool_surface.approval_mode_effective );
                   ("approval_mode_derived", `Bool r.tool_surface.approval_mode_derived);
                 ]
               in
                 let stop_reason_str =
                   match r.stop_reason with
-                  | Cascade_runner.Completed -> "completed"
-                  | Cascade_runner.TurnBudgetExhausted { turns_used; limit } ->
+                  | Runtime_agent.Completed -> "completed"
+                  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
                       Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
-                  | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
+                  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
@@ -354,19 +305,19 @@ let append_decision_record
                              tokens_per_second (output_tokens / latency_ms) below. Dashboards
                              should prefer hw_decode_* name; legacy name kept for backward compat. *)
                           [
-                            ("prompt_ms", match ti.prompt_ms with Some v -> `Float v | None -> `Null);
-                            ("predicted_ms", match ti.predicted_ms with Some v -> `Float v | None -> `Null);
-                            ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("hw_decode_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
-                            ("cache_n", match ti.cache_n with Some v -> `Int v | None -> `Null);
+                            ("prompt_ms", Json_util.float_opt_to_json ti.prompt_ms);
+                            ("predicted_ms", Json_util.float_opt_to_json ti.predicted_ms);
+                            ("provider_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("hw_decode_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("prompt_per_second", Json_util.float_opt_to_json ti.prompt_per_second);
+                            ("cache_n", Json_util.int_opt_to_json ti.cache_n);
                           ]
                       | None -> []
                     in
                     [
-                      ("system_fingerprint", match t.system_fingerprint with Some s -> `String s | None -> `Null);
-                      ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
+                      ("system_fingerprint", Json_util.string_opt_to_json t.system_fingerprint);
+                      ("reasoning_tokens", Json_util.int_opt_to_json t.reasoning_tokens);
+                      ("request_latency_ms", Json_util.int_opt_to_json t.request_latency_ms);
                     ] @ timings_fields
                 | None -> []
               in
@@ -377,7 +328,7 @@ let append_decision_record
                     ("output_tokens", `Int r.usage.output_tokens);
                     ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
                     ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
-                    ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                    ("cost_usd", Json_util.float_opt_to_json r.usage.cost_usd);
                     ( "tokens_per_second",
                       if usage_trust_is_trusted usage_trust && latency_ms > 0 then
                         `Float
@@ -405,15 +356,9 @@ let append_decision_record
                 ("stop_reason", `String stop_reason_str);
                 ("usage_reported", `Bool r.usage_reported);
                 ("telemetry_reported", `Bool telemetry_reported);
-                ( "coverage_stage",
-                  match coverage_stage with
-                  | Some stage -> `String stage
-                  | None -> `Null );
-                ( "coverage_reason",
-                  match coverage_reason with
-                  | Some reason -> `String reason
-                  | None -> `Null );
-              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
+                ( "coverage_stage", Json_util.string_opt_to_json coverage_stage );
+                ( "coverage_reason", Json_util.string_opt_to_json coverage_reason );
+              ] @ usage_fields @ thinking_enabled_field @ inference_fields @ runtime_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial
@@ -422,12 +367,9 @@ let append_decision_record
                 error_category_of_no_result_outcome ~outcome ~error
               in
               `Assoc [
-                ("cascade_name", `String (cascade_name_of_meta meta));
+                ("runtime_id", `String (runtime_id_of_meta meta));
                 ("candidate_models", `List []);
-                ( "error_category",
-                  match error_category with
-                  | Some category -> `String category
-                  | None -> `Null );
+                ( "error_category", Json_util.string_opt_to_json error_category );
                 ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);
@@ -446,7 +388,7 @@ let append_decision_record
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DecisionAuditFlushFailures)
         ~labels:[("keeper", meta.name)]
         ();

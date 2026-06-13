@@ -73,8 +73,8 @@ let compute_outcomes_rollup
   List.iter
     (fun (v : Dashboard_harness_health.harness_verdict_item) ->
       match Eval_calibration.verdict_of_string (String.lowercase_ascii v.verdict) with
-      | Some Anti_rationalization.Approve -> incr pass_v
-      | Some (Anti_rationalization.Reject reason) ->
+      | Some Task.Anti_rationalization.Approve -> incr pass_v
+      | Some (Task.Anti_rationalization.Reject reason) ->
           incr fail_v;
           let r =
             match (v.fallback_reason, String.trim reason) with
@@ -98,25 +98,6 @@ let compute_outcomes_rollup
     match keeper_verdicts with
     | [] -> `Null
     | v :: _ -> `Float v.timestamp
-  in
-  let cdal_bucket gate_name =
-    match
-      List.find_opt
-        (fun (s : Dashboard_attribution.gate_summary) ->
-          String.equal s.gate gate_name)
-        (Dashboard_attribution.summary ())
-    with
-    | None -> `Null
-    | Some s ->
-        `Assoc
-          [
-            ("scope", `String "global");
-            ("passed", `Int s.passed);
-            ("policy_failed", `Int s.policy_failed);
-            ("transition_blocked", `Int s.transition_blocked);
-            ("partial_pass", `Int s.partial_pass);
-            ("total", `Int s.total);
-          ]
   in
   `Assoc
     [
@@ -151,17 +132,6 @@ let compute_outcomes_rollup
                   ("unknown", `Int !unknown_v);
                   ("top_failure_reasons", `List top_failure_reasons);
                 ] );
-            (* cdal_gate: populate from Dashboard_attribution ring.
-               Scope is global (CDAL attribution is gate-keyed, not per-keeper),
-               but visibility in the per-keeper diagnostic is still useful.
-
-               Two buckets are exposed so consumers can tell "strict-enforced"
-               from "allowed through under advisory":
-               - [cdal_gate] -> gate="cdal_verdict" (strict)
-               - [cdal_gate_advisory] -> gate="cdal_verdict_advisory" (audit-only) *)
-            ("cdal_gate", cdal_bucket Cdal_verdict_gate.strict_gate_label);
-            ("cdal_gate_advisory", cdal_bucket Cdal_verdict_gate.advisory_gate_label);
-            ("cdal_runtime", Cdal_runtime_health.snapshot_json ~recent_limit:50 ());
             ("last_verdict_at", last_verdict_at);
           ] );
     ]

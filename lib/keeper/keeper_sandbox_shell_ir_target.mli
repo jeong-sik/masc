@@ -7,16 +7,14 @@ type target_error =
 
 val target_error : ?fields:(string * Yojson.Safe.t) list -> string -> target_error
 
-val docker_image : Keeper_types.keeper_meta -> string
+val docker_image : Keeper_meta_contract.keeper_meta -> string
 
 val docker_target
   :  turn_sandbox_factory:Keeper_sandbox_factory.t option
-  -> meta:Keeper_types.keeper_meta
+  -> meta:Keeper_meta_contract.keeper_meta
   -> cwd:string
-  -> timeout_sec:float
   -> (Masc_exec.Sandbox_target.t, target_error) result
 
 val docker_local_fallback_target
-  :  meta:Keeper_types.keeper_meta
-  -> timeout_sec:float
+  :  meta:Keeper_meta_contract.keeper_meta
   -> (Masc_exec.Sandbox_target.t * (string * Yojson.Safe.t) list) option

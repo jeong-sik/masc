@@ -320,14 +320,8 @@ let product_to_json state =
      | Lazy_task_queue.Pending tasks ->
        `Assoc [("pending", `List (List.map (fun t -> `String t) tasks))]);
     ("readiness", `String (Readiness.phase_to_string state.readiness));
-    ("last_error",
-     match state.last_error with
-     | Some e -> `String e
-     | None -> `Null);
-    ("fallback_reason",
-     match state.fallback_reason with
-     | Some r -> `String r
-     | None -> `Null);
+    ("last_error", Json_util.string_opt_to_json state.last_error);
+    ("fallback_reason", Json_util.string_opt_to_json state.fallback_reason);
     ("flat_phase",
      `String (match derive_flat_phase state with
        | Blocking -> "blocking"

@@ -49,7 +49,7 @@ type anomaly_report = {
     [agent_id]. Returns [None] when fewer than 3 samples exist — not enough
     for a meaningful stddev. *)
 val build_profile :
-  config:Coord.config -> agent_id:string -> window_days:int -> behavioral_profile option
+  config:Workspace.config -> agent_id:string -> window_days:int -> behavioral_profile option
 
 (** Persist a profile to [.masc/governance/baselines/<agent_id>.json]. *)
 val save_profile : base_path:string -> behavioral_profile -> unit
@@ -73,4 +73,4 @@ val report_json : anomaly_report -> Yojson.Safe.t
 (** Convenience: read audit log, build or load profile, detect deviations,
     and return a report. [None] when the agent has no audit history. *)
 val check_agent :
-  config:Coord.config -> agent_id:string -> window_days:int -> threshold:float -> anomaly_report option
+  config:Workspace.config -> agent_id:string -> window_days:int -> threshold:float -> anomaly_report option

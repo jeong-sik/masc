@@ -1,48 +1,5 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-type keeper_internal_error =
-  | Keeper_tool_surface_empty of
-      { keeper_name : string
-      ; turn_lane : string
-      ; affordances : string list
-      ; fallback_used : bool
-      }
-  | Keeper_tool_surface_mismatch of
-      { keeper_name : string
-      ; required_tools : string list
-      ; missing_required_tools : string list
-      ; visible_tools : string list
-      }
-
-let keeper_internal_error_prefix = "[keeper_internal_error] "
-
-let keeper_internal_error_to_json = function
-  | Keeper_tool_surface_empty { keeper_name; turn_lane; affordances; fallback_used } ->
-    `Assoc
-      [ "kind", `String "keeper_tool_surface_empty"
-      ; "keeper_name", `String keeper_name
-      ; "turn_lane", `String turn_lane
-      ; "affordances", `List (List.map (fun value -> `String value) affordances)
-      ; "fallback_used", `Bool fallback_used
-      ]
-  | Keeper_tool_surface_mismatch
-      { keeper_name; required_tools; missing_required_tools; visible_tools } ->
-    `Assoc
-      [ "kind", `String "tool_surface_mismatch"
-      ; "keeper_name", `String keeper_name
-      ; "required_tools", `List (List.map (fun value -> `String value) required_tools)
-      ; ( "missing_required_tools"
-        , `List (List.map (fun value -> `String value) missing_required_tools) )
-      ; "visible_tools", `List (List.map (fun value -> `String value) visible_tools)
-      ]
-;;
-
-let sdk_error_of_keeper_internal_error err =
-  Agent_sdk.Error.Internal
-    (keeper_internal_error_prefix
-     ^ Yojson.Safe.to_string (keeper_internal_error_to_json err))
-;;
-
 let sdk_error_kind = function
   | Agent_sdk.Error.Api _ -> "api"
   | Agent_sdk.Error.Provider _ -> "provider"
@@ -52,7 +9,6 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Serialization _ -> "serialization"
   | Agent_sdk.Error.Io _ -> "io"
   | Agent_sdk.Error.Orchestration _ -> "orchestration"
-  | Agent_sdk.Error.A2a _ -> "a2a"
   | Agent_sdk.Error.Internal _ -> "internal"
 ;;
 
@@ -65,8 +21,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
@@ -81,7 +35,8 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
     Oas_agent_execution_timeout
   | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
@@ -95,10 +50,6 @@ let sdk_termination_semantics = function
     Oas_cost_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.CostBudgetUnenforceable _) ->
     Oas_cost_budget_unenforceable
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-    Oas_contract_violation
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolRetryExhausted _) ->
-    Oas_tool_retry_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
@@ -112,7 +63,6 @@ let sdk_termination_semantics = function
   | Agent_sdk.Error.Serialization _ -> Sdk_error_failure
   | Agent_sdk.Error.Io _ -> Sdk_error_failure
   | Agent_sdk.Error.Orchestration _ -> Sdk_error_failure
-  | Agent_sdk.Error.A2a _ -> Sdk_error_failure
   | Agent_sdk.Error.Internal _ -> Sdk_error_failure
 ;;
 
@@ -125,8 +75,6 @@ let sdk_termination_semantics_to_string = function
   | Oas_token_budget_exhausted -> "oas_token_budget_exhausted"
   | Oas_cost_budget_exhausted -> "oas_cost_budget_exhausted"
   | Oas_cost_budget_unenforceable -> "oas_cost_budget_unenforceable"
-  | Oas_contract_violation -> "oas_contract_violation"
-  | Oas_tool_retry_exhausted -> "oas_tool_retry_exhausted"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
   | Oas_input_required -> "oas_input_required"
@@ -149,11 +97,16 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
-  | Agent_sdk.Retry.NetworkError _ -> "api_error_network"
+  (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
+     so the consumer-side disposition classifier
+     ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
+     encoder cannot drift. The structural-OAS-timeout branch keeps its own
+     distinct (non-transient) code. *)
+  | Agent_sdk.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
   | Agent_sdk.Retry.Timeout { message }
     when Keeper_error_classify.is_structural_oas_timeout_message message ->
     "api_error_oas_agent_execution_timeout"
-  | Agent_sdk.Retry.Timeout _ -> "api_error_timeout"
+  | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
 let provider_error_terminal_reason_code
@@ -208,24 +161,30 @@ let provider_error_terminal_reason_code
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.CompletionContractViolation
-      { contract; violation_detail = Some detail; _ } ->
-    Keeper_execution_receipt.encode_contract_violation_reason
-      ~called_tools:detail.called_tools
-      ~satisfying_tools:detail.satisfying_tools
-      (Agent_sdk.Completion_contract_id.to_string contract)
-  | Agent_sdk.Error.CompletionContractViolation { contract; violation_detail = None; _ } ->
-    Printf.sprintf
-      "completion_contract_violation:%s"
-      (Agent_sdk.Completion_contract_id.to_string contract)
   | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
-    Printf.sprintf "agent_error_max_turns_exceeded:turns=%d,limit=%d" turns limit
+    (* SSOT prefix: [Keeper_execution_receipt.is_auto_recoverable_turn_budget_terminal]
+       matches on it to route the disposition to [Reason_turn_budget_exhausted]. *)
+    Printf.sprintf
+      "%s:turns=%d,limit=%d"
+      Keeper_execution_receipt.terminal_prefix_max_turns_exceeded
+      turns
+      limit
   | Agent_sdk.Error.AgentExecutionTimeout
       { elapsed_sec; timeout_sec; turn_count; max_turns } ->
     Printf.sprintf
-      "agent_error_execution_timeout:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      "%s:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      Keeper_execution_receipt.terminal_prefix_execution_timeout
       elapsed_sec
       timeout_sec
+      turn_count
+      max_turns
+  | Agent_sdk.Error.AgentExecutionIdleTimeout
+      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "%s:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      Keeper_execution_receipt.terminal_prefix_idle_timeout
+      idle_sec
+      idle_timeout_sec
       turn_count
       max_turns
   | Agent_sdk.Error.ExitConditionMet { turn } ->
@@ -251,8 +210,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf
       "agent_error_idle_detected:consecutive_idle_turns=%d"
       consecutive_idle_turns
-  | Agent_sdk.Error.ToolRetryExhausted { attempts; limit; detail = _ } ->
-    Printf.sprintf "agent_error_tool_retry_exhausted:attempts=%d,limit=%d" attempts limit
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
@@ -316,10 +273,9 @@ let terminal_reason_code_of_sdk_error = function
   | Agent_sdk.Error.Serialization _ -> "serialization_error"
   | Agent_sdk.Error.Io _ -> "io_error"
   | Agent_sdk.Error.Orchestration _ -> "orchestration_error"
-  | Agent_sdk.Error.A2a _ -> "a2a_error"
   | Agent_sdk.Error.Internal msg -> (
-    match Cascade_error_classify.classify_masc_internal_error_of_string msg with
-    | Some err -> Cascade_error_classify.kind_of_masc_internal_error err
+    match Keeper_internal_error.classify_masc_internal_error_of_string msg with
+    | Some err -> Keeper_internal_error.kind_of_masc_internal_error err
     | None -> "internal_error")
 ;;
 
@@ -349,8 +305,6 @@ let receipt_outcome_kind_of_sdk_error err =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Sdk_error_failure -> `Error
@@ -364,10 +318,16 @@ let checkpoint_persistence_error ~keeper_name ~detail =
        detail)
 ;;
 
-let cascade_outcome_of_observation
-    : _ -> Keeper_execution_receipt.cascade_outcome = function
-  | Some (obs : Cascade_observation.cascade_observation) when obs.fallback_applied ->
-    Keeper_execution_receipt.Cascade_passed_to_next_model
-  | Some _ -> Keeper_execution_receipt.Cascade_completed
-  | None -> Keeper_execution_receipt.Cascade_not_observed
+let runtime_outcome_of_observation
+    : _ -> Keeper_execution_receipt.runtime_outcome = function
+  | Some (obs : Runtime_observation.runtime_observation) when obs.fallback_applied ->
+    Keeper_execution_receipt.Runtime_passed_to_next_model
+  | Some obs
+    when List.exists
+           (fun (attempt : Runtime_observation.runtime_attempt) ->
+              Option.is_some attempt.error)
+           obs.attempts ->
+    Keeper_execution_receipt.Runtime_failed
+  | Some _ -> Keeper_execution_receipt.Runtime_completed
+  | None -> Keeper_execution_receipt.Runtime_not_observed
 ;;

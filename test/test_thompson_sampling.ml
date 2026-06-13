@@ -1,7 +1,13 @@
 (** Tests for Thompson_sampling module — Thompson Sampling with fairness *)
 
 open Alcotest
-open Masc_mcp
+open Masc
+
+(* Production health predicate, injected into [select_with_feedback] after the
+   masc_thompson leaf carve inverted the direct [Health.is_healthy] edge.
+   Wiring the *real* predicate here keeps the health-gate tests below exercising
+   identical behavior — the inversion changed plumbing, not the algorithm. *)
+let is_healthy = Health.is_healthy
 
 (** {1 Beta Distribution Sampling Tests} *)
 
@@ -130,10 +136,12 @@ let test_vote_updates_alpha_beta () =
 
 let test_select_empty_agents () =
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents:[]
     ~max_n:3
     ~pending_triggers:[]
     ~tick_interval_s:14400.0
+    ()
   in
   check int "empty agents = empty selection" 0 (List.length results)
 
@@ -141,10 +149,12 @@ let test_select_respects_max_n () =
   let agents = ["agent-a"; "agent-b"; "agent-c"; "agent-d"; "agent-e"] in
   List.iter Thompson_sampling.init_agent agents;
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:[]
     ~tick_interval_s:14400.0
+    ()
   in
   check int "respects max_n" 2 (List.length results)
 
@@ -155,10 +165,12 @@ let test_select_mentioned_priority () =
     ("agent-y", Thompson_sampling.Mentioned "test mention")
   ] in
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
     ~tick_interval_s:14400.0
+    ()
   in
   (* Mentioned agent should be first *)
   check bool "mentioned agent selected" true
@@ -173,10 +185,12 @@ let test_select_content_alert_priority () =
     ("agent-r", Thompson_sampling.ContentAlert "urgent content")
   ] in
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
     ~tick_interval_s:14400.0
+    ()
   in
   check bool "content alert agent selected" true
     (List.exists (fun r -> r.Thompson_sampling.agent_name = "agent-r") results)
@@ -189,10 +203,12 @@ let test_stronger_trigger_replaces_weaker_duplicate () =
     ("agent-dupe", Thompson_sampling.Mentioned "mention");
   ] in
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents
     ~max_n:1
     ~pending_triggers:triggers
     ~tick_interval_s:14400.0
+    ()
   in
   let selected = List.hd results in
   match selected.Thompson_sampling.trigger with
@@ -210,18 +226,20 @@ let test_stronger_trigger_uses_winner_order () =
     ("agent-a", Thompson_sampling.Mentioned "mention-a");
   ] in
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents
     ~max_n:2
     ~pending_triggers:triggers
     ~tick_interval_s:14400.0
+    ()
   in
   let first = List.hd results in
   check string "winner ordering follows stronger trigger position" "agent-b" first.agent_name
 
 (** {1 Quality Signal Tests (Phase 3)} *)
 
-module Pv = Post_verifier
-module Ah = Masc_mcp.Agent_health
+module Pv = Thompson_sampling
+module Ah = Masc.Health
 
 let float_eq ?(eps = 0.001) a b = Float.abs (a -. b) < eps
 
@@ -293,10 +311,12 @@ let test_unhealthy_excluded_from_thompson () =
     Ah.record_failure ~agent_name:"hg-sick" ~reason:"test_fail"
   done;
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents:["hg-healthy"; "hg-sick"]
     ~max_n:2
     ~pending_triggers:[]
     ~tick_interval_s:60.0
+    ()
   in
   let has_sick = List.exists (fun r ->
     r.Thompson_sampling.agent_name = "hg-sick") results in
@@ -308,10 +328,12 @@ let test_mentioned_bypasses_health () =
     Ah.record_failure ~agent_name:"hg-mentioned" ~reason:"test_fail"
   done;
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents:["hg-mentioned"]
     ~max_n:1
     ~pending_triggers:[("hg-mentioned", Thompson_sampling.Mentioned "by-test")]
     ~tick_interval_s:60.0
+    ()
   in
   let selected = List.exists (fun r ->
     r.Thompson_sampling.agent_name = "hg-mentioned") results in
@@ -323,10 +345,12 @@ let test_content_alert_respects_health () =
     Ah.record_failure ~agent_name:"hg-alert" ~reason:"test_fail"
   done;
   let results = Thompson_sampling.select_with_feedback
+    ~is_healthy
     ~agents:["hg-alert"]
     ~max_n:1
     ~pending_triggers:[("hg-alert", Thompson_sampling.ContentAlert "needs-attention")]
     ~tick_interval_s:60.0
+    ()
   in
   let selected = List.exists (fun r ->
     r.Thompson_sampling.agent_name = "hg-alert") results in

@@ -8,25 +8,23 @@
       ([extract_command_from_input], [render_inline_skip_reason]) *)
 
 open Alcotest
-module KG = Masc_mcp.Keeper_guards
-module HK = Masc_mcp.Keeper_hooks_oas
-module HGA = Masc_mcp.Keeper_hooks_oas_gate_attempt
-module P = Masc_mcp.Prometheus
+module KG = Masc.Keeper_guards
+module HK = Masc.Keeper_hooks_oas
+module P = Masc.Otel_metric_store
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
 (* ----------------------------------------------------------------- *)
 
 (** Build a minimal keeper_meta ref for guards that only read [name]. *)
-let make_meta_ref (name : string) : Masc_mcp.Keeper_types.keeper_meta ref =
+let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
   let json : Yojson.Safe.t = `Assoc [
     ("name", `String name);
     ("agent_name", `String name);
     ("trace_id", `String "keeper-guards-test");
     ("tool_access",
-      Masc_mcp.Keeper_types.tool_access_to_json
-        (Masc_mcp.Keeper_types.Preset
-           { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }));
+      Json_util.json_string_list
+        ([]));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> ref meta
@@ -129,36 +127,6 @@ let test_render_inline_skip_reason () =
   check bool "contains source_line" true
     (contains_substring with_source "source_line=123")
 
-let make_gate_event ?(decision = KG.Gate_override) () =
-  { KG.stage = "keeper_deny";
-    keeper_name = "test_keeper";
-    decision;
-    reason_code = "keeper_deny";
-    reason_text = "tool is on the keeper deny list";
-    tool_name = "dangerous_tool";
-    input = `Assoc [];
-    turn = 4;
-    accumulated_cost_usd = 0.0;
-    stage_latency_ms = 1.0;
-    source_path = Some "lib/keeper/keeper_guards.ml";
-    source_line = Some 123;
-  }
-
-let test_render_pre_tool_gate_output_preserves_source () =
-  let blocked = HGA.render_pre_tool_gate_output (make_gate_event ()) in
-  check bool "override output carries source path" true
-    (contains_substring blocked "source_path=lib/keeper/keeper_guards.ml");
-  check bool "override output carries source line" true
-    (contains_substring blocked "source_line=123");
-  let approval =
-    HGA.render_pre_tool_gate_output
-      (make_gate_event ~decision:KG.Gate_approval_required ())
-  in
-  check bool "approval output carries source path" true
-    (contains_substring approval "source_path=lib/keeper/keeper_guards.ml");
-  check bool "approval output carries source line" true
-    (contains_substring approval "source_line=123")
-
 let test_gate_decision_vocabulary () =
   check string "override" "override"
     (KG.gate_decision_to_string KG.Gate_override);
@@ -170,7 +138,7 @@ let test_gate_decision_vocabulary () =
     (KG.gate_decision_is_rejection KG.Gate_override);
   check bool "continue does not reject" false
     (KG.gate_decision_is_rejection KG.Gate_continue);
-  check bool "approval rejects" true
+  check bool "approval waits without rejection" false
     (KG.gate_decision_is_rejection KG.Gate_approval_required)
 
 let test_gate_rejection_log_severity_splits_repeats () =
@@ -308,7 +276,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let keeper = (!meta_ref).name in
   let labels = [ ("keeper", keeper); ("site", "gate_observer") ] in
   let before =
-    P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   let on_gate_decision _event =
     raise (Failure "synthetic gate observer failure")
@@ -319,7 +287,7 @@ let test_gate_observer_failure_counts_actual_keeper () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"dangerous_tool" ()) in
   check string "denied tool still overrides" "Override" (decision_kind d);
   let after =
-    P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string GuardsFailures) ~labels ()
+    P.metric_value_or_zero Keeper_metrics.(to_string GuardsFailures) ~labels ()
   in
   check (float 0.0001) "observer failure counted for keeper"
     (before +. 1.0) after
@@ -333,7 +301,7 @@ let test_deny_guard_continues () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"allowed_tool" ()) in
   check string "allowed tool -> Continue" "Continue" (decision_kind d)
 
-let test_cost_guard_blocks () =
+let test_cost_guard_over_limit_continues () =
   let meta_ref = make_meta_ref "test_keeper" in
   let hook =
     KG.cost_guard ~meta_ref ~on_gate_decision:no_gate_observer
@@ -342,7 +310,7 @@ let test_cost_guard_blocks () =
   let d = invoke hook
     (pre_tool_use_event ~tool_name:"expensive" ~accumulated_cost_usd:0.15 ())
   in
-  check string "over limit -> Override" "Override" (decision_kind d)
+  check string "over advisory threshold -> Continue" "Continue" (decision_kind d)
 
 let test_cost_guard_under_limit () =
   let meta_ref = make_meta_ref "test_keeper" in
@@ -521,7 +489,7 @@ let test_compose_all_short_circuits_at_first_override () =
   in
   check string "first Override wins" "Override" (decision_kind d);
   let text = override_text d in
-  (* The reason should be from deny_guard, not cost_gate *)
+  (* The reason should be from deny_guard. Cost telemetry never overrides. *)
   check bool "short-circuit preserves first reason" true
     (contains_substring text "code=keeper_deny")
 
@@ -569,8 +537,6 @@ let () = run "Keeper_guards" [
   "utilities", [
     test_case "extract_command_from_input" `Quick test_extract_command_from_input;
     test_case "render_inline_skip_reason" `Quick test_render_inline_skip_reason;
-    test_case "pre-tool gate output preserves source" `Quick
-      test_render_pre_tool_gate_output_preserves_source;
     test_case "gate decision vocabulary" `Quick test_gate_decision_vocabulary;
     test_case "gate rejection log severity splits repeats" `Quick
       test_gate_rejection_log_severity_splits_repeats;
@@ -588,7 +554,8 @@ let () = run "Keeper_guards" [
     test_case "continues for allowed tool" `Quick test_deny_guard_continues;
   ];
   "cost_guard", [
-    test_case "blocks over limit" `Quick test_cost_guard_blocks;
+    test_case "continues over advisory threshold" `Quick
+      test_cost_guard_over_limit_continues;
     test_case "continues under limit" `Quick test_cost_guard_under_limit;
     test_case "no budget -> continue" `Quick test_cost_guard_disabled;
   ];

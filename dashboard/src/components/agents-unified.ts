@@ -7,7 +7,7 @@ import { useState } from 'preact/hooks'
 import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
-import { agents, keepers, executionLoaded } from '../store'
+import { agents, keepers, executionLoaded, shellCounts } from '../store'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail-page'
@@ -22,7 +22,6 @@ import { KeeperTokenStats } from './keeper-token-stats'
 import { KeeperMultiSelect } from './keeper-multi-select'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
-import { HandoffTimeline } from './handoff-timeline'
 import { CompositeFsmFlowchart } from './composite-fsm-flowchart'
 
 type AgentsView = 'all' | 'agents' | 'keepers' | 'fsm'
@@ -63,12 +62,16 @@ export function AgentsUnified() {
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
+    offlineKeepersCount: liveRuntimeCounts.offlineKeepers,
+    keeperRowsCount: liveRuntimeCounts.keeperRows,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
+    shellCounts: shellCounts.value,
+    shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   function chipCount(id: AgentsView): number | string | null {
     if (id === 'all') return formatRuntimeRosterCount(runtimeCounts)
-    if (id === 'agents') return `활성 ${runtimeCounts.live.agents}`
+    if (id === 'agents') return `런타임 가동 ${runtimeCounts.live.agents}`
     if (id === 'keepers') return formatKeeperRosterCount(runtimeCounts)
     return null
   }
@@ -125,10 +128,6 @@ function FleetAndFsmHubPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <${FleetFsmMatrix} onSelectKeeper=${(name: string) => setPinned(name)} />
-      <${HandoffTimeline}
-        onSelectKeeper=${(name: string) => setPinned(name)}
-        selectedKeeper=${pinned}
-      />
       <${CompositeFsmFlowchart} />
       <${FsmHub} selectedName=${pinned} />
     </div>

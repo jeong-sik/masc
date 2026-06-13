@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
 
@@ -128,7 +128,7 @@ let test_keeper_msg_async_roundtrip () =
   Alcotest.(check int)
     "one pending entry"
     1
-    (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha"))
+    (List.length (Keeper_msg_async.list_for_keeper ~keeper_name:"alpha" ()))
 ;;
 
 let test_keeper_msg_async_recovers_done_from_disk () =

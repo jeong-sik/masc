@@ -305,8 +305,8 @@ mod tests {
     #[test]
     fn url_with_last_event_id_existing_params() {
         let url =
-            url_with_last_event_id("http://example.com/sse?room=abc", &Some("99".to_string()));
-        assert_eq!(url, "http://example.com/sse?room=abc&lastEventId=99");
+            url_with_last_event_id("http://example.com/sse?workspace=abc", &Some("99".to_string()));
+        assert_eq!(url, "http://example.com/sse?workspace=abc&lastEventId=99");
     }
 
     #[test]

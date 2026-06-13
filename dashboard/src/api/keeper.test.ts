@@ -19,6 +19,7 @@ import {
   clearKeeper,
   deleteKeeperHistorySnapshots,
   fetchKeeperCheckpoints,
+  fetchQueuedKeeperMessageResult,
   fetchKeeperRuntimeTrace,
   pauseKeeper,
   parseKeeperRuntimeTrace,
@@ -26,6 +27,7 @@ import {
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
+  submitQueuedKeeperMessage,
   wakeKeeper,
 } from './keeper'
 
@@ -62,6 +64,67 @@ describe('sendKeeperMessageDetailed', () => {
       },
     })
     expect(reply.text).toBe('pong')
+  })
+})
+
+describe('submitQueuedKeeperMessage', () => {
+  it('submits direct keeper input through the async queue', async () => {
+    runOperatorAction.mockResolvedValueOnce({
+      result: {
+        tool_name: 'masc_keeper_msg',
+        result: {
+          request_id: 'kmsg_sangsu_1',
+          keeper_name: 'sangsu',
+          status: 'queued',
+        },
+      },
+    })
+
+    const submitted = await submitQueuedKeeperMessage('sangsu', 'ping')
+
+    expect(runOperatorAction).toHaveBeenCalledWith({
+      actor: 'dashboard',
+      action_type: 'keeper_message',
+      target_type: 'keeper',
+      target_id: 'sangsu',
+      payload: {
+        message: 'ping',
+        direct_reply: true,
+      },
+    })
+    expect(submitted).toEqual({
+      requestId: 'kmsg_sangsu_1',
+      keeperName: 'sangsu',
+      status: 'queued',
+      message: undefined,
+    })
+  })
+})
+
+describe('fetchQueuedKeeperMessageResult', () => {
+  it('polls the keeper chat request HTTP wrapper instead of MCP session state', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        request_id: 'kmsg_sangsu_1',
+        keeper_name: 'sangsu',
+        status: 'done',
+        ok: true,
+        result: { reply: 'pong' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchQueuedKeeperMessageResult('kmsg_sangsu_1')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/gate/message/requests/kmsg_sangsu_1')
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' })
+    expect(result.status).toBe('done')
+    expect(result.result).toEqual({ reply: 'pong' })
   })
 })
 
@@ -133,7 +196,7 @@ describe('keeper runtime trace', () => {
 	          {
 	            ts: '2026-05-12T00:00:00Z',
 	            event: 'provider_attempt_finished',
-	            cascade_name: 'provider-k-coding-with-spark',
+	            runtime_id: 'provider-k-coding-with-spark',
 	            status: 'timeout',
 	            error: 'Timeout after 120.0s',
 	            exception_kind: 'outer_oas_timeout',
@@ -208,39 +271,15 @@ describe('keeper runtime trace', () => {
       memory: {},
       runtime_lens: {
         axes: {
-          tool_surface: {
-            requested_tools: ['read_file'],
-            required_tools: ['keeper_task_done'],
-            materialized_tools: ['read_file'],
-            missing_required_tools: ['keeper_task_done'],
-            terminal_status: 'missing_required_tool',
-          },
           provider_lane: {
             resolved: false,
             status: 'error',
             resolved_lane: 'inline',
-            missing_required_tools: ['keeper_task_done'],
           },
           provider_attempt: {
             started_count: 1,
             finished_count: 1,
             terminal_status: 'timeout',
-          },
-          runtime_proof: {
-            source: 'keeper_tool_call_log',
-            status: 'pass',
-            matched_tool_call_count: 2,
-            successful_tool_call_count: 2,
-            failed_tool_call_count: 0,
-            tools: ['Execute', 'SearchFiles'],
-            successful_tools: ['Execute', 'SearchFiles'],
-            failed_tools: [],
-            sandbox_profiles: ['docker'],
-            network_modes: ['inherit'],
-            docker_visible: true,
-            git_credentials_enabled: true,
-            repo_cli_identity_materialized: true,
-            latest_at: '2026-05-13T00:00:01Z',
           },
         },
         swimlanes: {
@@ -256,10 +295,10 @@ describe('keeper runtime trace', () => {
           tool_runtime: {
             lane: 'tool_runtime',
             label: 'Tool Runtime',
-            event_count: 1,
-            terminal_status: 'missing_required_tool',
+            event_count: 0,
+            terminal_status: 'not_observed',
             completeness: 'complete',
-            gap_codes: ['required_tool_not_materialized'],
+            gap_codes: [],
           },
         },
         clock_edges: [
@@ -303,12 +342,6 @@ describe('keeper runtime trace', () => {
         ],
         gaps: [
           {
-            code: 'required_tool_not_materialized',
-            severity: 'bad',
-            lane: 'tool_runtime',
-            detail: 'missing required tools: keeper_task_done',
-          },
-          {
             code: 'clock_provider_attempt_unfinished',
             severity: 'warn',
             lane: 'provider',
@@ -321,14 +354,8 @@ describe('keeper runtime trace', () => {
 
     expect(result.runtime_lens.turn_clock.trace_id).toBe('trace-lens')
     expect(result.runtime_lens.turn_clock.terminal_event_present).toBe(false)
-    expect(result.runtime_lens.axes.tool_surface.requested_tools).toEqual(['read_file'])
-    expect(result.runtime_lens.axes.tool_surface.visible_tool_count).toBeNull()
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.axes.provider_attempt.terminal_status).toBe('timeout')
-    expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')
-    expect(result.runtime_lens.axes.runtime_proof.docker_visible).toBe(true)
-    expect(result.runtime_lens.axes.runtime_proof.repo_cli_identity_materialized).toBe(true)
-    expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['Execute', 'SearchFiles'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')
@@ -341,7 +368,6 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.clock_groups[0]?.closed).toBe(true)
     expect(result.runtime_lens.clock_groups[0]?.terminal_events).toEqual(['provider_attempt_finished'])
     expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual([
-      'required_tool_not_materialized',
       'clock_provider_attempt_unfinished',
     ])
   })
@@ -501,7 +527,6 @@ describe('keeper lifecycle', () => {
         session_dir: '/tmp/trace-keeper-test',
         current: null,
         history: [],
-        legacy_shadow_count: 0,
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -536,7 +561,6 @@ describe('keeper lifecycle', () => {
           session_dir: '/tmp/trace-keeper-test',
           current: null,
           history: [],
-          legacy_shadow_count: 0,
         },
       }), {
         status: 200,

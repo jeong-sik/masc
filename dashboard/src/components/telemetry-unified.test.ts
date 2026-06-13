@@ -482,7 +482,7 @@ describe('TelemetryUnified', () => {
           source: 'tool_usage',
           ts: 1_775_709_299,
           session_id: 'sess-1',
-          caller: 'keeper_internal',
+          caller: 'agent_internal',
           tool_name: 'masc_status',
         },
         {
@@ -761,7 +761,7 @@ describe('TelemetryUnified', () => {
           'Streaming_first_chunk',
           {
             provider: 'openai_compat',
-            model: 'provider-g-v4-flash:cloud',
+            model: 'deepseek-v4-flash:cloud',
             ttfrc_ms: 1685,
           },
         ],
@@ -787,7 +787,7 @@ describe('TelemetryUnified', () => {
       category: 'turn',
     })
 
-    const cloudMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
+    const cloudMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
     expect(cloudMatches).toHaveLength(1)
     expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
   })
@@ -855,7 +855,7 @@ describe('TelemetryUnified', () => {
     })
   })
 
-  it('does not group on turn=0 sentinel (turn-not-tracked records stay as entries)', async () => {
+  it('does not group on turn=0 marker (turn-not-tracked records stay as entries)', async () => {
     const { buildTelemetryDisplayItems } = await loadPanel(
       vi.fn().mockResolvedValue(baseTelemetry),
       vi.fn().mockResolvedValue(baseSummary),
@@ -928,7 +928,7 @@ describe('TelemetryUnified', () => {
           'Streaming_summary',
           {
             provider: 'openai_compat',
-            model: 'provider-g-v4-flash:cloud',
+            model: 'deepseek-v4-flash:cloud',
             total_ms: 3450,
           },
         ],
@@ -943,7 +943,7 @@ describe('TelemetryUnified', () => {
     expect(streamingMatches).toHaveLength(1)
     expect(streamingMatches[0]).toMatchObject({ kind: 'entry' })
 
-    const modelMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
+    const modelMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
     expect(modelMatches).toHaveLength(1)
     expect(modelMatches[0]).toMatchObject({ kind: 'entry' })
   })
@@ -965,7 +965,7 @@ describe('TelemetryUnified', () => {
           source: 'tool_usage',
           ts: 1_775_709_299,
           session_id: 'sess-2',
-          caller: 'keeper_internal',
+          caller: 'agent_internal',
           tool_name: 'masc_status',
         },
         {
@@ -1021,7 +1021,7 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-a',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {
@@ -1031,7 +1031,7 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-a',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
     ])
@@ -1054,14 +1054,14 @@ describe('TelemetryUnified', () => {
       {
         source: 'tool_usage',
         session_id: 'sess-z',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {
         source: 'tool_usage',
         ts: 1_775_709_111,
         session_id: 'sess-z',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
     ])
@@ -1368,7 +1368,7 @@ describe('filterTelemetryDisplayItems', () => {
         source: 'tool_usage' as const,
         ts: 1_775_709_299,
         session_id: 'sess-noisy',
-        caller: 'keeper_internal',
+        caller: 'agent_internal',
         tool_name: 'masc_status',
       },
       {

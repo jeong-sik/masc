@@ -1,18 +1,18 @@
 (** Tests for Worker safety gates in pre_tool_use hook.
 
-    Verifies the 3-gate defense-in-depth:
+    Verifies safety defense-in-depth:
     - Gate 0: Deny list
-    - Gate 1: Cost budget
-    - Gate 2: Destructive pattern detection
+    - Gate 1: Destructive pattern detection
+    - Advisory cost thresholds never gate execution
 
-    Uses Masc_mcp.Worker_oas.make_tool_tracking_hooks with gate_config. *)
+    Uses Masc.Worker_oas.make_tool_tracking_hooks with gate_config. *)
 
 open Alcotest
 
 (* ── Aliases ──────────────────────────────────── *)
 
-module WO = Masc_mcp.Worker_oas
-module EG = Masc_mcp.Eval_gate
+module WO = Masc.Worker_oas
+module EG = Masc.Eval_gate
 
 (* ── Helpers ──────────────────────────────────── *)
 
@@ -96,9 +96,9 @@ let test_deny_list_allows_non_denied () =
   check bool "continues" true
     (result = Agent_sdk.Hooks.Continue)
 
-(* ── Test: Gate 1 — Cost budget ──────────────── *)
+(* ── Test: Advisory cost telemetry ───────────── *)
 
-let test_cost_gate_blocks_over_budget () =
+let test_cost_threshold_allows_over_budget () =
   let gate_config = default_gate ~max_cost_usd:0.50 () in
   let _ref, hooks = WO.make_tool_tracking_hooks ~gate_config () in
   let result =
@@ -107,13 +107,10 @@ let test_cost_gate_blocks_over_budget () =
       ~input:`Null
       ~accumulated_cost_usd:0.55
   in
-  (match result with
-   | Agent_sdk.Hooks.Override msg ->
-     check bool "contains cost_gate" true
-       (Astring.String.is_infix ~affix:"cost_gate" msg)
-   | _ -> fail "expected Override for cost budget exceeded")
+  check bool "continues over advisory threshold" true
+    (result = Agent_sdk.Hooks.Continue)
 
-let test_cost_gate_blocks_at_exact_limit () =
+let test_cost_threshold_allows_at_exact_limit () =
   let gate_config = default_gate ~max_cost_usd:0.50 () in
   let _ref, hooks = WO.make_tool_tracking_hooks ~gate_config () in
   let result =
@@ -122,13 +119,10 @@ let test_cost_gate_blocks_at_exact_limit () =
       ~input:`Null
       ~accumulated_cost_usd:0.50
   in
-  (match result with
-   | Agent_sdk.Hooks.Override msg ->
-     check bool "contains cost_gate" true
-       (Astring.String.is_infix ~affix:"cost_gate" msg)
-   | _ -> fail "expected Override at exact budget limit")
+  check bool "continues at advisory threshold" true
+    (result = Agent_sdk.Hooks.Continue)
 
-let test_cost_gate_allows_under_budget () =
+let test_cost_threshold_allows_under_budget () =
   let gate_config = default_gate ~max_cost_usd:1.0 () in
   let _ref, hooks = WO.make_tool_tracking_hooks ~gate_config () in
   let result =
@@ -197,7 +191,7 @@ let test_destructive_disabled () =
   check bool "continues (destructive check disabled)" true
     (result = Agent_sdk.Hooks.Continue)
 
-(* ── Test: Gate priority (deny > cost > destructive) ── *)
+(* ── Test: Gate priority (deny > destructive; cost is advisory) ── *)
 
 let test_deny_takes_priority_over_cost () =
   let gate_config =
@@ -212,7 +206,7 @@ let test_deny_takes_priority_over_cost () =
   in
   (match result with
    | Agent_sdk.Hooks.Override msg ->
-     (* Should be denied by deny list, not cost gate *)
+     (* Should be denied by deny list. Cost telemetry never overrides. *)
      check bool "deny list first" true
        (Astring.String.is_infix ~affix:"worker_deny" msg)
    | _ -> fail "expected Override")
@@ -232,14 +226,14 @@ let () =
           test_case "allows non-denied tool" `Quick
             test_deny_list_allows_non_denied;
         ] );
-      ( "cost_gate",
+      ( "cost_telemetry",
         [
-          test_case "blocks over budget" `Quick
-            test_cost_gate_blocks_over_budget;
-          test_case "blocks at exact limit" `Quick
-            test_cost_gate_blocks_at_exact_limit;
-          test_case "allows under budget" `Quick
-            test_cost_gate_allows_under_budget;
+          test_case "allows over advisory threshold" `Quick
+            test_cost_threshold_allows_over_budget;
+          test_case "allows at advisory threshold" `Quick
+            test_cost_threshold_allows_at_exact_limit;
+          test_case "allows under advisory threshold" `Quick
+            test_cost_threshold_allows_under_budget;
         ] );
       ( "destructive",
         [
@@ -252,7 +246,7 @@ let () =
         ] );
       ( "priority",
         [
-          test_case "deny > cost > destructive" `Quick
+          test_case "deny before destructive; cost advisory" `Quick
             test_deny_takes_priority_over_cost;
         ] );
     ]

@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-12 · **Iteration**: 80 (`/loop` FSM/TLA+/OCaml drift hunt) · **Phase**: R (first entry)
 **Spec**: `specs/keeper-state-machine/KeeperLaunchPending.tla` (149 LOC, 3 vars, bug-model paired)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (`derive_phase`, `update_conditions` `Fiber_started` arm, conditions json export) · `lib/keeper/keeper_registry.ml` (`register_offline`, `mark_dead`)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (`derive_phase`, `update_conditions` `Fiber_started` arm, conditions json export) · `lib/keeper/keeper_registry.ml` (`register_offline`, `mark_dead`)
 **Verdict**: **model correct; preamble's ~8 line-number citations all stale (drift +100 to +1000), fixed comment-only**. The spec body (`launch_pending`/`fiber_alive`/`phase` vars, `Init`, `FiberStart`/`MarkDead`/`Done`, `FiberStartedWithoutClearing` bug action, `LaunchPendingExclusive`/`PhaseConsistent` invariants) is byte-identical and matches the runtime; TLC re-verified (clean = no error, buggy = `SafetyInvariant` violated). Only the preamble's OCaml citations had rotted — and `keeper_registry.ml` has grown ~1000 lines since they were written, so the `keeper_registry.ml:340`/`:407` anchors now point ~950-1040 lines off.
 
 ## What the spec is

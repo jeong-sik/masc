@@ -6,10 +6,10 @@
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
-module Meta_cognition = Masc_mcp.Meta_cognition
+module Meta_cognition = Masc.Meta_cognition
 
-module Tool_agent = Masc_mcp.Tool_agent
-module Coord = Masc_mcp.Coord
+module Tool_agent = Masc.Tool_agent
+module Workspace = Masc.Workspace
 
 let test_counter = ref 0
 
@@ -35,8 +35,8 @@ let with_ctx f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
-  let config = Coord.default_config base_dir in
-  ignore (Coord.init config ~agent_name:(Some "test-agent"));
+  let config = Workspace.default_config base_dir in
+  ignore (Workspace.init config ~agent_name:(Some "test-agent"));
   let ctx : Tool_agent.context = { config; agent_name = "test-agent" } in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -121,10 +121,11 @@ let test_dispatch_unknown () =
   Alcotest.(check bool) "unknown returns None" true (result = None);
   )
 
-let test_dispatch_agents () =
+let test_dispatch_agents_removed () =
   with_ctx (fun ctx ->
+  (* masc_agents removed (2026-06-09): dead agent-status surface. *)
   let result = Tool_agent.dispatch ctx ~name:"masc_agents" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agents dispatches" true (result <> None);
+  Alcotest.(check bool) "agents removed" true (result = None);
   )
 
 let test_dispatch_register_capabilities_removed () =
@@ -139,10 +140,11 @@ let test_dispatch_collaboration_graph_removed () =
   Alcotest.(check bool) "collaboration graph removed" true (result = None);
   )
 
-let test_dispatch_agent_update () =
+let test_dispatch_agent_update_removed () =
   with_ctx (fun ctx ->
+  (* masc_agent_update removed (2026-06-09): dead agent-status surface. *)
   let result = Tool_agent.dispatch ctx ~name:"masc_agent_update" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agent_update dispatches" true (result <> None);
+  Alcotest.(check bool) "agent_update removed" true (result = None);
   )
 
 let test_dispatch_agent_card () =
@@ -152,16 +154,8 @@ let test_dispatch_agent_card () =
   )
 
 
-(* ============================================================
-   Handler tests — masc_agents
-   ============================================================ *)
-
-let test_handle_agents () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agents ctx (`Assoc []) in
-  Alcotest.(check bool) "agents succeeds" true (Tool_result.is_success result);
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
+(* test_handle_agents removed (2026-06-09): handle_agents deleted with the
+   dead agent-status surface. *)
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
@@ -169,7 +163,7 @@ let test_handle_agent_card () =
   Alcotest.(check bool) "agent card succeeds" true (Tool_result.is_success result);
   let json = Yojson.Safe.from_string (Tool_result.message result) in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "card name" "MASC-MCP"
+  Alcotest.(check string) "card name" "MASC"
     (json |> member "name" |> to_string);
   Alcotest.(check string) "card schema" "masc.agent_card.v1"
     (json |> member "schema" |> to_string);
@@ -185,23 +179,8 @@ let test_handle_agent_card_rejects_unknown_action () =
     (String.contains (Tool_result.message result) 'b');
   )
 
-(* ============================================================
-   Handler tests — agent_update
-   ============================================================ *)
-
-let test_agent_update_status () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("status", `String "busy")] in
-  let result = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
-
-let test_agent_update_capabilities () =
-  with_ctx (fun ctx ->
-  let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
-  let result = Tool_agent.handle_agent_update ctx args in
-  Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
-  )
+(* agent_update handler tests removed (2026-06-09): handle_agent_update deleted
+   with the dead agent-status surface. *)
 
 (* ============================================================
    Handler tests — get_metrics
@@ -251,15 +230,31 @@ let test_agent_fitness_specific () =
   Alcotest.(check bool) "has response" true (String.length (Tool_result.message result) > 0);
   )
 
+let test_agent_fitness_does_not_mutate_thompson_stats () =
+  with_ctx (fun ctx ->
+  let agent_name = "fitness-read-only-agent" in
+  let stats = Thompson_sampling.get_stats agent_name in
+  stats.alpha <- 2.0;
+  stats.beta <- 3.0;
+  stats.selections <- 4;
+  let args = `Assoc [("agent_name", `String agent_name); ("days", `Int 7)] in
+  let result = Tool_agent.handle_agent_fitness ctx args in
+  Alcotest.(check bool) "fitness succeeds" true (Tool_result.is_success result);
+  let after = Thompson_sampling.get_stats agent_name in
+  Alcotest.(check (float 0.0001)) "alpha unchanged" 2.0 after.alpha;
+  Alcotest.(check (float 0.0001)) "beta unchanged" 3.0 after.beta;
+  Alcotest.(check int) "selections unchanged" 4 after.selections;
+  )
+
 (* ============================================================
    Handler tests — meta_cognition_snapshot
    ============================================================ *)
 
 let test_meta_cognition_snapshot_detects_signals () =
   with_ctx (fun ctx ->
-  ignore (Coord.join ctx.config ~agent_name:"peer" ~capabilities:[] ());
-  ignore (Coord.join ctx.config ~agent_name:"observer" ~capabilities:[] ());
-  let masc_dir = Coord.masc_dir ctx.config in
+  ignore (Workspace.bind_session ctx.config ~agent_name:"peer" ~capabilities:[] ());
+  ignore (Workspace.bind_session ctx.config ~agent_name:"observer" ~capabilities:[] ());
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -324,7 +319,7 @@ let test_meta_cognition_snapshot_detects_signals () =
 
 let test_meta_cognition_snapshot_marks_contested_belief () =
   with_ctx (fun ctx ->
-  let masc_dir = Coord.masc_dir ctx.config in
+  let masc_dir = Workspace.masc_dir ctx.config in
   save_jsonl
     (Filename.concat masc_dir "board_posts.jsonl")
     [
@@ -405,25 +400,24 @@ let () =
   Alcotest.run "Tool_agent" [
     ("dispatch", [
       Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
-      Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
+      Alcotest.test_case "agents removed" `Quick test_dispatch_agents_removed;
       Alcotest.test_case "register_capabilities removed" `Quick
         test_dispatch_register_capabilities_removed;
       Alcotest.test_case "collaboration_graph removed" `Quick
         test_dispatch_collaboration_graph_removed;
-      Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
+      Alcotest.test_case "agent_update removed" `Quick test_dispatch_agent_update_removed;
       Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);
     ("agents", [
-      Alcotest.test_case "handle_agents" `Quick test_handle_agents;
       Alcotest.test_case "handle_agent_card" `Quick test_handle_agent_card;
       Alcotest.test_case "handle_agent_card rejects unknown action" `Quick
         test_handle_agent_card_rejects_unknown_action;
     ]);
     ("agent_update", [
-      Alcotest.test_case "status update" `Quick test_agent_update_status;
-      Alcotest.test_case "capabilities update" `Quick test_agent_update_capabilities;
       Alcotest.test_case "no agents" `Quick test_agent_fitness_no_agents;
       Alcotest.test_case "specific agent" `Quick test_agent_fitness_specific;
+      Alcotest.test_case "fitness is read-only for thompson" `Quick
+        test_agent_fitness_does_not_mutate_thompson_stats;
     ]);
     ("get_metrics", [
       Alcotest.test_case "no data returns not_found" `Quick test_get_metrics_no_data;

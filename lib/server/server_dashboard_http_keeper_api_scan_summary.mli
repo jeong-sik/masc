@@ -34,10 +34,6 @@ val unique_ints : int list -> int list
 (** [json_int_list values] wraps [values] as [`List] of [`Int]. *)
 val json_int_list : int list -> Yojson.Safe.t
 
-(** [json_int_opt v] returns [`Int n] when [v = Some n], [`Null]
-    otherwise. *)
-val json_int_opt : int option -> Yojson.Safe.t
-
 (** [json_string_list values] wraps [values] as [`List] of [`String]. *)
 
 (** [event_bus_summary_json scan] folds the event-bus / context-compact
@@ -45,12 +41,6 @@ val json_int_opt : int option -> Yojson.Safe.t
     dashboard. Correlation IDs and run IDs are reversed and
     deduplicated (preserving first-seen order). *)
 val event_bus_summary_json
-  :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
-  -> Yojson.Safe.t
-
-(** [memory_summary_json scan] returns an [`Assoc] of the seven
-    memory-related counters held in [scan]. *)
-val memory_summary_json
   :  Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan
   -> Yojson.Safe.t
 

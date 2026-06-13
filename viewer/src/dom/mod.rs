@@ -1,5 +1,5 @@
 pub mod action_panel;
-pub mod actor_join;
+pub mod actor_bind;
 pub mod actor_lifecycle;
 pub mod character_panel;
 pub mod choice_panel;
@@ -56,7 +56,7 @@ impl Plugin for DomBridgePlugin {
                     turn_runtime::update_turn_runtime_dom,
                     connection::update_connection_dom,
                     map_canvas::update_canvas_map_dom,
-                    actor_join::sync_join_panel_interaction_state,
+                    actor_bind::sync_join_panel_interaction_state,
                     action_panel::sync_action_panel_interaction_state,
                     turn_controls::sync_turn_controls_visibility,
                     overlay::update_overlay_dom,
@@ -75,7 +75,7 @@ impl Plugin for DomBridgePlugin {
                 (
                     action_panel::bind_action_panel,
                     action_panel::sync_action_panel_interaction_state,
-                    actor_join::bind_actor_join,
+                    actor_bind::bind_actor,
                     turn_controls::bind_turn_controls,
                     dm_voice::bind_dm_voice_controls,
                 ),
@@ -84,7 +84,7 @@ impl Plugin for DomBridgePlugin {
                 OnExit(ViewerMode::Trpg),
                 (
                     action_panel::unbind_action_panel,
-                    actor_join::unbind_actor_join,
+                    actor_bind::unbind_actor,
                     turn_controls::unbind_turn_controls,
                     dm_voice::unbind_dm_voice_controls,
                 ),

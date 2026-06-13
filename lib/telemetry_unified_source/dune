@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name telemetry_unified_source)
+ (public_name masc.telemetry_unified_source)
+ (wrapped false)
+ (modules telemetry_unified_source telemetry_unified_source_meta)
+ (libraries eio masc.config masc.otel_metric_store masc_log yojson))

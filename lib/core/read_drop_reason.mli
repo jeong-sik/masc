@@ -1,5 +1,5 @@
 (** Closed sum type for the [reason] label of
-    [Prometheus.metric_persistence_read_drops]. See RFC-0044
+    [Otel_metric_store.metric_persistence_read_drops]. See RFC-0044
     (`docs/rfc/RFC-0044-persistence-read-drop-typed.md`) for the full
     motivation.
 
@@ -56,7 +56,7 @@ type t =
     compatible with the existing string constants in
     [Core.Safe_ops] ([persistence_read_drop_reason_list_dir_error],
     [_entry_load_error], [_invalid_payload]) so swapping callers in
-    PR-2 does not change the Prometheus label cardinality.
+    PR-2 does not change the Otel_metric_store label cardinality.
 
     Wire mapping:
     - [List_dir_error] → ["list_dir_error"]

@@ -1,9 +1,9 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 open Test_operator_control_support
 
-let test_digest_room_prefers_fresh_operator_judgment () =
+let test_digest_workspace_prefers_fresh_operator_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -11,16 +11,16 @@ let test_digest_room_prefers_fresh_operator_judgment () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
-        ~target_type:Operator_judgment.Coord ~target_id:None
+        ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"Pause the namespace before taking any destructive action."
         ~recommended_action:
           (`Assoc
             [
-              ("action_kind", `String "pause_room");
+              ("action_kind", `String "pause_workspace");
               ("resolved_tool", `String "masc_operator_confirm");
               ("target_type", `String "root");
               ("target_id", `Null);
@@ -32,11 +32,11 @@ let test_digest_room_prefers_fresh_operator_judgment () =
         (List.length (Operator_judgment.load_all config));
       (match
          Operator_judgment.latest_active config ~surface:"command.namespace"
-           ~target_type:Operator_judgment.Coord ~target_id:None
+           ~target_type:Operator_judgment.Workspace ~target_id:None
        with
       | Some _ -> ()
       | None ->
-          Alcotest.failf "expected room judgment in %s"
+          Alcotest.failf "expected workspace judgment in %s"
             (Operator_judgment.judgments_path config));
       let ctx = operator_ctx env sw config "operator" in
       let digest =
@@ -60,7 +60,7 @@ let test_digest_room_prefers_fresh_operator_judgment () =
       Alcotest.(check bool) "judgment present" true
         (Yojson.Safe.Util.member "judgment" digest <> `Null))
 
-let test_digest_room_ignores_stale_operator_judgment () =
+let test_digest_workspace_ignores_stale_operator_judgment () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -68,11 +68,11 @@ let test_digest_room_ignores_stale_operator_judgment () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      ignore (Coord.join config ~agent_name:"operator" ~capabilities:[] ());
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      ignore (Workspace.bind_session config ~agent_name:"operator" ~capabilities:[] ());
       record_operator_judgment config ~surface:"command.namespace"
-        ~target_type:Operator_judgment.Coord ~target_id:None
+        ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"This judgment is stale." ~fresh_for_sec:(-5.0) ();
       let ctx = operator_ctx env sw config "operator" in
       let digest =
@@ -97,10 +97,10 @@ let test_guidance_ignores_unsupported_target_type () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       record_operator_judgment config ~surface:"command.namespace"
-        ~target_type:Operator_judgment.Coord ~target_id:None
+        ~target_type:Operator_judgment.Workspace ~target_id:None
         ~summary:"Root guidance must not leak to keeper targets."
         ~fresh_for_sec:90.0 ();
       let fields =
@@ -127,8 +127,8 @@ let test_operator_judgment_write_and_latest_roundtrip () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator-judge"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
       let ctx = operator_ctx env sw config "operator-judge" in
       let written =
         match
@@ -168,9 +168,9 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
     true
     (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check bool)
-    "room no longer parses"
+    "namespace no longer parses"
     true
-    (Option.is_none (Operator_judgment.target_type_of_string "room"));
+    (Option.is_none (Operator_judgment.target_type_of_string "namespace"));
   Alcotest.(check (result string string))
     "digest rejects namespace"
     (Error "target_type must be root")
@@ -182,8 +182,8 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator-judge"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator-judge"));
       let ctx = operator_ctx env sw config "operator-judge" in
       match
         Operator_control.judgment_write_json ctx
@@ -208,11 +208,11 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      let pending_dir = Filename.concat (Coord.masc_dir config) "operator" in
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
       let path = Filename.concat pending_dir "pending_confirms.json" in
-      Coord_utils.mkdir_p pending_dir;
+      Workspace_utils.mkdir_p pending_dir;
       let token = "retry-token" in
       let entry_json =
         `Assoc
@@ -229,7 +229,7 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("expires_at", `Null);
           ]
       in
-      Coord_utils.write_json config path (`List [ entry_json ]);
+      Workspace_utils.write_json config path (`List [ entry_json ]);
       let ctx = operator_ctx env sw config "operator" in
       (match
          Operator_control.confirm_json ctx

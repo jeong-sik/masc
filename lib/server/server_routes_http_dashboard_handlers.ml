@@ -1,9 +1,11 @@
 (** Dashboard HTTP handler bodies, extracted from
     [server_routes_http_routes_dashboard.ml]. Holds the four
     request-handler bodies wired into the route table: agent broadcast,
-    link previews, task history, and rooms listing. *)
+    link previews, task history, and workspace timeline. *)
 
 module Http = Http_server_eio
+
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
 (* Duplicated locally to avoid sibling -> parent cycle. The parent file
    keeps its own copy because three sites there call it; both copies
@@ -25,13 +27,13 @@ let handle_broadcast state agent_name reqd body_str =
   in
   try
     let json = Yojson.Safe.from_string body_str in
-    match Yojson.Safe.Util.member "message" json with
-    | `String message ->
-        let config = state.Mcp_server.room_config in
-        let _ = Coord.broadcast config ~from_agent:agent_name ~content:message in
+    match Json_util.assoc_member_opt "message" json with
+    | Some (`String message) ->
+        let config = state.Mcp_server.workspace_config in
+        let _ = Workspace.broadcast config ~from_agent:agent_name ~content:message in
         reply true None
-    | `Null -> reply false (Some "missing required field: message")
-    | _ -> reply false (Some "field 'message' must be a string")
+    | Some `Null -> reply false (Some "missing required field: message")
+    | None | Some _ -> reply false (Some "field 'message' must be a string")
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error msg -> reply false (Some ("invalid JSON: " ^ msg))
@@ -76,17 +78,17 @@ let handle_dashboard_task_history state req reqd =
     in
     let cache_key =
       Printf.sprintf "task_history:%s:%s:%d"
-        state.Mcp_server.room_config.base_path task_id limit
+        state.Mcp_server.workspace_config.base_path task_id limit
     in
     let json =
-      Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+      Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
         Domain_pool_ref.submit_io_or_inline (fun () ->
-          Tool_task.task_history_events_json state.Mcp_server.room_config
+          Task.Tool.task_history_events_json state.Mcp_server.workspace_config
             ~task_id ~limit))
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
 
-let handle_dashboard_rooms state req reqd =
+let handle_dashboard_workspace state req reqd =
   let limit =
     Server_utils.int_query_param req "limit" ~default:50
     |> Server_utils.clamp ~min_v:1 ~max_v:200
@@ -96,5 +98,16 @@ let handle_dashboard_rooms state req reqd =
     | Some _ as value -> value
     | None -> trimmed_query_param req "agent"
   in
-  let json = Dashboard_rooms.json ~config:state.Mcp_server.room_config ?me ~limit () in
-  Http.Response.json_value ~compress:true ~request:req json reqd
+  (* Dashboard_workspace.json queries up to ~1000 messages from Workspace per request
+     (uncached, ~4.7s measured solo; under a parallel dashboard burst it held
+     the single Eio HTTP domain and dragged co-fired requests to ~3.4s). Cache
+     + offload via respond_cached_read; cache_key carries limit + actor so
+     param variants stay distinct. Shared by /dashboard/workspace and /workspaces. *)
+  let cache_key =
+    Printf.sprintf "workspace:%s:%d:%s"
+      state.Mcp_server.workspace_config.base_path limit
+      (Option.value ~default:"" me)
+  in
+  Server_routes_http_common.respond_cached_read ~request:req ~reqd ~cache_key
+    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s (fun () ->
+      Dashboard_workspace.json ~config:state.Mcp_server.workspace_config ?me ~limit ())

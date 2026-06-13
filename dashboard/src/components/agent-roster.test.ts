@@ -16,6 +16,7 @@ import {
 } from '../store'
 import { missionSnapshot } from '../mission-signals'
 import { namespaceTruth } from '../namespace-truth-store'
+import { fleetCompositeSnapshot } from '../composite-signals'
 
 function makeAgent(overrides: Partial<Agent> = {}): Agent {
   return {
@@ -24,6 +25,37 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     current_task: null,
     ...overrides,
   }
+}
+
+function makeCompositeSnapshot(
+  overrides: Partial<KeeperCompositeSnapshot> = {},
+): KeeperCompositeSnapshot {
+  return {
+    keeper: 'sangsu',
+    correlation_id: 'keeper:sangsu:1',
+    run_id: 'r-1',
+    ts: 0,
+    phase: 'running',
+    turn_phase: 'idle',
+    decision: { stage: 'undecided' },
+    runtime: { state: 'idle' },
+    compaction: { stage: 'accumulating' },
+    measurement: { captured: false },
+    invariants: {
+      phase_turn_alignment: true,
+      no_runtime_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    },
+    fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
+    is_live: false,
+    live_turn: null,
+    last_outcome: null,
+    recommended_actions: [],
+    ...overrides,
+  } as KeeperCompositeSnapshot
 }
 
 async function flushUi(): Promise<void> {
@@ -52,7 +84,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
       phase: 'Stable',
       turn_phase: 'idle',
       decision: { stage: 'idle' },
-      cascade: { state: 'idle' },
+      runtime: { state: 'idle' },
       compaction: { stage: 'idle' },
       measurement: {} as KeeperCompositeSnapshot['measurement'],
       invariants: {} as KeeperCompositeSnapshot['invariants'],
@@ -81,16 +113,38 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     }
   }
 
-  it('returns "현재 차단" when blocker is set and no composite is available', () => {
+  it('returns "상태 추정" for synthetic_stall when no composite is available', () => {
     const note = rosterStateNote(
-      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '실제 막힘' }),
+      k({ runtime_blocker_class: 'synthetic_stall', runtime_blocker_summary: '합성 상태 정체' }),
       null,
       null,
     )
     expect(note).toEqual({
-      label: '현재 차단',
-      text: '실제 막힘',
+      label: '상태 추정',
+      text: '합성 상태 정체',
       kind: 'synthetic_stall',
+    })
+  })
+
+  it('shows a pending approval gate before stale runtime blocker summaries', () => {
+    const note = rosterStateNote(
+      k({
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: '턴 응답 만료',
+        current_gate: {
+          kind: 'approval_required',
+          source: 'audit_approvals',
+          tool: 'Write',
+          risk: 'high',
+          disposition_reason: 'waiting_approval',
+        },
+      }),
+      null,
+      null,
+    )
+    expect(note).toEqual({
+      label: '승인 대기',
+      text: '도구 Write · 위험도 high · 사유 waiting_approval',
     })
   })
 
@@ -133,16 +187,16 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
     const note = rosterStateNote(
       k({
         phase: 'Running',
-        runtime_blocker_class: 'cascade_exhausted',
-        runtime_blocker_summary: 'cascade list 소진',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime list 소진',
       }),
       compositeWith(attention({ execution_current: true, blocked: true })),
       null,
     )
     expect(note).toEqual({
       label: '현재 차단',
-      text: 'cascade list 소진',
-      kind: 'cascade_exhausted',
+      text: 'runtime list 소진',
+      kind: 'runtime_exhausted',
     })
   })
 
@@ -262,23 +316,23 @@ describe('rosterBlockerDisplay', () => {
     const display = rosterBlockerDisplay(
       {
         label: '현재 차단',
-        text: 'cascade list 소진',
-        kind: 'cascade_exhausted',
+        text: 'runtime list 소진',
+        kind: 'runtime_exhausted',
       },
       {
         name: 'echo',
         status: 'active',
-        runtime_blocker_class: 'cascade_exhausted',
+        runtime_blocker_class: 'runtime_exhausted',
       } as Keeper,
     )
 
-    expect(display.cell).toBe('현재 차단: 캐스케이드 소진')
-    expect(display.detail).toBe('cascade list 소진')
+    expect(display.cell).toBe('현재 차단: 런타임 후보 소진')
+    expect(display.detail).toBe('runtime list 소진')
   })
 })
 
 describe('countRuntimeKinds', () => {
-  it('excludes configured-only paused keepers from live runtime counts', () => {
+  it('keeps configured paused keepers as detail rows without counting them as running', () => {
     const result = countRuntimeKinds(
       [],
       [
@@ -301,8 +355,10 @@ describe('countRuntimeKinds', () => {
     expect(result).toEqual({
       agents: 0,
       keepers: 1,
-      pausedKeepers: 0,
-      totalRuntimes: 1,
+      pausedKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 2,
+      totalRuntimes: 2,
     })
   })
 
@@ -332,6 +388,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 0,
       pausedKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -360,6 +418,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -389,6 +449,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -414,7 +476,46 @@ describe('countRuntimeKinds', () => {
       agents: 1,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 2,
+    })
+  })
+
+  it('does not count offline non-paused keeper rows as running fibers', () => {
+    const runningKeepers = Array.from({ length: 2 }, (_, index) => ({
+      name: `running-${index}`,
+      status: 'active',
+      registered: true,
+      keepalive_running: true,
+    } as Keeper))
+    const pausedKeepers = Array.from({ length: 6 }, (_, index) => ({
+      name: `paused-${index}`,
+      status: 'paused',
+      paused: true,
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+    const offlineKeepers = Array.from({ length: 9 }, (_, index) => ({
+      name: `offline-${index}`,
+      status: 'offline',
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+
+    const result = countRuntimeKinds([], [
+      ...runningKeepers,
+      ...pausedKeepers,
+      ...offlineKeepers,
+    ])
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 2,
+      pausedKeepers: 6,
+      offlineKeepers: 9,
+      keeperRows: 17,
+      totalRuntimes: 17,
     })
   })
 })
@@ -434,6 +535,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
   })
 
   afterEach(() => {
@@ -449,6 +551,7 @@ describe('AgentRoster live-only cards', () => {
     serverStatus.value = null
     namespaceTruth.value = null
     missionSnapshot.value = null
+    fleetCompositeSnapshot.value = null
   })
 
   it('renders keeper cards from live runtime data and ignores stale mission brief fields', async () => {
@@ -518,6 +621,140 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('stale keeper brief work')
     expect(container.textContent).not.toContain('stale_tool')
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
+  })
+
+  it('treats keeper-only rows as first-class runtime rows when agent registry is empty', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        recent_tool_names: ['keeper_tools_list'],
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('albini')
+    expect(text).toContain('keeper_tools_list')
+    expect(text).not.toContain('Source mismatch')
+    expect(text).not.toContain('agent registry 0')
+    expect(text).not.toContain('파생')
+  })
+
+  it('renders paused configured keepers even without live agent presence', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        agent_name: 'keeper-albini-agent',
+        status: 'paused',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        paused: true,
+        registered: false,
+        keepalive_running: false,
+      } as Keeper,
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'qa-king',
+        agent_name: 'keeper-qa-king-agent',
+        status: 'offline',
+        phase: 'Offline',
+        pipeline_stage: 'offline',
+        keepalive_running: false,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const rows = container.querySelectorAll('[data-testid="keeper-operations-row"]')
+    const text = container.textContent ?? ''
+    expect(rows.length).toBe(3)
+    expect(text).toContain('albini')
+    expect(text).toContain('rondo')
+    expect(text).toContain('qa-king')
+    expect(text).toContain('일시정지')
+    expect(text).toContain('재개 대기')
+    expect(text).toContain('오프라인')
+    expect(text).toContain('기동 필요')
+    expect(text).not.toContain('상세 상태 부분 동기화')
+  })
+
+  it('does not show keeper boot hints on offline non-keeper agent rows', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'mission-shadow',
+        status: 'offline',
+      }),
+    ]
+    keepers.value = []
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="agent-only" />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('mission-shadow')
+    expect(text).toContain('오프라인')
+    expect(text).toContain('연결 없음')
+    expect(text).not.toContain('기동 필요')
+  })
+
+  it('does not report source mismatch on default keeper ops when keeper projection has rows', async () => {
+    agents.value = []
+    keepers.value = [
+      {
+        name: 'albini',
+        status: 'idle',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        recent_tool_names: ['keeper_board_list'],
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('albini')
+    expect(text).not.toContain('Source mismatch')
+    expect(text).not.toContain('keeper projection 1')
+    expect(text).not.toContain('파생')
+  })
+
+  it('does not expose synthetic implementation labels in agent rows', async () => {
+    agents.value = [makeAgent({ name: 'runtime-shadow', synthetic: true })]
+    keepers.value = []
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('runtime-shadow')
+    expect(text).not.toContain('파생')
   })
 
   it('renders the operations list with a selected detail pane', async () => {
@@ -592,8 +829,8 @@ describe('AgentRoster live-only cards', () => {
         paused: true,
         registered: false,
         keepalive_running: false,
-        runtime_blocker_class: 'no_tool_capable_provider',
-        runtime_blocker_summary: 'no_tool_capable_provider',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime_exhausted',
         agent: {
           exists: true,
           status: 'busy',
@@ -620,8 +857,101 @@ describe('AgentRoster live-only cards', () => {
     expect(labels).not.toContain('작업 중')
 
     const text = container.textContent ?? ''
-    expect(text).toContain('일시정지 원인: 도구 실행 Provider 없음')
-    expect(text).toContain('요구 도구를 실행할 수 있는 provider가 없어 라우팅 또는 tool surface 확인이 필요합니다.')
+    expect(text).toContain('일시정지 원인: 런타임 후보 소진')
+    expect(text).toContain('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
+  })
+
+  it('projects live composite turns into keeper operation presence', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'keeper-sangsu-agent',
+        status: 'active',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: true,
+          turn_phase: 'executing',
+          live_turn: {
+            turn_id: 686,
+            started_at: 1_781_184_817,
+            last_progress_at: 1_781_184_843,
+            last_progress_kind: 'sse_thinking_delta',
+          },
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('busy')
+    expect(presence.dataset.presenceState).toBe('working')
+    expect(presence.dataset.presenceLabel).toBe('작업 중')
+    expect(presence.textContent).toContain('executing live')
+  })
+
+  it('projects non-live composite keepers as waiting instead of busy', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'keeper-sangsu-agent',
+        status: 'active',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          is_live: false,
+          turn_phase: 'idle',
+          live_turn: null,
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const presence = row.querySelector('[data-agent-presence]') as HTMLElement
+    expect(presence.dataset.presenceRawStatus).toBe('idle')
+    expect(presence.dataset.presenceState).toBe('idle')
+    expect(presence.dataset.presenceLabel).toBe('대기')
+    expect(presence.textContent).toContain('대기 중')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

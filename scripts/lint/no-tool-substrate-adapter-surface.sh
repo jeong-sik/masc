@@ -7,7 +7,7 @@
 #   2. GitHub/PR micro-tool names returning to active descriptor, prompt,
 #      policy, or capability-matrix surfaces.
 #   3. Internal web MCP names appearing in keeper-facing prompts or workflow
-#      guidance where the model-facing aliases are SearchWeb / FetchWeb.
+#      guidance where the model-facing aliases are WebSearch / WebFetch.
 #
 # The scan is intentionally narrow. It does not scan timeout/runtime plumbing
 # such as Timeout_policy.Layer.Oas_bridge, and it does not scan dashboard
@@ -42,13 +42,13 @@ done
 cd "$ROOT"
 
 EXECUTOR_SCAN_FILES=(
-  "lib/keeper/agent_tool_descriptor.ml"
-  "lib/keeper/agent_tool_descriptor.mli"
+  "lib/keeper/keeper_tool_descriptor.ml"
+  "lib/keeper/keeper_tool_descriptor.mli"
 )
 
 SURFACE_SCAN_FILES=(
-  "lib/keeper/agent_tool_descriptor.ml"
-  "lib/keeper/agent_tool_descriptor.mli"
+  "lib/keeper/keeper_tool_descriptor.ml"
+  "lib/keeper/keeper_tool_descriptor.mli"
   "lib/keeper/keeper_tool_alias.ml"
   "lib/keeper/keeper_tool_alias.mli"
   "lib/tool_catalog.ml"
@@ -144,7 +144,7 @@ if [[ -s "$new_tmp" ]]; then
   sed 's/^/  - /' "$new_tmp" >&2
   echo "  Keep gh/git work behind Execute/Shell_ir, and model PR work as ordinary CLI/worktree operations." >&2
   echo "  Do not add dedicated PR/GitHub micro-tools to active descriptor, prompt, policy, or capability surfaces." >&2
-  echo "  Use SearchWeb / FetchWeb in keeper-facing prompts; keep masc_web_* names in MCP compatibility docs only." >&2
+  echo "  Use WebSearch / WebFetch in keeper-facing prompts; keep masc_web_* names in MCP compatibility docs only." >&2
   fail=1
 fi
 

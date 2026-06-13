@@ -16,7 +16,7 @@ let format_mentions (mentions : (string * string) list) : string =
     (List.map
        (fun (from_agent, content) ->
          Printf.sprintf "- @%s: %s" from_agent
-           (Keeper_types.short_preview ~max_len:200 content))
+           (Keeper_types_profile.short_preview ~max_len:200 content))
        mentions)
 
 let scope_message_prompt_limit = 12
@@ -40,6 +40,52 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+(** Format one connected-surface presence line (RFC-0223 P2).
+    Presence only: lane label + liveness, no content, no counts. *)
+let format_surface_presence (p : Gate_surface.surface_presence) : string =
+  let lane =
+    match p.surface with
+    | Gate_surface.Dashboard -> "dashboard"
+    | Gate_surface.Discord { channel_id = Some channel; _ } ->
+        Printf.sprintf "discord #%s" channel
+    | Gate_surface.Discord { channel_id = None; _ } -> "discord"
+    | Gate_surface.Slack { channel_id = Some channel; _ } ->
+        Printf.sprintf "slack #%s" channel
+    | Gate_surface.Slack { channel_id = None; _ } -> "slack"
+    | Gate_surface.Gate { channel; channel_id = Some channel_id } ->
+        Printf.sprintf "%s #%s" channel channel_id
+    | Gate_surface.Gate { channel; channel_id = None } -> channel
+  in
+  Printf.sprintf "%s (%s)" lane (if p.alive then "alive" else "offline")
+
+let connected_surface_discretion_behavior_name =
+  "connected_surface_discretion"
+
+let connected_surface_discretion_prompt () =
+  match
+    Keeper_prompt_external.get connected_surface_discretion_behavior_name
+  with
+  | Some content -> String.trim content
+  | None ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string PromptFailures)
+        ~labels:
+          [
+            ( "prompt",
+              "behavior/" ^ connected_surface_discretion_behavior_name );
+          ]
+        ();
+      Log.Keeper.warn
+        "build_prompt: behavior prompt %s missing; rendering \
+         config-drift marker instead of in-source connected-surface policy"
+        connected_surface_discretion_behavior_name;
+      Printf.sprintf
+        "Behavior prompt config drift: missing \
+         config/prompts/behavior/%s.md. Do not improvise connector \
+         conversation policy; ask the operator to restore the missing \
+         behavior prompt file before relying on connected-surface context."
+        connected_surface_discretion_behavior_name
+
 let format_scope_messages
     (messages : (string * string) list) : string =
   let shown_messages, omitted =
@@ -60,7 +106,7 @@ let format_scope_messages
          (fun (from_agent, content) ->
            Printf.sprintf "- %s: %s"
              from_agent
-             (Keeper_types.short_preview ~max_len:scope_message_preview_len content))
+             (Keeper_types_profile.short_preview ~max_len:scope_message_preview_len content))
          shown_messages)
 
 let format_board_events
@@ -101,7 +147,7 @@ let format_board_events
          Printf.sprintf "- [%s] post_id=%s title=%S author=%s%s%s%s preview: %s"
            kind
            event.post_id
-           (Keeper_types.short_preview ~max_len:80 event.title)
+           (Keeper_types_profile.short_preview ~max_len:80 event.title)
            event.author
            hearth_note
            mention_note
@@ -208,11 +254,11 @@ let sanitize_retired_tool_names text =
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "Masc" "code")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "pr")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "preflight_check")
-  |> remove_tool_tokens_with_prefix
-       ~prefix:(retired_prefix "keeper" "task_submit_for_verification")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "github")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "github" "cli")
   |> replace_all ~needle:"``" ~replacement:""
+  |> replace_all ~needle:", , " ~replacement:", "
+  |> replace_all ~needle:", ," ~replacement:","
 
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 
@@ -228,7 +274,7 @@ let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 let turn_intent_fallback_block =
   String.concat "\n"
     [ "Use the world state below as raw context.";
-      "Pending mentions, board events, and worktree changes are observations.";
+      "Pending mentions, board events, and repo changes are observations.";
       "";
       "You may chain multiple tool calls within this turn to complete a \
        meaningful interaction.";
@@ -266,7 +312,7 @@ let contains_template_placeholder text =
   || String_util.contains_substring text "}}"
 
 let observe_turn_intent_render_failure message =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
     ();
@@ -277,30 +323,41 @@ let fallback_turn_intent_block reason =
   turn_intent_fallback_block
 
 let resolve_turn_intent_block substitutions =
+  let observe_outcome label =
+    Otel_metric_store.inc_counter
+      (Keeper_metrics.to_string PromptTemplateRenderOutcome)
+      ~labels:[("template", "turn_intent"); ("outcome", label)]
+      ()
+  in
   match
     Prompt_registry.render_prompt_template Keeper_prompt_names.turn_intent
       substitutions
   with
   | Ok value ->
       let rendered = String.trim value in
-      if String.equal rendered "" then
-        fallback_turn_intent_block "rendered prompt was empty"
-      else
-        rendered
+      if String.equal rendered "" then (
+        observe_outcome "empty";
+        fallback_turn_intent_block "rendered prompt was empty")
+      else (
+        observe_outcome "ok";
+        rendered)
   | Error msg ->
       let raw =
         String.trim (Prompt_registry.get_prompt Keeper_prompt_names.turn_intent)
       in
-      if String.equal raw "" then
+      if String.equal raw "" then (
+        observe_outcome "fallback";
         fallback_turn_intent_block
-          (Printf.sprintf "%s; raw prompt was empty after render failure" msg)
-      else if contains_template_placeholder raw then
+          (Printf.sprintf "%s; raw prompt was empty after render failure" msg))
+      else if contains_template_placeholder raw then (
+        observe_outcome "fallback";
         fallback_turn_intent_block
           (Printf.sprintf
              "%s; raw prompt still contained template placeholders after render \
               failure"
-             msg)
+             msg))
       else (
+        observe_outcome "fallback";
         observe_turn_intent_render_failure msg;
         raw)
 
@@ -316,23 +373,29 @@ let fallback_externalized_bullet key =
   if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_a then
     Some
       "- Claimable backlog is visible and you do not already hold a task. \
-       `keeper_task_claim {}` is available, not mandatory: claim only when \
+       `keeper_task_claim {}` is available, not mandatory; use \
+       `keeper_task_claim { \"task_id\": \"task-123\" }` when a user, mention, \
+       board item, or task list row points to a specific task. Claim only when \
        the work fits your current goal, persona, and capacity. Use \
-       `keeper_tasks_list` when you need to inspect backlog state before \
-       deciding."
+       `keeper_tasks_list` when you need to inspect backlog state before deciding."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
-      "- Repo and forge inspection is observation, not progress by itself. \
+      "- Repo and remote PR/issue inspection is observation, not progress by itself. \
        If you decide to do code-changing task work, claim first, then use \
        only the visible file, edit, and Execute tools from the repo \
-       worktree. Do not invent hidden shell or forge tools when they are \
+       checkout. Do not invent hidden shell or repo-hosting tools when they are \
        not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
-      "- See board activity? Use the listed post_id. If the preview is \
-       enough, comment directly with keeper_board_comment. If you need the \
-       full post, call keeper_board_get and keeper_board_comment in the same \
-       response; keeper_board_get alone is passive and fails actionable turns."
+      "- See board activity? Use the listed post_id. If no post_id is \
+       listed, call keeper_board_list or keeper_board_search to discover one \
+       before any keeper_board_post_get, comment, or vote. Never call \
+       keeper_board_post_get with {} or without post_id. If the preview is enough, \
+       comment directly with keeper_board_comment. If you need the full post, \
+       call keeper_board_post_get with that post_id; pair it with \
+       keeper_board_comment in the same response only when the full post gives \
+       you a concrete reply. keeper_board_post_get alone is passive and fails \
+       actionable turns."
   else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
     Some
       "- Have a substantive finding or update? Call keeper_board_post with \
@@ -350,8 +413,10 @@ let fallback_externalized_bullet key =
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
-       eligible unclaimed task, but this is an intake option rather than a \
-       required move.\n\
+       eligible unclaimed task; when a user, mention, board item, or \
+       `keeper_tasks_list` row names a specific task, use `keeper_task_claim { \
+       \"task_id\": \"task-123\" }` instead. Claiming is an intake option \
+       rather than a required move.\n\
        - Use keeper_tasks_list to inspect backlog state, diagnose missing \
        work, or verify task lifecycle before deciding. Never substitute \
        Execute probes (ls/cat/find against .masc/, backlog.json, or \
@@ -362,7 +427,7 @@ let fallback_externalized_bullet key =
        claiming unrelated work.\n\
        - If you choose to take code-changing task work, claim first and then \
        work through the visible file, edit, and Execute tools from the repo \
-       worktree. Create or update a forge PR only after the branch is \
+       checkout. Create or update a remote PR only after the branch is \
        prepared and the task requires it."
   else None
 
@@ -379,7 +444,7 @@ let load_externalized_bullet ~enabled key =
     if String.equal trimmed "" then
       match fallback_externalized_bullet key with
       | Some prose ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PromptFailures)
             ~labels:[("prompt", key)]
             ();
@@ -435,7 +500,7 @@ let autonomous_trigger_lines
       List.filter_map Fun.id lines
   | _ -> []
 
-let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
+let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
@@ -464,9 +529,22 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     else Printf.sprintf "\nInstructions:\n%s\n" instructions
   in
   let goal_lines =
+    let has_valid_primary_goal =
+      Option.is_some (Keeper_runtime_contract.primary_goal_id_opt meta)
+    in
     String.concat ""
       [
-        line_block "Primary goal" meta.goal;
+        line_block "Primary goal"
+          (if has_valid_primary_goal then meta.goal
+           else "(no valid active goal — awaiting assignment)");
+        (if not has_valid_primary_goal then
+           "\n\
+            You have no active goal. Pick ONE action this turn to self-assign a purpose:\n\
+            - Scan the backlog with keeper_tasks_list and claim a matching task.\n\
+            - Read the board with keeper_board_list and join an active discussion.\n\
+            - Post your intended focus to the board so other keepers can align.\n\
+            Do not stay silent when you have no goal.\n"
+         else "");
         (if meta.short_goal <> "" && meta.short_goal <> meta.goal then
            line_block "Short-term goal" meta.short_goal
          else "");
@@ -505,11 +583,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
      under config/prompts/. The OCaml side only computes the boolean toggle
      for each bullet and loads the prose via Prompt_registry; the prose
      itself (and any future edits) stay in the markdown files alongside the
-     other keeper prompts. See lib/keeper/keeper_prompt_names.ml for the
+     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for the
      key set and fallback_externalized_bullet above for in-binary fallbacks. *)
   let board_activity_guidance =
     load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_board_get"
+      ~enabled:(tool_allowed "keeper_board_post_get"
                 && tool_allowed "keeper_board_comment")
       Keeper_prompt_names.turn_intent_board_activity_guidance
   in
@@ -570,13 +648,37 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
          (List.length observation.active_goals));
     Buffer.add_string ubuf (format_goals observation.active_goals);
     Buffer.add_string ubuf "\n\n");
-  (* 2. Namespace state — usually lower churn than inbox/board detail *)
+  (* 2. Connected surfaces — connector presence, changes only on
+     bind/unbind or transport flaps (RFC-0223 P2). Omitted when only
+     the implicit dashboard is attached: every keeper has the
+     dashboard, so dashboard-only presence carries no signal. *)
+  let connector_presence =
+    List.filter
+      (fun (p : Gate_surface.surface_presence) ->
+        match p.surface with
+        | Gate_surface.Dashboard -> false
+        | Gate_surface.Discord _ | Gate_surface.Slack _ | Gate_surface.Gate _
+          ->
+            true)
+      observation.connected_surfaces
+  in
+  if connector_presence <> [] then (
+    Buffer.add_string ubuf "### Connected Surfaces\n";
+    List.iter
+      (fun p ->
+        Buffer.add_string ubuf
+          (Printf.sprintf "- %s\n" (format_surface_presence p)))
+      observation.connected_surfaces;
+    Buffer.add_string ubuf (connected_surface_discretion_prompt ());
+    Buffer.add_char ubuf '\n';
+    Buffer.add_char ubuf '\n');
+  (* 3. Namespace state — usually lower churn than inbox/board detail *)
   if
     observation.unclaimed_task_count > 0
     || observation.claimable_task_count > 0
     || observation.provider_capacity_blocked_task_count > 0
     || observation.failed_task_count > 0
-    || observation.active_agent_count > 0
+    || observation.running_keeper_fiber_count > 0
   then (
     Buffer.add_string ubuf "### Namespace State\n";
     if observation.unclaimed_task_count > 0 then
@@ -611,26 +713,16 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       Buffer.add_string ubuf
         (Printf.sprintf "- Failed tasks: %d\n" observation.failed_task_count);
     Buffer.add_string ubuf
-      (Printf.sprintf "- Active agents: %d\n" observation.active_agent_count);
+      (Printf.sprintf
+         "- Running keeper fibers: %d\n"
+         observation.running_keeper_fiber_count);
     Buffer.add_char ubuf '\n');
-  (* 3. Context health — stable resource framing *)
+  (* 4. Context health — stable resource framing *)
   Buffer.add_string ubuf
     (Printf.sprintf "### Context\n- Utilization: %.0f%%\n- Idle: %ds\n"
        (observation.context_ratio *. 100.0)
        observation.idle_seconds);
-  (match observation.last_turn_budget with
-   | Some (used, total) when used > 0 ->
-     Buffer.add_string ubuf
-       (Printf.sprintf "- Previous turn budget: %d/%d used\n" used total)
-   | _ -> ());
-  (match observation.economic_pressure with
-   | Agent_economy.Normal -> ()
-   | Frugal ->
-       Buffer.add_string ubuf "- Economy: Frugal (reduce token usage)\n"
-   | Hustle ->
-        Buffer.add_string ubuf
-          "- Economy: Hustle (minimize actions, conserve budget)\n");
-  (* 4. Autonomous trigger — lower churn than reactive inboxes *)
+  (* 5. Autonomous trigger — lower churn than reactive inboxes *)
   let turn_decision =
     Keeper_world_observation.keeper_cycle_decision ~meta observation
   in
@@ -641,7 +733,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf "\n### Autonomous Trigger\n";
     Buffer.add_string ubuf (String.concat "\n" autonomous_trigger);
     Buffer.add_char ubuf '\n');
-  (* 5. Continuity — usually large and moderately stable, so keep it
+  (* 6. Continuity — usually large and moderately stable, so keep it
      before highly volatile reactive sections for better prefix reuse.
      Inject only forward-looking fields (Goal, Next plan, Next, OpenQuestions,
      Constraints). Backward-looking fields (Done, Progress, Decisions) are
@@ -660,17 +752,17 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       "- Advisory only: ignore prior silence/wait directives until you re-verify them against the live world state.\n";
     Buffer.add_string ubuf
-      "- If this turn was still scheduled or backlog/worktree signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
+      "- If this turn was still scheduled or backlog/repo signals remain, investigate that mismatch instead of echoing the prior idle conclusion.\n";
     Buffer.add_string ubuf continuity_for_prompt;
     Buffer.add_char ubuf '\n');
-  (* 6. Pending mentions — reactive trigger *)
+  (* 7. Pending mentions — reactive trigger *)
   if observation.pending_mentions <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Pending Mentions (%d)\n"
          (List.length observation.pending_mentions));
     Buffer.add_string ubuf (format_mentions observation.pending_mentions);
     Buffer.add_string ubuf "\n\n");
-  (* 7. Scope messages — reactive trigger *)
+  (* 8. Scope messages — reactive trigger *)
   if observation.pending_scope_messages <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Scope Messages (%d recent)\n"
@@ -678,7 +770,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (format_scope_messages observation.pending_scope_messages);
     Buffer.add_string ubuf "\n\n");
-  (* 8. Claimable work — advisory operational guidance.
+  (* 9. Claimable work — advisory operational guidance.
      Body lives at config/prompts/keeper.immediate_task_move.md. The OCaml
      side only owns the section header and the trailing blank line; the
      bullet prose stays in the markdown file alongside the other keeper
@@ -690,7 +782,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
          ~enabled:true
          Keeper_prompt_names.immediate_task_move);
     Buffer.add_char ubuf '\n');
-  (* 9. Board activity — reactive trigger *)
+  (* 10. Board activity — reactive trigger *)
   if observation.pending_board_events <> [] then (
     Buffer.add_string ubuf
       (Printf.sprintf "### Board Activity (%d new)\n"
@@ -706,5 +798,35 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let user_message =
     Buffer.contents ubuf
   in
-  ( sanitize_retired_tool_names system_prompt,
-    sanitize_retired_tool_names user_message )
+  let sanitized_system = sanitize_retired_tool_names system_prompt in
+  let sanitized_user = sanitize_retired_tool_names user_message in
+  (* set_gauge only: a stray inc_counter here used to create this
+     (name, labels) cell as Counter first, so the system_prompt series
+     kept Counter kind, carried a non-monotonic byte length, and exported
+     as masc_keeper_prompt_segment_bytes_total while user_message exported
+     as the intended gauge. The store keys cells by (name, labels) and
+     never retypes an existing cell. *)
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "system_prompt")]
+    (Float.of_int (String.length sanitized_system));
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string PromptSegmentBytes)
+    ~labels:[("keeper", meta.name); ("segment", "user_message")]
+    (Float.of_int (String.length sanitized_user));
+  (* Instruction hash: emit a stable numeric fingerprint of the full prompt
+     composition (system + user) so Grafana can detect when the instruction
+     changes between turns without storing the prompt content itself.
+     Uses first 8 hex chars of SHA-256 as an integer (32-bit). *)
+  let prompt_hash =
+    let combined = sanitized_system ^ sanitized_user in
+    let hex =
+      Digestif.SHA256.(to_hex (digest_string combined))
+    in
+    Int32.to_float (Int32.of_string ("0x" ^ String.sub hex 0 8))
+  in
+  Otel_metric_store.set_gauge
+    (Keeper_metrics.to_string KeeperTurnInstructionHash)
+    ~labels:[("keeper", meta.name)]
+    prompt_hash;
+  ( sanitized_system, sanitized_user )

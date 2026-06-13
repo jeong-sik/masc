@@ -11,8 +11,8 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-04-14
-**Scope**: `masc-mcp` cross-spec joint invariants + dashboard observer contract
-**One sentence**: Decision/Cascade/Memory/Compaction의 turn 단위 상호작용을 1급으로 관찰하기 위한 composition observer를 도입하고, runtime projection과 TLA state set을 1:1로 고정한다.
+**Scope**: `masc` cross-spec joint invariants + dashboard observer contract
+**One sentence**: Decision/Runtime/Memory/Compaction의 turn 단위 상호작용을 1급으로 관찰하기 위한 composition observer를 도입하고, runtime projection과 TLA state set을 1:1로 고정한다.
 
 > Runtime note (2026-04-16)
 > Legacy `manual_reconcile` two-store runtime ownership was removed in `#7334`.
@@ -26,30 +26,30 @@ code_refs:
 - `RFC-0001-det-nondet-boundary-harness.md` — Det/NonDet 경계 원칙
 - `RFC-0002-keeper-state-machine.md` — 11-state parent phase FSM (이 RFC는 transition을 추가하지 않는다)
 - `docs/tla-audit/state-fsm-gap-2026-04-13.md` — Bug #1, 제안 P1~P5 (여기서 P4를 흡수)
-- `docs/tla-audit/cascade-fsm-gap-2026-04-13.md`
+- `docs/tla-audit/runtime-fsm-gap-2026-04-13.md`
 - `docs/tla-audit/decision-fsm-gap-2026-04-13.md`
 - `docs/design/oas-masc-state-boundary.md` — MASC/OAS SSOT
 - `specs/keeper-state-machine/KeeperStateMachine.tla` — 11-state spec
-- `specs/keeper-state-machine/KeeperCoreTriad.tla` — State × Decision × Cascade (7-phase 투사)
+- `specs/keeper-state-machine/KeeperCoreTriad.tla` — State × Decision × Runtime (7-phase 투사)
 - `specs/state-product/StateProduct.tla` — Keeper × Turn × Validation 직교 합성
 - `specs/keeper-state-machine/KeeperContextLifecycle.tla` — Context + Compaction + Checkpoint
-- `specs/keeper-state-machine/KeeperCascadeLifecycle.tla`
+- `specs/keeper-state-machine/KeeperRuntimeLifecycle.tla`
 - `specs/keeper-state-machine/KeeperCompactionLifecycle.tla`
 - `specs/boundary/KeeperContinueGate.tla`
 
 ## 1. Context & Motivation
 
-`masc-mcp` 저장소는 이미 세 개의 부분 합성 spec을 가진다.
+`masc` 저장소는 이미 세 개의 부분 합성 spec을 가진다.
 
 | Spec | 합성 축 | 커버 | 미커버 |
 |------|---------|------|--------|
-| `KeeperCoreTriad.tla` | State × Decision × Cascade | cascade routing, capability gate, side-effect containment | Memory compaction, turn cycle, recovery orchestration, 11-state 전체 |
-| `StateProduct.tla` | Keeper × Turn × Validation | det/nondet boundary per turn | Decision pipeline, Cascade, Memory |
-| `KeeperContextLifecycle.tla` | Context + Compaction + Checkpoint | context identity on resume, tool pair integrity | State machine의 11-state, Cascade, Decision |
+| `KeeperCoreTriad.tla` | State × Decision × Runtime | runtime routing, capability gate, side-effect containment | Memory compaction, turn cycle, recovery orchestration, 11-state 전체 |
+| `StateProduct.tla` | Keeper × Turn × Validation | det/nondet boundary per turn | Decision pipeline, Runtime, Memory |
+| `KeeperContextLifecycle.tla` | Context + Compaction + Checkpoint | context identity on resume, tool pair integrity | State machine의 11-state, Runtime, Decision |
 
 세 spec은 각자 영역에서 유효하지만, **한 turn 안에서 여러 FSM이 순서를 지키며 전이하는 joint property**는 아무도 검사하지 않는다. 근거:
 
-- `Keeper_state_machine.mli:131-136` `Context_measured` 이벤트는 Decision, Compaction, Cascade, Recovery의 분기 조건을 공통으로 공급하지만 이 공유 측정의 존재를 joint spec으로 명시한 곳이 없다.
+- `Keeper_state_machine.mli:131-136` `Context_measured` 이벤트는 Decision, Compaction, Runtime, Recovery의 분기 조건을 공통으로 공급하지만 이 공유 측정의 존재를 joint spec으로 명시한 곳이 없다.
 - `keeper_post_turn.ml:45-232` `apply_post_turn_lifecycle_with_resilience_handles`는 `Compaction_started/completed`, `Handoff_started/completed`를 한 turn 안에 atomic하게 emit하지만, 이 atomic 경계를 TLC로 검증할 수 있는 spec이 없다.
 - `docs/tla-audit/state-fsm-gap-2026-04-13.md` Bug #1(PR #6834, `keeper_keepalive.ml:774-836`)은 **data record 스토어와 FSM condition 스토어 간 비동기**가 만든 one-way trap이었다. 이 RFC의 live observer contract에서는 그 two-store 축을 더 이상 ownership 대상으로 두지 않는다. `KeeperRecoveryOrchestration.tla`는 historical audit model로만 남는다.
 - 대시보드 관점에서 각 FSM이 `dashboard/src/components/keeper-*.ts`의 개별 위젯으로 흩어져 있어 "이 keeper의 현재 상태가 invariants를 만족하는가"를 한눈에 볼 수 없다.
@@ -62,7 +62,7 @@ code_refs:
 
 1. `specs/keeper-state-machine/KeeperCompositeLifecycle.tla` 신규 — projection-style observer spec. state explosion 없이 joint invariants 4개 + liveness 2개 + bug model 2종.
 2. `KeeperCompositeLifecycle.cfg`(clean) + buggy cfg 2개 — clean은 전 invariant 통과, buggy cfg는 서로 다른 invariant를 위반한다 (`feedback_tla-spec-audit-outcome-trichotomy.md`).
-3. projected turn/decision/cascade/compaction 상태를 runtime observer contract와 1:1로 고정.
+3. projected turn/decision/runtime/compaction 상태를 runtime observer contract와 1:1로 고정.
 4. OCaml observer 모듈 계약(문서만, 구현은 후속 PR): `lib/keeper/keeper_composite_observer.ml{,i}`, `Keeper_registry.registry_entry` 파생 필드, event bus broadcast.
 5. 대시보드 payload shape: `/api/keepers/:name/composite` JSON 스키마.
 
@@ -88,13 +88,13 @@ RFC-0002는 11-state parent phase FSM을 pure function `derive_phase` + `apply_e
 
 | 후보 | 설명 | 채택 여부 |
 |------|------|-----------|
-| **C1 Hierarchical parent** | RFC-0002의 11-state를 parent로 삼고 Decision/Cascade/Memory를 guard로 매다는 HSM | **거절** |
+| **C1 Hierarchical parent** | RFC-0002의 11-state를 parent로 삼고 Decision/Runtime/Memory를 guard로 매다는 HSM | **거절** |
 | **C2 Turn-cycle root** | `KeeperTurnCycle.tla`를 composition root로 하고 나머지를 하위에 위치 | **거절** |
-| **C3 Event-driven projection** | `Context_measured` + OAS envelope를 coordination hub로 보고, 관찰 가능한 projection variables + joint invariants만 선언 | **채택** |
+| **C3 Event-driven projection** | `Context_measured` + OAS envelope를 workspace collaboration hub로 보고, 관찰 가능한 projection variables + joint invariants만 선언 | **채택** |
 
-C1을 거절한 구조적 이유: Decision/Cascade/Memory는 turn 내부에서만 의미 있는 상태를 갖는다. 이를 parent-child로 강제하면 `Paused`, `Crashed`, `Restarting` 같은 phase에서도 child FSM의 state를 정의해야 하는데, 현실에서 그 state는 존재하지 않거나 stale하다. 타입이 거짓말하는 spec이 된다.
+C1을 거절한 구조적 이유: Decision/Runtime/Memory는 turn 내부에서만 의미 있는 상태를 갖는다. 이를 parent-child로 강제하면 `Paused`, `Crashed`, `Restarting` 같은 phase에서도 child FSM의 state를 정의해야 하는데, 현실에서 그 state는 존재하지 않거나 stale하다. 타입이 거짓말하는 spec이 된다.
 
-C2를 거절한 이유: `KeeperTurnCycle.tla`는 turn의 물리적 시퀀스(`prompting/awaiting/tool_call/...`)를 모델링한다. 여기에 Cascade profile이나 Decision tier 같은 상위 개념을 얹으면 spec의 추상화 레벨이 뒤집힌다.
+C2를 거절한 이유: `KeeperTurnCycle.tla`는 turn의 물리적 시퀀스(`prompting/awaiting/tool_call/...`)를 모델링한다. 여기에 Runtime profile이나 Decision tier 같은 상위 개념을 얹으면 spec의 추상화 레벨이 뒤집힌다.
 
 C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할을 하고 있고, `Keeper_guard`의 priority ordering(3/4/5)으로 de facto serialization도 성립한다. 새 identifier를 만들지 않고 기존 identifier를 projection으로 재사용한다 (`feedback_no-derived-tag-when-existing-identifier-suffices.md`).
 
@@ -107,7 +107,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `ksm_phase` | `KeeperStateMachine.tla` 12-state → 7-state 투사 | `{Running, Failing, Overflowed, Compacting, HandingOff, Draining, Stable}` | Lossy projection. Stable은 turn cycle 밖 |
 | `ktc_turn_phase` | `KeeperTurnCycle.tla` / `keeper_unified_turn.ml` | `{idle, prompting, executing, compacting, finalizing}` | |
 | `kdp_decision` | `KeeperDecisionPipeline.tla` | `{undecided, guard_ok, gate_rejected, tool_policy_selected}` | Narrow projection |
-| `kcl_cascade_state` | `KeeperCascadeLifecycle.tla` | `{idle, selecting, trying, done, exhausted}` | |
+| `kcl_runtime_state` | `KeeperRuntimeLifecycle.tla` | `{idle, selecting, trying, done, exhausted}` | |
 | `kmc_compaction` | `KeeperCompactionLifecycle.tla` | `{accumulating, compacting, done}` | |
 | `shared_measurement` | `Context_measured` | `Nat` (0 = none, else snapshot id) | **hub** |
 | `measurement_turn` | `turn_tick` at capture | `Nat` | ordering |
@@ -135,9 +135,9 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 |------|------|-----------|---------|
 | `idle` | no live turn | no current turn / finalizing finished / overflow/failing abort | prompting, executing, compacting |
 | `prompting` | turn exists and awaits measurement/prompt completion | `StartTurn` | executing, idle |
-| `executing` | live turn is inside provider/tool work | live turn started or cascade attempt in flight | finalizing, compacting, idle on abort |
+| `executing` | live turn is inside provider/tool work | live turn started or runtime attempt in flight | finalizing, compacting, idle on abort |
 | `compacting` | turn is blocked on compaction completion | parent/lifecycle compaction owns the turn | idle |
-| `finalizing` | post-execution cleanup before idle | cascade/provider accepted result or handoff/drain cleanup | idle |
+| `finalizing` | post-execution cleanup before idle | runtime/provider accepted result or handoff/drain cleanup | idle |
 
 #### KDP
 
@@ -146,7 +146,7 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 | `undecided` | no committed decision yet | idle turn or freshly reset turn | guard_ok, gate_rejected |
 | `guard_ok` | gate evaluation passed | live turn survived guard evaluation | tool_policy_selected, undecided on reset |
 | `gate_rejected` | guard blocked the turn | guardrail stop or equivalent veto | undecided on reset/finalize |
-| `tool_policy_selected` | tool restriction set committed | tool policy filtering completed | cascade/select execution or undecided on reset |
+| `tool_policy_selected` | tool restriction set committed | tool policy filtering completed | runtime/select execution or undecided on reset |
 
 #### KCL
 
@@ -154,9 +154,9 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 |------|------|-----------|---------|
 | `idle` | no provider path active | no live turn / turn finished / abort path | selecting, trying |
 | `selecting` | provider path is being chosen | decision advanced past guard_ok | trying, exhausted |
-| `trying` | provider attempt in flight | cascade slot/provider selected | done, exhausted |
-| `done` | provider returned usable output | cascade/provider success accepted | idle/finalizing reset |
-| `exhausted` | every cascade path failed | last provider failed without usable result | idle/failing path |
+| `trying` | provider attempt in flight | runtime slot/provider selected | done, exhausted |
+| `done` | provider returned usable output | runtime/provider success accepted | idle/finalizing reset |
+| `exhausted` | every runtime path failed | last provider failed without usable result | idle/failing path |
 
 #### KMC
 
@@ -168,14 +168,14 @@ C3 채택 이유: 이미 `Context_measured` + `auto_rules_summary`가 hub 역할
 
 ### Actions (narrow abstractions)
 
-`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectToolPolicy`, `StartCascadeSelection`, `SelectCascade`, `GateRejected`, `CascadeDone`, `CascadeExhausted`, `FinishTurn`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearFailing`, `EnterOverflowed`, `OverflowedAutoCompact`. 총 16개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
+`StartTurn`, `MeasurementBroadcast`, `DecideGuard`, `SelectToolPolicy`, `StartRuntimeSelection`, `SelectRuntime`, `GateRejected`, `RuntimeDone`, `RuntimeExhausted`, `FinishTurn`, `StartCompaction`, `FinishCompaction`, `EnterFailing`, `ClearFailing`, `EnterOverflowed`, `OverflowedAutoCompact`. 총 16개. 각 action은 sub-FSM transition의 minimum projection이며, 자세한 guard는 원 spec에 위임한다.
 
 ### Safety invariants (clean cfg)
 
 | ID | 이름 | 요지 |
 |----|------|------|
 | I1 | `PhaseTurnAlignment` | `ksm_phase = Compacting ⇒ ktc_turn_phase = compacting ∧ kmc_compaction = compacting` |
-| I2 | `NoCascadeBeforeMeasurement` | cascade가 idle/selecting을 떠나려면 현재 turn의 measurement가 있어야 함 |
+| I2 | `NoRuntimeBeforeMeasurement` | runtime가 idle/selecting을 떠나려면 현재 turn의 measurement가 있어야 함 |
 | I3 | `CompactionAtomicity` | `kmc_compaction = compacting ⇒ ksm_phase = Compacting` |
 | I4 | `EventPriorityMonotone` | 한 turn에 measurement는 최대 1회 |
 ### Liveness (fairness 필요)
@@ -189,7 +189,7 @@ L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fa
 
 | Bug | 행동 | 예상 위반 invariant |
 |-----|------|-------------------|
-| `BugCascadeBeforeMeasurement` | measurement 없이 SelectCascade | I2 |
+| `BugRuntimeBeforeMeasurement` | measurement 없이 SelectRuntime | I2 |
 | `BugCompactionDesync` | KMC만 compacting으로 진행 | I1, I3 |
 세 bug는 **서로 다른 invariant를 때린다**. 모두 같은 곳을 치면 invariant 해상도가 낮다는 신호 (`feedback_tla-spec-audit-outcome-trichotomy.md`).
 
@@ -206,7 +206,7 @@ L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fa
     ksm_phase : ksm_phase;
     ktc_turn_phase : turn_phase;
     kdp_decision : decision_stage;
-    kcl_cascade_state : cascade_state;
+    kcl_runtime_state : runtime_state;
     kmc_compaction : compaction_stage;
     shared_measurement : Keeper_state_machine.auto_rules_summary option;
     invariants : invariants_check;
@@ -214,7 +214,7 @@ L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fa
 
   and invariants_check = {
     phase_turn_alignment : bool;
-    no_cascade_before_measurement : bool;
+    no_runtime_before_measurement : bool;
     compaction_atomicity : bool;
     event_priority_monotone : bool;
   }
@@ -236,7 +236,7 @@ L2는 `WF_vars(ClearFailing)`이 fairness에 포함되어야만 성립한다. fa
 ### 절대 하지 않는 것
 
 - `Keeper_state_machine.apply_event` 호출.
-- `Keeper_cascade_routing.select_cascade` 호출 변경.
+- `Keeper_runtime_routing.select_runtime` 호출 변경.
 - `registry_entry` 필드 mutation.
 - 토큰 수, context byte, provider 이름 읽기/저장.
 
@@ -251,7 +251,7 @@ GET /api/keepers/:name/composite
   "phase": "Running",
   "turn_phase": "executing",
   "decision": { "stage": "tool_policy_selected" },
-  "cascade": { "state": "trying" },
+  "runtime": { "state": "trying" },
   "compaction": { "stage": "accumulating" },
   "measurement": {
     "captured": true,
@@ -270,12 +270,12 @@ GET /api/keepers/:name/composite
     "turn_id": 41,
     "ended_at": 1712833970.2,
     "decision_stage": "tool_policy_selected",
-    "cascade_state": "done",
+    "runtime_state": "done",
     "selected_model": "provider-k-4.5"
   },
   "invariants": {
     "phase_turn_alignment": true,
-    "no_cascade_before_measurement": true,
+    "no_runtime_before_measurement": true,
     "compaction_atomicity": true,
     "event_priority_monotone": true
   }
@@ -307,7 +307,7 @@ P1(`TurnSucceeded` spec-code divergence)은 여기서 다루지 않는다. P1은
 | Phase | 산출물 | 의존 | 독립 PR |
 |-------|--------|------|---------|
 | **0** (이번 RFC) | `KeeperCompositeLifecycle.tla` + 3 cfg + RFC-0003 + redesign plan | 없음 | 본 PR |
-| 1 | Dashboard Phase 1 (cascade dehardcode + decision FSM fields + agent mini strip) | Phase 0 승인 | `docs/design/dashboard-fsm-redesign.md` §Phase 1 |
+| 1 | Dashboard Phase 1 (runtime dehardcode + decision FSM fields + agent mini strip) | Phase 0 승인 | `docs/design/dashboard-fsm-redesign.md` §Phase 1 |
 | 2 | `KeeperCompositeLifecycle` TLC 실행 + buggy cfg 검증 (3개 cfg 모두 pass/fail 확인) | Phase 0 | 독립 |
 | 3 | `lib/keeper/keeper_composite_observer.ml{,i}` + registry 파생 필드 | Phase 2 | 독립 |
 | 4 | `Keeper_event_bus` topic 브로드캐스트 + OAS envelope | Phase 3 | 독립 |

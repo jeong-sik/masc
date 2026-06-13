@@ -1,11 +1,13 @@
 (include_subdirs no)
 
 (library
- (name masc_mcp_transport_protocol)
- (public_name masc_mcp.mcp_transport_protocol)
+ (name masc_transport_protocol)
+ (public_name masc.mcp_transport_protocol)
  (modules mcp_transport_protocol)
  (wrapped false)
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries mcp_protocol yojson)
- (preprocess (pps ppx_deriving_yojson)))
+ (preprocess
+  (pps ppx_deriving_yojson)))

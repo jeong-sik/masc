@@ -10,27 +10,27 @@
 
      raw non-empty            -> runtime, no missing-model counter
      raw empty + telemetry    -> runtime, source="telemetry_resolved"
-     raw empty + no telemetry -> runtime, source="unknown_sentinel"
+     raw empty + no telemetry -> runtime, source="unknown_source"
      raw selector alias       -> runtime, alias="runtime"
 
    The test asserts that concrete raw/canonical labels never become the
    returned keeper-facing model string or metric alias label. *)
 
-module Hooks = Masc_mcp.Keeper_hooks_oas
-module Prom = Masc_mcp.Prometheus
+module Hooks = Masc.Keeper_hooks_oas
+module Metrics = Masc.Otel_metric_store
 
 let runtime_lane = "runtime"
-let metric_name = Prom.metric_after_turn_response_model_empty
-let alias_metric_name = Prom.metric_after_turn_response_model_alias
+let metric_name = Metrics.metric_after_turn_response_model_empty
+let alias_metric_name = Metrics.metric_after_turn_response_model_alias
 
 let counter_for ~keeper ~source =
-  Prom.metric_value_or_zero metric_name
+  Metrics.metric_value_or_zero metric_name
     ~labels:[ "keeper", keeper; "source", source ]
     ()
 ;;
 
 let alias_counter_for ~keeper ~alias ~source =
-  Prom.metric_value_or_zero alias_metric_name
+  Metrics.metric_value_or_zero alias_metric_name
     ~labels:[ "keeper", keeper; "alias", alias; "source", source ]
     ()
 ;;
@@ -74,7 +74,7 @@ let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry 
 let test_non_empty_raw_is_redacted () =
   let keeper = "test-keeper-raw-ok-10083" in
   let before_telemetry = counter_for ~keeper ~source:"telemetry_resolved" in
-  let before_unknown = counter_for ~keeper ~source:"unknown_sentinel" in
+  let before_unknown = counter_for ~keeper ~source:"unknown_source" in
   let response = make_response ~model:"oas-owned-model-id" () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
   Alcotest.(check string) "raw redacted to runtime lane" runtime_lane resolved;
@@ -83,9 +83,9 @@ let test_non_empty_raw_is_redacted () =
     before_telemetry
     (counter_for ~keeper ~source:"telemetry_resolved");
   Alcotest.(check (float 0.0001))
-    "unknown_sentinel counter unchanged"
+    "unknown_source counter unchanged"
     before_unknown
-    (counter_for ~keeper ~source:"unknown_sentinel")
+    (counter_for ~keeper ~source:"unknown_source")
 ;;
 
 let test_empty_raw_records_telemetry_presence () =
@@ -104,29 +104,29 @@ let test_empty_raw_records_telemetry_presence () =
 ;;
 
 let test_empty_everywhere_records_unknown_source () =
-  let keeper = "test-keeper-sentinel-10083" in
-  let before = counter_for ~keeper ~source:"unknown_sentinel" in
+  let keeper = "test-keeper-marker-10083" in
+  let before = counter_for ~keeper ~source:"unknown_source" in
   let response = make_response ~model:"" () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
   Alcotest.(check string) "runtime lane returned" runtime_lane resolved;
   Alcotest.(check (float 0.0001))
-    "unknown_sentinel counter +1"
+    "unknown_source counter +1"
     (before +. 1.0)
-    (counter_for ~keeper ~source:"unknown_sentinel")
+    (counter_for ~keeper ~source:"unknown_source")
 ;;
 
 let test_empty_canonical_id_records_unknown_source () =
   let keeper = "test-keeper-empty-canonical-10083" in
-  let before_sentinel = counter_for ~keeper ~source:"unknown_sentinel" in
+  let before_unknown_source = counter_for ~keeper ~source:"unknown_source" in
   let before_telemetry = counter_for ~keeper ~source:"telemetry_resolved" in
   let telemetry = make_telemetry ~canonical_model_id:"" () in
   let response = make_response ~model:"" ~telemetry () in
   let resolved = Hooks.resolve_after_turn_model ~keeper_name:keeper ~response in
   Alcotest.(check string) "runtime lane returned" runtime_lane resolved;
   Alcotest.(check (float 0.0001))
-    "unknown_sentinel counter +1"
-    (before_sentinel +. 1.0)
-    (counter_for ~keeper ~source:"unknown_sentinel");
+    "unknown_source counter +1"
+    (before_unknown_source +. 1.0)
+    (counter_for ~keeper ~source:"unknown_source");
   Alcotest.(check (float 0.0001))
     "telemetry_resolved counter unchanged"
     before_telemetry

@@ -1,0 +1,49 @@
+(include_subdirs no)
+
+(library
+ (name masc_task_handlers)
+ (public_name masc.task_handlers)
+ (wrapped true)
+ (modules
+  task
+  anti_rationalization
+  planning_eio
+  task_dispatch
+  task_transition_state
+  tool_task
+  tool_task_args
+  tool_task_completion_review
+  tool_task_contract_gate
+  tool_task_handlers
+  tool_task_no_eligible
+  tool_task_payloads
+  tool_task_schemas
+  workflow_rejection_payload)
+ (flags
+  (:standard -w -4))
+ (libraries
+  yojson
+  unix
+  re
+  re.str
+  re.pcre
+  eio
+  time_compat
+  fs_compat
+  masc_random_id
+  masc.config
+  masc_types
+  masc_core
+  masc_log
+  masc_workspace
+  masc_bounded_event_dedupe
+  masc_eio_context
+  masc.masc_tool_dispatch
+  masc.tool_types
+  masc.tool_contract_prompts
+  masc.config_dir_resolver
+  masc.prompt_registry
+  masc_goal
+  agent_sdk)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_tla)))

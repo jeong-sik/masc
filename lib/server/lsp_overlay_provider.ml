@@ -222,3 +222,192 @@ let enrich_hover ~base_dir ~file_path ~line (result : Yojson.Safe.t) =
           | None -> result)
        | None -> result)
     | _ -> result
+
+(** Generate LSP Location links for annotations overlapping [line].
+    Used by textDocument/definition to jump to annotation targets. *)
+let definition_links ~base_dir ~file_path ~line : Yojson.Safe.t list =
+  let matching = annotations_at_line ~base_dir ~file_path ~line in
+  List.map (fun (a : annotation) ->
+    `Assoc [
+      ("uri", `String ("file://" ^ base_dir ^ "/" ^ a.file_path));
+      ("range", `Assoc [
+        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
+      ]);
+    ]
+  ) matching
+
+(** Generate LSP Location[] for annotations related to those at [line].
+    Finds annotations sharing the same goal_id or task_id across the file.
+    Used by textDocument/references. *)
+let reference_locations ~base_dir ~file_path ~line ~include_declaration:_ :
+    Yojson.Safe.t list =
+  let matching = annotations_at_line ~base_dir ~file_path ~line in
+  let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
+  let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
+  let all = Cache.get ~base_dir ~file_path in
+  let related = List.filter (fun (a : annotation) ->
+    (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
+    || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
+  ) all in
+  let seen = Hashtbl.create 16 in
+  let deduped = List.filter (fun (a : annotation) ->
+    let key = (a.file_path, a.line_start) in
+    if Hashtbl.mem seen key then false
+    else (Hashtbl.add seen key (); true)
+  ) (matching @ related) in
+  List.map (fun (a : annotation) ->
+    `Assoc [
+      ("uri", `String ("file://" ^ base_dir ^ "/" ^ a.file_path));
+      ("range", `Assoc [
+        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
+      ]);
+    ]
+  ) deduped
+
+(** Generate CompletionItem[] for MASC annotation snippets.
+    Used by textDocument/completion. *)
+let completion_items ~base_dir ~file_path ~line:_ : Yojson.Safe.t list =
+  let annotations = Cache.get ~base_dir ~file_path in
+  let kinds = [ "Comment"; "Decision"; "Question"; "Bookmark" ] in
+  List.mapi (fun i kind ->
+    let label = Printf.sprintf "masc:%s" (String.lowercase_ascii kind) in
+    `Assoc [
+      ("label", `String label);
+      ("kind", `Int 15);
+      ("detail", `String (Printf.sprintf "Insert a MASC %s annotation" kind));
+      ("insertText", `String (Printf.sprintf "/* [%s]  */" kind));
+      ("insertTextFormat", `Int 2);
+      ("sortText", `String (Printf.sprintf "zzz_masc_%02d" i));
+      ("data", `Assoc [
+        ("file_path", `String file_path);
+        ("annotations_count", `Int (List.length annotations));
+      ]);
+    ]
+  ) kinds
+
+(** Generate CodeAction[] for annotation operations.
+    Used by textDocument/codeAction. *)
+let code_actions ~base_dir ~file_path ~line ~diagnostics:_ : Yojson.Safe.t list =
+  let matching = annotations_at_line ~base_dir ~file_path ~line in
+  let create_action =
+    `Assoc [
+      ("title", `String "Create MASC Annotation");
+      ("kind", `String "quickfix.createAnnotation");
+      ("edit", `Assoc [
+        ("changes", `Assoc [
+          ("file://" ^ base_dir ^ "/" ^ file_path, `List [
+            `Assoc [
+              ("range", `Assoc [
+                ("start", `Assoc [("line", `Int line); ("character", `Int 0)]);
+                ("end", `Assoc [("line", `Int line); ("character", `Int 0)]);
+              ]);
+              ("newText", `String "/* [Comment]  */\n");
+            ];
+          ]);
+        ]);
+      ]);
+    ]
+  in
+  if matching <> [] then
+    [
+      create_action;
+      `Assoc [
+        ("title", `String "View MASC Annotations");
+        ("kind", `String "quickfix.viewAnnotations");
+        ("command", `Assoc [
+          ("title", `String "Show Annotations");
+          ("command", `String "masc.showAnnotations");
+          ("arguments", `List [
+            `Assoc [("file_path", `String file_path); ("line", `Int line)];
+          ]);
+        ]);
+      ];
+    ]
+  else [ create_action ]
+
+(** Generate SymbolInformation[] for MASC annotations.
+    Used by textDocument/documentSymbol. *)
+let document_symbols ~base_dir ~file_path : Yojson.Safe.t list =
+  let annotations = Cache.get ~base_dir ~file_path in
+  List.map (fun (a : annotation) ->
+    let kind_label = annotation_kind_to_string a.kind in
+    let truncated =
+      if String.length a.content > 40 then
+        String.sub a.content 0 40 ^ "..."
+      else a.content
+    in
+    let name = Printf.sprintf "[%s] %s" kind_label truncated in
+    `Assoc [
+      ("name", `String name);
+      ("kind", `Int 17);
+      ("range", `Assoc [
+        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
+      ]);
+      ("selectionRange", `Assoc [
+        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
+      ]);
+    ]
+  ) annotations
+
+(** Generate FoldingRange[] for consecutive annotation blocks.
+    Used by textDocument/foldingRange. *)
+let folding_ranges ~base_dir ~file_path : Yojson.Safe.t list =
+  let annotations = Cache.get ~base_dir ~file_path in
+  let sorted_anns = List.sort (fun (a : annotation) (b : annotation) ->
+    compare a.line_start b.line_start
+  ) annotations in
+  let rec group_anns (acc : annotation list list) (current : annotation list) (xs : annotation list) : annotation list list =
+    match xs with
+    | [] -> (match current with [] -> List.rev acc | _ -> List.rev (List.rev current :: acc))
+    | a :: rest ->
+      (match current with
+       | [] -> group_anns acc [ a ] rest
+       | _ ->
+         let last = List.nth current (List.length current - 1) in
+         if a.line_start - last.line_end <= 2 then
+           group_anns acc (current @ [ a ]) rest
+         else
+           group_anns (List.rev current :: acc) [ a ] rest)
+  in
+  let groups = group_anns [] [] sorted_anns in
+  List.filter_map (fun (grp : annotation list) ->
+    match grp with
+    | [] -> None
+    | [ _ ] -> None
+    | first :: _ ->
+      let last = List.nth grp (List.length grp - 1) in
+      if last.line_start > first.line_start then
+        Some (`Assoc [
+          ("startLine", `Int (first.line_start - 1));
+          ("endLine", `Int (last.line_end - 1));
+          ("kind", `String "region");
+        ])
+      else None
+  ) groups
+
+(** Generate DocumentHighlight[] for annotations sharing goal/task context.
+    Used by textDocument/documentHighlight. *)
+let document_highlights ~base_dir ~file_path ~line : Yojson.Safe.t list =
+  let matching = annotations_at_line ~base_dir ~file_path ~line in
+  if matching = [] then []
+  else
+    let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
+    let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
+    let all = Cache.get ~base_dir ~file_path in
+    let related = List.filter (fun (a : annotation) ->
+      (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
+      || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
+    ) all in
+    List.map (fun (a : annotation) ->
+      `Assoc [
+        ("range", `Assoc [
+          ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
+          ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
+        ]);
+        ("kind", `Int 2);
+      ]
+    ) related

@@ -39,18 +39,21 @@ let redact_patterns (s : string) : string =
   let s = Re.replace_string url_credential_re ~by:"://[REDACTED]@" s in
   Re.replace_string sensitive_value_re ~by:"[REDACTED]" s
 
+let redact_text (s : string) : string =
+  redact_patterns s
+
 let truncate ?(max_len = default_max_len) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s
   else String.sub s 0 max_len ^ "...(truncated)"
 
-(* Blob sentinels (see [Tool_output.encode_for_oas]) embed a 64-hex sha256
+(* Blob markers (see [Tool_output.encode_for_oas]) embed a 64-hex sha256
    that the 24+ alnum pattern would otherwise overwrite with [REDACTED],
    destroying the structural fields the dashboard needs to render the marker
    as a "Stored blob" preview. Decode, redact only the user-visible preview
    body, then re-encode so sha256/bytes/mime survive intact. *)
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
-  if Tool_output.is_sentinel s then
+  if Tool_output.is_marker s then
     match Tool_output.decode_from_oas s with
     | Tool_output.Stored { sha256; bytes; preview; mime } ->
         let preview = preview |> truncate ~max_len |> redact_patterns in
@@ -69,6 +72,18 @@ let rec preview_json_strings ?(max_len = default_max_len) (json : Yojson.Safe.t)
         (List.map (fun (k, v) -> (k, preview_json_strings ~max_len v)) fields)
   | `List items -> `List (List.map (preview_json_strings ~max_len) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as j -> j
+
+let rec redact_json_strings = function
+  | `String s -> `String (redact_text s)
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if is_sensitive_key key then (key, `String "[REDACTED]")
+             else (key, redact_json_strings value))
+           fields)
+  | `List items -> `List (List.map redact_json_strings items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
 let rec redact_json_value = function
   | `Assoc fields ->
@@ -134,12 +149,11 @@ let build_tool_call_trace_json ?tool_use_id ~tool_name ~input
 
 let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
     string option * string option * string option =
-  let open Yojson.Safe.Util in
   let first_non_null key =
     List.find_map
       (fun json ->
-        match member key json with
-        | `String s ->
+        match Json_util.assoc_member_opt key json with
+        | Some (`String s) ->
             let trimmed = String.trim s in
             if trimmed <> "" then Some trimmed else None
         | _ -> None)
@@ -151,8 +165,8 @@ let summarize_tool_call_traces (traces : Yojson.Safe.t list) :
     List.rev traces
     |> List.find_map
          (fun json ->
-           match member "tool_output_preview" json with
-           | `String s ->
+           match Json_util.assoc_member_opt "tool_output_preview" json with
+           | Some (`String s) ->
                let trimmed = String.trim s in
                if trimmed <> "" then Some trimmed else None
            | _ -> None)

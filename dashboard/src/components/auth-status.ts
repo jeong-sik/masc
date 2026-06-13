@@ -6,9 +6,11 @@ import { useId } from '../../design-system/headless-preact/use-id'
 import {
   clearStoredToken,
   currentDashboardActor,
+  dashboardBearerToken,
   isRemoteAccess,
   setStoredToken,
 } from '../api/core'
+import { devTokenBootstrapStatus } from '../api/dev-token'
 import { resetMcpClientState } from '../api/mcp'
 import { dashboardAuthAccess, cleanErrorMessage } from '../lib/dashboard-auth-access'
 import {
@@ -51,6 +53,8 @@ function authBadgeSummary(): {
   const role = summary?.effective_role ?? summary?.default_role ?? 'unknown'
   const actor = summary?.effective_agent ?? summary?.token_agent ?? currentDashboardActor()
   const hasError = summary?.auth_error_code != null || (summary?.token_present === true && !validated)
+  const hasToken = !!dashboardBearerToken()
+  const bootstrap = devTokenBootstrapStatus.value
 
   if (validated) {
     return {
@@ -62,6 +66,13 @@ function authBadgeSummary(): {
     return {
       dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
       label: 'Auth error',
+    }
+  }
+  // No token and bootstrap failed — show actionable prompt
+  if (!hasToken && (bootstrap === 'no_endpoint' || bootstrap === 'network')) {
+    return {
+      dotColor: 'bg-[var(--color-status-err)] shadow-[0_0_6px_rgb(var(--err-glow)/0.45)]',
+      label: 'Login required',
     }
   }
   if (remote) {

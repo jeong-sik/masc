@@ -57,8 +57,8 @@ type agent_metrics = {
     [agent_metrics_to_yojson], [agent_metrics_of_yojson], and
     [show_agent_metrics]. *)
 
-type config = Coord_utils.config
-(** Transparent alias to {!Coord_utils.config} — the metrics store
+type config = Workspace_utils.config
+(** Transparent alias to {!Workspace_utils.config} — the metrics store
     inherits the same base-path resolution. *)
 
 (** {1 Path resolution} *)

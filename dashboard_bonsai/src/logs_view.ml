@@ -127,7 +127,7 @@ stylesheet
 
   .crumbs_sep { color: var(--color-border-strong); }
   .crumbs_cur { color: var(--text-bright); letter-spacing: 0.14em; }
-  .crumbs_room {
+  .crumbs_workspace {
     color: var(--color-accent-fg);
     letter-spacing: 0.14em;
     font-variant-numeric: tabular-nums;
@@ -1709,7 +1709,7 @@ let render_response
       (response : Logs_types.response)
     : Node.t =
   let runtime_name =
-    match keepers.room with
+    match keepers.workspace with
     | Some name when String.length name > 0 -> name
     | _ -> "local"
   in
@@ -1754,7 +1754,7 @@ let render_response
              ]
            in
            let runtime_seg =
-             [ Node.span ~attrs:[ Style.crumbs_room ] [ Node.text runtime_name ]
+             [ Node.span ~attrs:[ Style.crumbs_workspace ] [ Node.text runtime_name ]
              ; Node.span ~attrs:[ Style.crumbs_sep ] [ Node.text "›" ]
              ]
            in

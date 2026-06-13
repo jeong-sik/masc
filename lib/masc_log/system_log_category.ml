@@ -5,10 +5,8 @@ type t =
   | Telemetry_or_metadata_parse_drop
   | Host_fd_pressure
   | Docker_start_pressure
-  | Keeper_stale_watchdog_lifecycle
   | Provider_timeout
-  | Provider_cascade_exhaustion
-  | Required_tool_contract_mismatch
+  | Provider_runtime_exhaustion
   | Task_state_probe_misuse
   | Verifier_action_guard
   | Network_error_other
@@ -23,10 +21,8 @@ let to_string = function
   | Telemetry_or_metadata_parse_drop -> "telemetry_or_metadata_parse_drop"
   | Host_fd_pressure -> "host_fd_pressure"
   | Docker_start_pressure -> "docker_start_pressure"
-  | Keeper_stale_watchdog_lifecycle -> "keeper_stale_watchdog_lifecycle"
   | Provider_timeout -> "provider_timeout"
-  | Provider_cascade_exhaustion -> "provider_cascade_exhaustion"
-  | Required_tool_contract_mismatch -> "required_tool_contract_mismatch"
+  | Provider_runtime_exhaustion -> "provider_runtime_exhaustion"
   | Task_state_probe_misuse -> "task_state_probe_misuse"
   | Verifier_action_guard -> "verifier_action_guard"
   | Network_error_other -> "network_error_other"
@@ -40,10 +36,8 @@ let all =
     Telemetry_or_metadata_parse_drop;
     Host_fd_pressure;
     Docker_start_pressure;
-    Keeper_stale_watchdog_lifecycle;
     Provider_timeout;
-    Provider_cascade_exhaustion;
-    Required_tool_contract_mismatch;
+    Provider_runtime_exhaustion;
     Task_state_probe_misuse;
     Verifier_action_guard;
     Network_error_other;
@@ -59,10 +53,8 @@ let of_string_opt raw =
   | "telemetry_or_metadata_parse_drop" -> Some Telemetry_or_metadata_parse_drop
   | "host_fd_pressure" -> Some Host_fd_pressure
   | "docker_start_pressure" -> Some Docker_start_pressure
-  | "keeper_stale_watchdog_lifecycle" -> Some Keeper_stale_watchdog_lifecycle
   | "provider_timeout" -> Some Provider_timeout
-  | "provider_cascade_exhaustion" -> Some Provider_cascade_exhaustion
-  | "required_tool_contract_mismatch" -> Some Required_tool_contract_mismatch
+  | "provider_runtime_exhaustion" -> Some Provider_runtime_exhaustion
   | "task_state_probe_misuse" -> Some Task_state_probe_misuse
   | "verifier_action_guard" -> Some Verifier_action_guard
   | "network_error_other" -> Some Network_error_other

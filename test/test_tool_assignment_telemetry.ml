@@ -4,7 +4,7 @@
     config hash format, temporal ordering, read_recent ordering. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 open Tool_assignment_telemetry
 
 let temp_dir () =
@@ -32,7 +32,7 @@ let with_eio_temp_base_path f =
     ~finally:(fun () ->
       (match prev with
        | Some v -> Unix.putenv "MASC_BASE_PATH" v
-       | None -> ());
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
       cleanup_dir dir)
     (fun () ->
       Eio_main.run @@ fun env ->
@@ -40,8 +40,8 @@ let with_eio_temp_base_path f =
       f ())
 
 let failure_metric site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_tool_assignment_telemetry_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_tool_assignment_telemetry_failures
     ~labels:[ ("site", site) ]
     ()
 
@@ -60,7 +60,6 @@ let test_assigned_snapshot_has_all_fields () =
       Tool_assignment_telemetry.emit_assigned
         ~agent_id:"agent-1"
         ~profile:"keeper"
-        ~preset:"board_comment"
         ~tool_list:[ "bash"; "read" ]
         ~allow_set:[ "bash"; "read" ]
         ~deny_set:[]

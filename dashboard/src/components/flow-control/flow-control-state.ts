@@ -14,7 +14,7 @@ export const flowLoading = signal(false)
 export const maintenanceResult = signal<string | null>(null)
 export const maintenanceLoading = signal(false)
 
-function syncFlowStateFromDashboardSignals(): boolean {
+export function syncFlowStateFromDashboardSignals(options: { trustRunning: boolean } = { trustRunning: true }): boolean {
   if (namespaceTruthInitializing.value) {
     flowState.value = 'initializing'
     return true
@@ -26,8 +26,11 @@ function syncFlowStateFromDashboardSignals(): boolean {
     return true
   }
   if (paused === false) {
-    flowState.value = 'running'
-    return true
+    if (options.trustRunning) {
+      flowState.value = 'running'
+      return true
+    }
+    return false
   }
   return false
 }
@@ -41,7 +44,7 @@ function normalizedFlowStatus(value: unknown): string {
 }
 
 export async function fetchPauseStatus(): Promise<void> {
-  if (syncFlowStateFromDashboardSignals()) return
+  if (syncFlowStateFromDashboardSignals({ trustRunning: false })) return
   try {
     const raw = await callMcpTool('masc_pause_status', {})
     const parsed = JSON.parse(raw) as { paused?: boolean | null; status?: string; initializing?: boolean }
@@ -62,7 +65,7 @@ export async function fetchPauseStatus(): Promise<void> {
   } catch { flowState.value = 'unknown' }
 }
 
-export async function pauseRoom(): Promise<void> {
+export async function pauseWorkspace(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to pause the namespace.', 'error', 6000)
@@ -74,7 +77,7 @@ export async function pauseRoom(): Promise<void> {
   finally { flowLoading.value = false }
 }
 
-export async function resumeRoom(): Promise<void> {
+export async function resumeWorkspace(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to resume the namespace.', 'error', 6000)

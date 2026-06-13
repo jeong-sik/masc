@@ -54,30 +54,30 @@ progress" from "hung turn that will never complete".
 ## Out of scope
 
 - Flat global lowering of `turn_timeout_sec` to a single value
-  below the per-cascade design floor. Note the historical drift:
+  below the per-runtime design floor. Note the historical drift:
   this RFC was authored assuming `turn_timeout_sec () = 3600 s`,
   but `lib/keeper/keeper_runtime_resolved.ml:73-79` currently
   clamps the env-driven value to `[60, 600]`. The desync is a code
-  regression resolved separately by per-cascade override (Step 2 of
+  regression resolved separately by per-runtime override (Step 2 of
   goal `oas-bridge-stabilization`). What remains rejected is
   **flat global reduction** that ignores the legitimate 27 B
   `900 s+` floor (`lib/keeper/keeper_stale_watchdog.ml:405-418`).
-- **Permitted (per-cascade override, added 2026-05-06)**: a cascade
-  profile in `config/cascade.toml` may declare its own
+- **Permitted (per-runtime override, added 2026-05-06)**: a runtime
+  profile in `config/runtime.toml` may declare its own
   `turn_timeout_sec`. Checked-in remote/CLI profiles (`primary`,
   `keeper_diverse`, `retired_fast_profile`, `tier_medium`) run at 600 s.
   Operator-populated local-model profiles run at 900 s when they
   declare local providers (for example, `tier_small` with its Ollama
   entries enabled). `keeper_diverse` remains a single checked-in
   profile, not a family of implicit local variants. The 1 800 s tier
-  is gated behind a follow-up RFC after one week of Prometheus data
+  is gated behind a follow-up RFC after one week of legacy metrics backend data
   demonstrates a 900 s ceiling hit. Implementation: see
-  `feature/cascade-tiered-turn-timeout`.
+  `feature/runtime-tiered-turn-timeout`.
 - Changing OAS execution to use chunked reads. That is an OAS-level
   change; the user explicitly noted in
   `feedback_oas_execution_uncancellable_mid_turn` that
-  "masc-mcp 단독 fix 영역 zero".
-- Changing cascade routing. Tracked separately in the
+  "masc 단독 fix 영역 zero".
+- Changing runtime routing. Tracked separately in the
   `diag/27b-fallback-trace` worktree.
 
 ## Proposal
@@ -127,7 +127,7 @@ LOC estimate: 80–150 net additions.
   1-hour `active_turn_timeout_sec`. Existing healthy turns continue
   to pass.
 - Add a structured `keeper_stale_watchdog_progress_kill` log event
-  with `cascade_name`, `model`, `last_event_kind`,
+  with `runtime_id`, `model`, `last_event_kind`,
   `seconds_since_last_progress`, so the new kill class is
   attributable.
 - Mark the kill class in
@@ -143,15 +143,15 @@ LOC estimate: 80–150 net additions.
    never killed by the new path, regardless of total duration.
 3. Test fixture verifies both, including the boundary at exactly
    `progress_timeout_sec`.
-4. Prometheus counter
+4. legacy metrics backend counter
    `masc_keeper_stale_termination_by_class_total{class="mid_turn_no_progress"}`
    is non-zero in synthetic reproducer.
 
 ## Open questions
 
-- Should `progress_timeout_sec` differ per cascade? A cloud-only
-  cascade can reasonably have a 60 s threshold; a local-LLM cascade
-  needs 300 s+. Probably yes, exposed via cascade-level
+- Should `progress_timeout_sec` differ per runtime? A cloud-only
+  runtime can reasonably have a 60 s threshold; a local-LLM runtime
+  needs 300 s+. Probably yes, exposed via runtime-level
   `progress_timeout_sec_override`.
 - Substrate events that are not progress (heartbeats, surface
   re-emissions) must be filtered out. The list of "real progress"

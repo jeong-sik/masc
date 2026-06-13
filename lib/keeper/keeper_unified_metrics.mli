@@ -7,13 +7,13 @@
 
 (** Derive the trigger list from the observation. *)
 val observed_triggers_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
 (** Derive the affordance list from the observation. *)
 val observed_affordances_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
@@ -38,13 +38,13 @@ val classify_usage_trust :
 
 val usage_trust_is_trusted : usage_trust -> bool
 
-val estimate_trusted_usage_cost_usd :
-  usage_trusted:bool ->
+val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
-(** Return the OAS-reported turn cost for trusted usage.  MASC does not
-    estimate provider/model pricing locally; missing or non-positive cost
-    remains [0.0]. *)
+(** Return the OAS-reported turn cost. cost_usd is the provider's authoritative
+    cost field and is accounted independently of token-count trust (token⊥cost).
+    MASC does not estimate provider/model pricing locally; missing or
+    non-positive cost remains [0.0]. *)
 
 val usage_trust_to_string : usage_trust -> string
 
@@ -108,7 +108,7 @@ val record_context_max_observation :
     [turn_latency_bucket ms] returns the bucket label for a turn that
     took [ms] milliseconds.  The vocabulary is bounded
     ([under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]) so
-    Prometheus cardinality stays at [keeper × 5].
+    Otel_metric_store cardinality stays at [keeper × 5].
 
     [record_turn_latency_bucket] increments
     {!Keeper_metrics.(to_string TurnLatencyBucket)} on the matching
@@ -129,13 +129,13 @@ val record_turn_latency_bucket :
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  cascade_profile:string ->
+  runtime_profile:string ->
   latency_ms:int ->
   unit
 
 
 val update_metrics_from_result :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   ?is_autonomous_turn:bool ->
@@ -144,10 +144,10 @@ val update_metrics_from_result :
   ?social_transition_reason:string ->
   ?context_max:int ->
   Keeper_agent_run.run_result ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 val update_metrics_from_failure :
-  Keeper_types.keeper_meta ->
+  Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
@@ -155,11 +155,11 @@ val update_metrics_from_failure :
   ?social_transition_reason:string ->
   ?sdk_error:Agent_sdk.Error.sdk_error ->
   unit ->
-  Keeper_types.keeper_meta
+  Keeper_meta_contract.keeper_meta
 
 val append_metrics_snapshot :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   observation:Keeper_world_observation.world_observation ->
   result:Keeper_agent_run.run_result ->
   latency_ms:int ->
@@ -179,14 +179,14 @@ val append_metrics_snapshot :
   unit
 
 val append_decision_record :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   observation:Keeper_world_observation.world_observation ->
   latency_ms:int ->
-  ?semaphore_wait_ms:int ->
   outcome:string ->
   ?degraded_retry_applied:bool ->
-  ?degraded_retry_cascade:string ->
+  ?degraded_retry_runtime:string ->
   ?fallback_reason:string ->
   ?turn_mode:turn_mode ->
   ?social_state:Keeper_social_model.social_state ->

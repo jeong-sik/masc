@@ -12,7 +12,7 @@ code_refs:
 **Status**: Draft
 **Date**: 2026-04-09
 **Scope**: Canonical architecture truth, boundary enforcement, and surface reduction
-**One sentence**: Keep the repo-coordination + keeper-runtime spine, and delete, hide, or extract the rest until docs, code, and public surface tell the same story.
+**One sentence**: Keep the repo-workspace collaboration + keeper-runtime spine, and delete, hide, or extract the rest until docs, code, and public surface tell the same story.
 
 ## Related Documents
 
@@ -26,9 +26,9 @@ code_refs:
 
 ## Problem Statement
 
-`masc-mcp` has a credible core design:
+`masc` has a credible core design:
 
-- repo-local coordination for multiple coding agents
+- repo-local workspace collaboration for multiple coding agents
 - OAS-backed keeper runtime for long-running execution
 
 The problem is not that the repo lacks an architecture. The problem is that the
@@ -50,7 +50,7 @@ The current cleanup goal is therefore not "invent a new architecture". It is:
 
 The canonical front door is:
 
-- repo coordination: project scope, task ownership, worktree hygiene, heartbeat
+- repo workspace collaboration: project scope, task ownership, worktree hygiene, heartbeat
 - keeper runtime: OAS-backed keeper lifecycle and diagnostics
 
 Everything else must be classified explicitly as one of:
@@ -66,7 +66,7 @@ The repo must stop describing non-canonical surfaces as equally first-class.
 
 | ID | Symptom | Current evidence | Why this is a problem |
 |----|---------|------------------|------------------------|
-| E1 | Front-door promise is narrow, but public inventory claims are wide | `README.md` describes repo coordination + keeper runtime as the front door, while `docs/MCP-SURFACE-AUDIT.md` says default `tools/list` exposes 403 visible schemas | Users and agents cannot infer the intended default surface from docs alone |
+| E1 | Front-door promise is narrow, but public inventory claims are wide | `README.md` describes repo workspace collaboration + keeper runtime as the front door, while `docs/MCP-SURFACE-AUDIT.md` says default `tools/list` exposes 403 visible schemas | Users and agents cannot infer the intended default surface from docs alone |
 | E2 | Chain plane was described as canonical after the chain engine was removed | The superseded `MERGED-ARCHITECTURE-SSOT.md` was deleted, `docs/spec/04-chain-engine.md` was deleted (2026-04-17), and current implementation status says Chain Engine is removed and the codebase no longer contains `lib/chain_*`. Keep `docs/spec/01-system-overview.md` aligned with that state. | The orchestration spine becomes contradictory if historical chain claims re-enter current docs |
 | E3 | MASC/OAS boundary is declared as strict but not enforced | `docs/OAS-MASC-BOUNDARY.md` forbids `Agent_sdk` imports in MASC core, but real imports exist outside keeper/worker/bridge lanes | Boundary rules become advisory and regress silently |
 | E4 | "Small front door" narrative sits on top of a platform-scale monolith | `docs/ARCHITECTURE-COMPLEXITY-ANALYSIS.md` and `docs/spec/SPEC-INDEX.md` both show a very large tool/module footprint, while top-level docs increasingly describe a much smaller product | Without reduction or extraction, the product explanation remains fragile |
@@ -98,7 +98,7 @@ non-canonical is deletion or hiding, not indefinite preservation.
 ### Track A: Docs truth convergence
 
 - pick one counting source for public MCP truth and use it everywhere
-- rewrite front-door docs around repo coordination + keeper runtime
+- rewrite front-door docs around repo workspace collaboration + keeper runtime
 - downgrade chain and compatibility material from "canonical" to "historical" or "advanced"
 - ensure removed surfaces are described as removed, not merely optional
 
@@ -118,7 +118,7 @@ non-canonical is deletion or hiding, not indefinite preservation.
 
 ## Non-Goals
 
-- redesigning the coordination model from scratch
+- redesigning the workspace collaboration model from scratch
 - replacing OAS with a MASC-native execution engine
 - same-PR deletion of all non-canonical code paths
 - speculative new platform capabilities

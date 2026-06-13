@@ -100,7 +100,7 @@ let oas_record ?(level = Agent_sdk.Log.Info) ~module_name ~message fields =
 
 let test_oas_bridge_promotes_mcp_server_failures_to_error () =
   let level =
-    Masc_mcp.Agent_sdk_log_bridge.effective_level
+    Masc.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_config"
@@ -113,7 +113,7 @@ let test_oas_bridge_promotes_mcp_server_failures_to_error () =
 
 let test_oas_bridge_promotes_context_injector_failures_to_error () =
   let level =
-    Masc_mcp.Agent_sdk_log_bridge.effective_level
+    Masc.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_turn"
@@ -126,7 +126,7 @@ let test_oas_bridge_promotes_context_injector_failures_to_error () =
 
 let test_oas_bridge_promotes_missing_approval_callback_to_error () =
   let level =
-    Masc_mcp.Agent_sdk_log_bridge.effective_level
+    Masc.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_tools"
@@ -139,12 +139,12 @@ let test_oas_bridge_promotes_missing_approval_callback_to_error () =
 
 let test_oas_bridge_demotes_tool_choice_relaxation_to_debug () =
   let level =
-    Masc_mcp.Agent_sdk_log_bridge.effective_level
+    Masc.Agent_sdk_log_bridge.effective_level
       (oas_record
          ~level:Agent_sdk.Log.Info
          ~module_name:"completion_contract"
          ~message:"tool_choice contract relaxed (provider does not support tool_choice)"
-         [ Agent_sdk.Log.S ("provider", "provider_k") ])
+         [ Agent_sdk.Log.S ("provider", "glm") ])
   in
   Alcotest.(check string) "tool_choice fallback demoted" "DEBUG"
     (Log.level_to_string level)

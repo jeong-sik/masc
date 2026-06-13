@@ -8,6 +8,9 @@
     [Keeper_supervisor_launch] (godfile decomp). *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_execution
 
 include Keeper_supervisor_launch
@@ -19,14 +22,6 @@ let sweep_and_recover (ctx : _ context) =
   in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
-  (* Refresh the cascade health cache before Phase 3.5 reads it.  Without this
-     call the cache stayed cold (PR #14146 introduced the cache and
-     [Phase 3.5] guard but never wired a writer), so every cascade looked
-     unhealthy and auto-resume was silently disabled across the fleet.
-     [run_once] is a registry scan — bounded, no I/O — so running it
-     inline on every 30 s sweep is cheap.  [Safe_ops.protect] keeps a
-     transient registry exception from killing the sweep. *)
-  Safe_ops.protect ~default:() (fun () -> Keeper_health_probe.run_once ~base_path);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)
@@ -100,9 +95,8 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_registry.Stale_turn_timeout _
            | Keeper_registry.Stale_fleet_batch _
            | Keeper_registry.Provider_runtime_error _
-           | Keeper_registry.Tool_required_unsatisfied _
            | Keeper_registry.Ambiguous_partial_commit _
-           | Keeper_registry.Fiber_unresolved
+           | Keeper_registry.Fiber_unresolved _
            | Keeper_registry.Exception _ )
        | None ->
          queue_standard_restart ())
@@ -130,11 +124,10 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Provider_runtime_error _)
-    | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
     | Some (Keeper_registry.Ambiguous_partial_commit _)
-    | Some Keeper_registry.Fiber_unresolved
+    | Some (Keeper_registry.Fiber_unresolved _)
     | Some (Keeper_registry.Exception _)
     | None -> false
   in
@@ -163,11 +156,10 @@ let sweep_and_recover (ctx : _ context) =
       | Some (Keeper_registry.Heartbeat_consecutive_failures _)
       | Some (Keeper_registry.Turn_consecutive_failures _)
       | Some (Keeper_registry.Provider_runtime_error _)
-      | Some (Keeper_registry.Tool_required_unsatisfied _)
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
       | Some (Keeper_registry.Ambiguous_partial_commit _)
-      | Some Keeper_registry.Fiber_unresolved
+      | Some (Keeper_registry.Fiber_unresolved _)
       | Some (Keeper_registry.Exception _)
       | None -> None
     in
@@ -192,7 +184,7 @@ let sweep_and_recover (ctx : _ context) =
            with
            | Ok () -> ()
            | Error err ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string WriteMetaFailures)
                ~labels:[ "keeper", entry.name; "phase", "stale_turn_timeout_stamp" ]
                ();
@@ -202,65 +194,34 @@ let sweep_and_recover (ctx : _ context) =
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name
       msg;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
         ]
       ();
-    (* 2026-05-05 fleet-stuck cycle: when a keeper fiber is stuck inside
-       an LLM subprocess that does not honour [Eio.Cancel.Cancelled],
-       the natural [Fun.protect] release in [with_keeper_turn_slot]
-       never runs and its [reactive_turn_semaphore] permit is leaked.
-       Production observation: 16 keepers held [reactive_slot] for
-       18-25 minutes each, [reactive_available=0], every other keeper
-       skipped its turn after the 180s [acquire_bounded] timeout, and
-       the idle-turn watchdog killed them. Force-releasing here is the
-       only path that drains the semaphore short of a process restart.
-       Bounded over-release is documented in
-       [Keeper_turn_slot.force_release_holder_for].
-
-       WORKAROUND (RFC-0125 P5 removal target): this rescue path only
-       releases the semaphore permit; the underlying stuck subprocess
-       lives until process restart. The structural fix is RFC-0125 P4
-       [keeper-level max-turn watchdog] (PR #15964) which cancels the
-       keepalive fiber at a typed wall-clock boundary BEFORE the slot
-       leaks. Removal target: 30-day soak on
-       stale-watchdog timeout termination metric reaching
-       zero with [MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC] enabled
-       fleet-wide. Do not add new callers. *)
-    (match Keeper_turn_slot.force_release_holder_for ~keeper_name:entry.name with
-     | [] -> ()
-     | released ->
-       let summary =
-         released
-         |> List.map (fun (label, age) -> Printf.sprintf "%s/%.0fs" label age)
-         |> String.concat ","
-       in
-       Log.Keeper.error
-         "%s: force-released stale slots after watchdog crash: %s"
-         entry.name
-         summary);
-	    if Keeper_registry.try_resolve_done entry (`Crashed msg)
-	    then (
-	      let outcome =
-	        Keeper_registry_cascade_attempt.enrich_fiber_unresolved_outcome
-	          ~base_path
-	          ~keeper_name:entry.name
-	          msg
-	      in
-	      ignore
-	        (Keeper_registry.dispatch_event_and_log
-	           ~base_path
-	           entry.name
-	           (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None }));
-      let ts = Time_compat.now () in
-      Keeper_registry.record_crash ~base_path entry.name ts msg;
-      Keeper_registry_error_recording.record ~base_path entry.name msg;
-      match Keeper_registry.get ~base_path entry.name with
-      | Some updated -> queue_crashed_entry updated msg
-      | None -> ())
+    (match
+       Keeper_registry.resolve_done
+         entry
+         ~source:"supervisor_force_watchdog_crash"
+         (`Crashed msg)
+     with
+     | Keeper_registry.Done_already_resolved _ -> ()
+     | Keeper_registry.Done_resolved _ ->
+       let outcome = msg in
+       ignore
+         (Keeper_registry.dispatch_event_and_log
+            ~base_path
+            entry.name
+            (Keeper_state_machine.Fiber_terminated
+               { outcome; provider_id = None; http_status = None }));
+       let ts = Time_compat.now () in
+       Keeper_registry.record_crash ~base_path entry.name ts msg;
+       Keeper_registry_error_recording.record ~base_path entry.name msg;
+       (match Keeper_registry.get ~base_path entry.name with
+        | Some updated -> queue_crashed_entry updated msg
+        | None -> ()))
   in
   (* 2-level supervision slice: process the flat registry through stable
      8-keeper cohorts.  Each cohort re-reads its entries by name before
@@ -332,20 +293,20 @@ let sweep_and_recover (ctx : _ context) =
          Printf.sprintf "restart budget exhausted (%d), last: %s" max_restarts msg
        in
        publish_phase_lifecycle ~phase:Keeper_state_machine.Dead entry.name detail ();
-       (* Loud alert: structured Dead event + Prometheus counter so a fleet-wide
+       (* Loud alert: structured Dead event + Otel_metric_store counter so a fleet-wide
        silent crash (8 keepers, 2026-04-25) is impossible to miss in dashboard
-       or PromQL. The free-form [event="dead"] on masc.keeper.lifecycle does
+       or metric queries. The free-form [event="dead"] on masc.keeper.lifecycle does
        not carry restart_count or the structured failure reason. *)
        let last_fr_str =
          Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason
        in
-       Cascade_events.publish_keeper_dead
+       Keeper_event_publisher.publish_keeper_dead
          ~keeper_name:entry.name
          ~reason:msg
          ~restart_count:entry.restart_count
          ~last_failure_reason:last_fr_str
          ();
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string DeadTotal)
          ~labels:
            [ "keeper", entry.name; "reason", Option.value last_fr_str ~default:"unknown" ]
@@ -363,7 +324,7 @@ let sweep_and_recover (ctx : _ context) =
     (fun (entry : Keeper_registry.registry_entry) ->
        cleanup_dead_tombstone ctx entry;
        Keeper_lifecycle_hooks.run
-         ~base_dir:(Coord.masc_root_dir ctx.config)
+         ~base_dir:(Workspace.masc_root_dir ctx.config)
          ~meta:entry.meta
          ~keeper_id:entry.name
          Keeper_lifecycle_hooks.Tombstone_reaped)
@@ -372,18 +333,18 @@ let sweep_and_recover (ctx : _ context) =
     Keeper_registry.all ~base_path () |> active_supervision_keeper_count
   in
   let restart_list =
-    let keepers_dir = Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in
+    let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
     apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart
   in
   (* Restart crashed keepers *)
   List.iter
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string RestartAttempts)
          ~labels:[ "keeper", old_entry.name ]
          ();
-       match read_meta ctx.config old_entry.name with
+       match read_effective_meta ctx.config old_entry.name with
        | Ok (Some meta) ->
          (* RFC-0002: dispatch restart attempt event *)
          Keeper_registry.dispatch_event_unit
@@ -410,7 +371,7 @@ let sweep_and_recover (ctx : _ context) =
               "%s: register_restarting refused — restart_budget_remaining=false \
                (BudgetNeverRevives guard tripped); routing to mark_dead"
               old_entry.name;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
               ();
@@ -432,7 +393,7 @@ let sweep_and_recover (ctx : _ context) =
               old_entry.name
               (Printf.sprintf "attempt %d" attempt)
               ();
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
               ();
@@ -451,12 +412,12 @@ let sweep_and_recover (ctx : _ context) =
                 old_entry.name
                 attempt
                 max_restarts;
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string NearExhaustionTotal)
                 ~labels:[ "keeper", old_entry.name ]
                 ()))
        | _ ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
            ();
@@ -469,7 +430,7 @@ let sweep_and_recover (ctx : _ context) =
      on restart. The queue itself is in-memory, but paused keeper meta is
      durable, so rebuild the human gate from persisted blocker evidence. *)
   let sweep_names_ym = Eio_guard.create_yield_meter () in
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     (match read_meta ctx.config name with
      | Ok (Some meta)
@@ -481,7 +442,7 @@ let sweep_and_recover (ctx : _ context) =
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
   let paused_ttl_sec = Env_config.KeeperSupervisor.paused_cleanup_ttl_sec in
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
     then ()
@@ -492,7 +453,7 @@ let sweep_and_recover (ctx : _ context) =
              && (not (paused_meta_requires_reconcile_recovery meta))
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let path = Keeper_types.keeper_meta_path ctx.config name in
+        let path = Keeper_types_profile.keeper_meta_path ctx.config name in
         (try
            Sys.remove path;
            publish_lifecycle
@@ -504,13 +465,20 @@ let sweep_and_recover (ctx : _ context) =
              ();
            Log.Keeper.info "%s: stale paused meta pruned" name
          with
-         | Eio.Cancel.Cancelled _ as e -> raise e
+         | Eio.Cancel.Cancelled _ ->
+           (* supervisor finally cleanup cancelled: cleanup arms must not
+              re-raise cancellation, because [Fun.protect] wraps exceptions
+              raised from cleanup as [Fun.Finally_raised] and can re-arm the
+              2026-05-05 cycle9 incident. *)
+           Log.Keeper.debug
+             "%s: supervisor finally cleanup cancelled during paused meta prune"
+             name
          | exn ->
            Log.Keeper.warn
              "%s: paused meta prune failed: %s"
              name
              (Printexc.to_string exn);
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string SupervisorCleanupFailures)
              ~labels:
                [ "keeper", name
@@ -524,7 +492,7 @@ let sweep_and_recover (ctx : _ context) =
      [paused = false] here lets Phase 4 (reconcile_keepalive_keepers) pick them
      up and restart them on the same sweep.  Reconcile-gated pauses and
      intentional operator pauses are skipped. *)
-  Keeper_types.keeper_names ctx.config
+  Keeper_meta_store.keeper_names ctx.config
   |> List.iter (fun name ->
     if Keeper_registry.is_running ~base_path name
     then ()
@@ -534,118 +502,67 @@ let sweep_and_recover (ctx : _ context) =
         when Keeper_supervisor_types.paused_meta_auto_resume_due ~now meta
              && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
         ->
-        let cascade_name = Keeper_types.cascade_name_of_meta meta in
-        let cascade_status = Keeper_health_probe.get_cascade_status ~cascade_name in
-        (* Three-valued admission:
-                    Unhealthy   — block, the probe saw restart pressure.
-                    Healthy     — proceed with timer check.
-                    Unknown     — proceed with timer check.  No probe data
-                                  yet (e.g. all keepers in the cascade
-                                  paused so the registry has no entries
-                                  to score).  Defaulting to "block" here
-                                  is the bug PR #14146 shipped: it turned
-                                  the boot-time race window into a
-                                  permanent lockout.  See instructions/
-                                  software-development.md anti-pattern
-                                  "Unknown -> Permissive Default". *)
-        (match cascade_status with
-         | Keeper_health_probe.Unhealthy reason ->
-           Log.Keeper.info
-             "%s: auto-resume blocked; cascade %s is unhealthy (%s)"
-             name
-             cascade_name
-             reason;
-           Prometheus.inc_counter
-             Keeper_metrics.(to_string AutoResumeBlockedTotal)
-             ~labels:[ "keeper", name; "cascade", cascade_name ]
-             ()
-         | Keeper_health_probe.Unknown | Keeper_health_probe.Healthy ->
-           let resume_after_sec =
-             Option.value
-               ~default:0.0
-               meta.auto_resume_after_sec
-           in
-           let paused_ts =
-             Coord_resilience.Time.parse_iso8601_opt meta.updated_at
-             |> Option.value ~default:0.0
-           in
-           if paused_ts > 0.0 && now -. paused_ts >= resume_after_sec
-           then (
-             (* Resume: clear [paused] flag but retain [auto_resume_after_sec]
-                      so the doubled delay is ready for the next auto-pause.  It
-                      will be reset to [None] on a successful turn completion. *)
-             let resumed_meta =
-               { meta with
-                 paused = false
-               ; auto_resume_after_sec = Some resume_after_sec
-               ; updated_at = now_iso ()
-               ; runtime = { meta.runtime with last_blocker = None }
-               }
-             in
-             match
-               write_meta_with_merge
-                 ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                 ctx.config
-                 resumed_meta
-             with
-             | Ok () ->
-               Keeper_turn_livelock.reset_keeper_livelock ~keeper:name;
-               (match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
-                | Some _ ->
-                  Keeper_registry.dispatch_event_unit
-                    ~base_path:ctx.config.base_path
-                    name
-                    Keeper_state_machine.Operator_resume;
-                  Keeper_registry.wakeup ~base_path:ctx.config.base_path name
-                | None -> ());
-               publish_lifecycle
-                 ~event:
-                   (Keeper_lifecycle_events.Custom_event
-                      { verb = Keeper_lifecycle_events.Auto_resumed; phase = None })
-                 name
-                 (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
-                 ();
-               Prometheus.inc_counter
-                 Keeper_metrics.(to_string AutoResumedTotal)
-                 ~labels:[ "keeper", name ]
-                 ();
-               Log.Keeper.info
-                 "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if re-paused; \
-                  resets to initial on successful turn)"
-                 name
-                 resume_after_sec
-                 (Float.min
-                    Env_config.KeeperSupervisor.auto_resume_max_sec
-                    (resume_after_sec *. 2.0))
-             | Error err ->
-               Prometheus.inc_counter
-                 Keeper_metrics.(to_string WriteMetaFailures)
-                 ~labels:[ "keeper", name; "phase", "auto_resume" ]
-                 ();
-               Log.Keeper.warn "%s: auto-resume meta write failed: %s" name err))
+        (match
+           ( Keeper_supervisor_types.paused_meta_effective_auto_resume_after_sec meta
+           , Workspace_resilience.Time.parse_iso8601_opt meta.updated_at )
+         with
+         | Some resume_after_sec, Some paused_ts
+           when paused_ts > 0.0 && now -. paused_ts >= resume_after_sec ->
+           ((* Resume: clear [paused] flag but retain [auto_resume_after_sec]
+               so the doubled delay is ready for the next auto-pause. It will be
+               reset to [None] on a successful turn completion. *)
+            let resumed_meta =
+              { meta with
+                paused = false
+              ; auto_resume_after_sec = Some resume_after_sec
+              ; updated_at = now_iso ()
+              ; runtime = { meta.runtime with last_blocker = None }
+              }
+            in
+            match
+              write_meta_with_merge
+                ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                ctx.config
+                resumed_meta
+            with
+            | Ok () ->
+              Keeper_turn_livelock.reset_keeper_livelock ~keeper:name;
+              (match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
+               | Some _ ->
+                 Keeper_registry.dispatch_event_unit
+                   ~base_path:ctx.config.base_path
+                   name
+                   Keeper_state_machine.Operator_resume;
+                 Keeper_registry.wakeup ~base_path:ctx.config.base_path name
+               | None -> ());
+              publish_lifecycle
+                ~event:
+                  (Keeper_lifecycle_events.Custom_event
+                     { verb = Keeper_lifecycle_events.Auto_resumed; phase = None })
+                name
+                (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
+                ();
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string AutoResumedTotal)
+                ~labels:[ "keeper", name ]
+                ();
+              Log.Keeper.info
+                "%s: auto-resumed after %.0fs backoff (next backoff=%.0fs if re-paused; \
+                 resets to initial on successful turn)"
+                name
+                resume_after_sec
+                (Float.min
+                   Env_config.KeeperSupervisor.auto_resume_max_sec
+                   (resume_after_sec *. 2.0))
+            | Error err ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string WriteMetaFailures)
+                ~labels:[ "keeper", name; "phase", "auto_resume" ]
+                ();
+              Log.Keeper.warn "%s: auto-resume meta write failed: %s" name err)
+         | _ -> ())
       | _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ctx
 ;;
-
-type credential_recovery_outcome =
-  Keeper_supervisor_liveness_recovery.credential_recovery_outcome =
-  | Credential_recovery_not_needed
-  | Credential_recovery_reissued of string
-  | Credential_recovery_failed of string
-
-let credential_recovery_before_restart_for_test =
-  Keeper_supervisor_liveness_recovery.credential_recovery_before_restart_for_test
-;;
-
-let liveness_recovery_scan ctx =
-  Keeper_supervisor_liveness_recovery.scan ~supervise_keepalive ~publish_lifecycle ctx
-;;
-
-let request_alive_but_stuck_recovery_for_test =
-  Keeper_supervisor_alive_but_stuck.request_recovery_for_test
-;;
-
-let alive_but_stuck_reset_for_test = Keeper_supervisor_alive_but_stuck.reset_for_test
-let alive_but_stuck_scan = Keeper_supervisor_alive_but_stuck.scan

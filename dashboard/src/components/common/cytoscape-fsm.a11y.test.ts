@@ -50,7 +50,7 @@ describe('CytoscapeFsm a11y', () => {
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('with cascade + error edge types passes axe', async () => {
+  it('with runtime + error edge types passes axe', async () => {
     const withTypes: FsmGraphSpec = {
       nodes: [
         { id: 'a', label: 'a', type: 'start' },
@@ -58,7 +58,7 @@ describe('CytoscapeFsm a11y', () => {
         { id: 'c', label: 'c', type: 'end' },
       ],
       edges: [
-        { source: 'a', target: 'b', type: 'cascade' },
+        { source: 'a', target: 'b', type: 'runtime' },
         { source: 'b', target: 'c', type: 'error' },
       ],
     }

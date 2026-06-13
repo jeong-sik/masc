@@ -4,11 +4,11 @@ open Alcotest
 
     PR-7 wrapped the primary keeper-turn dispatch sites; PR-8 wrapped the
     MCP server tag-dispatch caller sites. PR-9 closes the remaining
-    fallback path inside [agent_tool_remote_mcp_runtime.ml:180-190] where
-    [Tool_dispatch.lookup_tag] + [Agent_tool_shared_runtime.tag_dispatch_fn]
+    fallback path inside [keeper_tool_registered_runtime.ml:180-190] where
+    [Tool_dispatch.lookup_tag] + [Keeper_tool_shared_runtime.tag_dispatch_fn]
     handle tools that didn't resolve through the handler registry.
 
-    With this PR, ALL THREE dispatch entries in masc-mcp emit the
+    With this PR, ALL THREE dispatch entries in masc emit the
     4-tuple (Span / Metric / trace_id / Audit slot via existing
     audit hooks). RFC-0084 §2.1 North Star reaches 100% propagation.
 
@@ -20,9 +20,9 @@ let pinned_tag_dispatch_outcome_labels = [ "handled"; "no_handler" ]
 
 let pinned_total_telemetry_wrap_sites_across_entries = 5
 (** Cumulative wrap sites after PR-9:
-    - PR-7 keeper turn: agent_tool_remote_mcp_runtime.ml:164 + :218     (2 sites)
+    - PR-7 keeper turn: keeper_tool_registered_runtime.ml:164 + :218     (2 sites)
     - PR-8 MCP server: mcp_server_eio_execute.ml:1065 + :1083 (2 sites)
-    - PR-9 tag-dispatch fallback: agent_tool_remote_mcp_runtime.ml:180+   (1 site)
+    - PR-9 tag-dispatch fallback: keeper_tool_registered_runtime.ml:180+   (1 site)
     Total: 5 wrap sites covering all three dispatch entries. *)
 
 let pinned_dispatch_entries_covered = 3
@@ -31,7 +31,7 @@ let pinned_dispatch_entries_covered = 3
     - MCP server (tag-based dispatch via dispatch_by_tag /
       dispatch_internal_keeper_runtime_tool)
     - Tag-dispatch fallback (keeper_tag_dispatch.ml /
-      Agent_tool_shared_runtime.tag_dispatch_fn)
+      Keeper_tool_shared_runtime.tag_dispatch_fn)
     PR-9 brings all 3 to telemetry parity. *)
 
 let test_outcome_vocab_parity () =

@@ -1,8 +1,8 @@
 open Alcotest
 
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Config = Masc_mcp.Config
-module Coord = Masc_mcp.Coord
+module Mcp_eio = Masc.Mcp_server_eio
+module Config = Masc.Config
+module Workspace = Masc.Workspace
 
 let temp_dir () =
   let dir = Filename.temp_file "test_tool_contract_truth_" "" in
@@ -64,7 +64,7 @@ let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
   in
   Mcp_eio.handle_request ~clock ~sw state request
 
-let test_visible_tools_expose_only_truthful_statuses () =
+let test_public_tools_expose_only_truthful_statuses () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
@@ -76,7 +76,7 @@ let test_visible_tools_expose_only_truthful_statuses () =
       List.iter
         (fun tool ->
           let status = tool_string_field tool "implementationStatus" in
-          check bool ("truthful visible status: " ^ tool_string_field tool "name")
+          check bool ("truthful public status: " ^ tool_string_field tool "name")
             true
             (String.equal status "real" || String.equal status "adapter"))
         tools)
@@ -89,7 +89,6 @@ let test_selected_tools_report_contract_status () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      (* masc_verify_handoff remains removed; runtime verify is covered by the admin surface. *)
       let tools =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:
@@ -106,6 +105,6 @@ let test_selected_tools_report_contract_status () =
 let () =
   run "tool contract truth"
     [
-      ("visible", [ test_case "visible tools stay truthful" `Quick test_visible_tools_expose_only_truthful_statuses ]);
+      ("public", [ test_case "public tools stay truthful" `Quick test_public_tools_expose_only_truthful_statuses ]);
       ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_contract_status ]);
     ]

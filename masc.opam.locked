@@ -1,0 +1,244 @@
+opam-version: "2.0"
+name: "masc"
+version: "0.19.42"
+synopsis: "Multi-Agent Shared Context MCP Server in OCaml"
+description:
+  "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents"
+maintainer: "Jeongsik Yun"
+authors: "Jeongsik Yun"
+license: "MIT"
+homepage: "https://github.com/jeong-sik/masc"
+doc: "https://github.com/jeong-sik/masc"
+bug-reports: "https://github.com/jeong-sik/masc/issues"
+depends: [
+  "agent_sdk" {= "0.206.6"}
+  "alcotest" {= "1.9.1" & with-test}
+  "ambient-context" {= "0.2"}
+  "ambient-context-eio" {= "0.2"}
+  "angstrom" {= "0.16.1"}
+  "asn1-combinators" {= "0.3.2"}
+  "astring" {= "0.8.5"}
+  "atd" {= "4.2.0"}
+  "atdgen" {= "4.2.0"}
+  "atdgen-runtime" {= "4.2.0"}
+  "atdts" {= "4.2.0"}
+  "atomic" {= "base"}
+  "base" {= "v0.17.3"}
+  "base-bigarray" {= "base"}
+  "base-bytes" {= "base"}
+  "base-domains" {= "base"}
+  "base-effects" {= "base"}
+  "base-nnp" {= "base"}
+  "base-threads" {= "base"}
+  "base-unix" {= "base"}
+  "base64" {= "3.5.2"}
+  "bigstringaf" {= "0.10.0"}
+  "biniou" {= "1.2.2"}
+  "bisect_ppx" {= "2.8.3" & with-test}
+  "bos" {= "0.2.1"}
+  "bstr" {= "0.0.4"}
+  "ca-certs" {= "1.0.1"}
+  "camlp-streams" {= "5.0.1"}
+  "checkseum" {= "0.5.2"}
+  "cmdliner" {= "2.1.1"}
+  "cohttp" {= "6.2.1"}
+  "cohttp-eio" {= "6.2.1"}
+  "conduit" {= "8.0.0"}
+  "conf-gmp" {= "5"}
+  "conf-gmp-powm-sec" {= "4"}
+  "conf-libssl" {= "4"}
+  "conf-pkg-config" {= "4"}
+  "conf-protoc" {= "4.4.0"}
+  "conf-sqlite3" {= "1"}
+  "conf-zstd" {= "1.3.8"}
+  "cppo" {= "1.8.0"}
+  "crunch" {= "4.0.0"}
+  "csexp" {= "1.5.2"}
+  "cstruct" {= "6.2.0"}
+  "ctypes" {= "0.24.0"}
+  "decompress" {= "1.5.3"}
+  "digestif" {= "1.3.0"}
+  "domain-local-await" {= "1.0.1"}
+  "domain-name" {= "0.5.0"}
+  "dune" {= "3.22.2"}
+  "dune-build-info" {= "3.22.2"}
+  "dune-compiledb" {= "0.6.0"}
+  "dune-configurator" {= "3.22.2"}
+  "duration" {= "0.2.1"}
+  "easy-format" {= "1.3.4"}
+  "eio" {= "1.3"}
+  "eio-ssl" {= "0.3.0"}
+  "eio_main" {= "1.3"}
+  "eio_posix" {= "1.3"}
+  "eqaf" {= "0.10"}
+  "ezjsonm" {= "1.3.0"}
+  "faraday" {= "0.8.2"}
+  "fmt" {= "0.11.0"}
+  "fpath" {= "0.7.3"}
+  "gen" {= "1.1"}
+  "gluten" {= "0.5.2"}
+  "gluten-eio" {= "0.5.2"}
+  "gmap" {= "0.3.0"}
+  "graphql" {= "0.14.0"}
+  "graphql_parser" {= "0.14.0"}
+  "grpc-direct" {= "0.2.6"}
+  "grpc-direct-core" {= "0.2.6"}
+  "h2" {= "0.13.0"}
+  "h2-eio" {= "0.13.0"}
+  "hex" {= "1.5.0"}
+  "hmap" {= "0.8.1"}
+  "hpack" {= "0.13.0"}
+  "http" {= "6.2.1"}
+  "httpun" {= "0.2.0"}
+  "httpun-eio" {= "0.2.0"}
+  "httpun-types" {= "0.2.0"}
+  "httpun-ws" {= "0.2.0"}
+  "httpun-ws-eio" {= "0.2.0"}
+  "integers" {= "0.7.0"}
+  "iomux" {= "0.4"}
+  "ipaddr" {= "5.6.2"}
+  "ipaddr-sexp" {= "5.6.2"}
+  "jane-street-headers" {= "v0.17.0"}
+  "js_of_ocaml-compiler" {= "6.3.2"}
+  "jsonm" {= "1.0.2"}
+  "jst-config" {= "v0.17.0"}
+  "kdf" {= "1.0.0"}
+  "ke" {= "0.6"}
+  "logs" {= "0.10.0"}
+  "lwt" {= "6.1.2"}
+  "lwt-dllist" {= "1.1.0"}
+  "macaddr" {= "5.6.2"}
+  "magic-mime" {= "1.3.1"}
+  "mcp_protocol" {= "1.3.0"}
+  "menhir" {= "20250912"}
+  "menhirCST" {= "20250912"}
+  "menhirLib" {= "20250912"}
+  "menhirSdk" {= "20250912"}
+  "mirage-crypto" {= "1.2.0"}
+  "mirage-crypto-ec" {= "1.2.0"}
+  "mirage-crypto-pk" {= "1.2.0"}
+  "mirage-crypto-rng" {= "1.2.0"}
+  "mirage-crypto-rng-eio" {= "1.2.0"}
+  "mtime" {= "2.1.0"}
+  "num" {= "1.6"}
+  "ocaml" {= "5.4.1"}
+  "ocaml-base-compiler" {= "5.4.1"}
+  "ocaml-compiler" {= "5.4.1"}
+  "ocaml-compiler-libs" {= "v0.17.0"}
+  "ocaml-config" {= "3"}
+  "ocaml-options-vanilla" {= "1"}
+  "ocaml-protoc-plugin" {= "6.2.0"}
+  "ocaml-syntax-shims" {= "1.0.0"}
+  "ocaml-webrtc" {= "0.2.6"}
+  "ocaml_intrinsics_kernel" {= "v0.17.1"}
+  "ocamlbuild" {= "0.16.1"}
+  "ocamlfind" {= "1.9.8"}
+  "ocplib-endian" {= "1.2"}
+  "odoc" {= "3.1.0" & with-doc}
+  "odoc-parser" {= "3.1.0" & with-doc}
+  "ohex" {= "0.2.0"}
+  "omd" {= "2.0.0~alpha4"}
+  "opentelemetry" {= "0.13"}
+  "optint" {= "0.3.0"}
+  "otoml" {= "1.0.5"}
+  "parsexp" {= "v0.17.0"}
+  "pbrt" {= "3.1.1"}
+  "pecu" {= "0.7"}
+  "piaf" {= "0.2.0"}
+  "ppx_assert" {= "v0.17.0"}
+  "ppx_base" {= "v0.17.0"}
+  "ppx_cold" {= "v0.17.0"}
+  "ppx_compare" {= "v0.17.0"}
+  "ppx_derivers" {= "1.2.1"}
+  "ppx_deriving" {= "6.1.1"}
+  "ppx_deriving_jsonschema" {= "0.0.4"}
+  "ppx_deriving_yojson" {= "3.10.0"}
+  "ppx_enumerate" {= "v0.17.0"}
+  "ppx_expect" {= "v0.17.3"}
+  "ppx_globalize" {= "v0.17.2"}
+  "ppx_hash" {= "v0.17.0"}
+  "ppx_here" {= "v0.17.0"}
+  "ppx_inline_test" {= "v0.17.1"}
+  "ppx_let" {= "v0.17.1"}
+  "ppx_optcomp" {= "v0.17.1"}
+  "ppx_sexp_conv" {= "v0.17.1"}
+  "ppxlib" {= "0.38.0"}
+  "ppxlib_jane" {= "v0.17.4"}
+  "prettym" {= "0.0.5"}
+  "psq" {= "0.2.1"}
+  "ptime" {= "1.2.0"}
+  "qcheck-alcotest" {= "0.91" & with-test}
+  "qcheck-core" {= "0.91" & with-test}
+  "re" {= "1.14.0"}
+  "rresult" {= "0.7.0"}
+  "sedlex" {= "3.7"}
+  "seq" {= "base"}
+  "sexplib" {= "v0.17.0"}
+  "sexplib0" {= "v0.17.0"}
+  "sqlite3" {= "5.4.1"}
+  "ssl" {= "0.7.0"}
+  "stdio" {= "v0.17.0"}
+  "stdlib-shims" {= "0.3.0"}
+  "stringext" {= "1.6.0"}
+  "thread-local-storage" {= "0.2"}
+  "thread-table" {= "1.0.0"}
+  "time_now" {= "v0.17.0"}
+  "tls" {= "2.0.4"}
+  "tls-eio" {= "2.0.4"}
+  "topkg" {= "1.1.1"}
+  "tyxml" {= "4.6.0" & with-doc}
+  "unstrctrd" {= "0.4"}
+  "uri" {= "4.4.0"}
+  "uri-sexp" {= "4.4.0"}
+  "uucp" {= "17.0.0"}
+  "uuidm" {= "0.9.10"}
+  "uunf" {= "17.0.0"}
+  "uutf" {= "1.0.4"}
+  "websocket" {= "2.17"}
+  "x509" {= "1.0.6"}
+  "yojson" {= "3.0.0"}
+  "zarith" {= "1.14"}
+  "zstd" {= "0.4"}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+dev-repo: "git+https://github.com/jeong-sik/masc.git"
+pin-depends: [
+  [
+  "agent_sdk.0.206.6"
+  "git+https://github.com/jeong-sik/oas.git#6475a19ec5ef58691edff232bd72ce5288b8b04e"
+]
+  [
+    "bisect_ppx.2.8.3"
+    "git+https://github.com/patricoferris/bisect_ppx.git#5.2"
+  ]
+  [
+  "grpc-direct.0.2.6"
+  "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
+]
+  [
+  "grpc-direct-core.0.2.6"
+  "git+https://github.com/jeong-sik/grpc-direct.git#d7269ebebf9e4688486cc6591c66e794607e7b0f"
+]
+  [
+    "mcp_protocol.1.3.0"
+    "git+https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0"
+  ]
+  [
+    "ocaml-webrtc.0.2.6"
+    "git+https://github.com/jeong-sik/ocaml-webrtc.git#1b7993605b293f45169369d488f970ba15132a9f"
+  ]
+]
+x-maintenance-intent: ["(latest)"]

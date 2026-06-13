@@ -303,7 +303,7 @@ function keeperActivityAge(keeper: Keeper): number {
 
 function keeperPriority(keeper: Keeper): number {
   const status = keeper.status.trim().toLowerCase()
-  if (keeper.keepalive_running === true || keeper.presence_keepalive === true) return 0
+  if (keeper.keepalive_running === true) return 0
   return classifyKeeperPriority(status)
 }
 

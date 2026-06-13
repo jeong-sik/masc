@@ -1,0 +1,18 @@
+(include_subdirs no)
+
+(library
+ (name masc_exec_policy)
+ (public_name masc.exec_policy)
+ (wrapped false)
+ (libraries
+  masc.attribution
+  masc.masc_exec
+  masc.masc_exec_bash_parser
+  masc.masc_exec_command_gate
+  masc_core
+  masc.host_config
+  masc.repo_manager
+  unix
+  yojson
+  eio
+  eio.unix))

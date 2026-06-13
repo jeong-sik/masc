@@ -1,3 +1,4 @@
+import { signal, type ReadonlySignal } from '@preact/signals'
 import {
   clearStoredToken,
   currentDashboardActor,
@@ -11,6 +12,25 @@ import {
 const DEV_TOKEN_FETCH_TIMEOUT_MS = 3000
 
 let devTokenBootstrapPromise: Promise<void> | null = null
+
+/**
+ * Tracks the outcome of the loopback dev-token bootstrap so the UI can
+ * distinguish "auth required but no token" from "network error" etc.
+ *   idle       — not yet attempted
+ *   fetching   — in-flight
+ *   ok         — token stored
+ *   no_endpoint — /dev-token returned 404 (loopback disabled or strict auth)
+ *   network    — fetch threw (server down, CORS, DNS)
+ */
+export type DevTokenBootstrapStatus =
+  | 'idle'
+  | 'fetching'
+  | 'ok'
+  | 'no_endpoint'
+  | 'network'
+
+export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
+  signal<DevTokenBootstrapStatus>('idle')
 
 interface DevTokenBootstrapPayload {
   token?: unknown
@@ -45,6 +65,7 @@ export async function ensureDevToken(): Promise<void> {
   devTokenBootstrapPromise = (async () => {
     const storedMeta = getStoredTokenMeta()
     const storedToken = getStoredToken()
+    ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'fetching'
     try {
       const res = await fetchWithTimeout(
         '/api/v1/dashboard/dev-token',
@@ -55,11 +76,15 @@ export async function ensureDevToken(): Promise<void> {
         if (res.status === 404 && storedMeta?.source === 'dev') {
           clearStoredToken()
         }
+        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
         return
       }
       const payload = (await res.json()) as DevTokenBootstrapPayload
       const token = typeof payload.token === 'string' ? payload.token.trim() : ''
-      if (!token) return
+      if (!token) {
+        ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+        return
+      }
       const actor = typeof payload.actor === 'string' ? payload.actor.trim() : 'dashboard'
       const scope =
         typeof payload.scope === 'string' && payload.scope.trim() !== ''
@@ -77,9 +102,9 @@ export async function ensureDevToken(): Promise<void> {
           scope,
         })
       }
+      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'
     } catch {
-      /* Loopback endpoint unavailable (LAN bind, strict auth, offline).
-         Leave auth headers empty; caller will surface the 401 as before. */
+      ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'network'
     }
   })()
   return devTokenBootstrapPromise

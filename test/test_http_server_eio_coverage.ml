@@ -6,7 +6,7 @@
 *)
 
 open Alcotest
-module Http_server_eio = Masc_mcp.Http_server_eio
+module Http_server_eio = Masc.Http_server_eio
 
 (* ============================================================
    config Type Tests

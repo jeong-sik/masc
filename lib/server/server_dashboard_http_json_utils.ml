@@ -9,8 +9,6 @@
     JSON readers:
     - [json_member key json] — `Assoc field-by-key with [`Null] on
       miss / non-Assoc.
-    - [json_string / json_int / json_float / json_bool] — Json_util
-      typed-getter aliases (key, json) order swap.
     - [json_number] — RFC-0142 PR-5 typed-failure variant via
       Json_field.float |> to_option (accepts both `Float and `Int).
     - [json_assoc] — Json_field.assoc adapter wrapping back to
@@ -36,11 +34,6 @@ let json_member key = function
      | None -> `Null)
   | _ -> `Null
 ;;
-
-let json_string key json = Json_util.get_string json key
-let json_int key json = Json_util.get_int json key
-let json_float key json = Json_util.get_float json key
-let json_bool key json = Json_util.get_bool json key
 
 let json_number key json =
   Json_field.float json key |> Json_field.to_option

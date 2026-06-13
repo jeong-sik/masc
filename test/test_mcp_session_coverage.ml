@@ -12,20 +12,20 @@ module Types = Masc_domain
 
 open Alcotest
 
-module Http_transport = Masc_mcp.Server_mcp_transport_http
-module Actor_injection = Masc_mcp.Server_mcp_actor_injection
-module Auth = Masc_mcp.Auth
+module Http_transport = Server_mcp_transport_http
+module Actor_injection = Server_mcp_actor_injection
+module Auth = Masc.Auth
 
-let setup_test_room () =
+let setup_test_workspace () =
   let unique_id =
-    Printf.sprintf "masc-mcp-session-coverage-%d-%d"
+    Printf.sprintf "masc-session-coverage-%d-%d"
       (Unix.getpid ()) (int_of_float (Unix.gettimeofday () *. 1000.))
   in
   let tmp = Filename.concat (Filename.get_temp_dir_name ()) unique_id in
   Unix.mkdir tmp 0o755;
   tmp
 
-let cleanup_test_room dir =
+let cleanup_test_workspace dir =
   let rec rm_rf path =
     if Sys.is_directory path then begin
       Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
@@ -231,9 +231,9 @@ let test_actor_injection_reducer_rewrites_with_http_auth () =
     (member "name" args |> to_string_option)
 
 let test_body_with_canonical_http_actor_uses_token_owner () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       let raw_token = "agent_code-token" in
       (match

@@ -1,7 +1,7 @@
 # KSM `Compaction_completed` Divergence Audit (2026-05-12)
 
 **Spec**: `specs/keeper-state-machine/KeeperStateMachine.tla` (`CompactionCompleted` action)
-**OCaml**: `lib/keeper/keeper_state_machine.ml` (lines 559-588, `update_conditions` for `Compaction_completed`)
+**OCaml**: `lib/keeper_state/keeper_state_machine.ml` (lines 559-588, `update_conditions` for `Compaction_completed`)
 **Iteration**: 7 (Phase A-5 잔여, `/loop` plan)
 **Cross-ref**: Iter 4 #14707 (KNOWN_FAILURES skip), Iter 6 #14720 (first real semantic drift fix), GitHub #9988, #9935, #8710.
 
@@ -123,12 +123,12 @@ OCaml line 560-573 주석이 #9988/#9935 production incident를 명시하지만 
 
 ### F-7.3 (LOW risk operational): `Log.Keeper.warn`의 string formatting
 
-OCaml line 583-587의 warn 메시지가 `Printf.sprintf`-style — `before_tokens` / `after_tokens`만 변수. 일관성 측면 OK. 단 prometheus counter (e.g., `keeper_compaction_noop_total`) 부재 → 운영자가 *시간당 발화 빈도*를 grafana로 못 봄. iter 5 PR #14713의 telemetry-as-fix 거부 기준에 닿음 — 이건 *기존 warn 보강*이지 *fix 자체*는 아니므로 OK. counter 추가는 별도 PR.
+OCaml line 583-587의 warn 메시지가 `Printf.sprintf`-style — `before_tokens` / `after_tokens`만 변수. 일관성 측면 OK. 단 Otel_metric_store counter (e.g., `keeper_compaction_noop_total`) 부재 → 운영자가 *시간당 발화 빈도*를 grafana로 못 봄. iter 5 PR #14713의 telemetry-as-fix 거부 기준에 닿음 — 이건 *기존 warn 보강*이지 *fix 자체*는 아니므로 OK. counter 추가는 별도 PR.
 
 ## Verification
 
 - [x] TLA+ `CompactionCompleted` 본문 cross-check (specs/.../KeeperStateMachine.tla §CompactionCompleted)
-- [x] OCaml `Compaction_completed` 본문 cross-check (lib/keeper/keeper_state_machine.ml:559-588)
+- [x] OCaml `Compaction_completed` 본문 cross-check (lib/keeper_state/keeper_state_machine.ml:559-588)
 - [x] #8710 dependency 확인 (specs/Makefile:60 KeeperStateMachine in KNOWN_FAILURES)
 - [x] iter 4 #14707 ZombieIsForever / ZombieRequiresTerminalFailureLatched가 #8710 해결 대기 중임 확인 (PR body §"KNOWN limitation")
 

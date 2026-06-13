@@ -16,7 +16,7 @@
     - Observability (C2): every override / approval decision emits a
       [masc:keeper_gate] Event_bus Custom event in addition to the
       existing [broadcast_tool_skipped] SSE call. The dual emit lets
-      downstream consumers migrate without coordinating with this
+      downstream consumers migrate without synchronizing with this
       change. Payload carries stage/reason/latency so dashboards can
       chart per-stage firing rates and drift.
 
@@ -28,7 +28,7 @@
 (*                                                                     *)
 (* Authoritative spec mirror is                                        *)
 (*   specs/keeper-state-machine/KeeperTurnCycle.tla                    *)
-(* (3-axis composite — turn_phase x decision_stage x cascade_state).   *)
+(* (3-axis composite — turn_phase x decision_stage x runtime_state).   *)
 (*                                                                     *)
 (* This module is one of FOUR cooperating write points; siblings are   *)
 (* keeper_registry.ml (raw setters), keeper_unified_turn.ml (top-level *)
@@ -39,7 +39,7 @@
 (*     pre_tool_use override / approval_required short-circuit.        *)
 (*     turn_phase: executing -> finalizing                             *)
 (*     decision_stage: tool_policy_selected -> gate_rejected           *)
-(*     cascade_state preserved at "trying" (UNCHANGED in spec).        *)
+(*     runtime_state preserved at "trying" (UNCHANGED in spec).        *)
 (*                                                                     *)
 (* Spec inline citation at KeeperTurnCycle.tla:58 says "line 120" —    *)
 (* current actual call site of                                         *)
@@ -52,12 +52,12 @@
 (* to this file:                                                       *)
 (*   - GateRejectedRequiresFinalizing                                  *)
 (*       (decision_stage = "gate_rejected" => turn_phase = "finalizing")*)
-(*   - TerminalCascadeRequiresFinalizing                               *)
+(*   - TerminalRuntimeRequiresFinalizing                               *)
 (*                                                                     *)
 (* These cross-axis invariants are why KeeperTurnCycle exists          *)
 (* alongside the single-axis siblings (KeeperDecisionPipeline,         *)
-(* KeeperCascadeLifecycle, KeeperConditionsGovernPhase): no single     *)
-(* axis can express the conjunction across phase x decision x cascade. *)
+(* KeeperRuntimeLifecycle, KeeperConditionsGovernPhase): no single     *)
+(* axis can express the conjunction across phase x decision x runtime. *)
 (* ─────────────────────────────────────────────────────────────────── *)
 
 (* -------------------------------------------------------------- *)
@@ -131,7 +131,7 @@ let render_inline_skip_reason_with_source
 (** Broadcast a tool skip event via SSE for dashboard visibility.
     Also records in [Dashboard_governance_metrics] for aggregation. *)
 let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  Dashboard_governance_metrics.record_tool_skipped
+  !Keeper_keepalive_signal.record_tool_skipped_callback
     ~keeper_name ~tool_name ~reason_code;
   (try
     Sse.broadcast
@@ -145,7 +145,7 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", keeper_name); ("site", "sse_broadcast")]
         ();
@@ -155,18 +155,16 @@ let broadcast_tool_skipped ~keeper_name ~tool_name ~reason_code =
 
 (** Extract command/content string from tool input JSON for screening. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
-  try
-    match input |> member "command" with
-    | `String s -> s
-    | `Null | _ ->
-      (match input |> member "cmd" with
-       | `String s -> s
-       | `Null | _ ->
-         (match input |> member "content" with
-          | `String s -> s
-          | _ -> ""))
-  with Yojson.Safe.Util.Type_error _ -> ""
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key input) in
+  match m "command" with
+  | `String s -> s
+  | _ ->
+    (match m "cmd" with
+     | `String s -> s
+     | _ ->
+       (match m "content" with
+        | `String s -> s
+        | _ -> ""))
 
 (* -------------------------------------------------------------- *)
 (* Telemetry                                                       *)
@@ -183,8 +181,8 @@ let gate_decision_to_string = function
   | Gate_approval_required -> "approval_required"
 
 let gate_decision_is_rejection = function
-  | Gate_override | Gate_approval_required -> true
-  | Gate_continue -> false
+  | Gate_override -> true
+  | Gate_continue | Gate_approval_required -> false
 
 type gate_rejection_log_severity =
   | Gate_rejection_first_warn
@@ -230,7 +228,7 @@ let planner_alternative_for_gate ~stage ~tool_name =
   | "keeper_deny" ->
     "planner_alternative=\"choose an allowed replacement tool, change plan, or request operator approval\""
   | "cost_gate" ->
-    "planner_alternative=\"stop tool use, summarize progress, or request a budget increase before retrying\""
+    "planner_alternative=\"cost telemetry is advisory; inspect the real gate before changing plan\""
   | "destructive_guard" ->
     "planner_alternative=\"use a safe read-only command, narrow the path, or request operator approval\""
   | _ ->
@@ -279,17 +277,24 @@ type gate_decision_event = {
 let ignore_gate_decision (_ : gate_decision_event) = ()
 
 let notify_gate_decision on_gate_decision (event : gate_decision_event) =
-  try on_gate_decision event
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Prometheus.inc_counter
+  (* RFC-0106 P0 canary: use Cancel_safe.observe so Cancelled
+     propagates without per-site discipline drift. *)
+  Cancel_safe.observe
+    ~on_exn:(fun exn ->
+      (* Keep existing GuardsFailures metric for backward compatibility
+         (test_keeper_guards.ml asserts this counter). *)
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", event.keeper_name); ("site", "gate_observer")]
         ();
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string LifecycleCallbackFailures)
+        ~labels:[("keeper", event.keeper_name); ("callback", "on_gate_decision")]
+        ();
       Log.Keeper.warn
         "keeper_guards: gate observer failed keeper=%s stage=%s tool=%s err=%s"
-        event.keeper_name event.stage event.tool_name (Printexc.to_string exn)
+        event.keeper_name event.stage event.tool_name (Printexc.to_string exn))
+    (fun () -> on_gate_decision event)
 
 (** Emit a [masc:keeper_gate] Event_bus Custom event.
 
@@ -305,42 +310,42 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason_text]         human-readable detail
     - [source]              "hook" (distinguishes from legacy paths) *)
 (* Spec mapping: GateRejected action — KeeperTurnCycle.tla lines 189-200.
-   The two-arm match below routes Gate_override | Gate_approval_required to
-   Keeper_registry.mark_turn_gate_rejected_by_name, which fires the
-   decision_stage = "gate_rejected" / turn_phase = "finalizing" transition.
-   The Gate_continue branch skips the spec action entirely and only emits
-   the Event_bus Custom event below.
+   Gate_override routes to Keeper_registry.mark_turn_gate_rejected_by_name,
+   which fires the decision_stage = "gate_rejected" / turn_phase =
+   "finalizing" transition. Gate_approval_required is not terminal: OAS
+   suspends in the approval callback and may still execute the tool after
+   approval.
 
    Cycle 49 observability addition: when the gate rejects, the turn
-   becomes terminal WITHOUT any cascade tier ever being attempted.  A
+   becomes terminal WITHOUT any runtime tier ever being attempted.  A
    dashboard reading only the final outcome ("Turn_gate_rejected") cannot
-   distinguish "all gates rejected, cascade=none" from "all cascades
-   exhausted" — both surface as terminal failure.  We add a Prometheus
-   counter, an INFO log line, and a [cascade_attempted] payload field so
+   distinguish "all gates rejected, runtime=none" from "all runtimes
+   exhausted" — both surface as terminal failure.  We add a Otel_metric_store
+   counter, an INFO log line, and a [runtime_attempted] payload field so
    the narrative is observable. *)
 
-(** Prometheus metric: turns terminated by a pre_tool_use gate rejection
-    (Override or ApprovalRequired) without ever attempting a cascade
+(** Otel_metric_store metric: turns terminated by a pre_tool_use gate rejection
+    (Override or ApprovalRequired) without ever attempting a runtime
     tier.  See [emit_gate_event] for the firing site.
 
     Labels stay bounded:
     - [keeper]   ∈ keeper agent names (finite per fleet)
     - [tool]     ∈ tool names (finite, registry-controlled)
     - [reason]   ∈ guard reason_code strings (finite, defined by guards)
-    - [decision] ∈ {override, approval_required} *)
+    - [decision] ∈ {override} *)
 let gate_rejected_terminal_metric =
   Keeper_metrics.(to_string TurnGateRejectedTerminal)
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:gate_rejected_terminal_metric
     ~help:
       "Total turns terminated by a pre_tool_use gate rejection \
        (Override or ApprovalRequired) without ever attempting a \
-       cascade tier.  A non-zero rate on a keeper indicates \
-       pre_tool_use guards short-circuit before the cascade ever \
+       runtime tier.  A non-zero rate on a keeper indicates \
+       pre_tool_use guards short-circuit before the runtime ever \
        runs — useful for distinguishing 'all gates rejected, \
-       cascade=none' from 'all cascades exhausted' in the keeper \
+       runtime=none' from 'all runtimes exhausted' in the keeper \
        terminal taxonomy.  Emitted with labels: keeper, tool, reason, \
        decision."
     ()
@@ -354,18 +359,23 @@ let emit_gate_event
   let is_gate_rejection = gate_decision_is_rejection decision in
   if is_gate_rejection then begin
     Keeper_registry.mark_turn_gate_rejected_by_name agent_name;
-    Prometheus.inc_counter gate_rejected_terminal_metric
+    Otel_metric_store.inc_counter gate_rejected_terminal_metric
       ~labels:[
         ("keeper", agent_name);
         ("tool", tool_name);
         ("reason", reason_code);
         ("decision", decision_label);
       ] ();
-    Log.Keeper.info
-      "keeper:%s tool:%s decision=%s reason_code=%s cascade=none \
-       (gate rejected before cascade attempt)"
-      agent_name tool_name decision_label reason_code
-  end;
+    Log.Keeper.info ~keeper_name:agent_name
+      "tool:%s decision=%s reason_code=%s runtime=none \
+       (gate rejected before runtime attempt)"
+      tool_name decision_label reason_code
+  end
+  else if decision = Gate_approval_required then
+    Log.Keeper.info ~keeper_name:agent_name
+      "tool:%s decision=%s reason_code=%s runtime=none \
+       (approval pending before runtime attempt)"
+      tool_name decision_label reason_code;
   match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
@@ -380,11 +390,13 @@ let emit_gate_event
       ("stage_latency_ms", `Float stage_latency_ms);
       ("reason_text", `String reason_text);
       ("source", `String "hook");
-      ("cascade_attempted", `Bool (not is_gate_rejection));
-      ("source_path",
-       (match source_path with Some path -> `String path | None -> `Null));
-      ("source_line",
-       (match source_line with Some line -> `Int line | None -> `Null));
+      ( "runtime_attempted"
+      , `Bool
+          (match decision with
+           | Gate_continue -> true
+           | Gate_override | Gate_approval_required -> false) );
+      ("source_path", Json_util.string_opt_to_json source_path);
+      ("source_line", Json_util.int_opt_to_json source_line);
     ] in
     (try
       Agent_sdk_metrics_bridge.publish bus
@@ -393,7 +405,7 @@ let emit_gate_event
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GuardsFailures)
         ~labels:[("keeper", agent_name); ("site", "event_emit")]
         ();
@@ -464,7 +476,7 @@ let timing_guard ~(tool_start_time : float ref)
 (** User-supplied custom guard. Short-circuits via [Override] when
     the caller's callback returns [Some reason_text]. *)
 let custom_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(guard : tool_name:string -> input:Yojson.Safe.t -> string option)
   : Agent_sdk.Hooks.hooks =
@@ -473,13 +485,13 @@ let custom_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       (match guard ~tool_name ~input with
        | Some reason ->
          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-         Log.Keeper.info
-           "keeper:%s pre_tool_use guard blocked %s"
-           keeper_name tool_name;
+         Log.Keeper.info ~keeper_name:keeper_name
+           "pre_tool_use guard blocked %s"
+           tool_name;
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"pre_tool_use_guard";
          let source_path = keeper_guards_source_path in
@@ -504,7 +516,7 @@ let custom_guard
     "same operation, different targets" pattern (e.g. reading 20
     board posts one by one). *)
 let streak_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(state : streak_state)
     ~(threshold : int)
@@ -514,7 +526,7 @@ let streak_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       let prev_name, prev_count = state.entry in
       let new_count =
         if prev_name = tool_name then prev_count + 1 else 1
@@ -527,7 +539,7 @@ let streak_guard
             tool_name new_count
         in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string GuardsFailures)
           ~labels:[("keeper", keeper_name); ("site", "streak_gate")]
           ();
@@ -557,7 +569,7 @@ let streak_guard
 (** Keeper deny list. Block administrative / destructive tools that
     should only be invoked by operators or controlled workflows. *)
 let deny_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(denied : string list)
   : Agent_sdk.Hooks.hooks =
@@ -566,11 +578,11 @@ let deny_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       if List.mem tool_name denied then begin
         let reason_text = "tool is on the keeper deny list" in
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string GuardsFailures)
           ~labels:[("keeper", keeper_name); ("site", "deny_list")]
           ();
@@ -597,58 +609,24 @@ let deny_guard
       else Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue)
 
-(** Cost budget gate: reject when the running cost meets or exceeds
-    [limit]. No-op when [max_cost_usd] is [None]. *)
+(** Cost telemetry passthrough.
+
+    [max_cost_usd] is advisory only and must never reject tool execution. *)
 let cost_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(max_cost_usd : float option)
   : Agent_sdk.Hooks.hooks =
-  hooks_of_pre_tool_use (fun event ->
-    match event with
-    | Agent_sdk.Hooks.PreToolUse
-        { tool_name; input; accumulated_cost_usd; turn; _ } ->
-      let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
-      (match max_cost_usd with
-       | Some limit when accumulated_cost_usd >= limit ->
-         let reason_text =
-           Printf.sprintf
-             "accumulated_cost_usd=%.4f exceeded limit=%.4f"
-             accumulated_cost_usd limit
-         in
-         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-         Prometheus.inc_counter
-           Keeper_metrics.(to_string GuardsFailures)
-           ~labels:[("keeper", keeper_name); ("site", "cost_gate")]
-           ();
-         log_gate_rejection
-           ~keeper_name ~stage:"cost_gate" ~tool_name
-           ~reason_code:"cost_gate"
-           "keeper:%s cost gate: $%.4f >= $%.4f limit, skipping %s"
-           keeper_name accumulated_cost_usd limit tool_name;
-         broadcast_tool_skipped
-           ~keeper_name ~tool_name ~reason_code:"cost_gate";
-         let source_path = keeper_guards_source_path in
-         let source_line = __LINE__ in
-         report_gate_decision on_gate_decision
-           ~source_path:(Some source_path) ~source_line:(Some source_line)
-           ~stage:"cost_gate" ~decision:Gate_override
-           ~reason_code:"cost_gate" ~reason_text
-           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
-           ~stage_latency_ms:latency_ms;
-         Agent_sdk.Hooks.Override
-           (render_inline_skip_reason_with_source
-              ~source_path ~source_line
-              ~tool_name ~reason_code:"cost_gate" ~reason_text)
-       | _ -> Agent_sdk.Hooks.Continue)
-    | _ -> Agent_sdk.Hooks.Continue)
+  ignore meta_ref;
+  ignore on_gate_decision;
+  ignore max_cost_usd;
+  hooks_of_pre_tool_use (fun _event -> Agent_sdk.Hooks.Continue)
 
 (** Destructive pattern detection for bash/edit style tools.
     Only applies when [enabled] is [true] and descriptor/catalog capability
     lookup flags the observed tool name as destructive. *)
 let destructive_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
     ~(enabled : bool)
   : Agent_sdk.Hooks.hooks =
@@ -659,14 +637,14 @@ let destructive_guard
       if not enabled then Agent_sdk.Hooks.Continue
       else if
         not
-          (Agent_tool_descriptor_resolution.capability_has
+          (Keeper_tool_descriptor_resolution.capability_has
              Tool_capability.Destructive
              tool_name)
       then
         Agent_sdk.Hooks.Continue
       else
         let t0 = Time_compat.now () in
-        let keeper_name = (!meta_ref).Keeper_types.name in
+        let keeper_name = (!meta_ref).name in
         let cmd = extract_command_from_input input in
         (match Eval_gate.detect_destructive cmd with
          | None -> Agent_sdk.Hooks.Continue
@@ -675,7 +653,7 @@ let destructive_guard
              Printf.sprintf "pattern='%s' (%s)" pattern desc
            in
            let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string GuardsFailures)
              ~labels:[("keeper", keeper_name); ("site", "destructive_guard")]
              ();
@@ -706,7 +684,7 @@ let destructive_guard
     confirm threshold. Relies on an approval callback wired into the
     agent Builder to resolve the decision. *)
 let governance_approval_guard
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~on_gate_decision
   : Agent_sdk.Hooks.hooks =
   hooks_of_pre_tool_use (fun event ->
@@ -714,7 +692,7 @@ let governance_approval_guard
     | Agent_sdk.Hooks.PreToolUse
         { tool_name; input; accumulated_cost_usd; turn; _ } ->
       let t0 = Time_compat.now () in
-      let keeper_name = (!meta_ref).Keeper_types.name in
+      let keeper_name = (!meta_ref).name in
       let governance_level = Env_config_core.governance_level () in
       let risk = Governance_pipeline.assess_risk ~tool_name ~input in
       let needs_approval =
@@ -749,10 +727,10 @@ let governance_approval_guard
     Order matters: the first guard to return a non-[Continue]
     decision wins (short-circuit via [Hooks.compose]). Preserves the
     ordering of the previous monolithic implementation:
-      timing -> custom -> streak -> deny -> cost -> destructive ->
+      timing -> custom -> streak -> deny -> cost telemetry passthrough -> destructive ->
       governance_approval *)
 let build_chain
-    ~(meta_ref : Keeper_types.keeper_meta ref)
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_start_time : float ref)
     ~(streak_state : streak_state)
     ~(streak_threshold : int)

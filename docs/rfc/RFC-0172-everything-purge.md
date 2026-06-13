@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 / 0166 / 0167 / 0168 / 0169 / 0170 / 0171 (client-agnostic family) |
 | Scope | 270 files: `docs/**/*.md`, `docs/**/*.{csv,toml,inc,tla,cfg,html}`, `dashboard/src/**/*.test.{ts,tsx}`, `dashboard/design-system/{audits,RFC,CHANGELOG,README,SKILL}.md` |
-| Repos | masc-mcp |
+| Repos | masc |
 | Out of scope | `test/` OCaml fixtures (168 files reverted — see §3) |
 
 ## 1. Problem
@@ -33,7 +33,7 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 | `openai` / `OpenAI` (word) | `provider-d` / `Provider-D` |
 | `xai` / `xAI` (word) | `provider-e` / `Provider-E` |
 | `gemini` / `Gemini` / `GEMINI` | `provider-f` / `Provider-F` / `PROVIDER-F` |
-| `deepseek` / `DeepSeek` | `provider-g` / `Provider-G` |
+| `deepseek` / `DeepSeek` | `deepseek` / `DeepSeek` |
 | `qwen` / `Qwen` (word) | `provider-h` / `Provider-H` |
 | `groq` / `Groq` (word) | `provider-i` / `Provider-I` |
 | `mistral` / `Mistral` (word) | `provider-j` / `Provider-J` |

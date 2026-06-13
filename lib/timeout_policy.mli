@@ -1,7 +1,7 @@
-(** Timeout policy SSOT for MASC-MCP.
+(** Timeout policy SSOT for MASC.
 
     Consolidates the layered wall-clock deadline matrix enumerated in
-    https://github.com/jeong-sik/masc-mcp/issues/9639, and provides a typed
+    https://github.com/jeong-sik/masc/issues/9639, and provides a typed
     [Deadline.t] that can be propagated across subsystems.
 
     Cooperative-cancel overshoot: OCaml 5 / Eio cancellation is cooperative.
@@ -54,7 +54,7 @@ module Deadline : sig
 end
 
 val metric_overshoot_total : string
-(** Canonical Prometheus counter name (pinned by #9662 contract test):
+(** Canonical Otel_metric_store counter name (pinned by #9662 contract test):
     [masc_timeout_policy_overshoot_total].  Incremented by
     [overshoot_warn] with [layer] and [origin] labels. *)
 

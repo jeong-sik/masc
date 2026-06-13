@@ -43,7 +43,7 @@
     <section>
       <h2>2. Keeper Task And Board Loop</h2>
       <pre class="flow">Goal / board context exists
-  -> Task appears in Coord task store
+  -> Task appears in Workspace task store
   -> Keeper claims task
   -> claim_post_provision hook runs
      -> Local keeper: project root
@@ -61,7 +61,7 @@
     <section>
       <h2>3. Repository Selection And Code IDE</h2>
       <pre class="flow">Code surface
-  -> IdeShell creates IdeDataCoordinator
+  -> IdeShell creates IdeDataWorkspaceStore
   -> User selects repository in explorer
   -> activeRepositoryId signal updates
   -> workspace tree/file/blame/diff fetches include repo_id
@@ -69,7 +69,7 @@
   -> annotation/region fetch includes repo_id after local implementation patch
   -> selected repository .masc-ide metadata can resolve through backend workspace selection</pre>
       <p class="evidence">
-        Evidence: `ide-shell.ts:413-436`, `ide-data-coordinator.ts:144-221`, `workspace.ts:44-113`, `api/ide.ts:12-115`.
+        Evidence: `ide-shell.ts:413-436`, `ide-data-workspace-store.ts:144-221`, `workspace.ts:44-113`, `api/ide.ts:12-115`.
       </p>
     </section>
 

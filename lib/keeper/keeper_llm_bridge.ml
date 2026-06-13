@@ -1,5 +1,5 @@
 (* lib/keeper/keeper_llm_bridge.ml *)
-(* OAS Adapter bridging Eio structured concurrency, multi-turn cascade rollbacks,
+(* OAS Adapter bridging Eio structured concurrency, multi-turn runtime rollbacks,
    and strict global stop preemptions as formally verified in KeeperOASAdvanced.tla. *)
 
 let json_field name value = Some (name, value)
@@ -163,7 +163,7 @@ let run_with_timeout_and_fallback
         site
         timeout_s
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LlmBridgeFailures)
       ~labels:[label_site, site_no_clock ]
       ();
@@ -234,7 +234,7 @@ let run_with_timeout_and_fallback
           ~now:t0
       in
       let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string LlmBridgeFailures)
         ~labels:[label_site, site_timeout ]
         ();
@@ -294,12 +294,12 @@ let run_with_timeout_and_fallback
           instead of entering the retry loop.
 
           #10716: bimodal distribution observed in production — 21 events in
-          [60, 300)s (short-tail, routine cancel: supervisor pause / cascade
+          [60, 300)s (short-tail, routine cancel: supervisor pause / runtime
           rotation) plus 8 events ≥1800s (long-tail, LLM provider hung). Same
           opaque message for both made root-cause attribution impossible.
           Categorize wall duration into a discrete bucket and surface the
           inner cancel exception so operators can split short_tail / mid_tail
-          / long_tail in PromQL and the inner reason ([Eio.Cancel.Cancel_hook]
+          / long_tail in metric queries and the inner reason ([Eio.Cancel.Cancel_hook]
           payload, parent-fiber Cancelled, etc.) appears in the log. Severity
           comes from the caller's explicit [cancel_classification], not the
           internal exception name or wall-clock bucket. *)
@@ -322,7 +322,7 @@ let run_with_timeout_and_fallback
            string_of_cancel_classification cancel_classification
          in
          let log_class = log_class_of_cancel_classification cancel_classification in
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LlmBridgeFailures)
            ~labels:[label_site, site_cancelled ]
            ();
@@ -368,7 +368,7 @@ let run_with_timeout_and_fallback
                 ]
                 envelope)
            message;
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string OasCancel)
            ~labels:[label_bucket, bucket ]
            ();
@@ -376,11 +376,11 @@ let run_with_timeout_and_fallback
      | exn ->
        (* TLA+: HandleError -> Rollback context *)
        let bt = Printexc.get_backtrace () in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string OasExecutionErrors)
          ~labels:[label_channel, channel_oas_bridge ]
          ();
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LlmBridgeFailures)
          ~labels:[label_site, site_execution_error ]
          ();

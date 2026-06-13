@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 val managed_kind : string
 
@@ -16,7 +18,7 @@ val parse_stop_scope : string -> (stop_scope, string) result
 val stop_scope_to_string : stop_scope -> string
 
 val start_managed_container :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   network_mode:network_mode ->
   ttl_sec:float ->
@@ -26,7 +28,7 @@ val start_managed_container :
 
 val stop_managed_containers :
   ?keeper_name:string ->
-  config:Coord.config ->
+  config:Workspace.config ->
   timeout_sec:float ->
   unit ->
   Keeper_sandbox_runtime.stop_result
@@ -34,19 +36,19 @@ val stop_managed_containers :
 val stop_containers :
   ?keeper_name:string ->
   scope:stop_scope ->
-  config:Coord.config ->
+  config:Workspace.config ->
   timeout_sec:float ->
   unit ->
   Keeper_sandbox_runtime.stop_result
 
 val cleanup_stale :
-  config:Coord.config ->
+  config:Workspace.config ->
   timeout_sec:float ->
   unit ->
   Keeper_sandbox_runtime.cleanup_result
 
 val playground_repos_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   Yojson.Safe.t
 
@@ -55,7 +57,7 @@ val live_status_json :
   ?preflight_override:Yojson.Safe.t option ->
   ?containers_override:(Keeper_sandbox_runtime.live_container list, string) result ->
   ?include_playground_repos:bool ->
-  config:Coord.config ->
+  config:Workspace.config ->
   meta:keeper_meta ->
   timeout_sec:float ->
   verbose:bool ->

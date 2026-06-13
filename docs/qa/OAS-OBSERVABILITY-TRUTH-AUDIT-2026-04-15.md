@@ -2,9 +2,9 @@
 status: runbook
 last_verified: 2026-05-12
 code_refs:
-  - lib/cascade/cascade_events.ml
-  - lib/cascade/cascade_event_bridge.ml
-  - lib/telemetry_unified.ml
+  - lib/core/masc_runtime_events.ml
+  - lib/keeper/keeper_event_bridge.ml
+  - lib/telemetry_unified/telemetry_unified.ml
 ---
 
 # OAS Observability Truth Audit (2026-04-15)
@@ -18,22 +18,22 @@ This audit records the producer -> bridge -> durable store -> dashboard consumer
 ### 1. Producers
 
 - OAS native runtime events originate in `agent_sdk` and enter the shared `Agent_sdk.Event_bus`.
-- MASC custom observability events are published by `lib/cascade/cascade_events.ml` under the `masc:*` namespace.
+- MASC custom observability events are published by `lib/runtime/runtime_events.ml` under the `masc:*` namespace.
 
 ### 2. Bridge
 
-- `lib/cascade/cascade_event_bridge.ml` subscribes to the OAS event bus with `accept_all`.
+- `lib/runtime/runtime_event_bridge.ml` subscribes to the OAS event bus with `accept_all`.
 - Native events are serialized with an `oas:` prefix.
 - Envelope fields `correlation_id`, `run_id`, and `ts_unix` are emitted for every relayed event.
 
 ### 3. Durable Store
 
-- `lib/cascade/cascade_event_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
+- `lib/runtime/runtime_event_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
 - This durable JSONL store is the replay source for dashboard recovery and telemetry inspection.
 
 ### 4. Server Read Path
 
-- `lib/telemetry_unified.ml` exposes the durable store as telemetry source `oas_event`.
+- `lib/telemetry_unified/telemetry_unified.ml` exposes the durable store as telemetry source `oas_event`.
 - Dashboard consumers read it through `/api/v1/dashboard/telemetry?source=oas_event`.
 
 ### 5. Dashboard Consumer Path
@@ -88,7 +88,7 @@ These items were intentionally deferred from the April 2026 dashboard cleanup wa
 
 - Symptom: keeper runtime still persists a MASC-owned `working_context` wrapper around OAS context/checkpoint primitives.
 - Suspected owner path: keeper post-turn and restore flows.
-- Required outcome: shrink `working_context` until OAS owns runtime context/checkpoint state and MASC only projects coordination state.
+- Required outcome: shrink `working_context` until OAS owns runtime context/checkpoint state and MASC only projects workspace collaboration state.
 
 ### 3. Raw `[STATE]` marker removal
 

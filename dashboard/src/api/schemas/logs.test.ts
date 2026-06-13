@@ -41,7 +41,7 @@ describe('parseLogsResponse', () => {
       source: 'masc_log_ring',
       retention: {
         scope: 'dashboard_logs',
-        coordination_root: '/Users/dancer/me/.masc',
+        workspace_root: '/Users/dancer/me/.masc',
         buffer: 'Log.Ring',
         capacity: 50000,
         durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',

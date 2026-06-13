@@ -1,11 +1,6 @@
-(** Mcp_server_eio_execute — inner [tools/call] dispatcher
-    plus the join-state resolver shared with the keeper
-    onboarding path.
+(** Mcp_server_eio_execute — inner [tools/call] dispatcher.
 
     Only a small set of entries reach callers:
-    - {!resolve_join_state} —
-      [test/test_mcp_server_eio.ml] exercises the join-required
-      decisions to keep alias handling consistent across refactors.
     - {!caller_agent_name_from_arguments} — isolates the
       HTTP [_agent_name] caller identity contract without running
       the full dispatcher.
@@ -20,38 +15,28 @@
 
     Internal helpers stay private at this boundary
     ([log_mcp_exn] re-export,
-    {!Agent_name_kind.is_ephemeral}, {!Agent_name_kind.is_transient},
     [silent_auth_token_error_kind],
-    [direct_call_block_message]).  The [execute_tool_eio]
+    [direct_call_block_message]).  Caller-name origin classification
+    now lives in {!Mcp_server_eio_caller_identity.minted_name_is_transient}
+    (a total match over the carried origin), replacing the deleted
+    [Client_name_kind] string classifier.  The [execute_tool_eio]
     body itself contains many internal sub-helpers
     (audit wrappers, tool dispatchers, error formatters)
     that are local to its lexical scope. *)
-
-(** {1 Join state resolution} *)
-
-val resolve_join_state :
-  room_initialized:bool ->
-  join_required:bool ->
-  agent_name:string ->
-  check_join:(string -> bool) ->
-  bool
-(** Returns [true] iff the request should be treated as a
-    joined-agent call.
-
-    The decision is short-circuited:
-    - [room_initialized = false] or [join_required = false]
-      → [false] (no join check needed).
-    - [agent_name = "unknown"] → [false] (sentinel name).
-    - Otherwise probes only [check_join agent_name].
-
-    [check_join] is injected so tests can drive the
-    resolver against a deterministic registry. *)
 
 val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
 (** Returns the explicit caller identity carried in [tools/call]
     arguments.  Only the internal HTTP-auth marker [_agent_name] is
     accepted; tool-domain [agent_name] arguments are not caller
     identity.  Blank and ["unknown"] values are ignored. *)
+
+val resolve_bind_state :
+  workspace_initialized:bool ->
+  bind_required:bool ->
+  agent_name:string ->
+  check_join:(string -> bool) ->
+  bool
+(** Test hook for the bind-required guard's read decision. *)
 
 (** {1 Test hooks} *)
 
@@ -94,7 +79,7 @@ val execute_tool_eio :
       downstream helpers that still consult ambient
       handles see the current request scope (tests can
       otherwise leave a finished switch in the global slot).
-    - Bumps the [Prometheus.record_request] counter for
+    - Bumps the [Otel_metric_store.record_request] counter for
       every inbound call.
 
     [profile] defaults to [Full]; [internal_keeper_runtime]
@@ -106,7 +91,7 @@ val execute_tool_eio :
     only passes them through to internal helpers — does
     not over-constrain the caller chain. *)
 
-(** {1 Cascade re-exports} *)
+(** {1 Runtime re-exports} *)
 
 val wait_for_message_eio :
   clock:_ Eio.Time.clock ->

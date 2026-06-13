@@ -1,4 +1,4 @@
-(** Comprehensive coverage tests for Types, Coord_utils, and Coord_eio modules *)
+(** Comprehensive coverage tests for Types, Workspace_utils, and Workspace_eio modules *)
 
 (* Initialize RNG for crypto operations *)
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -271,46 +271,6 @@ let test_tempo_config_roundtrip () =
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Masc_domain.a2a_task_status Tests                                   *)
-(* ============================================================ *)
-
-let test_a2a_task_status_all () =
-  let statuses = [
-    (Masc_domain.A2APending, "pending");
-    (Masc_domain.A2ARunning, "running");
-    (Masc_domain.A2ACompleted, "completed");
-    (Masc_domain.A2AFailed, "failed");
-    (Masc_domain.A2ACanceled, "canceled");
-  ] in
-  List.iter (fun (status, expected) ->
-    check string "to_string" expected (Masc_domain.a2a_task_status_to_string status);
-    let json = Masc_domain.a2a_task_status_to_yojson status in
-    let result = Masc_domain.a2a_task_status_of_yojson json in
-    check bool "roundtrip ok" true (is_ok result)
-  ) statuses
-
-let test_a2a_task_status_of_string_unknown () =
-  let result = Masc_domain.a2a_task_status_of_string "unknown" in
-  check bool "is error" true (is_error result)
-
-(* ============================================================ *)
-(* Masc_domain.portal_state Tests                                      *)
-(* ============================================================ *)
-
-let test_portal_state_all () =
-  let states = [(Masc_domain.PortalOpen, "open"); (Masc_domain.PortalClosed, "closed")] in
-  List.iter (fun (state, expected) ->
-    check string "to_string" expected (Masc_domain.portal_state_to_string state);
-    let json = Masc_domain.portal_state_to_yojson state in
-    let result = Masc_domain.portal_state_of_yojson json in
-    check bool "roundtrip ok" true (is_ok result)
-  ) states
-
-let test_portal_state_of_string_unknown () =
-  let result = Masc_domain.portal_state_of_string "half-open" in
-  check bool "is error" true (is_error result)
-
-(* ============================================================ *)
 (* Masc_domain.agent_role Tests                                        *)
 (* ============================================================ *)
 
@@ -422,13 +382,11 @@ let test_task_roundtrip () =
     id = "task-123";
     title = "Test Task";
     description = "A test task for coverage";
-    goal_id = None;
     task_status = Todo;
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-01T00:00:00Z";
     created_by = None;
-    stage = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson task in
@@ -443,16 +401,14 @@ let test_backlog_roundtrip () =
   let backlog = Masc_domain.{
     tasks = [
       { id = "t1"; title = "Task 1"; description = "Desc 1";
-        task_status = Todo; goal_id = None; priority = 1; files = [];
+        task_status = Todo; priority = 1; files = [];
         created_at = "2024-01-01T00:00:00Z";
         created_by = None;
-        stage = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
-        goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
+        priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
         created_by = None;
-        stage = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
     ];
     last_updated = "2024-01-02T00:00:00Z";
@@ -460,56 +416,6 @@ let test_backlog_roundtrip () =
   } in
   let json = Masc_domain.backlog_to_yojson backlog in
   let result = Masc_domain.backlog_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Masc_domain.a2a_task Tests                                          *)
-(* ============================================================ *)
-
-let test_a2a_task_roundtrip () =
-  let task = Masc_domain.{
-    a2a_id = "a2a-123";
-    from_agent = "agent_llm_a";
-    to_agent = "provider_f";
-    a2a_message = "Please review this code";
-    a2a_status = A2ARunning;
-    a2a_result = None;
-    created_at = "2024-01-01T00:00:00Z";
-    updated_at = "2024-01-01T01:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson task in
-  let result = Masc_domain.a2a_task_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_a2a_task_with_result () =
-  let task = Masc_domain.{
-    a2a_id = "a2a-456";
-    from_agent = "provider_f";
-    to_agent = "agent_code";
-    a2a_message = "Implement feature X";
-    a2a_status = A2ACompleted;
-    a2a_result = Some "Feature implemented successfully";
-    created_at = "2024-01-01T00:00:00Z";
-    updated_at = "2024-01-01T02:00:00Z";
-  } in
-  let json = Masc_domain.a2a_task_to_yojson task in
-  let result = Masc_domain.a2a_task_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
-(* Masc_domain.portal Tests                                            *)
-(* ============================================================ *)
-
-let test_portal_roundtrip () =
-  let portal = Masc_domain.{
-    portal_from = "agent_llm_a";
-    portal_target = "provider_f";
-    portal_opened_at = "2024-01-01T00:00:00Z";
-    portal_status = PortalOpen;
-    task_count = 5;
-  } in
-  let json = Masc_domain.portal_to_yojson portal in
-  let result = Masc_domain.portal_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
@@ -581,7 +487,7 @@ let test_default_auth_config () =
 let test_auth_config_roundtrip () =
   let cfg = Masc_domain.{
     enabled = true;
-    room_secret_hash = Some "sha256:secret";
+    workspace_secret_hash = Some "sha256:secret";
     require_token = true;
     token_expiry_hours = 48;
   } in
@@ -590,95 +496,79 @@ let test_auth_config_roundtrip () =
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Coord_utils.parse_gitdir Tests                                 *)
+(* Workspace_utils.parse_gitdir Tests                                 *)
 (* ============================================================ *)
 
 let test_parse_gitdir_worktree () =
   let line = "gitdir: /home/user/project/.git/worktrees/feature-branch" in
-  let result = Coord_utils.parse_gitdir_to_main_root line in
+  let result = Workspace_utils.parse_gitdir_to_main_root line in
   check bool "is Some" true (Option.is_some result)
 
 let test_parse_gitdir_invalid () =
   let line = "not a gitdir line" in
-  let result = Coord_utils.parse_gitdir_to_main_root line in
+  let result = Workspace_utils.parse_gitdir_to_main_root line in
   check bool "is None" true (Option.is_none result)
 
 (* ============================================================ *)
-(* Coord_utils.sanitize Tests                                     *)
+(* Workspace_utils.sanitize Tests                                     *)
 (* ============================================================ *)
 
 let test_sanitize_html () =
   let input = "<script>alert('xss')</script>" in
-  let result = Coord_utils.sanitize_html input in
+  let result = Workspace_utils.sanitize_html input in
   check bool "no angle brackets" true
     (not (String.contains result '<') && not (String.contains result '>'));
   check bool "escaped lt" true (String.length result > String.length input)
 
 let test_sanitize_html_quotes () =
   let input = "Hello \"world\" & 'friends'" in
-  let result = Coord_utils.sanitize_html input in
+  let result = Workspace_utils.sanitize_html input in
   check bool "quotes escaped" true
     (not (String.contains result '"') && not (String.contains result '\''))
 
 let test_safe_filename () =
   let input = "file with spaces & special<chars>.txt" in
-  let result = Coord_utils.safe_filename input in
+  let result = Workspace_utils.safe_filename input in
   check bool "no spaces" false (String.contains result ' ');
   check bool "no ampersand" false (String.contains result '&');
   check bool "no angle" false (String.contains result '<')
 
 let test_safe_filename_valid () =
   let input = "valid_file-name.txt" in
-  let result = Coord_utils.safe_filename input in
+  let result = Workspace_utils.safe_filename input in
   check string "unchanged" input result
 
 (* ============================================================ *)
-(* Coord_utils.validation Tests                                   *)
+(* Workspace_utils.validation Tests                                   *)
 (* ============================================================ *)
 
 let test_validate_agent_name_valid () =
-  let result = Coord_utils.validate_agent_name "agent_llm_a-123" in
+  let result = Workspace_utils.validate_agent_name "agent_llm_a-123" in
   check bool "valid" true (is_ok result)
 
 let test_validate_agent_name_r_valid () =
-  let result = Coord_utils.validate_agent_name_r "valid-agent" in
+  let result = Workspace_utils.validate_agent_name_r "valid-agent" in
   check bool "ok result" true (is_ok result)
 
 let test_validate_task_id_valid () =
-  let result = Coord_utils.validate_task_id "task-12345" in
+  let result = Workspace_utils.validate_task_id "task-12345" in
   check bool "valid" true (is_ok result)
 
 let test_validate_task_id_r_valid () =
-  let result = Coord_utils.validate_task_id_r "task-abc" in
+  let result = Workspace_utils.validate_task_id_r "task-abc" in
   check bool "ok result" true (is_ok result)
 
-let test_validate_room_id_valid () =
-  let room_id_result = Coord_utils.validate_room_id "room-alpha_01" in
-  check (result string string) "valid room id" (Ok "room-alpha_01") room_id_result
-
-let test_validate_room_id_trims_whitespace () =
-  let room_id_result = Coord_utils.validate_room_id "  room-alpha_01  " in
-  check (result string string) "trimmed room id" (Ok "room-alpha_01") room_id_result
-
-let test_validate_room_id_rejects_path_traversal () =
-  let result = Coord_utils.validate_room_id "../../tmp/x" in
-  check bool "invalid traversal" true (is_error result)
-
-let test_validate_room_id_rejects_invalid_chars () =
-  let result = Coord_utils.validate_room_id "room id" in
-  check bool "invalid chars" true (is_error result)
-
 let test_validate_file_path_valid () =
-  let result = Coord_utils.validate_file_path "src/main.ml" in
+  let result = Workspace_utils.validate_file_path "src/main.ml" in
   check bool "valid" true (is_ok result)
 
 let test_validate_file_path_too_long () =
   let long_path = String.make 501 'a' in
-  let result = Coord_utils.validate_file_path long_path in
+  let result = Workspace_utils.validate_file_path long_path in
   check bool "invalid too long" true (is_error result)
 
 let test_validate_file_path_angle_brackets () =
-  let result = Coord_utils.validate_file_path "file<name>.txt" in
+  let result = Workspace_utils.validate_file_path "file<name>.txt" in
   check bool "invalid angle brackets" true (is_error result)
 
 (* ============================================================ *)
@@ -695,39 +585,39 @@ let test_contains_substring_empty () =
   check bool "empty needle" true (String_util.contains_substring "hello" "")
 
 (* ============================================================ *)
-(* Coord_eio.event_type Tests                                     *)
+(* Workspace_eio.event_type Tests                                     *)
 (* ============================================================ *)
 
-let test_room_eio_event_type_to_string () =
-  check string "AgentJoin" "agent_join" (Coord_eio.event_type_to_string Coord_eio.AgentJoin);
-  check string "AgentLeave" "agent_leave" (Coord_eio.event_type_to_string Coord_eio.AgentLeave);
-  check string "Broadcast" "broadcast" (Coord_eio.event_type_to_string Coord_eio.Broadcast);
-  check string "LockAcquire" "lock_acquire" (Coord_eio.event_type_to_string Coord_eio.LockAcquire);
-  check string "LockRelease" "lock_release" (Coord_eio.event_type_to_string Coord_eio.LockRelease)
+let test_workspace_eio_event_type_to_string () =
+  check string "AgentSessionBound" "agent_session_bound" (Workspace_eio.event_type_to_string Workspace_eio.AgentSessionBound);
+  check string "AgentSessionEnded" "agent_session_ended" (Workspace_eio.event_type_to_string Workspace_eio.AgentSessionEnded);
+  check string "Broadcast" "broadcast" (Workspace_eio.event_type_to_string Workspace_eio.Broadcast);
+  check string "LockAcquire" "lock_acquire" (Workspace_eio.event_type_to_string Workspace_eio.LockAcquire);
+  check string "LockRelease" "lock_release" (Workspace_eio.event_type_to_string Workspace_eio.LockRelease)
 
 (* ============================================================ *)
-(* Coord_eio.now_iso Tests                                        *)
+(* Workspace_eio.now_iso Tests                                        *)
 (* ============================================================ *)
 
-let test_room_eio_now_iso () =
-  let ts = Coord_eio.now_iso () in
+let test_workspace_eio_now_iso () =
+  let ts = Workspace_eio.now_iso () in
   check bool "contains T" true (String.contains ts 'T');
   check bool "ends with Z" true (ts.[String.length ts - 1] = 'Z');
   (* Has milliseconds: YYYY-MM-DDTHH:MM:SS.mmmZ *)
   check bool "has ms" true (String.contains ts '.')
 
 (* ============================================================ *)
-(* Coord_eio.room_state JSON Tests                                *)
+(* Workspace_eio.workspace_state JSON Tests                                *)
 (* ============================================================ *)
 
-let test_room_eio_default_room_state () =
-  let state = Coord_eio.default_room_state () in
+let test_workspace_eio_default_workspace_state () =
+  let state = Workspace_eio.default_workspace_state () in
   check string "protocol_version" "1.0.0" state.protocol_version;
   check bool "not paused" false state.paused;
   check (list string) "no active agents" [] state.active_agents
 
-let test_room_eio_room_state_roundtrip () =
-  let state = Coord_eio.{
+let test_workspace_eio_workspace_state_roundtrip () =
+  let state = Workspace_eio.{
     protocol_version = "1.0.0";
     started_at = 1704067200.0;
     last_updated = 1704070800.0;
@@ -740,41 +630,41 @@ let test_room_eio_room_state_roundtrip () =
     paused_at = Some 1704070000.0;
     pause_reason = Some "Maintenance";
   } in
-  let json = Coord_eio.room_state_to_json state in
-  let result = Coord_eio.room_state_of_json json in
+  let json = Workspace_eio.workspace_state_to_json state in
+  let result = Workspace_eio.workspace_state_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Coord_eio.agent_state JSON Tests                               *)
+(* Workspace_eio.agent_state JSON Tests                               *)
 (* ============================================================ *)
 
-let test_room_eio_agent_state_roundtrip () =
-  let agent = Coord_eio.{
+let test_workspace_eio_agent_state_roundtrip () =
+  let agent = Workspace_eio.{
     name = "test-agent";
     last_seen = 1704067200.0;
     capabilities = ["code"; "review"; "test"];
     status = "active";
   } in
-  let json = Coord_eio.agent_state_to_json agent in
-  let result = Coord_eio.agent_state_of_json json in
+  let json = Workspace_eio.agent_state_to_json agent in
+  let result = Workspace_eio.agent_state_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
-(* Coord_eio.lock_info JSON Tests                                 *)
+(* Workspace_eio.lock_info JSON Tests                                 *)
 (* ============================================================ *)
 
-let test_room_eio_lock_info_roundtrip () =
-  let lock = Coord_eio.{
+let test_workspace_eio_lock_info_roundtrip () =
+  let lock = Workspace_eio.{
     resource = "src/main.ml";
     owner = "agent_llm_a";
     acquired_at = 1704067200.0;
     expires_at = 1704070800.0;
   } in
-  let json = Coord_eio.lock_info_to_json lock in
-  let result = Coord_eio.lock_info_of_json json in
+  let json = Workspace_eio.lock_info_to_json lock in
+  let result = Workspace_eio.lock_info_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
-let test_room_eio_lock_info_int_floats () =
+let test_workspace_eio_lock_info_int_floats () =
   (* Test parsing when floats are encoded as ints *)
   let json = `Assoc [
     ("resource", `String "file.ml");
@@ -782,35 +672,35 @@ let test_room_eio_lock_info_int_floats () =
     ("acquired_at", `Int 1704067200);
     ("expires_at", `Intlit "1704070800");
   ] in
-  let result = Coord_eio.lock_info_of_json json in
+  let result = Workspace_eio.lock_info_of_json json in
   check bool "parses int as float" true (is_ok result)
 
 (* ============================================================ *)
-(* Coord_eio.message JSON Tests                                   *)
+(* Workspace_eio.message JSON Tests                                   *)
 (* ============================================================ *)
 
-let test_room_eio_message_roundtrip () =
-  let msg = Coord_eio.{
+let test_workspace_eio_message_roundtrip () =
+  let msg = Workspace_eio.{
     seq = 42;
     from_agent = "agent_llm_a";
     content = "Hello @provider_f, please review this";
     mention = Some "provider_f";
     timestamp = 1704067200.0;
   } in
-  let json = Coord_eio.message_to_json msg in
-  let result = Coord_eio.message_of_json json in
+  let json = Workspace_eio.message_to_json msg in
+  let result = Workspace_eio.message_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
-let test_room_eio_message_no_mention () =
-  let msg = Coord_eio.{
+let test_workspace_eio_message_no_mention () =
+  let msg = Workspace_eio.{
     seq = 1;
     from_agent = "provider_f";
     content = "General broadcast";
     mention = None;
     timestamp = 1704067200.0;
   } in
-  let json = Coord_eio.message_to_json msg in
-  let result = Coord_eio.message_of_json json in
+  let json = Workspace_eio.message_to_json msg in
+  let result = Workspace_eio.message_of_json json in
   check bool "roundtrip ok" true (is_ok result)
 
 (* ============================================================ *)
@@ -865,19 +755,6 @@ let tempo_tests = [
   "mode roundtrip", `Quick, test_tempo_mode_roundtrip;
   "default config", `Quick, test_default_tempo_config;
   "config roundtrip", `Quick, test_tempo_config_roundtrip;
-]
-
-let a2a_tests = [
-  "status all", `Quick, test_a2a_task_status_all;
-  "status unknown error", `Quick, test_a2a_task_status_of_string_unknown;
-  "task roundtrip", `Quick, test_a2a_task_roundtrip;
-  "task with result", `Quick, test_a2a_task_with_result;
-]
-
-let portal_tests = [
-  "state all", `Quick, test_portal_state_all;
-  "state unknown error", `Quick, test_portal_state_of_string_unknown;
-  "roundtrip", `Quick, test_portal_roundtrip;
 ]
 
 let role_tests = [
@@ -942,10 +819,6 @@ let validation_tests = [
   "agent_name_r valid", `Quick, test_validate_agent_name_r_valid;
   "task_id valid", `Quick, test_validate_task_id_valid;
   "task_id_r valid", `Quick, test_validate_task_id_r_valid;
-  "room_id valid", `Quick, test_validate_room_id_valid;
-  "room_id trims whitespace", `Quick, test_validate_room_id_trims_whitespace;
-  "room_id rejects traversal", `Quick, test_validate_room_id_rejects_path_traversal;
-  "room_id rejects invalid chars", `Quick, test_validate_room_id_rejects_invalid_chars;
   "file_path valid", `Quick, test_validate_file_path_valid;
   "file_path too long", `Quick, test_validate_file_path_too_long;
   "file_path angle brackets", `Quick, test_validate_file_path_angle_brackets;
@@ -957,31 +830,31 @@ let substring_tests = [
   "empty needle", `Quick, test_contains_substring_empty;
 ]
 
-let room_eio_event_tests = [
-  "event_type_to_string", `Quick, test_room_eio_event_type_to_string;
+let workspace_eio_event_tests = [
+  "event_type_to_string", `Quick, test_workspace_eio_event_type_to_string;
 ]
 
-let room_eio_time_tests = [
-  "now_iso", `Quick, test_room_eio_now_iso;
+let workspace_eio_time_tests = [
+  "now_iso", `Quick, test_workspace_eio_now_iso;
 ]
 
-let room_eio_state_tests = [
-  "default_room_state", `Quick, test_room_eio_default_room_state;
-  "room_state roundtrip", `Quick, test_room_eio_room_state_roundtrip;
+let workspace_eio_state_tests = [
+  "default_workspace_state", `Quick, test_workspace_eio_default_workspace_state;
+  "workspace_state roundtrip", `Quick, test_workspace_eio_workspace_state_roundtrip;
 ]
 
-let room_eio_agent_tests = [
-  "agent_state roundtrip", `Quick, test_room_eio_agent_state_roundtrip;
+let workspace_eio_agent_tests = [
+  "agent_state roundtrip", `Quick, test_workspace_eio_agent_state_roundtrip;
 ]
 
-let room_eio_lock_tests = [
-  "lock_info roundtrip", `Quick, test_room_eio_lock_info_roundtrip;
-  "lock_info int floats", `Quick, test_room_eio_lock_info_int_floats;
+let workspace_eio_lock_tests = [
+  "lock_info roundtrip", `Quick, test_workspace_eio_lock_info_roundtrip;
+  "lock_info int floats", `Quick, test_workspace_eio_lock_info_int_floats;
 ]
 
-let room_eio_message_tests = [
-  "message roundtrip", `Quick, test_room_eio_message_roundtrip;
-  "message no mention", `Quick, test_room_eio_message_no_mention;
+let workspace_eio_message_tests = [
+  "message roundtrip", `Quick, test_workspace_eio_message_roundtrip;
+  "message no mention", `Quick, test_workspace_eio_message_no_mention;
 ]
 
 let () =
@@ -992,8 +865,6 @@ let () =
     "agent_status", agent_status_tests;
     "task_status", task_status_tests;
     "tempo", tempo_tests;
-    "a2a", a2a_tests;
-    "portal", portal_tests;
     "agent_role", role_tests;
     "rate_limit", rate_limit_tests;
     "masc_error", error_tests;
@@ -1006,10 +877,10 @@ let () =
     "sanitize", sanitize_tests;
     "validation", validation_tests;
     "contains_substring", substring_tests;
-    "Coord_eio.event", room_eio_event_tests;
-    "Coord_eio.time", room_eio_time_tests;
-    "Coord_eio.state", room_eio_state_tests;
-    "Coord_eio.agent", room_eio_agent_tests;
-    "Coord_eio.lock", room_eio_lock_tests;
-    "Coord_eio.message", room_eio_message_tests;
+    "Workspace_eio.event", workspace_eio_event_tests;
+    "Workspace_eio.time", workspace_eio_time_tests;
+    "Workspace_eio.state", workspace_eio_state_tests;
+    "Workspace_eio.agent", workspace_eio_agent_tests;
+    "Workspace_eio.lock", workspace_eio_lock_tests;
+    "Workspace_eio.message", workspace_eio_message_tests;
   ]

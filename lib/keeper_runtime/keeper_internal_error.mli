@@ -1,0 +1,129 @@
+(** Structured keeper-internal error envelopes carried through
+    [Agent_sdk.Error.Internal]. *)
+
+type provider_rejection = {
+  provider_label : string;
+  reason : string;
+}
+
+type capacity_backpressure_source =
+  | Provider_capacity
+  | Client_capacity
+  | Runtime_slot
+
+val capacity_backpressure_source_to_string :
+  capacity_backpressure_source -> string
+
+val capacity_backpressure_source_of_string :
+  string -> capacity_backpressure_source option
+
+type capacity_retry_after =
+  | Explicit of float
+  | Synthetic_default of float
+  | No_retry_hint
+
+type runtime_exhaustion_reason =
+  | Connection_refused
+  | Dns_failure
+  | No_providers_available
+  | All_providers_failed
+  | Candidates_filtered_after_cycles
+  | Max_turns_exceeded
+  | Structural_attempt_timeout of { detail : string }
+  | Capacity_exhausted
+  | Other_detail of string
+
+val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
+val runtime_exhaustion_reason_to_json : runtime_exhaustion_reason -> Yojson.Safe.t
+val runtime_exhaustion_reason_of_json : Yojson.Safe.t -> runtime_exhaustion_reason option
+
+type accept_rejection_kind =
+  | Accept_no_usable_progress
+  | Accept_predicate_rejected
+
+val accept_rejection_kind_to_string : accept_rejection_kind -> string
+val accept_rejection_kind_of_string : string -> accept_rejection_kind option
+
+type masc_internal_error =
+  | Runtime_exhausted of {
+      runtime_id : string;
+      reason : runtime_exhaustion_reason;
+    }
+  | Capacity_backpressure of {
+      runtime_id : string;
+      source : capacity_backpressure_source;
+      detail : string;
+      retry_after : capacity_retry_after;
+    }
+  | Resumable_cli_session of {
+      runtime_id : string;
+      detail : string;
+      exit_code : int option;
+    }
+  | Accept_rejected of {
+      scope : string;
+      model : string option;
+      reason_kind : accept_rejection_kind option;
+      reason : string;
+    }
+  | Admission_queue_timeout of {
+      keeper_name : string;
+      runtime_id : string;
+      wait_sec : float;
+    }
+  | Admission_queue_rejected of {
+      keeper_name : string;
+      reason : string;
+    }
+  | Turn_timeout of { elapsed_sec : float }
+  | Provider_timeout of {
+      budget_sec : float;
+      keeper_turn_timeout_sec : float;
+      estimated_input_tokens : int;
+      source : string;
+      remaining_turn_budget_sec : float option;
+      min_required_sec : float;
+      phase : string;
+    }
+  | Max_tokens_ceiling_violation of {
+      runtime_id : string;
+      requested_max_tokens : int;
+      provider_ceiling : int;
+      reason : string;
+    }
+  | Ambiguous_post_commit of {
+      is_timeout : bool;
+      tools : string list;
+      original_error : string;
+    }
+  | Internal_unhandled_exception of {
+      site : string;
+      exn_repr : string;
+    }
+  | Internal_bridge_exception of {
+      caller : string;
+      exn_repr : string;
+    }
+  | Internal_contract_rejected of { reason : string }
+
+val masc_internal_error_prefix : string
+
+val masc_internal_error_to_json : masc_internal_error -> Yojson.Safe.t
+
+val summary_of_masc_internal_error : masc_internal_error -> string option
+
+val kind_of_masc_internal_error : masc_internal_error -> string
+
+val runtime_id_of_masc_internal_error : masc_internal_error -> string
+
+val sdk_error_of_masc_internal_error :
+  masc_internal_error -> Agent_sdk.Error.sdk_error
+
+val parse_masc_internal_error_json :
+  Yojson.Safe.t -> masc_internal_error option
+
+val classify_masc_internal_error_of_string :
+  string -> masc_internal_error option
+
+val classify_masc_internal_error :
+  Agent_sdk.Error.sdk_error -> masc_internal_error option

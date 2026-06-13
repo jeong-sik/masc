@@ -116,10 +116,12 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.items.transport.tone).toBe('ok')
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.value).toBe('1/2')
+    expect(summary.items.fleet.value).toBe('fresh 1/2')
+    expect(summary.items.fleet.detail).toBe('1 stale heartbeat; freshness is separate from running fibers')
     expect(summary.items.attention.tone).toBe('err')
     expect(summary.items.attention.value).toBe('4')
     expect(summary.counts).toMatchObject({
+      freshKeepers: 1,
       staleKeepers: 1,
       keeperAttention: 1,
       pendingVerificationTasks: 1,
@@ -146,9 +148,9 @@ describe('summarizeStatusTray', () => {
         keeper('gamma', {
           needs_attention: false,
           trust: {
-            execution_summary: {
-              tool_contract_result: 'missing_required_tool_use',
-              missing_required_tools: ['Execute'],
+            latest_terminal_reason: {
+              code: 'runtime_exhausted',
+              severity: 'bad',
             },
           },
         }),
@@ -162,46 +164,9 @@ describe('summarizeStatusTray', () => {
 
     expect(summary.counts.keeperAttention).toBe(1)
     expect(summary.items.fleet.tone).toBe('warn')
-    expect(summary.items.fleet.detail).toBe('1 keeper need attention')
+    expect(summary.items.fleet.detail).toBe('1 keeper need attention; heartbeat freshness is current')
     expect(summary.items.attention.tone).toBe('warn')
     expect(summary.items.attention.value).toBe('1')
-  })
-
-  it.each([
-    'tool_surface_mismatch',
-    'no_tool_capable_provider',
-    'claim_only_after_owned_task',
-  ] as const)('detects previously-missed attention code: %s', (code) => {
-    const summary = summarizeStatusTray({
-      wsOnly: false,
-      sseConnected: true,
-      wsConnected: true,
-      wsReady: true,
-      wsLastEventAt: NOW - 1000,
-      wsEventCount60s: 1,
-      wsLastPongAt: 0,
-      wsLastPongLatencyMs: null,
-      wsLastError: null,
-      reconnectCount: 0,
-      lastDisconnectedAt: 0,
-      keepers: [
-        keeper('delta', {
-          needs_attention: false,
-          trust: {
-            execution_summary: {
-              tool_contract_result: code,
-            },
-          },
-        }),
-      ],
-      staleKeeperNames: new Set(),
-      tasks: [],
-      journalEntries: [],
-      unacknowledgedErrors: 0,
-      now: NOW,
-    })
-
-    expect(summary.counts.keeperAttention).toBe(1)
   })
 
   it('keeps the client transport green when route events are idle but heartbeat is fresh', () => {

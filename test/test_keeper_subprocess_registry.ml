@@ -7,8 +7,8 @@
 
 open Alcotest
 
-module R = Masc_mcp.Keeper_subprocess_registry
-module H = Masc_mcp.Keeper_lifecycle_hooks
+module R = Masc.Keeper_subprocess_registry
+module H = Masc.Keeper_lifecycle_hooks
 
 let setup () =
   R.reset_for_testing ();
@@ -93,8 +93,8 @@ let test_default_hook_ignores_phase_transition () =
   R.register_default_cleanup_hook ();
   H.run ~keeper_id:"k"
     (H.Phase_transition
-       { from_phase = Masc_mcp.Keeper_state_machine.Running;
-         to_phase   = Masc_mcp.Keeper_state_machine.Failing });
+       { from_phase = Keeper_state_machine.Running;
+         to_phase   = Keeper_state_machine.Failing });
   (* Phase_transition must not drain. *)
   check (list int) "still tracked" [ 0x7FFFFFF3 ] (R.pids_for ~keeper_id:"k")
 

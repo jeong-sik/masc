@@ -1,26 +1,28 @@
 (** Keeper_tool_registry -- runtime tool name sources and schema injection.
 
-    Static tool name lists have been moved to config/tool_policy.toml.
-    This module retains only runtime-resolved names (Tool_catalog,
-    Tool_shard, injected MASC tools), core always-visible tools, and
-    dynamic schema injection.
-
-    See Keeper_tool_policy_config for the declarative tool groups and presets. *)
+    This module retains runtime-resolved names (Tool_catalog, Tool_shard,
+    injected MASC tools), core always-available tools, and dynamic schema
+    injection. Execution surfaces are resolved from descriptors/registries
+    and then denylist-filtered. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
-(* RFC-0160 S7: raw command parsing is centralized in
-   {!Agent_tool_execute_command_parse}; word extraction is owned by
-   {!Agent_tool_execute_command_words}. *)
+(* RFC-0160 S7: raw command parsing is centralized in {!Exec_policy};
+   word extraction is owned by {!Keeper_tool_command_words}. *)
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 
-let keeper_internal_candidate_tool_names =
-  Tool_catalog.tools_for_surface Tool_catalog.Keeper_internal
+(* The Agent_internal surface was empty (agent_internal_surface_tools = []),
+   so this candidate list has always been empty.  Surface deleted in the
+   surface-cut refactor; retained as [] because the [Registry_internal_candidate]
+   resolution source and keeper_tool_policy still reference it. *)
+let keeper_internal_candidate_tool_names : string list = []
 ;;
 
 let keeper_voice_tool_schemas =
@@ -41,8 +43,8 @@ let keeper_voice_tool_schemas =
     See #4961. *)
 let core_always_tools =
   List.map
-    Tool_name.to_string
-    Tool_name.[ Keeper Context_status; Keeper Stay_silent; Keeper Tool_search ]
+    Keeper_tool_name.to_string
+    Keeper_tool_name.[ Context_status; Stay_silent; Tool_search ]
   @ [ "extend_turns" ]
 ;;
 
@@ -65,35 +67,40 @@ let core_always_tools =
     corresponding action tool (fs_read → fs_edit, board_list → board_post,
     shell → github).  This prevents the "read-only polling loop" where
     the model repeatedly observes but cannot find tools to act. *)
-let core_discovery_tools =
+let base_core_tools =
   core_always_tools
   @ List.map
-      Tool_name.to_string
-      Tool_name.
-        [ (* Coordination *)
-          Keeper Broadcast
-        ; Keeper Tasks_list
-        ; Keeper Task_claim
-        ; Keeper Task_done
-        ; Keeper Task_create
-        ; Keeper Memory_search
+      Keeper_tool_name.to_string
+      Keeper_tool_name.
+        [ (* Workspace *)
+          Broadcast
+        ; Tasks_list
+        ; Task_claim
+        ; Task_done
+        ; Task_create
+        ; Memory_search
         ; (* Board: core interaction *)
-          Keeper Board_get
-        ; Keeper Board_post
-        ; Keeper Board_comment
-        ; Keeper Board_vote
-        ; Keeper Board_list
-        ; Keeper Board_curation_read
-        ; Keeper Board_curation_submit
+          Board_post_get
+        ; Board_post
+        ; Board_comment
+        ; Board_vote
+        ; Board_list
+        ; Board_curation_read
+        ; Board_curation_submit
         ; (* Discovery fallback for meta/admin tools *)
-          Keeper Tools_list
+          Tools_list
         ]
+;;
+
+let core_discovery_tools =
+  base_core_tools
   (* RFC-0064/RFC-016x: public capability names replace internal names
      in the LLM-facing discovery surface. *)
-  @ Agent_tool_descriptor.public_names ()
+  @ Keeper_tool_descriptor.public_names ()
 ;;
 
 let effective_core_tools () = core_discovery_tools
+;;
 
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in
@@ -106,9 +113,9 @@ let is_core_always_tool (name : string) : bool = Hashtbl.mem core_always_set nam
 (* ── Read-only keeper tools ───────────────────────────────────── *)
 
 (** Descriptor-projected read-only tools. This covers non-shard tools and
-    descriptor-backed public/coordination tools without adding new string
+    descriptor-backed public/workspace tools without adding new string
     mirrors to the registry. *)
-let descriptor_read_only_tools = Agent_tool_descriptor.readonly_internal_names ()
+let descriptor_read_only_tools = Keeper_tool_descriptor.readonly_internal_names ()
 
 let keeper_read_only_tools =
   Tool_shard.all_read_only_keeper_tools () @ descriptor_read_only_tools
@@ -129,8 +136,8 @@ let is_effectively_read_only_tool (name : string) : bool =
   (* Keeper-local check first (bare Hashtbl, no mutex) before
      descriptor-aware capability lookup. *)
   is_keeper_read_only_tool name
-  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
-  || Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
+  || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+  || Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent name
 ;;
 
 let has_mutating_side_effect (name : string) : bool =
@@ -143,18 +150,18 @@ let has_mutating_side_effect (name : string) : bool =
    such a contract. *)
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  match Agent_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
+  match Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input with
   | Some readonly -> readonly
   | None -> is_effectively_read_only_tool tool_name
 ;;
 
 let descriptor_boundary_exempt tool_name =
-  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> None
   | Some descriptor ->
-    (match descriptor.Agent_tool_descriptor.policy.effect_domain with
+    (match descriptor.Keeper_tool_descriptor.policy.effect_domain with
      | Some Tool_catalog.Read_only
-     | Some Tool_catalog.Masc_coordination
+     | Some Tool_catalog.Masc_workspace
      | Some Tool_catalog.Playground_write -> Some true
      | Some Tool_catalog.Host_repo_write -> Some false
      | None -> None)
@@ -162,7 +169,7 @@ let descriptor_boundary_exempt tool_name =
 
 let effect_domain_boundary_exempt = function
   | Some Tool_catalog.Read_only
-  | Some Tool_catalog.Masc_coordination
+  | Some Tool_catalog.Masc_workspace
   | Some Tool_catalog.Playground_write -> Some true
   | Some Tool_catalog.Host_repo_write -> Some false
   | None -> None
@@ -173,7 +180,7 @@ let catalog_boundary_exempt tool_name =
   | Some _ as decision -> decision
   | None ->
     (match
-       Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
+       Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name
      with
      | Some internal_name when not (String.equal internal_name tool_name) ->
        effect_domain_boundary_exempt (Tool_catalog.effect_domain internal_name)
@@ -183,7 +190,7 @@ let catalog_boundary_exempt tool_name =
 (* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
    main-worktree checkpoint boundary because they either:
-   - only touch MASC coordination state (tasks, board, broadcast), or
+   - only touch MASC workspace state (tasks, board, broadcast), or
    - operate inside an explicit playground sandbox.
 
    Keep these tools mutating for reconcile/error handling; this predicate
@@ -227,22 +234,26 @@ let is_main_worktree_boundary_exempt_with_input
     be misleading dead entries. *)
 let reconcile_safe_tools =
   List.map
-    Tool_name.to_string
-    Tool_name.
-      [ Keeper Board_post
-      ; Keeper Board_comment
-      ; Keeper Board_vote
-      ; Keeper Board_comment_vote
-      ; Keeper Board_curation_submit
-      ; Keeper Broadcast
-      ; Keeper Task_done
-      ; Masc Board_post
-      ; Masc Board_comment
-      ; Masc Board_vote
-      ; Masc Board_comment_vote
-      ; Masc Board_curation_submit
-      ; Masc Broadcast
+    Keeper_tool_name.to_string
+    Keeper_tool_name.
+      [ Board_post
+      ; Board_comment
+      ; Board_vote
+      ; Board_comment_vote
+      ; Board_curation_submit
+      ; Broadcast
+      ; Task_done
       ]
+  @ List.map
+      Tool_name.Board_name.to_string
+      Tool_name.Board_name.
+        [ Board_post
+        ; Board_comment
+        ; Board_vote
+        ; Board_comment_vote
+        ; Board_curation_submit
+        ]
+  @ [ "masc_broadcast" ]
 ;;
 
 let reconcile_safe_set : (string, unit) Hashtbl.t =
@@ -270,27 +281,35 @@ let masc_schemas_snapshot () =
   Stdlib.Mutex.protect masc_schemas_mutex (fun () -> !masc_schemas_state)
 ;;
 
-let with_masc_schemas_for_test schemas f =
-  let previous = masc_schemas_snapshot () in
-  Eio_guard.protect
-    ~finally:(fun () -> set_masc_schemas previous)
-    (fun () ->
-       set_masc_schemas schemas;
-       f ())
-;;
-
 let injected_masc_tool_names () =
   masc_schemas_snapshot ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+;;
+
+(* ── Universe-aware effective core tools ─────────────────────── *)
+
+let effective_core_tools () =
+  let universe_set =
+    injected_masc_tool_names ()
+    |> List.fold_left
+         (fun acc name -> Set_util.StringSet.add name acc)
+         Set_util.StringSet.empty
+  in
+  let descriptor_publics =
+    Keeper_tool_descriptor.public_descriptors
+    |> List.filter (fun d -> Set_util.StringSet.mem d.Keeper_tool_descriptor.internal_name universe_set)
+    |> List.concat_map Keeper_tool_descriptor.public_names_of_descriptor
+  in
+  base_core_tools @ descriptor_publics
 ;;
 
 (* ── keeper_tool_search schema ───────────────────────────────── *)
 
 (** SSOT schema for keeper_tool_search.  Defined here because this is
     the keeper tool registry — the canonical owner of keeper-internal tool
-    metadata.  Consumed by [keeper_tool_policy.keeper_default_model_tools]. *)
+    metadata. *)
 let keeper_tool_search_schema : Masc_domain.tool_schema =
-  { name = Tool_name.(to_string (Keeper Tool_search))
+  { name = Keeper_tool_name.to_string Keeper_tool_name.Tool_search
   ; description =
       "Search for tools by query describing what you need. Returns tool names, \
        descriptions, and usage guidance. Use when your current tools are insufficient \
@@ -306,7 +325,7 @@ let keeper_tool_search_schema : Masc_domain.tool_schema =
                     ; ( "description"
                       , `String
                           "Natural language description of what you need to do, e.g. \
-                           'create a git worktree' or 'manage auth tokens'" )
+                           'inspect a repo' or 'manage auth tokens'" )
                     ] )
               ; ( "max_results"
                 , `Assoc

@@ -1,5 +1,6 @@
 open Tool_args
 include Operator_control_snapshot
+type 'a context = 'a Tool_operator.context
 
 open Result.Syntax
 
@@ -16,7 +17,7 @@ let normalize_judgment_surface value =
 let normalize_judgment_target_type value =
   let normalized = String.trim value |> String.lowercase_ascii in
   if Operator_digest_types.is_root_target_type normalized then
-    Ok ("root", Operator_judgment.Coord)
+    Ok ("workspace", Operator_judgment.Workspace)
   else Error "target_type must be root"
 
 let default_fresh_ttl_sec surface =
@@ -35,13 +36,13 @@ let judgment_write_json (ctx : 'a context) args =
   if summary = "" then Error "summary is required"
   else
     let now_unix = Unix.gettimeofday () in
-    let generated_at = Dashboard_utils.iso_of_unix now_unix in
+    let generated_at = Masc_domain.iso8601_of_unix_seconds now_unix in
     let fresh_ttl_sec =
       let default = default_fresh_ttl_sec surface in
       max 1 (get_int args "fresh_ttl_sec" default)
     in
     let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
-    let fresh_until = Dashboard_utils.iso_of_unix fresh_until_unix in
+    let fresh_until = Masc_domain.iso8601_of_unix_seconds fresh_until_unix in
     let confidence = get_float args "confidence" 0.5 in
     let keeper_name =
       match get_string_opt args "keeper_name" with
@@ -51,16 +52,9 @@ let judgment_write_json (ctx : 'a context) args =
           else normalized_actor ~context_actor:ctx.agent_name None
       | None -> normalized_actor ~context_actor:ctx.agent_name None
     in
-    let evidence_refs =
-      match U.member "evidence_refs" args with
-      | `List items -> List.filter_map U.to_string_option items
-      | _ -> []
+    let evidence_refs = Json_util.get_string_list args "evidence_refs"
     in
-    let recommended_action =
-      match U.member "recommended_action" args with
-      | `Assoc _ as value -> Some value
-      | _ -> None
-    in
+    let recommended_action = Json_util.get_object args "recommended_action" in
     let judgment =
       Operator_judgment.record ctx.config ~surface
         ~target_type:judgment_target_type ~target_id ~summary ~confidence
@@ -114,7 +108,7 @@ let canonical_action_type action_type = action_type
 
 let normalize_action_target_type target_type =
   let normalized = String.trim target_type |> String.lowercase_ascii in
-  if Operator_digest_types.is_root_target_type normalized then Ok "root"
+  if Operator_digest_types.is_root_target_type normalized then Ok "workspace"
   else match normalized with
   | "keeper" as value -> Ok value
   | "" -> Ok ""
@@ -123,7 +117,7 @@ let normalize_action_target_type target_type =
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
-    -> "root"
+    -> "workspace"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
@@ -151,7 +145,7 @@ let generate_confirm_token ~(clock : _ Eio.Time.clock) config =
   in
   loop 0
 
-let resolved_actor_for_args ?actor_hint ctx args =
+let resolved_actor_for_args ?actor_hint (ctx : 'a context) args =
   let payload_actor = get_string_opt args "actor" |> Option.map String.trim in
   let hinted_actor = actor_hint |> Option.map String.trim in
   Ok
@@ -160,7 +154,7 @@ let resolved_actor_for_args ?actor_hint ctx args =
        | Some actor when actor <> "" -> Some actor
        | _ -> payload_actor))
 
-let action_request_of_args ?actor_hint ctx args =
+let action_request_of_args ?actor_hint (ctx : 'a context) args =
   let action_type =
     get_string args "action_type" "" |> String.trim |> String.lowercase_ascii
     |> canonical_action_type
@@ -207,7 +201,7 @@ let preview_of_action (request : action_request) =
       ("actor", `String request.actor);
       ("action_type", `String request.action_type);
       ("target_type", `String request.target_type);
-      ("target_id", string_option_to_json request.target_id);
+      ("target_id", Json_util.string_opt_to_json request.target_id);
     ]
   in
   let payload_fields =

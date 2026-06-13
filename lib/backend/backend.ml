@@ -55,12 +55,12 @@ module FileSystem = struct
   (** {2 Mutex contention observers}
 
       Hooks for write-mutex contention metrics.  Default is a no-op
-      so [masc_backend] does not depend on [Prometheus] at link time;
-      the main library wires Prometheus histograms via
+      so [masc_backend] does not depend on [Otel_metric_store] at link time;
+      the main library wires Otel_metric_store histograms via
       [set_mutex_observers] at startup.
 
       Observers run *outside* the critical section to avoid nested
-      locking against [Prometheus]'s internal Stdlib.Mutex. *)
+      locking against [Otel_metric_store]'s internal Stdlib.Mutex. *)
 
   let mutex_acquire_observer
     : (op:string -> seconds:float -> unit) ref =
@@ -87,7 +87,7 @@ module FileSystem = struct
       Acquire latency is measured as [now - call_start]; held latency
       as [now - mutex_acquired].  Observers run after the lock is
       released, so they cannot extend the critical section even if
-      the underlying Prometheus implementation contends on its own
+      the underlying Otel_metric_store implementation contends on its own
       mutex. *)
   let with_observed_mutex ~op ~key t f =
     let mutex = stripe_for_key t key in
@@ -635,7 +635,6 @@ module FileSystem = struct
       None
     else
     try
-      let module U = Yojson.Safe.Util in
       let j = Yojson.Safe.from_string trimmed in
       let parse_float = function
         | `Float f -> Some f
@@ -644,14 +643,10 @@ module FileSystem = struct
         | `String s -> float_of_string_opt s
         | _ -> None
       in
-      let parse_string = function
-        | `String s -> Some s
-        | _ -> None
-      in
       match
-        (parse_string (U.member "owner" j),
-         parse_float (U.member "acquired_at" j),
-         parse_float (U.member "expires_at" j))
+        (Json_util.get_string j "owner",
+         parse_float (Yojson.Safe.Util.member "acquired_at" j),
+         parse_float (Yojson.Safe.Util.member "expires_at" j))
       with
       | Some owner, Some acquired_at, Some expires_at ->
           Some { owner; acquired_at; expires_at }

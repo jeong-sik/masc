@@ -6,17 +6,17 @@
     Modules tested:
     - Rate_limit (token bucket under contention)
     - Circuit_breaker (state transitions under contention)
-    - Prometheus (metric increments under contention)
+    - Otel_metric_store (metric increments under contention)
     - Streamable_http.Session (session CRUD under contention)
-    - Agent_registry_eio (identity resolution under contention)
+    - Client_registry_eio (identity resolution under contention)
 *)
 
 open Alcotest
 
-module RL = Masc_mcp.Rate_limit
+module RL = Masc.Rate_limit
 module CB = Circuit_breaker
-module Prom = Masc_mcp.Prometheus
-module SH = Masc_mcp.Streamable_http
+module Metrics = Masc.Otel_metric_store
+module SH = Masc.Streamable_http
 
 (** {1 Rate Limit Concurrency} *)
 
@@ -83,32 +83,28 @@ let test_circuit_breaker_multi_agent () =
   let all = CB.list_all_breakers cb in
   check int "5 breakers exist" 5 (List.length all)
 
-(** {1 Prometheus Concurrency} *)
+(** {1 Otel_metric_store Concurrency} *)
 
-let test_prometheus_concurrent () =
+let test_otel_metric_store_concurrent () =
   Eio.Fiber.all (List.init 10 (fun i -> fun () ->
     for _ = 1 to 100 do
-      Prom.inc_counter "test_concurrent_metric"
+      Metrics.inc_counter "test_concurrent_metric"
         ~labels:[("fiber", string_of_int i)] ()
     done
   ));
-  let text = Prom.to_prometheus_text () in
-  check bool "has metric name" true
-    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_metric") text 0); true
-     with Not_found -> false)
+  check (float 0.0001) "counter total" 1000.0
+    (Metrics.metric_total "test_concurrent_metric")
 
-let test_prometheus_gauge_concurrent () =
+let test_otel_metric_store_gauge_concurrent () =
   Eio.Fiber.all (List.init 5 (fun i -> fun () ->
     for j = 1 to 50 do
-      Prom.set_gauge "test_concurrent_gauge"
+      Metrics.set_gauge "test_concurrent_gauge"
         ~labels:[("fiber", string_of_int i)]
         (float_of_int j)
     done
   ));
-  let text = Prom.to_prometheus_text () in
-  check bool "has gauge name" true
-    (try ignore (Str.search_forward (Str.regexp_string "test_concurrent_gauge") text 0); true
-     with Not_found -> false)
+  check (float 0.0001) "gauge total" 250.0
+    (Metrics.metric_total "test_concurrent_gauge")
 
 (** {1 Streamable HTTP Session Concurrency} *)
 
@@ -141,9 +137,9 @@ let () =
       test_case "concurrent failure/check" `Quick test_circuit_breaker_concurrent;
       test_case "concurrent multi-agent" `Quick test_circuit_breaker_multi_agent;
     ];
-    "Prometheus", [
-      test_case "concurrent counter" `Quick test_prometheus_concurrent;
-      test_case "concurrent gauge" `Quick test_prometheus_gauge_concurrent;
+    "Otel_metric_store", [
+      test_case "concurrent counter" `Quick test_otel_metric_store_concurrent;
+      test_case "concurrent gauge" `Quick test_otel_metric_store_gauge_concurrent;
     ];
     "Streamable HTTP Session", [
       test_case "concurrent create/find" `Quick test_session_concurrent_create_find;

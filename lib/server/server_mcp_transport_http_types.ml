@@ -10,6 +10,8 @@ type runtime = {
   handle_request :
     ?profile:tool_profile ->
     ?mcp_session_id:string ->
+    ?otel_mcp_protocol_version:string ->
+    ?otel_transport_context:Otel_dispatch_hook.transport_context ->
     ?auth_token:string ->
     ?internal_keeper_runtime:bool ->
     string ->

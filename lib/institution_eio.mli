@@ -12,15 +12,14 @@
     - The {b lightweight} JSONL tail
       ({!episodes_jsonl_path} / {!record_episode_jsonl} /
       {!load_recent_episodes_jsonl} / {!cap_episodes_jsonl})
-      used by [memory_oas_bridge.ml],
-      [server_dashboard_http.ml], and the keeper heartbeat
+      used by [server_dashboard_http.ml] and the keeper heartbeat
       path that needs to record an episode without an Eio
       switch in scope.
 
     The {!institution} record is kept abstract at this
     boundary because external callers
     ([mcp_server_eio_resource.ml],
-    [tool_inline_dispatch_coord.ml]) only round-trip it
+    [mcp_tool_runtime_workspace.ml]) only round-trip it
     through {!institution_of_json} → {!format_for_injection}
     without touching its fields.  The {!episode} record stays
     concrete because [.id] / [.summary] / [.participants] are
@@ -87,7 +86,7 @@ type institution
 (** Held abstract because callers do not pattern-match on its
     fields — the only consumers
     ([mcp_server_eio_resource.ml],
-    [tool_inline_dispatch_coord.ml]) round-trip through
+    [mcp_tool_runtime_workspace.ml]) round-trip through
     {!institution_of_json} → {!format_for_injection}.  The
     .ml retains the concrete record (with [identity],
     [memory], [culture], [succession], [current_agents],
@@ -117,7 +116,7 @@ val format_for_injection :
 val episodes_jsonl_path : unit -> string
 (** [{!Common.masc_dir_from_base_path} ~base_path / "institution_episodes.jsonl"].
     Append-only path — readers can mmap or stream-parse
-    safely without coordinating with writers. *)
+    safely without synchronizing with writers. *)
 
 val record_episode_jsonl :
   event_type:string ->
@@ -146,17 +145,16 @@ val cap_episodes_jsonl : ?max_lines:int -> unit -> int
 (** Atomically rewrites {!episodes_jsonl_path} to keep the
     most recent [max_lines] entries (default 500).  Returns
     the number of lines dropped (0 when no rewrite was
-    needed).  Triggered by the flush path in
-    [memory_oas_bridge.ml] to bound the JSONL footprint. *)
+    needed). *)
 
 (** {1 Welcome / spawn injection} *)
 
 val load_and_format_for_welcome :
-  fs:'fs -> Coord_utils.config -> string
+  fs:'fs -> Workspace_utils.config -> string
 (** Loads the structured [institution.json] and returns a
     welcome-banner Markdown block (different surface than
     {!format_for_injection} — narrower, used by the
-    operator dashboard and the inline dispatch path).
+    operator dashboard and the MCP runtime path).
     Returns the empty string when the file is missing or
     any load / parse error occurs.  The [~fs] argument is
     accepted polymorphically and ignored by the .ml — the

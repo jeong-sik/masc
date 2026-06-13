@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - bin/main_stdio_eio.ml
-  - start-masc-mcp.sh
+  - start-masc.sh
 ---
 
 # MCP Config Template
@@ -29,7 +29,7 @@ code_refs:
 {
   "mcpServers": {
     "masc": {
-      "command": "masc-mcp-stdio"
+      "command": "masc-stdio"
     }
   }
 }

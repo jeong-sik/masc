@@ -10,9 +10,9 @@ module Types = Masc_domain
 let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
-module Auth = Masc_mcp.Auth
+module Auth = Masc.Auth
 
-let setup_test_room () =
+let setup_test_workspace () =
   let unique_id =
     Printf.sprintf "masc-alias-test-%d-%d" (Unix.getpid ())
       (int_of_float (Unix.gettimeofday () *. 1000.))
@@ -23,7 +23,7 @@ let setup_test_room () =
   Unix.mkdir masc_dir 0o755;
   tmp
 
-let cleanup_test_room dir =
+let cleanup_test_workspace dir =
   let rec rm_rf path =
     if Sys.is_directory path then begin
       Array.iter (fun f -> rm_rf (Filename.concat path f))
@@ -48,8 +48,8 @@ let alias_redirect_basename path =
   | _ -> None
 
 let test_alias_creates_redirect () =
-  let tmp = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room tmp) @@ fun () ->
+  let tmp = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace tmp) @@ fun () ->
   (* Bootstrap canonical credential via ensure_keeper_credential —
      this writes a UUID-backed redirect at keeper-foo-agent.json. *)
   (match
@@ -83,8 +83,8 @@ let test_alias_creates_redirect () =
     (token_of direct) (token_of via_alias)
 
 let test_alias_idempotent () =
-  let tmp = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room tmp) @@ fun () ->
+  let tmp = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace tmp) @@ fun () ->
   let _ =
     Auth.ensure_keeper_credential tmp ~agent_name:"keeper-bar-agent"
   in
@@ -107,8 +107,8 @@ let test_alias_idempotent () =
     mtime_before mtime_after
 
 let test_self_alias_noop () =
-  let tmp = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room tmp) @@ fun () ->
+  let tmp = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace tmp) @@ fun () ->
   let _ =
     Auth.ensure_keeper_credential tmp ~agent_name:"keeper-baz-agent"
   in
@@ -121,8 +121,8 @@ let test_self_alias_noop () =
                  (Masc_domain.masc_error_to_string e)
 
 let test_alias_missing_canonical () =
-  let tmp = setup_test_room () in
-  Fun.protect ~finally:(fun () -> cleanup_test_room tmp) @@ fun () ->
+  let tmp = setup_test_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_test_workspace tmp) @@ fun () ->
   match
     Auth.ensure_credential_alias tmp
       ~canonical_name:"does-not-exist" ~alias_name:"missing"

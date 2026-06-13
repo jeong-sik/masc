@@ -28,14 +28,14 @@ let string_ends_with ~suffix s =
 
 let test_finalize_handled_fires_observer () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.result option) =
+  let hook (outcome : Dispatch_outcome.t) (r : Tool_result.result option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_dispatch.register_dispatch_observer hook;
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.register_dispatch_observer hook;
   let r = Some (mk_result ~tool_name:"t" ~text:"ok") in
-  let _ = Masc_mcp.Tool_dispatch_emit.finalize_from_handler r in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
+  let _ = Tool_dispatch_emit.finalize_from_handler r in
+  Tool_dispatch.clear_hooks ();
   match !seen with
   | [ (Handled, true) ] -> ()
   | other ->
@@ -44,13 +44,13 @@ let test_finalize_handled_fires_observer () =
 
 let test_finalize_no_handler_fires_observer () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.result option) =
+  let hook (outcome : Dispatch_outcome.t) (r : Tool_result.result option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_dispatch.register_dispatch_observer hook;
-  let _ = Masc_mcp.Tool_dispatch_emit.finalize_from_handler None in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.register_dispatch_observer hook;
+  let _ = Tool_dispatch_emit.finalize_from_handler None in
+  Tool_dispatch.clear_hooks ();
   match !seen with
   | [ (No_handler, false) ] -> ()
   | _ -> failf "expected [No_handler, None] observation"
@@ -65,16 +65,16 @@ let test_finalize_applies_transformer_before_observer () =
     | Ok ok -> Ok { ok with data = `String ((Tool_result.message r) ^ "[capped]") }
     | Error err -> Error { err with message = err.message ^ "[capped]" }
   in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_dispatch.set_result_transformer transformer;
-  Masc_mcp.Tool_dispatch.register_dispatch_observer
-    (fun (outcome : Masc_mcp.Dispatch_outcome.t) r ->
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.set_result_transformer transformer;
+  Tool_dispatch.register_dispatch_observer
+    (fun (outcome : Dispatch_outcome.t) r ->
       match outcome, r with
       | Handled, Some out -> observed_message := Some (Tool_result.message out)
       | _ -> fail "expected observer to see handled result");
   let r = Some (mk_result ~tool_name:"t" ~text:"raw") in
-  let r' = Masc_mcp.Tool_dispatch_emit.finalize_from_handler r in
-  Masc_mcp.Tool_dispatch.clear_hooks ();
+  let r' = Tool_dispatch_emit.finalize_from_handler r in
+  Tool_dispatch.clear_hooks ();
   check int "transformer ran once" 1 !called;
   let suffix = "[capped]" in
   (match r' with

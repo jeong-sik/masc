@@ -15,5 +15,5 @@ type entry =
 
 val channel_to_string : channel -> string
 val entry_to_yojson : entry -> Yojson.Safe.t
-val recent : config:Coord.config -> limit:int -> entry list
-val json : config:Coord.config -> limit:int -> unit -> Yojson.Safe.t
+val recent : config:Workspace.config -> limit:int -> entry list
+val json : config:Workspace.config -> limit:int -> unit -> Yojson.Safe.t

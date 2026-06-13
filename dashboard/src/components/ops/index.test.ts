@@ -12,8 +12,8 @@ async function flushUi(): Promise<void> {
 
 async function loadOps() {
   vi.resetModules()
-  vi.doMock('./quick-intervene', () => ({
-    QuickIntervene: () => html`<div data-testid="quick-intervene">QuickIntervene</div>`,
+  vi.doMock('../board/composer-v2', () => ({
+    ComposerV2: () => html`<div data-testid="composer-v2">ComposerV2</div>`,
   }))
   vi.doMock('../flow-control/flow-control-panel', () => ({
     FlowControlPanel: () => html`<div data-testid="flow-control-panel">FlowControlPanel</div>`,
@@ -29,7 +29,7 @@ async function loadOps() {
     operatorActionLog: operatorStore.operatorActionLog,
     operatorDigestError: operatorStore.operatorDigestError,
     operatorError: operatorStore.operatorError,
-    operatorRoomDigest: operatorStore.operatorRoomDigest,
+    operatorWorkspaceDigest: operatorStore.operatorWorkspaceDigest,
     operatorSnapshot: operatorStore.operatorSnapshot,
     hydratedWorkflowId: helpers.hydratedWorkflowId,
   }
@@ -51,7 +51,7 @@ describe('Ops surface', () => {
     vi.useRealTimers()
     vi.resetModules()
     vi.clearAllMocks()
-    vi.doUnmock('./quick-intervene')
+    vi.doUnmock('../board/composer-v2')
     vi.doUnmock('../flow-control/flow-control-panel')
   })
 
@@ -62,7 +62,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -79,7 +79,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -121,7 +121,7 @@ describe('Ops surface', () => {
     await flushUi()
 
     expect(container.textContent).toContain('Recent Activity')
-    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('ComposerV2')
     expect(container.textContent).toContain('FlowControlPanel')
 
     // Placeholder-heavy review queue surface is gone — Live Judge + Keeper HITL
@@ -138,14 +138,14 @@ describe('Ops surface', () => {
     expect(items[2]?.textContent).toContain('키퍼 메시지는 잠시 보류')
   }, 120000)
 
-  it('renders keeper utility actions from the server catalog', async () => {
+  it('does not render its own keeper roster or fleet pointer (lives on Monitor → Keeper Fleet)', async () => {
     const {
       Ops,
       route,
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -166,7 +166,7 @@ describe('Ops surface', () => {
         { action_type: 'broadcast', target_type: 'root' },
       ],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -177,13 +177,12 @@ describe('Ops surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    const panel = container.querySelector('[data-testid="keeper-utilities-panel"]')
-    expect(panel).toBeTruthy()
-    expect(panel?.textContent).toContain('Keeper Utilities')
-    expect(panel?.textContent).toContain('probe from server')
-    expect(panel?.textContent).toContain('keeper_unknown_maintenance')
-    expect(panel?.textContent).toContain('UI adapter pending')
-    expect(panel?.textContent).not.toContain('Broadcast')
+    expect(container.querySelector('[data-testid="keeper-utilities-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-action-panel"]')).toBeNull()
+
+    // The keeper-fleet pointer card was removed: it had no action of its own,
+    // only a link to Monitor → Keeper Fleet (reachable from the sidebar).
+    expect(container.querySelector('[data-testid="ops-keeper-fleet-link"]')).toBeNull()
   }, 60000)
 
   it('renders the same single surface when active review items are present (no 3-column unhealthy branch)', async () => {
@@ -193,7 +192,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -210,7 +209,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -221,7 +220,7 @@ describe('Ops surface', () => {
     render(html`<${Ops} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('QuickIntervene')
+    expect(container.textContent).toContain('ComposerV2')
     expect(container.textContent).toContain('FlowControlPanel')
     expect(container.textContent).toContain('Recent Activity')
 
@@ -241,7 +240,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -258,7 +257,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -283,7 +282,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -300,7 +299,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],
@@ -324,7 +323,7 @@ describe('Ops surface', () => {
       operatorActionLog,
       operatorDigestError,
       operatorError,
-      operatorRoomDigest,
+      operatorWorkspaceDigest,
       operatorSnapshot,
       hydratedWorkflowId,
     } = await loadOps()
@@ -343,7 +342,7 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [],
     } as unknown as OperatorSnapshot
-    operatorRoomDigest.value = {
+    operatorWorkspaceDigest.value = {
       target_type: 'namespace',
       attention_items: [],
       recommended_actions: [],

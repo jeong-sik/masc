@@ -5,9 +5,6 @@
 
 (** {1 Time} *)
 
-val iso_of_unix : float -> string
-(** Format a Unix epoch as ISO-8601 in UTC, e.g. ["2026-04-28T10:34:12Z"]. *)
-
 val parse_iso_opt : string option -> float option
 (** Parse an ISO-8601 timestamp via {!Masc_domain.parse_iso8601}.
     Returns [None] for [None], empty/whitespace strings, or parse failures. *)
@@ -37,24 +34,43 @@ val normalized_text_key : string -> string
 (** [compact_text ~max_len:512] then trim and lowercase — a stable
     key for fuzzy text grouping. *)
 
+(** {1 Session JSON accessors} *)
+
+val session_payload_json : Yojson.Safe.t -> Yojson.Safe.t
+(** Normalise a session JSON: if the ["status"] field is an [`Assoc],
+    return that sub-object; otherwise return the original JSON. *)
+
+val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["session"] sub-key inside the payload. *)
+
+val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["summary"] sub-key inside the payload. *)
+
+val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["team_health"] sub-key inside the payload. *)
+
+val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["communication_metrics"] sub-key inside the payload. *)
+
+val session_status_opt : Yojson.Safe.t -> string option
+(** Resolve the status string by probing ["summary"] → ["meta"] →
+    top-level session JSON.  Returns [None] when no ["status"] field is found. *)
+
+val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
+(** ["recent_events"] list from the session JSON. *)
+
+val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
+(** ["detail"] sub-key inside an event JSON. *)
+
 (** {1 JSON helpers} *)
 
 val string_list_of_json : Yojson.Safe.t -> string list
 (** From a [`List] of [`String], yield the trimmed non-empty entries.
     Other shapes return []. *)
 
-val json_string_option : string option -> Yojson.Safe.t
-(** [Some s] (with whitespace) → [`String (String.trim s)]; otherwise [`Null]. *)
-
-val option_to_json : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
-(** Map [Some v] via [f], else [`Null]. *)
-
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Lookup [key] inside [`Assoc fields], returning [`Null] if missing or
     if the input is not an [`Assoc]. *)
-
-val int_field : ?default:int -> string -> Yojson.Safe.t -> int
-(** Read [key] as an integer ([`Int]/[`Intlit]/[`Float]). Default [0]. *)
 
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 (** Read [key] as a [`String]. Default [""]. *)

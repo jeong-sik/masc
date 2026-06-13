@@ -9,8 +9,6 @@ type deps = {
   get_session_id_any : Httpun.Request.t -> string option;
 }
 
-let clamp ~min_v ~max_v value = max min_v (min max_v value)
-
 let split_csv raw =
   raw
   |> String.split_on_char ','
@@ -30,7 +28,7 @@ let kind_filters deps request =
   in
   from_kinds @ from_kind |> List.sort_uniq String.compare
 
-(* room_filter removed — namespace retired (#unify-namespace). *)
+(* workspace_filter removed — namespace retired (#unify-namespace). *)
 
 let last_event_id request =
   match Httpun.Headers.get request.Httpun.Request.headers "last-event-id" with
@@ -95,7 +93,7 @@ let events_http_json ~deps ~state request =
   in
   let limit =
     deps.int_query_param request "limit" ~default:200
-    |> clamp ~min_v:1 ~max_v:1000
+    |> Server_utils.clamp ~min_v:1 ~max_v:1000
   in
   let is_default_query = kinds = [] && after_seq = 0 in
   let snapshot_hit =
@@ -115,7 +113,7 @@ let events_http_json ~deps ~state request =
        Offload via Domain_pool_ref still protects the HTTP main
        domain from JSONL-scan stall. *)
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Activity_graph.json_response state.Mcp_server.room_config ~kinds
+      Activity_graph.json_response state.Mcp_server.workspace_config ~kinds
         ~after_seq ~limit ())
 
 let parse_since_ms (raw : string) : int option =
@@ -135,11 +133,11 @@ let graph_http_json ~deps ~state request =
   let kinds = kind_filters deps request in
   let limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:50 ~max_v:2000
+    |> Server_utils.clamp ~min_v:50 ~max_v:2000
   in
   let timeline_limit =
     deps.int_query_param request "timeline_limit" ~default:80
-    |> clamp ~min_v:10 ~max_v:200
+    |> Server_utils.clamp ~min_v:10 ~max_v:200
   in
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
@@ -174,14 +172,14 @@ let graph_http_json ~deps ~state request =
             Some (now_ms - delta_ms)
         | None -> None
       in
-      Activity_graph.graph_json state.Mcp_server.room_config ~kinds ~limit
+      Activity_graph.graph_json state.Mcp_server.workspace_config ~kinds ~limit
         ~timeline_limit ?since_ms ())
 
 let swimlane_http_json ~deps ~state request =
 
   let limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:1 ~max_v:2000
+    |> Server_utils.clamp ~min_v:1 ~max_v:2000
   in
   let since_raw =
     deps.query_param request "since" |> Option.value ~default:""
@@ -209,7 +207,7 @@ let swimlane_http_json ~deps ~state request =
             Some (now_ms - delta_ms)
         | None -> None
       in
-      Activity_graph.agent_spans_json state.Mcp_server.room_config ~limit
+      Activity_graph.agent_spans_json state.Mcp_server.workspace_config ~limit
         ?since_ms ())
 
 let stream_headers ~deps origin =
@@ -265,7 +263,7 @@ let handle_stream ~deps ~state request reqd =
   let kinds = kind_filters deps request in
   let replay_limit =
     deps.int_query_param request "limit" ~default:500
-    |> clamp ~min_v:1 ~max_v:1000
+    |> Server_utils.clamp ~min_v:1 ~max_v:1000
   in
   let after_seq =
     max (last_event_id request)
@@ -302,7 +300,7 @@ let handle_stream ~deps ~state request reqd =
        (Printf.sprintf ": activity-stream after=%d\nretry: 3000\n\n"
           after_seq));
   let replay =
-    Activity_graph.list_events state.Mcp_server.room_config ~kinds
+    Activity_graph.list_events state.Mcp_server.workspace_config ~kinds
       ~after_seq ~limit:replay_limit ()
   in
   List.iter (fun value -> ignore (send_raw info (Activity_graph.format_sse_event value))) replay;

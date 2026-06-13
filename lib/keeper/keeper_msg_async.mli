@@ -41,7 +41,7 @@ val submit
   -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> base_path:string
-  -> f:(unit -> Keeper_types.tool_result)
+  -> f:(unit -> Keeper_types_profile.tool_result)
   -> keeper_name:string
   -> unit
   -> string
@@ -52,9 +52,14 @@ val submit
     terminal lost state is persisted. *)
 val poll : ?base_path:string -> string -> entry option
 
-(** [list_for_keeper ~keeper_name] returns all entries for a keeper
+(** [cancel ?base_path request_id] aborts a running async keeper_msg request.
+    Returns [true] if it was successfully cancelled, [false] if not found
+    or already finished. *)
+val cancel : ?base_path:string -> string -> bool
+
+(** [list_for_keeper ?keeper_name ()] returns all entries for a keeper (or all keepers if omitted)
     sorted most-recent-first. *)
-val list_for_keeper : keeper_name:string -> entry list
+val list_for_keeper : ?keeper_name:string -> unit -> entry list
 
 (** {1 JSON output} *)
 
@@ -66,6 +71,7 @@ val status_to_string : request_status -> string
 val entry_to_json : entry -> Yojson.Safe.t
 
 module For_testing : sig
+  val is_safe_request_id : string -> bool
   val forget : string -> unit
   val clear : unit -> unit
   val record_path : base_path:string -> request_id:string -> string option

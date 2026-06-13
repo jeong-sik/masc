@@ -97,7 +97,7 @@ layer-1 (runtime) wire strings. RFC-0042 PR-3 alone cannot remove them.
 |---|---------|
 | NG1 | Removing `Keeper_turn_terminal_code.t` or merging it into `Keeper_turn_disposition.t`. The two layers stay distinct. |
 | NG2 | Removing `Keeper_turn_terminal.t` itself; we only retype its `code` field over PR-2/PR-3. |
-| NG3 | Solving `lib/prometheus.ml` godfile (orthogonal). |
+| NG3 | Solving `legacy metrics backend module` godfile (orthogonal). |
 | NG4 | Per-variant breakdown of `Provider_error` (e.g., `Provider_error_rate_limited`). The runtime layer carries the parametrised wire under `Sdk_error of string`; operator disposition does not need that granularity yet. |
 
 ## 3. Design
@@ -130,7 +130,7 @@ type t =
   | Provider_error of Keeper_turn_terminal_code.t
       (** Runtime-layer termination promoted to operator-facing
           disposition. Wraps the typed runtime cause for diagnostics
-          (Prometheus / dashboard / bin/masc-trace). [to_wire] uses the
+          (legacy metrics backend / dashboard / bin/masc-trace). [to_wire] uses the
           inner code's wire. *)
   | Unknown of { raw_error : string }
       (** Last-resort escape hatch for un-classified producer paths.

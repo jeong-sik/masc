@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_hooks_oas_types)
+ (public_name masc.keeper_hooks_oas_types)
+ (wrapped false)
+ (modules keeper_hooks_oas_types)
+ (libraries agent_sdk masc.keeper_tooling masc.types_boundary yojson))

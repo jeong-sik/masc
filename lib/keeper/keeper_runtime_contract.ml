@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let current_task_id_opt (meta : keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
@@ -8,15 +10,46 @@ let primary_goal_id_opt (meta : keeper_meta) =
   | goal_id :: _ -> Some goal_id
   | [] -> None
 
+(** Cross-check [meta.active_goal_ids] against the live MASC goal store.
+    Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
+let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  let valid_goal_ids, invalid_goal_ids =
+    List.partition
+      (fun goal_id -> Option.is_some (Goal_store.get_goal config ~goal_id))
+      meta.active_goal_ids
+  in
+  if invalid_goal_ids <> [] then
+    Log.Keeper.warn ~keeper_name:meta.name
+      "pruned %d invalid goal_ids from active_goal_ids: %s"
+      (List.length invalid_goal_ids)
+      (String.concat ", " invalid_goal_ids);
+  valid_goal_ids
+
 let backend_of_meta (meta : keeper_meta) =
   match meta.sandbox_profile with
   | Docker -> "docker"
   | Local -> "local"
 
-let task_is_linked_to_keeper_goals goal_ids (task : Masc_domain.task) =
+let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_ids (task : Masc_domain.task) =
+  let task_goal_ids =
+    try Hashtbl.find task_goal_index task.id with Not_found -> []
+  in
   List.exists
-    (fun goal_id -> Convergence.task_matches_goal ~goal_id task)
+    (fun goal_id -> List.mem goal_id task_goal_ids)
     goal_ids
+
+(* A task is claimable-by-a-fresh-keeper only in [Todo]. Enumerate every
+   [task_status] variant so a new constructor forces a decision here rather than
+   silently widening "claimable" to e.g. a future [BlockedOnReview]. *)
+let task_is_unclaimed_todo (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Todo -> true
+  | Masc_domain.AwaitingVerification _
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.Done _
+  | Masc_domain.Cancelled _ ->
+    false
 
 type claim_goal_scope = {
   task_filter : Masc_domain.task -> bool;
@@ -25,51 +58,9 @@ type claim_goal_scope = {
   fallback_reason : string option;
 }
 
-let goal_title_matches_keeper_purpose ~(meta : keeper_meta) goal =
-  String.equal goal.Goal_store.title
-    (Keeper_goal_repair.goal_title_of_purpose meta.goal)
-
-let active_goal_ids_are_auto_keeper_goals config ~(meta : keeper_meta) goal_ids =
-  goal_ids <> []
-  && List.for_all
-       (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         | Some goal ->
-           (match goal.Goal_store.phase with
-           | Goal_phase.Paused -> false
-           | _ -> goal_title_matches_keeper_purpose ~meta goal)
-         | None -> false)
-       goal_ids
-
-let task_is_eligible_for_claim ?agent_tool_names latest_verification_status task =
-  Coord_task_schedule.task_is_claim_pool_candidate task
-  && not
-       (Coord_task_schedule.verification_blocks_claim
-          latest_verification_status
-          task)
-  && Coord_task_schedule.required_tools_allowed
-       ?agent_tool_names
-       (Coord_task_schedule.task_required_tools task)
-
-let active_goal_ids_have_eligible_claim_task
-    ?agent_tool_names
-    config
-    goal_ids
-  =
-  let latest_verification_status =
-    Coord_task_schedule.latest_verification_status_by_task config
-  in
-  Coord.get_tasks_safe config
-  |> List.exists (fun task ->
-       task_is_linked_to_keeper_goals goal_ids task
-       && task_is_eligible_for_claim
-            ?agent_tool_names
-            latest_verification_status
-            task)
-
-let resolve_claim_goal_scope ?agent_tool_names
-    ?(allow_empty_goal_scope_fallback = false) ~(config : Coord.config)
-    ~(meta : keeper_meta) () =
+(* Pure in-memory scope derived from [meta] alone — no disk read. The
+   [active_goal_ids] hard filter; an empty scope means all_tasks. *)
+let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
   match meta.active_goal_ids with
   | [] ->
       {
@@ -79,54 +70,64 @@ let resolve_claim_goal_scope ?agent_tool_names
         fallback_reason = None;
       }
   | goal_ids ->
-      let has_scoped_tasks =
-        active_goal_ids_have_eligible_claim_task
-          ?agent_tool_names
-          config
-          goal_ids
-      in
-      let is_auto_goal =
-        active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-      in
-      (* Advisory mode: active_goal_ids is a preference, not a hard gate.
-         Tasks outside the goal scope are claimable but the keeper receives
-         a warning in its context so it prefers goal-linked tasks. *)
-      if has_scoped_tasks then
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode = "active_goal_ids_advisory";
-          effective_goal_ids = goal_ids;
-          fallback_reason = None;
-        }
-      else if allow_empty_goal_scope_fallback || is_auto_goal then
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode =
-            (if is_auto_goal then "auto_goal_fallback_all_tasks"
-             else "empty_goal_scope_fallback_all_tasks");
-          effective_goal_ids = goal_ids;
-          fallback_reason =
-            Some
-              (if is_auto_goal then
-                 "auto keeper goal has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks"
-               else
-                 "active goal scope has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks");
-        }
-      else
-        {
-          task_filter = (fun (_task : Masc_domain.task) -> true);
-          mode = "active_goal_ids_advisory";
-          effective_goal_ids = goal_ids;
-          fallback_reason = None;
-        }
+      {
+        task_filter = task_is_linked_to_keeper_goals ?task_goal_index goal_ids;
+        mode = "active_goal_ids";
+        effective_goal_ids = goal_ids;
+        fallback_reason = None;
+      }
 
-let resolve_observation_claim_goal_scope ?agent_tool_names ~(config : Coord.config)
+(* Resolve the claim filter for a keeper's [active_goal_ids].
+
+   Goal-scope is a *priority hint*, not a hard gate: a keeper must never sit idle
+   while the backlog holds claimable work. When the keeper's active goals have no
+   claimable (Todo + unclaimed) task linked to them, widen the filter back to
+   all_tasks and record [fallback_reason] so the widening is visible.
+
+   Restores the [allow_empty_goal_scope_fallback] stopgap (RFC-0067 §1, PR
+   #13673) that was dropped when the resolver was simplified to a pure in-memory
+   match. Without it, a keeper whose goal carries no live task — or whose backlog
+   tasks are all goal_id=None — is starved indefinitely (the observed
+   "scope-blocked deadlock"). Note RFC-0067 §3's proposed *atomicity* design
+   (scope-version tokens) is a separate, unimplemented direction; this is the
+   stopgap, reinstated by operator decision, not that design.
+
+   Reads the backlog ([get_tasks_safe], a disk read) to test for a claimable
+   scoped task. Kept on the claim path only — NOT the per-turn observation path
+   ([resolve_observation_claim_goal_scope]), which stays pure-meta to avoid
+   adding a per-keeper, per-cycle backlog read. *)
+let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+  match meta.active_goal_ids with
+  | [] -> meta_only_claim_goal_scope meta
+  | goal_ids ->
+    let tasks = Workspace.get_tasks_safe config in
+    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
+    let scoped_claimable_exists =
+      List.exists (fun task ->
+             task_is_unclaimed_todo task
+             && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
+        tasks
+    in
+    if scoped_claimable_exists then meta_only_claim_goal_scope ~task_goal_index meta
+    else
+      {
+        task_filter = (fun (_task : Masc_domain.task) -> true);
+        (* Reuse the established mode label consumed by
+           [Keeper_tool_task_runtime.claim_scope_context_suffix] rather than
+           minting a new string — a second label for the same concept would
+           drift the two sites apart. *)
+        mode = "empty_goal_scope_fallback_all_tasks";
+        effective_goal_ids = goal_ids;
+        fallback_reason = Some "no_scoped_claimable_tasks";
+      }
+
+let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =
-  let allow_empty_goal_scope_fallback =
-    active_goal_ids_are_auto_keeper_goals config ~meta meta.active_goal_ids
-  in
-  resolve_claim_goal_scope ?agent_tool_names ~allow_empty_goal_scope_fallback
-    ~config ~meta ()
+  (* Signal-only: the observation surface just needs the scope hint, not the
+     claimability-aware fallback. Stays pure-meta so the per-turn observation
+     path adds no backlog disk read. *)
+  ignore config;
+  meta_only_claim_goal_scope meta
 
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new
@@ -155,9 +156,15 @@ let goal_progress_json ?config (meta : keeper_meta) =
           ("convergence", `Null);
         ]
   | Some config ->
+      let task_goal_index =
+        Workspace_goal_index.build_task_goal_index_for_config config
+      in
       let tasks =
-        Coord.get_tasks_safe config
-        |> List.filter (task_is_linked_to_keeper_goals meta.active_goal_ids)
+        Workspace.get_tasks_safe config
+        |> List.filter
+             (task_is_linked_to_keeper_goals
+                ~task_goal_index
+                meta.active_goal_ids)
       in
       let linked_task_count = List.length tasks in
       let done_task_count =
@@ -195,7 +202,7 @@ let goal_progress_json ?config (meta : keeper_meta) =
 let approval_policy_effective_json ?config (meta : keeper_meta) =
   let base_path =
     match config with
-    | Some (config : Coord.config) -> config.base_path
+    | Some (config : Workspace.config) -> config.base_path
     | None -> Env_config_core.base_path ()
   in
   Keeper_approval_queue.policy_summary_json ~base_path ~keeper_name:meta.name
@@ -212,11 +219,40 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+let backend_detail_keys =
+  [ "sandbox_profile"; "network_mode"; "backend"; "sandbox_target" ]
+
+let is_backend_detail_key key = List.mem key backend_detail_keys
+
+let redact_backend_details = function
+  | `Assoc fields ->
+      `Assoc
+        (List.filter
+           (fun (key, _) -> not (is_backend_detail_key key))
+           fields)
+  | json -> json
+
+let path_resolution_contract_json =
+  `Assoc
+    [ "read_implicit_cwd", `Bool false
+    ; "read_explicit_cwd_supported", `Bool true
+    ; ( "read_basis"
+      , `String
+          "Read file_path resolves against explicit cwd when cwd is provided; otherwise \
+           it is relative to the keeper sandbox/allowed_paths. It does not inherit \
+           Execute cwd implicitly." )
+    ; ( "discover_before_read"
+      , `String
+          "When unsure, inspect visible paths with the currently exposed read/listing \
+           tools before Read. For repo files, use cwd=\"repos/<repo>\" plus \
+           file_path=\"lib/...\", or use file_path=\"repos/<repo>/lib/...\"."
+      )
+    ]
+
+let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
-    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
-    ?cascade_profile () : Yojson.Safe.t =
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode
+    ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
       ("keeper_name", `String keeper_name);
@@ -230,17 +266,33 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("sandbox_profile", string_opt_json sandbox_profile);
       ("sandbox_root", string_opt_json sandbox_root);
       ("allowed_paths", Json_util.json_string_list (nonempty_list allowed_paths));
+      ("path_resolution", path_resolution_contract_json);
       ("network_mode", string_opt_json network_mode);
       ("approval_mode", string_opt_json approval_mode);
-      ("tool_surface_class", string_opt_json tool_surface_class);
-      ("visible_tool_count", int_opt_json visible_tool_count);
-      ("required_tools", Json_util.json_string_list (nonempty_list required_tools));
-      ( "required_tool_candidates",
-        Json_util.json_string_list (nonempty_list required_tool_candidates) );
-      ( "missing_required_tools",
-        Json_util.json_string_list (nonempty_list missing_required_tools) );
-      ("cascade_profile", string_opt_json cascade_profile);
+      ("runtime_profile", string_opt_json runtime_profile);
     ]
+
+let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
+    ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode
+    ?runtime_profile () : Yojson.Safe.t =
+  runtime_observability_contract_json_from_fields
+    ~keeper_name
+    ?agent_name
+    ?trace_id
+    ?session_id
+    ?generation
+    ?keeper_turn_id
+    ?task_id
+    ?goal_ids
+    ?sandbox_profile
+    ?sandbox_root
+    ?allowed_paths
+    ?network_mode
+    ?approval_mode
+    ?runtime_profile
+    ()
+  |> redact_backend_details
 
 
 let json_string_field name = function
@@ -295,7 +347,6 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
         "path";
         "file_path";
         "repo_path";
-        "worktree_path";
         "cwd";
       ]
       input
@@ -314,17 +365,12 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
     ]
 
 let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
-  let sandbox_target = backend_of_meta meta in
   let goal_progress = goal_progress_json ?config meta in
   let blocked_task_count =
     Safe_ops.json_int "blocked_task_count" ~default:0 goal_progress
   in
   `Assoc
     [
-      ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
-      ("network_mode", `String (network_mode_to_string meta.network_mode));
-      ("backend", `String sandbox_target);
-      ("sandbox_target", `String sandbox_target);
       ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));
       ("goal_id", Json_util.string_opt_to_json (primary_goal_id_opt meta));
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
@@ -332,3 +378,17 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
       ("blocked_task_count", `Int blocked_task_count);
       ("approval_policy_effective", approval_policy_effective_json ?config meta);
     ]
+
+let runtime_observability_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
+  let sandbox_target = backend_of_meta meta in
+  match runtime_contract_json ?config meta with
+  | `Assoc fields ->
+    `Assoc
+      ([
+         ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
+         ("network_mode", `String (network_mode_to_string meta.network_mode));
+         ("backend", `String sandbox_target);
+         ("sandbox_target", `String sandbox_target);
+       ]
+       @ fields)
+  | json -> json

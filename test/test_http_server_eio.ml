@@ -3,7 +3,7 @@
     Tests the Eio-native HTTP server infrastructure using httpun-eio.
 *)
 
-open Masc_mcp.Http_server_eio
+open Masc.Http_server_eio
 
 (* ===== Unit Tests for Router ===== *)
 
@@ -127,7 +127,7 @@ let test_router_method_index_preserves_exact_405 () =
 
 let test_frontend_transport_routes_present () =
   let routes =
-    Masc_mcp.Server_routes_http_routes_frontend.add_routes
+    Server_routes_http_routes_frontend.add_routes
       ~port:8935
       ~host:"127.0.0.1"
       (Router.create ())
@@ -154,7 +154,7 @@ let test_frontend_canonical_loopback_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard?agent=agent_code" in
   let location =
-    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+    Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
       request
   in
@@ -168,7 +168,7 @@ let test_frontend_canonical_loopback_location_ipv6 () =
   let headers = Httpun.Headers.of_list [ "host", "[::1]:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard" in
   let location =
-    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+    Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
       request
   in
@@ -182,7 +182,7 @@ let test_frontend_canonical_loopback_location_canonical_host () =
   let headers = Httpun.Headers.of_list [ "host", "127.0.0.1:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard" in
   let location =
-    Masc_mcp.Server_routes_http_routes_frontend.canonical_loopback_location
+    Server_routes_http_routes_frontend.canonical_loopback_location
       ~default_port:8935
       request
   in
@@ -196,7 +196,7 @@ let test_frontend_canonical_root_dashboard_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/" in
   let location =
-    Masc_mcp.Server_routes_http_routes_frontend.canonical_root_dashboard_location
+    Server_routes_http_routes_frontend.canonical_root_dashboard_location
       ~default_port:8935
       request
   in
@@ -208,7 +208,7 @@ let test_frontend_canonical_root_dashboard_location_localhost () =
 
 let test_parse_host_port_rejects_scheme_in_host_header () =
   let parsed =
-    Masc_mcp.Server_routes_http_common.parse_host_port
+    Server_routes_http_common.parse_host_port
       (Some "http://localhost:8935")
       "127.0.0.1"
       8935
@@ -221,7 +221,7 @@ let test_parse_host_port_rejects_scheme_in_host_header () =
 
 let test_parse_host_port_rejects_userinfo_in_host_header () =
   let parsed =
-    Masc_mcp.Server_routes_http_common.parse_host_port
+    Server_routes_http_common.parse_host_port
       (Some "user@localhost:8935")
       "127.0.0.1"
       8935

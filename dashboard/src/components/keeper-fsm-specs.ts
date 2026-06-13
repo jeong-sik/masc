@@ -2,7 +2,8 @@
 // Each returns an FsmGraphSpec consumed by CytoscapeFsm.
 
 import type { FsmGraphSpec, FsmNode, FsmEdge } from './common/cytoscape-fsm'
-import { compositePhaseTone, toKsmPhase } from '../lib/keeper-operational-state'
+import { compositePhaseTone } from '../lib/keeper-operational-state'
+import { toKeeperPhase } from '../keeper-store-normalize'
 
 
 // ================================================================
@@ -19,7 +20,7 @@ interface CompositeFsmParams {
   phase: string            // KSM — offline | running | failing | overflowed | compacting | handing_off | draining | paused | stopped | crashed | restarting | dead | zombie
   turnPhase: string        // KTC — idle | prompting | routing | executing | compacting | finalizing | exhausted
   decisionStage: string    // KDP — undecided | guard_ok | gate_rejected | tool_policy_selected
-  cascadeState: string     // KCL — idle | selecting | trying | done | exhausted
+  runtimeState: string     // KCL — idle | selecting | trying | done | exhausted
   compactionStage: string  // KMC — accumulating | compacting | done
 }
 
@@ -76,7 +77,7 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
 // edge in this list, otherwise the dashboard visualization hides a real
 // transition the runtime can take. The previous list omitted the four
 // `* -> exhausted` arms from prompting/routing/compacting/finalizing,
-// surfacing only the `executing -> exhausted` path even though cascade
+// surfacing only the `executing -> exhausted` path even though runtime
 // exhaustion can be entered from any non-terminal turn phase.
 const TURN_FSM_EDGES: FsmEdge[] = [
   // From Idle (1): boot dispatch.
@@ -88,7 +89,7 @@ const TURN_FSM_EDGES: FsmEdge[] = [
   { source: 'prompting', target: 'exhausted', label: 'Exhausted', type: 'error' },
   // From Routing (3): retry-back / dispatch / exhausted.
   { source: 'routing', target: 'prompting', label: 'Retry' },
-  { source: 'routing', target: 'executing', label: 'CascadeRouted', type: 'cascade' },
+  { source: 'routing', target: 'executing', label: 'RuntimeRouted', type: 'runtime' },
   { source: 'routing', target: 'exhausted', label: 'Exhausted', type: 'error' },
   // From Executing (5): retry-back / re-entry / compacting / completion / exhausted.
   { source: 'executing', target: 'prompting', label: 'Retry' },
@@ -143,15 +144,15 @@ export function buildCompositeFsmSpec(params: CompositeFsmParams): FsmGraphSpec 
   // `fsm-hub-invariant-analysis.ts` (N-of-M anti-pattern). Unknown wire
   // values fall back to 'active' to match the previous fall-through
   // semantics of the inline OR chain.
-  const ksmPhase = toKsmPhase(params.phase)
+  const ksmPhase = toKeeperPhase(params.phase)
   const ksmTone: 'active' | 'warn' | 'err' = ksmPhase === null ? 'active' : compositePhaseTone(ksmPhase)
   const nodes: FsmNode[] = [
     ...clusterNodes('KSM', 'KSM · keeper lifecycle', KSM_STATES, params.phase, ksmTone),
     ...clusterNodes('KTC', 'KTC · turn cycle', KTC_STATES, params.turnPhase, 'active'),
     ...clusterNodes('KDP', 'KDP · decision pipeline', KDP_STATES, params.decisionStage,
       params.decisionStage === 'gate_rejected' ? 'err' : 'active'),
-    ...clusterNodes('KCL', 'KCL · cascade state', KCL_STATES, params.cascadeState,
-      params.cascadeState === 'exhausted' ? 'err' : 'active'),
+    ...clusterNodes('KCL', 'KCL · runtime state', KCL_STATES, params.runtimeState,
+      params.runtimeState === 'exhausted' ? 'err' : 'active'),
     ...clusterNodes('KMC', 'KMC · memory compaction', KMC_STATES, params.compactionStage, 'warn'),
   ]
 
@@ -188,7 +189,7 @@ export function buildCompactionSpec(
       type: nodeType(state, activeStage, tone),
     })),
     edges: [
-      { source: 'accumulating', target: 'compacting', label: 'ratio_gate', type: 'cascade' },
+      { source: 'accumulating', target: 'compacting', label: 'ratio_gate', type: 'runtime' },
       { source: 'compacting', target: 'done', label: 'Compaction_completed', type: 'recovery' },
       { source: 'compacting', target: 'accumulating', label: 'Compaction_failed', type: 'error' },
     ],

@@ -1,11 +1,12 @@
 (** Tool-result → multimodal emission.
 
-    Cycle 27 / Tier K3 — the next layer above {!Keeper_emitter}.
+    Cycle 27 / Tier K3 — the tool-side detector, parameterized by
+    a keeper-side emitter port.
 
     {1 What this module is}
 
     A pure converter from a single tool-call result to (optionally)
-    one [working_context] update with a new
+    one emitter call that returns a [working_context] update with a new
     {!Multimodal_keeper_bridge.raw_artifact} entry, gated by an
     {b explicit} tag on the tool result.
 
@@ -37,9 +38,9 @@
       [__multimodal_kind] and parse via
       {!Multimodal_keeper_bridge.parse_kind_hint}. Returns [None]
       on missing key, malformed payload, or unknown kind.
-    - {!emit_from_tool_result}: detector + emitter chain. When the
-      result carries no tag, returns the [working_context]
-      unchanged.
+    - {!emit_from_tool_result}: detector + injected emitter chain. When
+      the result carries no tag, returns the [working_context]
+      unchanged without calling the emitter.
     - {!emit_from_tool_results}: bulk variant.
 
     The tag-emission contract on the tool side is left to
@@ -72,16 +73,28 @@ val extract_id_from_result : Yojson.Safe.t -> string option
     [result[multimodal_id_key]]. Returns [None] when the key is
     absent or the value is not a string. *)
 
+type emitter =
+  working_context:Yojson.Safe.t option ->
+  id:string ->
+  kind_tag:Artifact.kind_tag ->
+  payload_json:Yojson.Safe.t ->
+  metadata:Yojson.Safe.t ->
+  Yojson.Safe.t option
+(** Port supplied by the keeper-side wiring layer. [Tool_emission]
+    owns tag detection and payload cleanup, but does not know which
+    keeper implementation records the artifact. *)
+
 val emit_from_tool_result :
+  emit:emitter ->
   working_context:Yojson.Safe.t option ->
   result:Yojson.Safe.t ->
   Yojson.Safe.t option
-(** [emit_from_tool_result ~working_context ~result] is the chain:
+(** [emit_from_tool_result ~emit ~working_context ~result] is the chain:
 
     + extract [__multimodal_kind] (else return [working_context]);
     + extract [__multimodal_id] (else return [working_context]);
     + read optional [__multimodal_metadata];
-    + call {!Keeper_emitter.emit} with the tool result {b minus}
+    + call [emit] with the tool result {b minus}
       the reserved keys as the payload.
 
     The reserved-key strip ensures the artifact's
@@ -89,6 +102,7 @@ val emit_from_tool_result :
     already stored in dedicated [raw_artifact] fields. *)
 
 val emit_from_tool_results :
+  emit:emitter ->
   working_context:Yojson.Safe.t option ->
   Yojson.Safe.t list ->
   Yojson.Safe.t option

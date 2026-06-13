@@ -1,8 +1,9 @@
 open Alcotest
 
-module KAP = Masc_mcp.Keeper_alerting_path
-module KT = Masc_mcp.Keeper_types
-module KTU = Masc_mcp.Keeper_turn_up_args
+module KAP = Masc.Keeper_alerting_path
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module KTU = Masc.Keeper_turn_up_args
+
 let make_meta ?(allowed_paths = []) ~name () =
   let json =
     `Assoc
@@ -16,55 +17,12 @@ let make_meta ?(allowed_paths = []) ~name () =
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
-  match KT.meta_of_json json with
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
 let sandbox_roots meta =
   [ KAP.sandbox_path_of_meta ~meta ]
-
-let with_temp_dir prefix f =
-  let path = Filename.temp_file prefix "" in
-  Sys.remove path;
-  Unix.mkdir path 0o755;
-  Fun.protect
-    ~finally:(fun () ->
-      let rec rm dir =
-        if Sys.file_exists dir then
-          if Sys.is_directory dir then begin
-            Sys.readdir dir |> Array.iter (fun name -> rm (Filename.concat dir name));
-            Unix.rmdir dir
-          end else
-            Sys.remove dir
-      in
-      rm path)
-    (fun () -> f path)
-
-let with_env key value f =
-  let prior = Sys.getenv_opt key in
-  Unix.putenv key value;
-  Fun.protect
-    ~finally:(fun () ->
-      match prior with
-      | Some v -> Unix.putenv key v
-      | None -> Unix.putenv key "")
-    f
-
-let with_temp_config f =
-  with_temp_dir "keeper_allowed_paths_" (fun dir ->
-    Eio_main.run @@ fun env ->
-    Fs_compat.set_fs (Eio.Stdenv.fs env);
-    f (Masc_mcp.Coord.default_config dir))
-
-let ensure_dir path =
-  let rec loop p =
-    if p = "" || p = "." || p = "/" then ()
-    else if Sys.file_exists p then ()
-    else (
-      loop (Filename.dirname p);
-      Unix.mkdir p 0o755)
-  in
-  loop path
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -98,74 +56,32 @@ let test_playground_path_sanitizes_name () =
     ".masc/playground/my_keeper_.._.._etc/" path
 
 let test_validate_rejects_star_wildcard () =
-  with_temp_config (fun config ->
-    match
-      KTU.validate_sandbox_settings
-        ~config
-        ~keeper_name:"keeper"
-        ~repo_cli_identity:None
-        ~sandbox_profile:KT.Local
-        ~network_mode:KT.Network_inherit
-        ~allowed_paths:["*"]
-    with
-    | Ok () -> fail "expected wildcard rejection"
-    | Error err ->
-        check string "explicit rejection message"
-          "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
-          err)
+  match KTU.validate_sandbox_settings ~allowed_paths:[ "*" ] with
+  | Ok () -> fail "expected wildcard rejection"
+  | Error err ->
+      check string "explicit rejection message"
+        "allowed_paths=[\"*\"] is not supported; enumerate explicit paths instead"
+        err
 
-let test_validate_local_rejects_network_none () =
-  with_temp_config (fun config ->
-    match
-      KTU.validate_sandbox_settings
-        ~config
-        ~keeper_name:"keeper"
-        ~repo_cli_identity:None
-        ~sandbox_profile:KT.Local
-        ~network_mode:KT.Network_none
-        ~allowed_paths:[]
-    with
-    | Ok () -> fail "expected local network_mode rejection"
-    | Error err ->
-        check string "local requires inherit"
-          "network_mode=none requires sandbox_profile=docker"
-          err)
+let test_validate_rejects_globs_and_traversal () =
+  match
+    KTU.validate_sandbox_settings
+      ~allowed_paths:[ "workspace/../outside"; "logs/*.txt" ]
+  with
+  | Ok () -> fail "expected path-shape rejection"
+  | Error err ->
+      check bool "error mentions rejected path" true
+        (contains_substring err "workspace/../outside");
+      check bool "error mentions glob" true
+        (contains_substring err "logs/*.txt")
 
-let test_validate_docker_allows_private_root_paths () =
-  with_temp_config (fun config ->
-    let allowed =
-      [
-        Masc_mcp.Keeper_turn_up_args.private_workspace_root_rel ~sandbox_profile:KT.Docker
-          "keeper";
-      ]
-    in
-    match
-      KTU.validate_sandbox_settings
-        ~config
-        ~keeper_name:"keeper"
-        ~repo_cli_identity:None
-        ~sandbox_profile:KT.Docker
-        ~network_mode:KT.Network_none
-        ~allowed_paths:allowed
-    with
-    | Ok () -> ()
-    | Error err -> fail ("expected docker private root to validate: " ^ err))
-
-let test_validate_docker_rejects_paths_outside_private_root () =
-  with_temp_config (fun config ->
-    match
-      KTU.validate_sandbox_settings
-        ~config
-        ~keeper_name:"keeper"
-        ~repo_cli_identity:None
-        ~sandbox_profile:KT.Docker
-        ~network_mode:KT.Network_inherit
-        ~allowed_paths:["workspace/outside"]
-    with
-    | Ok () -> fail "expected docker path rejection"
-    | Error err ->
-        check bool "error mentions rejected path" true
-          (String.contains err 'w'))
+let test_validate_accepts_plain_paths () =
+  match
+    KTU.validate_sandbox_settings
+      ~allowed_paths:[ "workspace/outside"; ".masc/playground/keeper/" ]
+  with
+  | Ok () -> ()
+  | Error err -> fail ("expected plain paths to validate: " ^ err)
 
 
 let () =
@@ -184,11 +100,9 @@ let () =
         [
           test_case "rejects wildcard full access" `Quick
             test_validate_rejects_star_wildcard;
-          test_case "local rejects network none" `Quick
-            test_validate_local_rejects_network_none;
-          test_case "docker allows private root paths" `Quick
-            test_validate_docker_allows_private_root_paths;
-          test_case "docker rejects paths outside private root" `Quick
-            test_validate_docker_rejects_paths_outside_private_root;
+          test_case "rejects globs and traversal" `Quick
+            test_validate_rejects_globs_and_traversal;
+          test_case "accepts plain paths" `Quick
+            test_validate_accepts_plain_paths;
         ] );
     ]

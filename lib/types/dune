@@ -1,10 +1,28 @@
 (include_subdirs no)
+
 (library
  (name masc_types)
- (public_name masc_mcp.masc_types)
+ (public_name masc.masc_types)
  (wrapped false)
- (modules rate_limit_types masc_error ids evidence_claim types_core types_auth masc_domain task_stage severity)
+ (modules
+  rate_limit_types
+  masc_error
+  ids
+  prompt_block_id
+  turn_record
+  evidence_claim
+  deterministic_evidence_evaluator
+  types_core
+  types_auth
+  masc_domain
+  severity)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
- (flags (:standard -w +4))
+ (flags
+  (:standard -w +4))
  (libraries yojson unix time_compat masc_core base64 uuidm)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving.ord ppx_deriving_yojson)))
+ (preprocess
+  (pps
+   ppx_deriving.show
+   ppx_deriving.eq
+   ppx_deriving.ord
+   ppx_deriving_yojson)))

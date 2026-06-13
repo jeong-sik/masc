@@ -1,29 +1,13 @@
-(** A4a — typed approval gate plus first production spawn wrappers.
+(** A4a — production spawn wrappers around [Process_eio].
 
-    [run] remains the typed dispatcher on an already-computed
-    [Verdict.t].  The new [run_argv*] helpers are the production entry
-    points used by the first cutover callers: they build a typed
-    [Shell_ir.simple] from explicit argv, consult the overlay-aware
-    approval policy, optionally emit shadow evidence, and only then
-    delegate to [Process_eio]. *)
-
-type error =
-  [ `Ask_required of Verdict.request
-  | `Denied of Verdict.deny_reason
-  ]
-(** Non-allow outcomes.  [Ask_required] carries the approval request
-    so the caller may route it through the approval queue.  [Denied]
-    is terminal — no user-approved override exists. *)
-
-val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
-(** [run verdict] dispatches on the four verdict arms.
-
-    On [Allow trusted] or [Suggest_confirm (trusted, _)], returns
-    [Ok trusted].  [Suggest_confirm] auto-allows but the token is
-    recorded in telemetry for future HITL confirmation.
-
-    On [Ask request], returns [Error (`Ask_required request)].
-    On [Deny { reason; _ }], returns [Error (`Denied reason)]. *)
+    The [run_argv*] helpers are the production entry points used by the
+    cutover callers.  They delegate directly to [Process_eio]; the
+    [MASC_EXEC_GATE] approval gate that once wrapped them defaulted to
+    off and was never enabled outside its test, so the verdict
+    computation (and the [run] dispatcher / [error] type it fed) has
+    been removed (see exec_gate.ml history note). The
+    [~actor]/[~raw_source]/[~summary] arguments are retained for
+    signature compatibility but are no longer consumed. *)
 
 val run_argv :
   actor:Agent_id.t ->
@@ -33,9 +17,7 @@ val run_argv :
   ?env:string array ->
   string list ->
   string
-(** Typed gate in front of [Process_eio.run_argv].  In [parallel] mode,
-    Ask/Deny verdicts are recorded but execution still proceeds.  In
-    [enforced] mode, Ask/Deny return a synthetic blocked output. *)
+(** Delegates to [Process_eio.run_argv]. *)
 
 val run_argv_with_status :
   actor:Agent_id.t ->
@@ -46,7 +28,7 @@ val run_argv_with_status :
   ?cwd:string ->
   string list ->
   (Unix.process_status * string)
-(** Typed gate in front of [Process_eio.run_argv_with_status]. *)
+(** Delegates to [Process_eio.run_argv_with_status]. *)
 
 val run_argv_with_status_split :
   actor:Agent_id.t ->
@@ -57,7 +39,20 @@ val run_argv_with_status_split :
   ?cwd:string ->
   string list ->
   (Unix.process_status * string * string)
-(** Typed gate in front of [Process_eio.run_argv_with_status_split]. *)
+(** Delegates to [Process_eio.run_argv_with_status_split]. *)
+
+val run_argv_with_status_split_streaming :
+  actor:Agent_id.t ->
+  raw_source:string ->
+  summary:string ->
+  ?timeout_sec:float ->
+  ?env:string array ->
+  ?cwd:string ->
+  on_stdout_chunk:(string -> unit) ->
+  on_stderr_chunk:(string -> unit) ->
+  string list ->
+  (Unix.process_status * string * string)
+(** Delegates to [Process_eio.run_argv_with_status_split_streaming]. *)
 
 val run_argv_with_stdin_and_status :
   actor:Agent_id.t ->
@@ -69,7 +64,7 @@ val run_argv_with_stdin_and_status :
   stdin_content:string ->
   string list ->
   (Unix.process_status * string)
-(** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status]. *)
+(** Delegates to [Process_eio.run_argv_with_stdin_and_status]. *)
 
 val run_argv_with_stdin_and_status_split :
   actor:Agent_id.t ->
@@ -78,17 +73,20 @@ val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
   ?env:string array ->
   ?cwd:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
   (Unix.process_status * string * string)
-(** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status_split]. *)
+(** Delegates to [Process_eio.run_argv_with_stdin_and_status_split]. *)
 
 val run_argv_pipeline_with_status_split :
   actor:Agent_id.t ->
   raw_source:string ->
   summary:string ->
   ?timeout_sec:float ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   Process_eio.pipeline_stage list ->
   (Unix.process_status * string * string)
-(** Typed gate in front of [Process_eio.run_argv_pipeline_with_status_split].
-    Every stage is checked before any process is spawned. *)
+(** Delegates to [Process_eio.run_argv_pipeline_with_status_split]. *)

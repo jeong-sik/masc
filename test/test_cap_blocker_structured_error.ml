@@ -17,7 +17,7 @@
    6. cap_social_state routes blocker through cap_blocker but leaves
       every other option field on the narrative cap *)
 
-module T = Masc_mcp.Keeper_social_model_types
+module T = Keeper_social_model_types
 
 let oas_error_payload_small =
   "[masc_oas_error] {\"kind\":\"provider_timeout\",\
@@ -33,7 +33,7 @@ let oas_error_payload_huge =
   Buffer.add_string buf "\"}";
   Buffer.contents buf
 
-let narrative_short = "keeper cannot claim; preset mismatch on all 11 tasks"
+let narrative_short = "keeper cannot claim; tool_access mismatch on all 11 tasks"
 
 let narrative_long =
   let buf = Buffer.create 400 in

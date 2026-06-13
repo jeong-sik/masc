@@ -94,13 +94,13 @@ let server_icons = [ themed_icon ~label:"MM" ~bg:"#7C3AED" ~fg:"#F5F3FF" ]
 let server_info =
   `Assoc
     [
-      ("name", `String "masc-mcp");
+      ("name", `String "masc");
       ("title", `String "MASC MCP Server");
       ("version", `String Version.version);
       ( "description",
         `String
-          "Multi-agent MCP server exposing MASC room coordination, tools, prompts, and resources." );
-      ("websiteUrl", `String "https://github.com/yousleepwhen/masc-mcp");
+          "Multi-agent MCP server exposing MASC workspace state, tools, prompts, and resources." );
+      ("websiteUrl", `String "https://github.com/yousleepwhen/masc");
       ("icons", `List (List.map icon_to_json server_icons));
     ]
 
@@ -213,12 +213,12 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
 
 let resources : mcp_resource list = [
   make_resource ~uri:"masc://status" ~name:"MASC Status"
-    ~title:"Coord Status"
-    ~description:"Current room status snapshot (same as masc_status)"
+    ~title:"Project Status"
+    ~description:"Current project status snapshot (same as masc_status)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://status.json" ~name:"MASC Status (JSON)"
-    ~title:"Coord Status (JSON)"
-    ~description:"Current room status snapshot as JSON (for data collection)"
+    ~title:"Project Status (JSON)"
+    ~description:"Current project status snapshot as JSON (for data collection)"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://tasks" ~name:"Quest Board"
     ~title:"Task Board"
@@ -230,7 +230,7 @@ let resources : mcp_resource list = [
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://who" ~name:"Active Agents"
     ~title:"Online Agents"
-    ~description:"In-memory agent/session status (same as masc_who)"
+    ~description:"In-memory agent/session status"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://who.json" ~name:"Active Agents (JSON)"
     ~title:"Online Agents (JSON)"
@@ -361,7 +361,7 @@ let int_query_param uri key ~default =
 
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
-  let events_dir = Filename.concat (Coord.masc_dir config) "events" in
+  let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
     let month_dirs =
@@ -406,14 +406,14 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 (** Issue #8474: FSM transition matrix.  Each entry mirrors a match-arm
-    in [Coord_task.transition_task_r] (lib/coord/coord_task.ml ~line
+    in [task transition] (lib/workspace/task_state.ml ~line
     831).  Verifier-FSM rows ([submit_for_verification],
     [approve_verification], [reject_verification]) are gated at runtime
     by [MASC_VERIFICATION_FSM_ENABLED] but listed unconditionally so
     the published schema matches the action enum
     ([Masc_domain.valid_task_action_strings] via #8354).  The regression test
     [test_types.ml :: fsm_transition_matrix] asserts every action
-    listed by [Coord_task.valid_next_actions_for_status] for any
+    listed by [Workspace_task.valid_next_actions_for_status] for any
     reachable status appears here, so adding a 4th verifier action
     fails the test before it ships with a stale schema. *)
 let task_fsm_transitions : (string * string list * string * string option) list =
@@ -428,7 +428,6 @@ let task_fsm_transitions : (string * string list * string * string option) list 
     ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
     ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
     ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
-    ("submit_pr_evidence",      ["todo"],                                  "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + no required-tool gate");
   ]
 
 let task_fsm_transition_to_json (action, froms, to_, gate) =
@@ -478,7 +477,7 @@ let schema_markdown =
 
 (** MCP Server state *)
 type server_state = {
-  mutable room_config: Coord.config;
+  mutable workspace_config: Workspace.config;
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
@@ -490,14 +489,14 @@ type server_state = {
 }
 
 let create_state ~base_path =
-  let config = Coord.default_config base_path in
+  let config = Workspace.default_config base_path in
   let registry = Session.create () in
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    room_config = config;
+    workspace_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = None;
@@ -507,17 +506,28 @@ let create_state ~base_path =
     mono_clock = None;
     net = None;
   } in
-  Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_joined state.room_config ~agent_name:name
+  Board_tool.set_agent_lookup (fun name ->
+    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
 (** Create state with Eio context. *)
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   let config =
-    Coord.default_config_eio ~sw
+    Workspace.default_config_eio ~sw
       ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
+        Board_agent_effect_hooks.install ();
+        Board_metric_hooks_adapter.install ();
+        Workspace_metric_hooks.install ();
+        Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+        Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
+          Eval_calibration.record_verdict ~task_id ~req ~result ());
+        Atomic.set Task.Handlers.sse_broadcast_fn Sse.broadcast;
+        Atomic.set Task.Handlers.push_event_to_sessions_fn Subscriptions.push_event_to_sessions;
+        Atomic.set Task.Handlers.get_few_shot_block_fn (fun () ->
+          Eval_calibration.format_few_shot_block
+            (Eval_calibration.select_examples ~max_examples:3));
         Board_dispatch.init_jsonl ())
       base_path
   in
@@ -529,19 +539,20 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
      Missed when #10664 introduced the actor model. *)
   Session.start_loop registry ~sw;
   (* Same sweep miss as Session.start_loop above: PR #10730 introduced
-     [Cascade_observation] as an Eio actor (mailbox + Promise.await) but
+     [Runtime_observation] as an Eio actor (mailbox + Promise.await) but
      never wired its [start_actor_if_needed] into a bootstrap path.
-     [cascade_metrics_json ()] (called from [tool_unified.ml:summary_report],
+     [runtime_metrics_json ()] (called from [tool_unified.ml:summary_report],
      which the dashboard tool inspector hits) does
      [Stream.add Get_metrics_json u; Promise.await p]. Without an actor
      fiber draining [stream], the await blocks forever. *)
-  Cascade_observation.start_actor_if_needed ~sw;
+  Runtime_observation.start_actor_if_needed ~sw;
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event
   );
+  Keeper_supervisor.set_global_switch sw;
   let state = {
-    room_config = config;
+    workspace_config = config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
@@ -551,10 +562,10 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads state.room_config so
-     room changes via set_room are reflected automatically. *)
-  Tool_board.set_agent_lookup (fun name ->
-    try Coord.is_agent_joined state.room_config ~agent_name:name
+  (* Board post kind auto-classification: reads state.workspace_config so
+     workspace changes via set_workspace are reflected automatically. *)
+  Board_tool.set_agent_lookup (fun name ->
+    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

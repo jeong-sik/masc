@@ -5,7 +5,7 @@
     sha256 validation and the JSON envelope shape returned for hit /
     miss / store-unavailable cases. *)
 
-module A = Masc_mcp.Server_routes_http_routes_artifacts
+module A = Server_routes_http_routes_artifacts
 module B = Tool_blob_store
 module O = Tool_output
 

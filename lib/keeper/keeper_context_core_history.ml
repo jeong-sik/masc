@@ -1,6 +1,8 @@
 (** History JSONL migration and persistence helpers for keeper context. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 module StringSet = Set_util.StringSet
 
@@ -62,7 +64,7 @@ let classify_history_jsonl_line (line : string) : history_line_action option =
   try
     let json = Yojson.Safe.from_string line in
     let source =
-      match Yojson.Safe.Util.(json |> member "source" |> to_string_option) with
+      match Json_util.get_string json "source" with
       | Some raw -> String.trim raw
       | None -> ""
     in
@@ -148,7 +150,7 @@ let migrate_session_history_logs ~(session_dir : string) :
       (match Fs_compat.save_file_atomic main_path (render_jsonl_lines kept_lines) with
        | Ok () -> ()
        | Error detail ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CheckpointFailures)
              ~labels:
                [ ( "operation"
@@ -167,7 +169,7 @@ let migrate_session_history_logs ~(session_dir : string) :
        with
        | Ok () -> ()
        | Error detail ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CheckpointFailures)
              ~labels:
                [ ( "operation"

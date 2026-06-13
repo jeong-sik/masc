@@ -11,7 +11,7 @@ Boot-time observation (2026-05-06, `<base-path>/.masc/playground` server, port 8
 sustained claim/release loops on multiple tasks within ~90 seconds:
 
 ```
-[WARN] [RoomTask] task_oscillation_major task=task-125 agent=keeper-executor-agent
+[WARN] [TaskState] task_oscillation_major task=task-125 agent=keeper-executor-agent
        cycle_count=10 threshold=10 (sustained claim->release loop, candidate for triage)
 ```
 
@@ -19,10 +19,10 @@ sustained claim/release loops on multiple tasks within ~90 seconds:
 within 5 minutes. `task-150`, `task-185`, `task-151` show the same pattern.
 
 The detection is real, but the current implementation is narrower than the
-initial audit assumed: `coord_task.ml` emits WARN lines at the 5/10/20 threshold
-crossings, and its own comment keeps Prometheus/JSONL as follow-up work rather
+initial audit assumed: `workspace_task.ml` emits WARN lines at the 5/10/20 threshold
+crossings, and its own comment keeps legacy metrics backend/JSONL as follow-up work rather
 than an existing surface. The action surface is still observation-only:
-`coord_task.ml:390` explicitly states "Pure observation: does not block the
+`workspace_task.ml:390` explicitly states "Pure observation: does not block the
 release." Cycle thresholds fire once per crossing and let the loop continue.
 
 ### Current semantics boundary
@@ -45,7 +45,7 @@ the RFC should be marked superseded by #10421.
    exists after #10421's claim-preservation behavior.
 2. **Escalate to human** when automated mitigation has been exhausted.
 3. **Extend observability without overstating current behavior**: preserve the
-   existing WARN surface and add JSONL/Prometheus wiring in the implementation
+   existing WARN surface and add JSONL/legacy metrics backend wiring in the implementation
    phase.
 
 ## Non-Goals
@@ -64,7 +64,7 @@ the RFC should be marked superseded by #10421.
 | Stage | Trigger | Action | Recovery |
 |-------|---------|--------|----------|
 | **Cooldown** | `cycle_count` reaches 10 (oscillation_major) | Record `cooldown_until = now() + COOLDOWN_SEC` in a runtime-only scheduler overlay keyed by `task_id`; claim attempts during cooldown are rejected with `TaskInCooldown` error | Auto-clear when `now() >= cooldown_until`; reset `cycle_count` to 0 on first claim after cooldown |
-| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + room | Manual: human reviews, resets, resumes via dashboard or `task_resume_after_human_escalation` action |
+| **Human escalation** | `cycle_count` reaches 20 (oscillation_severe) | Transition task to a new human-paused task status; emit `task_oscillation_human_escalation` JSONL event; broadcast to assignee + workspace | Manual: human reviews, resets, resumes via dashboard or `task_resume_after_human_escalation` action |
 
 ### Domain changes
 
@@ -98,15 +98,15 @@ The wire string should be `paused_human`. Required surface:
 - `lib/types/types_core.ml`: add the variant and update
   `task_status_to_string`, `task_status_icon`, assignee extraction, terminal
   helpers, and schema enum witnesses.
-- `lib/coord/coord_task_schedule.ml`: exclude human-paused tasks from claim
+- `lib/workspace/workspace_task_schedule.ml`: exclude human-paused tasks from claim
   candidates.
-- `lib/coord/coord_task.ml`: add severe escalation and resume transition.
+- `lib/workspace/workspace_task.ml`: add severe escalation and resume transition.
 - Dashboard/cockpit task views: render the human-paused badge/state.
 - Tests: cover serialization compatibility and state-machine transitions.
 
 ### Claim path changes
 
-In `coord_task_schedule.ml::task_claim_next` and `coord_task.ml::claim_action`,
+In `workspace_task_schedule.ml::task_claim_next` and `workspace_task.ml::claim_action`,
 gate the candidate filter:
 
 ```ocaml
@@ -127,7 +127,7 @@ let claimable t =
 
 ### Release path additions
 
-In `coord_task.ml`, after the existing oscillation WARN block (line 392-417):
+In `workspace_task.ml`, after the existing oscillation WARN block (line 392-417):
 
 ```ocaml
 | Masc_domain.Release ->
@@ -157,7 +157,7 @@ In `coord_task.ml`, after the existing oscillation WARN block (line 392-417):
 
 ### Configuration
 
-Three env knobs (default values are conservative; tunable via cascade or
+Three env knobs (default values are conservative; tunable via runtime or
 operator config):
 
 | Env var | Default | Purpose |
@@ -172,7 +172,7 @@ operator config):
 |---------|--------|
 | WARN | Existing oscillation_major/severe WARN augmented with `action=cooldown_applied` / `action=paused_human` |
 | JSONL event | `task_cooldown_applied { task_id, until }`, `task_oscillation_human_escalation { task_id, cycle_count }` |
-| Prometheus counter | New: `masc_task_cooldown_applied_total{task,reason}`, `masc_task_human_escalation_total{task}` |
+| legacy metrics backend counter | New: `masc_task_cooldown_applied_total{task,reason}`, `masc_task_human_escalation_total{task}` |
 | Dashboard | Show cooldown countdown + paused_human badge in task list |
 
 ### Recovery actions
@@ -210,10 +210,10 @@ operator config):
 | Phase | Scope | Files |
 |-------|-------|-------|
 | **PR-1** | Domain fields + new human-paused status serialization | `lib/types/types_core.ml`, task JSON fixtures |
-| **PR-2** | Cooldown gate at oscillation_major | `lib/coord/coord_task.ml`, `lib/coord/coord_task_schedule.ml`, env_config |
-| **PR-3** | Severe-level paused_human + resume action | `lib/coord/coord_task.ml`, MCP tool addition |
+| **PR-2** | Cooldown gate at oscillation_major | `lib/workspace/workspace_task.ml`, `lib/workspace/workspace_task_schedule.ml`, env_config |
+| **PR-3** | Severe-level paused_human + resume action | `lib/workspace/workspace_task.ml`, MCP tool addition |
 | **PR-4** | Dashboard surface | `dashboard/src/components/...` |
-| **PR-5** | Prometheus counters + alert rules | `lib/prometheus.ml`, monitoring config |
+| **PR-5** | legacy metrics backend counters + alert rules | `legacy metrics backend module`, monitoring config |
 
 PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
 
@@ -227,13 +227,13 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
    timeout (e.g. 24h with no further oscillation activity)? Or strictly manual
    intervention?
 3. **Cross-keeper attribution**: When task-125 oscillates between `executor` and
-   `scholar`, which agent gets attributed in the Prometheus counter? Consider
+   `scholar`, which agent gets attributed in the legacy metrics backend counter? Consider
    labeling by the keeper that triggered the threshold crossing.
 
 ## Decision log
 
 - **2026-05-06**: RFC drafted from issue #13302 P0-4 audit, after caller-context
-  inspection of `coord_task_schedule.ml:380-422` and `coord_task.ml:380-417`.
+  inspection of `workspace_task_schedule.ml:380-422` and `workspace_task.ml:380-417`.
   Follow-up review corrected the premise: `task_claim_next` now preserves active
   work after #10421, so implementation must first prove a residual oscillation
   path and then apply A (cooldown) + B (human escalation) only to that path.
@@ -241,7 +241,7 @@ PR-1 is prerequisite for PR-2/PR-3; PR-4/PR-5 can land in parallel after PR-3.
 ## References
 
 - `#10421` — `task_claim_next` active-work preservation observability
-- `lib/coord/coord_task_schedule.ml:380-422` — `task_claim_next_preserved` handling
-- `lib/coord/coord_task.ml:380-417` — oscillation threshold detection (5/10/20)
-- `lib/coord/coord_hooks.ml:219` — `#10421` hook definition
-- Issue #13302 P0-4 audit: https://github.com/jeong-sik/masc-mcp/issues/13302#issuecomment-4380878513
+- `lib/workspace/workspace_task_schedule.ml:380-422` — `task_claim_next_preserved` handling
+- `lib/workspace/workspace_task.ml:380-417` — oscillation threshold detection (5/10/20)
+- `lib/workspace/workspace_hooks.ml:219` — `#10421` hook definition
+- Issue #13302 P0-4 audit: https://github.com/jeong-sik/masc/issues/13302#issuecomment-4380878513

@@ -29,27 +29,27 @@ function runtimeResolutionRaw(overrides: Record<string, unknown> = {}): Record<s
 }
 
 describe('normalizeExecutionSessionBrief', () => {
-  it('does not promote retired room-only payloads to namespace', () => {
+  it('does not promote retired workspace-only payloads to namespace', () => {
     const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-1',
       goal: 'legacy payload',
-      room: 'default',
+      workspace: 'default',
     })
     expect(normalized).toMatchObject({
       session_id: 'session-1',
       goal: 'legacy payload',
       namespace: null,
     })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
   })
 
-  it('keeps namespace-only payloads canonical without a room alias', () => {
+  it('keeps namespace-only payloads canonical without a workspace alias', () => {
     const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-2',
       goal: 'flattened payload',
       namespace: 'default',
     })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
     expect(normalized).toMatchObject({
       session_id: 'session-2',
       goal: 'flattened payload',
@@ -57,19 +57,19 @@ describe('normalizeExecutionSessionBrief', () => {
     })
   })
 
-  it('ignores retired room when namespace is present', () => {
+  it('ignores retired workspace when namespace is present', () => {
     const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-3',
       goal: 'dual payload',
       namespace: 'default',
-      room: 'legacy-room',
+      workspace: 'legacy-workspace',
     })
     expect(normalized).toMatchObject({
       session_id: 'session-3',
       goal: 'dual payload',
       namespace: 'default',
     })
-    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'workspace')).toBe(false)
   })
 })
 
@@ -120,31 +120,31 @@ describe('normalizeExecutionQueueItem', () => {
       summary: 'keeper turn is blocked',
       target_type: 'keeper',
       target_id: 'sangsu',
-      runtime_blocker_class: 'no_tool_capable_provider',
-      runtime_blocker_summary: 'no provider can satisfy required tools',
+      runtime_blocker_class: 'runtime_exhausted',
+      runtime_blocker_summary: 'no provider can satisfy tool surface',
       attention_reason: 'tool_contract_failed',
     })).toMatchObject({
       stop_cause: {
-        code: 'no_tool_capable_provider',
+        code: 'runtime_exhausted',
         source: 'runtime_blocker_class',
-        summary: 'no provider can satisfy required tools',
+        summary: 'no provider can satisfy tool surface',
       },
     })
   })
 })
 
 describe('normalizeMessage', () => {
-  it('preserves room metadata for board message room timelines', () => {
+  it('preserves workspace metadata for board message workspace timelines', () => {
     expect(normalizeMessage({
       id: 'm-1',
       from_agent: 'sangsu',
       content: 'handoff ready',
-      room_id: 'keeper-room',
+      workspace_id: 'keeper-workspace',
     })).toMatchObject({
       id: 'm-1',
       from: 'sangsu',
       content: 'handoff ready',
-      room: 'keeper-room',
+      workspace: 'keeper-workspace',
     })
   })
 })

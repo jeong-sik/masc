@@ -51,14 +51,14 @@ describe('OperationsPanel', () => {
     vi.doUnmock('./surface-readiness-panel')
   })
 
-  it('renders Ops, Governance, and Surfaces when view is not set (default)', async () => {
+  it('renders Ops and Governance when view is not set (default)', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('Surfaces')
+    expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
   })
 
   it('renders only Ops when view is ops', async () => {
@@ -83,17 +83,6 @@ describe('OperationsPanel', () => {
     expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
   })
 
-  it('renders only Surface Readiness when view is surfaces', async () => {
-    route.value.params = { section: 'operations', view: 'surfaces' }
-    const { OperationsPanel } = await loadPanel()
-    render(html`<${OperationsPanel} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('[data-testid="ops"]')).toBeNull()
-    expect(container.querySelector('[data-testid="governance"]')).toBeNull()
-    expect(container.querySelector('[data-testid="surfaces"]')).not.toBeNull()
-  })
-
   it('renders FilterChips options for the current operations views', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
@@ -101,12 +90,11 @@ describe('OperationsPanel', () => {
 
     const tablist = container.querySelector('[role="tablist"]')
     const buttons = tablist?.querySelectorAll('[role="tab"]') ?? []
-    expect(buttons.length).toBe(5)
+    expect(buttons.length).toBe(4)
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
     expect(labels).toContain('All')
     expect(labels).toContain('Intervene')
-    expect(labels).toContain('Governance')
-    expect(labels).toContain('Surfaces')
+    expect(labels).toContain('Approvals')
     expect(labels).toContain('Inspector')
   })
 
@@ -118,7 +106,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.querySelector('[data-testid="surfaces"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="surfaces"]')).toBeNull()
   })
 
   it('marks the active chip with aria-selected=true', async () => {
@@ -128,7 +116,7 @@ describe('OperationsPanel', () => {
     await flushUi()
 
     const buttons = container.querySelectorAll('button[type="button"]')
-    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'Governance')
+    const governanceBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'Approvals')
     expect(governanceBtn?.getAttribute('aria-selected')).toBe('true')
 
     const defaultBtn = Array.from(buttons).find(b => b.textContent?.trim() === 'All')

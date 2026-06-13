@@ -23,21 +23,11 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let with_env key value f =
-  let previous = Sys.getenv_opt key in
-  Unix.putenv key (Option.value ~default:"" value);
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some raw -> Unix.putenv key raw
-      | None -> Unix.putenv key "")
-    f
-
 let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
     ?tool_access name =
   let agent_name =
     Option.value agent_name
-      ~default:(Masc_mcp.Keeper_identity.keeper_agent_name name)
+      ~default:(Masc.Keeper_identity.keeper_agent_name name)
   in
   let fields =
     [
@@ -62,7 +52,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
      | Some tool_access ->
          [
            ( "tool_access",
-             Masc_mcp.Keeper_types.tool_access_to_json tool_access );
+             Json_util.json_string_list tool_access );
          ]
      | None -> [])
   in
@@ -70,15 +60,15 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta failed: " ^ err)
 
-let contract_requiring_tools required_tools : Masc_domain.task_contract =
+let empty_contract : Masc_domain.task_contract =
   {
     strict = false;
     completion_contract = [];
-    required_tools;
     required_evidence = [];
     inspect_gate_evidence = [];
     verify_gate_evidence = [];
-    required_evidence_typed = [];
+    evidence_claims = [];
+    stale_claim_timeout_sec = 0;
     links =
       {
         operation_id = None;
@@ -112,7 +102,7 @@ let rec check_json_strings_valid_utf8 label = function
 
 let test_timeout_quality_is_error () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:false
       ~message:"Tool timed out after 30s"
       ~attempts:1
@@ -123,7 +113,7 @@ let test_timeout_quality_is_error () =
 
 let test_generic_failure_quality_is_error () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:false
       ~message:"subprocess exited 1"
       ~attempts:2
@@ -134,7 +124,7 @@ let test_generic_failure_quality_is_error () =
 
 let test_success_quality_has_no_issues () =
   let quality =
-    Masc_mcp.Mcp_server_eio_call_tool.quality_from_result
+    Masc.Mcp_server_eio_call_tool.quality_from_result
       ~success:true
       ~message:"ok"
       ~attempts:1
@@ -144,7 +134,7 @@ let test_success_quality_has_no_issues () =
 
 let test_activity_payload_sanitizes_invalid_utf8 () =
   let payload =
-    Masc_mcp.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
+    Masc.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
       ~tool_name:"tool_execute"
       ~success:false
       ~duration_ms:42
@@ -165,8 +155,55 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
   check int "numeric field preserved" 15310
     (payload |> U.member "pr_number" |> U.to_int)
 
+let test_records_mcp_server_operation_duration_metric () =
+  let context =
+    { Otel_dispatch_hook.jsonrpc_request_id = Some "metric-request-otel"
+    ; mcp_session_id = Some "metric-session-otel"
+    ; mcp_protocol_version = Some "2025-06-18"
+    ; transport =
+        Some
+          (Otel_dispatch_hook.http_transport_context ~protocol_version:"2")
+    }
+  in
+  let result : Tool_result.result =
+    Ok
+      { Tool_result.data = `String "ok"
+      ; tool_name = "get-weather"
+      ; duration_ms = 123.0
+      }
+  in
+  let labels =
+    [ Otel_genai.Mcp_attr_key.mcp_method_name
+    , Otel_genai.Mcp_value.tools_call_method
+    ; Otel_genai.Attr_key.gen_ai_operation_name, "execute_tool"
+    ; Otel_genai.Attr_key.gen_ai_tool_name, "get-weather"
+    ; Otel_genai.Mcp_attr_key.mcp_protocol_version, "2025-06-18"
+    ; Otel_genai.Mcp_attr_key.network_protocol_name, "http"
+    ; Otel_genai.Mcp_attr_key.network_protocol_version, "2"
+    ; Otel_genai.Mcp_attr_key.network_transport, "tcp"
+    ]
+  in
+  let metric_name = Otel_genai.Mcp_metric_name.server_operation_duration in
+  let before_value =
+    Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+  in
+  let before_count =
+    Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+  in
+  Eio_main.run (fun _env ->
+    Otel_dispatch_hook.with_request_context context (fun () ->
+      Masc.Mcp_server_eio_call_tool.For_testing.record_mcp_server_operation_duration
+        result
+        ~duration_ms:250));
+  check (float 0.0001) "duration seconds delta" 0.250
+    (Masc.Otel_metric_store.metric_value_or_zero metric_name ~labels ()
+     -. before_value);
+  check (float 0.0001) "duration count delta" 1.0
+    (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
+     -. before_count)
+
 let test_contains_casefold_keeps_semantics () =
-  let contains = Masc_mcp.Mcp_server_eio_call_tool.contains_casefold in
+  let contains = Masc.Mcp_server_eio_call_tool.contains_casefold in
   check bool "empty needle" true (contains "anything" "");
   check bool "exact match" true (contains "auth required" "auth required");
   check bool "ascii casefold" true
@@ -178,80 +215,12 @@ let test_contains_casefold_keeps_semantics () =
   check bool "needle longer than haystack" false (contains "short" "shorter");
   check bool "absent substring" false (contains "Invalid JSON" "timeout")
 
-let test_transition_has_no_fixed_timeout () =
-  check bool "masc_transition has no fixed timeout"
-    true
-    (Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-       ~tool_name:"masc_transition"
-       ~_arguments:(`Assoc [])
-     = None)
-
-let test_persona_generate_timeout_exceeds_oas_budget () =
-  match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:"masc_persona_generate"
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec ->
-      check bool "persona generate timeout exceeds internal OAS budget" true
-        (timeout_sec > 120.)
-  | None -> fail "expected persona generation to keep a bounded outer timeout"
-
-let test_regular_tool_uses_default_timeout () =
-  match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:"masc_status"
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec -> check bool "default timeout remains enabled" true (timeout_sec >= 5.)
-  | None -> fail "expected masc_status to keep fixed timeout"
-
-let timeout_for_tool name =
-  match
-    Masc_mcp.Mcp_server_eio_call_tool.tool_timeout_sec_opt
-      ~tool_name:name
-      ~_arguments:(`Assoc [])
-  with
-  | Some timeout_sec -> timeout_sec
-  | None -> fail ("expected bounded timeout for " ^ name)
-
-let test_board_write_tools_use_board_timeout_default () =
-  with_env "MASC_TOOL_TIMEOUT_DEFAULT_SEC" (Some "60") @@ fun () ->
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" None @@ fun () ->
-  List.iter
-    (fun name ->
-       check (float 0.0001) (name ^ " timeout") 90.0 (timeout_for_tool name))
-    [
-      "keeper_board_post";
-      "keeper_board_comment";
-      "keeper_board_vote";
-      "keeper_board_comment_vote";
-      "keeper_board_curation_submit";
-      "masc_board_post";
-      "masc_board_comment";
-      "masc_board_vote";
-      "masc_board_comment_vote";
-      "masc_board_delete";
-      "masc_board_cleanup";
-      "masc_board_reaction";
-      "masc_board_curation_submit";
-    ];
-  check (float 0.0001) "regular tool keeps generic default" 60.0
-    (timeout_for_tool "masc_status")
-
-let test_board_write_timeout_can_override_and_clamps () =
-  with_env "MASC_TOOL_TIMEOUT_DEFAULT_SEC" (Some "60") @@ fun () ->
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "120") @@ fun () ->
-  check (float 0.0001) "board override" 120.0
-    (timeout_for_tool "keeper_board_post");
-  check (float 0.0001) "regular unaffected" 60.0
-    (timeout_for_tool "masc_status");
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "1") @@ fun () ->
-  check (float 0.0001) "board min clamp" 5.0
-    (timeout_for_tool "keeper_board_post");
-  with_env "MASC_TOOL_TIMEOUT_BOARD_SEC" (Some "999") @@ fun () ->
-  check (float 0.0001) "board max clamp" 300.0
-    (timeout_for_tool "keeper_board_post")
+(* Per-caller wrapper timeout was removed on 2026-06-08 (PR cleanup,
+   spirit: "tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸 왜 되나 안
+   되나 우리가 관찰하고 있나?").  The previous test_block asserted caller
+   timeout policy (default/board-write/min-max clamps) — that domain is
+   gone, so the tests are deleted rather than rewritten to assert "no
+   timeout".  The tool itself owns hang protection. *)
 
 let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let base_path = temp_dir () in
@@ -264,19 +233,19 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc_mcp.Keeper_registry.mark_turn_started ~base_path keeper_name;
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~base_path keeper_name;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
       let ctx =
-        Masc_mcp.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
           ~mcp_session_id:"mcp-session-1"
           entry
           ~arguments:(`Assoc [ ("session_id", `String "session-explicit") ])
@@ -285,7 +254,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some ("trace-test-" ^ keeper_name))
         ctx.trace_id;
       check (option string) "agent_name"
-        (Some (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name))
+        (Some (Masc.Keeper_identity.keeper_agent_name keeper_name))
         ctx.agent_name;
       check (option string) "session_id"
         (Some "session-explicit")
@@ -301,64 +270,48 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "sandbox profile present" true (Option.is_some ctx.sandbox_profile);
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
       check bool "allowed paths present" true (Option.is_some ctx.allowed_paths);
-      check bool "network mode present" true (Option.is_some ctx.network_mode);
-      check bool "tool surface class present" true
-        (Option.is_some ctx.tool_surface_class);
-      check bool "visible tool count present" true
-        (Option.is_some ctx.visible_tool_count);
-      check (option (list string)) "runtime mcp required tools empty"
-        (Some []) ctx.required_tools;
-      check (option (list string)) "runtime mcp missing required tools empty"
-        (Some []) ctx.missing_required_tools;
-      check (option string) "cascade profile" (Some (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
-        ctx.cascade_profile)
+      check bool "network mode present" true (Option.is_some ctx.network_mode))
 
 let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   let keeper_name = "sangsu-task-contract" in
-  let config = Masc_mcp.Coord.default_config base_path in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some keeper_name));
-  let contract =
-    contract_requiring_tools [ "tool_execute"; "tool_edit_file" ]
-  in
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some keeper_name));
+  let contract = empty_contract in
   ignore
-    (Masc_mcp.Coord.add_task
+    (Masc.Workspace.add_task
        ~contract
        config
        ~title:"Needs execution tools"
        ~priority:1
-       ~description:"exercise runtime MCP required tool logging");
+       ~description:"exercise runtime MCP tool logging");
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_execute" ])
+      ~tool_access:([ "tool_execute" ])
       keeper_name
   in
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
       let ctx =
-        Masc_mcp.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+        Masc.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
           entry
           ~arguments:(`Assoc [])
       in
-      check (option (list string)) "runtime mcp required tools"
-        (Some [ "tool_execute"; "tool_edit_file" ])
-        ctx.required_tools;
-      check (option (list string)) "runtime mcp missing required tools"
-        (Some [ "tool_edit_file" ])
-        ctx.missing_required_tools)
+      check bool "runtime mcp keeps task contract out of log context" true
+        (Option.is_some ctx.task_id))
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -373,28 +326,28 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   in
   let subscriber_id = "test-runtime-mcp-tool-trace" in
   let received_sse = ref None in
-  Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
-  Masc_mcp.Keeper_tool_call_log.init ~base_path ();
+  Masc.Keeper_tool_call_log.reset_for_testing ();
+  Masc.Keeper_tool_call_log.init ~base_path ();
   Fun.protect
     ~finally:(fun () ->
-      Masc_mcp.Sse.unsubscribe_external subscriber_id;
-      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
-      Masc_mcp.Keeper_tool_call_log.reset_for_testing ();
+      Masc.Sse.unsubscribe_external subscriber_id;
+      Masc.Keeper_registry.unregister ~base_path keeper_name;
+      Masc.Keeper_tool_call_log.reset_for_testing ();
       cleanup_dir base_path)
     (fun () ->
       ignore
-        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
-      Masc_mcp.Keeper_registry.mark_turn_started ~base_path keeper_name;
+        (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+      Masc.Keeper_registry.mark_turn_started ~base_path keeper_name;
       let entry =
-        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        match Masc.Keeper_registry.get ~base_path keeper_name with
         | Some entry -> entry
         | None -> fail "expected registered keeper entry"
       in
-      Masc_mcp.Sse.subscribe_external
+      Masc.Sse.subscribe_external
         ~id:subscriber_id
         ~callback:(fun payload -> received_sse := Some payload)
         ();
-      Masc_mcp.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
+      Masc.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"
         entry
         ~tool_name:"tool_execute"
@@ -408,7 +361,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         ~success:false
         ~duration_ms:87;
       let rows =
-        Masc_mcp.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
+        Masc.Keeper_tool_call_log.read_recent ~keeper_name ~n:1 ()
       in
       check int "logged row count" 1 (List.length rows);
       let row = List.hd rows in
@@ -431,7 +384,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
-        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
+        (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
       check bool "runtime contract has generation" true
         (match runtime_contract |> U.member "generation" with
@@ -444,19 +397,19 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (runtime_contract |> U.member "allowed_paths" |> U.to_list
          |> List.length
          > 0);
-      check bool "runtime contract visible tool count present" true
-        (match runtime_contract |> U.member "visible_tool_count" with
-         | `Int n -> n > 0
+      let omits_field name =
+        match runtime_contract with
+        | `Assoc fields -> not (List.mem_assoc name fields)
+        | _ -> false
+      in
+      check bool "runtime contract omits legacy required_tools" true
+        (omits_field "required_tools");
+      check bool "runtime contract omits legacy missing_required_tools" true
+        (omits_field "missing_required_tools");
+      check bool "runtime contract has runtime_profile field" true
+        (match runtime_contract |> U.member "runtime_profile" with
+         | `String _ | `Null -> true
          | _ -> false);
-      check int "runtime contract required tools empty" 0
-        (runtime_contract |> U.member "required_tools" |> U.to_list
-         |> List.length);
-      check int "runtime contract missing required tools empty" 0
-        (runtime_contract |> U.member "missing_required_tools" |> U.to_list
-         |> List.length);
-      check string "runtime contract cascade profile"
-        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
-        (runtime_contract |> U.member "cascade_profile" |> U.to_string);
       let masc_root =
         Filename.concat base_path Common.masc_dirname
       in
@@ -494,13 +447,14 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
          |> U.to_string);
       check string "trajectory runtime agent"
-        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
+        (Masc.Keeper_identity.keeper_agent_name keeper_name)
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
-      check string "trajectory runtime cascade profile"
-        (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
-        (trajectory_json |> U.member "runtime_contract"
-         |> U.member "cascade_profile" |> U.to_string);
+      check bool "trajectory runtime has runtime_profile field" true
+        (match trajectory_json |> U.member "runtime_contract"
+               |> U.member "runtime_profile" with
+         | `String _ | `Null -> true
+         | _ -> false);
       check string "trajectory action tool" "tool_execute"
         (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
          |> U.to_string);
@@ -538,16 +492,10 @@ let () =
           test_case "success has no issues" `Quick test_success_quality_has_no_issues;
           test_case "activity payload sanitizes invalid UTF-8" `Quick
             test_activity_payload_sanitizes_invalid_utf8;
+          test_case "records MCP server operation duration metric" `Quick
+            test_records_mcp_server_operation_duration_metric;
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
-          test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
-          test_case "persona generate timeout exceeds OAS budget" `Quick
-            test_persona_generate_timeout_exceeds_oas_budget;
-          test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
-          test_case "board write tools use board timeout default" `Quick
-            test_board_write_tools_use_board_timeout_default;
-          test_case "board write timeout override clamps" `Quick
-            test_board_write_timeout_can_override_and_clamps;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
           test_case "runtime MCP log context loads current task contract" `Quick

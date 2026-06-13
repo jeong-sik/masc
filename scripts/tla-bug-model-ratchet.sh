@@ -14,10 +14,14 @@
 # Strict metrics (gate fails on regression direction):
 #
 #   - bug_model_coverage_specs (monotonic INCREASE):
-#     count of *-buggy.cfg files across specs/. Each represents a
-#     spec with a working Bug Model pair (clean.cfg + buggy.cfg).
-#     Floor: current count. Goal: monotonic increase as more
-#     specs gain Bug Models.
+#     count of VERDICT-CAPABLE *-buggy.cfg files across specs/ — a buggy
+#     cfg counts only if its parent .tla resolves (progressive '-<token>'
+#     strip) AND it declares at least one INVARIANT/PROPERTY, i.e. TLC
+#     will actually run it and produce a verdict. This is NOT the raw
+#     file count: an orphan cfg (no parent) or an assertion-less cfg
+#     verifies nothing and is spec-level evidence theatre, so it is not
+#     counted. Floor: current count. Goal: monotonic increase as more
+#     specs gain working Bug Models.
 #
 #   - domains_without_bug_model (monotonic DECREASE):
 #     count of specs/<domain> directories with at least one .tla
@@ -52,11 +56,41 @@ for tool in find python3 wc tr; do
   }
 done
 
+# Count buggy cfgs that actually produce a TLC verdict, not the raw file count.
+# A *-buggy.cfg counts only if BOTH hold:
+#   1. its parent .tla resolves (progressive '-<token>' strip until a sibling
+#      .tla exists) — a cfg with no parent verifies nothing (TLC never runs it;
+#      the Makefile check-buggy reports it as ORPHAN and fails);
+#   2. it declares at least one INVARIANT(S) or PROPERTY(IES) — a cfg that asserts
+#      nothing produces a no-op "no error" run that verifies nothing.
+# Previously this returned `find ... | wc -l`, the raw file count. That over-
+# counted: a verdict-less orphan and any assertion-less cfg inflated coverage
+# without any TLC verdict behind them (spec-level evidence theatre). The
+# Makefile's runner skipped some of those silently, so the file count was a
+# lower bound on theatre, not a measure of real verification coverage.
 count_bug_model_specs() {
   ( set +o pipefail
     cd "$REPO_ROOT"
-    find specs -name '*-buggy*.cfg' -not -path '*/states/*' 2>/dev/null \
-      | wc -l | tr -d ' '
+    local n=0
+    local cfg dir base parent tla new_parent
+    while IFS= read -r cfg; do
+      [ -n "$cfg" ] || continue
+      dir=$(dirname "$cfg")
+      base=$(basename "$cfg" .cfg)
+      parent="$base"
+      tla="$dir/$parent.tla"
+      while [ ! -f "$tla" ] && [ -n "$parent" ]; do
+        new_parent=$(printf '%s' "$parent" | sed -E 's/-[^-]+$//')
+        [ "$new_parent" = "$parent" ] && break
+        parent="$new_parent"
+        tla="$dir/$parent.tla"
+      done
+      [ -f "$tla" ] || continue          # (1) no resolvable parent .tla
+      grep -E -q '^[[:space:]]*(INVARIANT|INVARIANTS|PROPERTY|PROPERTIES)\b' "$cfg" \
+        || continue                       # (2) declares no invariant/property
+      n=$((n + 1))
+    done < <(find specs -name '*-buggy*.cfg' -not -path '*/states/*' 2>/dev/null | sort)
+    echo "$n"
   )
 }
 
@@ -86,7 +120,7 @@ count_domains_without_bug_model() {
 
 # name|fn|hint|direction (INC=monotonic increase / DEC=monotonic decrease)
 STRICT_METRICS=(
-  "bug_model_coverage_specs|count_bug_model_specs|Specs with *-buggy.cfg companion. Decrease means a Bug Model was removed — open a follow-up issue.|INC"
+  "bug_model_coverage_specs|count_bug_model_specs|Verdict-capable *-buggy.cfg (resolvable parent .tla + >=1 INVARIANT/PROPERTY). Decrease means a Bug Model was removed or regressed to verifying nothing — open a follow-up issue.|INC"
   "domains_without_bug_model|count_domains_without_bug_model|Domains with .tla but zero *-buggy.cfg. Increase means a domain regressed to zero coverage.|DEC"
 )
 
@@ -136,6 +170,7 @@ baseline_file, cov, dom = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 data = {
     "_comment": "TLA+ Bug Model coverage baseline. Regenerate with scripts/tla-bug-model-ratchet.sh --regenerate.",
     "_metrics": "See scripts/tla-bug-model-ratchet.sh STRICT_METRICS array.",
+    "_metric_change": "bug_model_coverage_specs now counts VERDICT-CAPABLE buggy cfgs (resolvable parent .tla AND >=1 INVARIANT/PROPERTY), not the raw *-buggy.cfg file count. The previous file-count baseline (74) over-counted spec-level theatre: an orphan cfg and assertion-less cfgs inflated coverage without any TLC verdict. Removing the KeeperCampaignLifecycle orphan and counting only verdict-capable cfgs yields the current value.",
     "_audit": "docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md",
     "bug_model_coverage_specs": cov,
     "domains_without_bug_model": dom,

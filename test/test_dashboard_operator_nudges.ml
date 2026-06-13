@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let temp_dir prefix =
   let dir =
@@ -14,20 +14,20 @@ let temp_dir prefix =
   dir
 ;;
 
-let with_room f =
+let with_workspace f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = temp_dir "masc_nudges" in
   Fun.protect
     ~finally:(fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.reset config);
+      let config = Workspace.default_config dir in
+      ignore (Workspace.reset config);
       try Unix.rmdir dir with
       | _ -> ())
     (fun () ->
-       let config = Coord.default_config dir in
-       ignore (Coord.init config ~agent_name:(Some "operator"));
+       let config = Workspace.default_config dir in
+       ignore (Workspace.init config ~agent_name:(Some "operator"));
        f config)
 ;;
 
@@ -40,10 +40,10 @@ let field_string_list key json =
 ;;
 
 let test_structured_operator_nudge () =
-  with_room
+  with_workspace
   @@ fun config ->
   ignore
-    (Coord.broadcast
+    (Workspace.broadcast
        config
        ~from_agent:"operator"
        ~msg_type:"operator_nudge"
@@ -60,10 +60,10 @@ let test_structured_operator_nudge () =
 ;;
 
 let test_tagged_broadcast_nudge () =
-  with_room
+  with_workspace
   @@ fun config ->
   ignore
-    (Coord.broadcast
+    (Workspace.broadcast
        config
        ~from_agent:"operator"
        ~content:"[nudge:redirect] @rama @scholar focus ar-93ff2489");
@@ -78,10 +78,10 @@ let test_tagged_broadcast_nudge () =
 ;;
 
 let test_structured_nudge_preserves_angle_entities () =
-  with_room
+  with_workspace
   @@ fun config ->
   ignore
-    (Coord.broadcast
+    (Workspace.broadcast
        config
        ~from_agent:"operator"
        ~msg_type:"operator_nudge"
@@ -95,9 +95,9 @@ let test_structured_nudge_preserves_angle_entities () =
 ;;
 
 let test_non_nudge_broadcast_ignored () =
-  with_room
+  with_workspace
   @@ fun config ->
-  ignore (Coord.broadcast config ~from_agent:"operator" ~content:"plain update");
+  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"plain update");
   let json = Dashboard_operator_nudges.json ~config ~limit:10 () in
   Alcotest.(check int) "count" 0 (List.length (nudges json))
 ;;

@@ -149,8 +149,8 @@ let save_file_unix (path : string) (content : string) : unit =
    pointing at the cache. This PR extends the fix to
    [append_file_unix] (and removes the now-dead [Append_fd_cache]
    module and [at_exit] hook) so the ~15 [append_file] callers
-   (metrics_store_eio, memory_jsonl,
-   coord_utils_ops, board_core, keeper_chat_store, etc.) get the
+   (metrics_store_eio, workspace_utils_ops, board_core,
+   keeper_chat_store, etc.) get the
    same guarantee.
 
    The mutex registry is shared between [append_file_unix] and
@@ -163,7 +163,7 @@ let save_file_unix (path : string) (content : string) : unit =
    removed cache folded three syscalls (open/output_string/close)
    into one cached output_string under 64-keeper telemetry. Fresh
    fd per call restores those three syscalls. A future domain-safe
-   cache (per-domain fd, or a single-writer coordinator fiber) can
+   cache (per-domain fd, or a single-writer workspace fiber) can
    reinstate the optimization without giving up correctness. *)
 let append_path_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
   Hashtbl.create 32
@@ -406,7 +406,7 @@ let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
     1-based, increments only on non-blank lines so it tracks the
     {b printed} JSONL row number an operator would see in [cat -n].
     Aligns with the file-level diagnostic at line 559 ("line %d") so
-    a malformed log from either path uses the same coordinate system. *)
+    a malformed log from either path uses the same orchestrate system. *)
 let parse_jsonl_lines ~(source : string) (lines : string list) : Yojson.Safe.t list * int =
   let malformed = ref 0 in
   let line_no = ref 0 in
@@ -448,11 +448,82 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
     Malformed lines are logged and dropped. *)
 let load_jsonl (path : string) : Yojson.Safe.t list = fst (load_jsonl_diagnostics path)
 
+(* Bounded byte slice of a file. Clamps to the current size; a missing
+   file or an empty clamped range returns "". Stdlib-blocking like the
+   other tail-readers — callers bound [len], so the read cost is fixed
+   regardless of file size (RFC-0228 P1). *)
+let read_slice ~path ~from ~len =
+  if not (file_exists path) || len <= 0 then ""
+  else begin
+    let ic = Stdlib.open_in_bin path in
+    Stdlib.Fun.protect
+      ~finally:(fun () -> Stdlib.close_in_noerr ic)
+      (fun () ->
+         let size = Stdlib.in_channel_length ic in
+         let from = if from < 0 then 0 else if from > size then size else from in
+         let len = Stdlib.min len (size - from) in
+         if len <= 0 then ""
+         else begin
+           Stdlib.seek_in ic from;
+           Stdlib.really_input_string ic len
+         end)
+  end
+;;
+
+(* Fold over newline-terminated lines appended after byte offset [from].
+   Append-only JSONL stores never rewrite earlier bytes, so a (offset,
+   accumulator) pair is a pure function of the file prefix — callers cache
+   it and re-scan only the delta instead of the whole file. Bytes after the
+   last '\n' (a partially flushed line) are excluded from both the fold and
+   the returned boundary, so the next call re-reads them once the writer
+   completes the line. A [from] beyond EOF (file truncated/rotated) falls
+   back to a full scan from byte 0; callers detect shrinkage the same way
+   via the returned boundary. Blank lines advance the boundary but are not
+   folded. *)
+let fold_appended_lines ~path ~from ~init ~f =
+  if not (file_exists path)
+  then init, 0
+  else begin
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let len = in_channel_length ic in
+         let from = if from < 0 || from > len then 0 else from in
+         seek_in ic from;
+         let chunk = Bytes.create 65536 in
+         let line_buf = Buffer.create 256 in
+         let acc = ref init in
+         let boundary = ref from in
+         let pos = ref from in
+         let rec loop () =
+           let n = input ic chunk 0 (Bytes.length chunk) in
+           if n > 0
+           then begin
+             for i = 0 to n - 1 do
+               match Bytes.get chunk i with
+               | '\n' ->
+                 let line = Buffer.contents line_buf in
+                 Buffer.clear line_buf;
+                 boundary := !pos + i + 1;
+                 if not (String.equal (String.trim line) "")
+                 then acc := f !acc line
+               | c -> Buffer.add_char line_buf c
+             done;
+             pos := !pos + n;
+             loop ()
+           end
+         in
+         loop ();
+         !acc, !boundary)
+  end
+;;
+
 (** Stream JSONL line-by-line, folding [f] over parsed values.
 
     Uses [Eio.Buf_read.lines] over [Eio.Path.with_open_in] when the
     global fs is registered ([set_fs] called at boot), giving O(1)
-    resident memory regardless of file size and non-blocking IO inside
+    memory regardless of file size and non-blocking IO inside
     the Eio scheduler.  Falls back to {!load_jsonl} + [List.fold_left]
     when no fs is available (tests, pre-boot helpers).
 
@@ -580,4 +651,23 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   Stdlib.Mutex.protect path_mu (fun () ->
     Stdlib.output_string oc line;
     Stdlib.flush oc)
+
+let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
+  if jsons = [] then ()
+  else begin
+    test_exec_home_guard ~op:"append_jsonl_batch" path;
+    let dir = Stdlib.Filename.dirname path in
+    mkdir_p_memoized dir;
+    let buf = Buffer.create 4096 in
+    List.iter (fun json ->
+      Buffer.add_string buf (Yojson.Safe.to_string json);
+      Buffer.add_char buf '\n'
+    ) jsons;
+    let chunk = Buffer.contents buf in
+    let oc = Fd_cache.get_writer path in
+    let path_mu = get_append_path_mutex path in
+    Stdlib.Mutex.protect path_mu (fun () ->
+      Stdlib.output_string oc chunk;
+      Stdlib.flush oc)
+  end
 ;;

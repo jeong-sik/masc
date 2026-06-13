@@ -1,19 +1,9 @@
-(** test_persona_tool_reachability — Step 15 partial.
+(** test_persona_tool_reachability — tool_access group reachability.
 
-    Locks the Step 9 (research preset = delivery) capability decision
-    so a future PR cannot silently narrow research-tier keepers' tool
-    surface without failing this test.
+    Locks the reusable tool groups that keepers can reference from explicit
+    [tool_access] lists. *)
 
-    The Step 9 unblock at [config/tool_policy.toml]
-    [\[presets.research\]] is what makes delivery-class filesystem,
-    file-search, and execute tooling reach the research-tier toolset.  Before Step
-    9, analyst / scholar / verifier keepers could only share opinions on
-    the board.  After Step 9, the capability is opened and the
-    risk-tiered approval gate still queues high-risk ops for operator
-    confirmation.  This test is the regression sentinel for that
-    decision. *)
-
-open Masc_mcp
+open Masc
 
 let read_file path =
   let ic = open_in path in
@@ -37,25 +27,20 @@ let locate_tool_policy_toml () =
   | None ->
       Alcotest.fail "could not locate dune-project ancestor of cwd"
 
-(** Find the line [groups = [...]] inside the [[presets.<name>]]
-    section.  Returns the line with its [...] payload as one string
-    so callers can search for quoted group names without dragging
-    in a TOML parser. *)
-let extract_preset_groups_line ~preset toml_content =
-  let header = Printf.sprintf "[presets.%s]" preset in
+(** Find the [tools = [...]] line inside a [groups.<name>] section. *)
+let extract_group_tools_line ~group toml_content =
+  let header = Printf.sprintf "[groups.%s]" group in
   let lines = String.split_on_char '\n' toml_content in
   let rec scan_section = function
     | [] -> None
     | line :: rest ->
         let trimmed = String.trim line in
         if String.length trimmed > 0 && trimmed.[0] = '[' then
-          (* hit next section without finding groups *)
+          (* hit next section without finding tools *)
           None
         else if
-          String_util.contains_substring trimmed "groups"
+          String_util.contains_substring trimmed "tools"
           && String_util.contains_substring trimmed "="
-          && not
-               (String_util.contains_substring trimmed "masc_groups")
         then Some trimmed
         else scan_section rest
   in
@@ -67,77 +52,45 @@ let extract_preset_groups_line ~preset toml_content =
   in
   find_section lines
 
-let assert_group_in_line ~preset ~group line =
-  let needle = "\"" ^ group ^ "\"" in
+let assert_tool_in_line ~group ~tool line =
+  let needle = "\"" ^ tool ^ "\"" in
   Alcotest.(check bool)
-    (Printf.sprintf "preset %s includes group %s" preset group)
+    (Printf.sprintf "group %s includes tool %s" group tool)
     true
     (String_util.contains_substring line needle)
 
-(** Step 9 invariant: research preset has the delivery-class capability
-    groups so analyst/scholar/verifier keepers can clone, view PRs, and
-    create PRs (the risk-tiered approval gate still applies). *)
-let test_research_preset_includes_delivery_groups () =
+let test_repo_capability_groups_present () =
   let path = locate_tool_policy_toml () in
   let content = read_file path in
-  match extract_preset_groups_line ~preset:"research" content with
-  | None ->
-      Alcotest.fail
-        "could not find [presets.research].groups in tool_policy.toml"
-  | Some line ->
-      List.iter
-        (fun group ->
-          assert_group_in_line ~preset:"research" ~group line)
-        [
-          "execute";
-          "search_files";
-          "filesystem_write";
-        ]
+  List.iter
+    (fun group ->
+      Alcotest.(check bool)
+        ("tool_policy.toml has [groups." ^ group ^ "] header")
+        true
+        (String_util.contains_substring content ("[groups." ^ group ^ "]")))
+    [ "filesystem"; "workspace_write"; "search_files"; "execute" ]
 
-(** Sanity baseline: delivery preset keeps the production work groups.  If
-    this test fails, the TOML schema or the [delivery] preset shape
-    changed and the [research] expectation likely needs revisiting
-    in the same PR. *)
-let test_delivery_preset_baseline () =
+let test_repo_capability_groups_include_expected_tools () =
   let path = locate_tool_policy_toml () in
   let content = read_file path in
-  match extract_preset_groups_line ~preset:"delivery" content with
-  | None ->
-      Alcotest.fail
-        "could not find [presets.delivery].groups in tool_policy.toml"
-  | Some line ->
-      List.iter
-        (fun group ->
-          assert_group_in_line ~preset:"delivery" ~group line)
-        [
-          "execute";
-          "search_files";
-          "filesystem_write";
-        ]
-
-(** Anchor: research preset header is well-formed and not commented out.
-    Catches the trivial regression where the section header itself was
-    accidentally renamed or stripped. *)
-let test_research_preset_section_present () =
-  let path = locate_tool_policy_toml () in
-  let content = read_file path in
-  Alcotest.(check bool)
-    "tool_policy.toml has [presets.research] header" true
-    (String_util.contains_substring content "[presets.research]")
+  let check_group group tools =
+    match extract_group_tools_line ~group content with
+    | None -> Alcotest.failf "missing tools line for group %s" group
+    | Some line -> List.iter (fun tool -> assert_tool_in_line ~group ~tool line) tools
+  in
+  check_group "filesystem" [ "tool_read_file" ];
+  check_group "workspace_write" [ "tool_edit_file"; "tool_write_file" ];
+  check_group "search_files" [ "tool_search_files" ];
+  check_group "execute" [ "tool_execute" ]
 
 let () =
   Alcotest.run "persona_tool_reachability"
     [
-      ( "research_preset",
+      ( "tool_access_groups",
         [
-          Alcotest.test_case "section header present" `Quick
-            test_research_preset_section_present;
-          Alcotest.test_case "includes delivery groups (Step 9)" `Quick
-            test_research_preset_includes_delivery_groups;
-        ] );
-      ( "delivery_preset",
-        [
-          Alcotest.test_case "baseline delivery groups" `Quick
-            test_delivery_preset_baseline;
+          Alcotest.test_case "repo capability groups present" `Quick
+            test_repo_capability_groups_present;
+          Alcotest.test_case "repo capability groups include expected tools" `Quick
+            test_repo_capability_groups_include_expected_tools;
         ] );
     ]

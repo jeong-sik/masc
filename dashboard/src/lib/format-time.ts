@@ -30,11 +30,11 @@ export function formatRelativeAgeMs(ageMs: number): string {
 }
 
 /**
- * Sentinel string returned when a time-related helper has no input to format.
+ * Marker string returned when a time-related helper has no input to format.
  *
  * Exposed so call sites that compare against it (e.g. unwrapping the
  * fallback back to `null` in keeper-shared.formatTime) don't have to
- * duplicate the literal — changing the displayed sentinel here updates
+ * duplicate the literal — changing the displayed marker here updates
  * every comparison automatically. Tests in `format-time.test.ts`
  * deliberately keep the literal so the assertion documents the
  * user-visible string.
@@ -206,13 +206,13 @@ export function formatDelta(delta: number, decimals = 4): string {
  * milliseconds depending on magnitude.
  *
  * Backend producers emit timestamps in both units — anchored threads and
- * activity events use milliseconds, cascade hops and decision logs use
+ * activity events use milliseconds, runtime hops and decision logs use
  * seconds. Any value larger than `1e12` is treated as already-millis;
  * anything smaller is multiplied by 1000. `null` / `NaN` / non-finite
  * inputs return `NaN` so callers can branch on `Number.isFinite` once.
  *
  * Three IDE trace bridges (`decision-log-trace-bridge`,
- * `cascade-hop-trace-bridge`, `ide-conversation-rail`) shipped this
+ * `runtime-hop-trace-bridge`, `ide-conversation-rail`) shipped this
  * exact body file-internal before centralising here.
  */
 export function unixishToMs(ts: number | null | undefined): number {

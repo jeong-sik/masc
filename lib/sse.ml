@@ -14,7 +14,7 @@
 
     Session kinds:
     [Observer] sessions receive dashboard snapshots but not agent
-    coordination traffic.  [Coordinator] sessions receive heartbeats
+    workspace traffic.  [Agent_stream] sessions receive heartbeats
     and task events but not dashboard snapshots.  [Presence] sessions
     receive ephemeral liveness/awareness updates through the bufferless
     presence channel.  [broadcast_to All] reaches every durable session
@@ -38,7 +38,7 @@ let run_test_hook hook =
 
 type session_kind =
   | Observer [@tla.symbol "observer"]    (** Dashboard / read-only viewers *)
-  | Coordinator [@tla.symbol "coordinator"] (** MCP agent connections *)
+  | Agent_stream [@tla.symbol "agent_stream"] (** MCP agent connections *)
   | Presence [@tla.symbol "presence"]    (** Ephemeral liveness / awareness channel *)
 [@@deriving tla]
 
@@ -46,7 +46,7 @@ type session_kind =
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
-  | Coordinators (** Only [Coordinator] sessions *)
+  | Agent_streams (** Only [Agent_stream] sessions *)
   | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
@@ -111,20 +111,33 @@ type session_snapshot = {
 
 let session_kind_to_string = function
   | Observer -> "observer"
-  | Coordinator -> "coordinator"
+  | Agent_stream -> "agent_stream"
   | Presence -> "presence"
 
-let take n xs =
-  let rec loop acc remaining items =
-    match (remaining, items) with
-    | remaining, _ when remaining <= 0 -> List.rev acc
-    | _, [] -> List.rev acc
-    | remaining, x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
+let take = List.take
+
+(** Minimum interval between full transport snapshot computations (seconds).
+    The snapshot iterates all SSE clients and builds per-session records;
+    at ~9 broadcasts/sec this path accounts for most allocation on the
+    broadcast hot path.  Throttling to ~0.2/sec cuts allocation by ~97%
+    while keeping dashboard metrics within 5 seconds of reality.
+    Configurable via [MASC_SNAPSHOT_INTERVAL_SEC] env var (default 5.0). *)
+let snapshot_min_interval_sec =
+  try float_of_string (Sys.getenv "MASC_SNAPSHOT_INTERVAL_SEC")
+  with Not_found -> 5.0
+
+(** Timestamp of the last completed snapshot.  CAS-guarded so that
+    concurrent [broadcast_impl] fibers racing to snapshot after the
+    interval expires do not duplicate work — only one fiber wins the
+    compare-and-set and runs the full iteration. *)
+let last_snapshot_time : float Atomic.t = Atomic.make 0.0
 
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
+  let last = Atomic.get last_snapshot_time in
+  if now -. last < snapshot_min_interval_sec then ()
+  else if not (Atomic.compare_and_set last_snapshot_time last now) then ()
+  else begin
   (* Single-pass aggregation: previously [SMap.fold] built a
      [(sid, client)] tuple list, then [List.map] re-walked it to
      produce [session_snapshot] records.  [SMap.iter] over the
@@ -135,7 +148,7 @@ let sync_transport_snapshot () =
      on every [broadcast_impl] invocation, so the saved allocation
      compounds with the fan-out itself. *)
   let observer = ref 0 in
-  let coordinator = ref 0 in
+  let agent_stream = ref 0 in
   let presence = ref 0 in
   let queue_sum = ref 0 in
   let max_queue_depth = ref 0 in
@@ -147,7 +160,7 @@ let sync_transport_snapshot () =
     max_queue_depth := max !max_queue_depth queue_depth;
     (match client.kind with
      | Observer -> incr observer
-     | Coordinator -> incr coordinator
+     | Agent_stream -> incr agent_stream
      | Presence -> incr presence);
     incr total_sessions_acc;
     sessions_acc :=
@@ -185,10 +198,11 @@ let sync_transport_snapshot () =
          })
   in
   Transport_metrics.set_sse_sessions ~kind:"observer" !observer;
-  Transport_metrics.set_sse_sessions ~kind:"coordinator" !coordinator;
+  Transport_metrics.set_sse_sessions ~kind:"agent_stream" !agent_stream;
   Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
+  end
 
 let mark_seen (client : client) =
   Atomic.set client.last_seen_at (Time_compat.now ())
@@ -236,7 +250,7 @@ let buffer_event event_id event_str =
 let event_matches_session_kind kind event =
   match kind with
   | Observer -> true
-  | Coordinator -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_coordinator event
+  | Agent_stream -> Sse_jsonrpc_filter.event_string_jsonrpc_message_for_agent_stream event
   | Presence -> false
 
 (** Get events after given ID for replay (MCP spec MUST) *)
@@ -329,6 +343,31 @@ let format_event ?id ?event_type data =
   Buffer.add_string buf "\n\n";
   Buffer.contents buf
 
+(** Format SSE event from a [Yojson.Safe.t] value without the intermediate
+    [to_string] allocation.  Writes JSON bytes directly into the SSE event
+    buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
+    broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
+let format_event_yojson ?id ?event_type json =
+  let effective_id =
+    match id with
+    | Some i -> i
+    | None -> Atomic.fetch_and_add event_counter 1 + 1
+  in
+  let buf = Buffer.create 128 in
+  Buffer.add_string buf "id: ";
+  Buffer.add_string buf (string_of_int effective_id);
+  Buffer.add_char buf '\n';
+  (match event_type with
+   | Some e ->
+       Buffer.add_string buf "event: ";
+       Buffer.add_string buf e;
+       Buffer.add_char buf '\n'
+   | None -> ());
+  Buffer.add_string buf "data: ";
+  Yojson.Safe.to_buffer buf json;
+  Buffer.add_string buf "\n\n";
+  Buffer.contents buf
+
 (** Get current event ID *)
 let current_id () = Atomic.get event_counter
 
@@ -396,7 +435,7 @@ let invoke_disconnect_hook_for session_id =
     published to [clients] — closes the race window where a concurrent
     [broadcast] could observe the new entry, hit queue overflow, fire
     [unregister], and find no hook to wake the drain fiber. *)
-let register ?(kind = Coordinator) ?on_disconnect session_id ~last_event_id =
+let register ?(kind = Agent_stream) ?on_disconnect session_id ~last_event_id =
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
   let last_event_id = Atomic.make last_event_id in
   let event_stream = Eio.Stream.create stream_capacity in
@@ -559,10 +598,10 @@ let client_matches_target target ~jsonrpc_payload (client : client) =
   | All -> (
       match client.kind with
       | Observer -> true
-      | Coordinator -> jsonrpc_payload
+      | Agent_stream -> jsonrpc_payload
       | Presence -> false)
   | Observers -> client.kind = Observer
-  | Coordinators -> client.kind = Coordinator && jsonrpc_payload
+  | Agent_streams -> client.kind = Agent_stream && jsonrpc_payload
   | Presence_only -> client.kind = Presence
 
 (** {1 External Subscriber Hook}
@@ -768,14 +807,16 @@ let reap_dead_external_subscribers () =
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
-  let data = Yojson.Safe.to_string json in
   let jsonrpc_payload =
-    Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json
+    Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type data in
+  (* Write JSON directly into the SSE event buffer, avoiding the
+     intermediate [Yojson.Safe.to_string] allocation.  The output
+     is byte-for-byte identical to the previous two-step approach. *)
+  let event = format_event_yojson ~id:current_event_id ~event_type json in
   if buffer then
     buffer_event current_event_id event;
   (* The [SMap.t] returned by [Atomic.get] is immutable
@@ -786,7 +827,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
   let target_label = match target with
     | All -> "all"
     | Observers -> "observers"
-    | Coordinators -> "coordinators"
+    | Agent_streams -> "agent_streams"
     | Presence_only -> "presence"
   in
   let clients_entries = (Atomic.get clients).entries in
@@ -815,7 +856,7 @@ let broadcast_impl ?(buffer = true) ?(notify_external = true)
             the HTTP socket open until keep-alive timeout — operators
             saw "WS events stop arriving" with no error indication and
             had to manually refresh.  See plan
-            [planning/agent_llm_a-plans/me-workspace-yousleepwhen-masc-mcp-radiant-piglet.md]. *)
+            [planning/agent_llm_a-plans/me-workspace-yousleepwhen-masc-radiant-piglet.md]. *)
          Transport_metrics.inc_broadcast_failure ~target:target_label ();
          Log.Server.warn
            "Broadcast skip: session %s stream full (%d/%d) — disconnecting"
@@ -853,7 +894,7 @@ let broadcast json = broadcast_impl All json
 (** Broadcast event to sessions matching [target].
     - [All]: every session (same as [broadcast])
     - [Observers]: dashboard / read-only viewers only
-    - [Coordinators]: MCP agent sessions only *)
+    - [Agent_streams]: MCP agent sessions only *)
 let broadcast_to target json = broadcast_impl target json
 
 (** Broadcast an ephemeral presence/awareness event. Presence events are live
@@ -867,15 +908,13 @@ let broadcast_presence json =
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)
 let send_to session_id json =
-  if not (Sse_jsonrpc_filter.jsonrpc_message_for_coordinator json) then
+  if not (Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json) then
     Log.Server.warn
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
-  let data = Yojson.Safe.to_string json in
-  (* Atomic allocation — see [broadcast_impl] for rationale. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type:"message" data in
+  let event = format_event_yojson ~id:current_event_id ~event_type:"message" json in
   buffer_event current_event_id event;
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with
@@ -968,3 +1007,7 @@ let cleanup_stale ?(max_age_s=1800.0) () =
     unregister sid
   ) stale;
   List.map fst stale
+
+let () =
+  Dashboard_oas_bridge.set_broadcast_hook (fun json ->
+    broadcast_to Observers json)

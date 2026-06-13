@@ -10,12 +10,13 @@ open Auth_credential_base
     match - the root of the [bearer token belongs to X]
     regression.  We keep the legacy first-match return so
     existing callers do not need migration, but we WARN and
-    increment {!Prometheus.metric_auth_credential_ambiguous_lookup}
+    increment {!Otel_metric_store.metric_auth_credential_ambiguous_lookup}
     so an alert can fire on the live blast radius rather than
     just the one-shot boot audit. *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in
   let idx = credential_token_index config in
+  (* DET-OK: absent token hash is represented as an empty match list. *)
   let matches =
     Hashtbl.find_opt idx token_hash |> Option.value ~default:[]
   in
@@ -32,8 +33,8 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
          (List.length matches)
          (String.concat ", " names)
          first.agent_name;
-       Prometheus.inc_counter
-         Prometheus.metric_auth_credential_ambiguous_lookup
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_auth_credential_ambiguous_lookup
          ~labels:[ "first_match", first.agent_name ]
          ());
     (match first.expires_at with
@@ -59,16 +60,7 @@ let expires_at_for_auth_config auth_cfg =
       Time_compat.now ()
       +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
     in
-    let tm = Unix.gmtime expiry in
-    Some
-      (Printf.sprintf
-         "%04d-%02d-%02dT%02d:%02d:%02dZ"
-         (tm.Unix.tm_year + 1900)
-         (tm.Unix.tm_mon + 1)
-         tm.Unix.tm_mday
-         tm.Unix.tm_hour
-         tm.Unix.tm_min
-         tm.Unix.tm_sec))
+    Some (Masc_domain.iso8601_of_unix_seconds expiry))
   else None
 ;;
 
@@ -232,8 +224,8 @@ let rotate_shared_tokens_for_agents config ~agent_names : rotation_outcome list 
    label shape.  Non-mismatch rejects (no owner found at all) are
    NOT counted here — they have a different root cause. *)
 let record_bearer_token_mismatch ~expected_agent ~actual_agent =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_bearer_token_mismatch
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_bearer_token_mismatch
     ~labels:[ "expected_agent", expected_agent; "actual_agent", actual_agent ]
     ()
 ;;
@@ -241,7 +233,7 @@ let record_bearer_token_mismatch ~expected_agent ~actual_agent =
 let bearer_token_owner_mismatch_message ~requested_agent ~token_owner =
   Printf.sprintf
     "No credential found for %s (bearer token belongs to %s). MCP identity mismatch: \
-     mint/sync a bearer for %s (`masc-mcp login --agent %s --role worker --shell`, then \
+     mint/sync a bearer for %s (`masc login --agent %s --role worker --shell`, then \
      `sb mcp sync`) or send the token owner's identity."
     requested_agent
     token_owner
@@ -255,10 +247,15 @@ let missing_credential_error config ~agent_name ~token : masc_error =
     record_bearer_token_mismatch ~expected_agent:agent_name ~actual_agent:owner.agent_name;
     Auth
       (Auth_error.Unauthorized
-         (bearer_token_owner_mismatch_message
-            ~requested_agent:agent_name
-            ~token_owner:owner.agent_name))
-  | _ -> Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name))
+         { reason = Actor_mismatch
+         ; message = bearer_token_owner_mismatch_message
+              ~requested_agent:agent_name
+              ~token_owner:owner.agent_name
+         })
+  | _ -> Auth (Auth_error.Unauthorized
+      { reason = Missing_token
+      ; message = "No credential found for " ^ agent_name
+      })
 ;;
 
 (** Verify a token.
@@ -285,9 +282,11 @@ let verify_token_owner_alias config ~agent_name ~token =
     Error
       (Auth
          (Auth_error.Unauthorized
-            (bearer_token_owner_mismatch_message
-               ~requested_agent:agent_name
-               ~token_owner:owner.agent_name)))
+            { reason = Actor_mismatch
+            ; message = bearer_token_owner_mismatch_message
+                 ~requested_agent:agent_name
+                 ~token_owner:owner.agent_name
+            }))
   | Error e -> Error e
 ;;
 

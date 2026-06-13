@@ -113,14 +113,14 @@ let belief_rules =
     {
       id = "belief:idle_backlog_empty";
       claim =
-        "the room believes backlog is empty and multiple agents are idle or waiting for work";
+        "the workspace believes backlog is empty and multiple agents are idle or waiting for work";
       support = idle_backlog_support;
       challenge = (fun _ -> false);
     };
     {
       id = "belief:operator_needed";
       claim =
-        "the room believes operator intervention or a new privileged surface is needed";
+        "the workspace believes operator intervention or a new privileged surface is needed";
       support = operator_need_support;
       challenge = operator_need_challenge;
     };
@@ -136,7 +136,7 @@ let tension_rules =
     };
     {
       id = "tension:idle_backlog_empty";
-      topic = "idle room with empty backlog";
+      topic = "idle workspace with empty backlog";
       kind = "boredom";
       matches = idle_backlog_support;
     };
@@ -207,14 +207,14 @@ let desire_rules =
       id = "desire:synthetic_exercise";
       desired_state = "start a synthetic exercise, cleanup pass, or retrospective during idle time";
       desire_type = "aspiration";
-      actionability = "room_or_operator";
+      actionability = "workspace_or_operator";
       matches =
         (fun source ->
           has_any_signal source
             [
               "synthetic multi-agent exercise";
               "housekeeping";
-              "stress-testing keeper coordination";
+              "stress-testing keeper workspace";
               "reviewing completed task quality";
               "documenting patterns observed";
             ]);

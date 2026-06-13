@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Tempo = Masc_mcp.Tempo
+module Tempo = Masc.Tempo
 module Types = Masc_domain
 
 (* ============================================================
@@ -118,13 +118,11 @@ let make_task ~id ~status : Masc_domain.task = {
   id;
   title = "Test Task";
   description = "";
-  goal_id = None;
   task_status = status;
   priority = 3;
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   created_by = None;
-  stage = None;
   contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 
@@ -157,12 +155,10 @@ let make_task_with_priority ~id ~priority : Masc_domain.task = {
   title = "Task";
   description = "";
   task_status = Masc_domain.Todo;
-  goal_id = None;
   priority;
   files = [];
   created_at = "2024-01-01T00:00:00Z";
   created_by = None;
-  stage = None;
   contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 
@@ -213,9 +209,9 @@ let test_calculate_adaptive_tempo_low_priority () =
    tempo_file Tests
    ============================================================ *)
 
-module Coord_utils = Coord_utils
+module Workspace_utils = Workspace_utils
 
-let make_test_config ~base_path : Coord_utils.config =
+let make_test_config ~base_path : Workspace_utils.config =
   let backend_config : Backend_types.config = {
     backend_type = Backend_types.Memory;
     base_path;
@@ -225,11 +221,11 @@ let make_test_config ~base_path : Coord_utils.config =
   } in
   let memory_backend = Backend.Memory.create () in
   {
-    Coord_utils.base_path;
+    Workspace_utils.base_path;
     workspace_path = base_path;
     lock_expiry_minutes = 30;
     backend_config;
-    backend = Coord_utils.Memory memory_backend;
+    backend = Workspace_utils.Memory memory_backend;
   }
 
 let test_tempo_file_basic () =

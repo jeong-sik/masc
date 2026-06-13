@@ -1,5 +1,5 @@
 ---- MODULE KeeperLaunchPending ----
-\* Pre-launch lifecycle for `lib/keeper/keeper_state_machine.ml`'s Offline
+\* Pre-launch lifecycle for `lib/keeper_registry/keeper_state_machine.ml`'s Offline
 \* branch.  This spec closes Note A drift identified during Cycle 24 /
 \* Tier C1 Phase 0:
 \*

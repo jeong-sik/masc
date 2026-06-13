@@ -24,7 +24,7 @@ implementation_prs: [15467,15474,15488,15493,15494,15522,15531]
 > Companion to RFC-0056. RFC-0056 enumerated *incremental* leaf extraction
 > (1A trajectory → 1K compaction_trigger, 11 phases shipped). This RFC
 > evaluates whether the **remaining ~244 modules in `lib/keeper/`** should
-> be promoted to a single sub-library `masc_mcp.keeper` in one PR, instead
+> be promoted to a single sub-library `masc.keeper` in one PR, instead
 > of continuing leaf-by-leaf sweep. Recommendation: **Option B with
 > prerequisite rename PR (Phase 2.A)** — bulk extraction is feasible but
 > blocked by 38 collision-risk filenames that lack the `keeper_` prefix.
@@ -79,8 +79,8 @@ with `xargs rg -oI '\bKeeper_[a-z_]+'`):
 | Count | Module | Notes |
 |------:|---|---|
 | 292 | `Keeper_types` | facade |
-| 290 | `Keeper_metrics` | Prometheus metric names |
-| 110 | `Keeper_cascade_profile` | cascade runtime name type |
+| 290 | `Keeper_metrics` | legacy metrics backend metric names |
+| 110 | `Keeper_runtime_profile` | runtime runtime name type |
 | 105 | `Keeper_registry` | godfile, 3034 LoC |
 | 98 | `Keeper_runtime_manifest` | per-keeper config |
 | 44 | `Keeper_internal` | internal helpers |
@@ -91,7 +91,7 @@ with `xargs rg -oI '\bKeeper_[a-z_]+'`):
 
 Heavy code-vs-OCamldoc breakdown was not done at file granularity for
 this RFC — sampling showed mixed usage (admission_queue: real code refs;
-prometheus.ml: comment-only refs). For Option B feasibility the
+legacy metrics backend module: comment-only refs). For Option B feasibility the
 distinction does not matter (see §3.B).
 
 ### 2.3 Filename prefix audit (collision risk for `(wrapped false)`)
@@ -100,20 +100,21 @@ The cdal / trajectory / host_config etc. precedent uses
 `(wrapped false)`. Under that pattern, all .ml filenames become
 top-level modules — `keeper_X.ml` ⇒ `Keeper_X` (visible everywhere).
 
-Of 250 `.ml` files in `lib/keeper/`, **38 lack the `keeper_` prefix**:
+Of 250 `.ml` files in `lib/keeper/`, this RFC originally tracked a bulk
+non-prefix cleanup. Repo-auth provider files have since been retired and are
+omitted from the live inventory below.
 
 ```
 alert_persist_kind.ml                    chat_store_operation.ml
 approval_queue_failure_site.ml           checkpoint_failure_operation.ml
 bookkeeping_failure_kind.ml              checkpoint_store_failure_site.ml
-cascade_sync_failure_site.ml             compact_audit_failure_site.ml
-crash_persistence_failure_site.ml        credential_provider.ml
-docker_client.ml                         docker_client_mock.ml
-docker_client_real.ml                    docker_response.ml
+runtime_sync_failure_site.ml             compact_audit_failure_site.ml
+crash_persistence_failure_site.ml        docker_client.ml
+docker_client_mock.ml                     docker_client_real.ml
+docker_response.ml
 event_bus_drain_site.ml                  execution_receipt_failure_site.ml
 fs_failure_site.ml                       generation_lineage_failure_site.ml
-heartbeat_smart.ml                       host_config_provider.ml
-in_container_login_provider.ml           metric_emit_dropped_site.ml
+heartbeat_smart.ml                       metric_emit_dropped_site.ml
 metrics_sse_failure_kind.ml              oas_execution_error_phase.ml
 observation_query_operation.ml           operator_compact_result.ml
 paused_state_persist_phase.ml            post_turn_wirein_failure_site.ml
@@ -125,20 +126,18 @@ turn_up_update_failure_site.ml           write_meta_cycle_failure_site.ml
 ```
 
 These files generate top-level modules like `Docker_client`,
-`Credential_provider`, `Heartbeat_smart`, `Sandbox_executor`,
-`Tool_resolution`, `Host_config_provider` — names that **plausibly
-collide** with sibling sub-libraries (`Host_config` already exists as
-its own sub-lib per PR-0c). Dune docs §library.html quoted in Track A
+`Heartbeat_smart`, `Sandbox_executor`, and `Tool_resolution` — names that
+**plausibly collide** with sibling sub-libraries. Dune docs §library.html quoted in Track A
 say: "Never use `(wrapped false)` when library has filenames likely to
 collide (`Types`, `Utils`, `Error`, `Config`)."
 
-Sub-classification of the 38:
+Sub-classification of the remaining inventory:
 
 | Group | Count | Pattern | Mitigation |
 |---|---|---|---|
 | `*_failure_site.ml` / `*_failure_kind.ml` | ~15 | typed closed-sum errors (RFC-0042 lineage) | Rename to `keeper_*_failure_site.ml` OR move to dedicated typed-error sub-lib |
 | `docker_*.ml` (4 files) | 4 | Docker driver | Rename `keeper_docker_*` or move to `lib/keeper_sandbox_docker/` |
-| `sandbox_*.ml`, `credential_*.ml`, `host_config_*.ml`, `in_container_login_provider.ml` | 5 | runtime providers | Rename with `keeper_` prefix |
+| `sandbox_*.ml` | 2 | runtime providers | Rename with `keeper_` prefix |
 | `heartbeat_smart.ml`, `tool_resolution.ml`, `operator_compact_result.ml` | 3 | keeper-internal helpers | Rename |
 | `*_operation.ml`, `*_phase.ml` | ~5 | typed state/operation kinds | Rename |
 | residue | ~6 | misc | Rename |
@@ -165,8 +164,8 @@ warm-up for Options B/C.
 **Mechanism**: Add `lib/keeper/dune` with a single `(library)` stanza
 using `(wrapped false)`. Dune auto-excludes the subdir from parent
 `lib/dune`'s `(include_subdirs unqualified)`. Parent adds
-`masc_mcp.keeper` to its `(libraries …)` list. Tests add
-`(re_export masc_mcp.keeper)` to `test/deps/dune`.
+`masc.keeper` to its `(libraries …)` list. Tests add
+`(re_export masc.keeper)` to `test/deps/dune`.
 
 **Caller delta**: `Keeper_X` ⇒ `Keeper_X` (zero change, 248 + 335 = 583
 files untouched). Because `(wrapped false)` keeps bare top-level module
@@ -177,8 +176,8 @@ library boundary.
 references unchanged (sub-lib internal cycles are dune-allowed; only
 *inter-library* cycles are forbidden).
 
-**Block 1 — Collision risk (38 files, §2.3)**: Top-level names like
-`Docker_client`, `Credential_provider`, `Sandbox_executor` would leak
+**Block 1 — Collision risk (§2.3)**: Top-level names like
+`Docker_client` and `Sandbox_executor` would leak
 into the global namespace. Dune build *might* succeed depending on
 whether any other library publishes those same module names today —
 but the safety margin is zero. New sibling libraries (future
@@ -209,11 +208,11 @@ rename PR.
 **Mechanism**: Dune 3.7+ feature. Convert `lib/dune` from
 `(include_subdirs unqualified)` to `(include_subdirs qualified)`.
 Subdirectory names become module path prefixes. `lib/keeper/foo.ml`
-becomes `Masc_mcp.Keeper.Foo` (qualified path) instead of bare `Foo`.
+becomes `Masc.Keeper.Foo` (qualified path) instead of bare `Foo`.
 
 **Caller delta**: All 583 files referencing `Keeper_X` would resolve
 *differently* — `Keeper_X` (a top-level module today) becomes
-`Masc_mcp.Keeper.Keeper_X` or with `-open` `Keeper.Keeper_X`. The
+`Masc.Keeper.Keeper_X` or with `-open` `Keeper.Keeper_X`. The
 existing keeper_ prefix would actually become *redundant*
 (`Keeper.Keeper_X` is awkward).
 
@@ -234,10 +233,10 @@ Defer indefinitely; revisit only when ecosystem moves.
 
 ### 3.D. Tezos `lib_*/` with `(wrapped true) + -open`
 
-**Mechanism**: `lib/keeper/dune` with `(library (name masc_mcp_keeper)
-(wrapped true))`. Modules become `Masc_mcp_keeper.Keeper_X`. Parent
-`lib/dune` adds `(flags (:standard -open Masc_mcp_keeper))` so internal
-references resolve `Keeper_X` ⇒ `Masc_mcp_keeper.Keeper_X` transparently.
+**Mechanism**: `lib/keeper/dune` with `(library (name masc_keeper)
+(wrapped true))`. Modules become `Masc_keeper.Keeper_X`. Parent
+`lib/dune` adds `(flags (:standard -open Masc_keeper))` so internal
+references resolve `Keeper_X` ⇒ `Masc_keeper.Keeper_X` transparently.
 External `bin/` and `test/` need similar `-open` or qualified refs.
 
 **Caller delta**: With `-open` everywhere, zero caller change like
@@ -269,7 +268,7 @@ decomposition: it creates the library boundary; mesh work happens
 | PR | Phase | Scope | Approximate cost |
 |---|---|---|---|
 | **PR-A** | 2.A — rename | 38 `*.ml` files in `lib/keeper/` to `keeper_*` prefix; internal-only ref updates. **Skip files referenced from outside `lib/keeper/`** (per-file audit) — these get individual rename PRs or `(wrapped false)` exception list. | 38 git mv, ≤150 internal ref-sed lines |
-| **PR-B** | 2.B — promote | `lib/keeper/dune` new `(library)` stanza with `(wrapped false)`; parent `lib/dune` removes implicit keeper inclusion + adds `masc_mcp.keeper` dep; `test/deps/dune` re_export | ~10 dune edits, 0 caller updates |
+| **PR-B** | 2.B — promote | `lib/keeper/dune` new `(library)` stanza with `(wrapped false)`; parent `lib/dune` removes implicit keeper inclusion + adds `masc.keeper` dep; `test/deps/dune` re_export | ~10 dune edits, 0 caller updates |
 
 After both merge: `lib/keeper/` is a real sub-library. Mesh
 decomposition (Strategies #1, #5, #6 from Track A) resumes as RFC-0056
@@ -312,7 +311,7 @@ root-fix for filename inconsistency. Phase 2.B builds on top.
 
 | # | Question | Resolution path |
 |---|---|---|
-| 1 | Are any of the 38 non-prefix files referenced from *outside* `lib/keeper/`? | Audit `rg -l 'Docker_client\\|Credential_provider\\|Sandbox_executor\\|…'  lib/ bin/ test/` per filename. If yes, that file becomes its own mini-PR (Phase 2.A.i, …) before bulk rename. |
+| 1 | Are any non-prefix files referenced from *outside* `lib/keeper/`? | Audit `rg -l 'Docker_client\\|Sandbox_executor\\|…'  lib/ bin/ test/` per filename. If yes, that file becomes its own mini-PR (Phase 2.A.i, …) before bulk rename. |
 | 2 | Are there internal cycles in `lib/keeper/` that *only* break under `(wrapped false)` sub-library boundary? | `dune build @check` is the oracle. If cycle, revert Phase 2.B and isolate the cyclic cluster as separate sub-lib (Track A §2 closure bundle). |
 | 3 | Should `*_failure_site.ml` / `*_failure_kind.ml` (~15 files) be moved to dedicated `lib/keeper_typed_errors/` sub-lib instead of renamed in place? | Defer to RFC-0042 follow-on. Phase 2.A renames them with `keeper_` prefix as the conservative move — future RFC can extract. |
 | 4 | Filename consistency invariant for new keeper_* files: enforce via lint? | Out of scope; consider in Wave D after `(wrapped true)` migration makes prefix redundant. |
@@ -344,7 +343,7 @@ PR will implement Phase 2.A:
 3. `dune build @check` + `dune runtest` green locally.
 4. Single commit per logical group (e.g., "rename: `*_failure_site` → `keeper_*_failure_site` (15 files)").
 5. Self-review against RFC-0056 G1–G5 gates.
-6. Draft PR → CI green → `human-approved-ready` → Ready.
+6. Draft PR → CI green → Ready.
 
 Phase 2.B (this RFC's main deliverable) follows after Phase 2.A merges
 and main is verified green.
@@ -361,5 +360,5 @@ and main is verified green.
 - **RFC-0056**: Incremental sub-library extraction (Phase 0 cdal + Phase 1A–1K leaves). This RFC is the strategic successor for the keeper namespace specifically.
 - **RFC-0042**: Closed sum type for keeper turn terminal code. The `*_failure_site` / `*_failure_kind` modules under Phase 2.A audit are RFC-0042 lineage.
 - **RFC-0050**: Dashboard component ownership decomposition. Same anti-LoC-cap stance; same workaround rejection bar.
-- **Track A research**: `knowledge/research/2026-05-15-ocaml-large-system-decomposition-patterns.md` (worktree-resident; merge-bound).
+- **Track A research**: `knowledge/research/2026-05-15-ocaml-large-system-decomposition-patterns.md` (worktree-loaded; merge-bound).
 - **MEMORY**: `feedback_hardcoding_and_legacy_zero_tolerance` (2026-05-14), `feedback_extraction_audit_must_grep_both_bare_and_wrapped`.

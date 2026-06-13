@@ -153,6 +153,48 @@ fi
 if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
 exit 0
 |};
+  (* Fake findlib/ocamlobjinfo for the installed-agent-sdk interface marker.
+     Keep this deterministic so tests never inspect the real opam switch. *)
+  let fake_llm_provider_dir =
+    Filename.concat (Filename.concat base "fake-agent-sdk") "llm_provider"
+  in
+  mkdir_p fake_llm_provider_dir;
+  write_file
+    (Filename.concat fake_llm_provider_dir "llm_provider__Provider_config.cmi")
+    "fake-cmi";
+  write_file
+    (Filename.concat fake_llm_provider_dir "llm_provider__Provider_kind.cmi")
+    "fake-cmi";
+  write_executable
+    (Filename.concat bin_dir "ocamlfind")
+    (Printf.sprintf
+       {|#!/bin/sh
+if [ "$1" = "query" ] && [ "$2" = "agent_sdk.llm_provider" ]; then
+  printf '%%s\n' %s
+  exit 0
+fi
+exit 1
+|}
+       (quote fake_llm_provider_dir));
+  write_executable
+    (Filename.concat bin_dir "ocamlobjinfo")
+    {|#!/bin/sh
+case "$1" in
+  *llm_provider__Provider_kind.cmi)
+    unit=Llm_provider__Provider_kind
+    crc="${MASC_TEST_PROVIDER_KIND_CRC:-8b2c2a1da7a2b790f36f2cdbb3512b8f}"
+    ;;
+  *)
+    unit=Llm_provider__Provider_config
+    crc="${MASC_TEST_PROVIDER_CONFIG_CRC:-feedfacefeedfacefeedfacefeedface}"
+    ;;
+esac
+printf 'File %s\n' "$1"
+printf 'Unit name: %s\n' "$unit"
+printf 'Interfaces imported:\n'
+printf '\t%s\t%s\n' "$crc" "$unit"
+exit 0
+|};
   (* Fake dune: log subcommand and exit 0 *)
   let dune_log = Filename.concat base "dune-calls.log" in
   write_executable
@@ -184,7 +226,10 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
       ("PATH", path);
       ("GIT_CEILING_DIRECTORIES", base);
       ("DUNE_LOCAL_LOCK", lock_path);
+      ("DUNE_BUILD_DIR", Filename.concat base "_build");
       ("MASC_OPAM_LOCK_PATH", opam_lock_path);
+      ("MASC_DUNE_LOCK_HELD", "0");
+      ("MASC_OPAM_LOCK_HELD", "0");
     ]
     @ List.filter
         (fun (k, _) ->
@@ -238,6 +283,68 @@ let test_skip_pin_check_env_bypasses_guard () =
       in
       check int "exits zero when MASC_SKIP_PIN_CHECK=1" 0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
+
+let test_skip_pin_check_still_cleans_on_provider_config_crc_change () =
+  with_temp_dir "dune-local-provider-config-crc" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let build_dir = Filename.concat dir "_build" in
+      mkdir_p build_dir;
+      write_file (Filename.concat build_dir ".last-agent-sdk-provider-config-crc")
+        "oldcrc";
+      write_file (Filename.concat build_dir "stale-object") "stale";
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:
+            [
+              ("MASC_SKIP_PIN_CHECK", "1");
+              ("MASC_TEST_PROVIDER_CONFIG_CRC", "newcrc");
+            ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
+          "build"
+      in
+      check int "exits zero when pin guard is skipped" 0 code;
+      check bool "crc change message present" true
+        (contains_substring stderr "Provider_config interface changed");
+      check bool "stale build artifact removed" false
+        (Sys.file_exists (Filename.concat build_dir "stale-object"));
+      check string "crc marker refreshed" "newcrc"
+        (read_file
+           (Filename.concat build_dir ".last-agent-sdk-provider-config-crc"));
+      check bool "dune was invoked after cleanup" true (Sys.file_exists dune_log))
+
+let test_skip_pin_check_still_cleans_on_provider_kind_crc_change () =
+  with_temp_dir "dune-local-provider-kind-crc" (fun dir ->
+      let bin_dir, dune_log =
+        setup_fake_repo dir ~pin_check_exit_code:1
+          ~pin_check_stderr_msg:"pin mismatch"
+      in
+      let build_dir = Filename.concat dir "_build" in
+      mkdir_p build_dir;
+      write_file (Filename.concat build_dir ".last-agent-sdk-provider-kind-crc")
+        "oldcrc";
+      write_file (Filename.concat build_dir "stale-object") "stale";
+      let code, _stdout, stderr =
+        run_dune_local dir bin_dir
+          ~env:
+            [
+              ("MASC_SKIP_PIN_CHECK", "1");
+              ("MASC_TEST_PROVIDER_KIND_CRC", "newcrc");
+            ]
+          ~unset_env:[ "GITHUB_ACTIONS" ]
+          "build"
+      in
+      check int "exits zero when pin guard is skipped" 0 code;
+      check bool "crc change message present" true
+        (contains_substring stderr "Provider_kind interface changed");
+      check bool "stale build artifact removed" false
+        (Sys.file_exists (Filename.concat build_dir "stale-object"));
+      check string "crc marker refreshed" "newcrc"
+        (read_file
+           (Filename.concat build_dir ".last-agent-sdk-provider-kind-crc"));
+      check bool "dune was invoked after cleanup" true (Sys.file_exists dune_log))
 
 let test_github_actions_bypasses_pin_guard () =
   with_temp_dir "dune-local-ci-bypass" (fun dir ->
@@ -722,6 +829,18 @@ esac
 base="${1##*/}"
 printf '%s\n' "$base"
 |};
+      write_executable (Filename.concat bin_dir "awk")
+        {|#!/bin/sh
+while read -r first second rest; do
+  if [ "$second" = "Llm_provider__Provider_config" ]; then
+    printf '%s\n' "$first"
+    exit 0
+  fi
+done
+exit 1
+|};
+      let build_dir = Filename.concat dir "_build" in
+      mkdir_p build_dir;
       let opam_path = Filename.concat bin_dir "opam" in
       let script =
         Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
@@ -733,6 +852,7 @@ printf '%s\n' "$base"
               ("PATH", bin_dir);
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", Filename.concat dir "dune-local.lock");
+              ("DUNE_BUILD_DIR", build_dir);
               ("MASC_SKIP_PIN_CHECK", "1");
               ("MASC_SKIP_DEPS_CHECK", "1");
               ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
@@ -942,7 +1062,7 @@ let test_clean_subcommand_with_eq_flag_skips_pin_guard () =
         0 code;
       check bool "dune was invoked" true (Sys.file_exists dune_log))
 
-(* Codex-connector follow-ups (#13117, 2026-05-05):
+(* CLI-connector follow-ups (#13117, 2026-05-05):
    - `--auto-promote` is a BOOLEAN common option (no arg).  Treating
      it as value-taking made `--auto-promote clean` skip both tokens
      and fall back to `build`.
@@ -1182,6 +1302,14 @@ let () =
             test_pin_drift_aborts_build;
           test_case "MASC_SKIP_PIN_CHECK=1 bypasses pin guard" `Quick
             test_skip_pin_check_env_bypasses_guard;
+          test_case
+            "MASC_SKIP_PIN_CHECK=1 still cleans on Provider_config CRC change"
+            `Quick
+            test_skip_pin_check_still_cleans_on_provider_config_crc_change;
+          test_case
+            "MASC_SKIP_PIN_CHECK=1 still cleans on Provider_kind CRC change"
+            `Quick
+            test_skip_pin_check_still_cleans_on_provider_kind_crc_change;
           test_case "GITHUB_ACTIONS=true bypasses pin guard" `Quick
             test_github_actions_bypasses_pin_guard;
           test_case "opam absent skips pin guard" `Quick

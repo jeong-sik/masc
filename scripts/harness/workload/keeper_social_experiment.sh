@@ -19,7 +19,7 @@ mkdir -p "$RUN_DIR" "$RAW_DIR" "$SNAP_DIR"
 DRY_RUN="${DRY_RUN:-0}"
 ROUNDS="${ROUNDS:-6}"
 ARMS="${ARMS:-baseline,protocol}"
-MODEL_CASCADE="${MODEL_CASCADE:-glm:auto}"
+MODEL_RUNTIME="${MODEL_RUNTIME:-glm:auto}"
 TOPIC="${TOPIC:-영속 에이전트의 기억/계승/자율성 안정화 전략}"
 SLEEP_BETWEEN_CALLS_SEC="${SLEEP_BETWEEN_CALLS_SEC:-1}"
 CLEANUP="${CLEANUP:-0}"
@@ -159,7 +159,7 @@ json_or_empty() {
 }
 
 build_models_json() {
-  jq -cn --arg csv "$MODEL_CASCADE" \
+  jq -cn --arg csv "$MODEL_RUNTIME" \
     '$csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))'
 }
 
@@ -297,7 +297,7 @@ main() {
     --arg mcp_url "$MCP_URL" \
     --arg topic "$TOPIC" \
     --arg arms "$ARMS" \
-    --arg model_cascade "$MODEL_CASCADE" \
+    --arg model_runtime "$MODEL_RUNTIME" \
     --arg dry_run "$DRY_RUN" \
     --arg rounds "$ROUNDS" \
     '{
@@ -306,7 +306,7 @@ main() {
       mcp_url:$mcp_url,
       topic:$topic,
       arms:$arms,
-      model_cascade:$model_cascade,
+      model_runtime:$model_runtime,
       dry_run:($dry_run=="1"),
       rounds:($rounds|tonumber),
       started_at:(now|todateiso8601)

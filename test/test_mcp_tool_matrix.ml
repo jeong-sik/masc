@@ -188,7 +188,7 @@ let run_tool_case_process tool_name =
 
 let test_known_tool_inventory_matches_raw_schemas () =
   let schema_names =
-    Masc_mcp.Config.raw_all_tool_schemas
+    Masc.Config.raw_all_tool_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique_strings
   in
@@ -212,7 +212,7 @@ let test_known_tool_inventory_matches_raw_schemas () =
 let test_full_registry_tools_call_matrix () =
   let failures = ref [] in
   let requested = requested_tool_names () in
-  Masc_mcp.Config.raw_all_tool_schemas
+  Masc.Config.raw_all_tool_schemas
   |> (match requested with
      | None ->
          List.filter (fun (schema : Masc_domain.tool_schema) ->
@@ -234,6 +234,7 @@ let test_full_registry_tools_call_matrix () =
         (String.concat "\n" failures)
 
 let () =
+  Mirage_crypto_rng_unix.use_default ();
   run "mcp_tool_matrix"
     [
       ( "inventory",

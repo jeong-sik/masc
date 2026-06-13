@@ -11,7 +11,7 @@
       it to an [Error _] result.  Swallowing breaks structured
       concurrency and can leave parent fibers waiting forever.
    2. Preserve the backtrace via [Printexc.raise_with_backtrace].
-   3. Emit observability (Prometheus counter + WARN/INFO log) before
+   3. Emit observability (Otel_metric_store counter + WARN/INFO log) before
       re-raising so operators see anomalous cancellations in dashboards
       without turning routine fast [Not_first] races into WARN noise.
    4. Classify wall-time into buckets (fast/short_tail/mid_tail/
@@ -113,9 +113,9 @@ let () =
       "[B5] expected bucket classification (\"fast\" / \"long_tail\") in \
        masc_oas_bridge.ml";
 
-  (* B6: Prometheus counter incremented for cancel *)
+  (* B6: Otel_metric_store counter incremented for cancel *)
   assert_contains
-    ~label:"B6: Prometheus cancel counter"
+    ~label:"B6: Otel_metric_store cancel counter"
     src
     "metric_oas_bridge_cancel";
 
@@ -150,13 +150,13 @@ let () =
 
   (* ── cancel_observability ──────────────────────────────────── *)
 
-  (* O1: Per-caller label in Prometheus counter *)
+  (* O1: Per-caller label in Otel_metric_store counter *)
   assert_contains
     ~label:"O1: caller label in cancel counter"
     src
     "(\"caller\", caller)";
 
-  (* O2: Bucket label in Prometheus counter *)
+  (* O2: Bucket label in Otel_metric_store counter *)
   assert_contains
     ~label:"O2: bucket label in cancel counter"
     src
@@ -178,7 +178,7 @@ let () =
 
   (* T2: per-caller timeout label exists *)
   assert_contains
-    ~label:"T2: per-caller timeout Prometheus label"
+    ~label:"T2: per-caller timeout Otel_metric_store label"
     src
     "metric_oas_bridge_timeout";
 

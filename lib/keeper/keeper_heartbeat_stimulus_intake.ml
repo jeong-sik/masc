@@ -4,7 +4,7 @@
     the godfile decomp campaign. Owns:
 
     - the [heartbeat_event_intake] record returned to the heartbeat loop;
-    - per-class string labels used in Prometheus and log lines;
+    - per-class string labels used in Otel_metric_store and log lines;
     - per-stimulus consumption ([consume_single_heartbeat_stimulus]) +
       board-batch consumption ([consume_board_stimulus_batch]);
     - the top-level RFC-0020 §3 Rule 4 draining function
@@ -12,6 +12,8 @@
       falls back to a single non-board queue dequeue. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_execution
 
 let stimulus_urgency_to_string = function
@@ -23,7 +25,6 @@ let stimulus_urgency_to_string = function
 let stimulus_class_to_string = function
   | Keeper_event_queue.Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Alive_but_stuck_recovery -> "alive_but_stuck_recovery"
   | Stay_silent_recovery -> "stay_silent_recovery"
   | Unsupported _ -> "unsupported"
 ;;
@@ -69,7 +70,7 @@ let consume_single_heartbeat_stimulus
   =
   let stimulus_class = Keeper_event_queue.classify stim in
   let class_str = stimulus_class_to_string stimulus_class in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string StimulusConsumed)
     ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
     ();
@@ -88,17 +89,6 @@ let consume_single_heartbeat_stimulus
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
     []
-  | Alive_but_stuck_recovery ->
-    Log.Keeper.info
-      "turn entry: alive-but-stuck recovery stimulus consumed post_id=%s \
-       (keeper=%s)"
-      stim.post_id
-      meta_after_triage.name;
-    record_recovery_stimulus_turn_started
-      ~ctx
-      ~keeper_name:meta_after_triage.name
-      stim;
-    []
   | Stay_silent_recovery ->
     Log.Keeper.info
       "turn entry: stay-silent recovery stimulus consumed post_id=%s \
@@ -111,7 +101,7 @@ let consume_single_heartbeat_stimulus
       stim;
     []
   | Unsupported prefix ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string UnsupportedStimulus)
       ~labels:[ "keeper", meta_after_triage.name ]
       ();
@@ -133,7 +123,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
       meta_after_triage.name;
   List.filter_map
     (fun (stim : Keeper_event_queue.stimulus) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string StimulusConsumed)
          ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
          ();
@@ -150,12 +140,10 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
 
 let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
   (* RFC-0020 §3 Rule 4 — drain at most one Event Layer stimulus
-     per turn. Board signals are coalesced by a debounce window before
-     falling back to a single non-board queue dequeue. *)
-  let window = Keeper_config.keeper_board_debounce_window_sec () in
+     per turn. Board signals are coalesced by the default debounce
+     window in {!Keeper_event_queue.drain_board_window} (2 s). *)
   let board_batch =
     Keeper_registry_event_queue.drain_board
-      ~window_sec:window
       ~base_path:ctx.config.base_path
       meta_after_triage.name
   in

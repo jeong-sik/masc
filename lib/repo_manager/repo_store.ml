@@ -62,7 +62,6 @@ let repository_of_toml toml id =
   let* local_path = find_string_default "local_path" (default_local_path id) in
   let* aliases = find_string_list_default "aliases" [] in
   let* default_branch = find_string_default "default_branch" "main" in
-  let* credential_id = find_string_default "credential_id" "default" in
   let* keepers = find_string_list_default "keepers" [] in
   let* status_str = find_string_default "status" "Active" in
   let* status = status_of_string status_str in
@@ -86,7 +85,6 @@ let repository_of_toml toml id =
       local_path;
       aliases;
       default_branch;
-      credential_id;
       keepers;
       status;
       auto_sync;
@@ -105,7 +103,6 @@ let toml_of_repository repo =
         Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) repo.aliases)
       );
       ("default_branch", Otoml.string repo.default_branch);
-      ("credential_id", Otoml.string repo.credential_id);
       ( "keepers",
         Otoml.TomlArray (List.map (fun s -> Otoml.TomlString s) repo.keepers)
       );
@@ -138,7 +135,6 @@ let load_all ~base_path =
           local_path = base_path;
           aliases = [];
           default_branch = "main";
-          credential_id = "default";
           keepers = [];
           status = Active;
           auto_sync = false;
@@ -213,9 +209,6 @@ let add ~base_path (repo : repository) =
         local_path =
           (if String.trim repo.local_path = "" then default_local_path repo.id
            else repo.local_path);
-        credential_id =
-          (if String.trim repo.credential_id = "" then "default"
-           else repo.credential_id);
         created_at = (if Int64.equal repo.created_at Int64.zero then now else repo.created_at);
         updated_at = (if Int64.equal repo.updated_at Int64.zero then now else repo.updated_at);
       }
@@ -266,9 +259,6 @@ let update ~base_path id (repo : repository) =
               local_path =
                 (if String.trim repo.local_path = "" then default_local_path id
                  else repo.local_path);
-              credential_id =
-                (if String.trim repo.credential_id = "" then "default"
-                 else repo.credential_id);
               created_at = r.created_at;
               updated_at = now;
             }
@@ -458,7 +448,6 @@ let discover_repositories ~base_path =
                   local_path = abs_repo_dir;
                   aliases = [];
                   default_branch = "main";
-                  credential_id = "default";
                   keepers = [];
                   status = Active;
                   auto_sync = false;
@@ -502,4 +491,3 @@ end)
 
 let find_url_by_id = Lookup.find_url_by_id
 let find_repo_by_path_prefix = Lookup.find_repo_by_path_prefix
-

@@ -40,11 +40,11 @@ let require_net () =
 (** Helper: get optional net. *)
 let get_net_opt () = Eio_context.get_net_opt ()
 
-(** Stable string label for Prometheus bucketing — keeps the
+(** Stable string label for Otel_metric_store bucketing — keeps the
     metric [tag] dimension separated from per-tool [name]. *)
 let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   match tag with
-  | Mod_keeper -> "keeper"
+  | Mod_external -> "external"
   | Mod_library -> "library"
   | Mod_task -> "task"
   | Mod_shard -> "shard"
@@ -52,7 +52,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_local_runtime -> "local_runtime"
   | Mod_run -> "run"
   | Mod_agent -> "agent"
-  | Mod_room -> "room"
+  | Mod_state -> "state"
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_misc -> "misc"
@@ -66,7 +66,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
 
 (** Dispatch a tool by its module tag using keeper-available context.
 
-    @param config   Coord configuration
+    @param config   Workspace configuration
     @param agent_name  Keeper's agent name (meta.name)
     @param tag      Module tag from [Tool_dispatch.lookup_tag]
     @param name     Tool name
@@ -75,7 +75,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
     Returns [Some result] or [None] if module dispatch
     does not recognize the tool name (should not happen when tag is correct). *)
 let dispatch
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(agent_name : string)
       ~(tag : Tool_dispatch.module_tag)
       ~(name : string)
@@ -110,9 +110,10 @@ let dispatch
         ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
         ~name
         ~args
-    | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
+    | Mod_run ->
+      Tool_run.dispatch { Tool_run.config; agent_name = Some agent_name } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
-    | Mod_room -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
+    | Mod_state -> Tool_workspace.dispatch { Tool_workspace.config; agent_name } ~name ~args
     | Mod_control ->
       if name = "masc_pause_status"
       then Tool_control.dispatch { Tool_control.config; agent_name } ~name ~args
@@ -134,11 +135,17 @@ let dispatch
       Some (if success then ok message else err message)
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
-      Tool_task.dispatch
-        { Tool_task.config; agent_name; sw = Eio_context.get_switch_opt () }
+      Task.Tool.dispatch
+        { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args
-    | Mod_keeper ->
+    | Mod_external ->
+      (* [Mod_external] tools are dispatched at the MCP server boundary
+         (mcp_server_eio_execute.dispatch_by_tag), which has the per-request
+         config/agent_name/Eio resources these handlers need. From within a
+         keeper turn that context is unavailable, so reject and direct the
+         caller to the MCP client surface. Currently these are the
+         keeper-management tools registered by [Keeper_tool_surface]. *)
       Some
         (workflow_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))
@@ -150,9 +157,6 @@ let dispatch
                on OAS Agent.run"
               name))
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
-    | Mod_inline when String.equal name "masc_approval_pending" ->
-      let json = Keeper_approval_queue.list_pending_json () in
-      Some (Tool_result.make_ok ~tool_name:name ~start_time ~data:json ())
     | Mod_inline ->
       Some
         (workflow_err
@@ -173,7 +177,7 @@ let dispatch
       | Some i -> String.sub raw 0 i
       | None -> if String.length raw > 80 then String.sub raw 0 80 else raw
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TagDispatchFailures)
       ~labels:[ "tag", string_of_tag tag ]
       ();

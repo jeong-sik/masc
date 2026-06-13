@@ -3,7 +3,7 @@
     [masc_tool_schemas] only depends on [masc_types], so enum strings
     that must stay in sync with {!Tool_agent} (which lives higher up
     the dep tree) are hand-mirrored here. The
-    [test_types.ml :: agent_tool_variants_ssot] regression test catches
+    [test_types.ml :: keeper_tool_variants_ssot] regression test catches
     drift between the two sides.
 
     Issues: #8501 (mirror pattern), #8372 (agent_status enum derivation),

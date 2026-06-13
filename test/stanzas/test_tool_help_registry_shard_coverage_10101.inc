@@ -1,4 +1,4 @@
-; #10101: same rationale as #10091 / #10097 — Masc_mcp module
+; #10101: same rationale as #10091 / #10097 — Masc module
 ; init triggers #9903 prod-guard on HOME; setenv before exec.
 
 (test

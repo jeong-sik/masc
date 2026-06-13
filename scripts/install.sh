@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# masc-mcp installer — download prebuilt binary, seed minimum config, smoke-check.
+# masc installer — download prebuilt binary, seed minimum config, smoke-check.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc-mcp/main/scripts/install.sh | bash -s -- --version v0.8.0 --prefix /usr/local/bin
+#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash -s -- --version v0.8.0 --prefix /usr/local/bin
 #
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
@@ -14,15 +14,15 @@
 #   --dry-run          Print what would happen, do not write
 #
 # Env:
-#   MASC_MCP_VERSION   Same as --version
-#   MASC_MCP_PREFIX    Same as --prefix
-#   MASC_MCP_REPO      Override repo (default: jeong-sik/masc-mcp)
+#   MASC_VERSION   Same as --version
+#   MASC_PREFIX    Same as --prefix
+#   MASC_REPO      Override repo (default: jeong-sik/masc)
 
 set -euo pipefail
 
-REPO="${MASC_MCP_REPO:-jeong-sik/masc-mcp}"
-VERSION="${MASC_MCP_VERSION:-}"
-PREFIX="${MASC_MCP_PREFIX:-$HOME/.local/bin}"
+REPO="${MASC_REPO:-jeong-sik/masc}"
+VERSION="${MASC_VERSION:-}"
+PREFIX="${MASC_PREFIX:-$HOME/.local/bin}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
@@ -64,8 +64,8 @@ detect_asset() {
   local os arch
   os=$(uname -s); arch=$(uname -m)
   case "$os/$arch" in
-    Darwin/arm64)  echo "masc-mcp-macos-arm64" ;;
-    Linux/x86_64)  echo "masc-mcp-linux-x64"   ;;
+    Darwin/arm64)  echo "masc-macos-arm64" ;;
+    Linux/x86_64)  echo "masc-linux-x64"   ;;
     Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
     Linux/aarch64) die "Linux arm64 release asset not built yet. Track .github/workflows/release.yml." ;;
     *) die "unsupported platform: $os/$arch" ;;
@@ -89,7 +89,7 @@ log "version: $VERSION"
 
 # --- 3. download binary -------------------------------------------------------
 URL="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
-DEST="$PREFIX/masc-mcp"
+DEST="$PREFIX/masc"
 
 SKIP_DL=0
 if [ -e "$DEST" ] && [ "$FORCE" -eq 0 ]; then
@@ -168,7 +168,7 @@ fi
 
 cat <<EOF
 
-${c_grn}masc-mcp ${VERSION} installed.${c_off}
+${c_grn}masc ${VERSION} installed.${c_off}
 
 Next:
   ${c_dim}# start server (loopback only)${c_off}
@@ -177,7 +177,7 @@ Next:
   ${c_dim}# in another shell, sanity check${c_off}
   curl http://127.0.0.1:8935/health
 
-  ${c_dim}# wire up your MCP client (Claude / Codex / Gemini)${c_off}
+  ${c_dim}# wire up your MCP client (local agent)${c_off}
   See: https://github.com/$REPO#mcp-client-setup
 
 EOF

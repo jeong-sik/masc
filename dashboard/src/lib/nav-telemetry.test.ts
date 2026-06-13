@@ -84,7 +84,6 @@ describe('nav-telemetry', () => {
       tab: 'workspace',
       params: {
         section: 'repositories',
-        view: 'graph',
         [REDIRECTED_FROM_PARAM]: 'monitoring:git-graph',
       },
       postId: null,

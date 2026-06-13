@@ -8,7 +8,7 @@
 
 open Alcotest
 
-module Cache_eio = Masc_mcp.Cache_eio
+module Cache_eio = Masc.Cache_eio
 
 (* ============================================================
    cache_entry Type Tests

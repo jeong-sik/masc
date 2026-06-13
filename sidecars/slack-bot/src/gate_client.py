@@ -48,7 +48,7 @@ class GateClient(GateClientBase):
             "channel": "slack",
             "channel_user_id": user_id,
             "channel_user_name": username,
-            "channel_room_id": channel_id,
+            "channel_workspace_id": channel_id,
         }
 
     async def send_slack_message(

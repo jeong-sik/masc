@@ -111,8 +111,8 @@ module Operator : sig
   (** [MASC_OPERATOR_JUDGE_INTERVAL_SEC] (default [60]).
       Floor [15s]. *)
 
-  val room_ttl_sec : int
-  (** [MASC_OPERATOR_JUDGE_ROOM_TTL_SEC] (default [60]).
+  val workspace_ttl_sec : int
+  (** [MASC_OPERATOR_JUDGE_WORKSPACE_TTL_SEC] (default [60]).
       Floor [15s]. *)
 
   val session_ttl_sec : int
@@ -146,11 +146,11 @@ end
 (** {1 Model routing defaults} *)
 
 module Model_defaults : sig
-  val default_cascade_opt : unit -> string option
+  val default_runtime_opt : unit -> string option
   val default_provider_opt : unit -> string option
   val default_model_opt : unit -> string option
-  val routing_cascade : unit -> string
-  (** [MASC_ROUTING_CASCADE] override, otherwise logical key ["routing"]. *)
+  val routing_runtime : unit -> string
+  (** [MASC_ROUTING_RUNTIME] override, otherwise logical key ["routing"]. *)
 
   val goal_models_opt : unit -> string option
   val goal_dispatch_runtime : unit -> string

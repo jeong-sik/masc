@@ -6,7 +6,28 @@
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_core
+
+type pre_compact_event = {
+  timestamp : float;
+  keeper_name : string;
+  context_ratio : float;
+  message_count : int;
+  token_count : int;
+  strategies : string list;
+  context_window : int;
+  is_local_model : bool;
+  trigger : Compaction_trigger.t;
+}
+
+let record_pre_compact_callback : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option) ref =
+  ref (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+
+let register_record_pre_compact (f : (keeper_name:string -> context_ratio:float -> message_count:int -> token_count:int -> strategies:string list -> context_window:int -> is_local_model:bool -> trigger:Compaction_trigger.t -> pre_compact_event option)) =
+  record_pre_compact_callback := f
+;;
 
 (** Fraction of context window at which compaction is treated as an
     emergency, bypassing the continuity-reflection cooldown gate.
@@ -19,7 +40,7 @@ open Keeper_context_core
     the default with a one-time warn (parse-correctness, not silent
     coercion — a stale operator typo should not push the emergency
     floor outside the policy envelope, but it also should not block
-    boot). The effective value is exposed via Prometheus gauge
+    boot). The effective value is exposed via Otel_metric_store gauge
     {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}
     so operators can see what the running process is actually using.
 
@@ -41,7 +62,7 @@ let emergency_compact_ratio_threshold : float =
      get_float ~default collapses (1) and (3) into the same float value,
      making operator typos (e.g. "foo" or "0,9" with comma) indistinguishable
      from the unset case. The subsequent Float.equal raw default_value check
-     then suppresses the warn path entirely. (Codex P2 review of PR #15782.) *)
+     then suppresses the warn path entirely. (Review on PR #15782.) *)
   let effective =
     match Sys.getenv_opt env_var with
     | None -> default_value
@@ -75,33 +96,33 @@ let emergency_compact_ratio_threshold : float =
          default_value
        | Some parsed -> parsed)
   in
-  (* Surface the effective value for operators via /metrics. Registered
+  (* Surface the effective value for operators via telemetry export. Registered
      here so the gauge exists from module init regardless of whether any
      compaction has fired yet. *)
-  Prometheus.register_gauge
+  Otel_metric_store.register_gauge
     ~name:Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     ~help:
       "Effective emergency compaction ratio threshold (env-overridable via \
        MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD; clamped to [0.5, 0.99])."
     ();
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     effective;
   effective
 ;;
 
-(* Tool-heavy compaction thresholds.  Per-keeper values live on
-   [meta.compaction.tool_heavy_msg_threshold] and
-   [meta.compaction.tool_heavy_ratio_floor]; defaults at
-   {!Keeper_config.default_tool_heavy_msg_threshold} (40) and
-   {!Keeper_config.default_tool_heavy_ratio_floor} (0.15).
-
-   When message count exceeds the threshold AND context ratio exceeds
-   the floor, [decide_compaction] applies a Tool_heavy trigger that
-   bypasses the continuity-reflection cooldown, the same way the
-   emergency ratio gate does.  PR-A introduced the meta fields with
-   defaults preserving the prior global behavior; PR-B (this commit)
-   wires the meta values into the gate. *)
+(* The former tool_heavy trigger (msg_count > 40 && ratio > 0.15,
+   cooldown-bypassing) was removed: it gated on stored-history bulk that the
+   OAS call-time pruner (Agent_turn.prepare_messages: stub_tool_results
+   keep_recent + keep_last, applied on every LLM call without mutating
+   stored history) already bounds, while its destructive remedy
+   (prune/stub/drop on the checkpoint) erased in-flight investigation
+   state and did not push msg_count back under its own threshold —
+   re-arming itself within seconds.  Fleet logs 2026-06-08..10: 26/26
+   compactions fired via tool_heavy, none via the pressure gates below;
+   68k tokens saved vs ~1.2-2.6M re-spent on forced re-reads.
+   Real context pressure remains covered by ratio/message/token gates,
+   the emergency floor above, and the OAS overflow-retry summarizer. *)
 
 type compaction_decision =
   | Applied of Compaction_trigger.t
@@ -134,8 +155,6 @@ let decide_compaction
       ~message_gate
       ~token_gate
       ~cooldown_sec
-      ~tool_heavy_msg_threshold
-      ~tool_heavy_ratio_floor
       ~last_continuity_update_ts
       ~last_proactive_ts
       ~now_ts
@@ -155,15 +174,7 @@ let decide_compaction
     then 0.0
     else max 0.0 (Float.of_int cooldown_sec -. (now_ts -. last_reflection_ts))
   in
-  (* Tool-heavy compaction is an operational safety valve: accumulated
-     tool result bloat slows local inference and can hide below the
-     normal ratio/message/token gates, so it bypasses the reflection
-     cooldown like the emergency ratio gate. *)
-  let tool_heavy =
-    msg_count > tool_heavy_msg_threshold
-    && ratio > tool_heavy_ratio_floor
-  in
-  if not reflection_ready && not tool_heavy
+  if not reflection_ready
   then Skipped_continuity_reflection { hold_s; cooldown_sec }
   else if ratio >= ratio_gate
   then Applied (Compaction_trigger.Ratio_threshold { ratio; threshold = ratio_gate })
@@ -171,8 +182,6 @@ let decide_compaction
   then Applied (Compaction_trigger.Message_count { count = msg_count; threshold = message_gate })
   else if token_gate > 0 && tok_count >= token_gate
   then Applied (Compaction_trigger.Token_count { count = tok_count; threshold = token_gate })
-  else if tool_heavy
-  then Applied (Compaction_trigger.Tool_heavy { messages = msg_count; ratio })
   else Blocked_below_thresholds
 ;;
 
@@ -202,8 +211,6 @@ let compact_if_needed_typed
       ~message_gate
       ~token_gate
       ~cooldown_sec:meta.compaction.cooldown_sec
-      ~tool_heavy_msg_threshold:meta.compaction.tool_heavy_msg_threshold
-      ~tool_heavy_ratio_floor:meta.compaction.tool_heavy_ratio_floor
       ~last_continuity_update_ts:meta.runtime.last_continuity_update_ts
       ~last_proactive_ts:meta.runtime.proactive_rt.last_ts
       ~now_ts
@@ -241,7 +248,7 @@ let compact_if_needed_typed
       trigger_human;
     let model_meta =
       let model_labels = Keeper_model_labels.configured_model_labels_of_meta meta in
-      Cascade_runtime_candidate.context_window_hint_of_labels model_labels
+      Runtime_provider_binding.context_window_hint_of_labels model_labels
     in
     (* record_pre_compact's JSONL append is wrapped by
        append_store_json_fail_open in Dashboard_harness_health, so this call
@@ -250,16 +257,15 @@ let compact_if_needed_typed
        future revision adds throwing observability calls here, wrap them. *)
     let pre_compact_event =
       try
-        Some
-          (Dashboard_harness_health.record_pre_compact
-             ~keeper_name:meta.name
-             ~context_ratio:ratio
-             ~message_count:msg_count
-             ~token_count:tok_count
-             ~strategies:strategy_names
-             ~context_window:model_meta.context_window
-             ~is_local_model:model_meta.is_local_model
-             ~trigger)
+        !record_pre_compact_callback
+          ~keeper_name:meta.name
+          ~context_ratio:ratio
+          ~message_count:msg_count
+          ~token_count:tok_count
+          ~strategies:strategy_names
+          ~context_window:model_meta.context_window
+          ~is_local_model:model_meta.is_local_model
+          ~trigger
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -320,65 +326,77 @@ let compact_if_needed_typed
     (* RFC-0149 §3.2 PR-2 — the silent [max 0 (pre - post)] floor and
        the companion [metric_keeper_compaction_negative_savings] counter
        (a §1 telemetry-as-fix artefact) are replaced by a phantom-typed
-       [Token_count.saved] match.  The [`Divergent] arm carries the
+       [Keeper_token_count.saved] match.  The [`Divergent] arm carries the
        overrun magnitude as a typed payload that surfaces on the
        post-compact JSONL record below ([tokens_divergence] /
        [messages_divergence]), so operators can detect estimator
-       drift without a free-floating Prometheus counter. *)
+       drift without a free-floating Otel_metric_store counter. *)
     let saved_tokens, tokens_divergence =
       match
-        Token_count.saved
-          ~pre:(Token_count.pre_estimate tok_count)
-          ~post:(Token_count.post_recount new_tok_count)
+        Keeper_token_count.saved
+          ~pre:(Keeper_token_count.pre_estimate tok_count)
+          ~post:(Keeper_token_count.post_recount new_tok_count)
       with
       | `Saved n -> n, None
       | `Divergent n -> 0, Some n
     in
     let saved_messages, messages_divergence =
       match
-        Token_count.saved
-          ~pre:(Token_count.pre_estimate msg_count)
-          ~post:(Token_count.post_recount new_msg_count)
+        Keeper_token_count.saved
+          ~pre:(Keeper_token_count.pre_estimate msg_count)
+          ~post:(Keeper_token_count.post_recount new_msg_count)
       with
       | `Saved n -> n, None
       | `Divergent n -> 0, Some n
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string Compactions)
       ~labels:[ "keeper", meta.name ]
       ();
-    Prometheus.set_gauge
+    Otel_metric_store.set_gauge
       Keeper_metrics.(to_string CompactionRatioChange)
       ~labels:[ "keeper", meta.name ]
       (ratio -. new_ratio);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CompactionSavedTokens)
       ~labels:[ "keeper", meta.name ]
       ~delta:(float_of_int saved_tokens)
       ();
     (* C1 (CRIT) from oas-internal-audit.html §6: surface pair-repair
-       fabrication counts via /metrics so operators can alert on rising
-       fabrication rate without grepping the JSONL [tool_pair_repair]
-       structured log block emitted below. Increment by *count*, not by 1,
-       so the counter reflects fabrication volume rather than call
-       frequency. Kind label is a closed 2-value vocabulary (no Printexc-
-       style unbounded label) — see iter 21 / PR #15788 for the same
-       pattern. The repaired messages also carry [was_fabricated=true] plus
+       counts via telemetry export so operators can alert on rising repair
+       rate without grepping the JSONL [tool_pair_repair] structured log block
+       emitted below. Increment by *count*, not by 1, so the counter reflects
+       repair volume rather than call frequency. Kind label is a closed
+       2-value vocabulary (no Printexc-style unbounded label) — see iter 21 /
+       PR #15788 for the same pattern. The repaired messages also carry
        bounded provenance under [Keeper_context_core.pair_repair_metadata_key]. *)
     let bump_pair_repair kind count =
       if count > 0
       then
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string CompactionPairRepairFabrications)
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string CompactionPairRepairDrops)
           ~labels:[ "keeper", meta.name; "kind", kind ]
           ~delta:(float_of_int count)
           ()
     in
-    bump_pair_repair "downgraded_tool_use" pair_repair_stats.downgraded_tool_uses;
-    bump_pair_repair "downgraded_tool_result" pair_repair_stats.downgraded_tool_results;
-    Log.emit
+    bump_pair_repair "dropped_tool_use" pair_repair_stats.dropped_tool_uses;
+    bump_pair_repair "dropped_tool_result" pair_repair_stats.dropped_tool_results;
+    let tool_use_sample_json =
+      List.map
+        (fun (tool_use_id, tool_name) ->
+           `Assoc
+             [ "tool_use_id", `String tool_use_id
+             ; "tool_name", `String tool_name
+             ])
+        pair_repair_stats.dropped_tool_use_samples
+    in
+    let tool_result_id_json =
+      List.map
+        (fun tool_use_id -> `String tool_use_id)
+        pair_repair_stats.dropped_tool_result_ids
+    in
+    Log.Harness.emit
       Log.Info
-      ~module_name:"Harness"
       ~details:
         (`Assoc
             [ "keeper_name", `String meta.name
@@ -402,20 +420,22 @@ let compact_if_needed_typed
                 | None -> `Null )
             ; ( "tool_pair_repair"
               , `Assoc
-                  [ ( "downgraded_tool_uses"
-                    , `Int pair_repair_stats.downgraded_tool_uses )
-                  ; ( "downgraded_tool_results"
-                    , `Int pair_repair_stats.downgraded_tool_results )
+                  [ ( "dropped_tool_uses"
+                    , `Int pair_repair_stats.dropped_tool_uses )
+                  ; ( "dropped_tool_results"
+                    , `Int pair_repair_stats.dropped_tool_results )
+                  ; "dropped_tool_use_samples", `List tool_use_sample_json
+                  ; "dropped_tool_result_ids", `List tool_result_id_json
                   ] )
             ])
       (Printf.sprintf
-         "post_compact keeper=%s trigger=%s saved_tokens=%d pair_repair_tool_uses=%d \
-          pair_repair_tool_results=%d"
+         "post_compact keeper=%s trigger=%s saved_tokens=%d pair_repair_dropped_tool_uses=%d \
+          pair_repair_dropped_tool_results=%d"
          meta.name
          trigger_human
          saved_tokens
-         pair_repair_stats.downgraded_tool_uses
-         pair_repair_stats.downgraded_tool_results);
+         pair_repair_stats.dropped_tool_uses
+         pair_repair_stats.dropped_tool_results);
     compacted_ctx, Some trigger, decision
 ;;
 

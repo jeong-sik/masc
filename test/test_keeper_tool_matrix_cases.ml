@@ -1,8 +1,8 @@
 module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
-module KET = Masc_mcp.Agent_tool_dispatch_runtime
-module KTO = Masc_mcp.Keeper_tools_oas_bundle
+module KET = Masc.Keeper_tool_dispatch_runtime
+module KTO = Masc.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 
 type init_mode = Generic.init_mode =
@@ -24,9 +24,9 @@ type keeper_case = {
 
 and fixture = {
   generic : Generic.fixture;
-  config : Masc_mcp.Coord.config;
-  meta : Masc_mcp.Keeper_types.keeper_meta;
-  ctx_snapshot : Masc_mcp.Keeper_types.working_context;
+  config : Masc.Workspace.config;
+  meta : Masc.Keeper_meta_contract.keeper_meta;
+  ctx_snapshot : Keeper_types.working_context;
   tools : Agent_sdk.Tool.t list;
 }
 
@@ -67,19 +67,55 @@ let voice_guard_fragments =
     "tts endpoint";
   ]
 
-let init_keeper_bridge () =
-  Masc_test_deps.init_keeper_tool_registry ();
-  ignore (Masc_mcp.Mcp_server_eio.get_clock_opt ());
-  (* Use find_project_root — the test cwd is _build/default/test/ which
-     does not contain config/tool_policy.toml, so Sys.getcwd fails the
-     direct shortcut and falls into the exe-relative walk that picks up
-     the partial _build/default/config/cascade.json. *)
-  let base_path = Masc_test_deps.find_project_root () in
-  (match KET.init_policy_config ~base_path with
-   | Ok () -> ()
-   | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
-  Masc_mcp.Agent_tool_shared_runtime.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
-  KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
+let test_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_keeper_bridge =
+  let initialized = ref false in
+  fun () ->
+    if not !initialized then (
+      initialized := true;
+      Masc_test_deps.init_keeper_tool_registry ();
+      ignore (Masc.Mcp_server_eio.get_clock_opt ());
+      (* Use find_project_root — the test cwd is _build/default/test/ which
+         does not contain config/tool_policy.toml, so Sys.getcwd fails the
+         direct shortcut and falls into the exe-relative walk that picks up
+         the partial _build/default/config/runtime.json. *)
+      let base_path = Masc_test_deps.find_project_root () in
+      let runtime_config_path = Filename.concat base_path "config/runtime.toml" in
+      let config_path =
+        if Sys.file_exists runtime_config_path then
+          runtime_config_path
+        else (
+          let temp_path = Filename.temp_file "keeper_matrix_runtime_" ".toml" in
+          let oc = open_out temp_path in
+          output_string oc test_runtime_toml;
+          close_out oc;
+          temp_path)
+      in
+      (match Runtime.init_default ~config_path with
+       | Ok () -> ()
+       | Error err -> Printf.eprintf "[WARN] Runtime.init_default failed: %s\n" err);
+      Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
+      KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas)
 
 let make_meta ?(name = "keeper-tool-matrix") () =
   match
@@ -90,10 +126,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
-          ( "tool_access",
-            Masc_mcp.Keeper_types.tool_access_to_json
-              (Masc_mcp.Keeper_types.Preset
-                 { preset = Masc_mcp.Keeper_types.Full; also_allow = [] } ) );
+          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta
@@ -101,7 +134,9 @@ let make_meta ?(name = "keeper-tool-matrix") () =
 
 let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
-  KET.keeper_allowed_model_tools (make_meta ())
+  (* keeper_allowed_model_tools removed (dead per-keeper allowlist concept);
+     keeper_universe_model_tools is the live universe-filtered equivalent. *)
+  KET.keeper_universe_model_tools (make_meta ())
   |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
 
@@ -118,28 +153,31 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
   in
-  let config = Masc_mcp.Coord.default_config base_path in
+  let config = Masc.Workspace.default_config base_path in
   let ctx =
-    Masc_mcp.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
+    Masc.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
     |> fun ctx ->
-    Masc_mcp.Keeper_context_runtime.append ctx
+    Masc.Keeper_context_runtime.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
   let meta = make_meta () in
+  Masc.Keeper_registry.clear ();
+  ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
+  ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
   let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
   (match init_mode with
    | Init_joined ->
-       (* Join under both the raw meta name (used by masc_* tools called
+       (* Bind under both the raw meta name (used by masc_* tools called
           through the keeper) and the prefixed keeper alias. Some keeper
           tools resolve the agent through the prefixed alias while
           dispatched masc tools use the raw meta identity. *)
        ignore
-         (Masc_mcp.Coord.join config ~agent_name:meta.name
+         (Masc.Workspace.bind_session config ~agent_name:meta.name
             ~capabilities:[] ());
        ignore
-         (Masc_mcp.Coord.join config ~agent_name:("keeper-" ^ meta.name)
+         (Masc.Workspace.bind_session config ~agent_name:("keeper-" ^ meta.name)
             ~capabilities:[] ())
    | Fresh | Init_only -> ());
   { generic; config; meta; ctx_snapshot; tools }
@@ -153,26 +191,31 @@ let find_tool fixture name =
   match by_name name with
   | Some _ as found -> found
   | None ->
-    (match Masc_mcp.Keeper_tool_alias.public_name_for_internal name with
+    (match Masc.Keeper_tool_alias.public_name_for_internal name with
      | Some public -> by_name public
      | None -> None)
 
 let ensure_sample_file fixture =
   let relative = "keeper-tool-matrix.txt" in
-  let absolute = Filename.concat fixture.generic.base_path relative in
+  let absolute =
+    Filename.concat
+      (Masc.Keeper_sandbox.host_root_abs_of_meta ~config:fixture.config fixture.meta)
+      relative
+  in
+  Generic.mkdir_p (Filename.dirname absolute);
   Generic.write_text_file absolute "needle\nsecond line\n";
   relative
 
 let ensure_keeper_claim fixture =
   ignore (Generic.ensure_task fixture.generic);
   ignore
-    (Masc_mcp.Coord.claim_next fixture.config
+    (Masc.Workspace.claim_next fixture.config
        ~agent_name:fixture.meta.agent_name)
 
 let ensure_voice_session fixture =
-  let mgr = Masc_mcp.Keeper_voice_local.get_session_manager () in
+  let mgr = Masc.Keeper_voice_local.get_session_manager () in
   ignore
-    (Masc_mcp.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
+    (Masc.Voice_session_manager.start_session mgr ~agent_id:fixture.meta.name
        ~voice:"tool-matrix" ())
 
 let prepare_keeper_name fixture name =
@@ -201,6 +244,7 @@ let prepare_keeper_name fixture name =
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
+  if name = "keeper_ide_annotate" then ignore (ensure_sample_file fixture);
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -219,6 +263,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc []
   | "keeper_memory_search" ->
       `Assoc [ ("query", `String "memory needle"); ("limit", `Int 2) ]
+  | "keeper_memory_write" ->
+      `Assoc [ ("kind", `String "decision"); ("content", `String "tool matrix memory write content") ]
+  | "keeper_ide_annotate" ->
+      `Assoc
+        [
+          ("file_path", `String (ensure_sample_file fixture));
+          ("line_start", `Int 1);
+          ("content", `String "tool matrix ide annotation");
+        ]
   | "keeper_board_post" ->
       `Assoc
         [
@@ -281,6 +334,15 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       `Assoc [ ("query", `String "tool matrix") ]
   | "keeper_library_read" ->
       `Assoc [ ("topic", `String (Generic.ensure_library_topic fixture.generic)) ]
+  | "keeper_surface_read" -> `Assoc [ ("surface", `String "dashboard") ]
+  | "keeper_surface_post" ->
+      `Assoc
+        [ ("surface", `String "dashboard");
+          ("content", `String "tool matrix surface post") ]
+  | "keeper_person_note_set" ->
+      `Assoc
+        [ ("speaker_id", `String "98791450001");
+          ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_task_force_release" ->
       `Assoc
@@ -300,8 +362,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
       (* The completion text intentionally contains the "follow-up"
          excuse pattern so the anti-rationalization gate fast-rejects
          on Gate 2 (excuse pattern) without invoking the cross_verifier
-         LLM cascade. The matrix runs in environments where the
-         evaluator cascade is unreachable, and the LLM path's 180s
+         LLM runtime. The matrix runs in environments where the
+         evaluator runtime is unreachable, and the LLM path's 180s
          timeout would always exceed the 25s per-case budget. The
          expectation table accepts the structured rejection. *)
       `Assoc
@@ -312,7 +374,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
   | "keeper_stay_silent" ->
-      `Assoc [ ("reason", `String "tool matrix silence") ]
+      `Assoc []
   | "keeper_task_create" ->
       `Assoc
         [
@@ -342,10 +404,10 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard
-        [ "file not found"; "keeper not found in registry" ]
+        [ "file not found"; "keeper not found in registry"; "path_not_found_under_allowed_roots" ]
   | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
       Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed" ]
+        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function
@@ -356,9 +418,10 @@ let extra_guard_fragments_for_name = function
   | "masc_board_migrate" -> [ "requires postgresql backend" ]
   | "masc_get_metrics" -> [ "no metrics found" ]
   | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_portal_send" -> [ "no portal open" ]
-  | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
-  | "masc_keeper_status" ->
+  | "masc_keeper_msg" ->
+      [ "keeper management tool"; "use MCP client"; "requires Eio context" ]
+  | "masc_keeper_list" | "masc_keeper_msg_result"
+  | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
   | "tool_execute" -> [ "worktree not found" ]
   | _ -> []

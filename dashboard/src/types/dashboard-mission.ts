@@ -1,8 +1,8 @@
-import type { KeeperDiagnostic, KeeperTrustSummary, Message } from './core'
+import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth, MissionEvidenceSource } from './core'
 import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
 
 export interface DashboardMissionSummary {
-  room_health?: string
+  workspace_health?: string
   cluster?: string
   project?: string
   paused?: boolean
@@ -49,7 +49,7 @@ export interface DashboardMissionSessionBrief {
   session_id: string
   goal: string
   created_by?: string | null
-  origin_kind?: 'human' | 'system' | string
+  origin_kind?: 'human' | 'system'
   namespace?: string | null
   status?: string
   health?: string
@@ -121,13 +121,12 @@ export interface DashboardMissionAgentBrief {
   related_attention_count: number
   last_activity_at?: string | null
   last_activity_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'archived' | 'unknown'
-  evidence_source?: 'message' | 'presence' | 'session' | 'none'
+  signal_truth?: MissionSignalTruth
+  evidence_source?: MissionEvidenceSource
   recent_output_preview?: string | null
   recent_input_preview?: string | null
   recent_event?: string | null
   recent_tool_names: string[]
-  allowed_tool_names?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
@@ -341,7 +340,7 @@ export interface OperatorSessionSnapshot {
   team_health?: Record<string, unknown>
   communication_metrics?: Record<string, unknown>
   orchestration_state?: Record<string, unknown>
-  cascade_metrics?: Record<string, unknown>
+  runtime_metrics?: Record<string, unknown>
   report_paths?: Record<string, string>
   session?: Record<string, unknown>
   recent_events?: Record<string, unknown>[]
@@ -455,7 +454,7 @@ export interface OperatorJudgment {
 export interface OperatorReviewDecision {
   item_id: string
   fingerprint: string
-  decision: 'resolved' | 'deferred' | string
+  decision: 'resolved' | 'deferred'
   actor: string
   reason: string
   at: string
@@ -466,7 +465,7 @@ export interface OperatorReviewDecision {
 
 export interface OperatorDigest {
   trace_id?: string
-  target_type: 'root' | 'namespace' | 'room' | string
+  target_type: 'root' | 'namespace' | 'workspace' | 'keeper'
   target_id?: string | null
   health?: string
   judgment_owner?: string | null

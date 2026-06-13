@@ -61,14 +61,14 @@ val decide :
     - paranoid: confirm Medium+High+Critical, audit all *)
 
 val make_pre_hook :
-  config:Coord.config ->
+  config:Workspace.config ->
   governance_level:string ->
   Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
     Returns [Pass] (proceed) for allowed calls,
     [Reject result] (short-circuit) for confirm-required or denied calls. *)
 
-val install : config:Coord.config -> governance_level:string -> unit
+val install : config:Workspace.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
@@ -104,10 +104,10 @@ val combinatorial_risk_escalation :
     escalate risk to at least High. Otherwise return base_risk unchanged. *)
 
 val to_oas_approval_callback :
-  ?config:Coord.config ->
+  ?config:Workspace.config ->
   governance_level:string ->
   keeper_name:string ->
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   Agent_sdk.Hooks.approval_callback

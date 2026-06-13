@@ -1,0 +1,20 @@
+(include_subdirs no)
+
+(library
+ (name telemetry_unified)
+ (public_name masc.telemetry_unified)
+ (wrapped false)
+ (modules telemetry_unified)
+ (libraries
+  dated_jsonl
+  eio
+  fs_compat
+  otel_metric_store
+  masc.json_field
+  masc.telemetry_coverage_gap
+  masc.telemetry_unified_source
+  masc_core
+  masc_log
+  masc_types
+  unix
+  yojson))

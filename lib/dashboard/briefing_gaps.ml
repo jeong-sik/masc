@@ -8,7 +8,7 @@ let metadata_gap_json ~kind ~summary ~scope_type ~scope_id ~severity =
       ("kind", `String kind);
       ("summary", `String summary);
       ("scope_type", `String scope_type);
-      ("scope_id", option_string_json scope_id);
+      ("scope_id", Json_util.string_opt_to_json scope_id);
       ("severity", `String severity);
     ]
 
@@ -23,13 +23,14 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
     |> List.concat_map (fun json ->
            let session_id = string_field "session_id" json |> fun value -> if value = "" then None else Some value in
            let items = ref [] in
-           if string_field "goal" json = "unassigned" then
+           if String_util.trim_to_option (string_field "goal" json) = None then
              items :=
                metadata_gap_json ~kind:"session_goal_missing"
-                 ~summary:"Session goal is unassigned in briefing facts."
+                 ~summary:"Session goal is missing in briefing facts."
                  ~scope_type:"session" ~scope_id:session_id ~severity:"watch"
                :: !items;
-           if string_field "communication_mode" json = "unknown" then
+           if is_missing_or_unknown (string_field "communication_mode" json)
+           then
              items :=
                metadata_gap_json ~kind:"session_communication_mode_missing"
                  ~summary:"Session communication mode is not recorded."
@@ -41,7 +42,7 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
     keepers
     |> List.filter_map (fun json ->
            let status = string_field "last_reply_status" json in
-           if status = "not_recorded" then
+           if is_missing_or_unknown status then
              Some
                (metadata_gap_json ~kind:"keeper_last_reply_missing"
                   ~summary:"Keeper last reply status is not recorded."

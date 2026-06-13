@@ -177,31 +177,29 @@ let question_to_yojson (q : question) =
     ]
 
 let question_of_yojson (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   let string_list_field key =
-    json |> member key |> to_list |> List.filter_map to_string_option
+    (match Json_util.assoc_member_opt key json with Some (`List l) -> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None) l | _ -> [])
   in
-  match json |> member "question_id" |> to_string_option with
+  match Json_util.get_string json "question_id" with
   | None -> None
   | Some question_id ->
       Some
         {
           question_id;
-          title = json |> member "title" |> to_string_option |> Option.value ~default:question_id;
-          question = json |> member "question" |> to_string_option |> Option.value ~default:"";
+          title = Json_util.get_string_with_default json ~key:"title" ~default:question_id;
+          question = Json_util.get_string_with_default json ~key:"question" ~default:"";
           artifact_scope = string_list_field "artifact_scope";
           required_claims = string_list_field "required_claims";
           gold_paths = string_list_field "gold_paths";
-          difficulty = json |> member "difficulty" |> to_string_option;
+          difficulty = Json_util.get_string json "difficulty";
           tags = string_list_field "tags";
         }
 
 let answer_of_yojson (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   let string_list_field key =
-    json |> member key |> to_list |> List.filter_map to_string_option
+    (match Json_util.assoc_member_opt key json with Some (`List l) -> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None) l | _ -> [])
   in
-  match json |> member "question_id" |> to_string_option with
+  match Json_util.get_string json "question_id" with
   | None -> None
   | Some question_id ->
       Some
@@ -210,7 +208,7 @@ let answer_of_yojson (json : Yojson.Safe.t) =
           claims = string_list_field "claims";
           cited_paths = string_list_field "cited_paths";
           latency_ms =
-            json |> member "latency_ms" |> to_int_option |> Option.value ~default:0;
+            Json_util.get_int json "latency_ms" |> Option.value ~default:0;
         }
 
 let question_score_to_yojson (score : question_score) =
@@ -243,60 +241,59 @@ let score_summary_to_yojson (summary : score_summary) =
     ]
 
 let score_summary_of_yojson (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   let per_question =
-    json |> member "per_question" |> to_list
+    (match Json_util.assoc_member_opt "per_question" json with Some (`List l) -> l | _ -> [])
     |> List.filter_map (fun item ->
-           match item |> member "question_id" |> to_string_option with
+           match Json_util.get_string item "question_id" with
            | None -> None
            | Some question_id ->
                Some
                  {
                    question_id;
                    evidence_precision =
-                     item |> member "evidence_precision" |> to_float_option
+                     Json_util.get_float item "evidence_precision"
                      |> Option.value ~default:0.0;
                    claim_coverage =
-                     item |> member "claim_coverage" |> to_float_option
+                     Json_util.get_float item "claim_coverage"
                      |> Option.value ~default:0.0;
                    unsupported_claim_penalty =
-                     item |> member "unsupported_claim_penalty" |> to_float_option
+                     Json_util.get_float item "unsupported_claim_penalty"
                      |> Option.value ~default:0.0;
                    latency_ms =
-                     item |> member "latency_ms" |> to_int_option
+                     Json_util.get_int item "latency_ms"
                      |> Option.value ~default:0;
                    matched_claims =
-                     item |> member "matched_claims" |> to_list
-                     |> List.filter_map to_string_option;
+                     (match Json_util.assoc_member_opt "matched_claims" item with Some (`List l) -> l | _ -> [])
+                     |> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None);
                    missing_claims =
-                     item |> member "missing_claims" |> to_list
-                     |> List.filter_map to_string_option;
+                     (match Json_util.assoc_member_opt "missing_claims" item with Some (`List l) -> l | _ -> [])
+                     |> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None);
                    matched_paths =
-                     item |> member "matched_paths" |> to_list
-                     |> List.filter_map to_string_option;
+                     (match Json_util.assoc_member_opt "matched_paths" item with Some (`List l) -> l | _ -> [])
+                     |> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None);
                    unsupported_claims =
-                     item |> member "unsupported_claims" |> to_list
-                     |> List.filter_map to_string_option;
+                     (match Json_util.assoc_member_opt "unsupported_claims" item with Some (`List l) -> l | _ -> [])
+                     |> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None);
                  })
   in
   {
     answer_set_label =
-      json |> member "answer_set_label" |> to_string_option |> Option.value ~default:"";
+      Json_util.get_string_with_default json ~key:"answer_set_label" ~default:"";
     question_count =
-      json |> member "question_count" |> to_int_option |> Option.value ~default:0;
+      Json_util.get_int json "question_count" |> Option.value ~default:0;
     answered_count =
-      json |> member "answered_count" |> to_int_option |> Option.value ~default:0;
+      Json_util.get_int json "answered_count" |> Option.value ~default:0;
     evidence_precision =
-      json |> member "evidence_precision" |> to_float_option |> Option.value ~default:0.0;
+      Json_util.get_float json "evidence_precision" |> Option.value ~default:0.0;
     claim_coverage =
-      json |> member "claim_coverage" |> to_float_option |> Option.value ~default:0.0;
+      Json_util.get_float json "claim_coverage" |> Option.value ~default:0.0;
     unsupported_claim_penalty =
-      json |> member "unsupported_claim_penalty" |> to_float_option
+      Json_util.get_float json "unsupported_claim_penalty"
       |> Option.value ~default:0.0;
     avg_latency_ms =
-      json |> member "avg_latency_ms" |> to_float_option |> Option.value ~default:0.0;
+      Json_util.get_float json "avg_latency_ms" |> Option.value ~default:0.0;
     composite_score =
-      json |> member "composite_score" |> to_float_option |> Option.value ~default:0.0;
+      Json_util.get_float json "composite_score" |> Option.value ~default:0.0;
     per_question;
   }
 
@@ -332,44 +329,42 @@ let run_record_to_yojson (run : run_record) =
     ]
 
 let run_record_of_yojson (json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
   let string_list_field key =
-    json |> member key |> to_list |> List.filter_map to_string_option
+    (match Json_util.assoc_member_opt key json with Some (`List l) -> List.filter_map (fun x -> match x with `String s -> Some s | _ -> None) l | _ -> [])
   in
-  match json |> member "benchmark_run_id" |> to_string_option with
+  match Json_util.get_string json "benchmark_run_id" with
   | None -> None
   | Some benchmark_run_id ->
       Some
         {
           benchmark_run_id;
-          created_at = json |> member "created_at" |> to_string_option |> Option.value ~default:"";
-          created_by = json |> member "created_by" |> to_string_option;
-          goal = json |> member "goal" |> to_string_option |> Option.value ~default:"";
-          question = json |> member "question" |> to_string_option |> Option.value ~default:"";
-          question_id = json |> member "question_id" |> to_string_option;
-          repo_root = json |> member "repo_root" |> to_string_option |> Option.value ~default:"";
+          created_at = Json_util.get_string_with_default json ~key:"created_at" ~default:"";
+          created_by = Json_util.get_string json "created_by";
+          goal = Json_util.get_string_with_default json ~key:"goal" ~default:"";
+          question = Json_util.get_string_with_default json ~key:"question" ~default:"";
+          question_id = Json_util.get_string json "question_id";
+          repo_root = Json_util.get_string_with_default json ~key:"repo_root" ~default:"";
           artifact_scope = string_list_field "artifact_scope";
-          program_note = json |> member "program_note" |> to_string_option;
-          baseline_label = json |> member "baseline_label" |> to_string_option;
-          model = json |> member "model" |> to_string_option;
-          max_workers = json |> member "max_workers" |> to_int_option |> Option.value ~default:0;
+          program_note = Json_util.get_string json "program_note";
+          baseline_label = Json_util.get_string json "baseline_label";
+          model = Json_util.get_string json "model";
+          max_workers = Json_util.get_int json "max_workers" |> Option.value ~default:0;
           time_budget_sec =
-            json |> member "time_budget_sec" |> to_int_option |> Option.value ~default:0;
+            Json_util.get_int json "time_budget_sec" |> Option.value ~default:0;
           workload_profile =
-            json |> member "workload_profile" |> to_string_option
-            |> Option.value ~default:"coding_task";
-          operation_id = json |> member "operation_id" |> to_string_option;
-          trace_id = json |> member "trace_id" |> to_string_option;
-          session_id = json |> member "session_id" |> to_string_option;
-          report_json_path = json |> member "report_json_path" |> to_string_option;
-          report_md_path = json |> member "report_md_path" |> to_string_option;
-          proof_json_path = json |> member "proof_json_path" |> to_string_option;
-          proof_md_path = json |> member "proof_md_path" |> to_string_option;
-          dataset_ref = json |> member "dataset_ref" |> to_string_option;
+            Json_util.get_string_with_default json ~key:"workload_profile" ~default:"coding_task";
+          operation_id = Json_util.get_string json "operation_id";
+          trace_id = Json_util.get_string json "trace_id";
+          session_id = Json_util.get_string json "session_id";
+          report_json_path = Json_util.get_string json "report_json_path";
+          report_md_path = Json_util.get_string json "report_md_path";
+          proof_json_path = Json_util.get_string json "proof_json_path";
+          proof_md_path = Json_util.get_string json "proof_md_path";
+          dataset_ref = Json_util.get_string json "dataset_ref";
           case_refs = string_list_field "case_refs";
           planned_worker_roles = string_list_field "planned_worker_roles";
           recommended_next_tools = string_list_field "recommended_next_tools";
-          status = json |> member "status" |> to_string_option |> Option.value ~default:"started";
+          status = Json_util.get_string_with_default json ~key:"status" ~default:"started";
         }
 
 let make_run_id () =

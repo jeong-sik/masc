@@ -1,4 +1,6 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_supervisor_types
 
 let backoff_delay attempt =
@@ -14,8 +16,8 @@ let keep_last_n n item lst =
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =
   let trimmed = String.trim blocker in
-  match Cascade_error_classify.classify_masc_internal_error_of_string trimmed with
-  | Some (Cascade_error_classify.Ambiguous_post_commit { tools; _ }) -> tools
+  match Keeper_internal_error.classify_masc_internal_error_of_string trimmed with
+  | Some (Keeper_internal_error.Ambiguous_post_commit { tools; _ }) -> tools
   | _ ->
     (* Legacy: extract from bracket notation "prefix: [tool1, tool2]; ..." *)
     (match String.index_opt trimmed '[' with
@@ -54,7 +56,7 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   if Sys.file_exists searched
   then ()
   else (
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PersonaDriftMissing)
       ~labels:[ "keeper", meta.name ]
       ();

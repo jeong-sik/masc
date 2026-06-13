@@ -1,5 +1,3 @@
-open Masc_domain
-
 (** Issue #8520: hand-mirrored from [Mcp_session.valid_action_strings].
     [masc_tool_schemas] only depends on [masc_types], so it cannot
     derive directly. The sync regression test in [test_types.ml ::
@@ -8,72 +6,15 @@ open Masc_domain
 let mcp_session_action_enum_strings =
   [ "get"; "create"; "list"; "cleanup"; "remove" ]
 
-(* RFC-0057 PR-2c: masc_approval_pending and masc_approval_get
-   moved to codegen (Tool_descriptors_gen via Tool_schemas_misc.schemas).
-   masc_mcp_session remains here because its [action] enum is locked
+(* masc_session remains here because its [action] enum is locked
    to [mcp_session_action_enum_strings] above by the SSOT regression
-   test; codegen needs a shared enum source RFC before it can swap.
+   test; codegen needs a shared enum source RFC before it can swap. Approval
+   queue access is not a MASC tool schema. *)
 
-   The codegen-emitted tools are re-included in this list so downstream
-   consumers that read Tool_schemas_inline.schemas continue to see all
-   inline_infra tools. *)
-let codegen_inline_infra_names =
-  [ "masc_approval_pending"; "masc_approval_get" ]
-
-let inline_infra_from_codegen =
-  List.filter
-    (fun (s : tool_schema) -> List.mem s.name codegen_inline_infra_names)
-    Tool_schemas_misc.schemas
-
-let manual_inline_infra_schemas : tool_schema list =
-  [
-    {
-      name = "masc_approval_pending";
-      description = "List approvals currently waiting for operator resolution.";
-      input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; "properties", `Assoc []
-          ; "additionalProperties", `Bool false
-          ];
-    };
-    {
-      name = "masc_approval_get";
-      description = "Fetch full detail for a pending HITL approval by id.";
-      input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; ( "properties"
-            , `Assoc
-                [ ( "id"
-                  , `Assoc
-                      [ "type", `String "string"
-                      ; "description", `String "Pending approval id"
-                      ] )
-                ] )
-          ; "required", `List [ `String "id" ]
-          ; "additionalProperties", `Bool false
-          ];
-    };
-  ]
-
-let inline_infra_schemas =
-  codegen_inline_infra_names
-  |> List.filter_map (fun name ->
-    match
-      List.find_opt (fun (s : tool_schema) -> String.equal s.name name)
-        inline_infra_from_codegen
-    with
-    | Some schema -> Some schema
-    | None ->
-      List.find_opt
-        (fun (s : tool_schema) -> String.equal s.name name)
-        manual_inline_infra_schemas)
-
-let schemas : tool_schema list = inline_infra_schemas @ [
-  (* masc_mcp_session *)
+let schemas : Masc_domain.tool_schema list = [
+  (* masc_session *)
   {
-    name = "masc_mcp_session";
+    name = "masc_session";
     description = "Create, get, list, or remove MCP sessions that track client context across requests. \
 Use when managing multi-request workflows that need session continuity (Mcp-Session-Id header). \
 Pair with masc_subscription to receive session-scoped event notifications.";

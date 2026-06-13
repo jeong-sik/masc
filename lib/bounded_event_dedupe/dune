@@ -2,10 +2,11 @@
 ; for keeper/task log-noise reducers. Domain modules keep their typed
 ; public APIs; this leaf owns the repeated Hashtbl + Mutex + threshold
 ; mechanics so future reducers do not fork another bespoke state clone.
+
 (include_subdirs no)
 
 (library
- (name masc_mcp_bounded_event_dedupe)
- (public_name masc_mcp.bounded_event_dedupe)
+ (name masc_bounded_event_dedupe)
+ (public_name masc.bounded_event_dedupe)
  (wrapped false)
  (libraries))

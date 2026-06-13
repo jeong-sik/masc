@@ -13,8 +13,8 @@
 
 open Alcotest
 
-module Tool_task = Masc_mcp.Tool_task
-module Coord = Masc_mcp.Coord
+module Tool_task = Masc.Task.Tool
+module Workspace = Masc.Workspace
 
 (* ============================================================
    Stderr Capture Utility
@@ -84,15 +84,15 @@ let rec rm_rf path =
       Unix.unlink path
   end
 
-let with_test_room f =
+let with_test_workspace f =
   let dir = make_test_dir () in
   Unix.mkdir dir 0o755;
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let config = Coord.default_config dir in
-  let _ = Coord.init config ~agent_name:(Some "test-agent") in
+  let config = Workspace.default_config dir in
+  let _ = Workspace.init config ~agent_name:(Some "test-agent") in
   Fun.protect
-    ~finally:(fun () -> (try let _ = Coord.reset config in () with _ -> ()); rm_rf dir)
+    ~finally:(fun () -> (try let _ = Workspace.reset config in () with _ -> ()); rm_rf dir)
     (fun () -> f config)
 
 (* ============================================================
@@ -100,10 +100,10 @@ let with_test_room f =
    ============================================================ *)
 
 (** handle_done with a task_id that does not exist.
-    Coord.transition_task_r returns Error (TaskNotFound ...) and
+    Workspace.transition_task_r returns Error (TaskNotFound ...) and
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
-  with_test_room @@ fun config ->
+  with_test_workspace @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-does-not-exist-xyz");
@@ -117,7 +117,7 @@ let test_tool_task_done_nonexistent_logs () =
 
 (** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
 let test_tool_task_cancel_nonexistent_logs () =
-  with_test_room @@ fun config ->
+  with_test_workspace @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
   let args = `Assoc [
     ("task_id", `String "task-phantom-abc");

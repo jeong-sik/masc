@@ -13,8 +13,12 @@
 
 export type KeeperPriority = 1 | 2 | 3
 
+// Agent/keeper status SSOT: values from `types/core.ts#AgentStatus` plus
+// backend-emitted defaults (`'offline'`, `'unknown'`). Trajectory content
+// types (`'thinking'`, `'tool_use'`) are NOT keeper statuses — they live
+// in a different axis (trajectory event kind).
 const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
-  'active', 'running', 'thinking', 'tool_use', 'claimed', 'in_progress',
+  'active', 'running', 'busy', 'listening', 'claimed', 'in_progress',
 ])
 
 /** Terminal statuses for waterfall priority — does NOT include 'crashed'
@@ -24,9 +28,10 @@ const PRIORITY_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
 ])
 
 /** Offline display statuses — includes 'crashed' (keeper is not running
- *  but was recently active). Used for UI contextual messages, not sorting. */
+ *  but was recently active) and 'unbooted'/'stopped' (lifecycle terminal).
+ *  Used for UI contextual messages, not sorting. */
 const OFFLINE_DISPLAY_STATUSES: ReadonlySet<string> = new Set([
-  'offline', 'inactive', 'dead', 'crashed',
+  'offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped',
 ])
 
 /** Classify keeper status into a priority tier for waterfall display ordering.
@@ -82,7 +87,7 @@ const CRASH_PREFIX_MAP: readonly { prefix: string; category: LibCrashCategory }[
 ]
 
 /** Classify a raw crash reason string into a typed category.
- *  Exact match preferred over prefix heuristic to avoid ambiguity.
+ *  Exact match preferred over prefix matching to avoid ambiguity.
  *  RFC-0174 SSOT source — see file-level note for divergence from the
  *  production `categorizeCrashReason` UI helper. */
 export function classifyCrashReasonLib(raw: string): LibCrashCategory {

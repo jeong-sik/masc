@@ -8,12 +8,12 @@ let json_list values =
 
 let () =
   let raw_all_tool_names =
-    Masc_mcp.Config.raw_all_tool_schemas
+    Masc.Config.raw_all_tool_schemas
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     |> sorted_unique
   in
   let public_tool_names =
-    Masc_mcp.Tool_catalog.public_mcp_tools
+    Tool_catalog.public_mcp_tools
     |> sorted_unique
   in
   let contract_inventory =

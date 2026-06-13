@@ -5,7 +5,7 @@
     "basic smoke test".  Closes that gap with property pins
     instead of a smoke test (richer regression coverage). *)
 
-module H = Masc_mcp.Dashboard_feature_health
+module H = Dashboard_feature_health
 module R = Feature_flag_registry
 
 (** Force-unset an env var around [f] so {!R.runtime_value}'s

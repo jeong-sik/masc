@@ -1,6 +1,6 @@
 open Alcotest
 
-module Uid = Masc_mcp.Keeper_id.Uid
+module Uid = Keeper_id.Uid
 
 let test_generate_format () =
   let uid = Uid.generate () in

@@ -1,6 +1,6 @@
 (** Test Cache_eio Module - Pure Synchronous Tests *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.init 42
 
@@ -26,15 +26,15 @@ let with_temp_masc_dir f =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   (* Reset cached entry count to prevent cross-test contamination *)
   Cache_eio.reset_cached_entry_count ();
-  let config = Coord.default_config base in
-  let _ = Coord.init config ~agent_name:None in
+  let config = Workspace.default_config base in
+  let _ = Workspace.init config ~agent_name:None in
   try
     let result = f config in
-    let _ = Coord.reset config in
+    let _ = Workspace.reset config in
     rm_rf base;
     result
   with e ->
-    let _ = Coord.reset config in
+    let _ = Workspace.reset config in
     rm_rf base;
     raise e
 

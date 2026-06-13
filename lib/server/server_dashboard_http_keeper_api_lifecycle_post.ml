@@ -38,6 +38,13 @@ let invalidate_keeper_execution_surfaces ~config () =
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
   Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
 
+(* Typed outcome of a keeper lifecycle action, so the log severity is chosen by
+   an exhaustive match rather than a string-parsing wildcard with a permissive
+   default (#8605). [Succeeded]/[Already_live] are successes (Info);
+   [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
+   docs/spec/18-log-severity-taxonomy.md § 3.6. *)
+type lifecycle_outcome = Succeeded | Already_live | Rejected | Dispatch_none
+
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
   let req_path = Http.Request.path req in
@@ -58,12 +65,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.room_config in
+    let config = state.Mcp_server.workspace_config in
     let resolve_keeper_agent_name () =
       match Keeper_registry_lookup.find_by_name name with
       | Some entry -> Some entry.meta.agent_name
       | None -> (
-          match Keeper_types.read_meta config name with
+          match Keeper_meta_store.read_meta config name with
           | Ok (Some meta) -> Some meta.agent_name
           | Ok None -> None
           | Error err ->
@@ -73,18 +80,18 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               None)
     in
     let persist_keeper_paused_state paused =
-      match Keeper_types.read_meta config name with
+      match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when Bool.equal meta.paused paused -> ()
       | Ok (Some meta) ->
           let updated_meta =
             {
               meta with
               paused;
-              updated_at = Keeper_types.now_iso ();
+              updated_at = Keeper_meta_contract.now_iso ();
             }
           in
           (match
-             Keeper_types.write_meta_with_merge
+             Keeper_meta_store.write_meta_with_merge
                ~merge:Keeper_meta_merge.caller_wins config updated_meta
            with
            | Ok () -> ()
@@ -103,7 +110,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             "keeper %s %s: meta missing — skipping paused-state persist"
             name
             (if paused then "pause" else "resume");
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "meta_missing")]
@@ -114,14 +121,14 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             (if paused then "pause" else "resume")
             err;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "read_meta_error")]
             ()
     in
     let resume_booted_keeper_if_needed () =
-      match Keeper_types.read_meta config name with
+      match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when meta.paused ->
           persist_keeper_paused_state false;
           (match resolve_keeper_agent_name () with
@@ -135,13 +142,13 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  name)
       | Ok (Some _) -> ()
       (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
-         already succeeded via Tool_keeper.dispatch, so we don't change the
+         already succeeded via Keeper_tool_surface.dispatch, so we don't change the
          HTTP status. We make the failure observable instead. *)
       | Ok None ->
           Log.Keeper.warn
             "keeper %s boot: meta missing — skipping auto-resume check"
             name;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "meta_missing")]
@@ -151,13 +158,13 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             "keeper %s boot: read_meta failed during auto-resume check: %s"
             name
             err;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "read_meta_error")]
             ()
     in
-    let keeper_ctx : _ Tool_keeper.context =
+    let keeper_ctx : _ Keeper_tool_surface.context =
       {
         config;
         agent_name;
@@ -194,10 +201,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         let duration_ms () =
           (Eio.Time.now clock -. started_at) *. 1000.0 |> int_of_float
         in
-        let log_lifecycle_result outcome =
-          Log.Server.info
-            "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
-            action name agent_name outcome (duration_ms ())
+        let log_lifecycle_result (outcome : lifecycle_outcome) =
+          (* docs/spec/18-log-severity-taxonomy.md § 3.6: the line carries the
+             outcome, so the severity is derived from it (single emission)
+             instead of a static [Info] — otherwise a rejected/failed lifecycle
+             action hides under the noise floor. Failures are
+             degraded-with-recovery (the client gets an error response, the
+             server keeps serving) → [Warn]. *)
+          let level, outcome_s =
+            match outcome with
+            | Succeeded -> (Log.Info, "ok")
+            | Already_live -> (Log.Info, "already_live")
+            | Rejected -> (Log.Warn, "rejected")
+            | Dispatch_none -> (Log.Warn, "dispatch_none")
+          in
+          Log.Server.emit level
+            (Printf.sprintf
+               "keeper lifecycle %s name=%s actor=%s outcome=%s duration_ms=%d"
+               action name agent_name outcome_s (duration_ms ()))
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
@@ -227,10 +248,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
            refresh_keeper_execution_surfaces ~config ~name "started";
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with
-             | Some latest -> Keeper_types.meta_to_json latest.meta
-             | None -> Keeper_types.meta_to_json entry.meta
+             | Some latest -> Keeper_meta_json.meta_to_json latest.meta
+             | None -> Keeper_meta_json.meta_to_json entry.meta
            in
-           log_lifecycle_result "already_live";
+           log_lifecycle_result Already_live;
            Http.Response.json_value ~compress:true ~request:req
              (`Assoc
                 [
@@ -242,7 +263,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 ])
              reqd
          | None ->
-           (match Tool_keeper.dispatch keeper_ctx ~name:tool_name ~args with
+           (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
             | Some result
               when Tool_result.is_success result
                    && (String.equal action "boot" || String.equal action "clear") ->
@@ -256,7 +277,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
                  | Some _ | None -> ());
                 invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result "ok";
+              log_lifecycle_result Succeeded;
               Http.Response.json_value ~compress:true ~request:req
                 (`Assoc
                    [
@@ -272,7 +293,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                  persist_keeper_paused_state true;
                  refresh_keeper_execution_surfaces ~config ~name "stopped"
                | _ -> invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result "ok";
+              log_lifecycle_result Succeeded;
               Http.Response.json_value ~compress:true ~request:req
                 (`Assoc
                    [
@@ -283,12 +304,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 reqd
             | Some result ->
               let body = Tool_result.message result in
-              log_lifecycle_result "rejected";
+              log_lifecycle_result Rejected;
               Http.Response.json_value ~status:`Bad_request ~request:req
                 (`Assoc [("ok", `Bool false); ("error", `String body)])
                 reqd
             | None ->
-              log_lifecycle_result "dispatch_none";
+              log_lifecycle_result Dispatch_none;
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
                 reqd "dispatch returned None"))
 

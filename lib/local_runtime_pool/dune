@@ -1,0 +1,18 @@
+(include_subdirs no)
+
+(library
+ (name local_runtime_pool)
+ (public_name masc.local_runtime_pool)
+ (wrapped false)
+ (modules local_runtime_pool)
+ (libraries
+  agent_sdk.llm_provider
+  eio
+  masc.config
+  masc.discovery_cache
+  masc_core
+  masc_log
+  time_compat
+  unix
+  uri
+  yojson))

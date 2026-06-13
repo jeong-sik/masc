@@ -89,11 +89,8 @@ let add_routes ~port ~host router =
          Http.Response.json_value (Runtime.agent_card_json req) reqd)
          request reqd)
   |> Http.Router.get "/ws" websocket_discovery_handler
-  |> Http.Router.get "/metrics" (fun request reqd ->
-       with_read_auth (fun _state _req reqd ->
-         let body = Prometheus.to_prometheus_text () in
-         Http.Response.bytes ~content_type:"text/plain; version=0.0.4; charset=utf-8" body reqd
-       ) request reqd)
+  (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
+     export via OTLP push (Otel_metrics observable). *)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
   (* Dashboard Bonsai island — static JS bundle and SPA shell.
@@ -220,7 +217,29 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
-       with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
+       (* Observer/presence SSE streams authenticate via the `token` query
+          param — an EventSource cannot set an Authorization header. Parse
+          sse_kind and let handle_get_mcp route it: Observer/Presence go to
+          verify_mcp_observer_stream_auth (accepts header OR `token` query),
+          the default (Agent_stream) still requires a bearer header via
+          verify_mcp_auth. Do NOT wrap in with_read_auth — that gate is
+          header-only and 401s ("Token required") the query-token SSE
+          handshake before the sse_kind-aware auth runs, which is why the
+          dashboard observer stream failed and the client fell back/looped.
+          Mirrors POST /mcp, which already self-auths via handle_post_mcp. *)
+       let sse_kind =
+         match Server_utils.query_param request "sse_kind" with
+         | Some raw
+           when String.equal "observer"
+                  (String.lowercase_ascii (String.trim raw)) ->
+             Some Sse.Observer
+         | Some raw
+           when String.equal "presence"
+                  (String.lowercase_ascii (String.trim raw)) ->
+             Some Sse.Presence
+         | _ -> None
+       in
+       handle_get_mcp ?sse_kind request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"

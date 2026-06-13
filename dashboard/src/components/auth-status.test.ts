@@ -20,6 +20,7 @@ vi.mock('../store', () => ({
 vi.mock('../api/core', () => ({
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn().mockReturnValue('test'),
+  dashboardBearerToken: vi.fn().mockReturnValue(null),
   isRemoteAccess: vi.fn().mockReturnValue(false),
   setStoredToken: vi.fn(),
 }))

@@ -23,12 +23,12 @@ function keeperCompositeSnapshot(
     phase: "Running",
     turn_phase: "idle",
     decision: { stage: "undecided" },
-    cascade: { state: "idle" },
+    runtime: { state: "idle" },
     compaction: { stage: "accumulating" },
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -44,7 +44,7 @@ function keeperCompositeSnapshot(
     ...base,
     ...overrides,
     decision: { ...base.decision, ...(overrides.decision ?? {}) },
-    cascade: { ...base.cascade, ...(overrides.cascade ?? {}) },
+    runtime: { ...base.runtime, ...(overrides.runtime ?? {}) },
     compaction: { ...base.compaction, ...(overrides.compaction ?? {}) },
     measurement: { ...base.measurement, ...(overrides.measurement ?? {}) },
     invariants: { ...base.invariants, ...(overrides.invariants ?? {}) },
@@ -104,17 +104,15 @@ describe("TurnFsmDetailPanel", () => {
       execution: {
         latest_receipt_present: true,
         recorded_at: "2026-05-01T16:00:00Z",
-        outcome: "failed",
+        outcome: "receipt_failed",
         terminal_reason_code: "tool_contract",
         operator_disposition: null,
         operator_disposition_reason: null,
-        tool_contract_result: "violated",
         model_used: "provider-k-4.5",
         stop_reason: null,
         duration_ms: null,
         error: null,
-        cascade: null,
-        tool_surface: null,
+        runtime: null,
       },
     })
 
@@ -123,9 +121,8 @@ describe("TurnFsmDetailPanel", () => {
     const chips = [...container.querySelectorAll("[data-status-chip]")]
     expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
       "실행 중",
-      "receipt failed",
+      "receipt receipt_failed",
       "reason tool_contract",
-      "tool 도구 계약 위반",
     ]))
     expect(chips.map(chip => chip.getAttribute("data-status-chip-tone"))).toEqual(expect.arrayContaining([
       "info",

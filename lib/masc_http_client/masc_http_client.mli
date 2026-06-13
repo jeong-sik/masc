@@ -1,9 +1,11 @@
 (** Masc_http_client — typed pool front-end for outbound HTTP.
 
-    Every public entry point delegates to a process-wide
+    Every public entry point delegates to a per-domain
     {!Pool.t} (lib/masc_http_client/pool.mli), which owns the
     underlying piaf transport, keep-alive, and TLS context cache.
-    Callers should reach for [post_sync] / [get_sync] /
+    Each OCaml Domain (OS thread) gets its own pool instance with
+    its own [Eio.Switch], eliminating cross-domain Switch access
+    errors.  Callers should reach for [post_sync] / [get_sync] /
     [get_response_sync] for plain status+body access, or import
     {!Pool} directly when they need typed response headers or
     non-default pool configuration. *)
@@ -49,6 +51,17 @@ val post_sync :
     Connection-level errors (DNS, TLS, I/O) are caught and surfaced
     as [Error _] rather than propagating as exceptions. *)
 
+val patch_sync :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  url:string ->
+  headers:(string * string) list ->
+  body:string ->
+  unit ->
+  ((int * string), string) result
+(** [patch_sync ?clock ?timeout_sec ~url ~headers ~body ()] performs
+    a [PATCH url].  Same error handling as {!post_sync}. *)
+
 val get_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
@@ -78,15 +91,20 @@ val get_sync :
     tests can name the typed connection pool without reaching into
     the wrapped module path. Most callers should keep using
     [post_sync] / [get_sync] / [get_response_sync] which delegate
-    through the per-process [Pool.t] singleton internally; direct
+    through the per-domain [Pool.t] internally; direct
     [Pool.request] is reserved for code that needs typed responses
     with header maps or non-default config. *)
 module Pool : module type of Pool
 
 val pool_singleton_opt : unit -> Pool.t option
-(** [pool_singleton_opt ()] returns the per-process [Pool.t] if it
+(** [pool_singleton_opt ()] returns some domain's [Pool.t] if any
     has been lazy-initialized by a prior HTTP call, [None] otherwise.
-    Read-only accessor for telemetry consumers (Phase D.4 Prometheus
-    exporter); does not trigger pool initialization.  Callers that
-    need the pool initialized should issue a request through
-    [post_sync] / [get_sync] / [get_response_sync] instead. *)
+    Backward-compatible read-only accessor for telemetry consumers.
+    For comprehensive metrics across all domains, use
+    {!all_domain_pools} instead. *)
+
+val all_domain_pools : unit -> (int * Pool.t) list
+(** [all_domain_pools ()] returns all domain-local pools as
+    [(domain_id, pool)] pairs.  Used by [Pool_metrics] to aggregate
+    counters across all OCaml Domains.  Thread-safe; acquires an
+    internal [Stdlib.Mutex] for the duration of the snapshot. *)

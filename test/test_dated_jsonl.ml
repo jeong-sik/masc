@@ -195,6 +195,39 @@ let test_read_range_malformed () =
   let result = Dated_jsonl.read_range store ~since:"bad" ~until:"dates" in
   check int "malformed dates return empty" 0 (List.length result)
 
+let test_read_range_recent () =
+  let dir = tmpdir "dated_jsonl_range_recent" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|} ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":4}|}; {|{"i":5}|}; {|{"i":6}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":7}|}; {|{"i":8}|}; {|{"i":9}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let ints r = List.map json_i r in
+  (* newest 2 in window come from the tail of the newest in-range day-file *)
+  check
+    (list int)
+    "newest 2 in window"
+    [ 8; 9 ]
+    (ints (Dated_jsonl.read_range_recent store ~since:"2026-01-02" ~until:"2026-02-01" 2));
+  (* newest 5, spanning two in-range day-files, oldest-first within result *)
+  check
+    (list int)
+    "newest 5 across range"
+    [ 5; 6; 7; 8; 9 ]
+    (ints (Dated_jsonl.read_range_recent store ~since:"2026-01-01" ~until:"2026-02-01" 5));
+  (* a day outside the window is excluded; n larger than available returns all *)
+  check
+    (list int)
+    "single in-range day returns its entries"
+    [ 4; 5; 6 ]
+    (ints (Dated_jsonl.read_range_recent store ~since:"2026-01-02" ~until:"2026-01-02" 100));
+  check
+    int
+    "n=0 returns empty"
+    0
+    (List.length
+       (Dated_jsonl.read_range_recent store ~since:"2026-01-01" ~until:"2026-02-01" 0))
+;;
+
 let test_iter_all_chronological_skips_malformed () =
   let dir = tmpdir "dated_jsonl_iter_all" in
   write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; "not-json" ];
@@ -334,6 +367,7 @@ let () =
         [
           test_case "today range non-empty" `Quick test_read_range;
           test_case "malformed dates safe" `Quick test_read_range_malformed;
+          test_case "range_recent returns newest n in window" `Quick test_read_range_recent;
           test_case "iter_all chronological" `Quick
             test_iter_all_chronological_skips_malformed;
           test_case "iter_range chronological" `Quick test_iter_range_chronological;

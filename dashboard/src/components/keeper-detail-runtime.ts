@@ -22,12 +22,12 @@ import { formatIndependentCounters, formatRatioPair } from './counter-format'
 import type { Keeper } from '../types'
 import type {
   KeeperCompositeSnapshot,
+  KeeperSecretProjection,
   KeeperRuntimeLensClockEdge,
   KeeperRuntimeLensClockGroup,
   KeeperRuntimeLensLane,
   KeeperRuntimeLensPayloadRoleAxis,
   KeeperRuntimeLensSourceClockAxis,
-  KeeperRuntimeLensToolLineageAxis,
   KeeperRuntimeTraceResponse,
 } from '../api/keeper'
 import { serverStatus, shellRuntimeResolution } from '../store'
@@ -179,8 +179,8 @@ export function deriveKeeperLiveTruth({
             ? compactToken(compositeSnapshot?.runtime_attention?.state, 'blocked')
             : 'none',
         detail: staleBlocker !== null
-          ? `${projection.runtimeReason} · ${projection.toolContract} · 이전 차단: ${staleBlocker}`
-          : `${projection.runtimeReason} · ${projection.toolContract}`,
+          ? `${projection.runtimeReason} · 이전 차단: ${staleBlocker}`
+          : projection.runtimeReason,
         tone: blocked ? 'warn' : 'ok',
       },
     ],
@@ -306,6 +306,109 @@ export function KeeperLiveTruthPanel({
           ${summary.runtimeRepoLabel ? html`<span class="font-mono">repo ${summary.runtimeRepoLabel}</span>` : null}
         </div>
       ` : null}
+    </div>
+  `
+}
+
+function secretProjectionTone(status: string | null | undefined): StatusChipTone {
+  switch (status) {
+    case 'ready':
+      return 'ok'
+    case 'error':
+      return 'bad'
+    case 'empty':
+      return 'warn'
+    case 'absent':
+    default:
+      return 'neutral'
+  }
+}
+
+function secretProjectionLabel(status: string | null | undefined): string {
+  switch (status) {
+    case 'ready':
+      return 'ready'
+    case 'error':
+      return 'error'
+    case 'empty':
+      return 'empty'
+    case 'absent':
+      return 'not configured'
+    default:
+      return 'unknown'
+  }
+}
+
+function truncateSecretProjectionList(values: readonly string[], limit: number): string {
+  if (values.length === 0) return 'none'
+  const visible = values.slice(0, limit)
+  const suffix = values.length > visible.length ? ` +${values.length - visible.length}` : ''
+  return `${visible.join(', ')}${suffix}`
+}
+
+export function KeeperSecretProjectionPanel({
+  projection,
+}: {
+  projection: KeeperSecretProjection | null | undefined
+}) {
+  if (!projection) {
+    return html`
+      <div
+        class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+        data-testid="keeper-secret-projection"
+      >
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
+            <div class="mt-1 text-sm font-medium text-[var(--color-fg-primary)]">backend not reporting</div>
+          </div>
+          <${StatusChip} tone="neutral" uppercase=${false}>unknown<//>
+        </div>
+      </div>
+    `
+  }
+
+  const tone = secretProjectionTone(projection.status)
+  const filePaths = projection.file_mounts.map(mount => mount.container_path)
+  const envSummary = truncateSecretProjectionList(projection.env_names, 5)
+  const fileSummary = truncateSecretProjectionList(filePaths, 4)
+  const summary =
+    projection.status === 'ready'
+      ? `${projection.env_count} env · ${projection.file_count} files`
+      : projection.status === 'error'
+        ? projection.error ?? 'projection error'
+        : projection.next_action
+
+  return html`
+    <div
+      class="rounded-[var(--r-5)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-4"
+      data-testid="keeper-secret-projection"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Secret projection</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <${StatusChip} tone=${tone} uppercase=${false}>${secretProjectionLabel(projection.status)}<//>
+            <span class="text-sm font-medium text-[var(--color-fg-primary)]">${summary}</span>
+          </div>
+        </div>
+        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${projection.source}</span>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+        <${SignalRow} label="root" value=${projection.root} />
+        <${SignalRow} label="env names" value=${envSummary} />
+        <${SignalRow} label="file mounts" value=${fileSummary} />
+        <${SignalRow} label="validation" value=${projection.values_validated ? 'values validated · values redacted' : 'structure only'} />
+      </div>
+
+      ${projection.error
+        ? html`
+            <div class="mt-3 rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--bad-light)]">
+              ${projection.error}
+            </div>
+          `
+        : null}
     </div>
   `
 }
@@ -814,19 +917,6 @@ function formatLensList(values: string[], emptyLabel = 'none'): string {
   return `${values.slice(0, 3).join(', ')} +${values.length - 3}`
 }
 
-function formatToolLineage(lineage: KeeperRuntimeLensToolLineageAxis): string {
-  if (!lineage.recorded) return 'not recorded'
-  const stages = ['searched', 'visible', 'materialized', 'emitted', 'executed', 'verified']
-  const parts: string[] = []
-  for (const key of stages) {
-    const stage = lineage.decision?.[key]
-    if (stage) {
-      parts.push(`${key}:${stage.count}`)
-    }
-  }
-  return parts.length > 0 ? parts.join(' → ') : 'recorded (no stages)'
-}
-
 function formatPayloadRole(axis: KeeperRuntimeLensPayloadRoleAxis): string {
   const entries = Object.entries(axis.counts)
   if (entries.length === 0) return 'none'
@@ -928,7 +1018,6 @@ function clockEdgeTitle(edge: KeeperRuntimeLensClockEdge): string {
     edge.provider_attempt_id ? `provider ${edge.provider_attempt_id}` : null,
     edge.tool_batch_id ? `tool ${edge.tool_batch_id}` : null,
     edge.checkpoint_id ? `checkpoint ${edge.checkpoint_id}` : null,
-    edge.memory_injection_id ? `memory ${edge.memory_injection_id}` : null,
     edge.event_bus_correlation_id ? `corr ${edge.event_bus_correlation_id}` : null,
     edge.event_bus_run_id ? `run ${edge.event_bus_run_id}` : null,
     edge.event_bus_event_count !== null ? `event-bus events ${edge.event_bus_event_count}` : null,
@@ -1041,11 +1130,9 @@ export function RuntimeLensSection({
   }
 
   const lens = trace.runtime_lens
-  const tool = lens.axes.tool_surface
   const lane = lens.axes.provider_lane
   const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
-  const proof = lens.axes.runtime_proof
   const context = lens.axes.context
   const memory = lens.axes.memory
   const clock = lens.turn_clock
@@ -1054,7 +1141,7 @@ export function RuntimeLensSection({
   const clockGroups = lens.clock_groups
   const swimlanes = [
     lens.swimlanes.keeper,
-    lens.swimlanes.masc_policy_cascade,
+    lens.swimlanes.masc_policy_runtime,
     lens.swimlanes.oas_agent,
     lens.swimlanes.provider,
     lens.swimlanes.tool_runtime,
@@ -1064,28 +1151,16 @@ export function RuntimeLensSection({
   return html`
     <div class="flex flex-col gap-3" data-testid="runtime-lens">
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
-        <${SignalRow} label="keeper / OAS turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
+        <${SignalRow} label="keeper / agent turn" value=${`${clock.keeper_turn_id ?? '-'} / ${clock.max_oas_turn_count ?? '-'}`} />
         <${SignalRow} label="terminal event" value=${clock.terminal_event_present ? clock.terminal_event ?? 'present' : 'missing'} />
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
-        <${SignalRow} label="tool required" value=${formatLensList(tool.required_tools)} />
-        <${SignalRow} label="tool materialized" value=${formatLensList(tool.materialized_tools)} />
-        <${SignalRow} label="tool missing" value=${formatLensList(tool.missing_required_tools)} />
-        <${SignalRow} label="tool lineage" value=${formatToolLineage(lens.axes.tool_lineage)} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
         <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
         <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
         <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
-        <${SignalRow} label="cascade drift" value=${drift.cascade_override ? `${drift.default_cascade_name ?? '-'} -> ${drift.live_cascade_name ?? '-'}` : drift.status} />
+        <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
-        <${SignalRow} label="runtime proof" value=${`${proof.status} / ${proof.matched_tool_call_count} calls`} />
-        <${SignalRow} label="sandbox proof" value=${proof.docker_visible ? formatLensList(proof.sandbox_profiles, 'docker') : 'not observed'} />
-        <${SignalRow}
-          label="repo CLI proof"
-          value=${`${proof.git_credentials_enabled ? 'git creds' : 'no git creds'} / ${proof.repo_cli_identity_materialized ? 'identity materialized' : 'identity missing'}`}
-        />
-        <${SignalRow} label="proof tools" value=${formatLensList(proof.tools)} />
-        <${SignalRow} label="network proof" value=${formatLensList(proof.network_modes)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
         <${SignalRow} label="working loops" value=${context.active_open_loop_count} />
         <${SignalRow} label="memory flush" value=${formatIndependentCounters({ leftLabel: 'success', leftValue: memory.memory_flush_success_count, rightLabel: 'error', rightValue: memory.memory_flush_error_count })} />

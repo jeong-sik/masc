@@ -1,7 +1,7 @@
-(* Alcotest suite for [Masc_mcp.Tool_error].
+(* Alcotest suite for [Tool_error].
    RFC-0148 §5 acceptance: 7 variant + exn-preservation case. *)
 
-module TE = Masc_mcp.Tool_error
+module TE = Tool_error
 
 let test_kind_all_variants () =
   Alcotest.(check string) "Not_found tag"

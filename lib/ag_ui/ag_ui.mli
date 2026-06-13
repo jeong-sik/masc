@@ -87,11 +87,11 @@ val event_to_sse : event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_agent_joined : agent_name:string -> event
-(** [agent_joined] → [Run_started] with [custom_name="AGENT_JOINED"]. *)
+val of_agent_session_bound : agent_name:string -> event
+(** [agent_session_bound] → [Run_started] with [custom_name="AGENT_SESSION_BOUND"]. *)
 
-val of_agent_left : agent_name:string -> event
-(** [agent_left] → [Run_finished] with [custom_name="AGENT_LEFT"]. *)
+val of_agent_unbound : agent_name:string -> event
+(** [agent_unbound] → [Run_finished] with [custom_name="AGENT_UNBOUND"]. *)
 
 val of_broadcast :
   agent_name:string -> message:string -> message_id:string -> event list
@@ -113,8 +113,8 @@ val of_tool_call :
 (** Tool call → 3 events: [Tool_call_start], [Tool_call_args]
     (with [delta=args_json]), [Tool_call_end]. *)
 
-val of_room_state : Yojson.Safe.t -> event
-(** Room snapshot → [State_snapshot]. *)
+val of_workspace_state : Yojson.Safe.t -> event
+(** Workspace snapshot → [State_snapshot]. *)
 
 val of_custom : name:string -> Yojson.Safe.t -> event
 (** Wrap any MASC event in [Custom] with the given [name]/[value]. *)

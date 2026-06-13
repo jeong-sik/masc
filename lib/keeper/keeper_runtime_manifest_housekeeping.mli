@@ -2,11 +2,9 @@ type event_kind =
   Keeper_runtime_manifest_types.event_kind =
     Turn_started
   | Phase_gate_decided
-  | Cascade_routed
+  | Runtime_routed
   | Pre_dispatch_blocked
-  | Tool_surface_selected
   | Provider_lane_resolved
-  | Tool_lineage_recorded
   | Provider_attempt_started
   | Provider_attempt_finished
   | Context_injected
@@ -14,8 +12,6 @@ type event_kind =
   | State_snapshot_sidecar_saved
   | Working_state_sidecar_saved
   | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed
   | Checkpoint_loaded
   | Checkpoint_saved
   | Receipt_appended
@@ -41,7 +37,7 @@ type t =
   oas_turn_count : int option;
   logical_seq : int option;
   event : event_kind;
-  cascade_name : string option;
+  runtime_id : string option;
   status : string;
   decision : Yojson.Safe.t;
   links : links;

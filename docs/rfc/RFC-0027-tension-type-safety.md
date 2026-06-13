@@ -44,7 +44,7 @@ string values are valid.
 ### 1.2 Stringly-typed kind
 
 `tension_rule.kind` is `"policy_gap" | "boredom" | "blocker"` — but as a
-plain string. Adding a new kind requires coordinated manual edits across
+plain string. Adding a new kind requires synchronized manual edits across
 multiple files with no exhaustiveness checking.
 
 ### 1.3 No configurable threshold

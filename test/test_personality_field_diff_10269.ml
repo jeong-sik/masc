@@ -7,7 +7,7 @@
     field + length signature. *)
 
 open Alcotest
-module Kr = Masc_mcp.Keeper_runtime
+module Kr = Masc.Keeper_runtime
 
 let opt_string = option string
 
@@ -66,6 +66,30 @@ let test_long_field_truncates_preview () =
       check bool "untruncated preview must not appear" false
         (Astring.String.is_infix ~affix:long_a s)
 
+let test_utf8_preview_stays_readable () =
+  match
+    Kr.personality_field_diff_summary
+      ~field:"goal" ~current:"" ~target:"masc의 Telemetry와 Logging"
+  with
+  | None -> fail "expected Some summary for missing UTF-8 target"
+  | Some s ->
+      check bool "Korean UTF-8 is preserved" true
+        (Astring.String.is_infix ~affix:"masc의" s);
+      check bool "Korean bytes are not octal-escaped" false
+        (Astring.String.is_infix ~affix:"\\236" s)
+
+let test_control_chars_still_escape () =
+  match
+    Kr.personality_field_diff_summary
+      ~field:"instructions" ~current:"alpha" ~target:"line1\n\"line2\""
+  with
+  | None -> fail "expected Some summary for escaped-control target"
+  | Some s ->
+      check bool "newline escaped" true
+        (Astring.String.is_infix ~affix:"line1\\n" s);
+      check bool "quote escaped" true
+        (Astring.String.is_infix ~affix:"\\\"line2\\\"" s)
+
 let () =
   run "personality_field_diff_10269" [
     ("diff_summary", [
@@ -77,5 +101,9 @@ let () =
           test_length_drift_returns_summary;
         test_case "long preview is truncated" `Quick
           test_long_field_truncates_preview;
+        test_case "UTF-8 preview stays readable" `Quick
+          test_utf8_preview_stays_readable;
+        test_case "control chars still escape" `Quick
+          test_control_chars_still_escape;
       ]);
   ]

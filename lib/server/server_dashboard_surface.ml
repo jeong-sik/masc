@@ -21,8 +21,6 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let json_float_opt = Json_util.float_opt_to_json
-
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -30,7 +28,7 @@ let assoc_field key = function
 
 let string_field key json =
   match assoc_field key json with
-  | Some (`String value) when String.trim value <> "" -> Some value
+  | Some (`String value) -> String_util.trim_to_option value
   | _ -> None
 ;;
 
@@ -115,10 +113,10 @@ let to_json envelope =
       , `Assoc
           [ "state", `String envelope.cache.state
           ; "key", Json_util.string_opt_to_json envelope.cache.key
-          ; "ttl_s", json_float_opt envelope.cache.ttl_s
+          ; "ttl_s", Json_util.float_opt_to_json envelope.cache.ttl_s
           ; "stale", `Bool envelope.cache.stale
           ; "stale_reason", Json_util.string_opt_to_json envelope.cache.stale_reason
-          ; "latest_age_s", json_float_opt envelope.cache.latest_age_s
+          ; "latest_age_s", Json_util.float_opt_to_json envelope.cache.latest_age_s
           ; "health", Json_util.string_opt_to_json envelope.cache.health
           ] )
     ; ( "migration"

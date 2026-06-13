@@ -2,7 +2,7 @@
     to [<masc_dir>/operator/judgments.jsonl].
 
     A judgment captures one operator-level decision (currently:
-    coord-level scope decisions) with provenance, freshness
+    workspace-level scope decisions) with provenance, freshness
     window, supersedes-chain, confidence, evidence refs, and
     optional recommended-action JSON.
 
@@ -13,7 +13,7 @@
 
 (** {1 Types} *)
 
-type target_type = Coord
+type target_type = Workspace
 (** Currently a single constructor.  Closed variant — adding a
     second target (e.g. [Keeper]) must extend
     {!target_type_to_string} / {!target_type_of_string}
@@ -46,16 +46,16 @@ type record = {
     {!test_operator_control_judgment}) field-access the record
     when projecting to JSON or checking specific fields.  All
     19 fields are part of the on-disk JSONL contract — drift
-    requires coordinated migration. *)
+    requires synchronized migration. *)
 
 (** {1 target_type codec} *)
 
 val target_type_to_string : target_type -> string
-(** [Coord -> "root"].  Pinned literal for the on-disk JSONL format. *)
+(** [Workspace -> "workspace"].  Pinned literal for the on-disk JSONL format. *)
 
 val target_type_of_string : string -> target_type option
-(** Accepts only the canonical [["root"]] target type for [Coord].
-    Historical [["room"]] / [["namespace"]] aliases are rejected at
+(** Accepts only the canonical [["workspace"]] target type for [Workspace].
+    Historical [["workspace"]] / [["namespace"]] aliases are rejected at
     the parse boundary. *)
 
 (** {1 JSON codec} *)
@@ -90,12 +90,12 @@ val is_fresh : ?now:float -> record -> bool
 
 (** {1 Persistence} *)
 
-val judgments_path : Coord.config -> string
+val judgments_path : Workspace.config -> string
 (** [judgments_path config] returns
     [<masc_dir>/operator/judgments.jsonl].  Exposed for tests
     that assert path existence after a [record] call. *)
 
-val load_all : Coord.config -> record list
+val load_all : Workspace.config -> record list
 (** Reads every JSONL entry from the judgments file, parses,
     and returns the records.  Parse failures are logged at
     [Log.Governance.warn] and skipped — operator alerts on
@@ -106,11 +106,11 @@ val load_all : Coord.config -> record list
 
     Records are keyed by [(surface, target_type, target_id)]
     triple.  When [target_id] is [None] or empty/whitespace, the
-    composite key uses the literal [["__room__"]] sentinel —
+    composite key uses the literal [["__workspace__"]] marker —
     pinned because it must remain stable across runs. *)
 
 val latest_active :
-  Coord.config ->
+  Workspace.config ->
   surface:string ->
   target_type:target_type ->
   target_id:string option ->
@@ -122,7 +122,7 @@ val latest_active :
 (** {1 Write} *)
 
 val record :
-  Coord.config ->
+  Workspace.config ->
   surface:string ->
   target_type:target_type ->
   target_id:string option ->

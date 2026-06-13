@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 # check-main-branch-protection.sh - detect branch-protection drift for #9738.
 #
-# The draft PR guard only prevents ready/merge races when GitHub branch
-# protection requires the guard checks and applies them to admins.  #15938
-# showed that a one-time settings change can drift back; this check must fail
-# closed when it cannot read the setting, otherwise CI silently masks the drift.
+# This check must fail closed when it cannot read branch-protection settings;
+# otherwise CI silently masks required-context drift.
 set -euo pipefail
 
 repo="${BRANCH_PROTECTION_REPOSITORY:-${GITHUB_REPOSITORY:-}}"
 branch="${BRANCH_PROTECTION_BRANCH:-${GITHUB_BASE_REF:-${GITHUB_REF_NAME:-main}}}"
-required_contexts_csv="${BRANCH_PROTECTION_REQUIRED_CONTEXTS:-CI Gate,Draft Auto-Merge Guard}"
+required_contexts_csv="${BRANCH_PROTECTION_REQUIRED_CONTEXTS:-CI Gate}"
 allow_unreadable="${BRANCH_PROTECTION_ALLOW_UNREADABLE:-0}"
 
 if [[ -z "$repo" ]]; then

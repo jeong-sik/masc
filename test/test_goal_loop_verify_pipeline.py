@@ -32,7 +32,6 @@ def passing_metrics() -> dict[str, object]:
     return {
         "metrics": {
             "keeper_turn_success_rate": 0.99,
-            "keeper_skipping_turn_rate_5m": 0,
             "pricing_catalog_miss_total": 0,
             "persistence_utf8_repair_total": 0,
             "recovery_strategy_executed_total_1h": 1,
@@ -110,7 +109,6 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         by_id = {item.gate_id: item for item in report.gates}
         for gate_id in (
             "keeper_turn_success_rate_healthy",
-            "no_semaphore_skip",
             "no_pricing_miss",
             "no_utf8_repair",
             "recovery_executed",
@@ -181,7 +179,6 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         by_id = {item.gate_id: item for item in report.gates}
         for gate_id in (
             "keeper_turn_success_rate_healthy",
-            "no_semaphore_skip",
             "no_pricing_miss",
             "no_utf8_repair",
             "recovery_executed",
@@ -190,7 +187,6 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             metric_name = by_id[gate_id].evidence["metric_name"]
             command = " ".join(by_id[gate_id].command or [])
             self.assertIn(metric_name, command)
-            self.assertNotIn("prometheus query", command)
             self.assertEqual(
                 by_id[gate_id].evidence["metric_source"],
                 "GOAL_LOOP_METRICS_JSON (--metrics-json)",
@@ -211,8 +207,8 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             list(goal_loop_verify_pipeline.REQUIRED_VERIFY_GATE_IDS),
         )
 
-    def test_prometheus_sources_cover_metric_backed_snapshot_keys(self) -> None:
-        sources = goal_loop_verify_pipeline.PROMETHEUS_METRIC_SOURCES
+    def test_metric_series_sources_cover_metric_backed_snapshot_keys(self) -> None:
+        sources = goal_loop_verify_pipeline.METRIC_SERIES_SOURCES
         self.assertEqual(
             sources["persistence_utf8_repair_total"],
             ["masc_persistence_utf8_repair_total"],

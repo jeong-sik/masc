@@ -2,9 +2,9 @@
 \* Boundary spec for keeper turn completion-contract gating.
 \*
 \* Production reality (24h, 2026-04-26 fleet log measurement):
-\*   `Completion contract [require_tool_use] violated: actionable signal
-\*    present, model only used passive read-only tools (masc_status x2,
-\*    keeper_tasks_list x4)` — 43 events, exceeding even the cascade
+\*   `Completion contract violated: actionable progress signal present,
+\*    model only used passive read-only tools (masc_status x2,
+\*    keeper_tasks_list x4)` — 43 events, exceeding even the runtime
 \*   exhaustion volume.  See memory entry
 \*   feedback_proactive_turn_contract_violation_dominant.md.
 \*
@@ -13,19 +13,16 @@
 \*    동일하게 적용 (Phase B PR-8)."
 \*
 \* This spec models the contract-gate boundary.  The keeper sets a
-\* turn-level "tool use required" affordance, the LLM emits a turn,
-\* and the contract gate validates whether actionable mutating tools
-\* were called.  The bug being modeled: the gate detects the violation
-\* but the next turn re-enters with the same affordances and prompt
+\* turn-level completion contract, the LLM emits a turn, and the
+\* contract gate validates whether execution/completion progress was
+\* observed.  The bug being modeled: the gate detects the violation
+\* but the next turn re-enters with the same contract context and prompt
 \* because no LLM-visible "you violated the contract last turn"
 \* feedback was written to chat-store — same root cause as the
-\* empty-tool-universe path (Phase B PR-4).  Phase A telemetry
-\* (`required_tool_contract_violation_total`) measures the volume; Phase
-\* B PR-4 promotes the gate to a typed terminal state with feedback.
+\* terminal error path without the retired empty-tool-universe gate branch.
 \*
 \* Pattern (clean Spec + buggy SpecBuggy gated by a separate Bug action)
-\* matches KeeperTurnTerminal.tla, KeeperEmptyToolUniverse.tla, and
-\* KeeperContinueGate.tla.
+\* matches KeeperTurnTerminal.tla and KeeperContinueGate.tla.
 
 EXTENDS FiniteSets, TLC
 
@@ -54,7 +51,7 @@ Init ==
     /\ feedbackLogged = [k \in Keepers |-> FALSE]
     /\ silentRepeat = [k \in Keepers |-> FALSE]
 
-\* Turn fires with a tool-use-required affordance.
+\* Turn fires with a completion-contract context.
 EnterTurn(k) ==
     /\ turnState[k] = "Idle"
     /\ turnState' = [turnState EXCEPT ![k] = "Awaiting"]
@@ -66,8 +63,8 @@ ResponseReceived(k) ==
     /\ turnState' = [turnState EXCEPT ![k] = "ContractCheck"]
     /\ UNCHANGED <<contractViolated, feedbackLogged, silentRepeat>>
 
-\* Contract satisfied: actionable mutating tool was called.  Normal
-\* completion, reset for the next turn.
+\* Contract satisfied: execution/completion progress was observed.
+\* Normal completion, reset for the next turn.
 ContractSatisfied(k) ==
     /\ turnState[k] = "ContractCheck"
     /\ turnState' = [turnState EXCEPT ![k] = "Idle"]

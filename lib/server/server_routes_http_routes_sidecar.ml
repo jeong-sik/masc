@@ -92,10 +92,7 @@ let attempt_record_json (record : attempt_record) =
     ; "attempt_id", `String record.attempt_id
     ; "attempt_number", `Int record.attempt_number
     ; "last_attempt_result", `String record.last_attempt_result
-    ; ( "next_retry_at"
-      , match record.next_retry_at with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "next_retry_at", Json_util.string_opt_to_json record.next_retry_at )
     ; "operator_next_action", `String record.operator_next_action
     ; "updated_at", `String record.updated_at
     ]
@@ -226,30 +223,6 @@ let read_attempt_record ~base_path id =
       None)
 ;;
 
-let isoish_now () =
-  let tm = Unix.gmtime (Unix.time ()) in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900)
-    (tm.tm_mon + 1)
-    tm.tm_mday
-    tm.tm_hour
-    tm.tm_min
-    tm.tm_sec
-;;
-
-let isoish_at ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900)
-    (tm.tm_mon + 1)
-    tm.tm_mday
-    tm.tm_hour
-    tm.tm_min
-    tm.tm_sec
-;;
-
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
     tries to rename into it. *)
 let ensure_parent_dir path =
@@ -298,7 +271,7 @@ let write_desired_record ?updated_at ~base_path ~id ~updated_by desired_state =
     ; desired_state
     ; generation
     ; updated_by
-    ; updated_at = Option.value updated_at ~default:(isoish_now ())
+    ; updated_at = Option.value updated_at ~default:(Masc_domain.now_iso ())
     }
   in
   let path = sidecar_desired_path ~base_path id in
@@ -368,8 +341,8 @@ let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
 ;;
 
 let reconcile_desired_once
-      ?(now = isoish_now ())
-      ?(next_retry_at = isoish_at (Unix.time () +. retry_backoff_seconds ()))
+      ?(now = Masc_domain.now_iso ())
+      ?(next_retry_at = Masc_domain.iso8601_of_unix_seconds (Unix.time () +. retry_backoff_seconds ()))
       ?previous_attempt
       ?(write_attempt = fun (_ : attempt_record) -> Ok ())
       ~current_generation
@@ -400,7 +373,7 @@ let reconcile_desired_once
 let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_state =
   match record.desired_state, observed_state with
   | Desired_running, Observed_unavailable ->
-    let now = Option.value now ~default:(isoish_now ()) in
+    let now = Option.value now ~default:(Masc_domain.now_iso ()) in
     (match previous_attempt with
      | Some attempt
        when attempt.generation = record.generation && retry_backoff_active ~now attempt ->
@@ -418,10 +391,7 @@ let attempt_fields = function
     ]
   | Some attempt ->
     [ "last_attempt_result", `String attempt.last_attempt_result
-    ; ( "next_retry_at"
-      , match attempt.next_retry_at with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "next_retry_at", Json_util.string_opt_to_json attempt.next_retry_at )
     ; "operator_next_action", `String attempt.operator_next_action
     ; "attempt_id", `String attempt.attempt_id
     ]
@@ -488,7 +458,7 @@ let sidecar_status_metadata_fields ~base_path ~id ~status_path =
   [ "dashboard_surface", `String sidecar_status_dashboard_surface
   ; "source", `String sidecar_status_source
   ; "retention", sidecar_status_retention_json ~base_path ~id ~status_path
-  ; "generated_at_iso", `String (isoish_now ())
+  ; "generated_at_iso", `String (Masc_domain.now_iso ())
   ]
 ;;
 

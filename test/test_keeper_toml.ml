@@ -1,10 +1,9 @@
 open Alcotest
 
-module TL = Masc_mcp.Keeper_toml_loader
-module KTP = Masc_mcp.Keeper_types_profile
-module KPA = Masc_mcp.Keeper_persona_authoring
-module KEP = Masc_mcp.Agent_tool_persona_runtime
-module Runtime = Masc_mcp.Server_routes_http_runtime
+module TL = Keeper_toml_loader
+module KTP = Masc.Keeper_types_profile
+module KEP = Masc.Keeper_tool_persona_runtime
+module Runtime = Server_routes_http_runtime
 
 let contains_substring s needle =
   let s_len = String.length s in
@@ -15,6 +14,21 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   if n_len = 0 then true else loop 0
+
+let has_repo_keeper_config root =
+  Sys.file_exists (Filename.concat root "config/keepers/base.toml")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_repo_keeper_config root -> root
+  | _ ->
+    let rec ascend path =
+      if has_repo_keeper_config path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
 
 let with_env_restore keys f =
   let prev = List.map (fun key -> key, Sys.getenv_opt key) keys in
@@ -452,11 +466,8 @@ mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
 proactive_idle_sec = 300
 proactive_cooldown_sec = 60
-room_signal_prompt_enabled = true
 autoboot_enabled = false
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "keeper_alias"
-active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
+active_goal_ids = ["goal-runtime", "goal-masc"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -471,15 +482,9 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option string) "will" (Some "detect issues") d.will;
       check int "mention_targets" 2 (List.length d.mention_targets);
       check (option bool) "proactive" (Some true) d.proactive_enabled;
-      check (option bool) "room signal prompt" (Some true)
-        d.room_signal_prompt_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option string) "repo_cli_identity" (Some "anyang-keepers")
-        d.repo_cli_identity;
-      check (option string) "git_identity_mode" (Some "keeper_alias")
-        d.git_identity_mode;
       check (option (list string)) "active_goal_ids"
-        (Some [ "goal-runtime"; "goal-masc-mcp" ])
+        (Some [ "goal-runtime"; "goal-masc" ])
         d.active_goal_ids
 
 let test_profile_rejects_partial_proactive_interval_pair () =
@@ -497,21 +502,6 @@ proactive_idle_sec = 120
        | Error msg ->
            check bool "mentions missing cooldown" true
              (contains_substring msg "proactive_cooldown_sec is missing"))
-
-let test_profile_rejects_invalid_git_identity_mode () =
-  let input = {|
-[keeper]
-goal = "test"
-git_identity_mode = "hot_switch"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected invalid git_identity_mode error"
-       | Error msg ->
-           check bool "mentions invalid git_identity_mode" true
-             (contains_substring msg "invalid git_identity_mode"))
 
 let test_profile_rejects_invalid_social_model () =
   let input = {|
@@ -555,27 +545,6 @@ models = ["llama:test"]
                 true
               with Not_found -> false))
 
-let test_profile_rejects_removed_also_allow_alias () =
-  let input = {|
-[keeper]
-goal = "test"
-also_allow = ["tool_search_files"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-      (match KTP.profile_defaults_of_toml doc with
-       | Ok _ -> fail "expected removed TOML alias error"
-       | Error msg ->
-           check bool "mentions removed also_allow alias" true
-             (try
-                ignore
-                  (Str.search_forward
-                     (Str.regexp_string "keeper.also_allow")
-                     msg 0);
-                true
-              with Not_found -> false))
-
 let test_profile_rejects_removed_initiative_keys () =
   let input = {|
 [keeper]
@@ -596,6 +565,24 @@ initiative_enabled = true
                      msg 0);
                 true
               with Not_found -> false))
+
+let test_profile_rejects_removed_ref_keys () =
+  let input = {|
+[keeper]
+goal = "test"
+persona_ref = "base-persona"
+runtime_ref = "tool-runtime"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected removed TOML ref key error"
+       | Error msg ->
+           check bool "mentions removed persona_ref" true
+             (contains_substring msg "keeper.persona_ref");
+           check bool "mentions removed runtime_ref" true
+             (contains_substring msg "keeper.runtime_ref"))
 
 (* ================================================================ *)
 (* File loading tests                                                *)
@@ -668,41 +655,29 @@ let test_load_keeper_toml_inherits_base_defaults () =
       if Sys.file_exists base_path then Sys.remove base_path;
       if Sys.file_exists tmp_dir then Unix.rmdir tmp_dir)
     (fun () ->
+      (* persona⊥{model,runtime}: keeper TOML carries no runtime/model
+         selection (assignment lives in runtime.toml [[runtime.assignments]]).
+         Base inheritance is still exercised by sandbox_profile/network_mode. *)
       write_file base_path {|
 [keeper]
-cascade_name = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "repo_cli_identity"
 |};
       write_file child_path {|
 [keeper]
 base = "base.toml"
 persona_name = "sangsu"
 
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
 |};
       match KTP.load_keeper_toml child_path with
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          check (option string) "base cascade" (Some "route.keeper_turn")
-            defaults.cascade_name;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
           check (option string) "base network" (Some "inherit")
             (Option.map KTP.network_mode_to_string defaults.network_mode);
-          check (option string) "base github identity"
-            (Some "anyang-keepers") defaults.repo_cli_identity;
-          check (option string) "base git identity mode"
-            (Some "repo_cli_identity") defaults.git_identity_mode;
-          check (option string) "child preset wins" (Some "delivery")
-            defaults.tool_preset;
-          check (option string) "child preset source" (Some "toml")
-            defaults.tool_preset_source)
+          ())
 
 (* ================================================================ *)
 (* Discovery tests                                                   *)
@@ -774,6 +749,51 @@ goal = "works"
     (Sys.readdir tmp_dir);
   Unix.rmdir tmp_dir
 
+let require_nonempty_option path field value =
+  match value with
+  | Some text when String.trim text <> "" -> ()
+  | _ ->
+    fail
+      (Printf.sprintf
+         "%s must resolve non-empty keeper.%s from persona defaults or TOML \
+          overlay"
+         path
+         field)
+
+let test_bundled_keeper_profiles_resolve_prompt_self_model () =
+  let repo = repo_root () in
+  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  let restore key = function
+    | Some value -> Unix.putenv key value
+    | None -> Unix.putenv key ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      restore "MASC_CONFIG_DIR" original_config;
+      restore "MASC_PERSONAS_DIR" original_personas;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
+      Unix.putenv "MASC_PERSONAS_DIR"
+        (Filename.concat (Filename.concat repo "config") "personas");
+      Config_dir_resolver.reset ();
+      let keepers_dir = Filename.concat repo "config/keepers" in
+      Sys.readdir keepers_dir
+      |> Array.to_list
+      |> List.filter (fun file ->
+           Filename.check_suffix file ".toml"
+           && not (String.equal file "base.toml"))
+      |> List.iter (fun file ->
+           let path = Filename.concat keepers_dir file in
+           let name = Filename.chop_extension file in
+           match KTP.load_keeper_profile_defaults_result name with
+           | Error e -> fail (Printf.sprintf "%s failed to resolve: %s" path e)
+           | Ok defaults ->
+             require_nonempty_option path "will" defaults.will;
+             require_nonempty_option path "needs" defaults.needs;
+             require_nonempty_option path "desires" defaults.desires))
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -832,22 +852,6 @@ let with_config_dir f =
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();
       f config_dir)
-
-let test_profile_rejects_legacy_allowed_providers () =
-  let input = {|
-[keeper]
-goal = "test"
-allowed_providers = ["Ollama", "GLM"]
-cascade_name = "primary"
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    (match KTP.profile_defaults_of_toml doc with
-     | Ok _ -> fail "expected removed TOML key error"
-     | Error msg ->
-       check bool "mentions removed allowed_providers key" true
-         (contains_substring msg "keeper.allowed_providers"))
 
 let test_profile_max_turns_overrides () =
   let input = {|
@@ -929,27 +933,36 @@ max_turns_per_call_scheduled_autonomous = 0
        check int "zero autonomous falls back" 10
          (KTP.effective_max_turns_per_call_scheduled_autonomous d))
 
-let test_profile_rejects_removed_keeper_cascade_alias () =
+(* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
+   selection; a [keeper.runtime_id] (or legacy [keeper.model]) key is rejected
+   at load, pointing the operator at runtime.toml [[runtime.assignments]]. *)
+let test_profile_rejects_runtime_id_key () =
   let input = {|
 [keeper]
 goal = "test"
-cascade_name = "oas-coding_first"
+runtime_id = "oas-coding_first"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Error e ->
-       check bool "removed alias rejected" true
-         (try
-            ignore
-              (Str.search_forward (Str.regexp_string "invalid cascade_name") e 0);
-            true
-          with
-          | Not_found -> false)
-     | Ok _ -> fail "expected removed keeper cascade alias rejection")
+     | Ok _ -> fail "expected error: keeper.runtime_id is removed"
+     | Error _ -> ())
 
-let test_persona_resolver_defaults_to_research_tool_access () =
+let test_profile_rejects_model_key () =
+  let input = {|
+[keeper]
+goal = "test"
+model = "oas-coding_first"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Ok _ -> fail "expected error: keeper.model is removed"
+     | Error _ -> ())
+
+let test_persona_resolver_omits_unspecified_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -964,20 +977,43 @@ let test_persona_resolver_defaults_to_research_tool_access () =
 }
 |};
   match
-    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc [ ("persona_name", `String "probe") ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
       let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
-      check string "persona default tool_access kind" "preset"
-        (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string);
-      check string "persona default tool_access preset" "research"
-        (Yojson.Safe.Util.member "preset" tool_access |> Yojson.Safe.Util.to_string);
-      check bool "legacy tool_preset omitted" false
-        (match Yojson.Safe.Util.member "tool_preset" resolved with
-         | `String _ -> true
-         | _ -> false)
+      (match tool_access with
+       | `Null -> ()
+       | _ -> fail "unspecified tool_access should be omitted")
+
+let test_persona_defaults_load_self_model_fields () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "keeper": {
+    "goal": "test persona keeper",
+    "will": "legacy will",
+    "needs": "legacy needs",
+    "desires": "legacy desires",
+    "instructions": "legacy instructions"
+  }
+}
+|};
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "goal still loads" (Some "test persona keeper")
+    defaults.goal;
+  check (option string) "will loads" (Some "legacy will") defaults.will;
+  check (option string) "needs loads" (Some "legacy needs") defaults.needs;
+  check (option string) "desires loads" (Some "legacy desires")
+    defaults.desires;
+  check (option string) "instructions load" (Some "legacy instructions")
+    defaults.instructions
 
 let test_persona_resolver_rejects_operator_todo_profile () =
   with_personas_dir @@ fun personas_dir ->
@@ -1100,7 +1136,7 @@ let test_persona_resolver_ignores_non_public_social_model_arg () =
 }
 |};
   match
-    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1109,9 +1145,9 @@ let test_persona_resolver_ignores_non_public_social_model_arg () =
   with
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
-      check bool "social_model omitted from resolved args" false
+      check bool "social_model arg omitted" true
         (match Yojson.Safe.Util.member "social_model" resolved with
-         | `String _ -> true
+         | `Null -> true
          | _ -> false)
 
 let test_persona_resolver_preserves_autoboot_enabled_arg () =
@@ -1129,7 +1165,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
 }
 |};
   match
-    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1158,21 +1194,17 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
 }
 |};
   let expected_tool_access =
-    Masc_mcp.Keeper_types.tool_access_to_json
-      (Masc_mcp.Keeper_types.Custom [ "masc_status" ])
+    Json_util.json_string_list
+      ([ "masc_status" ])
   in
   match
-    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
+    KEP.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
           ("allowed_paths", `List [ `String "/tmp/demo" ]);
           ( "tool_access",
-            `Assoc
-              [
-                ("kind", `String "custom");
-                ("tools", `List [ `String "masc_status" ]);
-              ] );
+            `List [ `String "masc_status" ] );
         ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
@@ -1186,11 +1218,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
              List.filter_map
                (function `String value -> Some value | _ -> None)
                items
-         | _ -> []);
-      check bool "tool_preset omitted with canonical tool_access" false
-        (match Yojson.Safe.Util.member "tool_preset" resolved with
-         | `String _ -> true
-         | _ -> false)
+         | _ -> [])
 
 let test_persona_resolver_renders_durable_keeper_toml () =
   let resolved =
@@ -1210,12 +1238,7 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("proactive_cooldown_sec", `Int 60);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
         ( "tool_access",
-          `Assoc
-            [
-              ("kind", `String "preset");
-              ("preset", `String "research");
-              ("also_allow", `List [ `String "masc_status" ]);
-            ] );
+          `List [ `String "masc_status" ] );
         ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
       ]
   in
@@ -1242,14 +1265,12 @@ let test_persona_resolver_renders_durable_keeper_toml () =
                 [ "probe"; "@probe" ] defaults.mention_targets;
               check (option (list string)) "allowed_paths"
                 (Some [ "/tmp/probe" ]) defaults.allowed_paths;
-              check (option string) "tool_preset" (Some "research")
-                defaults.tool_preset;
-              check (option (list string)) "tool_also_allow"
-                (Some [ "masc_status" ]) defaults.tool_also_allow;
+              check (option (list string)) "tool_access"
+                (Some [ "masc_status" ]) defaults.tool_access;
               check (option (list string)) "tool_denylist"
                 (Some [ "masc_keeper_reset" ]) defaults.tool_denylist))
 
-let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
+let test_persona_resolver_renders_tool_access_array_durable_toml () =
   let resolved =
     `Assoc
       [
@@ -1258,211 +1279,14 @@ let test_persona_resolver_rejects_custom_tool_access_durable_toml () =
         ("goal", `String "test");
         ("mention_targets", `List [ `String "probe" ]);
         ( "tool_access",
-          `Assoc
-            [
-              ("kind", `String "custom");
-              ("tools", `List [ `String "masc_status" ]);
-            ] );
+          `List [ `String "masc_status" ] );
       ]
   in
   match KEP.render_keeper_toml_from_resolved_args resolved with
-  | Ok _ -> fail "expected custom tool_access durable TOML rejection"
-  | Error e ->
-      check bool "mentions custom tool_access" true
-        (contains_substring e "tool_access.kind=custom")
-
-let authoring_minimal_profile =
-  `Assoc
-    [
-      ("name", `String "Probe");
-      ("role", `String "research critic");
-      ("trait", `String "skeptical and concise");
-      ( "keeper",
-        `Assoc
-          [
-            ("goal", `String "Find weak assumptions and make concrete tasks.");
-          ] );
-    ]
-
-let test_persona_authoring_schema_explains_effects () =
-  let json = KPA.schema_json () in
-  let rendered = Yojson.Safe.to_string json in
-  check bool "documents keeper.goal" true
-    (contains_substring rendered "keeper.goal");
-  check bool "omits legacy tool_preset" false
-    (contains_substring rendered "tool_preset");
-  check bool "documents archetype axes" true
-    (contains_substring rendered "archetype_axes");
-  check bool "documents alignment axis" true
-    (contains_substring rendered "alignment");
-  check bool "documents choice effects" true
-    (contains_substring rendered "choice_effects");
-  check bool "documents generated fields" true
-    (contains_substring rendered "generated_fields");
-  check string "draft tool" "masc_persona_generate"
-    (Yojson.Safe.Util.member "authoring_flow" json
-     |> Yojson.Safe.Util.member "draft_tool"
-     |> Yojson.Safe.Util.to_string);
-  check string "save tool" "masc_persona_save"
-    (Yojson.Safe.Util.member "authoring_flow" json
-     |> Yojson.Safe.Util.member "save_tool"
-     |> Yojson.Safe.Util.to_string)
-
-let test_persona_authoring_social_model_choices_follow_variant_ssot () =
-  let json = KPA.schema_json () in
-  let choices =
-    Yojson.Safe.Util.member "choice_sets" json
-    |> Yojson.Safe.Util.member "social_model"
-    |> Yojson.Safe.Util.to_list
-    |> List.map Yojson.Safe.Util.to_string
-  in
-  check (list string) "persona schema social_model choices"
-    Masc_mcp.Keeper_social_model.valid_model_id_strings
-    choices;
-  check (list string) "profile parser social_model choices"
-    Masc_mcp.Keeper_social_model.valid_model_id_strings
-    KTP.valid_social_model_strings
-
-let test_persona_authoring_allowed_keeper_fields_follow_catalog () =
-  let json = KPA.schema_json () in
-  let keeper_prefix = "keeper." in
-  let keeper_fields =
-    Yojson.Safe.Util.member "field_catalog" json
-    |> Yojson.Safe.Util.to_list
-    |> List.filter_map (fun entry ->
-           let path =
-             Yojson.Safe.Util.member "path" entry |> Yojson.Safe.Util.to_string
-           in
-           if String.starts_with ~prefix:keeper_prefix path
-           then
-             Some
-               (String.sub
-                  path
-                  (String.length keeper_prefix)
-                  (String.length path - String.length keeper_prefix))
-           else None)
-    |> List.sort String.compare
-  in
-  check (list string) "allowed keeper fields follow schema catalog" keeper_fields
-    (List.sort String.compare KPA.allowed_keeper_fields)
-
-let test_persona_authoring_axes_validate () =
-  let args =
-    `Assoc
-      [
-        ("alignment", `String "Chaotic");
-        ("risk_posture", `String "high-autonomy");
-      ]
-  in
-  match KPA.selected_archetype_axes_from_args args with
-  | Error e -> fail e
-  | Ok axes ->
-      check string "alignment normalized" "chaotic"
-        (Yojson.Safe.Util.member "alignment" (KPA.archetype_axes_to_json axes)
-         |> Yojson.Safe.Util.to_string);
-      let selected_effects = KPA.selected_archetype_effects_to_json axes in
-      let rendered_effects = Yojson.Safe.to_string selected_effects in
-      check bool "selected effects include alignment" true
-        (contains_substring rendered_effects "alignment");
-      check bool "selected effects omit default preset" false
-        (contains_substring rendered_effects "default_tool_preset");
-      check bool "selected effects expose generated fields" true
-        (contains_substring rendered_effects "keeper.instructions")
-
-let test_persona_authoring_axes_reject_unknown_choices () =
-  match
-    KPA.selected_archetype_axes_from_args
-      (`Assoc [ ("alignment", `String "evil") ])
-  with
-  | Ok _ -> fail "expected invalid alignment rejection"
-  | Error e ->
-      check bool "mentions invalid alignment" true
-        (contains_substring e "invalid alignment");
-      check bool "mentions allowed values" true (contains_substring e "helpful")
-
-let test_persona_authoring_normalizes_keeper_defaults () =
-  match KPA.normalize_profile ~handle:"probe" authoring_minimal_profile with
-  | Error e -> fail e
-  | Ok json ->
-      let keeper = Yojson.Safe.Util.member "keeper" json in
-      check string "handle written" "probe"
-        (Yojson.Safe.Util.member "handle" json |> Yojson.Safe.Util.to_string);
-      check string "goal preserved"
-        "Find weak assumptions and make concrete tasks."
-        (Yojson.Safe.Util.member "goal" keeper |> Yojson.Safe.Util.to_string);
-      check string "short_goal defaults to goal"
-        "Find weak assumptions and make concrete tasks."
-        (Yojson.Safe.Util.member "short_goal" keeper
-         |> Yojson.Safe.Util.to_string);
-      check (list string) "mention target defaults to handle" [ "probe" ]
-        (Yojson.Safe.Util.member "mention_targets" keeper
-         |> Yojson.Safe.Util.to_list
-         |> List.map Yojson.Safe.Util.to_string);
-      check bool "legacy tool_preset omitted" false
-        (match Yojson.Safe.Util.member "tool_preset" keeper with
-         | `String _ -> true
-         | _ -> false)
-
-let test_persona_authoring_rejects_unknown_keeper_fields () =
-  let profile =
-    `Assoc
-      [
-        ( "keeper",
-          `Assoc
-            [
-              ("goal", `String "test");
-              ("evil_chaos_knob", `String "11");
-            ] );
-      ]
-  in
-  match KPA.normalize_profile ~handle:"probe" profile with
-  | Ok _ -> fail "expected unknown keeper field rejection"
-  | Error e ->
-      check bool "mentions unknown keeper fields" true
-        (contains_substring e "unknown keeper fields");
-      check bool "mentions schema tool" true
-        (contains_substring e "masc_persona_schema")
-
-let test_persona_authoring_rejects_operator_todo_placeholders () =
-  let profile =
-    `Assoc
-      [
-        ("name", `String "OPERATOR_TODO: display label");
-        ( "keeper",
-          `Assoc
-            [
-              ("goal", `String "Find weak assumptions and make concrete tasks.");
-            ] );
-      ]
-  in
-  match KPA.normalize_profile ~handle:"probe" profile with
-  | Ok _ -> fail "expected OPERATOR_TODO placeholder rejection"
-  | Error e ->
-      check bool "mentions placeholder marker" true
-        (contains_substring e "OPERATOR_TODO");
-      check bool "mentions replace action" true
-        (contains_substring e "replace placeholders")
-
-let test_persona_authoring_save_dry_run_does_not_write () =
-  with_personas_dir @@ fun personas_dir ->
-  match KPA.save_persona ~dry_run:true ~handle:"probe" authoring_minimal_profile with
-  | Error e -> fail e
-  | Ok result ->
-      check string "root" personas_dir result.personas_root;
-      check bool "profile not written" false (Sys.file_exists result.profile_path)
-
-let test_persona_authoring_save_writes_profile_and_loader_reads_it () =
-  with_personas_dir @@ fun _personas_dir ->
-  match KPA.save_persona ~handle:"probe" authoring_minimal_profile with
-  | Error e -> fail e
-  | Ok result ->
-      check bool "profile written" true (Sys.file_exists result.profile_path);
-      (match KTP.load_persona_summary "probe" with
-       | None -> fail "saved persona summary not loaded"
-       | Some summary ->
-           check string "loaded persona name" "probe" summary.persona_name;
-           check string "loaded display" "Probe" summary.display_name;
-           check bool "has keeper defaults" true summary.has_keeper_defaults)
+  | Error e -> fail ("render failed: " ^ e)
+  | Ok toml ->
+      check bool "renders tool_access array" true
+        (contains_substring toml "tool_access = [\"masc_status\"]")
 
 (* ================================================================ *)
 (* Unknown-key detection                                             *)
@@ -1474,15 +1298,7 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
-cascade_name = "primary"
-repo_cli_identity = "anyang-keepers"
-git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
-
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
-also_allow = ["x"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1505,20 +1321,17 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
-let test_detect_unknown_keys_accepts_tool_access_table () =
+let test_detect_unknown_keys_accepts_tool_access_array () =
   let input = {|
 [keeper]
 goal = "g"
-
-[keeper.tool_access]
-kind = "preset"
-preset = "delivery"
+tool_access = ["masc_status"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "tool_access TOML table is canonical" [] unknown
+    check (list string) "tool_access TOML array is canonical" [] unknown
 
 let test_detect_unknown_keys_accepts_loader_base () =
   let input = {|
@@ -1534,6 +1347,26 @@ legacy_scope = "removed"
     check (list string) "base include is a loader key"
       ["keeper.legacy_scope"] unknown
 
+let test_detect_unknown_keys_flags_provider_health_table () =
+  let input = {|
+[keeper]
+goal = "g"
+mention_targets = ["a"]
+
+[provider_health]
+ttfrc_degraded_ms = 5000.0
+timeout_count_5m_unhealthy = 3
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
+    check (list string) "provider health table is not keeper config"
+      [ "provider_health.timeout_count_5m_unhealthy"
+      ; "provider_health.ttfrc_degraded_ms"
+      ]
+      (List.sort String.compare unknown)
+
 let test_oas_env_parses_allowed_keys () =
   let input = {|
 [keeper]
@@ -1541,7 +1374,7 @@ persona_name = "analyst"
 [keeper.oas_env]
 OAS_CLAUDE_STRICT_MCP = "1"
 OAS_GEMINI_NO_MCP = "1"
-OAS_CODEX_CONFIG = "mcp_servers={}"
+OAS_CLAUDE_MCP_CONFIG = "mcp_servers={}"
 MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
 |} in
   match TL.parse_toml input with
@@ -1555,8 +1388,8 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
         "1" (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
       check string "no_mcp value"
         "1" (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env);
-      check string "codex_config value"
-        "mcp_servers={}" (List.assoc "OAS_CODEX_CONFIG" d.oas_env);
+      check string "claude_mcp_config value"
+        "mcp_servers={}" (List.assoc "OAS_CLAUDE_MCP_CONFIG" d.oas_env);
       check string "unified max tokens value"
         "8192" (List.assoc "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS" d.oas_env);
       check (option int) "unified max tokens override"
@@ -1670,7 +1503,7 @@ let test_oas_env_coerces_bool_to_string () =
 persona_name = "analyst"
 [keeper.oas_env]
 OAS_CLAUDE_STRICT_MCP = true
-OAS_CODEX_SKIP_GIT = false
+OAS_GEMINI_NO_MCP = false
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1681,20 +1514,7 @@ OAS_CODEX_SKIP_GIT = false
       check string "true → 1" "1"
         (List.assoc "OAS_CLAUDE_STRICT_MCP" d.oas_env);
       check string "false → 0" "0"
-        (List.assoc "OAS_CODEX_SKIP_GIT" d.oas_env)
-
-let test_detect_unknown_keys_flags_also_allow_alias () =
-  let input = {|
-[keeper]
-goal = "g"
-also_allow = ["x"]
-|} in
-  match TL.parse_toml input with
-  | Error e -> fail e
-  | Ok doc ->
-    let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "also_allow alias is stale drift"
-      ["keeper.also_allow"] unknown
+        (List.assoc "OAS_GEMINI_NO_MCP" d.oas_env)
 
 let test_load_keeper_toml_captures_unknown_keys_on_profile () =
   let tmp = Filename.temp_file "keeper_unknown" ".toml" in
@@ -1707,8 +1527,8 @@ typo_field = 42
 |};
   close_out oc;
   let unknown_metric () =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+    Masc.Otel_metric_store.metric_value_or_zero
+      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", tmp)]
       ()
   in
@@ -1776,8 +1596,8 @@ base = "base.toml"
 legacy_scope = "removed"
 |};
   let unknown_metric () =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_config_unknown_keys_ignored
+    Masc.Otel_metric_store.metric_value_or_zero
+      Masc.Otel_metric_store.metric_config_unknown_keys_ignored
       ~labels:[("file_path", Filename.concat keepers_dir "alpha.toml")]
       ()
   in
@@ -1964,18 +1784,16 @@ let () =
             test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects invalid social_model" `Quick
             test_profile_rejects_invalid_social_model;
-          test_case "rejects invalid git_identity_mode" `Quick
-            test_profile_rejects_invalid_git_identity_mode;
           test_case "rejects removed model keys" `Quick
             test_profile_rejects_removed_model_keys;
-          test_case "rejects removed also_allow alias" `Quick
-            test_profile_rejects_removed_also_allow_alias;
           test_case "rejects removed initiative keys" `Quick
             test_profile_rejects_removed_initiative_keys;
-          test_case "legacy allowed_providers rejected" `Quick
-            test_profile_rejects_legacy_allowed_providers;
-          test_case "removed keeper cascade alias rejected" `Quick
-            test_profile_rejects_removed_keeper_cascade_alias;
+          test_case "rejects removed ref keys" `Quick
+            test_profile_rejects_removed_ref_keys;
+          test_case "rejects keeper.runtime_id key" `Quick
+            test_profile_rejects_runtime_id_key;
+          test_case "rejects keeper.model key" `Quick
+            test_profile_rejects_model_key;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick
@@ -1991,12 +1809,12 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "accepts tool_access table" `Quick
-            test_detect_unknown_keys_accepts_tool_access_table;
+          test_case "accepts tool_access array" `Quick
+            test_detect_unknown_keys_accepts_tool_access_array;
           test_case "accepts loader base include" `Quick
             test_detect_unknown_keys_accepts_loader_base;
-          test_case "also_allow alias flagged" `Quick
-            test_detect_unknown_keys_flags_also_allow_alias;
+          test_case "flags provider_health table as unknown" `Quick
+            test_detect_unknown_keys_flags_provider_health_table;
           test_case "oas_env keys not flagged as unknown" `Quick
             test_oas_env_not_flagged_as_unknown;
           test_case "load_keeper_toml captures unknown keys on profile" `Quick
@@ -2045,8 +1863,12 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
-          test_case "persona resolver defaults to research tool_access" `Quick
-            test_persona_resolver_defaults_to_research_tool_access;
+          test_case "bundled keeper profiles resolve prompt self-model" `Quick
+            test_bundled_keeper_profiles_resolve_prompt_self_model;
+          test_case "persona resolver omits unspecified tool_access" `Quick
+            test_persona_resolver_omits_unspecified_tool_access;
+          test_case "persona defaults load self-model fields" `Quick
+            test_persona_defaults_load_self_model_fields;
           test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick
@@ -2061,27 +1883,7 @@ let () =
             test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths;
           test_case "persona resolver renders durable keeper TOML" `Quick
             test_persona_resolver_renders_durable_keeper_toml;
-          test_case "persona resolver rejects custom tool_access durable TOML" `Quick
-            test_persona_resolver_rejects_custom_tool_access_durable_toml;
-          test_case "persona authoring schema explains effects" `Quick
-            test_persona_authoring_schema_explains_effects;
-          test_case "persona authoring social_model choices follow variant SSOT" `Quick
-            test_persona_authoring_social_model_choices_follow_variant_ssot;
-          test_case "persona authoring allowed keeper fields follow catalog" `Quick
-            test_persona_authoring_allowed_keeper_fields_follow_catalog;
-          test_case "persona authoring axes validate" `Quick
-            test_persona_authoring_axes_validate;
-          test_case "persona authoring axes reject unknown choices" `Quick
-            test_persona_authoring_axes_reject_unknown_choices;
-          test_case "persona authoring normalizes defaults" `Quick
-            test_persona_authoring_normalizes_keeper_defaults;
-          test_case "persona authoring rejects unknown keeper fields" `Quick
-            test_persona_authoring_rejects_unknown_keeper_fields;
-          test_case "persona authoring rejects OPERATOR_TODO placeholders" `Quick
-            test_persona_authoring_rejects_operator_todo_placeholders;
-          test_case "persona authoring dry-run does not write" `Quick
-            test_persona_authoring_save_dry_run_does_not_write;
-          test_case "persona authoring save is loader-visible" `Quick
-            test_persona_authoring_save_writes_profile_and_loader_reads_it;
+          test_case "persona resolver renders tool_access durable TOML" `Quick
+            test_persona_resolver_renders_tool_access_array_durable_toml;
         ] );
     ]

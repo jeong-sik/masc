@@ -47,7 +47,7 @@ vars == <<state, risk>>
 
 CmdIds == 1..MaxCmds
 
-\* "None" sentinel for risk when not yet decided. We model this with a
+\* "None" marker for risk when not yet decided. We model this with a
 \* fresh string, since TLA+ functions are total: the field always has a
 \* value but only Decided/Dispatched states require a real RiskClass.
 NoRisk == "NoRisk"

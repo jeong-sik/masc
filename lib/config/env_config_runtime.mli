@@ -30,6 +30,7 @@ end
 module Session : sig
   val max_age_seconds : float
   val rate_limit_window_seconds : float
+  val sse_grace_period_seconds : float
 end
 
 (** {1 Tempo (polling interval)} *)
@@ -84,7 +85,6 @@ end
 
 module Spawn : sig
   val timeout_seconds : int
-  val coding_timeout_seconds : int
   val grace_period_seconds : int
 end
 
@@ -156,7 +156,6 @@ module Transport : sig
   val webrtc_enabled : unit -> bool
   val use_h2 : unit -> h2_mode
   val agent_transport_opt : unit -> agent_transport option
-  val openai_compat_enabled : bool
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end
@@ -177,16 +176,7 @@ module Verification : sig
   val timeout_check_interval_seconds : float
 end
 
-(** {1 Goal / Approval janitors} *)
-
-module Goal_janitor : sig
-  val enabled : unit -> bool
-  val interval_seconds : float
-  val auto_stagnant_days : unit -> int
-  (** [auto_stagnant_days ()] = [MASC_GOAL_JANITOR_AUTO_STAGNATE_DAYS]
-      or default [7].  Drops auto-generated Active goals (title suffix
-      [" (auto)"]) sooner than the 30-day manual threshold. *)
-end
+(** {1 Approval janitor} *)
 
 module Approval_janitor : sig
   val enabled : unit -> bool
@@ -295,12 +285,6 @@ module Oas_sse : sig
   val drain_interval_sec : float
 end
 
-(** {1 Memory OAS bridge} *)
-
-module Memory_oas : sig
-  val default_importance : int
-end
-
 (** {1 Smart heartbeat tuning} *)
 
 module SmartHeartbeatTuning : sig
@@ -323,7 +307,7 @@ module Dashboard : sig
   val shell_prewarm_outer_timeout_sec : float
   val execution_timeout_sec : float
   val execution_trust_timeout_sec : float
-  val mission_timeout_sec : float
+  val briefing_timeout_sec : float
   val shell_timeout_sec : float
   val shell_light_timeout_sec : float
   val render_timeout_sec : float
@@ -357,8 +341,8 @@ module Sidecar : sig
   val schema_generation_timeout_sec : float
 end
 
-(** {1 Coord local git operation timeouts} *)
+(** {1 Workspace local git operation timeouts} *)
 
-module Coord_git : sig
+module Workspace_git : sig
   val local_op_timeout_sec : float
 end

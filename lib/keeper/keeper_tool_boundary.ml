@@ -1,7 +1,7 @@
 (** Boundary for calling keeper tools from non-keeper entrypoints. *)
 
 type 'a context = {
-  config : Coord.config;
+  config : Workspace.config;
   agent_name : string;
   sw : Eio.Switch.t;
   clock : 'a Eio.Time.clock;
@@ -12,9 +12,9 @@ type 'a context = {
 let create ~config ~agent_name ~sw ~clock ~proc_mgr ~net =
   { config; agent_name; sw; clock; proc_mgr; net }
 
-let to_tool_keeper_context (ctx : _ context) : _ Tool_keeper.context =
+let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
   {
-    Tool_keeper.config = ctx.config;
+    Keeper_tool_surface.config = ctx.config;
     agent_name = ctx.agent_name;
     sw = ctx.sw;
     clock = ctx.clock;
@@ -23,8 +23,8 @@ let to_tool_keeper_context (ctx : _ context) : _ Tool_keeper.context =
   }
 
 let dispatch ctx ~name ~args =
-  Tool_keeper.dispatch (to_tool_keeper_context ctx) ~name ~args
+  Keeper_tool_surface.dispatch (to_tool_keeper_context ctx) ~name ~args
 
-let dispatch_stream ~on_text_delta ctx ~name ~args =
-  Tool_keeper.dispatch_stream ~on_text_delta (to_tool_keeper_context ctx) ~name
+let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args =
+  Keeper_tool_surface.dispatch_stream ?on_text_delta ?on_event (to_tool_keeper_context ctx) ~name
     ~args

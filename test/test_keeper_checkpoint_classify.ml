@@ -23,7 +23,7 @@
     [load_oas_history_file] and is exercised separately via the
     [Fs_compat.file_exists] / [Checkpoint_store.exists] branches. *)
 
-module Store = Masc_mcp.Keeper_checkpoint_store
+module Store = Masc.Keeper_checkpoint_store
 
 (* Alcotest testable for [Store.checkpoint_load_error]. We only need
    equality + a pretty printer for failure diagnostics; the variants

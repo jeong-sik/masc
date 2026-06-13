@@ -14,8 +14,33 @@
 
 open Alcotest
 
-module KP = Masc_mcp.Keeper_prompt
-module KSBP = Masc_mcp.Keeper_state_block_prompt
+module KP = Masc.Keeper_prompt
+module KSBP = Keeper_state_block_prompt
+
+let has_prompt_root path =
+  Sys.file_exists (Filename.concat path "config/prompts/keeper.constitution.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_prompt_root root -> root
+  | _ ->
+    let rec ascend path =
+      if has_prompt_root path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
+
+let with_prompt_registry f =
+  Fun.protect
+    ~finally:Prompt_registry.clear
+    (fun () ->
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir
+        (Filename.concat (repo_root ()) "config/prompts");
+      Masc.Prompt_defaults.init ();
+      f ())
 
 (* Local substring check to avoid a dep on a specific [String_util] surface
    from this leaf test.  Linear scan is fine for the small fixtures here. *)
@@ -57,10 +82,10 @@ let test_fallback_substitutes_state_block_instruction () =
 let test_happy_path_includes_state_block_template () =
   (* Regression guard: with a properly-loaded prompt registry,
      [keeper_constitution] still includes the "State block template" literal.
-     We do not require any prompt-file layout — [keeper_constitution] either
-     resolves via the registry (Ok branch, substitutes via
-     [render_prompt_template]) or falls back through the now-fixed Error path
-     (which also substitutes).  Either way the literal must be present. *)
+     The test initializes the registry explicitly; otherwise direct execution
+     would take the missing-prompt fallback and test runner cwd instead of the
+     happy path. *)
+  with_prompt_registry @@ fun () ->
   let prompt = KP.keeper_constitution () in
   check bool
     "keeper_constitution output contains \"State block template\" literal \

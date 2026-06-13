@@ -3,7 +3,7 @@
 
     Bridges OAS [Agent_sdk.Hooks] callbacks with MASC's keeper accounting:
     records OAS-reported usage/cost with explicit unknowns, records
-    Prometheus metrics, and gates pre-tool execution via [Keeper_guards].
+    Otel_metric_store metrics, and gates pre-tool execution via [Keeper_guards].
     Concrete provider/model identity remains OAS-owned; keeper-facing
     projections use neutral runtime lanes.  The [make_hooks] entry point
     wires every callback used by the keeper runtime turn loop. *)
@@ -12,7 +12,7 @@
 
 val keeper_denied_tools : string list
 (** Tool names that are always denied for keeper-bound execution
-    regardless of cascade or persona policy. *)
+    regardless of runtime or persona policy. *)
 
 (** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
     moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
@@ -20,7 +20,7 @@ val keeper_denied_tools : string list
 (** {1 Tool-failure metrics} *)
 
 val tool_use_failure_metric : string
-(** Prometheus metric name for tool-use failures. *)
+(** Otel_metric_store metric name for tool-use failures. *)
 
 val record_tool_use_failure : keeper_name:string -> tool_name:string -> unit
 (** Increment [tool_use_failure_metric] for [(keeper, tool)]. *)
@@ -58,7 +58,7 @@ val classify_usage_trust :
 
 val record_usage_anomaly_metrics :
   keeper_name:string -> Keeper_usage_trust.t -> unit
-(** Emit Prometheus counters for each anomaly category in the verdict. *)
+(** Emit Otel_metric_store counters for each anomaly category in the verdict. *)
 
 (** {1 Cost ledger}
 
@@ -102,7 +102,7 @@ val wall_tokens_per_second :
 (** {1 Cost emit source} *)
 
 val cost_emit_source_metric : string
-(** Prometheus metric for the cost-emit source label. *)
+(** Otel_metric_store metric for the cost-emit source label. *)
 
 val classify_cost_usd_source :
   usage_missing:bool ->
@@ -121,7 +121,7 @@ val cost_event_payload :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> Yojson.Safe.t
+  ?telemetry:Agent_sdk.Types.inference_telemetry -> ?model:string -> unit -> Yojson.Safe.t
 (** Assemble the structured cost-ledger event without writing it. *)
 
 val emit_cost_event :
@@ -133,7 +133,8 @@ val emit_cost_event :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
+  ?telemetry:Agent_sdk.Types.inference_telemetry ->
+  ?model:string -> unit -> unit
 (** Append a structured cost-ledger event to [costs.jsonl]. *)
 
 (** {1 Idle-loop policy} *)
@@ -166,8 +167,9 @@ val recent_tool_streak_count :
 (** {1 Hook factory} *)
 
 val make_hooks :
-  config:Coord.config ->
-  meta_ref:Keeper_types.keeper_meta ref ->
+  config:Workspace.config ->
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
+  turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
   ?max_cost_usd:float ->
   ?destructive_check:bool ->
@@ -180,13 +182,17 @@ val make_hooks :
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
-  ?passive_loop_nudge:(unit -> string option) ->
   unit -> Agent_sdk.Hooks.hooks
 (** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
-    pre-tool gate, post-tool accounting, idle-detection, cost guard,
+    pre-tool gate, post-tool accounting, idle-detection, cost telemetry,
     and trajectory hooks all wired together. *)
 
 val hook_introspection_json :
   ?max_cost_usd:float -> ?destructive_check:bool -> unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
     diagnostics surface. *)
+
+module For_testing : sig
+  val tool_input_shape_for_log : Yojson.Safe.t -> string
+  val tool_input_keys_for_log : Yojson.Safe.t -> string
+end

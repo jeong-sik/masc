@@ -1,5 +1,5 @@
 (** Test_mid_turn_resume — Verifies checkpoint preservation across
-    cascade provider failures (mid-turn resume).
+    runtime provider failures (mid-turn resume).
 
     LLM 0 — no real MODEL calls. Tests use mock Agent.create/set_state/checkpoint/resume.
 
@@ -25,7 +25,7 @@ let require_net () =
 
 (** Verify that Agent.checkpoint captures accumulated turn state,
     and Agent.resume restores it — the foundation of mid-turn resume.
-    If this roundtrip breaks, cascade fallback loses prior turns. *)
+    If this roundtrip breaks, runtime fallback loses prior turns. *)
 let test_checkpoint_roundtrip () =
   let net = require_net () in
   let config = { Agent_sdk.Types.default_config with
@@ -60,7 +60,7 @@ let test_checkpoint_roundtrip () =
   Alcotest.(check int) "checkpoint messages" 6 (List.length cp.messages);
   Alcotest.(check (option string)) "checkpoint system_prompt"
     (Some "test system prompt") cp.system_prompt;
-  (* Resume with different provider — simulates cascade fallback *)
+  (* Resume with different provider — simulates runtime fallback *)
   let resumed = Agent_sdk.Agent.resume ~net ~checkpoint:cp () in
   let resumed_state = Agent_sdk.Agent.state resumed in
   Alcotest.(check int) "resumed turn_count" 3 resumed_state.turn_count;
@@ -82,11 +82,11 @@ let test_zero_turns_no_checkpoint () =
 (** Verify checkpoint accumulation across multiple resume cycles.
     Simulates: Provider A (2 turns) -> fail -> Provider B (1 turn) -> fail -> Provider C resume.
     Provider C should see 3 accumulated turns. *)
-let test_multi_cascade_accumulation () =
+let test_multi_runtime_accumulation () =
   let net = require_net () in
   (* Provider A: 2 turns *)
   let agent_a = Agent_sdk.Agent.create ~net ~config:{ Agent_sdk.Types.default_config with
-    name = "cascade-a"; model = "provider-a" } () in
+    name = "runtime-a"; model = "provider-a" } () in
   Agent_sdk.Agent.set_state agent_a { (Agent_sdk.Agent.state agent_a) with
     messages = [
       Agent_sdk.Types.user_msg "t1";
@@ -151,8 +151,8 @@ let () =
         test_checkpoint_roundtrip;
       Alcotest.test_case "zero turns yields no checkpoint" `Quick
         test_zero_turns_no_checkpoint;
-      Alcotest.test_case "multi-cascade accumulation (A->B->C)" `Quick
-        test_multi_cascade_accumulation;
+      Alcotest.test_case "multi-runtime accumulation (A->B->C)" `Quick
+        test_multi_runtime_accumulation;
       Alcotest.test_case "resume preserves checkpoint model" `Quick
         test_resume_preserves_checkpoint_model;
     ];

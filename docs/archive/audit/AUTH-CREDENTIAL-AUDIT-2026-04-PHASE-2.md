@@ -21,14 +21,14 @@ Two gaps narrowed/collapsed (C3, C4), one anchor assumption falsified (C5). Patt
 
 ### 2.1 C2 — Identity telemetry (4/4 silent)
 
-Searched for `Prometheus.|metric_*|register_counter|inc_counter`:
+Searched for `retired scrape backend.|metric_*|register_counter|inc_counter`:
 
 | File | Telemetry | Notes |
 |---|---|---|
 | `lib/agent_identity.ml` | NO | 338 lines, zero counters; false positives only (`@since`, `register`, `registered_at`) |
 | `lib/build_identity.ml` | NO | Pure data structures |
-| `lib/keeper/keeper_identity.ml` | NO | Has comment at L201 referencing "Prometheus metric" but no instrumentation |
-| `lib/coord/coord_identity.ml` | NO | Zero matches |
+| `lib/keeper/keeper_identity.ml` | NO | Has comment at L201 referencing "retired scrape backend metric" but no instrumentation |
+| `lib/workspace/workspace_identity.ml` | NO | Zero matches |
 
 Phase 1 estimate: 4 modules without telemetry. Confirmed: **all 4** silent.
 
@@ -43,10 +43,10 @@ Both files exist; coverage is comprehensive (claim/start/done/heartbeat actions 
 
 ### 2.3 C4 — Credential redaction (gap collapsed)
 
-`lib/keeper/credential_provider.ml` and `lib/auth_doctor.ml` examined for `Log.error|Log.info|Log.warn|sprintf.*path|to_string.*ro_mount`:
+`lib/keeper/credential_provider.ml` and `lib/auth_diagnostic.ml` examined for `Log.error|Log.info|Log.warn|sprintf.*path|to_string.*ro_mount`:
 
 - `credential_provider.ml`: sprintf at L24, L26, L28, L30 — error display only, **not logged**
-- `auth_doctor.ml`: sprintf at L710-731 — diagnostic report builder, **not logged**
+- `auth_diagnostic.ml`: sprintf at L710-731 — diagnostic report builder, **not logged**
 
 Neither file has a `Log.*` call. Path strings flow into return values, not into log frameworks. The Phase 1-flagged "host path leak risk" is not currently a leak vector because there is no logging instrumentation that could carry the paths off-process.
 
@@ -54,9 +54,9 @@ This does **not** mean the C4 risk is dismissed — if Phase 3 work adds logging
 
 ### 2.4 C5 — Anchor verification (Phase 1 over-assumed)
 
-Phase 1 listed `server_auth.ml`, `auth_strict_mode.ml`, `auth_resolve.ml` as "well-covered anchors". Phase 2 grep for `Prometheus.`:
+Phase 1 listed `server_auth.ml`, `auth_strict_mode.ml`, `auth_resolve.ml` as "well-covered anchors". Phase 2 grep for `retired scrape backend.`:
 
-| File | Prometheus calls |
+| File | retired scrape backend calls |
 |---|---|
 | `lib/server/server_auth.ml` | **4** |
 | `lib/auth_strict_mode.ml` | **0** |
@@ -64,7 +64,7 @@ Phase 1 listed `server_auth.ml`, `auth_strict_mode.ml`, `auth_resolve.ml` as "we
 
 Only 1/3 actually qualifies as an anchor. `auth_strict_mode` and `auth_resolve` are bare. Phase 1 assumed them anchors based on their domain centrality, not measured telemetry. This is a Phase 1 assumption error worth recording — the codified pattern (PR #12193) advises taxonomy by structural evidence, not naming intuition; Phase 1 author here partially relied on the latter.
 
-### 2.5 Telemetry baseline — `metric_auth_*` Prometheus families
+### 2.5 Telemetry baseline — `metric_auth_*` retired scrape backend families
 
 6 unique metrics, all defined in single registry, all mutated through `server_auth.ml`:
 
@@ -82,7 +82,7 @@ Centralization is a strength (single point of reasoning) but also a single-point
 Phase 1 left floors as TBD. Phase 2 pins:
 
 ```
-auth_modules_with_prometheus_guards          (INC, floor 1)
+auth_modules_with_retired-scrape-backend_guards          (INC, floor 1)
   Current state: only server_auth.ml. Phase 3 should add at least
   auth_strict_mode + auth_resolve telemetry to reach floor 3.
 
@@ -100,8 +100,8 @@ C1 (token refresh tests) remains TBD — Phase 3 must locate refresh implementat
 ## 4. Phase 3 priorities (proposal — fixes deferred to follow-up PRs)
 
 Tier P1 (high-leverage gap closures):
-- Add Prometheus counter to `auth_resolve.ml` (cascade dispatch failure modes)
-- Add Prometheus counter to `auth_strict_mode.ml` (would-reject vs actual reject divergence)
+- Add retired scrape backend counter to `auth_resolve.ml` (runtime dispatch failure modes)
+- Add retired scrape backend counter to `auth_strict_mode.ml` (would-reject vs actual reject divergence)
 - Add at least one identity-resolution counter to `agent_identity.ml`
 
 Tier P2 (defensive):

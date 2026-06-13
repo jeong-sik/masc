@@ -1,7 +1,7 @@
 (** Keeper meta JSON codec facade.
 
     Included by [Keeper_types] so existing [Keeper_types.*] callers keep
-    their public API while scrubbing, parsing, and serialization stay in
+    their public API while guards, parsing, and serialization stay in
     smaller private modules. *)
 
 open Keeper_types_profile
@@ -10,15 +10,23 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Config/personality/policy fields are TOML-only; JSON persists
-     runtime state exclusively.  See [config_field_names] for the
-     full list of excluded keys. *)
+  (* Policy fields are TOML-only.  Identity/personality fields are persisted
+     as the effective runtime snapshot so dashboards and meta readers do not
+     show a blank keeper between TOML load and prompt render. *)
   `Assoc
     [ "name", `String m.name
     ; "agent_name", `String m.agent_name
+    ; ( "persona"
+      , match m.persona with
+        | Some s -> `String s
+        | None -> `Null )
+    ; "will", `String m.will
+    ; "needs", `String m.needs
+    ; "desires", `String m.desires
+    ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
+    ; "tool_access", Json_util.json_string_list m.tool_access
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room
     ; "generation", `Int rt.generation
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
@@ -29,7 +37,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "total_tokens", `Int rt.usage.total_tokens
     ; "total_cost_usd", `Float rt.usage.total_cost_usd
     ; "last_turn_ts", `Float rt.usage.last_turn_ts
-    ; "last_model_used", `String ""
     ; "last_input_tokens", `Int rt.usage.last_input_tokens
     ; "last_output_tokens", `Int rt.usage.last_output_tokens
     ; "last_total_tokens", `Int rt.usage.last_total_tokens
@@ -62,6 +69,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
+    ; "last_seen_message_seq", `Int rt.last_seen_message_seq
     ; "last_speech_act", `String rt.last_speech_act
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
@@ -70,9 +78,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
         | None -> `Null )
-    ; ( "last_cascade_attempt"
-      , match rt.last_cascade_attempt with
-        | Some record -> cascade_attempt_record_to_json record
+    ; ( "last_runtime_attempt"
+      , match rt.last_runtime_attempt with
+        | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
     ; "last_need", `String rt.last_need
     ; ( "last_turn_tool_calls"
@@ -102,9 +110,14 @@ include Keeper_meta_json_parse
 let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
+  ; "persona"
+  ; "will"
+  ; "needs"
+  ; "desires"
+  ; "instructions"
   ; "trace_id"
+  ; "tool_access"
   ; "trace_history"
-  ; "last_seen_seq_by_room"
   ; "generation"
   ; "last_handoff_ts"
   ; "created_at"
@@ -115,7 +128,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "total_tokens"
   ; "total_cost_usd"
   ; "last_turn_ts"
-  ; "last_model_used"
   ; "last_input_tokens"
   ; "last_output_tokens"
   ; "last_total_tokens"
@@ -145,12 +157,13 @@ let fallback_canonical_keeper_meta_key_names =
   ; "board_reactive_turn_count"
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
+  ; "last_seen_message_seq"
   ; "last_speech_act"
   ; "last_social_transition_reason"
   ; "last_active_desire"
   ; "last_current_intention"
   ; "last_blocker"
-  ; "last_cascade_attempt"
+  ; "last_runtime_attempt"
   ; "last_need"
   ; "last_turn_tool_calls"
   ; "paused"
@@ -162,16 +175,16 @@ let fallback_canonical_keeper_meta_key_names =
   ]
 ;;
 
-(* Seed round-trip: parse a minimal JSON then serialize to derive the
-   canonical key set.  [parse_sandbox_policy_fields] now defaults to
-   [Local]/[Network_inherit] when config fields are absent, so the seed
-   no longer needs sandbox_profile/network_mode. *)
+(* Seed round-trip: parse a minimal canonical JSON then serialize to derive
+   the canonical key set. *)
 let canonical_keeper_meta_key_names =
   let seed_json =
     `Assoc
       [ "name", `String "__keeper-meta-key-seed__"
       ; "agent_name", `String "__keeper-meta-key-seed__"
+      ; "persona", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
+      ; "tool_access", `List []
       ]
   in
   match meta_of_json seed_json with
@@ -180,7 +193,7 @@ let canonical_keeper_meta_key_names =
      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
      | _ -> fallback_canonical_keeper_meta_key_names)
   | Error msg ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetaJsonFailures)
       ~labels:[("site", "seed_parse")]
       ();
@@ -204,7 +217,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
     (match unknown with
      | [] -> ()
      | _ :: _ ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string MetaJsonFailures)
          ~labels:[("site", "unknown_keys")]
          ();

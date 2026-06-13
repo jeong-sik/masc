@@ -43,18 +43,18 @@ describe('normalizeMission', () => {
   it('extracts summary fields', () => {
     const result = normalizeMission({
       summary: {
-        room_health: 'healthy',
+        workspace_health: 'healthy',
         cluster: 'local',
-        project: 'masc-mcp',
+        project: 'masc',
         paused: false,
         tempo_interval_s: 30,
         active_agents: 3,
         active_operations: 1,
       },
     })
-    expect(result.summary.room_health).toBe('healthy')
+    expect(result.summary.workspace_health).toBe('healthy')
     expect(result.summary.cluster).toBe('local')
-    expect(result.summary.project).toBe('masc-mcp')
+    expect(result.summary.project).toBe('masc')
     expect(result.summary.paused).toBe(false)
     expect(result.summary.tempo_interval_s).toBe(30)
     expect(result.summary.active_agents).toBe(3)
@@ -62,7 +62,7 @@ describe('normalizeMission', () => {
 
   it('defaults summary fields to undefined/0', () => {
     const result = normalizeMission({ summary: {} })
-    expect(result.summary.room_health).toBeUndefined()
+    expect(result.summary.workspace_health).toBeUndefined()
     expect(result.summary.paused).toBeUndefined()
     expect(result.summary.active_agents).toBeUndefined()
   })
@@ -90,7 +90,7 @@ describe('normalizeMission', () => {
   it('extracts recommended_actions', () => {
     const result = normalizeMission({
       recommended_actions: [
-        { action_type: 'broadcast', target_type: 'room', reason: 'Alert' },
+        { action_type: 'broadcast', target_type: 'workspace', reason: 'Alert' },
       ],
     })
     expect(result.recommended_actions).toHaveLength(1)
@@ -169,7 +169,7 @@ describe('normalizeMission', () => {
   it('parses a full mission response', () => {
     const result = normalizeMission({
       generated_at: '2026-04-17T12:00:00Z',
-      summary: { room_health: 'healthy' },
+      summary: { workspace_health: 'healthy' },
       incidents: [],
       recommended_actions: [],
       command_focus: { health: 'ok' },
@@ -181,7 +181,7 @@ describe('normalizeMission', () => {
       internal_signals: [],
     })
     expect(result.generated_at).toBe('2026-04-17T12:00:00Z')
-    expect(result.summary.room_health).toBe('healthy')
+    expect(result.summary.workspace_health).toBe('healthy')
     expect(result.command_focus.health).toBe('ok')
   })
 })

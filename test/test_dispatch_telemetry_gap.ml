@@ -6,7 +6,7 @@ open Alcotest
     Verified at PR-1 author time:
 
     {v
-    rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/agent_tool_remote_mcp_runtime.ml
+    rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/keeper_tool_registered_runtime.ml
     # 0 matches
     v}
 
@@ -17,7 +17,7 @@ open Alcotest
     4-Tuple definition (RFC-0084 §2.1):
     - Span      : Tracing.with_span ~kind:Tool_dispatch ~name ~tool_id ~trace_id
     - Audit     : Audit_log.record ~event:Tool_dispatched ~outcome
-    - Metric    : Prometheus.inc_counter tool_dispatch_total{outcome,tool,surface}
+    - Metric    : Otel_metric_store.inc_counter tool_dispatch_total{outcome,tool,surface}
     - Trace_id  : propagated to handler + result
 *)
 
@@ -41,7 +41,7 @@ let test_audit_emission_gap () =
 
 let test_metric_emission_gap_on_none () =
   (check int)
-    "Prometheus.inc_counter calls when handler returns None \
+    "Otel_metric_store.inc_counter calls when handler returns None \
      (RFC-0084 §1.1 / tool_dispatch.ml:127-129; PR-10 target = 1)"
     0
     pinned_metric_emission_per_dispatch_when_handler_none

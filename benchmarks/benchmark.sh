@@ -1,6 +1,6 @@
 #!/bin/bash
 # MASC Benchmark Framework
-# Usage: ./benchmark.sh [session|read|coordination|runtime|a2a|all] [iterations]
+# Usage: ./benchmark.sh [session|read|workspace collaboration|runtime|a2a|all] [iterations]
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MASC_URL="${MASC_URL:-http://127.0.0.1:8935/mcp}"
 MASC_AGENT="${MASC_AGENT:-bench}"
 MASC_TOKEN="${MASC_TOKEN:-}"
-BENCH_ROOM_PATH="${BENCH_ROOM_PATH:-$ROOT_DIR}"
+BENCH_WORKSPACE_PATH="${BENCH_WORKSPACE_PATH:-$ROOT_DIR}"
 PATTERN="${1:-all}"
 ITERATIONS="${2:-3}"
 RESULTS_DIR="${SCRIPT_DIR}/results"
@@ -182,13 +182,7 @@ bench_call_tool() {
 }
 
 bench_bootstrap_agent() {
-  bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_ROOM_PATH" '{path:$path}')" >/dev/null
-}
-
-bench_leave_agent() {
-  if [[ -n "$MCP_SESSION_ID" ]]; then
-    bench_call_tool "masc_leave" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent}')" >/dev/null 2>&1 || true
-  fi
+  bench_call_tool "masc_start" "$(jq -cn --arg path "$BENCH_WORKSPACE_PATH" '{path:$path}')" >/dev/null
 }
 
 stats_csv() {
@@ -270,7 +264,7 @@ write_metadata() {
     --arg timestamp "$TIMESTAMP" \
     --arg started_at "$RUN_STARTED_AT" \
     --arg endpoint_url "$MASC_URL" \
-    --arg bench_room_path "$BENCH_ROOM_PATH" \
+    --arg bench_workspace_path "$BENCH_WORKSPACE_PATH" \
     --arg compare_to "$BENCH_COMPARE_TO" \
     --arg compare_baseline_file "$COMPARE_BASELINE_FILE" \
     --arg result_file "$RESULT_FILE" \
@@ -283,7 +277,7 @@ write_metadata() {
       timestamp: $timestamp,
       started_at: $started_at,
       endpoint_url: $endpoint_url,
-      room_path: $bench_room_path,
+      workspace_path: $bench_workspace_path,
       iterations: $iterations,
       warmup_iterations: $warmup_iterations,
       session_warmup_iterations: $session_warmup_iterations,
@@ -416,16 +410,16 @@ collect_tool_samples() {
 }
 
 bench_read_path() {
-  collect_tool_samples "mcp_read_status" "masc_status" '{}' "$ITERATIONS" "room status"
+  collect_tool_samples "mcp_read_status" "masc_status" '{}' "$ITERATIONS" "workspace status"
   collect_tool_samples "mcp_read_agents" "masc_agents" '{}' "$ITERATIONS" "agent details"
   collect_tool_samples "mcp_read_tasks" "masc_tasks" '{}' "$ITERATIONS" "active backlog"
-  collect_tool_samples "mcp_read_messages" "masc_messages" '{"limit":5}' "$ITERATIONS" "recent room messages"
+  collect_tool_samples "mcp_read_messages" "masc_messages" '{"limit":5}' "$ITERATIONS" "recent workspace messages"
 }
 
-bench_coordination() {
-  collect_tool_samples "mcp_coord_broadcast" "masc_broadcast" \
+bench_workspace collaboration() {
+  collect_tool_samples "mcp_workspace_broadcast" "masc_broadcast" \
     "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"benchmark",format:"compact"}')" \
-    "$ITERATIONS" "joined agent write path"
+    "$ITERATIONS" "bound agent write path"
 }
 
 bench_a2a() {
@@ -455,7 +449,7 @@ run_pattern() {
       collect_initialize_samples "$ITERATIONS"
       ensure_session_ready
       bench_read_path
-      bench_coordination
+      bench_workspace collaboration
       bench_a2a
       bench_runtime
       ;;
@@ -466,9 +460,9 @@ run_pattern() {
       ensure_session_ready
       bench_read_path
       ;;
-    coordination)
+    workspace collaboration)
       ensure_session_ready
-      bench_coordination
+      bench_workspace collaboration
       ;;
     runtime)
       ensure_session_ready
@@ -480,7 +474,7 @@ run_pattern() {
       ;;
     *)
       error "Unknown pattern: $PATTERN"
-      echo "Available: session, read, coordination, runtime, a2a, all" >&2
+      echo "Available: session, read, workspace collaboration, runtime, a2a, all" >&2
       exit 1
       ;;
   esac
@@ -489,7 +483,7 @@ run_pattern() {
 log "MASC Benchmark Suite"
 log "URL: $MASC_URL"
 log "Agent: $MASC_AGENT"
-log "Room: $BENCH_ROOM_PATH"
+log "Workspace: $BENCH_WORKSPACE_PATH"
 log "Pattern: $PATTERN"
 log "Iterations: $ITERATIONS"
 log "Warmup iterations: $BENCH_WARMUP_ITERATIONS"
@@ -497,7 +491,6 @@ log "Session warmup iterations: $BENCH_SESSION_WARMUP_ITERATIONS"
 log "Results: $RESULT_FILE"
 
 printf 'benchmark,avg_ms,p50_ms,p95_ms,max_ms,notes\n' >"$RESULT_FILE"
-trap bench_leave_agent EXIT
 
 run_pattern
 COMPARE_BASELINE_FILE="$(find_compare_baseline || true)"

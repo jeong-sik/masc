@@ -30,7 +30,7 @@ class ChangedSymbolsReportTest(unittest.TestCase):
     def test_report_marks_known_and_unknown_changed_paths(self):
         data = {
             "schema_version": "masc.symbol_graph.v1",
-            "repo": "masc-mcp",
+            "repo": "masc",
             "base_commit": "abc123",
             "lanes": [
                 {

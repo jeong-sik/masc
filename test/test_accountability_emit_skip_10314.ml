@@ -27,10 +27,10 @@ module Types = Masc_domain
        so dashboards can rate-alert per failure mode. *)
 
 open Alcotest
-open Masc_mcp
+open Masc
 
 module Acct = Keeper_accountability
-module Prom = Prometheus
+module Metrics = Otel_metric_store
 
 (* --- helpers ------------------------------------------------------ *)
 
@@ -54,12 +54,12 @@ let with_temp_config f =
   Fun.protect
     ~finally:(fun () -> rm_rf dir)
     (fun () ->
-      let config = Coord.default_config dir in
-      ignore (Coord.init config ~agent_name:(Some "planner"));
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "planner"));
       f config)
 
 let counter_for ~kind ~reason =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     Acct.accountability_emit_skip_metric
     ~labels:[ ("kind", kind); ("reason", reason) ]
     ()

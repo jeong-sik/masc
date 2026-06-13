@@ -61,7 +61,7 @@ let print_startup_banner
   if Masc_grpc_server.is_enabled ()
   then
     Printf.printf
-      "   gRPC :%d → Coordination + grpc.health.v1.Health + reflection\n%!"
+      "   gRPC :%d → Workspace + grpc.health.v1.Health + reflection\n%!"
       (Masc_grpc_server.configured_port ());
   if Server_ws_standalone.is_enabled ()
   then
@@ -72,13 +72,39 @@ let print_startup_banner
   then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
 ;;
 
+(** Run a list of cleanups on [sw] release, executing all of them
+    even if an earlier one raises a non-Cancel exception.  Each cleanup
+    runs under its own [try/with] so a single failure cannot prevent
+    the remaining cleanups (RFC-0194 §3 PR-B spirit: an
+    [Eio.Switch.on_release] callback must be *all-or-nothing* across
+    its cleanup steps).  [Eio.Cancel.Cancelled] propagates as usual so
+    structured-concurrency cancellation honors the enclosing fiber.
+
+    List ordering is preserved: cleanups run in the order supplied. *)
+let with_cleanups_on_release ~sw cleanups =
+  Eio.Switch.on_release sw (fun () ->
+    List.iter
+      (fun cleanup ->
+         try cleanup ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Misc.warn "on_release cleanup failed: %s"
+             (Printexc.to_string exn))
+      cleanups)
+;;
+
 let on_connection_release conn_sw ~mode ~listener_tag flow =
-  Eio.Switch.on_release conn_sw (fun () ->
-    Transport_metrics.record_http_connection_closed ~mode;
-    try Eio.Flow.close flow with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Misc.warn "[%s] flow close: %s" listener_tag (Printexc.to_string exn))
+  with_cleanups_on_release ~sw:conn_sw
+    [
+      (fun () -> Transport_metrics.record_http_connection_closed ~mode);
+      (fun () ->
+         try Eio.Flow.close flow with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Misc.warn "[%s] flow close: %s" listener_tag
+             (Printexc.to_string exn));
+    ]
 ;;
 
 let register_listener_lifecycle ~sw ~mode =

@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Human reporters, Codex, and internal agents may all file this form.
+        Human reporters and internal agents may all file this form.
         Use this for broken or incorrect behavior.
         Choose one planning area and one target lane below.
         Automation mirrors those choices into labels and keeps `triage-required`
@@ -17,7 +17,7 @@ body:
     attributes:
       label: Product area
       options:
-        - Repo coordination
+        - Repo workspace
         - Supervised delivery
         - Dashboard and read models
         - Operator and intervention
@@ -44,7 +44,7 @@ body:
     attributes:
       label: Promise affected
       options:
-        - repo coordination
+        - repo workspace
         - ops visibility
         - experimental or internal
     validations:

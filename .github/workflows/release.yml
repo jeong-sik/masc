@@ -107,13 +107,13 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p dist
-          cp _build/default/bin/main_eio.exe dist/masc-mcp-${{ matrix.arch }}
-          chmod +x dist/masc-mcp-${{ matrix.arch }}
+          cp _build/default/bin/main_eio.exe dist/masc-${{ matrix.arch }}
+          chmod +x dist/masc-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: masc-mcp-${{ matrix.arch }}
+          name: masc-${{ matrix.arch }}
           path: dist/*
 
   release:

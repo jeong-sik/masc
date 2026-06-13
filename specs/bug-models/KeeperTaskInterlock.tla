@@ -2,15 +2,15 @@
 \* Bug Model: Keeper FSM and Task FSM must stay interlocked across
 \* a Dead transition.
 \*
-\* Background (blog: Anthropic "Multi-Agent Coordination Patterns",
+\* Background (blog: Anthropic "Multi-Agent Workspace Patterns",
 \* Agent Teams + Shared State): when one agent terminates while
 \* holding work claimed from a shared queue, the queue must release
 \* or reassign the work — otherwise the system loses progress
 \* observability and subsequent consumers cannot tell whether a
 \* claimed task is making progress or is orphaned.
 \*
-\* masc-mcp reference:
-\*   lib/keeper/keeper_state_machine.ml (12-phase keeper FSM:
+\* masc reference:
+\*   lib/keeper_registry/keeper_state_machine.ml (12-phase keeper FSM:
 \*     Offline | Running | Failing | Overflowed | Compacting | HandingOff
 \*     | Draining | Paused | Stopped | Crashed | Restarting | Dead)
 \*   lib/types/types_core.ml:task_status (6-state task FSM:
@@ -30,7 +30,7 @@
 \*                   (Running, Paused-and-resumable).
 \*   Dead          — terminal tombstone (Dead, Crashed).
 \*   Draining      — transient phase in which a clean shutdown
-\*                   cascade fires: any claimed task owned by this
+\*                   runtime fires: any claimed task owned by this
 \*                   keeper must be released before entering Dead.
 \* The collapse is sound for the NoDeadKeeperHoldsTask invariant
 \* because the real FSM's Failing/Compacting/HandingOff/etc.
@@ -43,7 +43,7 @@
 \*
 \*   1. Keeper_registry.mark_dead (keeper_registry.ml:237) sets
 \*      entry.phase = Dead but never touches the task FSM. No
-\*      task cascade fires on this call.
+\*      task runtime fires on this call.
 \*   2. cleanup_dead_tombstone (keeper_supervisor.ml:380, called from
 \*      :545) writes paused=true and unregisters the keeper; task FSM
 \*      untouched. Verified 2026-04-20 (line 225 was a stale anchor
@@ -55,11 +55,11 @@
 \*
 \* What actually restores the invariant:
 \*
-\*   Coord_gc.cleanup_zombies (lib/coord/coord_gc.ml:cleanup_zombies) scans the
+\*   Workspace_gc.cleanup_zombies (lib/workspace/workspace_gc.ml:cleanup_zombies) scans the
 \*   agents directory on a periodic GC cycle, detects agents whose
 \*   last_seen is older than Env_config.Zombie.keeper_threshold_seconds
 \*   ("zombie" agents), and in Phase 3 iterates the backlog calling
-\*   Coord_hooks.force_release_task_fn for every Claimed/InProgress
+\*   Workspace_hooks.force_release_task_fn for every Claimed/InProgress
 \*   task whose assignee is a zombie. This is the **asynchronous,
 \*   heartbeat-timeout-driven** path that eventually restores the
 \*   NoDeadKeeperHoldsTask property.
@@ -67,12 +67,12 @@
 \* Implication for this spec:
 \*
 \*   This file formalizes an UPGRADE TARGET, not a proof of current
-\*   correctness. A synchronous cascade from mark_dead into the task
+\*   correctness. A synchronous runtime from mark_dead into the task
 \*   FSM would be the code change that makes the invariant hold
-\*   without the GC window. Until that cascade exists, a Dead keeper
+\*   without the GC window. Until that runtime exists, a Dead keeper
 \*   can hold a Claimed task for up to ~keeper_threshold_seconds —
 \*   the transient window is visible on the dashboard Keepers section
-\*   (#6556) and is safe because Coord_task.claim_task_r rejects any
+\*   (#6556) and is safe because Workspace_task.claim_task_r rejects any
 \*   attempt by another agent to re-claim the orphaned task
 \*   (TaskAlreadyClaimed), so no state corruption is possible.
 \*
@@ -260,7 +260,7 @@ CrashToDead(k) ==
     /\ keeper_phase' = [keeper_phase EXCEPT ![k] = "dead"]
     /\ UNCHANGED <<task_status, task_claimer>>
 
-\* Also model a bug in the drain cascade: FinishDrain forgets the
+\* Also model a bug in the drain runtime: FinishDrain forgets the
 \* held-task check and goes to Dead regardless.
 SloppyFinishDrain(k) ==
     /\ keeper_phase[k] = "draining"
@@ -311,8 +311,8 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \*      update in keeper_registry.mark_dead leaves task_claimer
 \*      pointing at the dead keeper.
 \*
-\*   2. A separate asynchronous subsystem, Coord_gc.cleanup_zombies
-\*      (lib/coord/coord_gc.ml:cleanup_zombies), periodically scans agents by
+\*   2. A separate asynchronous subsystem, Workspace_gc.cleanup_zombies
+\*      (lib/workspace/workspace_gc.ml:cleanup_zombies), periodically scans agents by
 \*      heartbeat
 \*      last_seen and force-releases Claimed/InProgress tasks whose
 \*      assignee is a zombie agent. This is modelled below as
@@ -325,7 +325,7 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 \* it against the TLC runner in tla-check.sh / specs/Makefile.
 
 \* Zombie GC reconciliation: release an orphaned task whose claimer
-\* is dead. Mirrors lib/coord/coord_gc.ml:cleanup_zombies Phase 3 cascade.
+\* is dead. Mirrors lib/workspace/workspace_gc.ml:cleanup_zombies Phase 3 runtime.
 ReconcileByGC(t) ==
     /\ Held(t)
     /\ keeper_phase[task_claimer[t]] = "dead"

@@ -1,0 +1,10 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_types_profile_sandbox)
+ (public_name masc.keeper_types_profile_sandbox)
+ (wrapped false)
+ (preprocess
+  (pps ppx_tla))
+ (libraries masc.config)
+ (modules keeper_types_profile_sandbox))

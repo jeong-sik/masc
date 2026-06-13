@@ -34,17 +34,12 @@ let make ~category ~payload ~prev_hash =
   }
 
 let canonical_json t =
-  let prev =
-    match t.prev_hash with
-    | None -> `Null
-    | Some h -> `String h
-  in
   let fields = [
     "id", `String t.id;
     "ts", `Float t.ts;
     "category", `String t.category;
     "payload", t.payload;
-    "prev_hash", prev;
+    "prev_hash", (match t.prev_hash with Some s -> `String s | None -> `Null);
   ] in
   Yojson.Safe.to_string (`Assoc fields)
 
@@ -55,17 +50,12 @@ let compute_hash t =
 let hash_for_chain = compute_hash
 
 let to_json t =
-  let prev =
-    match t.prev_hash with
-    | None -> `Null
-    | Some h -> `String h
-  in
   `Assoc [
     "id", `String t.id;
     "ts", `Float t.ts;
     "category", `String t.category;
     "payload", t.payload;
-    "prev_hash", prev;
+    "prev_hash", (match t.prev_hash with Some s -> `String s | None -> `Null);
   ]
 
 (* Local [kind_name] — [shared_audit] is a leaf library that cannot

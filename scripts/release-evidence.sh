@@ -5,12 +5,12 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release-evidence.sh [PATH_TO_BINARY] [OUTPUT_MARKDOWN]
 
-Captures a reproducible release-evidence bundle for a built masc-mcp binary.
+Captures a reproducible release-evidence bundle for a built masc binary.
 The bundle includes:
   - artifact install smoke (`--version` from an installed location)
   - local boot + /health capture
   - MCP initialize + tools/list + masc_status captures
-  - dashboard read-path captures for mission + namespace truth
+  - dashboard read-path captures for briefing + namespace truth
 
 Raw files are written next to OUTPUT_MARKDOWN.
 EOF
@@ -42,7 +42,7 @@ out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
 tmp="$(mktemp -d -t masc-release-evidence.XXXXXX)"
 base_path="$tmp/base"
 prefix_dir="$tmp/prefix"
-installed_bin="$prefix_dir/masc-mcp"
+installed_bin="$prefix_dir/masc"
 server_log="$out_dir/server.log"
 health_json="$out_dir/health.json"
 initialize_headers="$out_dir/initialize.headers"
@@ -54,9 +54,9 @@ tools_json="$out_dir/tools-list.json"
 status_headers="$out_dir/masc-status.headers"
 status_body="$out_dir/masc-status.body"
 status_json="$out_dir/masc-status.json"
-mission_headers="$out_dir/dashboard-mission.headers"
-mission_body="$out_dir/dashboard-mission.body"
-mission_json="$out_dir/dashboard-mission.json"
+briefing_headers="$out_dir/dashboard-briefing.headers"
+briefing_body="$out_dir/dashboard-briefing.body"
+briefing_json="$out_dir/dashboard-briefing.json"
 namespace_headers="$out_dir/namespace-truth.headers"
 namespace_body="$out_dir/namespace-truth.body"
 namespace_json="$out_dir/namespace-truth.json"
@@ -112,6 +112,25 @@ PY
 status_code() {
   local header_file="$1"
   awk 'toupper($1) ~ /^HTTP\/[0-9.]+$/ { code=$2 } END { print code }' "$header_file"
+}
+
+normalize_http_json() {
+  local headers="$1"
+  local body="$2"
+  local dest="$3"
+  local label="$4"
+  local code
+  code="$(status_code "$headers")"
+  case "$code" in
+    2*) ;;
+    *)
+      echo "release-evidence: ${label} returned HTTP ${code:-<missing>}" >&2
+      head -c 400 "$body" >&2 || true
+      echo >&2
+      exit 1
+      ;;
+  esac
+  normalize_json "$body" "$dest"
 }
 
 header_value() {
@@ -205,6 +224,25 @@ copy_install_smoke() {
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
   cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
+  cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
+[runtime]
+default = "release_evidence.smoke"
+
+[providers.release_evidence]
+display-name = "Release Evidence Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.smoke]
+api-name = "smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[release_evidence.smoke]
+is-default = true
+max-concurrent = 1
+EOF
 }
 
 capture_installed_version() {
@@ -238,7 +276,7 @@ env \
   MASC_BASE_PATH="$base_path" \
   MASC_ADMIN_TOKEN= \
   MASC_INTERNAL_MCP_TOKEN= \
-  MASC_MCP_TOKEN= \
+  MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
   MASC_WEBRTC_ENABLED=0 \
@@ -293,15 +331,17 @@ post_json "$MCP_URL" "$status_payload" "$status_headers" "$status_body" \
   -H "Mcp-Protocol-Version: ${protocol_version}"
 normalize_json "$status_body" "$status_json"
 
-curl -sS -D "$mission_headers" -o "$mission_body" \
+curl -sS -D "$briefing_headers" -o "$briefing_body" \
   -H 'Accept: application/json' \
-  "${BASE_URL}/api/v1/dashboard/mission"
-normalize_json "$mission_body" "$mission_json"
+  "${BASE_URL}/api/v1/dashboard/briefing"
+normalize_http_json "$briefing_headers" "$briefing_body" "$briefing_json" \
+  "/api/v1/dashboard/briefing"
 
 curl -sS -D "$namespace_headers" -o "$namespace_body" \
   -H 'Accept: application/json' \
   "${BASE_URL}/api/v1/dashboard/namespace-truth"
-normalize_json "$namespace_body" "$namespace_json"
+normalize_http_json "$namespace_headers" "$namespace_body" "$namespace_json" \
+  "/api/v1/dashboard/namespace-truth"
 
 python3 - \
   "$OUTFILE" \
@@ -314,7 +354,7 @@ python3 - \
   "$health_json" \
   "$tools_json" \
   "$status_json" \
-  "$mission_json" \
+  "$briefing_json" \
   "$namespace_json" \
   "$initialize_json" \
   "$server_log" <<'PY'
@@ -334,7 +374,7 @@ from datetime import datetime, timezone
     health_json,
     tools_json,
     status_json,
-    mission_json,
+    briefing_json,
     namespace_json,
     initialize_json,
     server_log,
@@ -347,7 +387,7 @@ def load(path):
 health = load(health_json)
 tools = load(tools_json)
 status = load(status_json)
-mission = load(mission_json)
+briefing = load(briefing_json)
 namespace_truth = load(namespace_json)
 initialize = load(initialize_json)
 
@@ -359,7 +399,7 @@ for item in content:
       status_text = item.get("text", "")
       break
 
-mission_keys = sorted(mission.keys())[:10]
+briefing_keys = sorted(briefing.keys())[:10]
 namespace_keys = sorted(namespace_truth.keys())[:10]
 health_keys = sorted(health.keys())[:10]
 generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -390,7 +430,7 @@ md = f"""# Release Evidence Bundle
 - `tools/list` returned `{tool_count}` tools on the default surface.
 - Initialize response keys: `{", ".join(sorted(initialize.keys()))}`
 
-## Repo Coordination Read Path
+## Repo Workspace Read Path
 
 - `masc_status` completed through MCP after initialization.
 
@@ -400,7 +440,7 @@ md = f"""# Release Evidence Bundle
 
 ## Dashboard Read Paths
 
-- `/api/v1/dashboard/mission` returned HTTP-shaped JSON with keys: `{", ".join(mission_keys)}`
+- `/api/v1/dashboard/briefing` returned HTTP-shaped JSON with keys: `{", ".join(briefing_keys)}`
 - `/api/v1/dashboard/namespace-truth` returned keys: `{", ".join(namespace_keys)}`
 
 ## Raw Captures
@@ -412,7 +452,7 @@ md = f"""# Release Evidence Bundle
 - `initialize.json`
 - `tools-list.json`
 - `masc-status.json`
-- `dashboard-mission.json`
+- `dashboard-briefing.json`
 - `namespace-truth.json`
 - `server.log`
 

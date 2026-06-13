@@ -7,10 +7,10 @@ open Alcotest
 
     5 active (PR-12 pattern: misleading _ prefix on used bindings):
        - config_dir_resolver._cached_resolution
-       - tool_keeper._keeper_list_cache
-       - tool_board._board_list_cache
+       - keeper_tool_surface_ops._keeper_list_cache
+       - board_tool_cache._board_list_cache
        - governance_pipeline_risk._destructive_pattern_strings
-       - tool_coord._status_cache
+       - tool_workspace._status_cache
     All renamed (drop _ prefix), callers in same file updated.
 
     Original test scanned [count_string_literals], which examines only
@@ -24,13 +24,13 @@ let dead_identifiers =
 ;;
 
 let renamed_identifiers =
-  [ "lib/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
-  ; "lib/tool_keeper.ml", "_keeper_list_cache", "keeper_list_cache"
-  ; "lib/tool_board.ml", "_board_list_cache", "board_list_cache"
+  [ "lib/config_dir_resolver/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
+  ; "lib/keeper/keeper_tool_surface_ops.ml", "_keeper_list_cache", "keeper_list_cache"
+  ; "lib/board_tool_adapter/board_tool_cache.ml", "_board_list_cache", "board_list_cache"
   ; ( "lib/governance_pipeline_risk.ml"
     , "_destructive_pattern_strings"
     , "destructive_pattern_strings" )
-  ; "lib/tool_coord.ml", "_status_cache", "status_cache"
+  ; "lib/tool_workspace.ml", "_status_cache", "status_cache"
   ]
 ;;
 

@@ -1,7 +1,7 @@
 (** Operator_control_snapshot — operator dashboard snapshot
     + audit cache + runtime-status alignment helpers.
 
-    The .ml is 1446 lines.  Cascade-includes
+    The .ml is 1446 lines.  Runtime-includes
     {!Operator_pending_confirm} and {!Operator_digest} so
     callers can reach the pending-confirm + digest surface
     via [Operator_control_snapshot.X].  Type identity
@@ -20,7 +20,7 @@
       [test/test_types]).
     - {!align_keeper_runtime_status}, {!max_turns_override_source}
       (test-only direct callers).
-    - {!get_payload} (cascade-include
+    - {!get_payload} (runtime-include
       consumer {!Operator_control_action} reaches it
       unqualified).
 
@@ -49,7 +49,7 @@
     [cached_tool_audit_json], the snapshot dispatcher
     family).
 
-    Cascade pattern: {!Operator_control_action} does
+    Runtime pattern: {!Operator_control_action} does
     [include Operator_control_snapshot] in its .ml + .mli;
     every entry exposed at this boundary therefore
     transitively re-exposed at the action layer. *)
@@ -57,7 +57,7 @@
 module U = Yojson.Safe.Util
 (** Yojson utilities re-exported because
     {!Operator_control_action} reaches them via the
-    cascade-include of this module. *)
+    runtime-include of this module. *)
 
 include module type of struct
   include Operator_pending_confirm
@@ -145,19 +145,19 @@ val max_turns_override_source : int option -> string
 (** {1 Context ratio} *)
 
 val compute_context_ratio :
-  Keeper_types.keeper_meta -> float option
+  Keeper_meta_contract.keeper_meta -> float option
 (** Returns [used_tokens / context_budget] when the
     keeper meta has a resolved context budget, [None]
     otherwise.  Pinned because
     [test/test_operator_control_snapshot.ml] exercises
     the ratio calculation across budget edge cases. *)
 
-(** {1 Cascade-include consumer re-exports} *)
+(** {1 Runtime-include consumer re-exports} *)
 
 val remote_confirm_ttl_seconds : float
 (** TTL applied to remote-confirmation pending entries
     (15 minutes).  Pinned because
-    {!Operator_control} reads it via the cascade-include
+    {!Operator_control} reads it via the runtime-include
     of this module to compute expiration timestamps. *)
 
 type action_result_status = ActionOk | ActionError
@@ -188,16 +188,16 @@ type action_log_entry = {
 }
 
 val append_action_log :
-  Coord.config -> action_log_entry -> unit
+  Workspace.config -> action_log_entry -> unit
 (** Appends [entry] to the operator action log JSONL.
     Pinned because {!Operator_control} reaches it via the
-    cascade-include of this module. *)
+    runtime-include of this module. *)
 
 val remote_client_type_of_context : 'a context -> string
 (** Classifies the [mcp_session_id] of an operator
     request context into a wire string (["dashboard"] /
     ["mcp"] / ["unknown"]).  Pinned because
-    {!Operator_control} reaches it via the cascade-include
+    {!Operator_control} reaches it via the runtime-include
     of this module.  ['a context] comes from
     {!Operator_pending_confirm}. *)
 
@@ -234,18 +234,18 @@ val snapshot_json :
     {!_snapshot_table} keyed by the context config +
     actor + view + include flags.  Pinned because
     {!Operator_control} re-exposes it via the
-    cascade-include of this module. *)
+    runtime-include of this module. *)
 
-val recent_actions_json : Coord.config -> Yojson.Safe.t
+val recent_actions_json : Workspace.config -> Yojson.Safe.t
 (** Returns the most recent operator-action log entries
     as a [`List].  Returns [`List []] when the log file
-    is missing.  Pinned for the same cascade-include
+    is missing.  Pinned for the same runtime-include
     reason as {!snapshot_json}. *)
 
 val cached_tool_audit_json :
   lightweight:bool ->
-  Coord.config ->
-  Keeper_types.keeper_meta ->
+  Workspace.config ->
+  Keeper_meta_contract.keeper_meta ->
   Yojson.Safe.t
 (** Returns the cached tool-audit JSON for a keeper.
     [lightweight=true] uses the 120-second stale-fallback
@@ -256,5 +256,24 @@ val cached_tool_audit_json :
 val get_payload : Yojson.Safe.t -> Yojson.Safe.t
 (** Extracts the [payload] field from a JSON args object,
     returning [`Null] when the field is missing or not an
-    [`Assoc].  Pinned for the same cascade-include
+    [`Assoc].  Pinned for the same runtime-include
     consumer reason as {!iso_of_unix}. *)
+
+(** {1 Keeper slot helper (PR-C2)} *)
+
+val with_keeper_slot :
+  sem:Eio.Semaphore.t ->
+  name:string ->
+  (unit -> 'a) ->
+  'a
+(** Runs [f] after acquiring [sem], then releases [sem]
+    via a [Fun.protect ~finally] scope so the slot is
+    released on the normal-exit, exception, and
+    [Eio.Cancel.Cancelled] paths (no double-release).
+    Pinned for the white-box test suite
+    [test/test_operator_control_snapshot_state.ml]
+    which exercises the slot accounting invariant
+    independent of [keepers_json].  Mirrors PR-B's
+    typed-state pattern in spirit (no separate counter
+    for the per-fiber slot) but expressed as a scope
+    rather than a state transition. *)

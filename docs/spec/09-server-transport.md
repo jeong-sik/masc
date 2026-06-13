@@ -1,9 +1,11 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-06-05
 code_refs:
   - lib/server/
-  - lib/grpc/
+  - lib/server/masc_grpc_server.ml
+  - lib/server/masc_grpc_service.ml
+  - lib/config/masc_grpc_transport.ml
   - lib/sse.ml
   - lib/transport.ml
   - bin/main_eio.ml
@@ -16,7 +18,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Server |
-| Maps to | `lib/server/`, `lib/grpc/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
+| Maps to | `lib/server/`, `lib/sse.ml`, `lib/transport.ml`, `lib/http_server_eio.ml`, `lib/http_server_h2.ml`, `lib/mcp_server_eio*.ml`, `bin/main_eio.ml`, `bin/main_stdio_eio.ml` |
 | Dependencies | 02-types-and-invariants |
 | Modules | 61 |
 | LOC | ~17,700 |
@@ -104,13 +106,13 @@ graph TB
 | WebSocket | httpun-ws-eio | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, discovery via 8935 `/ws` | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
 | WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | **Experimental** (local interop only; live env-gated) |
-| stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-mcp-stdio` 실행 | Available |
+| stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
 
 **Experimental** 상태의 의미: 해당 transport는 코드가 존재하고 로컬 테스트에서 동작하지만, 프로덕션 interop 검증이 미완료. API/프로토콜은 향후 breaking change가 발생할 수 있음. 기본값으로 활성화되어 있으나, 주의해서 사용.
 
 ### 3.1 Transport 선택 로직 (에이전트 측)
 
-`lib/grpc/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
 type t = Http | Grpc | Ws | Webrtc | Local
@@ -119,7 +121,7 @@ type t = Http | Grpc | Ws | Webrtc | Local
 선택 순서:
 1. API 호출 시 명시된 `~transport` 파라미터
 2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"webrtc"`, `"local"`)
-3. 기본값: `Local` (파일시스템 기반 Room 직접 호출)
+3. 기본값: `Local` (파일시스템 기반 Workspace 직접 호출)
 
 ---
 
@@ -251,12 +253,12 @@ SSE 세션은 두 종류로 분류된다:
 | Kind | 대상 | 수신 이벤트 |
 |------|------|-----------|
 | `Observer` | Dashboard, 읽기 전용 뷰어 | dashboard snapshot |
-| `Coordinator` | MCP 에이전트 연결 | heartbeat, task event |
+| `Agent stream` | MCP 에이전트 연결 | heartbeat, task event |
 
 `broadcast_to` 함수로 대상을 지정할 수 있다:
 
 ```ocaml
-type broadcast_target = All | Observers | Coordinators
+type broadcast_target = All | Observers | Agent streams
 ```
 
 `broadcast json`은 `broadcast_to All json`과 동일하다 (하위 호환).
@@ -329,7 +331,7 @@ Sse.subscribe_external ~id:"ws-123"
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
 | POST | `/mcp` | `handle_post_mcp ~profile:Full` | MCP JSON-RPC (전체 도구) |
-| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Coordinator) |
+| GET | `/mcp` | `handle_get_mcp` | SSE 스트림 (Agent stream) |
 | DELETE | `/mcp` | `handle_delete_mcp` | MCP 세션 종료 |
 | POST | `/mcp/managed` | `handle_post_mcp ~profile:Managed_agent` | 관리 에이전트 MCP |
 | GET | `/mcp/managed` | `handle_get_mcp` | 관리 에이전트 SSE |
@@ -351,10 +353,10 @@ Sse.subscribe_external ~id:"ws-123"
 let make_routes ~port ~host ~sw ~clock =
   Http.Router.empty
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
-  |> Server_routes_http_routes_room.add_routes
+  |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw
-  |> Server_routes_http_routes_cascade.add_routes
+  |> Server_routes_http_routes_runtime.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
   |> Server_routes_http_routes_channel_gate.add_routes ~sw ~clock
 ```
@@ -363,11 +365,11 @@ let make_routes ~port ~host ~sw ~clock =
 
 | 그룹 | Prefix | 모듈 | 예시 경로 |
 |------|--------|------|----------|
-| Frontend | `/`, `/health`, `/metrics` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
+| Frontend | `/`, `/health` | `_frontend` | `GET /health`, `GET /.well-known/agent.json` |
 | Dashboard | `/api/v1/dashboard/*` | `_dashboard` | `GET /api/v1/dashboard/shell` |
-| Room | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_room` | `GET /api/v1/status` |
+| Workspace | `/api/v1/status`, `/api/v1/tasks`, `/api/v1/agents`, `/api/v1/messages` | `_workspace` | `GET /api/v1/status` |
 | Provider Runs | `/api/v1/chains/*` | `_provider_runs` | `GET /api/v1/chains/summary` |
-| Cascade | `/api/v1/cascade/*` | `_cascade` | `GET /api/v1/cascade/health` |
+| Runtime | `/api/v1/runtime/*` | `_runtime` | `GET /api/v1/runtime/health` |
 | Activity | `/api/v1/activity/*` | `_activity` | `GET /api/v1/activity/events` |
 | Channel Gate | `/api/v1/gate/*` | `_channel_gate` | `GET /api/v1/gate/health` |
 | Board | `/api/v1/board/*` | main_eio 직접 | `GET /api/v1/board/{id}` |
@@ -386,7 +388,7 @@ let make_routes ~port ~host ~sw ~clock =
 
 ## 7. Authentication
 
-**소스**: `lib/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
+**소스**: `lib/auth/auth.ml` (435 LOC), `lib/server/server_auth.ml` (491 LOC)
 
 ### 7.1 인증 모델
 
@@ -395,7 +397,7 @@ let make_routes ~port ~host ~sw ~clock =
 ```
 .masc/auth/
   config.json          -- auth_config (enabled, require_token, token_expiry_hours)
-  room_secret.hash     -- room-level secret (SHA256 해시)
+  workspace_secret.hash     -- workspace-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
     agent-llm-a.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
@@ -427,7 +429,7 @@ let make_routes ~port ~host ~sw ~clock =
 | `Worker` | 도구 호출, broadcast, task claim/complete |
 | `Observer` | 읽기 전용 (status, messages 조회) |
 
-`permission_for_tool` 함수가 각 MCP 도구명을 필요 권한으로 매핑한다. 매핑되지 않은 내부 도구명은 `CanBroadcast` 이상을 요구하고, 매핑되지 않은 외부 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
+도구 인증은 per-tool required-permission 매핑을 사용하지 않는다. 알려진 내부 도구와 `masc_*` 도구는 `CanBroadcast` 이상을 요구하고, unknown external 도구명은 거부한다. 이 동작은 fail-closed 고정값이며 환경변수로 완화할 수 없다.
 
 ### 7.5 Admin 인증
 
@@ -503,7 +505,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ## 10. gRPC Service
 
-**소스**: `lib/grpc/` (1,143 LOC)
+**소스**: `lib/server/masc_grpc_server.ml`, `lib/server/masc_grpc_service.ml`, `lib/server/masc_grpc_client.ml`, `lib/server/masc_grpc_types.ml`, `lib/config/masc_grpc_transport.ml`
 
 ### 10.1 활성화
 
@@ -512,7 +514,7 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 ### 10.2 Service 정의
 
 ```
-Service: masc.coordination.v1.MascCoordination
+Service: masc.workspace collaboration.v1.MascWorkspace
 
 RPCs:
   Join(JoinRequest) -> JoinResponse            // Unary
@@ -709,8 +711,8 @@ sequenceDiagram
 부트스트랩 순서 (`run_server` -> `Server_runtime_bootstrap.run`):
 
 1. `init_runtime_context`: Eio 환경(clock, net, proc_mgr, fs) 추출
-2. `create_server_state`: 서버 상태 생성 (Room config, Eio context 설정)
-3. `bootstrap_server_state`: Room 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
+2. `create_server_state`: 서버 상태 생성 (Workspace config, Eio context 설정)
+3. `bootstrap_server_state`: Workspace 초기화, Chain bootstrap, Tool registry warm-up, JSONL pruning
 4. `bootstrap_keepers`: Keeper 에이전트 부트스트랩
 5. `init_task_backend`: 태스크 백엔드 초기화
 6. `start_background_maintenance`: 주기적 cleanup fiber 시작
@@ -741,7 +743,7 @@ sequenceDiagram
 |---------|--------|------|
 | `MASC_HOST` | `127.0.0.1` | 바인드 주소 |
 | `--port` / `-p` | `8935` | 리스닝 포트 |
-| `--base-path` | `$MASC_BASE_PATH` or `cwd` | `.masc` 데이터 디렉토리 위치 |
+| `--base-path` | `$MASC_BASE_PATH` or `cwd` | workspace/base 경로. runtime root는 `<base-path>/.masc` |
 
 ### 15.2 트랜스포트 설정
 
@@ -833,7 +835,7 @@ sequenceDiagram
 | `mcp_server_eio_resource.ml` | 335 | MCP Resource/Prompt 핸들러 |
 | `mcp_server_eio_governance.ml` | 110 | Governance 설정 |
 | `sse.ml` | 474 | SSE event registry + broadcast |
-| `sse_room_filter.ml` | 63 | Room별 SSE 필터링 |
+| `sse_workspace_filter.ml` | 63 | Workspace별 SSE 필터링 |
 | `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
@@ -860,15 +862,15 @@ sequenceDiagram
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |
 | `server_utils.ml` | 120 | 공용 유틸리티 |
 
-### 18.3 gRPC (lib/grpc/)
+### 18.3 gRPC
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
-| `masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
-| `masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
-| `masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
-| `masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
+| `lib/server/masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
+| `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
+| `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
+| `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |
+| `lib/config/masc_grpc_transport.ml` | 24 | 트랜스포트 선택 로직 |
 
 ---
 

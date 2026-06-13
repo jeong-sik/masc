@@ -7,48 +7,6 @@ let generate_trace_id ?(now = Time_compat.now ()) () : string =
   let seq = Atomic.fetch_and_add trace_counter 1 land 0xFFFFF in
   Printf.sprintf "trace-%d-%05x" ts seq
 
-let sanitize_name (name : string) : string =
-  String.map
-    (fun c ->
-      if
-        (c >= 'A' && c <= 'Z')
-        || (c >= 'a' && c <= 'z')
-        || (c >= '0' && c <= '9')
-        || c = '-'
-        || c = '_'
-        || c = '.'
-      then c
-      else '_')
-    name
-
-let keeper_git_author ~(keeper_name : string) : string =
-  let safe = sanitize_name keeper_name in
-  Printf.sprintf "%s (MASC Keeper)" safe
-
-let keeper_git_email ~(keeper_name : string) : string =
-  let safe = sanitize_name keeper_name in
-  Printf.sprintf "%s@masc.local" safe
-
-let git_env_for_keeper ~(keeper_name : string) : string array =
-  let author = keeper_git_author ~keeper_name in
-  let email = keeper_git_email ~keeper_name in
-  let base_env = Unix.environment () in
-  let filtered =
-    Array.to_list base_env
-    |> List.filter (fun s ->
-           not (String.starts_with ~prefix:"GIT_AUTHOR_" s)
-           && not (String.starts_with ~prefix:"GIT_COMMITTER_" s))
-  in
-  let overrides =
-    [
-      "GIT_AUTHOR_NAME=" ^ author;
-      "GIT_AUTHOR_EMAIL=" ^ email;
-      "GIT_COMMITTER_NAME=" ^ author;
-      "GIT_COMMITTER_EMAIL=" ^ email;
-    ]
-  in
-  Array.of_list (filtered @ overrides)
-
 let parse_keeper_agent_name ~prefix ~suffix agent_name =
   let plen = String.length prefix and slen = String.length suffix in
   let alen = String.length agent_name in
@@ -106,14 +64,14 @@ let canonical_keeper_name_from_agent_name agent_name =
   | Some _ when Nickname.is_generated_nickname trimmed -> (
       match Nickname.extract_agent_type trimmed with
       | Some candidate when Keeper_config.validate_name candidate -> Some candidate
-      | _ -> None)
+      | Some _ | None -> None)
   | Some keeper_name -> Some keeper_name
   | None ->
       if Nickname.is_generated_nickname trimmed
       then
         match Nickname.extract_agent_type trimmed with
         | Some candidate when Keeper_config.validate_name candidate -> Some candidate
-        | _ -> None
+        | Some _ | None -> None
       else
         None
 
@@ -162,21 +120,48 @@ let explicit_keeper_name raw_name =
     | None ->
       if Keeper_config.validate_name trimmed then Some trimmed else None
 
+(* RFC-0232 §3.4 — structural keeper identity.  [of_string] is the single
+   parse boundary: it folds case, then runs the same canonicalizers the
+   legacy token-set expansion used, with [canonical_keeper_name_from_agent_name]
+   first because it is the more specific form (wrapper unwrap, nickname →
+   agent type) and [canonical_keeper_name] as the broad fallback.  Inputs
+   that no canonicalizer recognizes keep their case-folded raw form so
+   non-keeper authors (humans, external bots) still mint comparable ids. *)
+module Keeper_id = struct
+  type t = string
+
+  let of_string value =
+    let folded = String.lowercase_ascii (String.trim value) in
+    if folded = "" then None
+    else (
+      let canonical =
+        match canonical_keeper_name_from_agent_name folded with
+        | Some c -> Some c
+        | None -> canonical_keeper_name folded
+      in
+      (* DET-OK: the raw fallback is the contract, not a permissive
+         default — authors that are not keepers (humans, external bots)
+         must still mint a comparable id, and their canonical form IS
+         the case-folded raw string.  Keeper-shaped inputs never reach
+         the fallback. *)
+      match String.trim (Option.value canonical ~default:folded) with
+      | "" -> None
+      | id -> Some (String.lowercase_ascii id))
+
+  let to_string id = id
+  let equal = String.equal
+  let compare = String.compare
+end
+
 type name_bundle = {
   persona_name : string;
   keeper_name : string;
   agent_name : string;
-  credential_stem : string;
 }
 
 type validation_error =
   | Empty_input
   | Persona_not_found of {
-      input : string;
-      resolved : string;
-      searched : string;
-    }
-  | Credential_missing of {
       input : string;
       resolved : string;
       searched : string;
@@ -189,10 +174,6 @@ let pp_validation_error fmt = function
   | Persona_not_found { input; resolved; searched } ->
       Format.fprintf fmt
         "Persona_not_found { input=%S; resolved=%S; searched=%S }" input
-        resolved searched
-  | Credential_missing { input; resolved; searched } ->
-      Format.fprintf fmt
-        "Credential_missing { input=%S; resolved=%S; searched=%S }" input
         resolved searched
   | Name_ambiguous { input; candidates } ->
       Format.fprintf fmt "Name_ambiguous { input=%S; candidates=[%s] }" input
@@ -208,13 +189,12 @@ let show_validation_error err =
   Format.pp_print_flush fmt ();
   Buffer.contents buf
 
-(* Stable snake_case label for Prometheus metric outcome labels. Keep
+(* Stable snake_case label for Otel_metric_store metric outcome labels. Keep
    exhaustive — adding a new variant must require updating this match
    so no telemetry path silently aggregates to a generic bucket. *)
 let validation_error_outcome_label = function
   | Empty_input -> "empty_input"
   | Persona_not_found _ -> "persona_not_found"
-  | Credential_missing _ -> "credential_missing"
   | Name_ambiguous _ -> "name_ambiguous"
   | Ephemeral_suffix_rejected _ -> "ephemeral_suffix_rejected"
 
@@ -233,7 +213,7 @@ let strip_nickname_once name =
    does not exist in production deployments — personas live under the
    repo's [config/personas/] which the resolver finds, but the legacy
    path silently fails [check_persona] and triggers logging-only
-   fallback at every coord_join_normalize call.
+   fallback at every workspace_bind_normalize call.
 
    Design: prefer the resolver result; fall back to the legacy path
    only when the resolver yields no candidate (preserves test
@@ -248,7 +228,7 @@ let persona_path_for ~base_path persona_name =
         persona_name
 
 let normalize_all_names ~input_agent_name ?(base_path = "")
-    ?(check_persona = false) ?(check_credential = false) () :
+    ?(check_persona = false) () :
     (name_bundle, validation_error) result =
   let trimmed = String.trim input_agent_name in
   if trimmed = "" then Error Empty_input
@@ -265,13 +245,11 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
         let persona_name = keeper_name in
-        let credential_stem = keeper_name in
         let bundle =
           {
             persona_name;
             keeper_name;
             agent_name = input_agent_name;
-            credential_stem;
           }
         in
         let persona_check () =
@@ -284,22 +262,7 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
                 (Persona_not_found
                    { input = input_agent_name; resolved = persona_name; searched = path })
         in
-        let credential_check () =
-          if not check_credential then Ok ()
-          else
-            let path =
-              Filename.concat
-                (Common.agents_dir_from_base_path ~base_path)
-                (credential_stem ^ ".json")
-            in
-            if Sys.file_exists path then Ok ()
-            else
-              Error
-                (Credential_missing
-                   { input = input_agent_name; resolved = credential_stem; searched = path })
-        in
-        Result.bind (persona_check ()) (fun () ->
-            Result.bind (credential_check ()) (fun () -> Ok bundle))
+        Result.bind (persona_check ()) (fun () -> Ok bundle)
 
 type parsed_identity = {
   keeper_name : string;

@@ -18,8 +18,8 @@ include Keeper_approval_queue_rules
    or poison the registry after a recoverable store-creation failure. *)
 (** Dated JSONL audit trail for approval events.
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
-    Dashboard and room-scoped keeper runs pass [base_path] explicitly so approval
-    history stays with the room that made the decision. *)
+    Dashboard and workspace-scoped keeper runs pass [base_path] explicitly so approval
+    history stays with the workspace that made the decision. *)
 let audit_stores_mu = Stdlib.Mutex.create ()
 
 let audit_io_mu = Stdlib.Mutex.create ()
@@ -90,7 +90,7 @@ let audit_today_path base_dir =
 let get_audit_store ?base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:
         [ "keeper", "aggregate"
@@ -145,6 +145,7 @@ let audit_approval_event
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -175,6 +176,7 @@ let audit_approval_event
          ; "goal_id", Json_util.string_opt_to_json goal_id
          ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
          ; "selected_model", `Null
+         ; "sandbox_target", Json_util.string_opt_to_json sandbox_target
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
          ]
@@ -245,7 +247,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Keeper_fd_pressure.note_exception ~site:"approval_audit.read_recent" exn;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels:
             [ "keeper",
@@ -264,7 +266,7 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  Agent_tool_execute_command_words.first_token_of_cmd cmd
+  Keeper_tool_command_words.first_token_of_cmd cmd
 ;;
 
 module For_testing = struct
@@ -307,7 +309,7 @@ let sandbox_target_of_runtime_contract = function
 ;;
 
 let input_preview_of_json (json : Yojson.Safe.t) =
-  (* Per-leaf sentinel-aware truncation: a naive [String.sub] on the
+  (* Per-leaf marker-aware truncation: a naive [String.sub] on the
      serialized form would chop a [masc:blob ...] marker mid-field and
      leave sha256/bytes/mime malformed so the approval-queue viewer
      cannot round-trip the preview. *)
@@ -326,6 +328,9 @@ let create_entry
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -337,13 +342,23 @@ let create_entry
   =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
+  let sandbox_target =
+    match nonempty_string_opt sandbox_target with
+    | Some target -> target
+    | None -> sandbox_target_of_runtime_contract runtime_contract
+  in
+  let sandbox_profile =
+    sandbox_profile_of_runtime_context ?sandbox_profile runtime_contract
+  in
+  let backend = backend_of_runtime_context ?backend runtime_contract in
   { id
   ; keeper_name
   ; tool_name
   ; action_key
   ; input_hash
   ; sandbox_target
+  ; sandbox_profile
+  ; backend
   ; input
   ; risk_level
   ; requested_at = Unix.gettimeofday ()
@@ -450,6 +465,7 @@ let record_pending (entry : pending_approval) =
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
+    ~sandbox_target:entry.sandbox_target
     ?runtime_contract:entry.runtime_contract
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
@@ -477,6 +493,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
     ?task_id:entry.task_id
     ?goal_id:entry.goal_id
     ~goal_ids:entry.goal_ids
+    ~sandbox_target:entry.sandbox_target
     ?runtime_contract:entry.runtime_contract
     ?selected_model:entry.selected_model
     ?disposition:entry.disposition
@@ -488,17 +505,20 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
    | None -> ());
   (match entry.on_resolution with
    | Some f ->
-     (try f decision with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ApprovalQueueFailures)
-          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
-          ();
-        Log.Keeper.warn
-          "approval_queue: resolution callback failed id=%s err=%s"
-          entry.id
-          (Printexc.to_string exn))
+     Cancel_safe.observe
+       ~on_exn:(fun exn ->
+         Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+           ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_resolution") ]
+           ();
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string ApprovalQueueFailures)
+           ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
+           ();
+         Log.Keeper.warn
+           "approval_queue: resolution callback failed id=%s err=%s"
+           entry.id
+           (Printexc.to_string exn))
+       (fun () -> f decision)
    | None -> ());
   try
     Sse.broadcast
@@ -580,7 +600,7 @@ let find_pending_id_in_map
 let sort_entries_by_requested_at entries =
   List.sort
     (fun left right ->
-       let ts_of_json json = Yojson.Safe.Util.(member "requested_at" json |> to_float) in
+       let ts_of_json json = (match Json_util.assoc_member_opt "requested_at" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0) in
        Float.compare (ts_of_json left) (ts_of_json right))
     entries
 ;;
@@ -612,6 +632,9 @@ let submit_and_await
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -634,6 +657,9 @@ let submit_and_await
       ?task_id
       ?goal_id
       ~goal_ids
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -681,6 +707,7 @@ let submit_and_await
            ?task_id
            ?goal_id
            ~goal_ids
+           ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
            ~decision:(Approval_expired reason)
@@ -707,6 +734,7 @@ let submit_and_await
            ?task_id
            ?goal_id
            ~goal_ids
+           ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
            ?disposition
@@ -726,6 +754,9 @@ let submit_pending
       ?task_id
       ?goal_id
       ?(goal_ids = [])
+      ?sandbox_target
+      ?sandbox_profile
+      ?backend
       ?runtime_contract
       ?selected_model
       ?disposition
@@ -736,7 +767,11 @@ let submit_pending
   =
   let action_key = action_key_of_input ~tool_name ~input in
   let input_hash = normalized_input_hash input in
-  let sandbox_target = sandbox_target_of_runtime_contract runtime_contract in
+  let sandbox_target =
+    match nonempty_string_opt sandbox_target with
+    | Some target -> target
+    | None -> sandbox_target_of_runtime_contract runtime_contract
+  in
   let rec submit () =
     let map = Atomic.get pending in
     match
@@ -764,6 +799,9 @@ let submit_pending
           ?task_id
           ?goal_id
           ~goal_ids
+          ~sandbox_target
+          ?sandbox_profile
+          ?backend
           ?runtime_contract
           ?selected_model
           ?disposition
@@ -811,6 +849,8 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
           ~tool_name:entry.tool_name
           ~input:entry.input
           ~risk_level:entry.risk_level
+          ?sandbox_profile:entry.sandbox_profile
+          ?backend:entry.backend
           ?runtime_contract:entry.runtime_contract
           ?created_by
           ~source_approval_id:entry.id
@@ -821,7 +861,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ApprovalQueueFailures)
         ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule) ]
         ();
@@ -866,7 +906,7 @@ let resolve_with_policy
     [Error (Already_resolved _)] if the atomic update found no matching
     entry (concurrent resolve race).
     Called from the dashboard approval HTTP handler
-    ([server_dashboard_http.ml]) and MCP inline dispatch. *)
+    ([server_dashboard_http.ml]) and MCP runtime. *)
 let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision)
   : (unit, resolve_error) result
   =
@@ -984,7 +1024,7 @@ let expire_stale ~max_wait_s =
        let reason =
          Printf.sprintf "approval timed out after %.0fs" (now -. entry.requested_at)
        in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ApprovalQueueFailures)
          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Approval_expired) ]
          ();
@@ -1004,6 +1044,7 @@ let expire_stale ~max_wait_s =
          ?task_id:entry.task_id
          ?goal_id:entry.goal_id
          ~goal_ids:entry.goal_ids
+         ~sandbox_target:entry.sandbox_target
          ?runtime_contract:entry.runtime_contract
          ?selected_model:entry.selected_model
          ?disposition:entry.disposition
@@ -1015,17 +1056,20 @@ let expire_stale ~max_wait_s =
         | None -> ());
        match entry.on_resolution with
        | Some f ->
-         (try f (Agent_sdk.Hooks.Reject reason) with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Prometheus.inc_counter
-              Keeper_metrics.(to_string ApprovalQueueFailures)
-              ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
-              ();
-            Log.Keeper.warn
-              "approval_queue: expire callback failed id=%s err=%s"
-              id
-              (Printexc.to_string exn))
+         Cancel_safe.observe
+           ~on_exn:(fun exn ->
+             Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+               ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
+               ();
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string ApprovalQueueFailures)
+               ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
+               ();
+             Log.Keeper.warn
+               "approval_queue: expire callback failed id=%s err=%s"
+               id
+               (Printexc.to_string exn))
+           (fun () -> f (Agent_sdk.Hooks.Reject reason))
        | None -> ())
     stale
 ;;

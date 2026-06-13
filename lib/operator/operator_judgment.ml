@@ -1,9 +1,7 @@
-open Yojson.Safe.Util
-
 open Result.Syntax
 
 type target_type =
-  | Coord
+  | Workspace
 
 type record = {
   judgment_id : string;
@@ -28,15 +26,15 @@ type record = {
 }
 
 let target_type_to_string = function
-  | Coord -> "root"
+  | Workspace -> "workspace"
 
 let target_type_of_string = function
-  | "root" -> Some Coord
+  | "workspace" -> Some Workspace
   | _ -> None
 
 
 let operator_dir config =
-  Filename.concat (Coord.masc_dir config) "operator"
+  Filename.concat (Workspace.masc_dir config) "operator"
 
 let judgments_path config =
   Filename.concat (operator_dir config) "judgments.jsonl"
@@ -49,8 +47,8 @@ let key_of ~surface ~target_type ~target_id =
     match target_id with
     | Some value ->
         let trimmed = String.trim value in
-        if trimmed <> "" then trimmed else "__room__"
-    | None -> "__room__"
+        if trimmed <> "" then trimmed else "__workspace__"
+    | None -> "__workspace__"
   in
   String.concat ":" [ surface; target_type_to_string target_type; target ]
 
@@ -83,7 +81,7 @@ let to_yojson (value : record) =
 let of_yojson json =
   try
     let* target_type =
-      match json |> member "target_type" |> to_string_option with
+      match Json_util.get_string json "target_type" with
       | Some value -> (
           match target_type_of_string value with
           | Some parsed -> Ok parsed
@@ -92,56 +90,56 @@ let of_yojson json =
     in
     Ok
       {
-        judgment_id = json |> member "judgment_id" |> to_string;
-        surface = json |> member "surface" |> to_string;
+        judgment_id = (match Json_util.assoc_member_opt "judgment_id" json with Some (`String s) -> s | _ -> "");
+        surface = (match Json_util.assoc_member_opt "surface" json with Some (`String s) -> s | _ -> "");
         target_type;
-        target_id = json |> member "target_id" |> to_string_option;
+        target_id = Json_util.get_string json "target_id";
         status =
-          json |> member "status" |> to_string_option
+          Json_util.get_string json "status"
           |> Option.value ~default:"active";
-        summary = json |> member "summary" |> to_string;
+        summary = (match Json_util.assoc_member_opt "summary" json with Some (`String s) -> s | _ -> "");
         confidence =
-          (match json |> member "confidence" with
-          | `Float value -> value
-          | `Int value -> float_of_int value
+          (match Json_util.assoc_member_opt "confidence" json with
+          | Some (`Float value) -> value
+          | Some (`Int value) -> float_of_int value
           | _ -> 0.0);
-        generated_at = json |> member "generated_at" |> to_string;
+        generated_at = (match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "");
         generated_at_unix =
-          (match json |> member "generated_at_unix" with
-          | `Float value -> value
-          | `Int value -> float_of_int value
-          | _ -> Masc_domain.parse_iso8601 (json |> member "generated_at" |> to_string));
-        fresh_until = json |> member "fresh_until" |> to_string;
+          (match Json_util.assoc_member_opt "generated_at_unix" json with
+          | Some (`Float value) -> value
+          | Some (`Int value) -> float_of_int value
+          | _ -> Masc_domain.parse_iso8601 ((match Json_util.assoc_member_opt "generated_at" json with Some (`String s) -> s | _ -> "")));
+        fresh_until = (match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "");
         fresh_until_unix =
-          (match json |> member "fresh_until_unix" with
-          | `Float value -> value
-          | `Int value -> float_of_int value
-          | _ -> Masc_domain.parse_iso8601 (json |> member "fresh_until" |> to_string));
+          (match json |> Json_util.assoc_member_opt "fresh_until_unix" with
+          | Some (`Float value) -> value
+          | Some (`Int value) -> float_of_int value
+          | _ -> Masc_domain.parse_iso8601 ((match Json_util.assoc_member_opt "fresh_until" json with Some (`String s) -> s | _ -> "")));
         keeper_name =
-          json |> member "keeper_name" |> to_string_option
+          Json_util.get_string json "keeper_name"
           |> Option.value ~default:"operator-judge";
-        model_name = json |> member "model_name" |> to_string_option;
-        runtime_name = json |> member "runtime_name" |> to_string_option;
+        model_name = Json_util.get_string json "model_name";
+        runtime_name = Json_util.get_string json "runtime_name";
         evidence_refs =
-          (match json |> member "evidence_refs" with
-          | `List items -> List.filter_map to_string_option items
+          (match json |> Json_util.assoc_member_opt "evidence_refs" with
+          | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
           | _ -> []);
         recommended_action =
-          (match json |> member "recommended_action" with
-          | `Assoc _ as value -> Some value
+          (match json |> Json_util.assoc_member_opt "recommended_action" with
+          | Some (`Assoc _ as value) -> Some value
           | _ -> None);
         supersedes =
-          (match json |> member "supersedes" with
-          | `List items -> List.filter_map to_string_option items
+          (match json |> Json_util.assoc_member_opt "supersedes" with
+          | Some (`List items) -> List.filter_map (function `String s -> Some s | _ -> None) items
           | _ -> []);
         fallback_used =
-          json |> member "fallback_used" |> to_bool_option
+          Json_util.get_bool json "fallback_used"
           |> Option.value ~default:false;
         disagreement_with_truth =
-          json |> member "disagreement_with_truth" |> to_bool_option
+          Json_util.get_bool json "disagreement_with_truth"
           |> Option.value ~default:false;
       }
-  with Type_error (msg, _) | Failure msg -> Error msg
+  with Yojson.Safe.Util.Type_error (msg, _) | Failure msg -> Error msg
 
 let generated_at_unix value =
   value.generated_at_unix

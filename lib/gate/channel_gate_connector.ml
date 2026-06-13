@@ -21,9 +21,9 @@ module type S = sig
     channel_id:string ->
     actor_name:string ->
     (Yojson.Safe.t, string) result
+  val bound_channels : keeper_name:string -> string list
+  val connected : unit -> bool
 end
-
-module U = Yojson.Safe.Util
 
 let registry : (string, (module S)) Hashtbl.t = Hashtbl.create 4
 
@@ -46,17 +46,23 @@ let connectors_json ?gate_status_json ?(audit_limit = 10) () =
   let active_count =
     List.fold_left
       (fun acc json ->
-        if json |> U.member "available" |> U.to_bool_option
+        if Json_util.get_bool json "available"
            |> Option.value ~default:false
         then acc + 1
         else acc)
       0 connector_jsons
+  in
+  let policy_str =
+    match Channel_gate_discord_state.get_trigger_policy () with
+    | None -> "unknown"
+    | Some p -> Discord_gateway_state.trigger_policy_to_string p
   in
   `Assoc
     [
       ("connectors", `List connector_jsons);
       ("total", `Int (List.length connectors));
       ("active_count", `Int active_count);
+      ("discord_trigger_policy", `String policy_str);
       ("generated_at",
        `String (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())));
     ]

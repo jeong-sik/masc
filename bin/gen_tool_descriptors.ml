@@ -23,9 +23,6 @@ open Tool_schemas_specs_types
    hand-written schema, and Phase 1 collapses all three into a typed
    SSOT. *)
 
-let admin_section_enum_strings = [ "auth" ]
-;;
-
 let config_category_enum_strings =
   [ "server"
   ; "auth"
@@ -88,30 +85,6 @@ let masc_tool_help_spec : tool_spec =
 
 let dashboard_scope_enum_strings = [ "all"; "current" ]
 
-let masc_dashboard_spec : tool_spec =
-  { name = "masc_dashboard"
-  ; description =
-      "Render the MASC dashboard summarizing rooms, agents, and tasks. Set \
-       scope='current' for this room only."
-  ; parameters =
-      [ { p_name = "compact"
-        ; p_type = T_bool { default = None }
-        ; p_description =
-            "If true, show compact single-line summary instead of full dashboard"
-        ; p_required = false
-        }
-      ; { p_name = "scope"
-        ; p_type =
-            T_string { enum = Some dashboard_scope_enum_strings; default = Some "all" }
-        ; p_description = "Dashboard scope (default: all)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
@@ -121,71 +94,6 @@ let masc_gc_spec : tool_spec =
       [ { p_name = "days"
         ; p_type = T_int { min = None; max = None; default = Some 7 }
         ; p_description = "Age threshold in days (default: 7)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_web_search_spec : tool_spec =
-  { name = "masc_web_search"
-  ; description =
-      "Search the public web and return top result titles, URLs, and snippets. Read-only \
-       helper for current-information lookups before deeper file or repo work. Uses \
-       configured web-search providers with structured fallback behavior and returns \
-       structured JSON."
-  ; parameters =
-      [ { p_name = "query"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Search query text"
-        ; p_required = true
-        }
-      ; { p_name = "limit"
-        ; p_type = T_int { min = Some 1; max = Some 10; default = Some 5 }
-        ; p_description = "Maximum number of results to return (default 5, max 10)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_web_fetch_spec : tool_spec =
-  { name = "masc_web_fetch"
-  ; description =
-      "Fetch a web page by URL and return cleaned text content. Read-only helper for \
-       reading selected sources after web search before citing them. Strips HTML tags, \
-       decodes entities, normalizes whitespace, and optionally extracts <title> and \
-       <meta name=\"description\">. Returns structured JSON with the cleaned text."
-  ; parameters =
-      [ { p_name = "url"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "URL to fetch (http or https only)"
-        ; p_required = true
-        }
-      ; { p_name = "timeout"
-        ; p_type = T_int { min = Some 1; max = Some 60; default = Some 15 }
-        ; p_description = "Request timeout in seconds (default 15, max 60)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_tool_admin_snapshot_spec : tool_spec =
-  { name = "masc_tool_admin_snapshot"
-  ; description =
-      "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane \
-       surfaces."
-  ; parameters =
-      [ { p_name = "include_hidden"
-        ; p_type = T_bool { default = Some true }
-        ; p_description = "Include hidden tools in tool_inventory (default: true)"
         ; p_required = false
         }
       ]
@@ -221,84 +129,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   }
 ;;
 
-let masc_tool_admin_update_spec : tool_spec =
-  { name = "masc_tool_admin_update"
-  ; description =
-      "Apply auth updates through a single admin entrypoint. Use after \
-       masc_tool_admin_snapshot to review current state before making changes. \
-       Additional sections (unit_policy, keeper_policy) are not yet implemented and \
-       will be added here when their handlers land."
-  ; parameters =
-      [ { p_name = "section"
-        ; p_type = T_string { enum = Some admin_section_enum_strings; default = None }
-        ; p_description = "Config section to update (currently only auth is implemented)"
-        ; p_required = true
-        }
-      ; { p_name = "enabled"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Enable or disable auth for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "require_token"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Require tokens for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "token_expiry_hours"
-        ; p_type = T_int { min = None; max = None; default = None }
-        ; p_description = "Token expiry in hours for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "unit_id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Managed unit id for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "policy"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit policy envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "budget"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit budget envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_pause_spec : tool_spec =
-  { name = "masc_pause"
-  ; description =
-      "Pause the server. Stops orchestrator from spawning new agents. Broadcasts \
-       notification to all agents. Use when you need to stop automated work temporarily."
-  ; parameters =
-      [ { p_name = "reason"
-        ; p_type = T_string { enum = None; default = Some "Manual pause" }
-        ; p_description =
-            "Reason for pausing (e.g., 'Need to review', 'Taking a break')"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_resume_spec : tool_spec =
-  { name = "masc_resume"
-  ; description =
-      "Resume the server after pause. Allows orchestrator to spawn agents again. \
-       Broadcasts notification to all agents."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 (* === PR-2: plan group (8 tools) === *)
 
 let masc_plan_init_spec : tool_spec =
@@ -306,7 +136,7 @@ let masc_plan_init_spec : tool_spec =
   ; description =
       "Initialize a planning context for a task, creating task_plan.md, notes.md, and \
        deliverable.md structure. Use when starting structured work on a claimed task \
-       that needs planning artifacts. After masc_claim_next or masc_add_task; follow up \
+       that needs planning artifacts. After keeper_task_claim; follow up \
        with masc_plan_update to write the plan."
   ; parameters =
       [ { p_name = "task_id"
@@ -367,7 +197,7 @@ let masc_plan_set_task_spec : tool_spec =
   ; description =
       "Set the current task for your session so you can omit task_id in subsequent \
        planning calls. Use when starting work on a task after claiming it. After \
-       masc_claim_next; auto-cleared on masc_leave."
+       keeper_task_claim; auto-cleared on session end."
   ; parameters =
       [ { p_name = "task_id"
         ; p_type = T_string { enum = None; default = None }
@@ -385,7 +215,7 @@ let masc_plan_get_task_spec : tool_spec =
   ; description =
       "Get the task_id you're currently working on (session-scoped). Use when resuming \
        work after a context switch or verifying your current assignment. Set via \
-       masc_plan_set_task. Auto-cleared on masc_leave."
+       masc_plan_set_task. Auto-cleared on session end."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -397,8 +227,7 @@ let masc_plan_clear_task_spec : tool_spec =
   ; description =
       "Clear your current task assignment without completing it (does not change task \
        status). Use when switching to a different task, abandoning work, or resetting \
-       session state. Use masc_transition to change task status separately. Auto-called \
-       on masc_leave."
+       session state. Use masc_transition to change task status separately."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -451,44 +280,7 @@ let masc_deliver_spec : tool_spec =
   }
 ;;
 
-(* === PR-2c: inline_infra group (3 of 4 tools — masc_mcp_session
-   deferred because enum SSOT is locked to Tool_schemas_inline_infra
-   by test_types.ml :: mcp_session_action_ssot. Codegen needs a
-   shared enum source RFC before that can swap.) === *)
-
-let masc_approval_pending_spec : tool_spec =
-  { name = "masc_approval_pending"
-  ; description =
-      "Keeper-safe read-only view of the pending approval queue. Use this to \
-       detect whether any approvals are waiting before asking an operator or using an \
-       admin-only detail/resolve path."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_approval_get_spec : tool_spec =
-  { name = "masc_approval_get"
-  ; description =
-      "Operator/admin-only detail view. Fetch one pending HITL approval by id, \
-       including the full input JSON. Use after finding an approval id in the \
-       dashboard or pending approval queue when the preview is insufficient for an \
-       operator decision. Requires the same privileged approval surface as resolving \
-       an approval."
-  ; parameters =
-      [ { p_name = "id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Pending approval id, for example appr_abc123def456"
-        ; p_required = true
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-(* === PR-2d: inline_coord group (6 tools) === *)
+(* === PR-2d: inline_workspace group (6 tools) === *)
 
 let masc_start_spec : tool_spec =
   { name = "masc_start"
@@ -509,52 +301,6 @@ let masc_start_spec : tool_spec =
             "If provided, creates a task with this title, claims it, and sets it as \
              current_task. Omit to just join without a task."
         ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_join_spec : tool_spec =
-  { name = "masc_join"
-  ; description =
-      "Join the active MASC project as agent_name to collaborate with other AI agents. \
-       Call at session start or to re-register presence. Other agents can @mention \
-       you. Check masc_status after joining to see active agents and available tasks."
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description =
-            "Your identity — any string you choose. Conventionally matches \
-             your MCP client name (so other agents can @mention you), but the \
-             server holds no closed list."
-        ; p_required = true
-        }
-      ; { p_name = "capabilities"
-        ; p_type = T_string_array { default = None }
-        ; p_description =
-            "Your strengths (e.g., ['typescript', 'code-review', 'testing'])"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_leave_spec : tool_spec =
-  { name = "masc_leave"
-  ; description =
-      "Leave the active MASC project and mark yourself as offline. Call when: (1) \
-       session ends, (2) switching projects, (3) work complete. Side effects: releases \
-       all your locks, sets presence to offline. Other agents will see you've left via \
-       SSE. Example: masc_leave({agent_name: 'worker-1'})"
-  ; parameters =
-      [ { p_name = "agent_name"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Your agent name"
-        ; p_required = true
         }
       ]
   ; additional_properties = false
@@ -612,34 +358,12 @@ let masc_messages_spec : tool_spec =
   }
 ;;
 
-let masc_who_spec : tool_spec =
-  { name = "masc_who"
-  ; description =
-      "List all agents currently in the active project with their capabilities. \
-       Shows: agent name, join time, capabilities (e.g., ['typescript', 'testing']). \
-       Use to: find who can help, check if specific agent is online, see team \
-       composition. Agents appear after masc_join, disappear after masc_leave. Tip: \
-       Use capabilities to find the right agent for @mentions."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let phase6_specs : tool_spec list =
   [ masc_config_spec
   ; masc_tool_help_spec
-  ; masc_dashboard_spec
   ; masc_gc_spec
-  ; masc_web_search_spec
-  ; masc_web_fetch_spec
-  ; masc_tool_admin_snapshot_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-  ; masc_tool_admin_update_spec
-    (* PR-1 (paving stone): control group *)
-  ; masc_pause_spec
-  ; masc_resume_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec
@@ -649,16 +373,10 @@ let phase6_specs : tool_spec list =
   ; masc_plan_clear_task_spec
   ; masc_note_add_spec
   ; masc_deliver_spec
-    (* PR-2c: inline_infra (masc_mcp_session manual; masc_spawn removed by RFC-0182) *)
-  ; masc_approval_pending_spec
-  ; masc_approval_get_spec
-    (* PR-2d: inline_coord group *)
+    (* PR-2d: inline_workspace group *)
   ; masc_start_spec
-  ; masc_join_spec
-  ; masc_leave_spec
   ; masc_broadcast_spec
   ; masc_messages_spec
-  ; masc_who_spec
   ]
 ;;
 

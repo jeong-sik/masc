@@ -19,6 +19,9 @@ let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
+let cache_hint_fields ~scope ~ttl_ms =
+  [ ("ttlMs", `Int ttl_ms); ("cacheScope", `String scope) ]
+
 let handle_read_resource_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
@@ -28,11 +31,11 @@ let handle_read_resource_eio state id params =
         make_error_typed ~id Mcp_error_code.Invalid_params "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
-        let config = state.Mcp_server.room_config in
+        let config = state.Mcp_server.workspace_config in
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =
-          let msgs_path = Coord.messages_dir config in
+          let msgs_path = Workspace.messages_dir config in
           if Sys.file_exists msgs_path then
             let extract_seq name =
               match String.index_opt name '_' with
@@ -47,7 +50,7 @@ let handle_read_resource_eio state id params =
             List.iter (fun name ->
               if !count < limit then begin
                 let path = Filename.concat msgs_path name in
-                let json = Coord.read_json config path in
+                let json = Workspace.read_json config path in
                 match Masc_domain.message_of_yojson json with
                 | Ok msg when msg.Masc_domain.seq > since_seq ->
                     msgs := (Masc_domain.message_to_yojson msg) :: !msgs;
@@ -103,10 +106,10 @@ let handle_read_resource_eio state id params =
                 | None -> None
               in
               ("text/markdown", text_opt)
-          | "status" -> ("text/markdown", Some (Coord.status config))
+          | "status" -> ("text/markdown", Some (Workspace.status config))
           | "status.json" ->
-              let state_json = Masc_domain.room_state_to_yojson (Coord.read_state config) in
-              let backlog_json = Masc_domain.backlog_to_yojson (Coord.read_backlog config) in
+              let state_json = Masc_domain.workspace_state_to_yojson (Workspace.read_state config) in
+              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
@@ -115,24 +118,20 @@ let handle_read_resource_eio state id params =
                 ("connected_agents", `List connected_agents);
               ] in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
-          | "tasks" -> ("text/markdown", Some (Coord.list_tasks config))
+          | "tasks" -> ("text/markdown", Some (Workspace.list_tasks config))
           | "tasks.json" ->
-              let backlog_json = Masc_domain.backlog_to_yojson (Coord.read_backlog config) in
+              let backlog_json = Masc_domain.backlog_to_yojson (Workspace.read_backlog config) in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
-          | "agents" ->
-              let json = Coord.get_agents_status config in
-              ("text/markdown", Some (Yojson.Safe.pretty_to_string json))
-          | "agents.json" ->
-              let json = Coord.get_agents_status config in
-              ("application/json", Some (Yojson.Safe.pretty_to_string json))
+          (* `agents` / `agents.json` resource removed (2026-06-09): backed by
+             the dead .masc/agents/ registry. Live agent status = `who`. *)
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
-              ("text/markdown", Some (Coord.get_messages config ~since_seq ~limit))
+              ("text/markdown", Some (Workspace.get_messages config ~since_seq ~limit))
           | "messages.json" | "messages.json/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in
@@ -177,7 +176,7 @@ let handle_read_resource_eio state id params =
                 "institution.json" in
               if Sys.file_exists file then
                 try
-                  let json = Coord.read_json config file in
+                  let json = Workspace.read_json config file in
                   let inst = Institution_eio.institution_of_json json in
                   ("text/markdown", Some (Institution_eio.format_for_injection inst))
                 with
@@ -362,7 +361,10 @@ let handle_read_resource_eio state id params =
                 ("text", `String text);
               ]
             ] in
-            make_response ~id (`Assoc [("contents", contents)])
+            make_response ~id
+              (`Assoc
+                ([ ("contents", contents) ]
+                @ cache_hint_fields ~scope:"private" ~ttl_ms:5000))
       end
   | Some _ ->
       make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params"

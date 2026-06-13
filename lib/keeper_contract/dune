@@ -1,0 +1,22 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_contract)
+ (public_name masc.keeper_contract)
+ (wrapped false)
+ (modules
+  keeper_accountability_claim_types
+  keeper_transition_audit_types
+  keeper_world_observation_turn_types
+  keeper_approval_queue_rules_types
+  keeper_invariant
+  keeper_path_rejection)
+ (libraries
+  agent_sdk
+  eio
+  masc.keeper_registry
+  masc.keeper_metrics
+  masc.masc_core
+  masc.masc_types
+  unix
+  yojson))

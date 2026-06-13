@@ -117,7 +117,7 @@ val record_dashboard_actor_fallback :
     Consolidates the two prior inline warn sites (Ok None / Error err
     arms in [dashboard_actor_for_request]) onto a single helper. The
     rendered log message is byte-equivalent to the prior format strings
-    — prometheus log alerts keyed on the literal
+    — otel_metric_store log alerts keyed on the literal
     [silent:dashboard_actor_fallback] prefix continue to fire.
 
     WORKAROUND-CARRYOVER: the fallback path itself remains (the
@@ -155,9 +155,9 @@ val host_port_scheme_of_origin :
 val host_port_of_request : Httpun.Request.t -> (string * int option) option
 (** Host/port from the request's [Host] header. *)
 
-val allow_anonymous_mutations : bool
-(** Compile-time toggle: when [true] non-loopback mutations skip auth
-    (test fixtures only). *)
+val allow_anonymous_mutations : unit -> bool
+(** Re-reads [MASC_ALLOW_ANONYMOUS_MUTATIONS] on each call.
+    When [true] non-loopback mutations skip auth (test fixtures only). *)
 
 val default_loopback_dev_mutation_origins : string list
 (** Built-in allowlist of dev-loopback origins (e.g. Vite). *)

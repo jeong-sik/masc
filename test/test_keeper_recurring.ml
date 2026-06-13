@@ -1,8 +1,8 @@
 (** Tests for Keeper_recurring — in-memory recurring task registry. *)
 
 open Alcotest
-module Rec = Masc_mcp.Keeper_recurring
-module Prom = Masc_mcp.Prometheus
+module Rec = Masc.Keeper_recurring
+module Metrics = Masc.Otel_metric_store
 
 let check = Alcotest.check
 
@@ -11,8 +11,8 @@ let task_by_label label =
 ;;
 
 let recurring_failure_value ~task ~phase =
-  Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.(to_string RecurringFailures)
+  Metrics.metric_value_or_zero
+    Keeper_metrics.(to_string RecurringFailures)
     ~labels:[("task", task); ("phase", phase)]
     ()
 ;;

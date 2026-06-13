@@ -10,59 +10,55 @@
 open Cmdliner
 
 (** Module aliases *)
-module Http = Masc_mcp.Http_server_eio
-module Http_h2 = Masc_mcp.Http_server_h2
-module Mcp_server = Masc_mcp.Mcp_server
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module Coord = Masc_mcp.Coord
-module Coord_utils = Coord_utils
-module Tool_keeper = Masc_mcp.Tool_keeper
-module Keeper_types = Masc_mcp.Keeper_types
-module Keeper_memory = Masc_mcp.Keeper_memory
-module Keeper_execution = Masc_mcp.Keeper_execution
-module Keeper_runtime = Masc_mcp.Keeper_runtime
-module Tool_operator = Masc_mcp.Tool_operator
-module Operator_control = Masc_mcp.Operator_control
-module Dashboard_execution = Masc_mcp.Dashboard_execution
-module Dashboard_mission = Masc_mcp.Dashboard_mission
+module Http = Masc.Http_server_eio
+module Http_h2 = Masc.Http_server_h2
+module Mcp_server = Masc.Mcp_server
+module Mcp_eio = Masc.Mcp_server_eio
+module Workspace = Masc.Workspace
+module Workspace_utils = Workspace_utils
+module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_memory = Masc.Keeper_memory
+module Keeper_execution = Masc.Keeper_execution
+module Keeper_runtime = Masc.Keeper_runtime
+module Tool_operator = Masc.Tool_operator
+module Operator_control = Operator_control
+module Dashboard_execution = Dashboard_execution
+module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
-module Dashboard_mission_briefing = Masc_mcp.Dashboard_mission_briefing
-module Build_identity = Masc_mcp.Build_identity
-module Config_doctor = Masc_mcp.Config_doctor
-module Auth_doctor = Masc_mcp.Auth_doctor
-module Auth_login = Masc_mcp.Auth_login
-module Keeper_id = Masc_mcp.Keeper_id
-module Keeper_msg_async = Masc_mcp.Keeper_msg_async
-module Keeper_status_bridge = Masc_mcp.Keeper_status_bridge
-module Keeper_tool_call_log = Masc_mcp.Keeper_tool_call_log
-module Graphql_api = Masc_mcp.Graphql_api
+module Dashboard_briefing_sections = Dashboard_briefing_sections
+module Build_identity = Masc.Build_identity
+module Auth_login = Masc.Auth_login
+module Keeper_msg_async = Masc.Keeper_msg_async
+module Keeper_status_bridge = Masc.Keeper_status_bridge
+module Keeper_tool_call_log = Masc.Keeper_tool_call_log
+module Graphql_api = Masc.Graphql_api
 module Types = Masc_domain
-module Tempo = Masc_mcp.Tempo
-module Auth = Masc_mcp.Auth
-module Board = Masc_mcp.Board
-module Board_curation = Masc_mcp.Board_curation
-module Board_dispatch = Masc_mcp.Board_dispatch
-module Task_dispatch = Masc_mcp.Task_dispatch
+module Tempo = Masc.Tempo
+module Auth = Masc.Auth
+module Board = Masc.Board
+module Board_curation = Masc.Board_curation
+module Board_dispatch = Masc.Board_dispatch
+module Task = Masc.Task
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
-module Progress = Masc_mcp.Progress
-module Sse = Masc_mcp.Sse
+module Progress = Masc.Progress
+module Sse = Masc.Sse
 module Safe_ops = Safe_ops
-module Tool_board = Masc_mcp.Tool_board
-module Server_mcp_transport_http = Masc_mcp.Server_mcp_transport_http
+module Tool_board = Board_tool
+module Server_mcp_transport_http = Server_mcp_transport_http
 
 
 (* ============================================ *)
 (* Extracted modules (lib/)                      *)
 (* ============================================ *)
-include Masc_mcp.Server_utils
-include Masc_mcp.Server_auth
-include Masc_mcp.Server_voice_config
-include Masc_mcp.Server_dashboard_http
-module Server_h2_gateway = Masc_mcp.Server_h2_gateway
-module Server_runtime_bootstrap = Masc_mcp.Server_runtime_bootstrap
-module Server_routes_http_runtime = Masc_mcp.Server_routes_http_runtime
-module Server_openai_compat = Masc_mcp.Server_openai_compat
-module Server_startup_takeover = Masc_mcp.Server_startup_takeover
+include Masc.Server_utils
+include Server_auth
+include Server_voice_config
+include Server_dashboard_http
+module Server_h2_gateway = Server_h2_gateway
+module Server_runtime_bootstrap = Server_runtime_bootstrap
+module Server_routes_http_runtime = Server_routes_http_runtime
+module Server_startup_takeover = Server_startup_takeover
 
 let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
 
@@ -105,7 +101,7 @@ let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session
 
-module Server_routes_http = Masc_mcp.Server_routes_http
+module Server_routes_http = Server_routes_http
 
 open Server_routes_http
 
@@ -114,7 +110,7 @@ open Server_routes_http
    manual edit here. *)
 let is_rate_limit_exempt path =
   String.equal path "/health"
-  || Masc_mcp.Server_health_paths.is_public path
+  || Server_health_paths.is_public path
 
 (** [safe_reqd_respond reqd response body] guards all direct
     [Httpun.Reqd.respond_with_string] calls in the main request handler
@@ -146,10 +142,10 @@ let safe_reqd_respond reqd response body =
 let try_rate_limit_block ~path ~client_addr ~request reqd =
   if is_rate_limit_exempt path then false
   else
-    let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
-    if not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then begin
-      let body = Masc_mcp.Rate_limit.too_many_requests_body () in
-      let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
+    let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
+    if not (Masc.Rate_limit.check_global ~key:rl_key) then begin
+      let body = Masc.Rate_limit.too_many_requests_body () in
+      let rl_headers = Masc.Rate_limit.headers_global ~key:rl_key in
       let headers = Httpun.Headers.of_list (
         ("content-type", "application/json") ::
         ("content-length", string_of_int (String.length body)) ::
@@ -162,14 +158,14 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
       match auth_token_from_request request with
       | None -> false
       | Some token ->
-          match Masc_mcp.Rate_limit.agent_key_of_token_or_name ~token () with
+          match Masc.Rate_limit.agent_key_of_token_or_name ~token () with
           | None -> false
           | Some agent_key ->
-              if Masc_mcp.Rate_limit.check_agent_global ~key:agent_key then false
+              if Masc.Rate_limit.check_agent_global ~key:agent_key then false
               else begin
-                let body = Masc_mcp.Rate_limit.too_many_agent_requests_body () in
+                let body = Masc.Rate_limit.too_many_agent_requests_body () in
                 let rl_headers =
-                  Masc_mcp.Rate_limit.headers_agent_global ~key:agent_key
+                  Masc.Rate_limit.headers_agent_global ~key:agent_key
                 in
                 let headers =
                   Httpun.Headers.of_list
@@ -197,7 +193,7 @@ let is_mcp_like_path path =
     Caller should short-circuit further handling in that case. *)
 let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
   if is_mcp_like && not (validate_origin request) then begin
-    let body = json_rpc_error (-32600) "Invalid origin" in
+    let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Invalid origin" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin
@@ -208,7 +204,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
           not (is_valid_protocol_version protocol_version) then begin
-    let body = json_rpc_error (-32600) "Unsupported protocol version" in
+    let body = json_rpc_error Masc.Mcp_error_code.Invalid_request "Unsupported protocol version" in
     let headers = Httpun.Headers.of_list (
       ("content-length", string_of_int (String.length body))
       :: json_headers "-" protocol_version origin
@@ -236,50 +232,20 @@ let dispatch_route ~router ~request ~path reqd =
     ] in
     let response = Httpun.Response.create ~headers `OK in
     safe_reqd_respond reqd response body
-  | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
+      match Server_webrtc_transport.handle_offer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+  | `POST, "/webrtc/answer" when Server_webrtc_transport.is_enabled () ->
     Http.Request.read_body_async reqd (fun body ->
-      match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
+      match Server_webrtc_transport.handle_answer_request body with
       | Ok json -> Http.Response.json json reqd
       | Error msg ->
         Http.Response.json ~status:`Bad_request
           (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/v1/chat/completions" when Server_openai_compat.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match !server_state with
-      | None ->
-        let origin = get_origin request in
-        Http.Response.json ~status:`Internal_server_error
-          ~extra_headers:(cors_headers origin)
-          (Server_openai_compat.error_response
-             ~status:"server_error" ~message:"Server not initialized" ())
-          reqd
-      | Some state ->
-        let config = state.Mcp_server.room_config in
-        (match state.Mcp_server.sw, state.Mcp_server.clock with
-        | Some sw, Some clock ->
-            let (status, resp_body) =
-              Server_openai_compat.handle_chat_completions
-                ~config ~sw ~clock body
-            in
-            let origin = get_origin request in
-            Http.Response.json ~status
-              ~extra_headers:(cors_headers origin)
-              resp_body reqd
-        | _ ->
-            let origin = get_origin request in
-            Http.Response.json ~status:`Internal_server_error
-              ~extra_headers:(cors_headers origin)
-              (Server_openai_compat.error_response
-                 ~status:"server_error"
-                 ~message:"Server runtime not fully initialized" ())
-              reqd))
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->
       handle_delete_mcp
@@ -426,7 +392,7 @@ let dispatch_route ~router ~request ~path reqd =
       let format = Option.value ~default:"nested" (query_param request "format") in
       let voter = board_voter_query request in
       let config =
-        Option.map (fun state -> state.Mcp_server.room_config) !server_state
+        Option.map (fun state -> state.Mcp_server.workspace_config) !server_state
       in
       let (status, body) =
         board_post_detail_json ~include_moderation:false ~blind_votes:false
@@ -484,16 +450,15 @@ let make_extended_handler routes =
       | None -> try_internal_error_response reqd msg)
 
 (** Main server loop *)
-let run_server ~sw:_ ~env ~host ~port ~base_path =
-  (* Use a dedicated sub-switch so that ALL fibers spawned by
+let run_server ~sw ~env ~host ~port ~base_path =
+  (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  When
      Eio.Fiber.first cancels the run_server fiber on SIGTERM, the
-     sub-switch is cancelled too, which propagates Cancel to every
+     switch is cancelled too, which propagates Cancel to every
      child fiber — preventing the 10s force-exit timeout. *)
-  Eio.Switch.run @@ fun server_sw ->
   try
-    Server_runtime_bootstrap.run ~sw:server_sw ~env ~host ~port ~base_path ~make_routes
+    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
@@ -510,15 +475,17 @@ let port =
 let host =
   let default = Env_config.masc_host () in
   let doc =
-    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable room auth with `require_token=true`."
+    "Host/IP to bind. Defaults to loopback (`127.0.0.1`). Use `0.0.0.0` or `::` only when you also enable workspace auth with `require_token=true`."
   in
   Arg.(value & opt string default & info ["host"] ~docv:"HOST" ~doc)
 
 let base_path =
-  let doc = "Base path for MASC data (.masc folder location)" in
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
-let doctor_json =
+let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
 
@@ -550,7 +517,7 @@ let login_client_env =
   let doc =
     "Env var name your MCP client reads to pick up the minted bearer \
      token. Required; the server holds no list of \"known\" MCP \
-     clients. Example: MASC_MCP_TOKEN or any \
+     clients. Example: MASC_TOKEN or any \
      operator-chosen name. The value is \
      rendered verbatim into the shell exports and JSON output."
   in
@@ -670,6 +637,11 @@ let run_cmd host port base_path =
   acquire_pid_lock port;
   acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
+  (* Decouple console mirror writes from the Eio domain before any keeper
+     boots: with fd 2 on a pty, a full pty buffer (scrollback/copy-mode)
+     blocks write(2) outside the scheduler and halts the whole fleet
+     (#20684, 2026-06-10 live stall). *)
+  Console_sink.start ();
   if stripped_base_path <> ""
      && String.equal (Filename.basename stripped_base_path) Common.masc_dirname
   then
@@ -678,7 +650,7 @@ let run_cmd host port base_path =
       base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
-  Coord_utils_backend_setup.cache_resolved_base_path normalized_base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
@@ -695,7 +667,7 @@ let run_cmd host port base_path =
          let dst = Filename.concat log_dir fname in
          if not (Sys.file_exists dst) then
            (try Sys.rename src dst;
-                Log.info "log migration: moved %s -> .masc/logs/" fname
+                Log.Server.info "log migration: moved %s -> .masc/logs/" fname
             with Sys_error _ -> ())
           end) files);
   Log.Ring.init_file_sink log_dir;
@@ -711,17 +683,22 @@ let run_cmd host port base_path =
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
-  (* Wire Runtime_events listener. After masc-mcp#18567 removed dead
+  (* Wire Runtime_events listener. After masc#18567 removed dead
      [Http_server_eio.start] (the only prior production caller), this
      would have been silently uninitialized. Idempotent-safe per
      [Masc_runtime_events] mli; consumed by Olly / custom callbacks
      to bracket agent turn spans ([emit_turn_start]/[emit_turn_end]). *)
   Masc_runtime_events.start_listener ();
 
-  (* Signal handlers stay side-effect free. The Eio watcher fiber performs
-     all shutdown work inside the event loop. *)
+  (* Signal handlers do the minimum async-signal-safe work: mark the sticky
+     global flag so any fiber that observes [Eio.Cancel.Cancelled] before the
+     watcher fiber wakes up can still classify itself as a graceful drop
+     ([Keeper_registry_types_failure.fiber_drop_cause]: [Graceful_shutdown]),
+     then enqueue the signal name for the Eio watcher fiber to consume.
+     [Atomic.set]/[Atomic.get] are lock-free and signal-safe. *)
   let pending_shutdown_signal = Atomic.make None in
   let request_shutdown signal_name =
+    Masc.Shutdown.mark_shutting_down ();
     if Option.is_none (Atomic.get pending_shutdown_signal) then
       Atomic.set pending_shutdown_signal (Some signal_name)
   in
@@ -739,7 +716,7 @@ let run_cmd host port base_path =
             Eio.Time.sleep clock 0.05;
             await_shutdown_signal ()
         | Some signal_name ->
-            let shutdown_cfg = Masc_mcp.Shutdown.config_from_env () in
+            let shutdown_cfg = Masc.Shutdown.config_from_env () in
             let force_timeout = shutdown_cfg.force_timeout_s in
             let t_shutdown_start = Unix.gettimeofday () in
             Log.Server.info
@@ -764,8 +741,8 @@ let run_cmd host port base_path =
               "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
               (Unix.gettimeofday () -. t_phase)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
 
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
             (* Phase 2: Run shutdown hooks with cleanup timeout *)
@@ -774,7 +751,7 @@ let run_cmd host port base_path =
               shutdown_cfg.cleanup_timeout_s;
             (try
               Eio.Time.with_timeout_exn clock shutdown_cfg.cleanup_timeout_s
-                (fun () -> Masc_mcp.Shutdown_hooks.run_all ())
+                (fun () -> Masc.Shutdown_hooks.run_all ())
             with
             | Eio.Time.Timeout ->
                 Log.Server.warn
@@ -791,8 +768,8 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: flush starting (timeout=2.0s)";
@@ -814,16 +791,16 @@ let run_cmd host port base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
 
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
                run_server cleanly via Eio.Cancel.Cancelled. *)
             Log.Server.info
               "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
               (Unix.gettimeofday () -. t_shutdown_start)
-              (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-              (Masc_mcp.Server_mcp_transport_ws.session_count ());
+              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_ws.session_count ());
             ()
             in
             Eio.Fiber.first
@@ -837,8 +814,8 @@ let run_cmd host port base_path =
                 Log.Server.warn "shutdown: SSE close error: %s"
                   (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
-            (Masc_mcp.Server_mcp_transport_http_sse.active_session_count ())
-            (Masc_mcp.Server_mcp_transport_ws.session_count ())
+            (Server_mcp_transport_http_sse.active_session_count ())
+            (Server_mcp_transport_ws.session_count ())
 
     with
     | Eio.Cancel.Cancelled _ ->
@@ -875,724 +852,6 @@ let run_cmd_exit host port base_path =
   run_cmd host port base_path;
   Cmd.Exit.ok
 
-let doctor_cmd_exit base_path as_json =
-  let report =
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
-    Config_doctor.analyze_live
-      ~sw
-      ~net:(Eio.Stdenv.net env)
-      ~clock:(Eio.Stdenv.clock env)
-      ~fs:(Eio.Stdenv.fs env)
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
-      ~base_path_input:base_path
-      ~default_base_path:(default_base_path ())
-      ()
-  in
-  let output =
-    if as_json then
-      Config_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
-    else
-      Config_doctor.render_text report
-  in
-  print_endline output;
-  Config_doctor.exit_code report
-
-let doctor_auth_cmd_exit base_path as_json =
-  let report =
-    Auth_doctor.analyze
-      ~base_path_input:base_path
-      ~default_base_path:(default_base_path ())
-      ()
-  in
-  let output =
-    if as_json then
-      Auth_doctor.to_yojson report |> Yojson.Safe.pretty_to_string
-    else
-      Auth_doctor.render_text report
-  in
-  print_endline output;
-  Auth_doctor.exit_code report
-
-let keeper_doctor_json_member key = function
-  | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt key fields)
-  | _ -> `Null
-
-let keeper_doctor_json_string key json =
-  match keeper_doctor_json_member key json with
-  | `String value -> Some value
-  | _ -> None
-
-let keeper_doctor_json_int key json =
-  match keeper_doctor_json_member key json with
-  | `Int value -> Some value
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let keeper_doctor_json_bool key json =
-  match keeper_doctor_json_member key json with
-  | `Bool value -> Some value
-  | _ -> None
-
-let keeper_doctor_json_string_list key json =
-  match keeper_doctor_json_member key json with
-  | `List values ->
-    values
-    |> List.filter_map (function
-      | `String value when String.trim value <> "" -> Some value
-      | _ -> None)
-    |> List.sort_uniq String.compare
-  | _ -> []
-
-let keeper_doctor_string_has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-
-let keeper_doctor_string_contains ~needle value =
-  let value = String.lowercase_ascii value in
-  let needle = String.lowercase_ascii needle in
-  let value_len = String.length value in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    idx + needle_len <= value_len
-    && (String.equal (String.sub value idx needle_len) needle || loop (idx + 1))
-  in
-  needle_len = 0 || loop 0
-
-let keeper_doctor_json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let keeper_doctor_string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
-let keeper_doctor_json_bool_opt = function
-  | Some value -> `Bool value
-  | None -> `Null
-
-let keeper_doctor_json_int_opt = function
-  | Some value -> `Int value
-  | None -> `Null
-
-let keeper_doctor_tool_output_text json =
-  match keeper_doctor_json_member "output" json with
-  | `String value -> Some value
-  | `Assoc _ as output -> (
-    match keeper_doctor_json_member "_blob" output with
-    | `Assoc _ as blob -> keeper_doctor_json_string "preview" blob
-    | _ -> None)
-  | _ -> None
-
-let keeper_doctor_parse_tool_output json =
-  match keeper_doctor_tool_output_text json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"doctor_keeper.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let keeper_doctor_claim_status output =
-  let result =
-    Option.value ~default:"" (keeper_doctor_json_string "result" output)
-    |> String.trim
-  in
-  match keeper_doctor_json_member "claimed_task" output with
-  | `Assoc _ -> "claimed"
-  | _ when keeper_doctor_string_has_prefix ~prefix:"No eligible tasks" result ->
-    "no_eligible"
-  | _ when keeper_doctor_string_has_prefix ~prefix:"No unclaimed tasks" result ->
-    "no_unclaimed"
-  | _ when keeper_doctor_string_has_prefix ~prefix:"Error:" result -> "error"
-  | _ when result = "" -> "unknown"
-  | _ -> "observed"
-
-let keeper_doctor_claim_scope_json ~keeper_name =
-  Keeper_tool_call_log.read_recent ~keeper_name ~n:100 ()
-  |> List.find_opt (fun json ->
-       String.equal
-         (Option.value ~default:"" (keeper_doctor_json_string "tool" json))
-         "keeper_task_claim")
-  |> function
-  | None ->
-    `Assoc
-      [ "present", `Bool false
-      ; "status", `String "not_observed"
-      ; "mode", `Null
-      ; "excluded_count", `Null
-      ; "active_goal_ids", `List []
-      ; "effective_goal_ids", `List []
-      ; "claimed_task_id", `Null
-      ; "result", `Null
-      ]
-  | Some call ->
-    let output =
-      match keeper_doctor_parse_tool_output call with
-      | Some (`Assoc _ as output) -> output
-      | _ -> `Assoc []
-    in
-    let scope =
-      match keeper_doctor_json_member "claim_scope" output with
-      | `Assoc _ as scope -> scope
-      | _ -> `Assoc []
-    in
-    let claimed_task =
-      match keeper_doctor_json_member "claimed_task" output with
-      | `Assoc _ as task -> Some task
-      | _ -> None
-    in
-    `Assoc
-      [ "present", `Bool true
-      ; "status", `String (keeper_doctor_claim_status output)
-      ; "mode", keeper_doctor_json_string_opt (keeper_doctor_json_string "mode" scope)
-      ; "scoped", keeper_doctor_json_bool_opt (keeper_doctor_json_bool "scoped" scope)
-      ; ( "excluded_count",
-          keeper_doctor_json_int_opt
-            (keeper_doctor_json_int "excluded_count" scope) )
-      ; ( "active_goal_ids",
-          keeper_doctor_string_list_json
-            (keeper_doctor_json_string_list "active_goal_ids" scope) )
-      ; ( "effective_goal_ids",
-          keeper_doctor_string_list_json
-            (keeper_doctor_json_string_list "effective_goal_ids" scope) )
-      ; ( "claimed_task_id",
-          match claimed_task with
-          | Some task -> keeper_doctor_json_string_opt (keeper_doctor_json_string "task_id" task)
-          | None -> `Null )
-      ; "result", keeper_doctor_json_string_opt (keeper_doctor_json_string "result" output)
-      ]
-
-let keeper_doctor_config_drift_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
-  | Ok (Some meta) ->
-    let sources = Keeper_status_bridge.source_provenance_json config meta in
-    let override_fields = keeper_doctor_json_string_list "override_fields" sources in
-    let cascade_detail =
-      match keeper_doctor_json_member "override_field_sources" sources with
-      | `List values ->
-        List.find_opt
-          (fun value ->
-            keeper_doctor_json_string "field" value = Some "model.cascade_name")
-          values
-      | _ -> None
-    in
-    let string_value key json =
-      match keeper_doctor_json_member key json with
-      | `String value -> Some value
-      | _ -> None
-    in
-    let default_cascade_name, live_cascade_name =
-      match cascade_detail with
-      | Some detail -> string_value "default_value" detail, string_value "live_value" detail
-      | None -> None, None
-    in
-    let cascade_override = Option.is_some cascade_detail in
-    `Assoc
-      [ "status", `String (if cascade_override then "drift" else "ok")
-      ; "cascade_override", `Bool cascade_override
-      ; "override_fields", keeper_doctor_string_list_json override_fields
-      ; "default_cascade_name", keeper_doctor_json_string_opt default_cascade_name
-      ; "live_cascade_name", keeper_doctor_json_string_opt live_cascade_name
-      ; ( "active_config_root",
-          keeper_doctor_json_string_opt
-            (keeper_doctor_json_string "active_config_root" sources) )
-      ]
-  | Ok None ->
-    `Assoc
-      [ "status", `String "keeper_missing"
-      ; "cascade_override", `Bool false
-      ; "override_fields", `List []
-      ; "default_cascade_name", `Null
-      ; "live_cascade_name", `Null
-      ; "active_config_root", `Null
-      ]
-  | Error message ->
-    `Assoc
-      [ "status", `String "error"
-      ; "error", `String message
-      ; "cascade_override", `Bool false
-      ; "override_fields", `List []
-      ; "default_cascade_name", `Null
-      ; "live_cascade_name", `Null
-      ; "active_config_root", `Null
-      ]
-
-let keeper_doctor_current_task_json config meta =
-  match meta.Keeper_types.current_task_id with
-  | None -> `Assoc [ "present", `Bool false; "task_id", `Null ]
-  | Some task_id ->
-    let task_id_s = Keeper_id.Task_id.to_string task_id in
-    let task_result =
-      try
-        Ok
-          (Coord.get_tasks_raw config
-           |> List.find_opt (fun (task : Types.task) ->
-                String.equal task.id task_id_s))
-      with exn -> Error (Printexc.to_string exn)
-    in
-    (match task_result with
-     | Error message ->
-       `Assoc
-         [ "present", `Bool true
-         ; "task_id", `String task_id_s
-         ; "status", `String "task_store_unavailable"
-         ; "assignee", `Null
-         ; "error", `String message
-         ]
-     | Ok task -> (
-       match task with
-       | None ->
-         `Assoc
-           [ "present", `Bool true
-           ; "task_id", `String task_id_s
-         ; "status", `String "missing_from_task_store"
-         ; "assignee", `Null
-         ]
-     | Some task ->
-       `Assoc
-         [ "present", `Bool true
-         ; "task_id", `String task.id
-         ; "title", `String task.title
-         ; "status", `String (Types.task_status_to_string task.task_status)
-         ; "assignee", `String (Types.task_display_assignee task.task_status)
-         ; "goal_id", keeper_doctor_json_string_opt task.goal_id
-         ]))
-
-let keeper_doctor_async_json ~keeper_name ~claim_scope =
-  let latest =
-    match Keeper_msg_async.list_for_keeper ~keeper_name with
-    | entry :: _ -> Some entry
-    | [] -> None
-  in
-  let latest_json =
-    match latest with
-    | Some entry -> Keeper_msg_async.entry_to_json entry
-    | None -> `Null
-  in
-  let latest_status =
-    match latest with
-    | Some entry -> Keeper_msg_async.status_to_string entry.Keeper_msg_async.status
-    | None -> "none"
-  in
-  let side_effect_visible =
-    keeper_doctor_json_string "claimed_task_id" claim_scope <> None
-  in
-  `Assoc
-    [ "latest_status", `String latest_status
-    ; "latest", latest_json
-    ; "side_effect_visible", `Bool side_effect_visible
-    ; ( "lost_after_side_effect",
-        `Bool (String.equal latest_status "lost" && side_effect_visible) )
-    ]
-
-let keeper_doctor_primary_reason ~claim_scope ~config_drift ~config_report ~async =
-  let claim_status = keeper_doctor_json_string "status" claim_scope in
-  let cascade_override =
-    Option.value ~default:false
-      (keeper_doctor_json_bool "cascade_override" config_drift)
-  in
-  let route_gap =
-    List.exists
-      (fun warning ->
-        keeper_doctor_string_contains ~needle:"no_tool_capable_provider" warning
-        || keeper_doctor_string_contains ~needle:"forced required-tool" warning)
-      config_report.Config_doctor.warnings
-  in
-  let lost_after_side_effect =
-    Option.value ~default:false
-      (keeper_doctor_json_bool "lost_after_side_effect" async)
-  in
-  match claim_status with
-  | Some "no_eligible" -> "claim_scope_no_eligible"
-  | _ when cascade_override -> "keeper_cascade_override_drift"
-  | _ when route_gap -> "route_tool_capability_gap"
-  | _ when lost_after_side_effect -> "request_lost_after_side_effect"
-  | _ when Config_doctor.has_blocking_warning config_report -> "config_doctor_not_ok"
-  | _ -> "ok"
-
-let keeper_doctor_next_actions reason =
-  match reason with
-  | "claim_scope_no_eligible" ->
-    [ "Inspect active_goal_ids and link/create an eligible task before retrying." ]
-  | "keeper_cascade_override_drift" ->
-    [ "Inspect keeper TOML/live meta cascade_name and align it with the intended route." ]
-  | "route_tool_capability_gap" ->
-    [ "Run `masc-mcp doctor config --json` and route keeper_turn/tool_required to a tool-capable runtime lane." ]
-  | "request_lost_after_side_effect" ->
-    [ "Inspect current_task and recent tool-calls before retrying the same keeper message." ]
-  | "config_doctor_not_ok" ->
-    [ "Resolve config doctor warnings before restarting or retrying the keeper." ]
-  | _ -> []
-
-let doctor_keeper_report base_path keeper_name =
-  let config_report =
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
-    Config_doctor.analyze_live
-      ~sw
-      ~net:(Eio.Stdenv.net env)
-      ~clock:(Eio.Stdenv.clock env)
-      ~fs:(Eio.Stdenv.fs env)
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
-      ~base_path_input:base_path
-      ~default_base_path:(default_base_path ())
-      ()
-  in
-  let config = Coord.default_config config_report.base_path in
-  Keeper_tool_call_log.init ~base_path:config.base_path ();
-  let meta_result = Keeper_types.read_meta config keeper_name in
-  let claim_scope = keeper_doctor_claim_scope_json ~keeper_name in
-  let config_drift = keeper_doctor_config_drift_json ~config ~keeper_name in
-  let async = keeper_doctor_async_json ~keeper_name ~claim_scope in
-  let current_task =
-    match meta_result with
-    | Ok (Some meta) -> keeper_doctor_current_task_json config meta
-    | Ok None -> `Assoc [ "present", `Bool false; "error", `String "keeper_missing" ]
-    | Error message -> `Assoc [ "present", `Bool false; "error", `String message ]
-  in
-  let reason =
-    match meta_result with
-    | Ok (Some _) ->
-      keeper_doctor_primary_reason ~claim_scope ~config_drift ~config_report ~async
-    | Ok None -> "keeper_missing"
-    | Error _ -> "keeper_meta_error"
-  in
-  let next_actions = keeper_doctor_next_actions reason in
-  let status =
-    if String.equal reason "ok" then "ok"
-    else if String.equal reason "claim_scope_no_eligible" then "warn"
-    else "error"
-  in
-  let payload =
-    `Assoc
-      [ "status", `String status
-      ; "keeper", `String keeper_name
-      ; "server",
-        `Assoc
-          [ "base_path", `String config.base_path
-          ; "config_status", `String (Config_doctor.status_to_string config_report.status)
-          ; "active_config_root", `String config_report.active_config_root
-          ]
-      ; "scope", claim_scope
-      ; "route",
-        `Assoc
-          [ "config_drift", config_drift
-          ; "doctor_warnings",
-            keeper_doctor_string_list_json config_report.warnings
-          ]
-      ; "tools",
-        `Assoc
-          [ "route_tool_capability_gap",
-            `Bool
-              (List.exists
-                 (fun warning ->
-                   keeper_doctor_string_contains
-                     ~needle:"no_tool_capable_provider" warning)
-                 config_report.warnings)
-          ]
-      ; "current_task", current_task
-      ; "async_request", async
-      ; "disposition", `Assoc [ "reason", `String reason ]
-      ; "recommended_actions", keeper_doctor_string_list_json next_actions
-      ]
-  in
-  payload, if String.equal status "ok" then 0 else 1
-
-let render_doctor_keeper_text json =
-  let section name =
-    match keeper_doctor_json_member name json with
-    | `Assoc _ as value -> Yojson.Safe.to_string value
-    | `List _ as value -> Yojson.Safe.to_string value
-    | `String value -> value
-    | `Bool value -> string_of_bool value
-    | `Int value -> string_of_int value
-    | `Null -> "null"
-    | other -> Yojson.Safe.to_string other
-  in
-  String.concat
-    "\n"
-    [ "MASC Keeper Doctor"
-    ; "status: " ^ section "status"
-    ; "keeper: " ^ section "keeper"
-    ; "server: " ^ section "server"
-    ; "scope: " ^ section "scope"
-    ; "route: " ^ section "route"
-    ; "tools: " ^ section "tools"
-    ; "current_task: " ^ section "current_task"
-    ; "async_request: " ^ section "async_request"
-    ; "disposition: " ^ section "disposition"
-    ; "recommended_actions: " ^ section "recommended_actions"
-    ]
-
-let doctor_keeper_cmd_exit base_path keeper_name as_json =
-  let keeper_name = String.trim keeper_name in
-  if keeper_name = "" then (
-    Printf.eprintf "keeper name is required\n%!";
-    1)
-  else
-    let payload, rc = doctor_keeper_report base_path keeper_name in
-    let output =
-      if as_json then Yojson.Safe.pretty_to_string payload
-      else render_doctor_keeper_text payload
-    in
-    print_endline output;
-    rc
-
-let doctor_sidecar_exit name as_json =
-  match Masc_mcp.Doctor_dispatch.sidecar_dir name with
-  | None ->
-    Printf.eprintf
-      "unknown sidecar: %s (known: %s)\n"
-      name
-      Masc_mcp.Doctor_dispatch.known_summary;
-    2
-  | Some rel_dir ->
-    let repo_root = Sys.getcwd () in
-    let abs_dir =
-      if Filename.is_relative rel_dir
-      then Filename.concat repo_root rel_dir
-      else rel_dir
-    in
-    if not (Sys.file_exists abs_dir)
-    then begin
-      Printf.eprintf
-        "sidecar directory not found: %s\nhint: run from repository root\n"
-        abs_dir;
-      2
-    end
-    else begin
-      let python =
-        Option.value (Sys.getenv_opt "MASC_PYTHON") ~default:"python3"
-      in
-      let args =
-        if as_json
-        then [| python; "-m"; "src"; "doctor"; "--json" |]
-        else [| python; "-m"; "src"; "doctor" |]
-      in
-      let prev = Sys.getcwd () in
-      Sys.chdir abs_dir;
-      let pid =
-        try
-          Some
-            (Unix.create_process
-               python
-               args
-               Unix.stdin
-               Unix.stdout
-               Unix.stderr)
-        with Unix.Unix_error (err, _, _) ->
-          Printf.eprintf
-            "failed to exec %s: %s\nhint: set MASC_PYTHON to a valid interpreter\n"
-            python
-            (Unix.error_message err);
-          None
-      in
-      Sys.chdir prev;
-      match pid with
-      | None -> 2
-      | Some pid ->
-        let _, status = Unix.waitpid [] pid in
-        (match status with
-         | Unix.WEXITED n -> n
-         | Unix.WSIGNALED s -> 128 + s
-         | Unix.WSTOPPED s -> 128 + s)
-    end
-
-let sidecar_name_arg =
-  let doc =
-    Printf.sprintf
-      "Sidecar name (%s)"
-      Masc_mcp.Doctor_dispatch.known_summary
-  in
-  Arg.(required & pos 0 (some string) None & info [] ~docv:"SIDECAR" ~doc)
-
-let doctor_keeper_name =
-  let doc = "Keeper name to diagnose" in
-  Arg.(required & opt (some string) None & info ["name"] ~docv:"KEEPER" ~doc)
-
-let doctor_config_cmd =
-  let doc =
-    "Diagnose config initialization, active config roots, and base-path shadowing"
-  in
-  let info = Cmd.info "config" ~doc in
-  Cmd.v info Term.(const doctor_cmd_exit $ base_path $ doctor_json)
-
-let doctor_auth_cmd =
-  let doc =
-    "Diagnose auth mode, bearer readiness, and role/permission mismatches"
-  in
-  let info = Cmd.info "auth" ~doc in
-  Cmd.v info Term.(const doctor_auth_cmd_exit $ base_path $ doctor_json)
-
-let doctor_keeper_cmd =
-  let doc =
-    "Diagnose one keeper's scope, cascade drift, tool lane, task, and async state"
-  in
-  let info = Cmd.info "keeper" ~doc in
-  Cmd.v info Term.(const doctor_keeper_cmd_exit $ base_path $ doctor_keeper_name $ doctor_json)
-
-let doctor_sidecar_cmd =
-  let doc =
-    "Run a sidecar's doctor and forward its output (spawns python -m src doctor)"
-  in
-  let info = Cmd.info "sidecar" ~doc in
-  Cmd.v info Term.(const doctor_sidecar_exit $ sidecar_name_arg $ doctor_json)
-
-let doctor_all_divider () =
-  print_endline "========================================"
-
-let doctor_all_section title =
-  print_newline ();
-  doctor_all_divider ();
-  print_endline title;
-  doctor_all_divider ()
-
-let label_for_rc = function
-  | 0 -> "정상"
-  | 1 -> "경고"
-  | 2 -> "오류"
-  | _ -> "오류"
-
-let doctor_all_json_exit base_path =
-  let config_report =
-    Eio_main.run @@ fun env ->
-    Eio.Switch.run @@ fun sw ->
-    Config_doctor.analyze_live
-      ~sw
-      ~net:(Eio.Stdenv.net env)
-      ~clock:(Eio.Stdenv.clock env)
-      ~fs:(Eio.Stdenv.fs env)
-      ~proc_mgr:(Eio.Stdenv.process_mgr env)
-      ~base_path_input:base_path
-      ~default_base_path:(default_base_path ())
-      ()
-  in
-  let config_payload = Config_doctor.to_yojson config_report in
-  let config_rc = Config_doctor.exit_code config_report in
-  let sidecar_entries =
-    List.map
-      (fun name ->
-        match Masc_mcp.Doctor_dispatch.capture_sidecar_json name with
-        | Ok (body, rc) ->
-          let payload : Yojson.Safe.t =
-            try Yojson.Safe.from_string body with
-            | _ ->
-              `Assoc
-                [ "raw", `String body
-                ; "parse_error", `String "invalid JSON from sidecar"
-                ]
-          in
-          (name, rc, payload)
-        | Error msg -> (name, 2, `Assoc [ "error", `String msg ]))
-      Masc_mcp.Doctor_dispatch.known_sidecars
-  in
-  let all_entries =
-    ("config", "config", config_rc, config_payload)
-    :: List.map
-         (fun (name, rc, payload) -> (name, "sidecar", rc, payload))
-         sidecar_entries
-  in
-  let all_rcs = List.map (fun (_, _, rc, _) -> rc) all_entries in
-  let total = List.length all_rcs in
-  let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
-  let ok_count = count_eq 0 in
-  let warn_count = count_eq 1 in
-  let err_count = total - ok_count - warn_count in
-  let doctors_json : Yojson.Safe.t =
-    `List
-      (List.map
-         (fun (name, kind, rc, payload) ->
-           `Assoc
-             [ "name", `String name
-             ; "kind", `String kind
-             ; "exit_code", `Int rc
-             ; "payload", payload
-             ])
-         all_entries)
-  in
-  let aggregate =
-    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
-  in
-  let result : Yojson.Safe.t =
-    `Assoc
-      [ "title", `String "MASC Doctor (전 계층)"
-      ; "doctors", doctors_json
-      ; ( "summary"
-        , `Assoc
-            [ "total", `Int total
-            ; "ok", `Int ok_count
-            ; "warn", `Int warn_count
-            ; "error", `Int err_count
-            ] )
-      ; "exit_code", `Int aggregate
-      ]
-  in
-  print_endline (Yojson.Safe.pretty_to_string result);
-  aggregate
-
-let doctor_all_exit base_path as_json =
-  if as_json
-  then doctor_all_json_exit base_path
-  else begin
-    doctor_all_section "Config Doctor";
-    let config_rc = doctor_cmd_exit base_path false in
-    let sidecar_rcs =
-      List.map
-        (fun name ->
-          doctor_all_section
-            (Printf.sprintf
-               "%s Sidecar Doctor"
-               (String.capitalize_ascii name));
-          let rc = doctor_sidecar_exit name false in
-          (name, rc))
-        Masc_mcp.Doctor_dispatch.known_sidecars
-    in
-    let all_rcs = config_rc :: List.map snd sidecar_rcs in
-    let total = List.length all_rcs in
-    let count_eq v = List.length (List.filter (( = ) v) all_rcs) in
-    let ok_count = count_eq 0 in
-    let warn_count = count_eq 1 in
-    let err_count = total - ok_count - warn_count in
-    print_newline ();
-    doctor_all_divider ();
-    Printf.printf
-      "합계: %d Doctor · 정상 %d · 경고 %d · 오류 %d\n"
-      total
-      ok_count
-      warn_count
-      err_count;
-    let breakdown =
-      ("config", config_rc) :: sidecar_rcs
-      |> List.map (fun (name, rc) ->
-             Printf.sprintf "%s=%s" name (label_for_rc rc))
-      |> String.concat " · "
-    in
-    print_endline breakdown;
-    doctor_all_divider ();
-    Masc_mcp.Doctor_dispatch.aggregate_exit_code all_rcs
-  end
-
-let doctor_all_cmd =
-  let doc =
-    "Run config + every registered sidecar doctor and show an aggregate \
-     summary"
-  in
-  let info = Cmd.info "all" ~doc in
-  Cmd.v info Term.(const doctor_all_exit $ base_path $ doctor_json)
-
-let doctor_cmd =
-  let doc = "Doctor: diagnose MASC server and sidecars" in
-  let info = Cmd.info "doctor" ~doc in
-  Cmd.group
-    ~default:Term.(const doctor_cmd_exit $ base_path $ doctor_json)
-    info
-    [ doctor_config_cmd
-    ; doctor_auth_cmd
-    ; doctor_keeper_cmd
-    ; doctor_sidecar_cmd
-    ; doctor_all_cmd
-    ]
-
 let login_cmd_exit base_path host port agent role client_env no_expiry
     as_json as_shell =
   let token_lifetime : Auth_login.token_lifetime =
@@ -1628,7 +887,7 @@ let login_cmd =
   Cmd.v info
     Term.(
       const login_cmd_exit $ base_path $ host $ port $ login_agent
-      $ login_role $ login_client_env $ login_no_expiry $ doctor_json
+      $ login_role $ login_client_env $ login_no_expiry $ login_json
       $ login_shell)
 
 let init_force =
@@ -1659,7 +918,7 @@ let seed_one ~target_root ~force tally rel =
 
 let init_cmd_exit base_path force =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let target_root = Config_doctor.local_base_config_root ~base_path in
+  let target_root = Filename.concat (Filename.concat base_path ".masc") "config" in
   Fs_compat.mkdir_p target_root;
   let result =
     List.fold_left
@@ -1678,8 +937,8 @@ let init_cmd =
 
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
-  let info = Cmd.info "masc-mcp" ~version:Masc_mcp.Version.version ~doc in
+  let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ doctor_cmd; init_cmd; login_cmd ]
+    info [ init_cmd; login_cmd ]
 
 let () = exit (Cmd.eval' cmd)

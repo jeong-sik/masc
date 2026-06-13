@@ -1,7 +1,7 @@
 // MASC Dashboard — K1 · ToolAccess summary variant (read-only)
 //
 // Phase 2 spec (`design-system/preview/cb-group-h.jsx:KeeperToolAccess`)
-// expects a compact <dl> of cascade / sandbox / network / auto_handoff /
+// expects a compact <dl> of runtime / sandbox / network / auto_handoff /
 // handoff_threshold / proactive_idle / mention targets,
 // rendered as a quick-scan summary before the operator dives into the
 // editable form. Production has all the data on `KeeperConfig` but only
@@ -36,13 +36,13 @@ function mentionsLabel(targets: readonly string[]): string {
 }
 
 export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
-  const cascade = config.execution.selected_cascade_name || '—'
+  const runtime = config.execution.selected_runtime_id || '—'
   const sandbox = config.sandbox_profile ?? '(unknown sandbox_profile)'
   const network = config.network_mode ?? '(unknown network_mode)'
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
   const idle = `${config.proactive.idle_sec}s${config.proactive.enabled ? '' : ' (disabled)'}`
-  const mentions = mentionsLabel(config.coordination.mention_targets)
-  const allowlistCount = config.tools.resolved_allowlist.length
+  const mentions = mentionsLabel(config.workspace.mention_targets)
+  const candidateCount = config.tools.resolved_allowlist.length
   const denylistCount = config.tools.tool_denylist.length
 
   return html`
@@ -57,15 +57,15 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
         <span class="text-2xs text-text-disabled">read-only · 변경은 아래 편집 영역</span>
       </header>
       <dl class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
-        <${ToolAccessRow} label="cascade" value=${cascade} />
+        <${ToolAccessRow} label="runtime" value=${runtime} />
         <${ToolAccessRow} label="sandbox" value=${sandbox} />
         <${ToolAccessRow} label="network" value=${network} />
         <${ToolAccessRow} label="auto handoff" value=${handoff} />
         <${ToolAccessRow} label="proactive idle" value=${idle} />
         <${ToolAccessRow} label="mention targets" value=${mentions} />
         <${ToolAccessRow}
-          label="allow / deny"
-          value=${`${allowlistCount} allow · ${denylistCount} deny`}
+          label="candidate / deny"
+          value=${`${candidateCount} candidate · ${denylistCount} deny`}
         />
       </dl>
     </section>

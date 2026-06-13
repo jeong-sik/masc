@@ -3,7 +3,7 @@
     RFC-0047 PR-3: the [code: string] field is removed; the typed
     [disposition] field is the SSOT. [code : t -> string] is provided
     as an accessor for callers that still need the wire string
-    (Prometheus labels, JSON, dashboard chips). [severity / summary /
+    (Otel_metric_store labels, JSON, dashboard chips). [severity / summary /
     next_action] are now exhaustive matches on [disposition]; the
     legacy [severity_of_code / summary_of_code / next_action_of_code]
     substring classifiers are deleted.
@@ -33,7 +33,7 @@ type t =
 (** Wire-format accessor. Returns
     [Keeper_turn_disposition.to_wire t.disposition]. Use this when
     the caller needs the legacy string code (JSON serialisation,
-    Prometheus labels, dashboard chips). *)
+    Otel_metric_store labels, dashboard chips). *)
 val code : t -> string
 
 val severity_to_string : severity -> string

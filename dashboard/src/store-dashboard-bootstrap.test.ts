@@ -67,7 +67,7 @@ describe('refreshDashboard bootstrap', () => {
         generated_at: '2026-05-14T06:00:01Z',
         goals: [],
         rollup: {},
-        coordination_fsm: null,
+        workspace_fsm: null,
       },
       namespace_truth: {
         generated_at: '2026-05-14T06:00:02Z',

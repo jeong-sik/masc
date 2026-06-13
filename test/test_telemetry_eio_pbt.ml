@@ -18,7 +18,7 @@
     Properties (2) + (3) collectively make the addition of a new [option]
     field automatically safe — no per-variant lenient code to remember. *)
 
-module Telemetry_eio = Masc_mcp.Telemetry_eio
+module Telemetry_eio = Masc.Telemetry_eio
 
 let opt_string =
   let open QCheck.Gen in
@@ -37,11 +37,11 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
   | 0 ->
       let* agent_id = string_small in
       let* capabilities = list_size (int_range 0 3) string_small in
-      return (Telemetry_eio.Agent_joined { agent_id; capabilities })
+      return (Telemetry_eio.Agent_session_bound { agent_id; capabilities })
   | 1 ->
       let* agent_id = string_small in
       let* reason = string_small in
-      return (Telemetry_eio.Agent_left { agent_id; reason })
+      return (Telemetry_eio.Agent_unbound { agent_id; reason })
   | 2 ->
       let* task_id = string_small in
       let* agent_id = string_small in
@@ -95,12 +95,11 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
   | _ ->
       let* agent_id = string_small in
       let* profile = string_small in
-      let* preset = opt_string in
       let* tool_count = nat_small in
       let* assignment_id = string_small in
       return
         (Telemetry_eio.Tool_assigned
-           { agent_id; profile; preset; tool_count; assignment_id })
+           { agent_id; profile; tool_count; assignment_id })
 
 let gen_record : Telemetry_eio.event_record QCheck.Gen.t =
   let open QCheck.Gen in

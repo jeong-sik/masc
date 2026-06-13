@@ -34,7 +34,7 @@ export interface FormatIssuesOptions {
  * whose `path` resolves to an empty array. Exposed so per-domain
  * `SchemaDriftError` subclasses that build their own summary in a
  * `super(...)` call don't have to inline the same `.map(...).join(';')`
- * block — keeps the `<root>` sentinel and the segment shape in one place.
+ * block — keeps the `<root>` marker and the segment shape in one place.
  *
  * `maxIssues` truncates the input before mapping; without it the
  * whole list is formatted (existing default).

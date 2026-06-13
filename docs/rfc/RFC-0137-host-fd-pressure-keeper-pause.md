@@ -14,7 +14,7 @@ implementation_prs: [16665]
 ## Progress audit (2026-05-21)
 
 Status promoted Draft → Active. PR-1 landed (squash-merged with the
-RFC body as #16665); PR-2 (poller) and PR-3 (Prometheus metric)
+RFC body as #16665); PR-2 (poller) and PR-3 (legacy metrics backend metric)
 remain.
 
 | §4 Phase | PR | Scope | Merged |
@@ -42,10 +42,10 @@ landed, status not yet flipped".
 | §4 Phase | Scope | LoC | depends |
 |----------|------|-----|---------|
 | **PR-2** | `host_fd_pressure_poller.{ml,mli}` new module + wiring in `server_bootstrap_loops.ml` + tests | ~120 | PR-1 |
-| **PR-3 (optional)** | Prometheus metric `host_fd_pressure_*` registration | ~30 | PR-2 |
+| **PR-3 (optional)** | legacy metrics backend metric `host_fd_pressure_*` registration | ~30 | PR-2 |
 
 PR-2 is the load-bearing follow-up (the actual host-FD poller is what
-detects Docker Desktop VM XPC pressure outside masc-mcp's nofile
+detects Docker Desktop VM XPC pressure outside masc's nofile
 budget). PR-3 is the observability ratchet.
 
 ### Related RFC
@@ -103,9 +103,9 @@ evicts under bookkeeping pressure.
 | layer | observes | acts | gap |
 |---|---|---|---|
 | `Keeper_fd_pressure` (RFC-0101) | process `nofile` + a probe of `kern.num_files` at error sites | trips a per-process circuit breaker | **probe is reactive at error sites only**; nothing polls the host budget while quiet, so a 1-hour drift to 75% triggers nothing until a syscall fails |
-| `Fd_accountant` (5-kind FD slot semaphore) | per-kind FD slots inside the masc-mcp process | rejects new spawns once the masc-mcp process budget is exhausted | observes *masc-mcp*, not the *host*. Apple VM XPC owns the FDs, not masc-mcp |
+| `Fd_accountant` (5-kind FD slot semaphore) | per-kind FD slots inside the masc process | rejects new spawns once the masc process budget is exhausted | observes *masc*, not the *host*. Apple VM XPC owns the FDs, not masc |
 | `Docker_spawn_throttle` (RFC-0097 adjacent, PR #15727) | concurrent docker spawns | per-kind semaphore | reduces *spawn rate*; does not reduce *cumulative* mount accumulation |
-| `sysmon-fd-oom-disk.sh` (out-of-process, `.tmp/`) | `kern.num_files / kern.maxfiles` every 60s | macOS notification + terminal bell | observer-only — masc-mcp keeper loop is not informed, so keepers keep adding work |
+| `sysmon-fd-oom-disk.sh` (out-of-process, `.tmp/`) | `kern.num_files / kern.maxfiles` every 60s | macOS notification + terminal bell | observer-only — masc keeper loop is not informed, so keepers keep adding work |
 
 The 2026-05-19 incident proves this gap empirically: sysmon emitted a
 WARN at 15:35 and a CRIT at 22:02; the keeper fleet kept scheduling
@@ -120,7 +120,7 @@ A naive read of this RFC could classify it as "make data loss visible"
   The pressure signal triggers an **action** (keeper pause) before the
   failure manifests.
 - The root fix (Apple VM cache lifecycle, Docker bind mount lifecycle,
-  keeper worktree-per-task) is **out-of-process** for masc-mcp.
+  keeper worktree-per-task) is **out-of-process** for masc.
   RFC-0097 is the in-process root fix (container reuse). This RFC is
   the safety net while RFC-0097 lands and reaches steady state.
 - The action (pause) is **degraded operation**, not a workaround that
@@ -139,7 +139,7 @@ sysmon (.tmp/sysmon-fd-oom-disk.sh, already deployed)
    │ emits  /tmp/masc-host-pressure.state  (atomic write)
    │   {"level": "WARN"|"CRIT", "kinds": "...", "summary": "...", "ts": "...", "pid": ...}
    ▼
-masc-mcp server polling loop (NEW)
+masc server polling loop (NEW)
    │ reads /tmp/masc-host-pressure.state every 1s
    │ on level change: invokes
    ▼
@@ -207,7 +207,7 @@ New file: `lib/server/host_fd_pressure_poller.ml`.
 
 | level | cooldown | rationale |
 |---|---|---|
-| WARN (≥30%) | 600s (10min) | give keepers room to drain in-flight turns; resume if pressure clears |
+| WARN (≥30%) | 600s (10min) | give keepers workspace to drain in-flight turns; resume if pressure clears |
 | CRIT (≥75%) | 1800s (30min) | panic is imminent; sysmon's own macOS notification advises user restart in parallel |
 
 Durations are env-overrideable: `MASC_HOST_PRESSURE_COOLDOWN_WARN_SEC`,
@@ -219,7 +219,7 @@ Durations are env-overrideable: `MASC_HOST_PRESSURE_COOLDOWN_WARN_SEC`,
 |---|---|---|---|
 | PR-1 | `keeper_fd_pressure.{ml,mli}` add `engage_external` + tests | ~60 | none |
 | PR-2 | `host_fd_pressure_poller.{ml,mli}` new module + wiring in `server_bootstrap_loops.ml` + tests | ~120 | PR-1 |
-| PR-3 (optional) | Prometheus metric `host_fd_pressure_*` registration | ~30 | PR-2 |
+| PR-3 (optional) | legacy metrics backend metric `host_fd_pressure_*` registration | ~30 | PR-2 |
 
 Each PR is Draft, follows `workflow-pr.md` (RFC-WAIVED line not needed;
 this RFC itself is the citation).

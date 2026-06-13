@@ -45,9 +45,37 @@ val delete_oas_history_files :
   snapshot_ids:string list ->
   string list * string list
 
+(** Relation between an incoming checkpoint and the current known high
+    watermark for the same canonical OAS checkpoint path. *)
+type save_oas_relation = [ `Cold | `Forward | `Equal ]
+
+(** Classified checkpoint save result.
+
+    [Stale_noop] is a successful no-op: the canonical checkpoint was left
+    untouched because accepting [incoming_turn_count] would move memory
+    behind the known high watermark. It must not be treated as keeper
+    turn failure, pause, or stop. *)
+type save_oas_outcome =
+  | Saved of { relation : save_oas_relation; turn_count : int }
+  | Stale_noop of { incoming_turn_count : int; known_turn_count : int }
+
 (** Save [ckpt] via the OAS Checkpoint_store when an Eio FS is
     available; falls back to atomic file write otherwise. Always
-    appends to the OAS history archive on success. *)
+    appends to the OAS history archive on success.
+
+    RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
+    [ckpt.turn_count] is older than the last checkpoint saved for the
+    same session. A stale writer must not clobber a conversation the
+    newer writer already persisted, but this is not a keeper lifecycle
+    failure. Equal turn_count re-saves pass. *)
+val save_oas_classified :
+  session_dir:string ->
+  Agent_sdk.Checkpoint.t ->
+  (save_oas_outcome, string) result
+
+(** Compatibility wrapper around {!save_oas_classified}. [Saved] and
+    [Stale_noop] both return [Ok ()]; only real store/IO failures return
+    [Error]. *)
 val save_oas :
   session_dir:string ->
   Agent_sdk.Checkpoint.t ->
@@ -87,3 +115,9 @@ val load_oas :
   session_dir:string ->
   session_id:string ->
   (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
+
+module For_testing : sig
+  val reset_stale_write_guard : unit -> unit
+  (** Clear the process-local last-saved turn_count map so tests that
+      reuse session ids across temp dirs start from a cold state. *)
+end

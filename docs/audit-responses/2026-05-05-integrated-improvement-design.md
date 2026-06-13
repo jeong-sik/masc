@@ -108,12 +108,13 @@ fetch 또는 in-memory aggregation. **별도 RFC 필요** (RFC-0029 후보).
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| 현재 14개 모두 `PR-3b1 starvation`으로 archived | `rg "PR-3b1\|starvation"` zero hits in `lib/keeper/credential*`. 단일 `lib/keeper/credential_provider.ml` 존재 | **D** (출처 misread) |
+| 현재 14개 모두 `PR-3b1 starvation`으로 archived | 해당 keeper repo-auth provider surface는 retired. starvation claim은 전제부터 미확인 | **D** (출처 misread) |
 | 36개 starvation → boot 불가 | 전제 자체가 미확인 | **D** |
 
-해당 axis에서 active 작업: **#13088 (EINTR-safe waitpid in credential_materializer,
-2026-05-05)** + **#13068 (R)** — credential rotation/reissue 트랙은 별도로
-진행. audit이 본 "archived" 상태가 어떤 snapshot인지 출처 미명시.
+해당 axis의 과거 작업은 현재 repo-manager credential deletion으로 retired.
+credential rotation/reissue 트랙은 auth-token 운영 문제로만 남고, repository
+GitHub identity materialization은 현재 설계 대상이 아니다. audit이 본
+"archived" 상태가 어떤 snapshot인지 출처 미명시.
 
 ### §1-4 Config 파일: O(K) 파일 증가
 
@@ -139,15 +140,15 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 ## 2. 신규 요구사항 3가지 검증
 
-### §2 요구사항 1: Cascade 생성 기능
+### §2 요구사항 1: Runtime 생성 기능
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| `cascade.toml`을 수동으로 편집 | 진짜 — `config/cascade.toml` 수동 편집 기반 | **C — real gap** |
-| `masc cascade create/activate/list/delete` CLI | 미구현 | **C — design idea** |
-| 런타임에 즉시 적용 (재시작 없이) | RFC-0027 진행 중 — **#13067 (PR-9a weighted_entry, schema additive, R)** + **#13097 (PR-9b dual-track resolver wiring, D)**가 같은 axis (cascade evolution) | **B** |
+| `runtime.toml`을 수동으로 편집 | 진짜 — `config/runtime.toml` 수동 편집 기반 | **C — real gap** |
+| `masc runtime create/activate/list/delete` CLI | 미구현 | **C — design idea** |
+| 런타임에 즉시 적용 (재시작 없이) | RFC-0027 진행 중 — **#13067 (PR-9a weighted_entry, schema additive, R)** + **#13097 (PR-9b dual-track resolver wiring, D)**가 같은 axis (runtime evolution) | **B** |
 
-**§2-1 결과**: "Cascade CRUD CLI"는 진짜 unimplemented design idea. 다만
+**§2-1 결과**: "Runtime CRUD CLI"는 진짜 unimplemented design idea. 다만
 실시간 reload는 RFC-0027의 PR-9a/9b가 dual-track resolver로 풀고 있는 axis.
 사용자 결정 후 별도 RFC로.
 
@@ -156,7 +157,7 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
 | `unknown keys: keeper.base` 경고 | **경고 없음으로 확인됨**: `lib/keeper/keeper_types_profile.ml:1237` 에서 `keeper.base` 를 base inheritance pointer 로 별도 처리하고, 1253 줄에서 `unknown_toml_keys` 리스트에서 명시적으로 filter out (`k <> "keeper.base"`). 즉 `keeper.base` 키는 valid key 로 인정되며 warning 발생 시점이 없음 | **D** |
-| 죽은 필드 (`work_discovery_sources`, `git_identity_mode`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
+| 죽은 필드 (`work_discovery_sources`, `retired_git_author_config`, etc.) | active cleanup 트랙: **#13091 (drop dead persona-schema computed signals -6 LOC)**, **#13076 (unexport internal-only helpers across 4 components)**, **#13070 (-655 LOC dead ide-editor-mock)**, **#13071 (-40 LOC orphans)** — 같은 axis 매주 진행 | **B** |
 | `masc persona create` CLI + validate | 미구현 | **C — design idea** |
 
 **§2-2 결과**: 죽은 필드 cleanup은 매우 active한 트랙. CLI 자체는 unimplemented.
@@ -192,8 +193,8 @@ override 형태이고 36-keeper로 늘어나도 1 line 추가 수준. base+overr
 
 | 클레임 | 실제 | 분류 |
 |--------|------|------|
-| binary semaphore → token bucket | 메모리 `feedback_semaphore_tier_is_architectural_anti_pattern.md` (2026-05-05)와 같은 결론 — 단 그 fix 방향은 "multi-cascade fanout / deadline scheduling / token bucket per provider". RFC-0026 PR-E-1.6/1.7 가 admission router cascade로 같은 axis 풀고 있음 | **B** |
-| token bucket per provider | RFC-0026/0027 트랙과 중복. **#13104 (cascade_state Mutex+Hashtbl → Atomic+immutable Map)** 도 concurrency 패러다임 갱신 axis | **B** |
+| binary semaphore → token bucket | 메모리 `feedback_semaphore_tier_is_architectural_anti_pattern.md` (2026-05-05)와 같은 결론 — 단 그 fix 방향은 "multi-runtime fanout / deadline scheduling / token bucket per provider". RFC-0026 PR-E-1.6/1.7 가 admission router runtime로 같은 axis 풀고 있음 | **B** |
+| token bucket per provider | RFC-0026/0027 트랙과 중복. **#13104 (runtime_state Mutex+Hashtbl → Atomic+immutable Map)** 도 concurrency 패러다임 갱신 axis | **B** |
 
 #### C. Dashboard N+1 → 단일 쿼리
 
@@ -213,23 +214,23 @@ candidate (RFC-0029)**.
 |------|-------------|------|------|
 | `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 | **D — false** |
 | `work_discovery_sources` | 죽음, `work.source`로 대체 | sangsu.toml line 4가 실제 사용. 코드 caller 확인 필요 | TBD |
-| `git_identity_mode` | 죽음, 항상 `"repo_cli_identity"` | active cleanup 후보 | **C** |
-| `tool_access.preset` | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
+| `retired_git_author_config` | 죽음, 항상 `"retired_credential_config"` | active cleanup 후보 | **C** |
+| retired nested tool-access preset field | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
 | `sandbox_profile` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `network_mode` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
-| `repo_cli_identity` | persona에서 파생 | 검증 필요 | TBD |
-| `max_context_tokens` | tier에서 파생 | tier 자체가 cascade routing이라 derive 가능 | **C** |
-| `fallback_cascade` | tier 순서에서 파생 | RFC-0027의 weighted_entry로 더 정밀 | **B** |
+| `retired_credential_config` | persona에서 파생 | 검증 필요 | TBD |
+| `max_context_tokens` | tier에서 파생 | tier 자체가 runtime routing이라 derive 가능 | **C** |
+| `fallback_runtime` | tier 순서에서 파생 | RFC-0027의 weighted_entry로 더 정밀 | **B** |
 | `keeper_assignable` | advanced로 | 5 TOML 미선언 | **D** |
 
 **§4-1 결과**: 10개 중 7개가 D 또는 C. 진짜 죽은 필드 1-2개는 #13091/#13076
 cleanup 트랙에 추가 가능.
 
-### §4-2 Cascade TOML 죽은 필드
+### §4-2 Runtime TOML 죽은 필드
 
 | 필드 | 분류 |
 |------|------|
-| `tier_small.models = []` | **C** — 빈 배열 자체가 의도일 수 있음 (cascade 구조에서 "사용 안 함" 표시). cleanup 후보지만 RFC-0027 진행 후 정리. |
+| `tier_small.models = []` | **C** — 빈 배열 자체가 의도일 수 있음 (runtime 구조에서 "사용 안 함" 표시). cleanup 후보지만 RFC-0027 진행 후 정리. |
 | `ollama_max_concurrent`, `cli_max_concurrent` null | **B** — null 자체가 "no cap" 표현일 가능성. caller-context 30줄 확인 필요. |
 | `routes` 16개 항목 중복 | **C** — 단순 cleanup 후보. |
 | `max_tokens` 파생 가능 | **B** — 모델 capability snapshot이 시간 따라 변하므로 명시 유지가 안전. |
@@ -262,7 +263,7 @@ cleanup 트랙에 추가 가능.
 | # | Action item | 분류 | 근거 |
 |---|------------|------|------|
 | 4 | `masc create keeper` CLI/API | **C** | 진짜 unimplemented. 사용자 결정 필요 |
-| 5 | `masc create cascade` CLI/API | **C** | 진짜 unimplemented. RFC-0027과 정합성 확인 |
+| 5 | `masc create runtime` CLI/API | **C** | 진짜 unimplemented. RFC-0027과 정합성 확인 |
 | 6 | `masc create persona` CLI/API | **C** | 진짜 unimplemented |
 | 7 | Auto-credential + auto-registration | **C** | dependency on #4-6 |
 
@@ -281,7 +282,7 @@ cleanup 트랙에 추가 가능.
 |---|------------|------|------|
 | 12 | 죽은 필드 20개 제거 | **B** | cleanup 트랙 active (#13091/#13076/#13070/#13071, 매주 -100~-700 LOC) |
 | 13 | 3-Tier 필드 노출 | **C** | 사용자 priority 결정 후 |
-| 14 | 파생 필드 자동화 | **B/C** | `fallback_cascade`는 RFC-0027 weighted_entry로 진행. `max_tokens`는 catalog miss 위험 |
+| 14 | 파생 필드 자동화 | **B/C** | `fallback_runtime`는 RFC-0027 weighted_entry로 진행. `max_tokens`는 catalog miss 위험 |
 | 15 | 443 env var → 50 통합 JSON | **C** | RFC-급 변경. 별도 design 필요 |
 
 ### Phase 4: 검증
@@ -290,7 +291,7 @@ cleanup 트랙에 추가 가능.
 |---|------------|------|------|
 | 16 | 36 keeper 동시 실행 테스트 | TBD | infra 결정 |
 | 17 | 부하 테스트 36×1000 concurrent | TBD | 측정 환경 |
-| 18 | TLA+ proof: 36-keeper liveness | **C** | 진짜 가치 — masc-mcp 가 이미 다수의 TLA+ spec 을 보유하고 있어 토대가 단단함 (재현 명령: `find specs -name '*.tla' \| wc -l`, 작성 시점 89). 25 라는 직전 추정치는 audit 자체 인용이며 본 응답에서는 `specs/INDEX.md` 의 실제 카운트로 대체했음 |
+| 18 | TLA+ proof: 36-keeper liveness | **C** | 진짜 가치 — masc 가 이미 다수의 TLA+ spec 을 보유하고 있어 토대가 단단함 (재현 명령: `find specs -name '*.tla' \| wc -l`, 작성 시점 89). 25 라는 직전 추정치는 audit 자체 인용이며 본 응답에서는 `specs/INDEX.md` 의 실제 카운트로 대체했음 |
 
 ## 7. 분류 합산
 
@@ -317,7 +318,7 @@ cleanup 트랙에 추가 가능.
 | 후보 RFC | 내용 | 우선순위 결정 사항 |
 |---------|------|-----------------|
 | **RFC-0029 후보** | Dashboard snapshot N+1 → fiber-batched aggregation (SQL 아님) | 진짜 measurement 데이터 수집 후 결정 |
-| **RFC-0030 후보** | `masc create keeper/cascade/persona` CLI/API + auto-registration | "operator UX" priority confirm 필요 |
+| **RFC-0030 후보** | `masc create keeper/runtime/persona` CLI/API + auto-registration | "operator UX" priority confirm 필요 |
 | **RFC-0031 후보** | 3-Tier 필드 노출 (Progressive Disclosure) | RFC-0030 후 도입 시 자연스러움 |
 | **RFC-0032 후보** | 1662 raw env mention → unified JSON config | 매우 큰 cross-cut 변경. 별도 sprint |
 
@@ -325,7 +326,7 @@ cleanup 트랙에 추가 가능.
 
 - §1-2 코멘트 보강: Dashboard `dashboard_http_keeper_metrics.ml` 헤더에
   "no SQL layer; fiber-batched aggregation TBD" 한 줄 (false-positive 방지).
-- §4-1 cleanup: `git_identity_mode` 등 진짜 죽은 필드는 다음 cleanup PR
+- §4-1 cleanup: `retired_git_author_config` 등 진짜 죽은 필드는 다음 cleanup PR
   (#13091 axis)에 함께.
 
 위 두 항목은 본 audit-response 머지 후 follow-up commit으로 처리. 본 PR에는
@@ -344,21 +345,20 @@ cleanup 트랙에 추가 가능.
 |------|------|
 | `lib/keeper/keeper_types_profile.ml:299, 473, 923` | `string list option` 타입 + default + ser/de |
 | `lib/keeper/keeper_meta_json_parse.ml:623-626` | TOML/JSON parse |
-| `lib/keeper/keeper_persona_authoring.ml:209, 544` | persona authoring path |
 | `lib/keeper/keeper_run_tools.ml:908` | `Option.value ~default:[] meta.work_discovery_sources` — runtime consumer |
 | `test/test_keeper_toml.ml:685, 712` | TOML round-trip 검증 |
 
 **`work.source`는 audit이 추정한 키이며 코드에 존재하지 않음**. 분류 **D**.
 
-### §10.2 §4-1 `repo_cli_identity` ("persona에서 파생 가능")
+### §10.2 §4-1 `retired_credential_config` ("persona에서 파생 가능")
 
-`rg "repo_cli_identity\b" lib/keeper/` → 12 hit, 명시 필드:
+`rg "retired_credential_config\b" lib/keeper/` → 12 hit, 명시 필드:
 
 - `lib/keeper/keeper_turn_up_create.ml:116`:
-  `~repo_cli_identity:p.profile_defaults.repo_cli_identity` — 명시적 named arg.
+  `~retired_credential_config:p.profile_defaults.retired_credential_config` — 명시적 named arg.
 - `lib/keeper/keeper_types_profile.ml:290, 465, 714, 911`: type +
   default + parse + ser.
-- `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `git_identity_mode`
+- `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `retired_git_author_config`
   의 valid value 중 하나로 사용 — 즉 *파생 가능한 다른 모드와의 enumeration*
   으로 선택되는 명시 필드.
 
@@ -374,7 +374,7 @@ cleanup 트랙에 추가 가능.
   값으로 직접 사용.
 - `lib/server/server_startup_takeover.mli:20`: `?probe_timeout_sec:float ->`
   startup takeover API의 optional arg.
-- `lib/cascade/cascade_catalog_runtime.ml:6`: `let probe_timeout_sec = 5.0`
+- `lib/runtime/runtime_catalog_runtime.ml:6`: `let probe_timeout_sec = 5.0`
   module-internal const.
 
 세 위치 모두 active 사용. 분류 **D**.
@@ -389,13 +389,13 @@ cleanup 트랙에 추가 가능.
 
 두 layer는 의도된 ortogonality:
 
-- `MASC_CLIENT_CAPACITY` (`lib/cascade/cascade_client_capacity.ml:153, 196,
+- `MASC_CLIENT_CAPACITY` (`lib/runtime/runtime_client_capacity.ml:153, 196,
   201, 211, 216, 231, 254`): env-level override, `"url=max,url=max,..."`
   포맷, runtime override.
-- `cli_max_concurrent` (`lib/cascade/cascade_toml_materializer.ml:283, 356`,
-  `lib/cascade/cascade_config.ml:1356-1362`, `lib/oas_worker_named.ml:892`):
-  config-file-level field, per-cascade.
-- `cascade_client_capacity.ml:216` 코멘트가 정확히 둘의 관계 명시:
+- `cli_max_concurrent` (`lib/runtime/runtime_toml_materializer.ml:283, 356`,
+  `lib/runtime/runtime_config.ml:1356-1362`, `lib/oas_worker_named.ml:892`):
+  config-file-level field, per-runtime.
+- `runtime_client_capacity.ml:216` 코멘트가 정확히 둘의 관계 명시:
   "explicit `MASC_CLIENT_CAPACITY` entry. ... when this is missing,
   capacity should use [the config field] (parsed above)".
 

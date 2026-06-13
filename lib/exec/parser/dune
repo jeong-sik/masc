@@ -4,9 +4,9 @@
 
 (library
  (name masc_exec_bash_parser)
- (public_name masc_mcp.masc_exec_bash_parser)
+ (public_name masc.masc_exec_bash_parser)
  (wrapped true)
- (libraries masc_exec masc_exec_shell_words))
+ (libraries masc_exec masc_core masc_exec_shell_words))
 
 (ocamllex bash_lexer)
 

@@ -70,6 +70,24 @@ interface FormEntry {
 
 const formState = signal<Record<string, FormEntry>>({})
 
+interface InProcessConfigGuide {
+  displayName: string
+  envVar: string
+  docsRef: string
+}
+
+const IN_PROCESS_CONFIG_GUIDES: Record<string, InProcessConfigGuide> = {
+  discord: {
+    displayName: 'Discord',
+    envVar: 'DISCORD_BOT_TOKEN',
+    docsRef: 'docs/CONNECTOR-CONFIG-SCHEMA.md',
+  },
+}
+
+function inProcessConfigGuide(id: string): InProcessConfigGuide | null {
+  return IN_PROCESS_CONFIG_GUIDES[id] ?? null
+}
+
 function emptyEntry(): FormEntry {
   return {
     fields: [],
@@ -278,7 +296,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
       setEntry(connectorId, { open: false })
     } else {
       setEntry(connectorId, { open: true })
-      if (entry.fields.length === 0 && !entry.loading) {
+      if (inProcessConfigGuide(connectorId) === null && entry.fields.length === 0 && !entry.loading) {
         void fetchSchema(connectorId)
       }
     }
@@ -389,6 +407,57 @@ function FieldWidget({ id, field, value, revealed }: {
 export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const entry = getEntry(connectorId)
   if (!entry.open) return null
+
+  const inProcess = inProcessConfigGuide(connectorId)
+  if (inProcess !== null) {
+    const hint = getFieldHint(inProcess.envVar)
+    return html`
+      <${SurfaceCard}
+        class="mt-3 !border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !p-3 text-2xs"
+        id=${`connector-config-${connectorId}`}
+        data-in-process-config-panel
+      >
+        <div class="mb-2 flex flex-wrap items-center gap-2">
+          <span class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">server in-process</span>
+          <span class="font-semibold text-[var(--color-fg-primary)]">${inProcess.displayName} 설정</span>
+        </div>
+        <div class="text-[var(--color-fg-secondary)]">
+          ${inProcess.displayName}는 외부 sidecar가 아니라 서버 프로세스 내부 gateway로 실행됩니다. 이 패널은
+          <span class="mx-1 font-mono text-[var(--color-fg-primary)]">${inProcess.envVar}</span>
+          위치만 보여주며, sidecar schema/config/start/stop API를 호출하지 않습니다.
+        </div>
+        ${hint === null
+          ? null
+          : html`
+              <${SurfaceCard} class="mt-2 !border-[var(--accent-20)] !bg-[var(--accent-10)]/5 !px-2 !py-1 text-3xs text-[var(--color-accent-fg)]" data-field-hint=${inProcess.envVar}>
+                <span>${hint.where}</span>
+                ${hint.url
+                  ? html`
+                      <a
+                        href=${hint.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="ml-1 underline hover:text-[var(--color-accent-fg)]"
+                      >열기 ↗</a>
+                    `
+                  : null}
+              </${SurfaceCard}>
+            `}
+        <div class="mt-3 border-t border-[var(--color-border-default)] pt-2.5">
+          <div class="mb-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
+            env
+          </div>
+          <${CopyableCode}
+            command=${`${inProcess.envVar}=<token>`}
+            ariaLabel=${`${inProcess.displayName} in-process env var`}
+          />
+          <div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">
+            ${inProcess.docsRef} 기준: 서버 환경변수에 설정한 뒤 MASC 서버를 재기동해야 gateway 연결에 반영됩니다.
+          </div>
+        </div>
+      </${SurfaceCard}>
+    `
+  }
 
   useEffect(() => {
     if (entry.fields.length === 0 && !entry.loading && !entry.error) {
@@ -552,7 +621,7 @@ export function openConnectorConfig(id: string) {
   const entry = getEntry(id)
   if (!entry.open) {
     setEntry(id, { open: true })
-    if (entry.fields.length === 0 && !entry.loading) {
+    if (inProcessConfigGuide(id) === null && entry.fields.length === 0 && !entry.loading) {
       void fetchSchema(id)
     }
   }

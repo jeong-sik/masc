@@ -5,7 +5,7 @@ type accumulator = {
   mutex : Stdlib.Mutex.t;
   keeper_name : string option;
     (* Tier K6 — set by [accumulator_for_keeper] so the [push]
-       function can emit a per-keeper Prometheus counter without
+       function can emit a per-keeper Otel_metric_store counter without
        routing the name through every call site. [None] for the
        process-wide [global_accumulator] and for test-created
        accumulators (no metric emitted in those cases). *)
@@ -39,7 +39,7 @@ let push acc (json : Yojson.Safe.t) : unit =
   match acc.keeper_name with
   | None -> ()
   | Some name ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ToolEmissionPushes)
       ~labels:[ ("keeper", name) ]
       ()
@@ -107,7 +107,7 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
     if items = [] then working_context
     else
       Multimodal.Tool_emission.emit_from_tool_results
-        ~working_context items
+        ~emit:Multimodal.Keeper_emitter.emit ~working_context items
 
 let global_accumulator = create_accumulator ()
 
@@ -126,7 +126,7 @@ let registry_mutex : Stdlib.Mutex.t = Stdlib.Mutex.create ()
    under the same lock that mutated the table. No labels. *)
 let emit_registry_size_gauge_holding_lock () : unit =
   let n = Hashtbl.length registry in
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string ToolEmissionRegistrySize)
     ~labels:[]
     (float_of_int n)

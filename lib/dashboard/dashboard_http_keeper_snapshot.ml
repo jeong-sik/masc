@@ -7,7 +7,7 @@ open Dashboard_http_keeper_types
 open Dashboard_http_helpers
 open Keeper_status_bridge
 
-let recent_keeper_metric_jsons (config : Coord.config) name =
+let recent_keeper_metric_jsons (config : Workspace.config) name =
   let metrics_store = Keeper_types_support.keeper_metrics_store config name in
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 80 in
@@ -70,15 +70,15 @@ let latest_tool_call_json name =
              ("duration_ms", Json_util.float_opt_to_json (Safe_ops.json_float_opt "duration_ms" json));
            ])
 
-let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
+let keeper_bdi_snapshot_json (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Error msg ->
       (`Not_found, `Assoc [ ("error", `String msg) ])
   | Ok None ->
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
-  | Ok (Some (m : Keeper_types.keeper_meta)) ->
+  | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
       let metrics = recent_keeper_metric_jsons config name in
       let latest_social =
         sort_by_latest_ts metrics
@@ -100,7 +100,7 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
                  let trimmed = String.trim info.detail in
                  let label =
                    if trimmed = "" then
-                     Keeper_types.blocker_class_to_string info.klass
+                     Keeper_meta_contract.blocker_class_to_string info.klass
                    else trimmed
                  in
                  Some ("blocked: " ^ label)
@@ -141,15 +141,15 @@ let keeper_bdi_snapshot_json (config : Coord.config) (name : string)
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
-let keeper_config_json (config : Coord.config) (name : string)
+let keeper_config_json (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
-  match Keeper_types.read_meta config name with
+  match Keeper_meta_store.read_meta config name with
   | Error msg ->
       (`Not_found, `Assoc [ ("error", `String msg) ])
   | Ok None ->
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
-  | Ok (Some (m : Keeper_types.keeper_meta)) ->
+  | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
       let defaults = Keeper_types_profile.load_keeper_profile_defaults m.name in
@@ -173,6 +173,25 @@ let keeper_config_json (config : Coord.config) (name : string)
                | None -> None)
           m.active_goal_ids
       in
+      let default_prompt_string default live =
+        match default with
+        | Some value when String.trim live = "" -> value
+        | _ -> live
+      in
+      let prompt_goal = default_prompt_string defaults.goal m.goal in
+      let prompt_short_goal =
+        default_prompt_string defaults.short_goal m.short_goal
+      in
+      let prompt_mid_goal = default_prompt_string defaults.mid_goal m.mid_goal in
+      let prompt_long_goal =
+        default_prompt_string defaults.long_goal m.long_goal
+      in
+      let prompt_will = default_prompt_string defaults.will m.will in
+      let prompt_needs = default_prompt_string defaults.needs m.needs in
+      let prompt_desires = default_prompt_string defaults.desires m.desires in
+      let prompt_instructions =
+        default_prompt_string defaults.instructions m.instructions
+      in
       let active_goal_ids_json =
         `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
       in
@@ -195,8 +214,8 @@ let keeper_config_json (config : Coord.config) (name : string)
         |> List.filter (fun goal_id ->
                not (List.mem goal_id resolved_active_goal_ids))
       in
-      let coordination =
-        match coordination_surface_json m with
+      let workspace =
+        match workspace_surface_json m with
         | `Assoc fields ->
             `Assoc
               (fields
@@ -217,23 +236,56 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
-          ~goal:m.goal ~short_goal:m.short_goal ~mid_goal:m.mid_goal
-          ~long_goal:m.long_goal ~will:m.will
-          ~needs:m.needs ~desires:m.desires ~instructions:m.instructions
+          ~goal:prompt_goal
+          ~short_goal:prompt_short_goal
+          ~mid_goal:prompt_mid_goal
+          ~long_goal:prompt_long_goal
+          ~will:prompt_will
+          ~needs:prompt_needs
+          ~desires:prompt_desires
+          ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
           ~active_goals
           ()
       in
+      (* Preview the actual unified prompt the keeper turn uses.
+         We build the observation from the current workspace state so the
+         system message and the "Current World State" user message both
+         match what a turn would see right now.
+
+         Board events are collected WITHOUT advancing the keeper's board
+         cursor: passing [~pending_board_events:None] would route through
+         [collect_board_events ~advance_cursor:true], so merely opening a
+         keeper's detail page would consume the live cursor and the next
+         real turn would miss those events. Only a turn owns cursor
+         advancement. *)
+      let unified_system_prompt_preview, unified_user_message_preview =
+        let observation =
+          let pending_board_events, _new_count, _mention_count =
+            Keeper_world_observation
+            .collect_board_events_without_advancing_cursor
+              ~base_path:config.base_path
+              ~continuity_summary:
+                (Keeper_world_observation.read_continuity_summary ~config
+                   ~meta:m)
+              ~meta:m
+          in
+          Keeper_world_observation.observe
+            ~pending_board_events:(Some pending_board_events) ~config ~meta:m
+        in
+        Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
+          ~profile_defaults:defaults ~observation ()
+      in
       let prompt =
         `Assoc [
-          ("goal", `String m.goal);
-          ("short_goal", `String m.short_goal);
-          ("mid_goal", `String m.mid_goal);
-          ("long_goal", `String m.long_goal);
-          ("will", `String m.will);
-          ("needs", `String m.needs);
-          ("desires", `String m.desires);
-          ("instructions", `String m.instructions);
+          ("goal", `String prompt_goal);
+          ("short_goal", `String prompt_short_goal);
+          ("mid_goal", `String prompt_mid_goal);
+          ("long_goal", `String prompt_long_goal);
+          ("will", `String prompt_will);
+          ("needs", `String prompt_needs);
+          ("desires", `String prompt_desires);
+          ("instructions", `String prompt_instructions);
           ( "system_prompt_blocks",
             `Assoc
               [
@@ -242,39 +294,54 @@ let keeper_config_json (config : Coord.config) (name : string)
                 ("capabilities", prompt_block_json Keeper_prompt_names.capabilities);
               ] );
           ("effective_system_prompt", `String effective_system_prompt);
+          ("unified_system_prompt", `String unified_system_prompt_preview);
+          ("unified_user_message_preview", `String unified_user_message_preview);
         ]
       in
-      let cascade_name = Keeper_types.cascade_name_of_meta m in
+      let runtime_id = Keeper_meta_contract.runtime_id_of_meta m in
+      let runtime_options =
+        let catalog =
+          Runtime.get_runtime_ids ()
+          |> List.map String.trim
+          |> List.filter (fun id -> id <> "")
+        in
+        let with_current =
+          if List.mem runtime_id catalog then catalog else runtime_id :: catalog
+        in
+        List.sort_uniq String.compare with_current
+      in
       (* RFC-0149 §3.3 — Result-returning resolver: on [Error] the
          canonical field surfaces as JSON [null] (parse-don't-validate
          honest signal) instead of the silent [Keeper_turn] rewrite the
-         legacy [live_keeper_cascade_name] would produce. *)
-      let selected_cascade_canonical_json =
-        match live_keeper_cascade_name_result cascade_name with
+         legacy live runtime-id facade would produce. *)
+      let selected_runtime_canonical_json =
+        match live_keeper_runtime_id_result runtime_id with
         | Ok runtime ->
-          `String (Cascade_name.to_string runtime)
+          `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
+      let profile_defaults =
+        Keeper_types_profile.load_keeper_profile_defaults name
+      in
+      let per_provider_timeout = profile_defaults.per_provider_timeout in
       let execution =
         `Assoc [
-          ("selected_cascade_name", `String cascade_name);
-          ( "selected_cascade_canonical",
-            selected_cascade_canonical_json );
-          ( "cascade_ref",
-            (match m.cascade_ref with
-             | Some ref_ -> Cascade_ref.cascade_ref_to_json ref_
-             | None -> `Null) );
+          ("selected_runtime_id", `String runtime_id);
+          ( "selected_runtime_canonical",
+            selected_runtime_canonical_json );
+          ( "runtime_options",
+            `List (List.map (fun id -> `String id) runtime_options) );
           ("models", `List []);
           ("active_model", `Null);
           ("active_model_label", `Null);
           ("last_model_used_label", `Null);
           ( "per_provider_timeout_sec",
-            Json_util.float_opt_to_json m.per_provider_timeout_s );
+            Json_util.float_opt_to_json per_provider_timeout );
           ( "per_provider_timeout_mode",
             `String
-              (match m.per_provider_timeout_s with
-               | Some _ -> "override"
-               | None -> "turn_budget_heuristic") );
+               (match per_provider_timeout with
+                | Some _ -> "override"
+                | None -> "turn_budget_default") );
           ("verify", `Bool false);
         ]
       in
@@ -337,6 +404,14 @@ let keeper_config_json (config : Coord.config) (name : string)
         | Some phase -> Keeper_status_runtime.pipeline_stage_of_phase phase
         | None -> "offline"
       in
+      let lifecycle_phase =
+        Option.map Keeper_state_machine.phase_to_string current_phase
+      in
+      let pipeline_stage_detail =
+        match current_phase with
+        | Some phase -> Keeper_status_runtime.pipeline_stage_detail_of_phase phase
+        | None -> "registry_absent"
+      in
       let state_diagram =
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
@@ -344,10 +419,6 @@ let keeper_config_json (config : Coord.config) (name : string)
       let decision_pipeline_diagram =
         let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
         let stats = Thompson_sampling.get_stats m.agent_name in
-        let tool_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names m) in
-        let recovery_floor_count =
-          List.length (Keeper_tool_policy.failing_minimum_tool_names ())
-        in
         let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
@@ -361,23 +432,12 @@ let keeper_config_json (config : Coord.config) (name : string)
           ~phase
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
-          ~tool_count
-          ~recovery_floor_count
           ()
       in
       let tools_access =
-        let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names m in
-        let masc_tool_count =
-          List.length (Agent_tool_dispatch_runtime.keeper_masc_tool_names m)
-        in
         `Assoc [
-          ("tool_access", Keeper_types.tool_access_to_json m.tool_access);
-          ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
+          ("tool_access", Json_util.json_string_list m.tool_access);
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
-          ("active_masc_tool_count", `Int masc_tool_count);
-          ("active_keeper_tool_count",
-            `Int (List.length allowed - masc_tool_count));
-          ("total_active", `Int (List.length allowed));
         ]
       in
       let sandbox_last_error =
@@ -385,88 +445,21 @@ let keeper_config_json (config : Coord.config) (name : string)
         | Some entry -> entry.last_error
         | None -> None
       in
-      let effective_sandbox_image =
-        if m.sandbox_profile = Keeper_types.Docker
-        then Some (Env_config_sandbox.Runtime.docker_image ())
-        else None
-      in
-      let sandbox_preflight_json =
-        Keeper_sandbox_runtime.docker_preflight ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ()) ()
-        |> Option.map Keeper_sandbox_runtime.docker_preflight_to_yojson
-      in
-      let sandbox_preflight =
-        match effective_sandbox_image, sandbox_preflight_json with
-        | Some _, Some preflight -> Some preflight
-        | _ -> None
-      in
-      let private_workspace_root =
-        Keeper_sandbox.host_root_abs_of_meta ~config m
-      in
-      let sandbox_environment =
-        let string_or_null value =
-          let trimmed = String.trim value in
-          if trimmed = "" then `Null else `String trimmed
-        in
-        `Assoc [
-          ("base_path", `String config.base_path);
-          ("project_root",
-            `String (Keeper_alerting_path.project_root_of_config config));
-          ("docker_playground_enabled",
-            `Bool (Env_config_sandbox.Runtime.docker_playground_enabled ()));
-          ("docker_container_name",
-            string_or_null
-              (Env_config_sandbox.Runtime.docker_playground_container_name ()));
-          ("container_playground_root",
-            string_or_null
-              (Env_config_sandbox.Runtime.docker_playground_container_root ()));
-          ("git_egress",
-            `String
-              (if Env_config_sandbox.Runtime.git_dispatch () then
-                 "repo_cli_identity_dispatch"
-               else
-                 "container_network_policy"));
-          ("credential_fallbacks_disabled", `Bool false);
-          ("docker_image",
-            match effective_sandbox_image with
-            | Some img -> string_or_null img
-            | None -> `Null);
-          ("pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ()));
-          ("memory",
-            string_or_null (Env_config_sandbox.Hardening.memory ()));
-          ("tmpfs_size",
-            string_or_null (Env_config_sandbox.Hardening.tmpfs_size ()));
-          ("relax_fs",
-            `Bool (Env_config_sandbox.Hardening.relax_fs ()));
-          ("seccomp_profile",
-            string_or_null
-              (Env_config_sandbox.Hardening.seccomp_profile ()));
-          ("require_rootless",
-            `Bool (Env_config_sandbox.Hardening.require_rootless ()));
-          ("require_userns",
-            `Bool (Env_config_sandbox.Hardening.require_userns ()));
-          ("preflight",
-            Json_util.option_to_yojson Fun.id sandbox_preflight);
-        ]
-      in
       (`OK,
        `Assoc [
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
-         ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
-         ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
-         ("sandbox_preflight",
-           Json_util.option_to_yojson Fun.id sandbox_preflight);
-         ("effective_sandbox_image",
-           Json_util.string_opt_to_json effective_sandbox_image);
-         ("private_workspace_root", `String private_workspace_root);
-         ("sandbox_environment", sandbox_environment);
+         ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
+         ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",
            `List (List.map (fun s -> `String s) m.allowed_paths));
-         ("effective_allowed_paths",
-           `List (List.map (fun s -> `String s)
-             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
-         ("pipeline_stage", `String pipeline_stage);
-         ("state_diagram", `String state_diagram);
+	         ("effective_allowed_paths",
+	           `List (List.map (fun s -> `String s)
+	             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
+	         ("pipeline_stage", `String pipeline_stage);
+	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+	         ("pipeline_stage_detail", `String pipeline_stage_detail);
+	         ("state_diagram", `String state_diagram);
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);
@@ -479,7 +472,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);
-         ("coordination", coordination);
+         ("workspace", workspace);
          ("sources", source_provenance_json config m);
          ("metrics", metrics);
        ])

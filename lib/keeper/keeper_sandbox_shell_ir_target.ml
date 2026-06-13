@@ -1,6 +1,8 @@
 (* Sandbox target helpers for typed Shell IR dispatch. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type target_error =
   { message : string
@@ -42,16 +44,31 @@ let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_er
        failure)
 ;;
 
-let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
+(* Per PR cleanup spirit (caller does not observe the tool's hang
+   protection): the docker target hardcodes its own internal timeout.
+   The image-presence check, [docker exec] of a single command, and the
+   pipeline dispatch all share the same internal budget because the
+   hang modes (docker daemon stall, container start stall, command
+   stall) are the same domain — the sandbox's own. *)
+let internal_sandbox_timeout_sec = 30.0
+
+let docker_target ~turn_sandbox_factory ~meta ~cwd =
   let default_cwd = cwd in
   let stage_cwd_or_default = function
     | Some stage_cwd -> stage_cwd
     | None -> default_cwd
   in
+  let timeout_sec = internal_sandbox_timeout_sec in
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-  | None ->
-    Error (target_error "typed Shell IR Docker dispatch requires a turn sandbox factory")
-  | Some runtime ->
+  | No_factory ->
+    Error
+      (target_error
+         "typed Shell IR Docker dispatch requires a turn sandbox factory (no factory provided)")
+  | Local_profile ->
+    Error
+      (target_error
+         "typed Shell IR Docker dispatch requires a turn sandbox factory (sandbox profile is Local)")
+  | Runtime runtime ->
     let image = docker_image meta in
     (match
        Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
@@ -60,45 +77,64 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec =
      with
      | Error failure -> Error (image_preflight_target_error failure)
      | Ok () ->
-       let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
-         let cwd = stage_cwd_or_default stage_cwd in
-         match
-           Keeper_turn_sandbox_runtime.run_exec_with_status
-             ?stdin_content
-             runtime
-             ~timeout_sec
-             ~cwd
-             ~command_argv:argv
-         with
-         | Ok (status, output) -> status, output, ""
-         | Error err -> Unix.WEXITED 1, "", err
+      let runner ~on_stdout_chunk ~on_stderr_chunk ~stdin_content ~argv ~env ~cwd:stage_cwd =
+        if Array.length env > 0 then
+          (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+        else
+          let cwd = stage_cwd_or_default stage_cwd in
+          match
+            Keeper_turn_sandbox_runtime.run_exec_with_status_split
+              ?stdin_content
+              ?on_stdout_chunk
+              ?on_stderr_chunk
+              ~timeout_sec
+              runtime
+              ~cwd
+              ~command_argv:argv
+           with
+           | Ok result -> result
+           | Error err -> Unix.WEXITED 1, "", err
        in
-       let pipeline_runner ~stages ~timeout_sec =
-         let stages =
-           List.map
-             (fun stage ->
-                { Keeper_turn_sandbox_runtime.command_argv =
-                    stage.Masc_exec.Sandbox_target.argv
-                ; cwd = stage.cwd
-                })
+      let pipeline_runner ~on_stdout_chunk ~on_stderr_chunk ~stages =
+        match
+          List.find_opt
+            (fun stage -> Array.length stage.Masc_exec.Sandbox_target.env > 0)
              stages
-         in
-         match
-           Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
-             runtime
-             ~timeout_sec
-             ~cwd
-             ~stages
          with
-         | Ok result -> result
-         | Error err -> Unix.WEXITED 1, "", err
+         | Some _ ->
+           (Unix.WEXITED 1, "", "typed Shell IR Docker dispatch does not support env yet")
+         | None ->
+           let stages =
+             List.map
+               (fun stage ->
+                  { Keeper_turn_sandbox_runtime.command_argv =
+                      stage.Masc_exec.Sandbox_target.argv
+                  ; cwd = stage.cwd
+                  })
+               stages
+           in
+           match
+            Keeper_turn_sandbox_runtime.run_exec_pipeline_with_status
+              ?on_stdout_chunk
+              ?on_stderr_chunk
+              ~timeout_sec
+              runtime
+              ~cwd
+              ~stages
+           with
+           | Ok result -> result
+           | Error err -> Unix.WEXITED 1, "", err
        in
        Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()))
 ;;
 
-let docker_local_fallback_target ~meta ~timeout_sec =
+let docker_local_fallback_target ~meta =
   let image = docker_image meta in
-  match Keeper_sandbox_runtime.docker_image_present ~image ~timeout_sec with
+  match
+    Keeper_sandbox_runtime.docker_image_present
+      ~image
+      ~timeout_sec:internal_sandbox_timeout_sec
+  with
   | Ok () -> None
   | Error message ->
     Some

@@ -209,7 +209,7 @@ function SkeletonPanel({ height = 180 }) {
 // Inline tone (1px ring + soft tinted bg) — never neon.
 
 function ErrorRecoverable({
-  title = 'Cascade failed at provider · openai',
+  title = 'Runtime failed at provider · openai',
   detail = 'The request bounced through 2 fallback providers and timed out at 12.4s.',
   onRetry,
 }) {
@@ -233,7 +233,7 @@ function ErrorRecoverable({
           color: 'var(--color-status-warn-fg, #d9b764)',
           letterSpacing: 'var(--track-caps)', textTransform: 'uppercase',
           fontWeight: 600,
-        }}>recoverable · cascade fallback</span>
+        }}>recoverable · runtime fallback</span>
         <button type="button" onClick={onRetry} style={{
           marginLeft: 'auto',
           padding: '3px 10px',

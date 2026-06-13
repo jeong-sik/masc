@@ -1,7 +1,7 @@
 # RFC-0057: Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation
 
 > **Status**: Draft
-> **Author**: masc-mcp design loop
+> **Author**: masc design loop
 > **Date**: 2026-05-09
 > **Depends on**: RFC-0054 (shell-ir-ppx-deriving) — PPX track CLOSED-WONTFIX, codegen track ACTIVE
 > **Replaces**: progress_report.md §3.2 "PPX 개발" claim (outdated)
@@ -49,10 +49,10 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 | `tool_schemas_misc.ml` | 12 | config, webrtc, admin, board 등 |
 | `tool_schemas_plan.ml` | 8 | plan, task 관련 |
 | `tool_schemas_agent.ml` | 6 | agent 관리 |
-| `tool_schemas_coord_core.ml` | 6 | coord 핵심 |
+| `tool_schemas_workspace_core.ml` | 6 | workspace 핵심 |
 | `tool_schemas_run.ml` | 6 | run, execution |
-| `tool_schemas_inline_coord.ml` | 6 | inline coord |
-| `tool_schemas_coord_extra.ml` | 5 | coord 부가 |
+| `tool_schemas_inline_workspace.ml` | 6 | inline workspace |
+| `tool_schemas_workspace_extra.ml` | 5 | workspace 부가 |
 | `tool_schemas_inline_infra.ml` | 4 | infra |
 | `tool_schemas_code.ml` | 3 | code 편집 |
 | `tool_schemas_worktree.ml` | 3 | worktree |
@@ -284,7 +284,7 @@ python3 -c "import json; tools=json.load(open('tool_descriptors_golden.json')); 
 
 > **Phase numbering footnote**: Phase 5 was reserved during planning but not
 > ultimately scoped into a PR — the work originally intended for Phase 5
-> (codegen-swap inline_coord group) was bundled into Phase 6's scope when
+> (codegen-swap inline_workspace group) was bundled into Phase 6's scope when
 > the cross-cutting nature became clear during Phase 4 review. The number
 > is preserved as a gap rather than renumbered to avoid invalidating PR
 > titles already merged with "Phase 6" / "Phase 7" labels. Future RFCs

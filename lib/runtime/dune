@@ -1,0 +1,42 @@
+(include_subdirs no)
+
+(library
+ (name masc_runtime)
+ (public_name masc.runtime)
+ (wrapped false)
+ (flags :standard)
+ (libraries
+  yojson
+  otoml
+  base64
+  unix
+  logs
+  eio
+  agent_sdk
+  agent_sdk.base
+  agent_sdk.llm_provider
+  masc.masc_core
+  masc.masc_types
+  uri
+  masc.masc_log
+  masc_eio_context
+  masc.runtime_provider_labels
+  masc.runtime_model
+  masc.tool_types
+  masc.tool_catalog_surfaces
+  masc.masc_tool_dispatch
+  masc.config
+  masc.config_dir_resolver
+  masc.masc_event_bus
+  masc.provider_tool_support
+  masc.keeper_runtime
+  masc.auth
+  masc.fs_compat
+  masc.fd_accountant
+  masc.types_boundary
+  time_compat
+  masc.dated_jsonl
+  masc.masc_process
+  masc.otel_spans)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

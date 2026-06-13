@@ -187,7 +187,7 @@ describe('JourneyPanel', () => {
       expect(screen.getByText('Keeper Turn Waterfall')).toBeInTheDocument()
       expect(screen.getByText('Turn 1')).toBeInTheDocument()
       expect(screen.getByText('fs_read')).toBeInTheDocument()
-      expect(screen.getByText('OAS turns 2')).toBeInTheDocument()
+      expect(screen.getByText('agent turns 2')).toBeInTheDocument()
       expect(screen.getByText('trajectory + I/O')).toBeInTheDocument()
     })
 

@@ -5,13 +5,13 @@
     that produced ~666 WARN entries.
 
     Post-fix: [build_keeper_system_prompt] emits a single WARN per build
-    that lists every missing field.  Per-field Prometheus counters and the
+    that lists every missing field.  Per-field Otel_metric_store counters and the
     in-prompt config-drift markers stay identical so dashboards and the
     LLM-visible drift signal are unchanged. *)
 
 open Alcotest
 
-module KP = Masc_mcp.Keeper_prompt
+module KP = Masc.Keeper_prompt
 
 (* Per-build snapshot of Keeper WARN entries emitted by build_keeper_system_prompt.
    Filters on the canonical aggregation prefix written by F-3. *)

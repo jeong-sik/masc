@@ -37,7 +37,7 @@ type retryability =
 (* RFC-0092 Phase B Step 1: typed validator hand-off marker.
    Replaces string-based "next_action" suggestion in blocked_result_json
    extras with a closed sum.  Consumers (Cluster C Step 5,
-   agent_tool_execute_runtime.ml block path) will populate this; readers
+   keeper_tool_execute_runtime.ml block path) will populate this; readers
    pattern-match exhaustively so new validator stages become a
    compile-time addition. *)
 type validator_stage =
@@ -45,13 +45,6 @@ type validator_stage =
   | Probe_http
   | Probe_search
   | Allowed
-
-let validator_stage_to_string = function
-  | Probe_task_state -> "probe_task_state"
-  | Probe_http -> "probe_http"
-  | Probe_search -> "probe_search"
-  | Allowed -> "allowed"
-;;
 
 type artifact_policy =
   | Inline_only
@@ -222,64 +215,24 @@ let artifact_threshold_bytes =
   max 1024 (env_int "MASC_EXEC_ARTIFACT_THRESHOLD_BYTES" 16384)
 ;;
 
-let command_word_stages cmd =
+let last_base_command cmd =
   match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Error _ -> []
-  | Ok ir -> Exec_policy_mutation_classifier.stages_words_of_ir ir
+  | Error _ -> None
+  | Ok ir ->
+    Masc_exec.Shell_ir_command_shape.last_command_name ir
+    |> Option.map Masc_exec.Shell_ir_command_shape.normalize_command_name
 ;;
 
-let first_segment_tokens cmd =
-  match command_word_stages cmd with
-  | [] -> []
-  | tokens :: _ -> tokens
-;;
-
-let last_segment_tokens cmd =
-  match List.rev (command_word_stages cmd) with
-  | [] -> []
-  | tokens :: _ -> tokens
-;;
-
-let git_global_option_takes_value = function
-  | "-c"
-  | "-C"
-  | "--exec-path"
-  | "--git-dir"
-  | "--work-tree"
-  | "--namespace"
-  | "--super-prefix"
-  | "--config-env" -> true
-  | _ -> false
-;;
-
-let git_global_option_has_inline_value token =
-  List.exists
-    (fun prefix -> String.starts_with ~prefix token)
-    [ "--exec-path="; "--git-dir="; "--work-tree="; "--namespace="; "--config-env=" ]
-;;
-
-let rec first_git_subcommand = function
+let first_effective_stage ir =
+  match Masc_exec.Shell_ir_command_shape.effective_stages ir with
+  | stage :: _ -> Some stage
   | [] -> None
-  | token :: rest when git_global_option_takes_value token ->
-    (match rest with
-     | _value :: tail -> first_git_subcommand tail
-     | [] -> None)
-  | token :: rest when git_global_option_has_inline_value token ->
-    first_git_subcommand rest
-  | token :: rest when String.starts_with ~prefix:"-" token -> first_git_subcommand rest
-  | token :: _ -> Some token
 ;;
 
-let base_command_of_tokens = function
+let first_stage_arg { Masc_exec.Shell_ir_command_shape.args; _ } =
+  match args with
+  | sub :: _ -> Some sub
   | [] -> None
-  | token :: _ -> Some (Filename.basename token)
-;;
-
-let last_base_command cmd = last_segment_tokens cmd |> base_command_of_tokens
-
-let second_token = function
-  | _cmd :: sub :: _ -> Some sub
-  | _ -> None
 ;;
 
 let looks_like_test_command ~base ~sub =
@@ -293,15 +246,17 @@ let looks_like_test_command ~base ~sub =
   | _ -> false
 ;;
 
-let family_of_base_command ~risk_class ~tokens ~base =
-  let sub = second_token tokens in
+let family_of_stage ~risk_class stage =
+  let base =
+    Masc_exec.Shell_ir_command_shape.normalize_command_name
+      stage.Masc_exec.Shell_ir_command_shape.bin
+  in
+  let sub = first_stage_arg stage in
   match String.lowercase_ascii base with
   | "git" ->
     (match
-       first_git_subcommand
-         (match tokens with
-          | _ :: rest -> rest
-          | [] -> [])
+       Masc_exec.Shell_ir_command_shape.git_subcommand
+         stage.Masc_exec.Shell_ir_command_shape.args
      with
      | Some "clone" -> Clone
      | _ ->
@@ -370,15 +325,14 @@ let risk_of_command ~risk_class ~is_destructive family =
 ;;
 
 let classify_command_of_ir ir =
-  let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
   let envelope =
     Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
   in
   let risk_class = envelope.Masc_exec.Shell_ir_risk.risk in
-  let is_destructive = Exec_policy.is_destructive_bash_operation ir in
+  let is_destructive = Masc_exec.Shell_ir_risk.is_destructive envelope in
   let family =
-    match base_command_of_tokens tokens with
-    | Some base -> family_of_base_command ~risk_class ~tokens ~base
+    match first_effective_stage ir with
+    | Some stage -> family_of_stage ~risk_class stage
     | None -> Unknown
   in
   { family
@@ -563,9 +517,9 @@ let mentions_task_state_file text =
     (lowercase_contains text)
     [ ".masc/backlog.json"
     ; ".masc/state/backlog.json"
-    ; "repos/masc-mcp/.masc/backlog.json"
-    ; "repos/masc-mcp/.masc/tasks/backlog.json"
-    ; "repos/masc-mcp/backlog.json"
+    ; "repos/masc/.masc/backlog.json"
+    ; "repos/masc/.masc/tasks/backlog.json"
+    ; "repos/masc/backlog.json"
     ; "tasks/backlog.json"
     ]
 
@@ -583,7 +537,7 @@ let recovery_hint_for_output ~cmd ~output classification semantic_status =
 
 let ensure_exec_artifact_dir path =
   try Fs_compat.mkdir_p path with
-  | Sys_error msg -> Logs.warn (fun f -> f "exec artifact mkdir failed: %s" msg)
+  | Sys_error msg -> Log.Backend.warn "exec artifact mkdir failed: %s" msg
 ;;
 
 let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
@@ -616,7 +570,7 @@ let persist_artifact_if_needed ~base_path ~keeper_name ~cmd ~output =
     match Fs_compat.save_file_atomic path output with
     | Ok () -> Some { path; bytes = String.length output; storage = Filesystem }
     | Error err ->
-      Logs.warn (fun f -> f "exec artifact persist failed: %s" err);
+      Log.Backend.warn "exec artifact persist failed: %s" err;
       None)
 ;;
 
@@ -708,47 +662,6 @@ let semantic_payload_to_yojson (key, value) =
   key, v
 ;;
 
-(* Tick 16 introduced the flag opt-in; Tick 21 flips it to
-   default-on.  The verifier cascade (#7598) and any agent that
-   consumes [Test_pass {count}] / [Build_ok] / [Lint_clean] /
-   [Git_clean] now get them without an explicit operator switch.
-   Field is additive only (empty list is omitted), so callers
-   that ignore the [verifiable_markers] key remain byte-compatible.
-   Explicit opt-out: [MASC_BASH_VERIFIABLE_MARKERS=0] (or
-   ["false" / "FALSE" / "no" / "off"]).  The flag itself survives
-   one more minor bump before removal. *)
-let markers_enabled () =
-  match Sys.getenv_opt "MASC_BASH_VERIFIABLE_MARKERS" with
-  | Some ("0" | "false" | "FALSE" | "no" | "off") -> false
-  | _ -> true
-;;
-
-let verifiable_marker_to_json (m : Cdal_judge.verifiable_marker) : Yojson.Safe.t =
-  let tag (kind : string) ?(count = None) (confidence : string) : Yojson.Safe.t =
-    let base = [ "kind", `String kind; "confidence", `String confidence ] in
-    match count with
-    | None -> `Assoc base
-    | Some n -> `Assoc (base @ [ "count", `Int n ])
-  in
-  let conf_str = function
-    | `Exact -> "exact"
-    | `Heuristic -> "heuristic"
-  in
-  match m with
-  | Test_pass { count; confidence } ->
-    tag "test_pass" ~count:(Some count) (conf_str confidence)
-  | Test_fail { count; confidence } ->
-    tag "test_fail" ~count:(Some count) (conf_str confidence)
-  | Build_ok { confidence } -> tag "build_ok" (conf_str confidence)
-  | Build_fail { confidence } -> tag "build_fail" (conf_str confidence)
-  | Lint_clean { confidence } -> tag "lint_clean" (conf_str confidence)
-  | Lint_dirty { count; confidence } ->
-    tag "lint_dirty" ~count:(Some count) (conf_str confidence)
-  | Git_clean { confidence } -> tag "git_clean" (conf_str confidence)
-  | Git_dirty { confidence } -> tag "git_dirty" (conf_str confidence)
-  | Git_not_a_repo -> tag "git_not_a_repo" "exact"
-;;
-
 let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Safe.t) list
   =
   if not (Masc_exec.Exec_semantic.enabled ())
@@ -782,22 +695,7 @@ let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Sa
       | None -> []
       | Some h -> [ "return_code_interpretation", `String h ]
     in
-    let marker_field =
-      if not (markers_enabled ())
-      then []
-      else (
-        (* Foreground exec merges stdout+stderr via "2>&1" at the
-           keeper layer, so feed the merged stream as stdout and an
-           empty stderr. *)
-        let markers =
-          Cdal_judge.of_exec_outcome ~semantic:sem ~stdout:result.output ~stderr:""
-        in
-        match markers with
-        | [] -> []
-        | _ ->
-          [ "verifiable_markers", `List (List.map verifiable_marker_to_json markers) ])
-    in
-    ("semantic_exit", semantic_obj) :: (rci_field @ marker_field))
+    ("semantic_exit", semantic_obj) :: rci_field)
 ;;
 
 (* Tick 9: head+tail output cap — opt-in via MASC_BASH_OUTPUT_CAP.

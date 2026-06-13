@@ -14,7 +14,7 @@
     Behavior-preserving. Failure here means the descriptor surface
     drifted relative to its mli contract. *)
 
-open Masc_mcp
+open Masc
 module D = Exec_policy_path_arg_descriptor
 
 let test_is_path_flag_closed_set () =
@@ -106,20 +106,20 @@ let test_corpus_and_predicate_are_in_sync () =
 let test_rg_context_flags_are_not_path_args () =
   let values =
     Exec_policy.path_argument_values "rg"
-      [ "capacity"; "repos/masc-mcp"; "-n"; "-C"; "3" ]
+      [ "capacity"; "repos/masc"; "-n"; "-C"; "3" ]
   in
   Alcotest.(check bool) "search path remains" true
-    (List.mem "repos/masc-mcp" values);
+    (List.mem "repos/masc" values);
   Alcotest.(check bool) "context flag skipped" false (List.mem "-C" values);
   Alcotest.(check bool) "context count skipped" false (List.mem "3" values)
 
 let test_grep_context_flags_are_not_path_args () =
   let values =
     Exec_policy.path_argument_values "grep"
-      [ "-R"; "-C"; "3"; "capacity"; "repos/masc-mcp" ]
+      [ "-R"; "-C"; "3"; "capacity"; "repos/masc" ]
   in
   Alcotest.(check bool) "grep search path remains" true
-    (List.mem "repos/masc-mcp" values);
+    (List.mem "repos/masc" values);
   Alcotest.(check bool) "grep context flag skipped" false
     (List.mem "-C" values);
   Alcotest.(check bool) "grep context count skipped" false

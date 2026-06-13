@@ -5,10 +5,9 @@
     {
       "id": "read_search_prompt_fingerprint",
       "prompt": "Search for `prompt_fingerprint`, then read the keeper tool-call log implementation file and report exactly two concrete file touch points where prompt fingerprints are recorded. Do not use bash for this case.",
-      "category": "tool_required",
+      "category": "tool_use",
       "keeper_profiles": ["bench-analyst", "bench-executor"],
-      "required_tools": ["keeper_tool_search", "keeper_fs_read"],
-      "forbidden_tools": ["keeper_bash"],
+      "forbidden_tools": ["tool_execute"],
       "max_tool_calls": 3,
       "success_checks": [
         { "path": "$.status", "equals": "completed" },
@@ -21,7 +20,7 @@
           "contains": "prompt_fingerprint"
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "path": "$.path",
           "contains": "keeper_tool_call_log"
         }
@@ -36,7 +35,6 @@
       "prompt": "Do not call any tools. Decide whether the sentence `No lookup is needed here.` requires tools, and respond in text only.",
       "category": "tool_forbidden",
       "keeper_profiles": ["bench-analyst"],
-      "required_tools": [],
       "forbidden_tools": [],
       "max_tool_calls": 0,
       "success_checks": [
@@ -54,7 +52,6 @@
       "prompt": "First attempt to read `lib/missing_file.ml`. After that fails, search for `keeper_agent_run prompt_fingerprint`, then read `lib/keeper/keeper_agent_run.ml` and state whether recovery succeeded. Do not use bash for this case.",
       "category": "recovery_required",
       "keeper_profiles": ["bench-verifier"],
-      "required_tools": ["keeper_fs_read", "keeper_tool_search"],
       "forbidden_tools": [],
       "max_tool_calls": 4,
       "success_checks": [
@@ -68,7 +65,7 @@
           "contains": "keeper_agent_run"
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "path": "$.path",
           "contains": "keeper_agent_run.ml"
         }
@@ -84,7 +81,6 @@
       "prompt": "Search for `tool_call_quality_benchmark_cli`, run a short validation command with bash, and then call `masc_board_post` with a body that contains the word `verified`.",
       "category": "multi_step",
       "keeper_profiles": ["bench-executor", "bench-verifier"],
-      "required_tools": ["keeper_tool_search", "keeper_bash", "masc_board_post"],
       "forbidden_tools": [],
       "max_tool_calls": 4,
       "success_checks": [

@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Proposed
 **Date**: 2026-03-30
-**Refs**: masc-mcp#3825 (Delta-Context Epic), P2-2 (Handoff delta entries)
+**Refs**: masc#3825 (Delta-Context Epic), P2-2 (Handoff delta entries)
 
 ## Context
 
@@ -43,7 +43,7 @@ Delta entry 포맷(P2-2)을 도입하려면 "어느 것이 SSOT인가"를 먼저
 
 | 항목 | 값 |
 |------|---|
-| **정의** | `~/me/skills/handoff/SKILL.md` (me repo, not masc-mcp) |
+| **정의** | `~/me/skills/handoff/SKILL.md` (me repo, not masc) |
 | **포맷** | Semi-structured markdown (template 기반, 자유 텍스트) |
 | **저장** | PostgreSQL (`sb retro save`) + `.claude/session-state.md` |
 | **생산자** | CLI-Tool-A 세션 종료 시 `/handoff` skill 실행 |
@@ -94,7 +94,7 @@ P2-2의 "handoff delta entries"는 **세션 간 재개** 시 변경분만 로드
 ### Path 3은 관심사가 다르다
 
 local memory는 CLI-Tool-A auto-memory 시스템의 영역이다.
-masc-mcp가 직접 관리하는 것이 아니며, 포맷도 user-facing markdown이다.
+masc가 직접 관리하는 것이 아니며, 포맷도 user-facing markdown이다.
 Delta entry 시스템이 이를 직접 소비하는 것은 경계 위반이다.
 
 ## Decision
@@ -141,7 +141,7 @@ session metadata (trace_id 등)  ──extract──> checkpoint reference
 - keeper_state_snapshot의 typed 필드를 활용한 구조화된 delta 생성
 
 ### 부정적 / 리스크
-- handoff skill이 `~/me` repo에 정의됨 → masc-mcp에서 직접 수정 불가, 인터페이스 합의 필요
+- handoff skill이 `~/me` repo에 정의됨 → masc에서 직접 수정 불가, 인터페이스 합의 필요
 - PostgreSQL 의존성 → filesystem-first 원칙(feedback memory)과 긴장
   - 완화: filesystem fallback으로 `session-state.md`에도 delta fields 포함
 

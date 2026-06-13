@@ -204,20 +204,17 @@ let parse_response body : (Yojson.Safe.t, string) result =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error msg -> Error ("JSON parse error: " ^ msg)
   | json ->
-    let open Yojson.Safe.Util in
-    (match member "errors" json with
-     | `List (err :: _) ->
+    (match Json_util.assoc_member_opt "errors" json with
+     | Some (`List (err :: _)) ->
        let msg =
-         err
-         |> member "message"
-         |> to_string_option
+         Json_util.get_string err "message"
          |> Option.value ~default:"Unknown GraphQL error"
        in
        Error ("GraphQL error: " ^ msg)
      | _ ->
-       (match member "data" json with
-        | `Null -> Error "GraphQL data is null"
-        | data -> Ok data))
+       (match Json_util.assoc_member_opt "data" json with
+        | None | Some `Null -> Error "GraphQL data is null"
+        | Some data -> Ok data))
 ;;
 
 (** {1 Public API} *)
@@ -249,14 +246,13 @@ let mutate ?(timeout_sec = 10.0) ~mutation ?(variables = `Null) ()
 
 (** Convenience: extract a mutation result (success/message). *)
 let extract_mutation_result field_name data : (bool * string option, string) result =
-  let open Yojson.Safe.Util in
-  let field = member field_name data in
-  if field = `Null
-  then Error ("Field " ^ field_name ^ " not found in response")
-  else (
+  match Json_util.assoc_member_opt field_name data with
+  | None | Some `Null ->
+    Error ("Field " ^ field_name ^ " not found in response")
+  | Some field ->
     let success =
-      field |> member "success" |> to_bool_option |> Option.value ~default:false
+      Json_util.get_bool field "success" |> Option.value ~default:false
     in
-    let message = field |> member "message" |> to_string_option in
-    Ok (success, message))
+    let message = Json_util.get_string field "message" in
+    Ok (success, message)
 ;;

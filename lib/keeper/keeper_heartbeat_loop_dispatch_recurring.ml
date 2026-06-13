@@ -7,9 +7,9 @@
        were previously auto-disabled by [Keeper_recurring.dispatch_due]'s
        [max_failures] guard (without this re-enable step the keeper
        falls silent for the lifetime of the process and triggers
-       stale-kill cascades).
+       stale-kill runtimes).
     2. Dispatch all due tasks via [Keeper_recurring.dispatch_due],
-       broadcasting each via [Coord.broadcast] tagged
+       broadcasting each via [Workspace.broadcast] tagged
        [\[loop:<label>\] <msg>]. Per-task broadcast failures tick
        [metric_keeper_recurring_failures] with [phase="task_execution"]
        and surface as [Error] in the inner result. The outer try/with
@@ -20,6 +20,8 @@
     Cancellation re-raises. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 let dispatch_recurring_keepalive
       ~(ctx : _ context)
@@ -31,7 +33,7 @@ let dispatch_recurring_keepalive
      auto-disabled tasks via [dispatch_due]'s [max_failures] guard.
      Without this call the keeper's heartbeat broadcasts stay silent
      for the lifetime of the process, eventually triggering stale-kill
-     cascades.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
+     runtimes.  See lib/keeper/keeper_recurring.ml for the cooldown rule. *)
   let _reenabled =
     Keeper_recurring.reenable_due_tasks ~keeper_name:meta_after_proactive.name ~now_ts
   in
@@ -44,7 +46,7 @@ let dispatch_recurring_keepalive
         | Keeper_recurring.Broadcast msg ->
           (try
              let _ =
-               Coord.broadcast
+               Workspace.broadcast
                  ctx.config
                  ~from_agent:meta_after_proactive.agent_name
                  ~content:(Printf.sprintf "[loop:%s] %s" task.label msg)
@@ -54,7 +56,7 @@ let dispatch_recurring_keepalive
            with
            | exn ->
              Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RecurringFailures)
                ~labels:[ "task", task.id; "phase", "task_execution" ]
                ();
@@ -63,7 +65,7 @@ let dispatch_recurring_keepalive
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string RecurringFailures)
       ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
       ();

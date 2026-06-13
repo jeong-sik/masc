@@ -6,7 +6,7 @@
 #
 #   - keeper_mli_missing: count of lib/keeper/keeper_*.ml files without a
 #     matching .mli (interface-first design gap)
-#   - coord_mli_missing : same metric for lib/coord/
+#   - workspace_mli_missing : same metric for lib/workspace/
 #   - godsplit_count    : occurrences of `;; godsplit` markers in lib/dune
 #     (god-file decomposition stubs left as comments — should converge to 0
 #     by sub-library extraction)
@@ -18,7 +18,7 @@
 #     content is verbatim inferred-type output that should be normalized
 #     to a real one-line docstring.
 #   - lib_other_mli_missing: long-tail .mli coverage — every lib/*/*.ml
-#     file outside lib/keeper/ and lib/coord/ that lacks a sibling .mli.
+#     file outside lib/keeper/ and lib/workspace/ that lacks a sibling .mli.
 #     Captures lib/server/, lib/dashboard/, lib/config/, lib/local/,
 #     lib/types/, lib/voice/, etc.
 #
@@ -26,7 +26,7 @@
 # that reduce debt may regenerate the baseline (intentional "downward
 # ratchet"). Increases must be justified by --regenerate with a paired
 # follow-up issue (anti-pattern: silent baseline rebound after admin
-# override; see masc-mcp memory feedback_ratchet-naturalization-after-admin-merge).
+# override; see masc memory feedback_ratchet-naturalization-after-admin-merge).
 #
 # Usage:
 #   scripts/ocaml-structure-ratchet.sh              # check; exit 0 ok / 2 drift up / 1 error
@@ -82,17 +82,54 @@ count_inferred_dump_headers() {
 
 count_lib_other_mli_missing() {
   # All lib/*/*.ml files without a sibling .mli, EXCLUDING lib/keeper/
-  # and lib/coord/ which have dedicated metrics. Captures the long
-  # tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
+  # and lib/workspace/ which have dedicated metrics. Dune
+  # (private_modules ...) entries are implementation details of their
+  # library and must not be counted as public interface debt. Captures the
+  # long tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
   python3 - <<'EOF' "${REPO_ROOT}"
-import os, sys, glob
+import glob
+import os
+import re
+import sys
 repo_root = sys.argv[1]
 total = 0
+
+def dune_private_modules(dune_path):
+    try:
+        with open(dune_path, encoding='utf-8') as f:
+            text = '\n'.join(line.split(';', 1)[0] for line in f)
+    except OSError:
+        return set()
+
+    tokens = re.findall(r'\(|\)|[^\s()]+', text)
+    private = set()
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == '(' and i + 1 < len(tokens) and tokens[i + 1] == 'private_modules':
+            depth = 1
+            i += 2
+            while i < len(tokens) and depth > 0:
+                tok = tokens[i]
+                if tok == '(':
+                    depth += 1
+                elif tok == ')':
+                    depth -= 1
+                elif depth == 1:
+                    private.add(tok)
+                i += 1
+            continue
+        i += 1
+    return private
+
 for d in glob.glob(os.path.join(repo_root, 'lib', '*') + '/'):
     name = d.rstrip('/').rsplit('/', 1)[-1]
-    if name in ('keeper', 'coord'):
+    if name in ('keeper', 'workspace'):
         continue
+    private = dune_private_modules(os.path.join(d, 'dune'))
     for ml in glob.glob(d + '*.ml'):
+        stem = os.path.splitext(os.path.basename(ml))[0]
+        if stem in private:
+            continue
         if not os.path.exists(ml + 'i'):
             total += 1
 print(total)
@@ -102,17 +139,17 @@ EOF
 # Metric definitions: name|hint
 METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
-  "coord_mli_missing|Add .mli for the new lib/coord/*.ml file."
+  "workspace_mli_missing|Add .mli for the new lib/workspace/*.ml file."
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
-  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/coord which have their own metrics)."
+  "lib_other_mli_missing|Add .mli for the new public lib/*/*.ml file, or mark implementation-only modules private in the local dune stanza."
 )
 
 current_value() {
   case "$1" in
     keeper_mli_missing)     count_mli_missing "lib/keeper" "keeper_*" ;;
-    coord_mli_missing)      count_mli_missing "lib/coord"  "*" ;;
+    workspace_mli_missing)      count_mli_missing "lib/workspace"  "*" ;;
     godsplit_count)         count_godsplit ;;
     lib_dune_lines)         count_lib_dune_lines ;;
     inferred_dump_headers)  count_inferred_dump_headers ;;

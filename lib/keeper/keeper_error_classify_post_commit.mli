@@ -4,6 +4,14 @@ val committed_mutating_tools : string list -> string list
 
 val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
 
+val ambiguous_side_effect_commit_tools :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> string list
+
+val has_ambiguous_side_effect_commit :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> bool
+
 val reclassify_error_after_side_effect :
   tool_names:string list ->
   Agent_sdk.Error.sdk_error -> Agent_sdk.Error.sdk_error

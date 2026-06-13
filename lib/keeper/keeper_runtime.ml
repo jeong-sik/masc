@@ -2,6 +2,9 @@
     Runtime-only mutable state stays behind keeper runtime/execution modules. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 
 (** #10061: compare personality text fields ignoring leading/trailing
     whitespace.  The TOML heredoc parser drops the newline before the
@@ -93,7 +96,7 @@ let auto_recoverable_paused_keeper_names ?now config =
          Some meta.name
        | Ok (Some _) | Ok None -> None
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ ("keeper", name); ("site", "auto_recoverable_paused_read") ]
            ();
@@ -127,44 +130,30 @@ let apply_default_opt opt current = match opt with Some _ -> opt | None -> curre
 
 
 let invalid_profile_defaults_error ~keeper_name detail =
-  if String_util.contains_substring detail "cascade_name" then
+  if String_util.contains_substring detail "runtime_id" then
     Printf.sprintf
-      "invalid profile.cascade_name for keeper %s: unknown cascade_name: %s"
+      "invalid profile.runtime_id for keeper %s: unknown runtime_id: %s"
       keeper_name detail
   else
     Printf.sprintf "invalid keeper profile for keeper %s: %s" keeper_name detail
 
-let effective_declarative_cascade_name
-    (defaults : Keeper_types_profile.keeper_profile_defaults)
+let effective_declarative_runtime_id
+    (_defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  match defaults.cascade_name, defaults.manifest_path with
-  | Some cascade_name, _ ->
-      Keeper_cascade_profile.normalize_keeper_runtime_declared_name cascade_name
-  | None, Some _ -> (Keeper_config.default_cascade_name ())
-  | None, None ->
-      Keeper_cascade_profile.normalize_keeper_runtime_declared_name
-        (cascade_name_of_meta meta)
+  (* persona⊥{model,runtime}: the keeper's runtime is assigned in runtime.toml,
+     not in [defaults].  Delegate to {!Keeper_meta_contract.runtime_id_of_meta}
+     (the dispatcher) so the declare/status view and the wire share ONE source
+     by construction — divergence is structurally impossible, not convention-
+     enforced (prevents the reconcile re-sync storm, cf. #10061).  [_defaults]
+     is retained in the signature for caller call-sites but no longer carries a
+     runtime selection. *)
+  runtime_id_of_meta meta
 
 let resynced_tool_access
     (defaults : Keeper_types_profile.keeper_profile_defaults)
     (meta : keeper_meta) =
-  let current_preset =
-    match meta.tool_access with
-    | Preset { preset; _ } -> Some preset
-    | Custom _ -> None
-  in
-  let current_also_allow = tool_access_also_allowlist meta.tool_access in
-  let target_preset =
-    match defaults.tool_preset with
-    | Some raw -> tool_preset_of_string raw
-    | None -> current_preset
-  in
-  let target_also_allow =
-    apply_default defaults.tool_also_allow current_also_allow
-  in
-  match target_preset with
-  | Some preset ->
-      Preset { preset; also_allow = target_also_allow }
+  match defaults.tool_access with
+  | Some tools -> normalize_tool_names tools
   | None -> meta.tool_access
 
 let ensure_keeper_meta config name =
@@ -191,56 +180,10 @@ let ensure_keeper_meta config name =
     let target_cooldown_sec =
       apply_default defaults.proactive_cooldown_sec Keeper_config.default_proactive_cooldown_sec in
     let target_tool_access = resynced_tool_access defaults meta in
-    let target_room_signal_prompt_enabled =
-      match Keeper_config.keeper_room_signal_prompt_enabled_override () with
-      | Some override -> override
-      | None ->
-          Option.value
-            ~default:
-              (tool_access_default_room_signal_prompt_enabled
-                 ~default:Keeper_config.default_room_signal_prompt_enabled
-                 target_tool_access)
-            defaults.room_signal_prompt_enabled
-    in
     let target_denylist = apply_default defaults.tool_denylist meta.tool_denylist in
     let target_social_model =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
-    let target_cascade_name =
-      effective_declarative_cascade_name defaults meta
-    in
-    match
-      Cascade_catalog_runtime.resolve_declared_name
-        ~raw_name:target_cascade_name
-        ()
-    with
-    | Error detail ->
-        let field =
-          match defaults.cascade_name, defaults.manifest_path with
-          | Some _, _ -> "profile.cascade_name"
-          | None, Some _ -> "manifest.default_cascade_name"
-          | None, None -> "meta.cascade_name"
-        in
-        let raw_value =
-          match defaults.cascade_name, defaults.manifest_path with
-          | Some cascade_name, _ -> cascade_name
-          | None, Some _ -> (Keeper_config.default_cascade_name ())
-          | None, None -> cascade_name_of_meta meta
-        in
-        let msg =
-          Printf.sprintf
-            "invalid %s %S for keeper %s: %s"
-            field raw_value meta.name detail
-        in
-        Log.Keeper.error "%s" msg;
-        Error msg
-    | Ok resolved_target_cascade_name ->
-    let target_tool_preset_source =
-      match defaults.tool_preset_source with
-      | Some _ as s -> s
-      | None -> meta.tool_preset_source
-    in
-
     (* --- Personality --- *)
     let target_goal = apply_default defaults.goal meta.goal in
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
@@ -311,18 +254,6 @@ let ensure_keeper_meta config name =
     let target_tf_window =
       apply_default_opt defaults.telemetry_feedback_window_hours meta.telemetry_feedback_window_hours in
 
-    (* --- Per-Provider Timeout --- *)
-    let target_per_provider_timeout =
-      match defaults.per_provider_timeout_state with
-      | Keeper_types_profile.Per_provider_timeout_unset ->
-          normalize_per_provider_timeout_opt
-            ~source:(Printf.sprintf "keeper runtime %s" name)
-            meta.per_provider_timeout_s
-      | Keeper_types_profile.Per_provider_timeout_invalid -> None
-      | Keeper_types_profile.Per_provider_timeout_set ->
-          defaults.per_provider_timeout
-    in
-
     (* --- Always Approve --- *)
     let target_always_approve =
       apply_default_opt defaults.always_approve meta.always_approve
@@ -333,148 +264,15 @@ let ensure_keeper_meta config name =
       | [] -> meta.oas_env
       | env -> env
     in
-    (* --- Change detection by category --- *)
-    let proactive_changed =
-      meta.proactive.enabled <> target_proactive
-      || meta.proactive.idle_sec <> target_idle_sec
-      || meta.proactive.cooldown_sec <> target_cooldown_sec in
-    let signal_changed =
-      meta.room_signal_prompt_enabled <> target_room_signal_prompt_enabled in
-    let denylist_changed = meta.tool_denylist <> target_denylist in
-    let social_model_changed = meta.social_model <> target_social_model in
-    (* [meta.cascade_name] may be a raw TOML/JSON value while
-       [resolved_target_cascade_name] is the validated runtime catalog
-       name. Normalize the meta side only so alias cleanup does not
-       register as a semantic change. *)
-    let cascade_changed =
-      Keeper_cascade_profile.normalize_declared_name (cascade_name_of_meta meta)
-      <> Cascade_name.to_string resolved_target_cascade_name
-    in
-    (* #10061: persisted state vs TOML source can differ by a single
-       trailing newline when OCaml string literals round-trip through
-       the TOML writer (heredoc [""" … """] closing sequence drops the
-       final newline) or through an older binary that wrote the field
-       with extra whitespace. The semantic content of these prose
-       fields does not care about trailing whitespace, yet a byte-
-       level [<>] compare marks every 30 s hot-reload tick as a
-       personality change, producing a re-sync storm (2880 redundant
-       writes/day on nick0cave alone; other 13 keepers: 0 events).
-       Normalise both sides with [String.trim] so only meaningful
-       content drives resync. *)
-    (* #10269: name the diverging fields so the re-sync log carries
-       the diagnostic upstream (length and first-diff offset) instead
-       of the opaque [personality] category. *)
-    let personality_diff_entries =
-      personality_diff_summary
-        [
-          ("goal", meta.goal, target_goal);
-          ("short_goal", meta.short_goal, target_short_goal);
-          ("mid_goal", meta.mid_goal, target_mid_goal);
-          ("long_goal", meta.long_goal, target_long_goal);
-          ("will", meta.will, target_will);
-          ("needs", meta.needs, target_needs);
-          ("desires", meta.desires, target_desires);
-          ("instructions", meta.instructions, target_instructions);
-        ]
-    in
-    let personality_changed = personality_diff_entries <> [] in
-    let policy_changed =
-      meta.autoboot_enabled <> target_autoboot_enabled
-      || meta.mention_targets <> target_mention_targets
-      || meta.active_goal_ids <> target_active_goal_ids
-      || meta.tool_access <> target_tool_access
-      || meta.tool_preset_source <> target_tool_preset_source
-      || meta.sandbox_profile <> target_sandbox_profile
-      || meta.network_mode <> target_network_mode
-      || meta.allowed_paths <> target_allowed_paths
-      || meta.always_approve <> target_always_approve in
-    let telemetry_changed =
-      meta.telemetry_feedback_enabled <> target_tf_enabled
-      || meta.telemetry_feedback_window_hours <> target_tf_window in
-    let timeout_policy_changed =
-      meta.per_provider_timeout_s <> target_per_provider_timeout in
-    let oas_env_changed = meta.oas_env <> target_oas_env in
-    let any_changed =
-      proactive_changed || signal_changed || denylist_changed
-      || social_model_changed
-      || cascade_changed
-      || personality_changed || policy_changed
-      || telemetry_changed || timeout_policy_changed || oas_env_changed in
-
-    if any_changed then begin
-      let cats = List.filter_map Fun.id [
-        (if proactive_changed then Some "proactive" else None);
-        (if signal_changed then Some "signal" else None);
-        (if denylist_changed then Some "denylist" else None);
-        (if social_model_changed then Some "social_model" else None);
-        (if cascade_changed then Some "cascade" else None);
-        (if personality_changed then
-           Some
-             (Printf.sprintf "personality:%s"
-                (String.concat "+" personality_diff_entries))
-        else None);
-        (if policy_changed then Some "policy" else None);
-        (if telemetry_changed then Some "telemetry" else None);
-        (if timeout_policy_changed then Some "timeout_policy" else None);
-        (if oas_env_changed then Some "oas_env" else None);
-      ] in
-      Log.Keeper.info
-        "ensure_keeper_meta: re-syncing [%s] for %s"
-        (String.concat "," cats)
-        meta.name;
-      (* #10269: nick0cave alone re-syncs [personality] on every reconcile
-         tick (~371 events / 3000 logs).  When personality is in [cats],
-         emit a follow-up info line listing the specific fields that
-         differ along with their raw lengths and trim-normalised
-         previews so root cause (TOML triple-quote, JSON encoding drift,
-         persona overlay) is visible without code-reading. *)
-      if personality_changed then begin
-        let diffs =
-          List.filter_map Fun.id
-            [
-              personality_field_diff_summary ~field:"goal"
-                ~current:meta.goal ~target:target_goal;
-              personality_field_diff_summary ~field:"short_goal"
-                ~current:meta.short_goal ~target:target_short_goal;
-              personality_field_diff_summary ~field:"mid_goal"
-                ~current:meta.mid_goal ~target:target_mid_goal;
-              personality_field_diff_summary ~field:"long_goal"
-                ~current:meta.long_goal ~target:target_long_goal;
-              personality_field_diff_summary ~field:"will"
-                ~current:meta.will ~target:target_will;
-              personality_field_diff_summary ~field:"needs"
-                ~current:meta.needs ~target:target_needs;
-              personality_field_diff_summary ~field:"desires"
-                ~current:meta.desires ~target:target_desires;
-              personality_field_diff_summary ~field:"instructions"
-                ~current:meta.instructions ~target:target_instructions;
-            ]
-        in
-        Log.Keeper.info
-          "ensure_keeper_meta: personality drift fields for %s: %s"
-          meta.name
-          (String.concat "; " diffs)
-      end;
-      let updated = { meta with
+    let overlayed =
+      { meta with
         proactive = {
           enabled = target_proactive;
           idle_sec = target_idle_sec;
           cooldown_sec = target_cooldown_sec;
         };
-        room_signal_prompt_enabled = target_room_signal_prompt_enabled;
         tool_denylist = target_denylist;
         social_model = target_social_model;
-        (* RFC-0041: cascade_ref is the SSOT after step 4 (B7). When
-           cascade_changed flips, materialize a fresh cascade_ref;
-           otherwise preserve [meta.cascade_ref] verbatim so an unrelated
-           reconcile never canonicalizes routing silently. *)
-        cascade_ref =
-          if cascade_changed then
-            Some Cascade_ref.{
-              group = resolved_target_cascade_name;
-              item = None;
-            }
-          else meta.cascade_ref;
         goal = target_goal;
         short_goal = target_short_goal;
         mid_goal = target_mid_goal;
@@ -487,29 +285,51 @@ let ensure_keeper_meta config name =
         mention_targets = target_mention_targets;
         active_goal_ids = target_active_goal_ids;
         tool_access = target_tool_access;
-        tool_preset_source = target_tool_preset_source;
         sandbox_profile = target_sandbox_profile;
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
         allowed_paths = target_allowed_paths;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
-        per_provider_timeout_s = target_per_provider_timeout;
         always_approve = target_always_approve;
         oas_env = target_oas_env;
-        updated_at = now_iso ();
-      } in
+      }
+    in
+    (* Runtime JSON intentionally omits TOML-owned config/personality
+       fields.  They must be overlaid into the returned meta for the
+       live registry, but comparing those omitted fields against TOML
+       would classify every reconcile tick as a write-worthy drift.
+       [active_goal_ids] can also be runtime-owned when set explicitly via
+       keeper_up, but when supplied by TOML it remains an overlay-only
+       declarative scope rather than being copied into runtime JSON. *)
+    let oas_env_changed = meta.oas_env <> target_oas_env in
+    let persistent_changed = oas_env_changed in
+    let overlay_without_persistent_changes =
+      { overlayed with
+        oas_env = meta.oas_env;
+      }
+    in
+
+    if persistent_changed then begin
+      let cats = List.filter_map Fun.id [
+        (if oas_env_changed then Some "oas_env" else None);
+      ] in
+      Log.Keeper.info
+        "ensure_keeper_meta: re-syncing [%s] for %s"
+        (String.concat "," cats)
+        meta.name;
+      let updated = { overlayed with updated_at = now_iso () } in
       match write_meta config updated with
-      | Ok () -> Ok updated
+      | Ok () -> Ok { updated with meta_version = updated.meta_version + 1 }
       | Error e ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
-        Ok meta
+        Ok overlay_without_persistent_changes
     end
-    else Ok meta))
+    else Ok overlayed))
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;
@@ -677,35 +497,11 @@ let start_supervisor_sweep ctx =
         let on_beat _beat =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string SupervisorSweepFailures)
                ~labels:[("origin", "keeper_runtime")]
                ();
              Log.Keeper.error "supervisor sweep failed: %s"
-               (Printexc.to_string exn));
-          (* #12801 Liveness Recovery Supervisor: attempt to auto-recover Dead
-             keepers whose root cause has cleared.  Runs after sweep_and_recover
-             so any newly-crashed keepers are processed by sweep first. *)
-          (try Keeper_supervisor.liveness_recovery_scan ctx
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string SupervisorSweepFailures)
-               ~labels:[("origin", "liveness_recovery")]
-               ();
-             Log.Keeper.error "liveness recovery scan failed: %s"
-               (Printexc.to_string exn));
-          (* #12838 Alive-but-stuck detector: emit a Prometheus counter
-             (and a warn log) for keepers that are alive in every other
-             health metric but have a frozen [proactive_rt.last_ts] while
-             autonomous turns keep advancing.  Running keepers also receive
-             a deduped Event Layer recovery wakeup; no restart is triggered. *)
-          (try Keeper_supervisor.alive_but_stuck_scan ctx
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string SupervisorSweepFailures)
-               ~labels:[("origin", "alive_but_stuck")]
-               ();
-             Log.Keeper.error "alive-but-stuck scan failed: %s"
                (Printexc.to_string exn));
           (* TOML hot-reload: re-sync declarative fields for running keepers.
              Runs after sweep_and_recover so TOML edits take effect within
@@ -758,7 +554,7 @@ let start_supervisor_sweep ctx =
                     (match ensure_keeper_meta ctx.config entry.name with
                      | Ok updated_meta ->
                          (* Propagate the updated meta back into the registry so
-                            subsequent turns observe the new cascade_name (and
+                            subsequent turns observe the new runtime_id (and
                             any other reconciled fields) immediately.  Without
                             this the file is updated but the in-memory
                             [registry_entry.meta] stays stale until restart. *)
@@ -782,9 +578,9 @@ let start_supervisor_sweep ctx =
                               (* WORKAROUND-CARRYOVER §Symptom-억제: demote
                                  repeats to DEBUG so the system_log isn't
                                  flooded by invalid TOML drift. Root fix is
-                                 keeper TOML correction + cascade.toml
+                                 keeper TOML correction + runtime.toml
                                  [keeper_assignable] policy (separate RFC). *)
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)
                                 ~labels:
                                   [ "keeper", entry.name
@@ -797,14 +593,14 @@ let start_supervisor_sweep ctx =
                           | `Threshold_disable ->
                               (* One explicit escalation at the moment
                                  the reconciler parks this keeper. *)
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)
                                 ~labels:
                                   [ "keeper", entry.name
                                   ; "outcome", "threshold_disable"
                                   ]
                                 ();
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string ReconcileDisabled)
                                 ~labels:[ "keeper", entry.name ]
                                 ();
@@ -827,7 +623,7 @@ let start_supervisor_sweep ctx =
               | Keeper_state_machine.Dead
               | Keeper_state_machine.Zombie -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string TomlReconcileSweepFailures)
                ~labels:[("origin", "keeper_runtime")]
                ();
@@ -836,7 +632,7 @@ let start_supervisor_sweep ctx =
           (* #10125: advance the supervisor liveness gauge after a
              completed beat.  Stale gauge (now - last > 2 × interval)
              tells operators the sweep stopped. *)
-          Prometheus.set_gauge
+          Otel_metric_store.set_gauge
             Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
             ~labels:[ ("base_path", base_path) ]
             (Unix.gettimeofday ());
@@ -855,18 +651,19 @@ let start_supervisor_sweep ctx =
     in
     with_sweeps_rw (fun () ->
       Hashtbl.replace supervisor_sweeps base_path p);
-    Pulse.run ~sw:ctx.sw p;
+    let sw = Option.value (Keeper_supervisor.get_global_switch ()) ~default:ctx.sw in
+    Pulse.run ~sw p;
     (* #10125: counter increments once per actual Pulse start.
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorSweepStarts)
       ~labels:[ ("base_path", base_path) ]
       ();
     (* Initialize the liveness gauge to "now" so dashboards do not
        start at unixtime=0 (which would look infinitely stale).  The
        on_beat will overwrite this on every subsequent sweep. *)
-    Prometheus.set_gauge
+    Otel_metric_store.set_gauge
       Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
@@ -880,7 +677,7 @@ let start_supervisor_sweep ctx =
     the sweep stalls; tests use it to verify the gauge advances. *)
 let supervisor_sweep_age_seconds ~(base_path : string) : float option =
   match
-    Prometheus.get_metric_value
+    Otel_metric_store.get_metric_value
       Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ~labels:[ ("base_path", base_path) ]
       ()
@@ -901,7 +698,7 @@ let has_boot_entries config =
    spinning up an Eio + Pulse runtime.  See [maybe_start_supervisor_sweep]
    for the WHY. *)
 let should_start_supervisor_sweep
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(stats : keeper_bootstrap_stats) : bool =
   stats.started > 0
   || Keeper_registry.count_running ~base_path:config.base_path () > 0

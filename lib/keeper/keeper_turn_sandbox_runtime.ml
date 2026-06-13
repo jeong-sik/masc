@@ -1,11 +1,13 @@
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type state =
   | Not_started
   | Running of { container_name : string }
 
 type t =
-  { config : Coord.config
+  { config : Workspace.config
   ; meta : keeper_meta
   ; turn_id : int
   ; raw_host_root : string
@@ -22,7 +24,7 @@ let host_root t = t.host_root
 let normalize_path path = Keeper_alerting_path.normalize_path_for_check_stripped path
 
 let create
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ?(network_mode = Network_none)
       ~turn_id
@@ -47,18 +49,27 @@ let create
   }
 ;;
 
+(* Monotonically increasing counter to disambiguate containers created
+   within the same millisecond by the same process.  Without this, 64
+   concurrent keepers starting simultaneously can produce duplicate
+   container names, causing [docker run --name X] to fail with "name
+   already in use". *)
+let container_counter : int Atomic.t = Atomic.make 0
+
 let container_name_of (t : t) =
   let net_suffix =
     match t.network_mode with
     | Network_none -> "none"
     | Network_inherit -> "inherit"
   in
+  let seq = Atomic.fetch_and_add container_counter 1 in
   Printf.sprintf
-    "masc-keeper-turn-%s-%s-%d-%d"
-    (Coord_utils.safe_filename t.meta.name)
+    "masc-keeper-turn-%s-%s-%d-%d-%d"
+    (Workspace_utils.safe_filename t.meta.name)
     net_suffix
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
+    seq
 ;;
 
 let container_path_of_host (t : t) ~host_path =
@@ -82,10 +93,78 @@ let container_path_of_host (t : t) ~host_path =
          t.host_root)
 ;;
 
+let repos_in_playground host_root =
+  let repos_dir = Filename.concat host_root "repos" in
+  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
+  then []
+  else (
+    try
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        let p = Filename.concat repos_dir name in
+        try Sys.is_directory p && Sys.file_exists (Filename.concat p ".git") with
+        | Sys_error _ -> false)
+      |> List.sort compare
+    with
+    | Sys_error _ -> [])
+
+let rec skip_worktree_prefix = function
+  | ".worktrees" :: _branch :: rest -> rest
+  | "./.worktrees" :: _branch :: rest -> rest
+  | other -> other
+
+let find_repo_segment_and_suffix ~repos ~host_cwd =
+  let segments = String.split_on_char '/' host_cwd in
+  let rec find_suffix = function
+    | [] -> None
+    | head :: tail ->
+      if List.mem head repos then
+        let effective_tail = skip_worktree_prefix tail in
+        Some (head, String.concat "/" effective_tail)
+      else
+        find_suffix tail
+  in
+  find_suffix segments
+
 let container_cwd_of_host (t : t) ~host_cwd =
   match container_path_of_host t ~host_path:host_cwd with
   | Ok container_cwd -> container_cwd
-  | Error _ -> t.container_root
+  | Error _ ->
+    match Keeper_cwd_response.profile_independent_cwd
+            ~container_root:t.container_root ~host_cwd with
+    | Some cwd -> cwd
+    | None ->
+      let repos = repos_in_playground t.host_root in
+      (match find_repo_segment_and_suffix ~repos ~host_cwd with
+       | Some (repo_name, suffix) ->
+         let logical_path =
+           Filename.concat (Filename.concat "repos" repo_name) suffix
+         in
+         Filename.concat t.container_root logical_path
+       | None -> t.container_root)
+;;
+
+let host_cwd_of_container (t : t) ~container_cwd =
+  let container_root_norm = normalize_path t.container_root in
+  let container_cwd_norm = normalize_path container_cwd in
+  if container_cwd_norm = container_root_norm
+  then Ok t.host_root
+  else if String.starts_with ~prefix:(container_root_norm ^ "/") container_cwd_norm
+  then (
+    let suffix =
+      String.sub
+        container_cwd_norm
+        (String.length container_root_norm + 1)
+        (String.length container_cwd_norm - String.length container_root_norm - 1)
+    in
+    Ok (Filename.concat t.host_root suffix))
+  else
+    Error
+      (Printf.sprintf
+         "host_path_of_container: %s is not inside container root %s"
+         container_cwd_norm
+         t.container_root)
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -111,18 +190,19 @@ let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_err
     failure
 ;;
 
-let run_argv_with_status_retry_eintr ~timeout_sec argv =
-  let max_eintr_retries = 8 in
+let max_eintr_retries = 8
+
+let run_argv_with_status_retry_eintr ?timeout_sec argv =
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_status
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           argv
       in
       match st with
@@ -142,43 +222,292 @@ let output_for_status ~(stdout : string) ~(stderr : string) =
   | out, err -> out ^ "\n" ^ err
 ;;
 
-let run_argv_with_status_split_retry_eintr ~timeout_sec argv =
-  let max_eintr_retries = 8 in
-  Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let st, stdout, stderr =
-        Masc_exec.Exec_gate.run_argv_with_status_split
-          ~actor:`System_sandbox
-          ~raw_source:(String.concat " " argv)
-          ~summary:"keeper turn sandbox command"
-          ~env:(Unix.environment ())
-          ~cwd:(Sys.getcwd ())
-          ~timeout_sec
-          argv
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, out
-    in
-    loop max_eintr_retries)
+let retryable_eintr_status ~attempts_left st ~stdout ~stderr =
+  match st with
+  | Unix.WEXITED 127
+    when attempts_left > 0
+         && String_util.contains_substring_ci
+              (output_for_status ~stdout ~stderr)
+              "interrupted system call" ->
+    true
+  | _ -> false
 ;;
 
-let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv =
-  let max_eintr_retries = 8 in
+type retry_stream_guard = {
+  on_stdout_chunk : (string -> unit) option;
+  on_stderr_chunk : (string -> unit) option;
+  held_chunks : [ `Stdout of string | `Stderr of string ] list ref;
+  mutable saw_retry_marker : bool;
+  mutable pass_through : bool;
+  mutable visible_flushed : bool;
+  mutable marker_scan_tail : string;
+  mutable release_scheduled : bool;
+  mutable prefix_release_deferrals : int;
+  mutable closed : bool;
+  mu : Stdlib.Mutex.t;
+}
+
+let retry_eintr_marker = "interrupted system call"
+let retry_stream_guard_release_delay_sec = 0.2
+let retry_stream_guard_prefix_deferral_limit = 1
+let retry_eintr_marker_lower = String.lowercase_ascii retry_eintr_marker
+
+let with_retry_guard_lock guard f =
+  Stdlib.Mutex.lock guard.mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock guard.mu) f
+;;
+
+let retry_marker_tail text =
+  let max_len = max 0 (String.length retry_eintr_marker - 1) in
+  let len = String.length text in
+  if len <= max_len then text else String.sub text (len - max_len) max_len
+;;
+
+let retry_marker_prefix_pending tail =
+  let tail = String.lowercase_ascii tail in
+  let marker_len = String.length retry_eintr_marker_lower in
+  let min_prefix_len = min 4 (marker_len - 1) in
+  let max_len = min (String.length tail) (marker_len - 1) in
+  let rec loop len =
+    if len < min_prefix_len
+    then false
+    else
+      let suffix = String.sub tail (String.length tail - len) len in
+      let prefix = String.sub retry_eintr_marker_lower 0 len in
+      String.equal suffix prefix || loop (len - 1)
+  in
+  loop max_len
+;;
+
+let update_retry_marker_scan guard chunk =
+  let scan_text = guard.marker_scan_tail ^ chunk in
+  if String_util.contains_substring_ci scan_text retry_eintr_marker
+  then guard.saw_retry_marker <- true;
+  guard.marker_scan_tail <- retry_marker_tail scan_text
+;;
+
+let invoke_guard_output_callback f chunk =
+  try
+    f chunk;
+    ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "[Keeper_turn_sandbox_runtime] output chunk callback error, continuing: %s"
+      (Printexc.to_string exn)
+;;
+
+let mark_guard_visible guard =
+  with_retry_guard_lock guard (fun () -> guard.visible_flushed <- true)
+;;
+
+let emit_guard_chunk guard = function
+  | `Stdout chunk ->
+    (match guard.on_stdout_chunk with
+     | None -> ()
+     | Some f ->
+       mark_guard_visible guard;
+       invoke_guard_output_callback f chunk)
+  | `Stderr chunk ->
+    (match guard.on_stderr_chunk with
+     | None -> ()
+     | Some f ->
+       mark_guard_visible guard;
+       invoke_guard_output_callback f chunk)
+;;
+
+let take_guard_held_chunks_locked guard =
+  let chunks = List.rev !(guard.held_chunks) in
+  guard.held_chunks := [];
+  chunks
+;;
+
+let emit_guard_chunks guard chunks = List.iter (emit_guard_chunk guard) chunks
+
+let guard_chunk_has_visible_callback guard = function
+  | `Stdout _ -> Option.is_some guard.on_stdout_chunk
+  | `Stderr _ -> Option.is_some guard.on_stderr_chunk
+;;
+
+let guard_release_chunks guard =
+  with_retry_guard_lock guard (fun () ->
+    guard.release_scheduled <- false;
+    if guard.closed || guard.saw_retry_marker
+    then [], false
+    else if
+      retry_marker_prefix_pending guard.marker_scan_tail
+      && guard.prefix_release_deferrals < retry_stream_guard_prefix_deferral_limit
+    then (
+      guard.prefix_release_deferrals <- guard.prefix_release_deferrals + 1;
+      guard.release_scheduled <- true;
+      [], true)
+    else (
+      guard.pass_through <- true;
+      guard.prefix_release_deferrals <- 0;
+      let chunks = take_guard_held_chunks_locked guard in
+      if List.exists (guard_chunk_has_visible_callback guard) chunks
+      then guard.visible_flushed <- true;
+      chunks, false))
+;;
+
+(* Docker EINTR retry output arrives as a short burst. Release ordinary held
+   prefixes after a small Eio sleep so sparse successful commands still stream
+   without invoking user callbacks from an unmanaged systhread. *)
+let rec schedule_guard_release guard =
+  match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
+  | Some sw, Some clock ->
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Time.sleep clock retry_stream_guard_release_delay_sec;
+      let chunks, reschedule = guard_release_chunks guard in
+      emit_guard_chunks guard chunks;
+      if reschedule then schedule_guard_release guard)
+  | _ ->
+    (* Without Eio context there is no safe live timer surface for user
+       callbacks. Held chunks are emitted when the attempt completes. *)
+    ()
+;;
+
+let guard_attempt_callback guard stream chunk =
+  let item = stream chunk in
+  let chunks, should_schedule_release =
+    with_retry_guard_lock guard (fun () ->
+      update_retry_marker_scan guard chunk;
+      if
+        guard.pass_through
+        && not guard.saw_retry_marker
+        && not (retry_marker_prefix_pending guard.marker_scan_tail)
+      then [ item ], false
+      else (
+        guard.held_chunks := item :: !(guard.held_chunks);
+        let should_schedule_release =
+          (not guard.release_scheduled)
+          && not guard.closed
+          && not guard.saw_retry_marker
+        in
+        if should_schedule_release then guard.release_scheduled <- true;
+        [], should_schedule_release))
+  in
+  emit_guard_chunks guard chunks;
+  if should_schedule_release then schedule_guard_release guard
+;;
+
+let run_split_retry_eintr_with_live_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt
+      ()
+  =
+  let rec loop attempts_left =
+    let guard =
+      { on_stdout_chunk
+      ; on_stderr_chunk
+      ; held_chunks = ref []
+      ; saw_retry_marker = false
+      ; pass_through = false
+      ; visible_flushed = false
+      ; marker_scan_tail = ""
+      ; release_scheduled = false
+      ; prefix_release_deferrals = 0
+      ; closed = false
+      ; mu = Stdlib.Mutex.create ()
+      }
+    in
+    let has_output_callback =
+      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+    in
+    let attempt_on_stdout_chunk =
+      if has_output_callback
+      then Some (guard_attempt_callback guard (fun chunk -> `Stdout chunk))
+      else None
+    in
+    let attempt_on_stderr_chunk =
+      if has_output_callback
+      then Some (guard_attempt_callback guard (fun chunk -> `Stderr chunk))
+      else None
+    in
+    let st, stdout, stderr =
+      run_attempt
+        ?on_stdout_chunk:attempt_on_stdout_chunk
+        ?on_stderr_chunk:attempt_on_stderr_chunk
+        ()
+    in
+    let retryable = retryable_eintr_status ~attempts_left st ~stdout ~stderr in
+    let should_retry, chunks =
+      with_retry_guard_lock guard (fun () ->
+        guard.closed <- true;
+        if retryable
+        then (
+          let _dropped_retry_prefix = take_guard_held_chunks_locked guard in
+          true, [])
+        else false, take_guard_held_chunks_locked guard)
+    in
+    if should_retry
+    then loop (attempts_left - 1)
+    else (
+      emit_guard_chunks guard chunks;
+      st, stdout, stderr)
+  in
+  loop max_eintr_retries
+;;
+
+let run_argv_with_status_split_retry_eintr
+      ?timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      argv
+  =
+  Docker_spawn_throttle.with_slot (fun () ->
+    run_split_retry_eintr_with_live_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source = String.concat " " argv in
+        let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
+        let cwd = Sys.getcwd () in
+        match on_stdout_chunk, on_stderr_chunk with
+        | None, None ->
+          Masc_exec.Exec_gate.run_argv_with_status_split
+            ?timeout_sec
+            ~actor:`System_sandbox
+            ~raw_source
+            ~summary:"keeper turn sandbox command"
+            ~env
+            ~cwd
+            argv
+        | _ ->
+          (* DET-OK: absent stream callbacks mean the caller requested capture only. *)
+          let on_stdout_chunk =
+            Option.value on_stdout_chunk ~default:(fun _ -> ())
+          in
+          (* DET-OK: stderr callback absence has the same capture-only meaning. *)
+          let on_stderr_chunk =
+            Option.value on_stderr_chunk ~default:(fun _ -> ())
+          in
+          Masc_exec.Exec_gate.run_argv_with_status_split_streaming
+            ?timeout_sec
+            ~actor:`System_sandbox
+            ~raw_source
+            ~summary:"keeper turn sandbox command streaming"
+            ~env
+            ~cwd
+            ~on_stdout_chunk
+            ~on_stderr_chunk
+            argv)
+      ())
+;;
+
+let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv =
   Docker_spawn_throttle.with_slot (fun () ->
     let rec loop attempts_left =
       let st, out =
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status
+          ?timeout_sec
           ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
+          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
           ~cwd:(Sys.getcwd ())
-          ~timeout_sec
           ~stdin_content
           argv
       in
@@ -192,59 +521,98 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
     loop max_eintr_retries)
 ;;
 
-let run_argv_with_stdin_and_status_split_retry_eintr ~timeout_sec ~stdin_content argv =
-  let max_eintr_retries = 8 in
+let run_argv_with_stdin_and_status_split_retry_eintr
+      ?timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~stdin_content
+      argv
+  =
   Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let st, stdout, stderr =
+    run_split_retry_eintr_with_live_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source = String.concat " " argv in
+        let env = Env_keeper_scrub.filter_environment (Unix.environment ()) in
+        let cwd = Sys.getcwd () in
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
+          ?timeout_sec
           ~actor:`System_sandbox
-          ~raw_source:(String.concat " " argv)
+          ~raw_source
           ~summary:"keeper turn sandbox stdin command"
-          ~env:(Unix.environment ())
-          ~cwd:(Sys.getcwd ())
-          ~timeout_sec
+          ~env
+          ~cwd
+          ?on_stdout_chunk
+          ?on_stderr_chunk
           ~stdin_content
-          argv
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, out
-    in
-    loop max_eintr_retries)
+          argv)
+      ())
 ;;
 
-let run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec stages =
-  let max_eintr_retries = 8 in
+let run_argv_pipeline_with_status_split_retry_eintr
+      ?timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      stages
+  =
   Docker_spawn_throttle.with_slot (fun () ->
-    let rec loop attempts_left =
-      let st, stdout, stderr =
-        Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
-          ~actor:`System_sandbox
-          ~raw_source:
-            (stages
-             |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
-             |> String.concat " | ")
-          ~summary:"keeper turn sandbox pipeline command"
-          ~timeout_sec
+    run_split_retry_eintr_with_live_callbacks
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
+        let raw_source =
           stages
-      in
-      let out = output_for_status ~stdout ~stderr in
-      match st with
-      | Unix.WEXITED 127
-        when attempts_left > 0
-             && String_util.contains_substring_ci out "interrupted system call" ->
-        loop (attempts_left - 1)
-      | _ -> st, stdout, stderr
-    in
-    loop max_eintr_retries)
+          |> List.map (fun stage -> String.concat " " stage.Process_eio.argv)
+          |> String.concat " | "
+        in
+        Masc_exec.Exec_gate.run_argv_pipeline_with_status_split
+          ?timeout_sec
+          ~actor:`System_sandbox
+          ~raw_source
+          ~summary:"keeper turn sandbox pipeline command"
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          stages)
+      ())
 ;;
 
-let start_container (t : t) ~(timeout_sec : float) =
+let container_inspect_timeout_sec () =
+  Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
+;;
+
+let inspect_container_exists ~timeout_sec container_name =
+  let inspect_argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
+  in
+  let inspect_st, inspect_out =
+    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
+  in
+  match inspect_st with
+  | Unix.WEXITED 0 -> Ok ()
+  | _ -> Error inspect_out
+;;
+
+let inspect_container_running ~timeout_sec container_name =
+  let inspect_argv =
+    Keeper_sandbox_runtime.docker_command_argv ()
+    @ [ "inspect"; "--format"; "{{.State.Running}}"; container_name ]
+  in
+  let inspect_st, inspect_out =
+    run_argv_with_status_retry_eintr ~timeout_sec inspect_argv
+  in
+  match inspect_st, String.trim inspect_out with
+  | Unix.WEXITED 0, "true" -> Ok ()
+  | Unix.WEXITED 0, state ->
+    Error
+      (Printf.sprintf
+         "docker_container_not_running: %s"
+         (if state = "" then "<empty>" else state))
+  | _ -> Error inspect_out
+;;
+
+let start_container (t : t) ~timeout_sec =
   let image =
     match t.meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
@@ -263,7 +631,7 @@ let start_container (t : t) ~(timeout_sec : float) =
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers
           ~base_path:t.config.base_path
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_sandbox ())
+
           ()
       in
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec with
@@ -281,6 +649,14 @@ let start_container (t : t) ~(timeout_sec : float) =
        with
        | Error _ as err -> err
        | Ok identity_mounts ->
+       (match
+          Keeper_secret_projection.docker_args_for_keeper
+            ~base_path:t.config.base_path
+            ~keeper_name:t.meta.name
+            ~container_name
+        with
+        | Error err -> Error ("docker_container_start_failed: secret_projection: " ^ err)
+        | Ok secret_projection ->
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -317,31 +693,30 @@ let start_container (t : t) ~(timeout_sec : float) =
            @ Keeper_sandbox_runtime.docker_config_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
-           @ Keeper_sandbox_runtime.docker_room_state_mount_args
+           @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
                ~base_path:t.config.base_path
                ~container_root:t.container_root
+           @ secret_projection.docker_args
            @ identity_mounts
            @ network_args
            @ [ image; "tail"; "-f"; "/dev/null" ]
          in
-         let st, out = run_argv_with_status_retry_eintr ~timeout_sec argv in
+         let st, out =
+           Eio_guard.protect
+             ~finally:secret_projection.cleanup
+             (fun () -> run_argv_with_status_retry_eintr argv)
+         in
          (match st with
-          | Unix.WEXITED 0 ->
-            let inspect_argv =
-              Keeper_sandbox_runtime.docker_command_argv ()
-              @ [ "inspect"; "--format"; "{{.Id}}"; container_name ]
-            in
-            let inspect_st, inspect_out =
-              run_argv_with_status_retry_eintr
-                ~timeout_sec:
-                  (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-                inspect_argv
-            in
-            (match inspect_st with
-             | Unix.WEXITED 0 ->
+         | Unix.WEXITED 0 ->
+            (match
+               inspect_container_exists
+                 ~timeout_sec:(container_inspect_timeout_sec ())
+                 container_name
+             with
+             | Ok () ->
                t.state <- Running { container_name };
                Ok container_name
-             | _ ->
+             | Error inspect_out ->
                (* Inspect failed after a successful `docker run`. Without an
                   explicit cleanup the container would leak: t.state stays
                   Not_started, so [cleanup] would skip `docker rm`. Best-effort
@@ -352,8 +727,7 @@ let start_container (t : t) ~(timeout_sec : float) =
                in
                let _rm_st, _rm_out =
                  run_argv_with_status_retry_eintr
-                   ~timeout_sec:
-                     (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
+                   ~timeout_sec:(container_inspect_timeout_sec ())
                    rm_argv
                in
                Error
@@ -385,23 +759,38 @@ let start_container (t : t) ~(timeout_sec : float) =
               (Printf.sprintf
                  "docker_container_start_failed: %s%s"
                  (Keeper_sandbox_runtime.docker_failure_output_for_log out)
-                 mount_context))))
+                 mount_context)))))
 ;;
 
-let ensure_started (t : t) ~(timeout_sec : float) =
+let ensure_started ?(validate_running = false) (t : t) ~timeout_sec =
   match t.state with
-  | Running { container_name } -> Ok container_name
+  | Running { container_name } ->
+    if not validate_running
+    then Ok container_name
+    else (
+      match
+        inspect_container_running
+          ~timeout_sec:(container_inspect_timeout_sec ())
+          container_name
+      with
+      | Ok () -> Ok container_name
+      | Error _ ->
+        t.state <- Not_started;
+        start_container t ~timeout_sec)
   | Not_started -> start_container t ~timeout_sec
 ;;
 
-let run_exec_with_status_once
+let run_exec_with_status_split_once
+      ?(validate_cached_container = false)
       ?(stdin_content : string option)
+      ?on_stdout_chunk
+      ?on_stderr_chunk
       (t : t)
-      ~(timeout_sec : float)
+      ~timeout_sec
       ~(cwd : string)
       ~(command_argv : string list)
   =
-  match ensure_started t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
     let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
@@ -434,33 +823,98 @@ let run_exec_with_status_once
          | None -> [])
       @ (container_name :: command_argv)
     in
-    let st, out =
-      match stdin_content with
-      | Some content ->
-        run_argv_with_stdin_and_status_retry_eintr
+    let has_output_callback =
+      Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+    in
+    let st, stdout, stderr =
+      match stdin_content, has_output_callback with
+      | Some content, false ->
+        run_argv_with_stdin_and_status_split_retry_eintr
           ~timeout_sec
           ~stdin_content:content
           argv
-      | None -> run_argv_with_status_retry_eintr ~timeout_sec argv
+      | None, false -> run_argv_with_status_split_retry_eintr ~timeout_sec argv
+      | Some content, true ->
+        run_argv_with_stdin_and_status_split_retry_eintr
+          ~timeout_sec
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          ~stdin_content:content
+          argv
+      | None, true ->
+        run_argv_with_status_split_retry_eintr
+          ~timeout_sec
+          ?on_stdout_chunk
+          ?on_stderr_chunk
+          argv
     in
-    Ok (st, out)
+    Ok (st, stdout, stderr)
+;;
+
+let run_exec_with_status_split
+      ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~timeout_sec
+      (t : t)
+      ~(cwd : string)
+      ~(command_argv : string list)
+  =
+  let has_output_callback =
+    Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+  in
+  match
+    run_exec_with_status_split_once
+      ~validate_cached_container:has_output_callback
+      ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      t
+      ~timeout_sec
+      ~cwd
+      ~command_argv
+  with
+  | Error _ as err -> err
+  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
+    when container_missing_error (output_for_status ~stdout ~stderr) ->
+    t.state <- Not_started;
+    (match
+       run_exec_with_status_split_once
+         ?stdin_content
+         ?on_stdout_chunk
+         ?on_stderr_chunk
+         t
+         ~timeout_sec
+         ~cwd
+         ~command_argv
+     with
+     | Ok _ as ok -> ok
+     | Error _ as err -> err)
+  | Ok other -> Ok other
 ;;
 
 let run_exec_with_status
       ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~timeout_sec
       (t : t)
-      ~(timeout_sec : float)
       ~(cwd : string)
       ~(command_argv : string list)
   =
-  match run_exec_with_status_once ?stdin_content t ~timeout_sec ~cwd ~command_argv with
+  match
+    run_exec_with_status_split
+      ?stdin_content
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~timeout_sec
+      t
+      ~cwd
+      ~command_argv
+  with
   | Error _ as err -> err
-  | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), out) when container_missing_error out ->
-    t.state <- Not_started;
-    (match run_exec_with_status_once ?stdin_content t ~timeout_sec ~cwd ~command_argv with
-     | Ok _ as ok -> ok
-     | Error _ as err -> err)
-  | Ok other -> Ok other
+  | Ok (status, stdout, stderr) ->
+    Ok (status, output_for_status ~stdout ~stderr)
 ;;
 
 type exec_pipeline_stage = {
@@ -497,12 +951,15 @@ let docker_exec_pipeline_argv (t : t) ~container_name ~container_cwd command_arg
 ;;
 
 let run_exec_pipeline_with_status_once
+      ?(validate_cached_container = false)
+      ?on_stdout_chunk
+      ?on_stderr_chunk
       (t : t)
-      ~(timeout_sec : float)
+      ~timeout_sec
       ~(cwd : string)
       ~(stages : exec_pipeline_stage list)
   =
-  match ensure_started t ~timeout_sec with
+  match ensure_started ~validate_running:validate_cached_container t ~timeout_sec with
   | Error _ as err -> err
   | Ok container_name ->
     let process_stages =
@@ -511,19 +968,44 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv; env = Some (Unix.environment ()); cwd = Some (Sys.getcwd ()) })
+          { Process_eio.argv; env = Some (Env_keeper_scrub.filter_environment (Unix.environment ())); cwd = Some (Sys.getcwd ()) })
         stages
     in
-    Ok (run_argv_pipeline_with_status_split_retry_eintr ~timeout_sec process_stages)
+    Ok
+      (run_argv_pipeline_with_status_split_retry_eintr
+         ~timeout_sec
+         ?on_stdout_chunk
+         ?on_stderr_chunk
+         process_stages)
 ;;
 
-let run_exec_pipeline_with_status t ~timeout_sec ~cwd ~stages =
-  match run_exec_pipeline_with_status_once t ~timeout_sec ~cwd ~stages with
+let run_exec_pipeline_with_status ?on_stdout_chunk ?on_stderr_chunk ~timeout_sec t ~cwd ~stages =
+  let has_output_callback =
+    Option.is_some on_stdout_chunk || Option.is_some on_stderr_chunk
+  in
+  match
+    run_exec_pipeline_with_status_once
+      ~validate_cached_container:has_output_callback
+      t
+      ~timeout_sec
+      ?on_stdout_chunk
+      ?on_stderr_chunk
+      ~cwd
+      ~stages
+  with
   | Error _ as err -> err
   | Ok ((Unix.WEXITED 126 | Unix.WEXITED 127), stdout, stderr)
     when container_missing_error (output_for_status ~stdout ~stderr) ->
     t.state <- Not_started;
-    (match run_exec_pipeline_with_status_once t ~timeout_sec ~cwd ~stages with
+    (match
+       run_exec_pipeline_with_status_once
+         t
+         ~timeout_sec
+         ?on_stdout_chunk
+         ?on_stderr_chunk
+         ~cwd
+         ~stages
+     with
      | Ok _ as ok -> ok
      | Error _ as err -> err)
   | Ok other -> Ok other
@@ -531,11 +1013,11 @@ let run_exec_pipeline_with_status t ~timeout_sec ~cwd ~stages =
 
 let run_command_with_status
       ?(ok_exit_codes = [ 0 ])
+      ~timeout_sec
       (t : t)
       ~(cwd : string)
       ~(command_argv : string list)
       ~(max_bytes : int)
-      ~(timeout_sec : float)
       ()
   =
   match command_argv with
@@ -554,15 +1036,15 @@ let run_command_with_status
         | _ -> Error (format_docker_exec_error ~head_program ~st ~out)))
 ;;
 
-let run_command ?(ok_exit_codes = [ 0 ]) t ~cwd ~command_argv ~max_bytes ~timeout_sec () =
+let run_command ?(ok_exit_codes = [ 0 ]) ~timeout_sec t ~cwd ~command_argv ~max_bytes () =
   match
-    run_command_with_status ~ok_exit_codes t ~cwd ~command_argv ~max_bytes ~timeout_sec ()
+    run_command_with_status ~ok_exit_codes ~timeout_sec t ~cwd ~command_argv ~max_bytes ()
   with
   | Ok (_st, out) -> Ok out
   | Error _ as err -> err
 ;;
 
-let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec : float) ()
+let run_bash_with_status ~timeout_sec (t : t) ~(cwd : string) ~(cmd : string) ()
   =
   let cmd =
     Keeper_sandbox_runtime.rewrite_host_root_to_container_root
@@ -591,8 +1073,7 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
   | Ok container_name ->
     let argv = docker_exec_argv ~container_name in
     let st, out =
-      run_argv_with_stdin_and_status_split_retry_eintr
-        ~timeout_sec
+      run_argv_with_stdin_and_status_retry_eintr
         ~stdin_content:cmd
         argv
     in
@@ -606,8 +1087,7 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
          | Ok container_name ->
            let argv = docker_exec_argv ~container_name in
            Ok
-             (run_argv_with_stdin_and_status_split_retry_eintr
-                ~timeout_sec
+             (run_argv_with_stdin_and_status_retry_eintr
                 ~stdin_content:cmd
                 argv))
       | _ -> Ok (st, out))
@@ -615,10 +1095,10 @@ let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string) ~(timeout_sec :
 ;;
 
 let write_file_common
+      ~timeout_sec:_
       (t : t)
       ~(host_path : string)
       ~(content : string)
-      ~timeout_sec:_
       ~(append : bool)
       ()
   =
@@ -644,12 +1124,12 @@ let write_file_common
             (if String.equal arg "" then "" else " " ^ arg)))
 ;;
 
-let overwrite_file t ~host_path ~content ~timeout_sec () =
-  write_file_common t ~host_path ~content ~timeout_sec ~append:false ()
+let overwrite_file ~timeout_sec t ~host_path ~content () =
+  write_file_common ~timeout_sec t ~host_path ~content ~append:false ()
 ;;
 
-let append_file t ~host_path ~content ~timeout_sec () =
-  write_file_common t ~host_path ~content ~timeout_sec ~append:true ()
+let append_file ~timeout_sec t ~host_path ~content () =
+  write_file_common ~timeout_sec t ~host_path ~content ~append:true ()
 ;;
 
 let cleanup (t : t) =
@@ -657,13 +1137,17 @@ let cleanup (t : t) =
   | Not_started -> ()
   | Running { container_name } ->
     t.state <- Not_started;
+    let rm_timeout =
+      Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ()
+    in
     let rm_argv =
       Keeper_sandbox_runtime.docker_command_argv () @ [ "rm"; "-f"; container_name ]
     in
-    let st, out =
-      run_argv_with_status_retry_eintr
-        ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-        rm_argv
+    let status_label st =
+      match st with
+      | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
+      | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
+      | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n
     in
     let still_exists () =
       (* Use `docker ps -a` so a stopped-but-still-existing container is not
@@ -680,10 +1164,7 @@ let cleanup (t : t) =
         @ [ "ps"; "-a"; "-q"; "--filter"; "name=" ^ container_name ]
       in
       let check_st, check_out =
-        run_argv_with_status_retry_eintr
-          ~timeout_sec:
-            (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Cleanup_rm ())
-          check_argv
+        run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout check_argv
       in
       match check_st with
       | Unix.WEXITED 0 -> String.trim check_out <> ""
@@ -693,39 +1174,56 @@ let cleanup (t : t) =
            as unknown"
           t.meta.name
           container_name
-          (match check_st with
-           | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
-           | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
-           | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
+          (status_label check_st)
           (Exec_policy.truncate_for_log check_out);
         false
     in
-    (* Probe existence once and reuse across the success/failure branches —
-       each [still_exists] call runs [docker ps -a], which adds latency per
-       cleanup turn. *)
-    let exists_after = still_exists () in
+    let st, out =
+      run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+    in
+    (* First attempt succeeded and container is gone — done. *)
     (match st with
-     | Unix.WEXITED 0 when not exists_after -> ()
+     | Unix.WEXITED 0 when not (still_exists ()) -> ()
      | _ ->
-       if exists_after
-       then (
-         Log.Keeper.warn
-           "%s: docker rm -f %s failed and container still exists (status=%s, out=%s)"
-           t.meta.name
-           container_name
-           (match st with
-            | Unix.WEXITED n -> Printf.sprintf "exited(%d)" n
-            | Unix.WSIGNALED n -> Printf.sprintf "signaled(%d)" n
-            | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
-           out;
-         Prometheus.inc_counter
-           Keeper_metrics.(to_string TurnCleanupFailures)
-           ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
-           ())
-       else
-         Log.Keeper.info
-           "%s: docker rm -f %s reported failure but container is gone"
-           t.meta.name
-           container_name);
-    ()
+       (* First attempt failed or container still exists.
+          Retry once — transient daemon issues can resolve within seconds,
+          and a single retry catches the common "docker rm raced with
+          container exit" case without unbounded retries. *)
+       let final_st, final_out =
+         match st with
+         | Unix.WEXITED 0 ->
+           (* rm reported success but container still exists — unlikely
+              but re-probe after a brief yield for daemon state to
+              settle. *)
+           st, out
+         | _ ->
+           Log.Keeper.info
+             "%s: docker rm -f %s failed (status=%s), retrying once"
+             t.meta.name
+             container_name
+             (status_label st);
+           run_argv_with_status_retry_eintr ~timeout_sec:rm_timeout rm_argv
+       in
+       let exists_after_final = still_exists () in
+       (match final_st with
+        | Unix.WEXITED 0 when not exists_after_final -> ()
+        | _ ->
+          if exists_after_final
+          then (
+            Log.Keeper.warn
+              "%s: docker rm -f %s failed after retry and container still exists \
+               (status=%s, out=%s)"
+              t.meta.name
+              container_name
+              (status_label final_st)
+              (Exec_policy.truncate_for_log final_out);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string TurnCleanupFailures)
+              ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
+              ())
+          else
+            Log.Keeper.info
+              "%s: docker rm -f %s reported failure but container is gone"
+              t.meta.name
+              container_name))
 ;;

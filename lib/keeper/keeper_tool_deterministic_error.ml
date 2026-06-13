@@ -10,9 +10,10 @@ type deterministic_reason =
   | Policy_blocked
   | Write_operation_gated
   | Completion_contract_violation
-  | Structured_tool_required
+  | Structured_tool_payload
   | Workflow_rejection_blocked
   | Git_precondition_failed
+  | Path_not_found
 
 type classification_source =
   | Deterministic_retry_marker
@@ -43,9 +44,10 @@ let to_telemetry_key = function
   | Write_operation_gated -> "deterministic_error_write_operation_gated"
   | Completion_contract_violation ->
     "deterministic_error_completion_contract_violation"
-  | Structured_tool_required -> "deterministic_error_structured_tool_required"
+  | Structured_tool_payload -> "deterministic_error_structured_tool_payload"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
   | Git_precondition_failed -> "deterministic_error_git_precondition_failed"
+  | Path_not_found -> "deterministic_error_path_not_found"
 ;;
 
 let to_string = function
@@ -59,50 +61,29 @@ let to_string = function
     "destructive operation blocked (force push / rm -rf / push to main)"
   | Path_outside_sandbox -> "path argument outside keeper-allowed sandbox roots"
   | Cwd_not_directory -> "cwd argument is not a directory"
-  | Policy_blocked -> "governance / preset policy rejected the call"
+  | Policy_blocked -> "governance / candidate policy rejected the call"
   | Write_operation_gated ->
     "write-capable Execute is required; retrying the same arguments cannot succeed"
   | Completion_contract_violation ->
-    "keeper completion contract violated (e.g. require_tool_use)"
-  | Structured_tool_required ->
+    "keeper completion contract violated"
+  | Structured_tool_payload ->
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "workflow rejection explicitly marked deterministic and unrecoverable"
   | Git_precondition_failed ->
     "git command failed a process precondition; inspect repository/ref state or change the command"
+  | Path_not_found ->
+    "a typed Execute path argument does not exist; probe the parent directory before retrying"
 ;;
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
 
-let assoc_field_opt key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-;;
-
-let assoc_string_opt key json =
-  match assoc_field_opt key json with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
-
-let assoc_int_opt key json =
-  match assoc_field_opt key json with
-  | Some (`Int value) -> Some value
-  | _ -> None
-;;
-
-let assoc_bool_opt key json =
-  match assoc_field_opt key json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
-
 let detail_assoc_field_opt key json =
-  match assoc_field_opt key json with
+  match Json_util.assoc_member_opt key json with
   | Some _ as value -> value
   | None ->
-    (match assoc_field_opt "detail" json with
-     | Some detail -> assoc_field_opt key detail
+    (match Json_util.assoc_member_opt "detail" json with
+     | Some detail -> Json_util.assoc_member_opt key detail
      | None -> None)
 ;;
 
@@ -110,11 +91,11 @@ let detail_assoc_field_opt key json =
    to a nested ["detail"] object. Mirrors the lookup pattern used in
    [keeper_tools_oas.workflow_rejection_info_of_raw]. *)
 let error_or_detail_string key json =
-  match assoc_string_opt key json with
+  match Json_util.assoc_string_opt key json with
   | Some _ as v -> v
   | None ->
-    (match assoc_field_opt "detail" json with
-     | Some detail -> assoc_string_opt key detail
+    (match Json_util.assoc_member_opt "detail" json with
+     | Some detail -> Json_util.assoc_string_opt key detail
      | None -> None)
 ;;
 
@@ -128,9 +109,10 @@ let reason_to_wire = function
   | Policy_blocked -> "policy_blocked"
   | Write_operation_gated -> "write_operation_gated"
   | Completion_contract_violation -> "completion_contract_violation"
-  | Structured_tool_required -> "structured_tool_required"
+  | Structured_tool_payload -> "structured_tool_payload"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
   | Git_precondition_failed -> "git_precondition_failed"
+  | Path_not_found -> "path_not_found"
 ;;
 
 let reason_of_wire = function
@@ -143,11 +125,10 @@ let reason_of_wire = function
   | "policy_blocked" -> Some Policy_blocked
   | "write_operation_gated" -> Some Write_operation_gated
   | "completion_contract_violation" -> Some Completion_contract_violation
-  | "structured_tool_required" -> Some Structured_tool_required
-  | legacy when String.equal legacy ("keeper" ^ "_" ^ "shell" ^ "_" ^ "op" ^ "_" ^ "required") ->
-    Some Structured_tool_required
+  | "structured_tool_payload" -> Some Structured_tool_payload
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
   | "git_precondition_failed" -> Some Git_precondition_failed
+  | "path_not_found" -> Some Path_not_found
   | _ -> None
 ;;
 
@@ -160,7 +141,7 @@ let deterministic_retry_fields reason =
   ]
 ;;
 
-(* Path-prefixed sentinel string (no substring search): path checks
+(* Path-prefixed marker string (no substring search): path checks
    compare the *full* value of the [error] field — or, when the
    payload nests the reason in [detail.path_check.reason], that field
    — but never accept a partial match. *)
@@ -176,7 +157,7 @@ let path_check_reason_of_explicit = function
 let classify_deterministic_retry json =
   match detail_assoc_field_opt "deterministic_retry" json with
   | Some (`Assoc _ as retry) ->
-    (match assoc_bool_opt "retry_same_args" retry, assoc_string_opt "reason" retry with
+    (match Json_util.assoc_bool_opt "retry_same_args" retry, Json_util.assoc_string_opt "reason" retry with
      | Some false, Some reason -> reason_of_wire reason
      | (Some true | None), _
      | _, None ->
@@ -206,9 +187,9 @@ let classify_path_check json =
      [detail.path_check.reason]. Both are checked against a closed
      allow-list (no substring scanning). *)
   let from_path_check_field =
-    match assoc_field_opt "path_check" json with
+    match Json_util.assoc_member_opt "path_check" json with
     | Some pc ->
-      (match assoc_string_opt "reason" pc with
+      (match Json_util.assoc_string_opt "reason" pc with
        | Some v -> path_check_reason_of_explicit v
        | None -> None)
     | None -> None
@@ -228,10 +209,9 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
      dedicated counter in [Keeper_tools_oas]). Once observed, it must
      not fall through to [error] string fallbacks; only explicit
      deterministic workflow markers may short-circuit retry. Path
-     checks have their own typed surface. Generic [error] codes and
-     retryability-only fields are observational metadata, not a
-     deterministic reason. Git process failures must be marked by
-     their typed producer instead of re-parsed from stderr here. *)
+     checks have their own typed surface. Generic [error] codes,
+     retryability-only fields, and git process failures are
+     observational metadata, not a deterministic reason. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->

@@ -17,7 +17,7 @@ implementation_prs: []
 | Depends on | RFC-0047 (oas-adapter-decomposition, merged), RFC-0048 PR-1/PR-2 (helper + wrapper extraction, merged) |
 | Implementation scope | `lib/keeper/keeper_turn_driver.ml` (1146 LOC) |
 
-본 RFC는 `keeper_turn_driver.ml` 내 `run_named` 함수(현재 1109 LOC)의 내부 closure 3종 (`try_provider`, `try_cascade`, `cycle_loop`)을 분해하는 **설계 문서**다. 실제 구현 PR은 본 RFC 승인 후 별도 발행한다.
+본 RFC는 `keeper_turn_driver.ml` 내 `run_named` 함수(현재 1109 LOC)의 내부 closure 3종 (`try_provider`, `try_runtime`, `cycle_loop`)을 분해하는 **설계 문서**다. 실제 구현 PR은 본 RFC 승인 후 별도 발행한다.
 
 ---
 
@@ -42,7 +42,7 @@ implementation_prs: []
 | Header + module includes | 1–33 | 33 | 2.9% |
 | `run_named` 시그니처 + setup | 34–267 | 234 | 20.4% |
 | `run_named` 내부 closure `try_provider` | 268–515 | 248 | 21.6% |
-| `run_named` 내부 closure `try_cascade` | 516–1095 | 580 | 50.6% |
+| `run_named` 내부 closure `try_runtime` | 516–1095 | 580 | 50.6% |
 | `run_named` 내부 closure `cycle_loop` | 1096–1142 | 47 | 4.1% |
 | `For_testing` 모듈 | 1143–1146 | 4 | 0.3% |
 
@@ -53,7 +53,7 @@ implementation_prs: []
 RFC-0047 §4.1과 RFC-0048 본문이 명시한 **A/B/C 의미 결합도**:
 
 - **A (Agent SDK invocation)**: 단일 provider에 대한 LLM 호출, response 파싱, error 분류 — `try_provider` 본체
-- **B (Cascade strategy)**: provider 후보군 순회, retry 정책, exhaustion 판정 — `try_cascade` 본체
+- **B (Runtime strategy)**: provider 후보군 순회, retry 정책, exhaustion 판정 — `try_runtime` 본체
 - **C (Keeper bookkeeping)**: turn 카운팅, idle 감지, checkpoint 발행, event broadcast — `run_named` setup + `cycle_loop`
 
 세 관심사가 *동일 함수 body* 안에서 변수 이름 (~50+) 공유로만 연결되어 있다. 결과:
@@ -61,12 +61,12 @@ RFC-0047 §4.1과 RFC-0048 본문이 명시한 **A/B/C 의미 결합도**:
 1. **변경 영향 범위 추정 불가** — A 수정이 B/C로 leak할지 *컴파일러가 잡지 못함* (closure 변수는 type-checked되나 *의도적 분리* 강제 불가).
 2. **단위 테스트 불가** — A만 stub해서 B 로직만 테스트하려면 1109 LOC 전체를 caller-context로 끌고 와야 함.
 3. **Trace/log span boundary 부정확** — 현재 OpenTelemetry span은 `run_named` 단일 boundary. A/B 별 latency 분리 측정 어려움.
-4. **RFC-0029 (multi-cascade fanout) 차단** — fanout은 B 레이어 변경. B가 단일 closure에 박혀 있어 fanout site를 격리해 도입할 수 없음.
+4. **RFC-0029 (multi-runtime fanout) 차단** — fanout은 B 레이어 변경. B가 단일 closure에 박혀 있어 fanout site를 격리해 도입할 수 없음.
 
 ### 1.4 본 RFC가 *풀지 않는* 문제
 
 - **`run_named` 시그니처 50+ 인자 자체의 인자 그룹화** — 별도 RFC 후보. 본 RFC는 호출 시그니처를 *불변 유지*.
-- **Cascade strategy의 token bucket / deadline scheduler 도입** — RFC-0029 영역.
+- **Runtime strategy의 token bucket / deadline scheduler 도입** — RFC-0029 영역.
 - **Agent SDK 자체의 streaming protocol 변경** — agent_sdk repo 영역.
 - **`run_named` 외 다른 OAS-prefix 잔재 정리** — RFC-0047에서 완료.
 
@@ -80,22 +80,22 @@ RFC-0047 §4.1과 RFC-0048 본문이 명시한 **A/B/C 의미 결합도**:
 
 ```ocaml
 (* before *)
-let run_named ~cascade_name (* ... ~50 args ... *) =
+let run_named ~runtime_id (* ... ~50 args ... *) =
   let setup_state = ... in
   let try_provider ?resume_checkpoint provider_cfg =
     (* uses setup_state.foo, captured_arg_bar, ... *)
   in
-  let rec try_cascade attempt_idx providers =
+  let rec try_runtime attempt_idx providers =
     (* uses try_provider, setup_state, ... *)
   in
   let rec cycle_loop n =
-    (* uses try_cascade, ... *)
+    (* uses try_runtime, ... *)
   in
   cycle_loop 0
 
 (* after *)
 type try_provider_ctx = {
-  cascade_name : string;
+  runtime_id : string;
   guardrails : ...;
   hooks : ...;
   on_event : ...;
@@ -109,7 +109,7 @@ let try_provider
     (provider_cfg : Llm_provider.Provider_config.t)
   : ... = ...
 
-(* 같은 패턴으로 try_cascade, cycle_loop *)
+(* 같은 패턴으로 try_runtime, cycle_loop *)
 ```
 
 **장점:**
@@ -119,9 +119,9 @@ let try_provider
 
 **단점:**
 - record field 누락/오타 시 *런타임* 발견 (record는 nominal이라 컴파일러가 잡지만, *어떤 변수를 ctx에 넣을지* 결정은 사람 판단).
-- 기존 50+ 인자 중 일부는 `try_provider`에서만 쓰이고, `try_cascade`에서만 쓰이고, 양쪽에서 쓰임. 분류가 *추측이 아닌 측정*이어야 함.
+- 기존 50+ 인자 중 일부는 `try_provider`에서만 쓰이고, `try_runtime`에서만 쓰이고, 양쪽에서 쓰임. 분류가 *추측이 아닌 측정*이어야 함.
 - 수정 LOC 큼 (record type 정의 + 3 함수 시그니처 변경 + body의 모든 변수 참조에 `ctx.` prefix 추가).
-- `try_cascade` body 580 LOC에 분포된 변수 참조가 ~수백 곳, 검수 부담 큼.
+- `try_runtime` body 580 LOC에 분포된 변수 참조가 ~수백 곳, 검수 부담 큼.
 
 **위험도:** 🟡 medium (mechanical하지만 분량 크고 silent type-correct 실수 가능)
 
@@ -131,7 +131,7 @@ let try_provider
 
 ```ocaml
 module type RUN_NAMED_CTX = sig
-  val cascade_name : string
+  val runtime_id : string
   val guardrails : ...
   val on_event : ...
   (* ... *)
@@ -148,7 +148,7 @@ end
 
 **단점:**
 - OCaml functor는 run-time application 비용 (각 `run_named` 호출마다 functor 인스턴스화).
-- masc_mcp 코드베이스에 functor 사용 사례 많지 않음 — stylistic mismatch.
+- masc 코드베이스에 functor 사용 사례 많지 않음 — stylistic mismatch.
 - record/struct 옵션 A와 표현력 차이 거의 없는데 ceremony만 늘어남.
 
 **위험도:** 🟡 medium-high (codebase convention과 어긋남)
@@ -161,7 +161,7 @@ end
 type run_named_state =
   | Setup of setup_args
   | Try_provider of { ctx; provider_cfg; checkpoint }
-  | Try_cascade of { ctx; attempt_idx; providers }
+  | Try_runtime of { ctx; attempt_idx; providers }
   | Cycle_loop of { ctx; turn_n; ... }
   | Done of run_result
 
@@ -186,7 +186,7 @@ let step : run_named_state -> run_named_state = ...
 `run_named` 본체 분해 안 함. 대신:
 
 - A/B/C 영역 위에 `(* === A: provider invocation === *)` 주석 헤더 추가.
-- `try_provider`/`try_cascade`/`cycle_loop` 위에 *captured variables* 주석 인벤토리 (수동) 추가.
+- `try_provider`/`try_runtime`/`cycle_loop` 위에 *captured variables* 주석 인벤토리 (수동) 추가.
 - CI lint가 영역 헤더 누락/이동 감지.
 
 **장점:**
@@ -210,8 +210,8 @@ let step : run_named_state -> run_named_state = ...
 
 | PR | 작업 | 예상 LOC delta | 검증 |
 |---|---|---|---|
-| **PR-3a** | `try_provider`만 top-level 함수화 + `try_provider_ctx` record 도입. `try_cascade`/`cycle_loop`는 기존 closure 유지 (단, `try_provider` 호출만 외부 함수 이름으로 전환) | -200~-280, 신규 module +~350 | `dune build` + 기존 `test_keeper_turn_driver_*` 전부 pass |
-| **PR-3b** | `try_cascade`를 top-level 함수화. `cycle_loop`는 closure 유지 | -500~-580, 신규 module +~650 | 동일 + 새로운 unit test for try_cascade exhaustion path |
+| **PR-3a** | `try_provider`만 top-level 함수화 + `try_provider_ctx` record 도입. `try_runtime`/`cycle_loop`는 기존 closure 유지 (단, `try_provider` 호출만 외부 함수 이름으로 전환) | -200~-280, 신규 module +~350 | `dune build` + 기존 `test_keeper_turn_driver_*` 전부 pass |
+| **PR-3b** | `try_runtime`를 top-level 함수화. `cycle_loop`는 closure 유지 | -500~-580, 신규 module +~650 | 동일 + 새로운 unit test for try_runtime exhaustion path |
 | **PR-3c** | `cycle_loop`를 top-level 함수화. `run_named`는 setup + 3 함수 호출만 남김 | -40~-50, 신규 module +~60 | 동일 + idle-detection unit test |
 | **PR-3d** (조건부) | `keeper_turn_driver.ml`을 facade로 축소 (200 LOC 미만), 새 모듈 `keeper_turn_runner.ml` 등으로 분리 | 분배 변경만 | godfile lint 재기동 |
 
@@ -224,7 +224,7 @@ let step : run_named_state -> run_named_state = ...
 1. `lib/keeper/keeper_turn_driver.ml` L268–515 (try_provider body) 안에서 *closure-captured* 변수를 grep으로 1차 enumerate.
 2. 각 변수에 대해 다음 4분류:
    - **try_provider only** → ctx record field
-   - **try_cascade only** → 분리 ctx record field (PR-3b ctx)
+   - **try_runtime only** → 분리 ctx record field (PR-3b ctx)
    - **양쪽 사용** → 공통 ctx record field
    - **cycle_loop only** → PR-3c ctx
 3. 측정 결과를 PR-3a body에 *명시 인용* (변수명 + line 번호).
@@ -234,7 +234,7 @@ let step : run_named_state -> run_named_state = ...
 
 ### 3.3 비목표 명시
 
-- 본 RFC PR 시리즈는 *behavioral equivalence* 만 목표. 새 기능 추가 / cascade strategy 정책 변경 / token bucket 도입은 *전부 out of scope*.
+- 본 RFC PR 시리즈는 *behavioral equivalence* 만 목표. 새 기능 추가 / runtime strategy 정책 변경 / token bucket 도입은 *전부 out of scope*.
 - 단일 PR에서 기능 변경 + 구조 변경을 섞지 않는다. 회귀 발생 시 원인 분리 비용 폭증을 피한다 (3-Try Rule §"같은 영역 fix 2회 = 근본 수정" 적용 영역).
 
 ---
@@ -257,8 +257,8 @@ rg -l "Keeper_turn_driver\." test/ | sort -u
 |---|---|---|
 | PR-3a | `test_try_provider_provider_rejection_classification` | A 영역의 error 분류 격리 검증 |
 | PR-3a | `test_try_provider_per_provider_timeout` | A 영역의 timeout 경로 격리 검증 |
-| PR-3b | `test_try_cascade_exhaustion_path` | B 영역의 exhaustion 종료 격리 검증 |
-| PR-3b | `test_try_cascade_provider_filter_fanout_skip` | B 영역의 filter 분기 검증 |
+| PR-3b | `test_try_runtime_exhaustion_path` | B 영역의 exhaustion 종료 격리 검증 |
+| PR-3b | `test_try_runtime_provider_filter_fanout_skip` | B 영역의 filter 분기 검증 |
 | PR-3c | `test_cycle_loop_idle_termination` | C 영역의 max_idle_turns 종료 검증 |
 
 ### 4.3 Trace boundary 회귀 검사
@@ -302,10 +302,10 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 |---|---|
 | 옵션 C (state machine defunctionalization) | rewrite scope, 별 RFC 격상 필요 |
 | `run_named` 시그니처 50+ 인자 그룹화 | 본 RFC scope 밖, 별 RFC 후보 |
-| Cascade strategy 정책 변경 (token bucket / deadline) | RFC-0029 영역 |
+| Runtime strategy 정책 변경 (token bucket / deadline) | RFC-0029 영역 |
 | Agent SDK invocation surface 변경 | agent_sdk repo 영역 |
 | Captured-var-as-comment-inventory (옵션 D) 단독 적용 | workaround 거부 기준 §1 (telemetry-as-fix). 분리 회피 |
-| `try_provider`/`try_cascade`를 *동일 module* 안 sibling top-level fn으로만 두고 ctx 없이 진행 | OCaml은 top-level fn에서 전 closure 변수를 자동 캡처하지 않음. ctx record 필요 |
+| `try_provider`/`try_runtime`를 *동일 module* 안 sibling top-level fn으로만 두고 ctx 없이 진행 | OCaml은 top-level fn에서 전 closure 변수를 자동 캡처하지 않음. ctx record 필요 |
 
 ---
 
@@ -313,7 +313,7 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 
 본 RFC 머지 후 PR-3a 시작 전:
 
-1. [ ] 사용자 명시 승인 (`human-approved-ready` 또는 직접 합의 문구).
+1. [ ] 사용자 명시 승인 또는 직접 합의 문구.
 2. [ ] §6 open question 1 (ctx 명명) 결정.
 3. [ ] 새 worktree (`rfc-0051-pr-3a-try-provider`).
 4. [ ] §3.2 사전 측정 결과를 `.tmp/rfc-0051-pr-3a-capture-inventory.md`에 기록 후 PR-3a body에서 인용.
@@ -328,12 +328,12 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
   - `lib/keeper/keeper_turn_driver_helpers.ml` (RFC-0048 PR-1, #14319)
   - `lib/keeper/keeper_turn_driver_wrappers.ml` (RFC-0048 PR-2, #14324)
 - **연관 RFC**:
-  - RFC-0029 multi-cascade fanout (B 레이어 변경 후속작)
+  - RFC-0029 multi-runtime fanout (B 레이어 변경 후속작)
   - RFC-0036 multi-keeper docker orchestration (cancel 경로 race 가능성)
   - RFC-0046 keeper-detail FSM hub SSOT (trace boundary 영향)
 - **메모리 (운영 규칙)**:
   - `feedback_audit_matrix_decays_with_main_drift` — 사전 측정 fresh-grep 의무
-  - `feedback_masc_mcp_admin_merge_fast_track` — Draft 유지 + 사용자 라벨 대기
+  - `feedback_masc_admin_merge_fast_track` — Draft 유지 + 사용자 라벨 대기
   - `feedback_check_open_prs_before_fixing_pasted_build_error` — PR 시작 전 active PR sweep
   - `feedback_split_brain_rfc_0022_pr_2_pr3_overlap` — 동일 영역 동시 PR 차단
   - 워크어라운드 거부 기준 §1 (AGENT-LLM-A.md `software-development.md`) — 옵션 D 단독 채택 거부 근거

@@ -1,0 +1,44 @@
+(include_subdirs no)
+
+;; Board MCP adapter.
+;;
+;; This is intentionally not part of lib/tool/:
+;; the neutral Tool substrate must not depend on Board. It is also intentionally
+;; not part of lib/board/: the Board domain should not depend on MCP schema /
+;; dispatch registration. This adapter is the composition boundary that knows
+;; both sides.
+
+(library
+ (name board_tool_adapter)
+ (public_name masc.board_tool_adapter)
+ (wrapped false)
+ (private_modules
+  board_tool_cache
+  board_tool_curation
+  board_tool_handlers
+  board_tool_post
+  board_tool_sub_board)
+ (modules
+  board_tool
+  board_tool_cache
+  board_tool_curation
+  board_tool_dispatch
+  board_tool_format
+  board_tool_handlers
+  board_tool_post
+  board_tool_registry
+  board_tool_schemas
+  board_tool_sub_board)
+ (libraries
+  eio
+  re
+  time_compat
+  yojson
+  masc.config
+  masc.masc_core
+  masc.masc_log
+  masc.board_handlers
+  masc.masc_tool_dispatch
+  masc.masc_tool_surface
+  masc.tool_types
+  masc_types))

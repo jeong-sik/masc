@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard IDE Boundary Report - 2026-06-07</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --panel-2: #f0f3f6;
+      --ink: #20242a;
+      --muted: #5f6875;
+      --border: #d9dee5;
+      --accent: #1768ac;
+      --ok: #177245;
+      --warn: #9a5b00;
+      --bad: #a43232;
+      --code: #111827;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(1180px, calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    header {
+      padding: 28px 0 18px;
+      border-bottom: 2px solid var(--ink);
+      margin-bottom: 24px;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.2;
+    }
+
+    h1 {
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-size: 22px;
+    }
+
+    h3 {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+
+    p { margin: 10px 0; }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    code {
+      color: var(--code);
+      background: #eef1f4;
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+
+    pre {
+      margin: 12px 0;
+      padding: 14px 16px;
+      background: #101820;
+      color: #eef5ff;
+      border-radius: 6px;
+      overflow-x: auto;
+      line-height: 1.45;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 22px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: var(--panel-2);
+      font-weight: 700;
+      color: #1d2733;
+    }
+
+    ul {
+      margin: 8px 0 12px;
+      padding-left: 22px;
+    }
+
+    li { margin: 5px 0; }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0 24px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      padding: 14px;
+      min-height: 120px;
+    }
+
+    .card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .severity {
+      display: inline-block;
+      min-width: 38px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #fff;
+      text-align: center;
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .p0 { background: var(--bad); }
+    .p1 { background: var(--warn); }
+    .p2 { background: var(--accent); }
+    .ok { background: var(--ok); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .flow-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 110px;
+    }
+
+    .flow-box b {
+      display: block;
+      margin-bottom: 6px;
+      color: #14212f;
+    }
+
+    .note {
+      background: #fff8e8;
+      border: 1px solid #e9c983;
+      border-left: 4px solid var(--warn);
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+
+    .bad-note {
+      background: #fff1f1;
+      border-color: #e6b5b5;
+      border-left-color: var(--bad);
+    }
+
+    .good-note {
+      background: #eefaf2;
+      border-color: #b8dcc5;
+      border-left-color: var(--ok);
+    }
+
+    .small {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    @media (max-width: 900px) {
+      main { width: min(100vw - 24px, 1180px); padding-top: 16px; }
+      .summary, .flow { grid-template-columns: 1fr; }
+      table { font-size: 12px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Dashboard IDE Boundary Report</h1>
+    <p>Tool, Keeper, IDE, Sandbox, Board, Task, Goal, Turn 흐름과 결합도 분석</p>
+    <div class="meta">
+      <span class="pill">작성일: 2026-06-07 KST</span>
+      <span class="pill">기준: <code>origin/main</code> @ <code>14806fe3de</code></span>
+      <span class="pill">범위: <code>dashboard/src/components/ide</code>, <code>lib/ide</code>, <code>lib/keeper</code>, <code>lib/server</code></span>
+      <span class="pill">산출물: 정적 HTML 감사 보고서</span>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. 핵심 결론</h2>
+    <div class="summary">
+      <div class="card">
+        <strong>IDE는 독립 모듈이 아니라 cross-domain facade다</strong>
+        <p><code>ide-shell.ts</code>가 route, Keeper, workspace, Goal/Task, Board, PR/Git/Log/Telemetry, LSP, terminal drawer를 한 곳에서 조합한다.</p>
+      </div>
+      <div class="card">
+        <strong>데이터 plane이 7갈래다</strong>
+        <p>dashboard projection, workspace REST, <code>.masc-ide</code> JSONL, activity graph, board/decision fetch, presence SSE, LSP WS가 frontend에서 join된다.</p>
+      </div>
+      <div class="card">
+        <strong>구현 누락과 schema drift가 있다</strong>
+        <p><code>.masc-ide/tool_events</code> read API, execute-output backend, presence cursor payload가 현재 코드 기준으로 비어 있거나 불일치한다.</p>
+      </div>
+    </div>
+
+    <div class="bad-note">
+      <strong>판정:</strong> IDE boundary는 “컴포넌트가 도메인 상태를 읽는 정도”를 넘어섰다. 현재 구조는
+      <code>routeLinksForContext</code>, <code>IdeShell</code>, <code>IdeActivityPanel</code>, <code>IdeKeeperWorkPanel</code>이 domain adapter 역할까지 같이 수행한다.
+      개선은 UI 리팩토링보다 먼저 <em>context contract / event contract / presence contract</em>를 분리하는 순서가 맞다.
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 전체 흐름도</h2>
+    <div class="flow">
+      <div class="flow-box">
+        <b>Runtime Producers</b>
+        <code>Keeper_agent_run</code><br>
+        <code>Keeper_run_tools_hooks</code><br>
+        <code>Keeper_tool_execute_runtime</code><br>
+        <code>Activity_graph.emit</code>
+      </div>
+      <div class="flow-box">
+        <b>Storage / Projection</b>
+        <code>.masc-ide/*.jsonl</code><br>
+        <code>.masc/activity-events</code><br>
+        dashboard execution/planning/memory snapshots<br>
+        workspace filesystem/git
+      </div>
+      <div class="flow-box">
+        <b>HTTP / WS / SSE</b>
+        <code>/api/v1/ide/*</code><br>
+        <code>/api/v1/workspace/*</code><br>
+        <code>/api/v1/activity/events</code><br>
+        dashboard WS surfaces<br>
+        <code>/api/v1/ide/lsp</code>
+      </div>
+      <div class="flow-box">
+        <b>IDE Consumers</b>
+        <code>IdeShell</code><br>
+        <code>IdeDataWorkspaceStore</code><br>
+        <code>IdeContextLens</code><br>
+        <code>IdeActivityPanel</code><br>
+        <code>IdeKeeperWorkPanel</code>
+      </div>
+    </div>
+
+    <pre>Route hash / global dashboard state
+  -> IdeShell route parser
+  -> focusIdeContextAnchor(activeIdeFile + ideContextFocus)
+  -> IdeDataWorkspaceStore
+  -> workspace tree/file + git blame/diff + IDE annotations/regions
+  -> Editor / Context Lens / Explorer / Toolbar
+
+Keeper turn
+  -> Keeper_agent_run emits turn_event to .masc-ide
+  -> Tool hook emits tool_event and PR event to .masc-ide
+  -> Activity_graph emits separate activity events
+  -> IDE consumes activity events, but not yet .masc-ide tool/turn/pr events
+
+Tool Execute
+  -> typed Shell IR
+  -> sandbox/local dispatch
+  -> success JSON includes command_descriptor
+  -> Ide_bridge parses descriptor
+  -> PR/Git semantics are persisted as IDE bridge events
+  -> frontend route links infer Goal/Task/Git/Telemetry from task/cursor/context
+</pre>
+  </section>
+
+  <section>
+    <h2>3. Domain 흐름 매트릭스</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Domain</th>
+          <th>주요 SSOT / 생산자</th>
+          <th>API / 저장소</th>
+          <th>IDE 소비자</th>
+          <th>결합 상태</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Tool</td>
+          <td><code>Keeper_run_tools_hooks.assemble_hooks</code>의 <code>on_tool_executed</code>, <code>Keeper_tool_execute_runtime</code> typed Shell IR 실행</td>
+          <td><code>.masc-ide/tool_events.jsonl</code>, <code>.masc-ide/pr_events.jsonl</code>, tool result JSON의 <code>command_descriptor</code></td>
+          <td><code>IdeActivityPanel</code>, <code>ExecuteOutputDrawer</code>, <code>IdeContextLens</code>가 activity/context/task/cursor를 조합</td>
+          <td><span class="severity p0">P0</span> producer는 있으나 tool/turn/pr IDE events를 읽는 REST/consumer가 보이지 않는다.</td>
+        </tr>
+        <tr>
+          <td>Keeper</td>
+          <td>dashboard execution snapshot, Keeper registry/meta, active keeper signal</td>
+          <td>dashboard WS <code>execution</code>, <code>/api/v1/agents</code>, <code>/api/v1/status</code>, <code>/api/v1/ide/presence</code></td>
+          <td><code>IdeShell</code>, <code>IdeKeeperWorkPanel</code>, <code>IdeInterject</code>, <code>InspectorKeeperBDI</code>, presence strip</td>
+          <td><span class="severity p1">P1</span> route keeper가 없으면 global active keeper 또는 첫 keeper로 fallback되어 IDE context가 암묵적으로 바뀐다.</td>
+        </tr>
+        <tr>
+          <td>IDE</td>
+          <td><code>Ide_annotations</code>, <code>Ide_region_tracker</code>, <code>Ide_bridge</code></td>
+          <td><code>.masc-ide/annotations.jsonl</code>, <code>regions.jsonl</code>, <code>tool_events.jsonl</code>, <code>turn_events.jsonl</code>, <code>pr_events.jsonl</code></td>
+          <td><code>IdeDataWorkspaceStore</code>, <code>IdeEditor</code>, <code>IdeContextLens</code>, <code>IdeMemoryPanel</code></td>
+          <td><span class="severity p1">P1</span> annotations/regions는 REST가 있으나 bridge events는 read surface가 빠져 있다.</td>
+        </tr>
+        <tr>
+          <td>Sandbox</td>
+          <td><code>Keeper_sandbox_runner.effective_sandbox_profile</code>, Docker/local dispatch, workspace resolver</td>
+          <td><code>/api/v1/workspace/tree</code>, <code>/api/v1/workspace/file</code>, <code>/api/v1/git/blame</code>, <code>/api/v1/git/diff</code></td>
+          <td><code>IdeDataWorkspaceStore</code>, editor ownership/diff, status bar workspace source</td>
+          <td><span class="severity p1">P1</span> IDE는 repo/playground/server-base 세 filesystem view를 한 화면에서 조합한다.</td>
+        </tr>
+        <tr>
+          <td>Board</td>
+          <td>Board dispatch + dashboard memory projection + Activity_graph board events</td>
+          <td><code>fetchBoard</code>, dashboard memory snapshot, <code>/api/v1/activity/events</code></td>
+          <td><code>IdeConversationRail</code>, <code>IdeActivityPanel</code>, <code>routeLinksForContext</code></td>
+          <td><span class="severity p1">P1</span> board post text에서 PR/Task/Git refs를 regex로 재추출한다.</td>
+        </tr>
+        <tr>
+          <td>Task</td>
+          <td>dashboard execution snapshot <code>tasks</code>, Keeper current task, tool hook task scope</td>
+          <td>dashboard WS <code>execution</code>, <code>selectedTask</code>, activity context</td>
+          <td><code>IdeDataWorkspaceStore</code>, <code>IdeKeeperWorkPanel</code>, <code>ExecuteOutputDrawer</code></td>
+          <td><span class="severity p1">P1</span> selected dashboard task가 IDE annotation query filter에 직접 들어간다.</td>
+        </tr>
+        <tr>
+          <td>Goal</td>
+          <td>dashboard planning snapshot <code>goals</code>, task goal_id</td>
+          <td>dashboard WS <code>goals</code>, <code>/api/v1/dashboard/planning</code></td>
+          <td><code>IdeKeeperWorkPanel</code>, context routes, status bar</td>
+          <td><span class="severity p2">P2</span> Goal progress는 IDE panel에서 dashboard goal helper를 직접 호출한다.</td>
+        </tr>
+        <tr>
+          <td>Turn</td>
+          <td><code>Keeper_agent_run</code> start/end, unified turn success activity emit</td>
+          <td><code>.masc-ide/turn_events.jsonl</code>, <code>activity-events/YYYY-MM/DD.jsonl</code></td>
+          <td><code>IdeActivityPanel</code>, context lens, trace store</td>
+          <td><span class="severity p1">P1</span> turn 이벤트 저장소가 두 개이며 IDE는 activity graph 쪽만 실질적으로 소비한다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>4. 코드 레벨 흐름표</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>흐름</th>
+          <th>생산자 / 경계</th>
+          <th>소비자</th>
+          <th>코드 근거</th>
+          <th>해석</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td>
+          <td>URL route -> IDE focus</td>
+          <td><code>IdeShell</code>가 route params를 읽어 file/line/surface/keeper/goal/task/board/comment/pr/git/log/session/operation/worker/telemetry로 펼침</td>
+          <td><code>focusIdeContextAnchor</code>, status bar, terminal drawer, panels</td>
+          <td><code>dashboard/src/components/ide/ide-shell.ts:122-128</code>, <code>446-546</code></td>
+          <td>route parsing이 IDE shell 안에 크고, keeper fallback이 global state에 의존한다.</td>
+        </tr>
+        <tr>
+          <td>2</td>
+          <td>IDE file -> workspace data</td>
+          <td><code>activeIdeFile</code>, <code>activeKeeperName</code>, active repo id, <code>selectedTask</code></td>
+          <td>tree/file/blame/diff/annotations/regions store</td>
+          <td><code>dashboard/src/components/ide/ide-data-workspace-store.ts:1-35</code>, <code>151-243</code></td>
+          <td>IDE data store가 workspace API뿐 아니라 Keeper와 Goal/Task UI state를 직접 import한다.</td>
+        </tr>
+        <tr>
+          <td>3</td>
+          <td>workspace browsing</td>
+          <td><code>classify_workspace_query</code>로 project/repo/playground base를 결정</td>
+          <td>tree/file/blame/diff endpoint</td>
+          <td><code>lib/server/server_routes_http_routes_workspace.ml:561-691</code>, <code>dashboard/src/api/workspace.ts:44-113</code></td>
+          <td>IDE가 보는 파일과 <code>.masc-ide</code> 저장 위치가 다르다. report/repo/playground context가 섞이면 trace가 어긋날 수 있다.</td>
+        </tr>
+        <tr>
+          <td>4</td>
+          <td>annotations / regions</td>
+          <td><code>server_ide_http</code>가 server base <code>.masc-ide</code> partition을 읽고 쓴다</td>
+          <td><code>fetchIdeAnnotations</code>, <code>fetchIdeRegions</code>, editor/context lens/memory panel</td>
+          <td><code>lib/server/server_ide_http.ml:129-359</code>, <code>dashboard/src/api/ide.ts:17-123</code></td>
+          <td>annotation schema는 Goal/Task/Board/Comment/PR/Git/Log/Runtime ids를 이미 모두 품고 있다. IDE-local contract라기보다 workspace context contract다.</td>
+        </tr>
+        <tr>
+          <td>5</td>
+          <td>Keeper turn event</td>
+          <td><code>Keeper_agent_run</code> start/end가 <code>Ide_bridge.ingest_turn_event</code> 호출</td>
+          <td><code>.masc-ide/turn_events.jsonl</code></td>
+          <td><code>lib/keeper/keeper_agent_run.ml:112-149</code>, <code>lib/ide/ide_bridge.ml:62-87</code></td>
+          <td>write path는 있으나 현재 frontend read path는 검색되지 않는다.</td>
+        </tr>
+        <tr>
+          <td>6</td>
+          <td>Tool call -> IDE event</td>
+          <td><code>on_tool_executed</code> hook에서 outcome/typed_outcome/duration/input/output을 bridge로 전달</td>
+          <td><code>.masc-ide/tool_events.jsonl</code>, PR descriptor event</td>
+          <td><code>lib/keeper/keeper_run_tools_hooks.ml:119-184</code>, <code>lib/ide/ide_bridge.ml:188-224</code></td>
+          <td>Tool event semantic extraction이 Keeper hook 안에서 IDE bridge로 직결된다.</td>
+        </tr>
+        <tr>
+          <td>7</td>
+          <td>Tool execute -> command descriptor</td>
+          <td>typed Shell IR 성공 결과에 <code>Ide_command_descriptor.compute</code> 결과를 붙임</td>
+          <td><code>Ide_bridge.extract_descriptor_from_output</code>가 PR/Git 의미로 재해석</td>
+          <td><code>lib/keeper/keeper_tool_execute_runtime.ml:222-295</code>, <code>441-449</code>, <code>lib/ide/ide_command_descriptor.ml:41-127</code></td>
+          <td>Shell IR schema 변화가 IDE PR/Git event 생성에 직접 영향을 준다.</td>
+        </tr>
+        <tr>
+          <td>8</td>
+          <td>Tool write -> code regions</td>
+          <td><code>Ide_region_tracker.ingest_tool_call</code>가 <code>write_file/edit_file/apply_patch</code> args에서 path/diff/content를 추출</td>
+          <td><code>.masc-ide/regions.jsonl</code>, editor region overlay</td>
+          <td><code>lib/ide/ide_region_tracker.ml:105-228</code>, <code>lib/keeper/keeper_tool_filesystem_runtime.ml:433-482</code></td>
+          <td>file tool argument schema가 region producer contract다. explicit typed region event가 아니다.</td>
+        </tr>
+        <tr>
+          <td>9</td>
+          <td>Activity graph -> IDE activity</td>
+          <td><code>Activity_graph.event_to_yojson</code>가 payload/tags에서 context 생성</td>
+          <td><code>IdeActivityPanel</code>가 다시 payload/tags/context를 정규화</td>
+          <td><code>lib/activity_graph/activity_graph_types.ml:210-303</code>, <code>dashboard/src/components/ide/ide-activity-panel.ts:183-310</code></td>
+          <td>context extraction이 backend/frontend에 중복되어 drift 가능성이 높다.</td>
+        </tr>
+        <tr>
+          <td>10</td>
+          <td>Context -> route links</td>
+          <td><code>routeLinksForContext</code>가 Code/Goal/Task/Board/Comment/PR/Git/Log/Telemetry/Keeper route를 생성</td>
+          <td>toolbar, editor, activity, conversation, keeper work, terminal drawer</td>
+          <td><code>dashboard/src/components/ide/ide-context-lens.ts:1124-1269</code></td>
+          <td>이 함수는 IDE helper 위치에 있지만 실제로 dashboard-wide route contract다.</td>
+        </tr>
+        <tr>
+          <td>11</td>
+          <td>Board/Decision -> IDE conversation</td>
+          <td><code>fetchBoard</code>, <code>fetchKeeperDecisions</code>, board text regex refs</td>
+          <td><code>IdeConversationRail</code>, trace bridge</td>
+          <td><code>dashboard/src/components/ide/ide-conversation-rail.ts:74-180</code>, <code>482-512</code></td>
+          <td>Board post 내용이 operational route source가 된다. contract가 아니라 text parsing이다.</td>
+        </tr>
+        <tr>
+          <td>12</td>
+          <td>Presence / cursor</td>
+          <td><code>/api/v1/ide/presence/stream</code>은 active client snapshot을 유지하고, <code>/api/v1/ide/cursors/stream</code>은 cursor snapshot을 분리 제공함</td>
+          <td><code>keeper-cursor-overlay</code>가 cursor stream만 읽고 file_path/line/focus_mode/tool_name/turn이 있는 row만 표시</td>
+          <td><code>lib/server/server_ide_http.ml</code>, <code>lib/ide/ide_bridge.ml</code>, <code>dashboard/src/components/ide/keeper-cursor-overlay.ts</code></td>
+          <td>presence-only payload가 cursor placeholder로 승격되지 않는다. cursor row는 tool hook input에 real file/line이 있을 때만 생성된다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. 경계 실패 / 강결합 지점</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>우선순위</th>
+          <th>지점</th>
+          <th>증상</th>
+          <th>왜 문제인가</th>
+          <th>개선 방향</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="severity p0">P0</span></td>
+          <td><code>.masc-ide/tool_events|turn_events|pr_events</code></td>
+          <td>write producer와 tests는 있지만 HTTP read endpoint/frontend consumer가 검색되지 않는다.</td>
+          <td>Keeper/Tool/Turn bridge가 운영 화면에 닿지 않아, 저장 비용만 있고 IDE 분석에는 activity graph를 우회 사용한다.</td>
+          <td><code>GET /api/v1/ide/events?kind=tool|turn|pr</code>를 만들고 Activity/Trace store가 이 stream을 first-class source로 읽게 하거나, producer를 제거한다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td>Execute output drawer</td>
+          <td>2026-06-07 slice에서 <code>/api/dashboard/execute-output/:keeper</code>와 <code>/api/v1/dashboard/execute-output/:keeper</code> SSE route가 추가됐고, 후속 slice에서 line ring + long-lived SSE tail로 확장됐다.</td>
+          <td>drawer backend 부재 P0와 completed-output line tail은 닫혔다. 다만 현재 producer는 Execute completion boundary 기반이라 process 실행 중 stdout/stderr capture는 아직 별도 확장 대상이다.</td>
+          <td>후속은 executor/process drain 지점에서 RFC-0025식 running stdout/stderr line producer를 붙이는 작업이다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td>Presence stream schema</td>
+          <td>2026-06-07 slice에서 <code>/api/v1/ide/cursors</code>와 <code>/api/v1/ide/cursors/stream</code>이 추가됐다. 기존 presence stream은 presence strip 전용 contract로 남는다.</td>
+          <td>placeholder cursor, line 0 guard, stale focus P0는 닫혔다. 아직 editor/LSP native cursor producer는 없고 tool-hook input 기반 cursor만 생성된다.</td>
+          <td>후속은 editor/LSP cursor producer와 IDE WS snapshot surface에 cursor freshness를 포함하는 작업이다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td><code>IdeShell</code></td>
+          <td>IDE 화면 조립, route parser, terminal policy, statusbar domain chip, keeper fallback을 한 파일이 소유한다.</td>
+          <td>IDE를 수정할 때 Keeper/Board/Goal/Telemetry route 규칙을 같이 건드리게 된다.</td>
+          <td><code>ide-route-context.ts</code>, <code>ide-runtime-view-model.ts</code>, <code>ide-layout-shell.ts</code>로 분리한다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td><code>IdeDataWorkspaceStore</code></td>
+          <td><code>activeKeeperName</code>과 <code>selectedTask</code>를 직접 import하여 annotation query를 필터링한다.</td>
+          <td>IDE file view가 dashboard Goal/Task selection state에 의해 암묵적으로 바뀐다.</td>
+          <td>store 생성 input으로 explicit scope를 넘기고, default는 file/repo only로 둔다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td>Activity context normalization</td>
+          <td>backend <code>Activity_graph</code>와 frontend <code>IdeActivityPanel</code>이 payload/tag context 추출 규칙을 중복 보유한다.</td>
+          <td>새 id field가 추가될 때 한쪽만 갱신되면 IDE route link가 누락된다.</td>
+          <td>backend가 canonical <code>context</code>를 보장하고 frontend는 legacy fallback만 telemetry warning과 함께 유지한다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td><code>routeLinksForContext</code></td>
+          <td>IDE 폴더 안에 있지만 workspace/monitoring/repository route contract 전체를 안다.</td>
+          <td>Board/Goal/Task/Telemetry route 변경이 IDE 모듈 변경으로 나타난다.</td>
+          <td><code>dashboard/src/context-routing</code> 같은 dashboard-wide adapter로 승격하고 generated schema와 묶는다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">P1</span></td>
+          <td>annotation mutation auth</td>
+          <td><code>POST/DELETE /api/v1/ide/annotations</code>도 <code>with_public_read</code> wrapper를 사용한다.</td>
+          <td>local dashboard auth policy상 의도일 수 있으나, mutation endpoint 이름과 auth wrapper 의미가 맞지 않는다.</td>
+          <td>write auth helper로 분리하거나, local-only public write 의도를 route comment/test로 고정한다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p2">P2</span></td>
+          <td><code>IdeMemoryPanel</code></td>
+          <td>server comment에 따르면 현재 memory endpoint는 annotation 기반 memory entries만 반환한다.</td>
+          <td>Memory UI가 실제 semantic/episode memory와 다르게 보일 수 있다.</td>
+          <td>이름을 <code>IdeAnnotationMemoryPanel</code>로 좁히거나 Neo4j/pgvector memory adapter를 별도 계약으로 붙인다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>6. 빠진 구현 후보</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>항목</th>
+          <th>현재 상태</th>
+          <th>필요 구현</th>
+          <th>검증 기준</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>IDE event reader</td>
+          <td><code>Ide_bridge</code>가 <code>tool_events.jsonl</code>, <code>turn_events.jsonl</code>, <code>pr_events.jsonl</code>을 쓴다.</td>
+          <td><code>server_ide_http</code>에 paginated/read-only endpoint 추가. dashboard store에 event source 추가.</td>
+          <td>tool call 후 <code>/api/v1/ide/events?kind=tool</code>에서 최신 keeper/tool/turn이 보이고 IDE trace에 표시된다.</td>
+        </tr>
+        <tr>
+          <td>Live execute output backend</td>
+          <td><code>lib/dashboard/dashboard_execute_output.ml(i)</code>가 completed Execute stdout/stderr를 per-keeper byte ring과 line ring에 보관하고 snapshot + live <code>line</code>/<code>task_closed</code> SSE frame을 반환한다.</td>
+          <td>현재 Execute completion boundary에서는 long-lived line tail이 가능하다. 실행 중 drain 단계 stdout/stderr producer는 다음 P1 확장이다.</td>
+          <td><code>curl -N /api/dashboard/execute-output/sangsu</code>가 초기 <code>snapshot</code>/<code>no_task</code> 후 future <code>line</code>/<code>task_closed</code> frame을 유지한다. focused test: <code>test_dashboard_execute_output.exe</code>.</td>
+        </tr>
+        <tr>
+          <td>Cursor event producer</td>
+          <td><code>cursor_events.jsonl</code> producer가 tool hook input의 real file/line을 cursor row로 저장한다.</td>
+          <td>후속은 editor/LSP native cursor event를 같은 <code>/api/v1/ide/cursors</code> contract로 추가한다.</td>
+          <td>presence strip과 editor cursor chip이 같은 keeper/file/line을 표시하고 line 0 placeholder가 사라진다.</td>
+        </tr>
+        <tr>
+          <td>IDE WS snapshot surface</td>
+          <td>runtime bootstrap dashboard WS provider는 <code>shell/execution/operator/transport/namespace/composite/board/goals</code>만 제공한다.</td>
+          <td><code>ide</code> snapshot surface 추가: focus, annotations, regions, events, presence freshness.</td>
+          <td>WS-only dashboard 모드에서 IDE가 polling 없이 동일한 data freshness를 가진다.</td>
+        </tr>
+        <tr>
+          <td>Shared context schema</td>
+          <td>annotation, activity, route links, board text refs가 모두 비슷한 id set을 따로 정규화한다.</td>
+          <td>OCaml/TS 공통 <code>IdeContextRef</code> schema와 validator를 도입한다.</td>
+          <td>schema drift guard comment가 제거되고 null label crash test가 shared validator에서 막힌다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>7. 개선 순서 제안</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Phase</th>
+          <th>목표</th>
+          <th>작업</th>
+          <th>효과</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="severity p0">0</span></td>
+          <td>깨진 기능과 죽은 producer 정리</td>
+          <td>IDE bridge event reader 추가, execute-output snapshot/line-tail route 연결, presence/cursor schema 분리 완료</td>
+          <td>IDE 화면의 “눌렀는데 안 되는” 지점을 제거하고 runtime evidence를 살린다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">1</span></td>
+          <td>Context contract 단일화</td>
+          <td><code>IdeContextRef</code> shared schema, backend context canonicalization, frontend fallback 축소</td>
+          <td>Goal/Task/Board/PR/Git/Log/Telemetry 링크 누락과 drift를 줄인다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">2</span></td>
+          <td>IDE facade 얇게 만들기</td>
+          <td><code>IdeShell</code>에서 route parsing/status model/terminal policy/panel data를 view-model adapter로 분리</td>
+          <td>IDE layout 변경과 runtime/domain 변경의 PR blast radius가 줄어든다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p1">3</span></td>
+          <td>Snapshot plane 정렬</td>
+          <td>dashboard WS provider에 <code>ide</code> surface 추가, activity/ide events freshness metric 노출</td>
+          <td>polling, REST, WS, SSE가 제각각 stale해지는 문제를 관측 가능하게 만든다.</td>
+        </tr>
+        <tr>
+          <td><span class="severity p2">4</span></td>
+          <td>UX 사용성 개선</td>
+          <td>terminal, activity, keeper work, context lens가 같은 route/context badge 모델을 쓰도록 정리</td>
+          <td>운영자가 “이 이벤트가 어느 Goal/Task/PR/line에서 왔는지”를 한 번에 추적한다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>8. 의존성 재배치 초안</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>현재 위치</th>
+          <th>현재 책임</th>
+          <th>권장 위치</th>
+          <th>분리 이유</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>components/ide/ide-context-lens.ts</code></td>
+          <td>context anchors + route link builder + text ref regex + surface count</td>
+          <td><code>dashboard/src/context-routing/</code> + <code>components/ide/context-lens-view.ts</code></td>
+          <td>route builder는 IDE가 아니라 dashboard-wide domain adapter다.</td>
+        </tr>
+        <tr>
+          <td><code>components/ide/ide-shell.ts</code></td>
+          <td>layout, route parse, statusbar, terminal selection, domain focus</td>
+          <td><code>ide-shell.ts</code>는 layout만, parser/model은 <code>ide-route-state.ts</code>/<code>ide-statusbar-model.ts</code></td>
+          <td>IDE shell을 고치면서 Keeper/Goal/Board route 규칙을 건드리지 않게 한다.</td>
+        </tr>
+        <tr>
+          <td><code>components/ide/ide-data-workspace-store.ts</code></td>
+          <td>workspace fetch + keeper/repo/task scope 구독</td>
+          <td><code>ide-workspace-store.ts</code> + explicit <code>IdeWorkspaceScope</code></td>
+          <td>selected task나 active keeper가 파일 로딩 query에 몰래 들어가지 않게 한다.</td>
+        </tr>
+        <tr>
+          <td><code>lib/ide/ide_bridge.ml</code></td>
+          <td>tool/turn/pr event write + descriptor parsing + PR event synthesis</td>
+          <td>write bridge 유지, read API는 <code>server_ide_http</code>, descriptor parse는 Shell IR event adapter로 명시</td>
+          <td>IDE write model과 Shell IR semantic model의 경계를 명확히 한다.</td>
+        </tr>
+        <tr>
+          <td><code>IdeActivityPanel</code></td>
+          <td>activity fetch + context extraction + progress model + rendering</td>
+          <td><code>run-activity-store</code>가 canonical context만 받고, panel은 rendering만</td>
+          <td>backend/frontend context derivation 중복을 없앤다.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>9. 코드 근거 색인</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>파일</th>
+          <th>라인</th>
+          <th>근거</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>dashboard/src/components/ide/ide-shell.ts</code></td><td>122-128, 291-376, 409-546, 601-727</td><td>keeper fallback, statusbar domain chips, route param parsing, IDE layout composition.</td></tr>
+        <tr><td><code>dashboard/src/components/ide/ide-data-workspace-store.ts</code></td><td>1-35, 151-243</td><td>active file, active keeper, selected task, repo id를 workspace fetch와 annotation query에 결합.</td></tr>
+        <tr><td><code>dashboard/src/api/ide.ts</code></td><td>17-123</td><td>annotation input/filter가 Goal/Task/Board/Comment/PR/Git/Log/Session/Operation/Worker ids를 모두 포함.</td></tr>
+        <tr><td><code>lib/server/server_ide_http.ml</code></td><td>14-69, 129-359, 373-420, 420-463</td><td>workspace base resolver, annotation/region REST, presence SSE, annotation-backed memory endpoint.</td></tr>
+        <tr><td><code>lib/keeper/keeper_agent_run.ml</code></td><td>112-149</td><td>turn start/completed를 IDE bridge로 기록.</td></tr>
+        <tr><td><code>lib/keeper/keeper_run_tools_hooks.ml</code></td><td>119-184</td><td>tool executed hook이 IDE tool event와 PR descriptor event를 기록.</td></tr>
+        <tr><td><code>lib/keeper/keeper_tool_execute_runtime.ml</code></td><td>112-180, 222-295, 441-449</td><td>typed Shell IR, sandbox profile, risk gate, command descriptor injection.</td></tr>
+        <tr><td><code>lib/ide/ide_bridge.ml</code></td><td>8-24, 188-224, 258-395</td><td>tool/turn/pr events JSONL write and descriptor-based PR event synthesis.</td></tr>
+        <tr><td><code>lib/ide/ide_region_tracker.ml</code></td><td>105-228</td><td>file-write tool args에서 code region을 추출.</td></tr>
+        <tr><td><code>lib/activity_graph/activity_graph_types.ml</code></td><td>210-303</td><td>payload/tags에서 canonical context를 생성.</td></tr>
+        <tr><td><code>dashboard/src/components/ide/ide-activity-panel.ts</code></td><td>183-310, 774-799</td><td>activity API event를 IDE RunActivityEvent로 재정규화하고 route context 생성.</td></tr>
+        <tr><td><code>dashboard/src/components/ide/ide-context-lens.ts</code></td><td>303-351, 1008-1055, 1124-1269</td><td>null guard workaround, text ref regex, dashboard route link builder.</td></tr>
+        <tr><td><code>dashboard/src/components/ide/ide-keeper-work-panel.ts</code></td><td>61-83, 331-383</td><td>global keepers/tasks/goals를 읽어 Keeper work summary 생성.</td></tr>
+        <tr><td><code>dashboard/src/components/ide/ide-conversation-rail.ts</code></td><td>74-180, 482-512</td><td>Board/decision fetch와 text ref 기반 route link 생성.</td></tr>
+        <tr><td><code>dashboard/src/api/execute-output.ts</code></td><td>45-95</td><td>frontend SSE client endpoint.</td></tr>
+        <tr><td><code>dashboard/design-system/RFC/0025-live-execute-output-drawer.md</code></td><td>72-90</td><td>execute-output server module/handler가 계획되어 있으나 현재 route 검색상 부재.</td></tr>
+        <tr><td><code>lib/server/server_runtime_bootstrap.ml</code></td><td>761-797</td><td>dashboard WS snapshot provider에 <code>ide</code> surface가 없다.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>10. 진행 상태와 다음 작업</h2>
+    <div class="good-note">
+      <strong>2026-06-07 worktree 진행 반영:</strong>
+      <ul>
+        <li><code>Ide_bridge.list_events</code> reader를 추가하여 <code>tool_events.jsonl</code>, <code>turn_events.jsonl</code>, <code>pr_events.jsonl</code>을 newest-first, <code>kind</code>, <code>keeper_id</code>, <code>limit</code>, <code>offset</code> 기준으로 읽는다.</li>
+        <li><code>GET /api/v1/ide/events</code>를 추가했다. <code>kind=tool|turn|pr|all</code>와 기존 <code>repo_id</code>/<code>canonical_url</code> partition resolver를 사용한다.</li>
+        <li><code>dashboard/src/api/ide.ts</code>에 <code>fetchIdeEvents</code>를 추가하고, <code>IdeActivityPanel</code>이 bridge events를 기존 activity timeline/context lens/trace bridge에 병합한다.</li>
+        <li>이로써 “runtime이 IDE용 bridge events를 쓰지만 IDE가 읽지 않는” P0 gap은 read surface 기준으로 닫혔다.</li>
+        <li><code>Dashboard_execute_output</code> collector를 추가했다. completed Execute stdout/stderr를 per-keeper ring에 저장하고 <code>snapshot</code>/<code>no_task</code> SSE frame으로 직렬화한다.</li>
+        <li><code>/api/dashboard/execute-output/:keeper</code>와 <code>/api/v1/dashboard/execute-output/:keeper</code> route를 추가하고, typed Shell IR dispatch 성공 후 <code>Keeper_keepalive_signal.record_execute_output_callback</code>으로 producer를 연결했다.</li>
+        <li><code>Dashboard_execute_output</code>을 per-keeper line ring + subscriber model로 확장했다. route는 초기 snapshot 후 long-lived SSE tail을 유지하며 <code>line</code>/<code>task_closed</code> frame과 heartbeat를 보낸다.</li>
+        <li><code>cursor_events.jsonl</code> producer와 <code>Ide_bridge.list_cursors</code> reader를 추가했다. tool hook input에 non-empty <code>file_path</code>와 positive <code>line</code>/<code>line_start</code>가 있을 때만 cursor row를 저장한다.</li>
+        <li><code>GET /api/v1/ide/cursors</code>와 <code>GET /api/v1/ide/cursors/stream</code>을 추가했다. 기존 presence endpoint는 active client presence 전용으로 남기고, <code>keeper-cursor-overlay</code>는 dedicated cursor stream만 읽는다.</li>
+      </ul>
+    </div>
+
+    <div class="note">
+      <strong>검증 완료:</strong>
+      <ul>
+        <li><code>./scripts/dune-local.sh build test/test_ide_bridge.exe lib/server/server_ide_http.ml lib/ide/ide_bridge.ml</code></li>
+        <li><code>./_build/default/test/test_ide_bridge.exe</code> — 24 tests</li>
+        <li><code>./scripts/dune-local.sh build test/test_dashboard_execute_output.exe lib/dashboard/dashboard_execute_output.ml lib/server/server_routes_http_routes_dashboard.ml lib/keeper/keeper_tool_execute_runtime.ml</code></li>
+        <li><code>./_build/default/test/test_dashboard_execute_output.exe</code> — 7 tests</li>
+        <li><code>pnpm exec vitest run src/api/ide.test.ts src/components/ide/ide-activity-panel.test.ts src/components/ide/keeper-cursor-overlay.test.ts src/api/execute-output.test.ts src/components/ide/execute-output-drawer.test.ts</code> — 42 tests</li>
+        <li><code>pnpm exec tsc --noEmit --pretty</code></li>
+        <li><code>opam exec -- ocamlformat --check lib/ide/ide_bridge.ml lib/ide/ide_bridge.mli lib/server/server_ide_http.ml lib/server/server_ide_http.mli test/test_ide_bridge.ml</code></li>
+        <li><code>scripts/ci/check-determinism-contract.sh --base origin/main --head HEAD</code></li>
+      </ul>
+    </div>
+
+    <div class="note">
+      <strong>남은 P0:</strong>
+      <ul>
+        <li>없음. 현재 남은 항목은 P1 후속: editor/LSP native cursor producer, Execute running-output producer, IDE WS snapshot surface다.</li>
+      </ul>
+    </div>
+
+    <p>event reader, execute-output route, presence/cursor split을 먼저 닫은 이유는 그대로다. 이 구멍을 메워야 이후 Shell IR, Task/Goal, Board context 개선을 운영 화면에서 검증할 수 있다. 다음 순서는 executor/process drain 단계의 running-output producer를 붙이고, IDE WS snapshot surface에 cursor/event freshness를 포함하는 것이다.</p>
+  </section>
+</main>
+</body>
+</html>

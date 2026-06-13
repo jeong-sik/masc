@@ -50,11 +50,6 @@ let all_flags : flag list = [
     default = true; category = "transport";
     lifecycle = Active; since = "2.120.0" };
 
-  { env_name = "MASC_OPENAI_COMPAT";
-    description = "OpenAI-compatible /v1/chat/completions endpoint";
-    default = false; category = "transport";
-    lifecycle = Active; since = "2.80.0" };
-
   { env_name = "MASC_HTTP_AUTH_STRICT";
     description = "Require auth for all HTTP endpoints (not just /mcp)";
     default = false; category = "transport";
@@ -91,7 +86,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.130.0" };
 
   { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
-    description = "Count successful room heartbeat after a turn as presence proof";
+    description = "Count successful workspace heartbeat after a turn as presence proof";
     default = true; category = "keeper";
     lifecycle = Active; since = "2.162.0" };
 
@@ -99,16 +94,6 @@ let all_flags : flag list = [
     description = "Skip heartbeat cycles when busy (task proves liveness) or extend interval when idle";
     default = true; category = "keeper";
     lifecycle = Active; since = "2.163.0" };
-
-  { env_name = "MASC_CASCADE_TIER_ADMISSION_ENABLED";
-    description = "Enforce per-tier cascade inflight admission before provider dispatch";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.243.0" };
-
-  { env_name = "MASC_CASCADE_TIER_WAIT_ENABLED";
-    description = "Wait with bounded backoff when per-tier cascade admission is saturated";
-    default = false; category = "keeper";
-    lifecycle = Active; since = "0.19.30" };
 
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
@@ -140,8 +125,8 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.50.0" };
 
-  { env_name = "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED";
-    description = "Global override for keeper room-signal prompt injection";
+  { env_name = "MASC_KEEPER_WORKSPACE_SIGNAL_PROMPT_ENABLED";
+    description = "Global override for keeper workspace-signal prompt injection";
     default = false; category = "keeper";
     lifecycle = Active; since = "2.214.0" };
 
@@ -151,6 +136,11 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.233.0" };
 
   (* ── Dashboard & Governance ───────────────────────────────── *)
+  { env_name = "MASC_DISABLE_HITL";
+    description = "Disable Human-in-the-loop (HITL) approval gates globally";
+    default = true; category = "dashboard";
+    lifecycle = Active; since = "2.250.0" };
+
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";
     default = false; category = "dashboard";

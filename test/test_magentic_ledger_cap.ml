@@ -10,7 +10,7 @@
     This test locks the final emission contract: for any (oversized)
     input, the returned social_state must satisfy the Gen8 budget. *)
 
-module T = Masc_mcp.Keeper_social_model_types
+module T = Keeper_social_model_types
 
 (* overlay_ledger_state is internal; we check the invariant at the
    emission level by constructing a synthetic state that would bypass
@@ -62,7 +62,7 @@ let test_speech_and_surface_preserved () =
 let test_short_magentic_state_unchanged () =
   let s =
     { base with
-      belief_summary = "quiet_room";
+      belief_summary = "quiet_workspace";
       active_desire = Some "wait_for_delta";
       current_intention = Some "record_progress_evidence";
       blocker = None;
@@ -71,7 +71,7 @@ let test_short_magentic_state_unchanged () =
   in
   let capped = T.cap_social_state s in
   Alcotest.(check string) "short belief unchanged"
-    "quiet_room" capped.belief_summary;
+    "quiet_workspace" capped.belief_summary;
   Alcotest.(check (option string)) "blocker None stays None" None capped.blocker
 
 let () =

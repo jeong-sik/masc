@@ -8,7 +8,7 @@ import { shellAuthSummary } from '../../store'
 import { operatorSnapshot } from '../../operator-store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import {
-  flowState, flowLoading, fetchPauseStatus, pauseRoom, resumeRoom,
+  flowState, flowLoading, fetchPauseStatus, pauseWorkspace, resumeWorkspace,
   maintenanceResult, maintenanceLoading, runGarbageCollection, cleanupZombies,
 } from './flow-control-state'
 
@@ -36,8 +36,8 @@ export function FlowControlPanel() {
   const mutationAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   const admission = operatorSnapshot.value?.admission_queue ?? null
   const admissionMode = admission?.mode ?? 'unknown'
-  const admissionOwner = admission?.throttle_owner === 'oas_cascade'
-    ? 'OAS cascade'
+  const admissionOwner = admission?.throttle_owner === 'oas_runtime'
+    ? 'OAS runtime'
     : admission?.throttle_owner ?? 'unknown'
   return html`
     <${SurfaceCard} variant="compact" class="mb-4">
@@ -58,9 +58,9 @@ export function FlowControlPanel() {
         </p>
       `}
       <div class="flex flex-wrap gap-2">
-        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseRoom()}>
+        <${ActionButton} variant="ghost" size="md" disabled=${loading || isPaused || isInitializing || !mutationAccess.allowed} onClick=${() => void pauseWorkspace()}>
           ${loading && !isPaused ? '...' : 'Pause'}<//>
-        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeRoom()}>
+        <${ActionButton} variant="primary" size="md" disabled=${loading || isRunning || isInitializing || !mutationAccess.allowed} onClick=${() => void resumeWorkspace()}>
           ${loading && isPaused ? '...' : 'Resume'}<//>
       </div>
     <//>

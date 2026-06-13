@@ -44,22 +44,22 @@ done
 printf '{"id":"comment-old","post_id":"old","created_at":%s}\n' "$old" >>"$masc_dir/board_comments.jsonl"
 
 cat >"$masc_dir/logs/system_log_${today}.jsonl" <<JSONL
-{"ts":$now,"level":"WARN","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
-{"ts":$now,"level":"ERROR","event":"image_not_found","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
-{"ts":$now,"level":"WARNING","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
-{"ts":$now,"level":"INFO","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
+{"ts":$now,"level":"WARN","details":{"event":"runtime_attempt_terminal","outcome":"success"}}
+{"ts":$now,"level":"ERROR","event":"image_not_found","details":{"event":"runtime_attempt_terminal","outcome":"failure"}}
+{"ts":$now,"level":"WARNING","details":{"event":"runtime_attempt_terminal","outcome":"success"}}
+{"ts":$now,"level":"INFO","details":{"event":"runtime_attempt_terminal","outcome":"success"}}
 {"ts":$now,"level":"WARN","message":"project-snapshot async shell refresh timed out (5.0s)"}
 {"ts":$now,"level":"WARN","message":"[Process_eio] Timeout after 1s: '/bin/bash' '-lc' 'git status -sb 2>&1'"}
 {"ts":$now,"level":"WARN","message":"[Process_eio] Timeout after 5s (command): '/bin/bash' '-lc' 'scripts/dune-local.sh build test/test_operator_control.exe 2>&1'"}
 {"ts":$now,"level":"INFO","message":"verifier: prepared 60 docker worktree gitdir path(s) under /fixture/.masc/playground/docker/verifier"}
 {"ts":$now,"level":"INFO","message":"verifier: restored 60 docker worktree gitdir path(s) under /fixture/.masc/playground/docker/verifier"}
 {"ts":$now,"level":"ERROR","message":"docker_shell_failed: fd_pressure: host_fd_hotspot_budget_exhausted"}
-{"ts":$old,"level":"INFO","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
+{"ts":$old,"level":"INFO","details":{"event":"runtime_attempt_terminal","outcome":"failure"}}
 JSONL
 
 mkdir -p \
-  "$masc_dir/playground/docker/verifier/repos/masc-mcp/.worktrees/task-a" \
-  "$masc_dir/playground/docker/verifier/repos/masc-mcp/.worktrees/task-b"
+  "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-a" \
+  "$masc_dir/playground/docker/verifier/repos/masc/.worktrees/task-b"
 
 cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
 {"ts":$now,"tool":"keeper_board_post","success":true,"semantic_success":true,"duration_ms":10}
@@ -86,7 +86,7 @@ check '.metrics.high_churn_threads_48h == 1'
 check '.metrics.warn_error_window == 7'
 check '.metrics.tool_call_success_pct == 50'
 check '.metrics.execute_failure_pct == 100'
-check '.metrics.cascade_audit_failure_pct == 25'
+check '.metrics.runtime_audit_failure_pct == 25'
 check '.metrics.docker_false_positive_24h == 1'
 check '.metrics.live_defect_signatures.project_snapshot_timeout == 1'
 check '.metrics.live_defect_signatures.process_eio_1s_timeout == 1'

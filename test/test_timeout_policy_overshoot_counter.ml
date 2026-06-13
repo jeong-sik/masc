@@ -9,10 +9,10 @@
    - past-slack DOES increment;
    - per-(layer, origin) label isolation. *)
 
-module TP = Masc_mcp.Timeout_policy
+module TP = Masc.Timeout_policy
 
 let counter_for ~layer ~origin =
-  Masc_mcp.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     TP.metric_overshoot_total
     ~labels:[ ("layer", layer); ("origin", origin) ]
     ()

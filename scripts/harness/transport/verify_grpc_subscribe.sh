@@ -3,7 +3,7 @@
 #
 # Tests:
 #   1. gRPC health check returns SERVING
-#   2. gRPC reflection lists MascCoordination and Health
+#   2. gRPC reflection lists MascWorkspace and Health
 #   3. Subscribe RPC returns subscription_started event
 #   4. Subscribe stream receives broadcast events through the MCP bridge
 #   5. Server stays healthy after subscriber disconnect
@@ -17,6 +17,8 @@ HARNESS_NAME="gRPC-Subscribe"
 require_server
 
 PROTO_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)/proto"
+MASC_GRPC_SERVICE="masc.workspace.v1.MascWorkspace"
+MASC_GRPC_PROTO="masc_workspace.proto"
 
 if ! require_tool grpcurl; then
   echo "ERROR: grpcurl required for gRPC E2E tests"
@@ -33,7 +35,7 @@ wait_for_grpc_health() {
       grpcurl -plaintext \
         -import-path "${PROTO_DIR}" \
         -proto grpc_health_v1.proto \
-        -d '{"service":"masc.coordination.v1.MascCoordination"}' \
+        -d "{\"service\":\"${MASC_GRPC_SERVICE}\"}" \
         "${MASC_GRPC_ADDR}" \
         grpc.health.v1.Health/Check 2>&1 || true
     )"
@@ -59,10 +61,10 @@ else
 fi
 
 services="$(grpcurl -plaintext "${MASC_GRPC_ADDR}" list 2>&1 || true)"
-if echo "$services" | grep -q "masc.coordination.v1.MascCoordination"; then
-  pass "gRPC reflection: MascCoordination listed"
+if echo "$services" | grep -q "${MASC_GRPC_SERVICE}"; then
+  pass "gRPC reflection: MascWorkspace listed"
 else
-  fail "gRPC reflection" "MascCoordination missing from reflection output"
+  fail "gRPC reflection" "MascWorkspace missing from reflection output"
 fi
 if echo "$services" | grep -q "grpc.health.v1.Health"; then
   pass "gRPC reflection: Health listed"
@@ -73,10 +75,10 @@ fi
 subscribe_resp="$(
   grpcurl -plaintext -max-time 5 \
     -import-path "${PROTO_DIR}" \
-    -proto masc_coordination.proto \
+    -proto "${MASC_GRPC_PROTO}" \
     -d '{"agent_name":"e2e-harness","session_id":"grpc-e2e-harness","since_seq":"0","event_types":["message"]}' \
     "${MASC_GRPC_ADDR}" \
-    masc.coordination.v1.MascCoordination/Subscribe 2>&1 || true
+    "${MASC_GRPC_SERVICE}/Subscribe" 2>&1 || true
 )"
 if echo "$subscribe_resp" | grep -q "subscription_started"; then
   pass "Subscribe: received subscription_started event"
@@ -87,10 +89,10 @@ fi
 subscribe_output="$(harness_mktemp_file "masc-transport-grpc")"
 grpcurl -plaintext \
   -import-path "${PROTO_DIR}" \
-  -proto masc_coordination.proto \
+  -proto "${MASC_GRPC_PROTO}" \
   -d '{"agent_name":"e2e-grpc-listener","session_id":"grpc-e2e-listener","since_seq":"0","event_types":["message"]}' \
   "${MASC_GRPC_ADDR}" \
-  masc.coordination.v1.MascCoordination/Subscribe >"${subscribe_output}" 2>&1 &
+  "${MASC_GRPC_SERVICE}/Subscribe" >"${subscribe_output}" 2>&1 &
 subscribe_pid=$!
 sleep 1
 

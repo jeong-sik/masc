@@ -26,18 +26,7 @@ let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
-  if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name
-  then (
-    let replacement_hint =
-      match (Tool_catalog.metadata name).Tool_catalog.replacement with
-      | Some replacement -> Printf.sprintf " Try `%s` instead." replacement
-      | None -> ""
-    in
-    Printf.sprintf
-      "Tool '%s' is keeper-internal and unavailable on this MCP endpoint.%s"
-      name
-      replacement_hint)
-  else Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
+  Printf.sprintf "Tool '%s' is not available on this MCP endpoint." name
 ;;
 
 (** {1 Resource Subscriptions} *)
@@ -121,15 +110,12 @@ let resource_id_of_uri uri =
 
 let affected_resource_ids_for_tool = function
   | "masc_add_task"
-  | "masc_claim_next"
   | "masc_transition"
   | "masc_update_priority"
   | "masc_plan_set_task"
   | "masc_plan_clear_task" -> task_resource_ids
-  | "masc_join"
-  | "masc_leave"
   | "masc_heartbeat" -> agent_resource_ids
-  | "masc_broadcast" | "masc_portal_open" | "masc_portal_send" | "masc_portal_close" ->
+  | "masc_broadcast" ->
     message_resource_ids
   | _ -> core_status_resource_ids
 ;;
@@ -138,7 +124,7 @@ let maybe_emit_resource_notifications ~success ~tool_name =
   if
     success
     && not
-         (Agent_tool_descriptor_resolution.capability_has
+         (Keeper_tool_descriptor_resolution.capability_has
             Tool_capability.Read_only
             tool_name)
   then (
@@ -177,7 +163,7 @@ let handle_initialize_eio ?(profile = Full) id params =
              ; ( "instructions"
                , `String
                    (match profile with
-                    | Full -> TP.default_instructions
+                    | Full -> TP.default_instructions ()
                     | Managed_agent -> TP.managed_agent_instructions
                     | Operator_remote -> TP.operator_remote_instructions) )
              ; ( "_meta"
@@ -194,14 +180,40 @@ let handle_initialize_eio ?(profile = Full) id params =
              ]))
 ;;
 
+let profile_instructions = function
+  | Full -> TP.default_instructions ()
+  | Managed_agent -> TP.managed_agent_instructions
+  | Operator_remote -> TP.operator_remote_instructions
+;;
+
+let handle_server_discover_eio ?(profile = Full) id =
+  make_response
+    ~id
+    (`Assoc
+        [ "resultType", `String "complete"
+        ; ( "supportedVersions"
+          , `List
+              (List.map
+                 (fun version -> `String version)
+                 Mcp_transport_protocol.supported_protocol_versions) )
+        ; "capabilities", Mcp_server.capabilities
+        ; "serverInfo", Mcp_server.server_info
+        ; "instructions", `String (profile_instructions profile)
+        ])
+;;
+
 let public_tool_help_schemas () = Config.visible_tool_schemas ()
+
+let cache_hint_fields ~scope ~ttl_ms =
+  [ "ttlMs", `Int ttl_ms; "cacheScope", `String scope ]
+;;
 
 let handle_list_tools_eio
       ?(profile = Full)
       ?names
       ?(include_hidden = false)
       ?(include_usage = false)
-      ?(include_keeper_internal = false)
+      ?(include_agent_internal = false)
       ?cursor
       ?agent_id
       state
@@ -213,13 +225,13 @@ let handle_list_tools_eio
       Some
         (Telemetry_eio.summarize_tool_usage
            ?fs:state.Mcp_server.fs
-           state.Mcp_server.room_config)
+           state.Mcp_server.workspace_config)
     else None
   in
   let tools =
     TP.tool_schemas_for_profile
       ~include_hidden
-      ~include_keeper_internal
+      ~include_agent_internal
       state
       profile
     |> (match names with
@@ -227,17 +239,11 @@ let handle_list_tools_eio
       | Some wanted ->
         List.filter (fun (schema : Masc_domain.tool_schema) ->
           List.mem schema.name wanted))
+    (* The Agent_internal surface was empty, so the former agent-internal-first
+       ranking applied to no schema; the order reduces to name comparison.
+       Surface deleted in the surface-cut refactor. *)
     |> List.sort (fun (a : Masc_domain.tool_schema) (b : Masc_domain.tool_schema) ->
-      let rank (schema : Masc_domain.tool_schema) =
-        if
-          include_keeper_internal
-          && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal schema.name
-        then 0
-        else 1
-      in
-      match Int.compare (rank a) (rank b) with
-      | 0 -> String.compare a.name b.name
-      | order -> order)
+      String.compare a.name b.name)
   in
   (match agent_id with
    | Some aid ->
@@ -265,6 +271,7 @@ let handle_list_tools_eio
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
       @ [ ( "_meta"
           , `Assoc
               [ "totalCount", `Int total_count; "pageSize", `Int (TP.list_page_size ()) ]
@@ -312,6 +319,7 @@ let handle_list_resources_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"private" ~ttl_ms:5000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -331,6 +339,7 @@ let handle_list_resource_templates_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -351,6 +360,7 @@ let handle_list_prompts_eio id cursor =
       @ TP.maybe_assoc_field
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
+      @ cache_hint_fields ~scope:"public" ~ttl_ms:30000
     in
     make_response ~id (`Assoc result_fields)
 ;;
@@ -359,18 +369,17 @@ let handle_get_prompt_eio state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some (`Assoc _ as payload) ->
-    let open Yojson.Safe.Util in
-    (match payload |> member "name" with
-     | `String name ->
+    (match Json_util.assoc_member_opt "name" payload with
+     | Some (`String name) ->
        let arguments =
-         match payload |> member "arguments" with
+         match Option.value ~default:`Null (Json_util.assoc_member_opt "arguments" payload) with
          | `Assoc _ as args -> args
          | `Null -> `Assoc []
          | _ -> `Assoc []
        in
        (match
           Mcp_prompt_surface.get_json
-            ~config:state.Mcp_server.room_config
+            ~config:state.Mcp_server.workspace_config
             ~name
             ~arguments
             Config.raw_all_tool_schemas
@@ -382,12 +391,11 @@ let handle_get_prompt_eio state id params =
 ;;
 
 let handle_resources_subscribe_eio id ?mcp_session_id params =
-  let open Yojson.Safe.Util in
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/subscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
-    (match payload |> member "uri" with
-     | `String uri ->
+    (match Json_util.assoc_member_opt "uri" payload with
+     | Some (`String uri) ->
        subscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
@@ -396,12 +404,11 @@ let handle_resources_subscribe_eio id ?mcp_session_id params =
 ;;
 
 let handle_resources_unsubscribe_eio id ?mcp_session_id params =
-  let open Yojson.Safe.Util in
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "resources/unsubscribe requires an MCP session"
   | Some session_id, Some (`Assoc _ as payload) ->
-    (match payload |> member "uri" with
-     | `String uri ->
+    (match Json_util.assoc_member_opt "uri" payload with
+     | Some (`String uri) ->
        unsubscribe_resource_for_session ~session_id ~uri;
        make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
@@ -430,6 +437,32 @@ let string_list_member key fields =
   | _ -> []
 ;;
 
+let dashboard_hello_handler =
+  ref (fun ~base_path:_ ~session_id:_ ?token:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_subscribe_handler =
+  ref (fun ~session_id:_ ?route:_ ~slices:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_unsubscribe_handler =
+  ref (fun ~session_id:_ ?slices:_ () -> Error "Dashboard WS not integrated")
+
+let dashboard_ping_handler =
+  ref (fun ~session_id:_ () -> Error "Dashboard WS not integrated")
+
+let register_dashboard_ws_handlers ~hello ~subscribe ~unsubscribe ~ping =
+  dashboard_hello_handler := hello;
+  dashboard_subscribe_handler := subscribe;
+  dashboard_unsubscribe_handler := unsubscribe;
+  dashboard_ping_handler := ping
+;;
+
+let dashboard_ack_callback =
+  ref (fun ~session_id:_ ~seq:_ ?buffered_amount:_ () -> Error "Dashboard WS not integrated")
+
+let register_dashboard_ack fn =
+  dashboard_ack_callback := fn
+
+
 let dashboard_response_or_error id = function
   | Ok result -> make_response ~id result
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_request msg
@@ -440,8 +473,8 @@ let handle_dashboard_hello_eio state id ?mcp_session_id params =
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/hello requires a WebSocket session"
   | Some session_id, Some (`Assoc fields) ->
     let token = optional_string_member "token" fields in
-    Server_mcp_transport_ws.dashboard_hello
-      ~base_path:state.Mcp_server.room_config.base_path
+    !dashboard_hello_handler
+      ~base_path:state.Mcp_server.workspace_config.base_path
       ~session_id
       ?token
       ()
@@ -458,7 +491,7 @@ let handle_dashboard_subscribe_eio state id ?mcp_session_id params =
     let slices = string_list_member "slices" fields in
     let slices = if slices = [] then [ "shell"; "namespace"; "transport" ] else slices in
     ignore state;
-    Server_mcp_transport_ws.dashboard_subscribe ~session_id ?route ~slices ()
+    !dashboard_subscribe_handler ~session_id ?route ~slices ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -471,10 +504,10 @@ let handle_dashboard_unsubscribe_eio id ?mcp_session_id params =
   | Some session_id, Some (`Assoc fields) ->
     let slices = string_list_member "slices" fields in
     let slices_opt = if slices = [] then None else Some slices in
-    Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ?slices:slices_opt ()
+    !dashboard_unsubscribe_handler ~session_id ?slices:slices_opt ()
     |> dashboard_response_or_error id
   | Some session_id, None ->
-    Server_mcp_transport_ws.dashboard_unsubscribe ~session_id ()
+    !dashboard_unsubscribe_handler ~session_id ()
     |> dashboard_response_or_error id
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
@@ -483,7 +516,7 @@ let handle_dashboard_ping_eio id ?mcp_session_id params =
   match mcp_session_id, params with
   | None, _ -> make_error_typed ~id Mcp_error_code.Invalid_request "dashboard/ping requires a WebSocket session"
   | Some session_id, None | Some session_id, Some (`Assoc _) ->
-    Server_mcp_transport_ws.dashboard_ping ~session_id ()
+    !dashboard_ping_handler ~session_id ()
     |> dashboard_response_or_error id
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
 ;;
@@ -508,7 +541,7 @@ let handle_dashboard_ack_eio id ?mcp_session_id params =
       | Some (`Float f) when f >= 0.0 && Float.is_finite f -> Some (int_of_float f)
       | _ -> None
     in
-    Server_mcp_transport_ws.dashboard_ack ~session_id ~seq ?buffered_amount ()
+    (!dashboard_ack_callback) ~session_id ~seq ?buffered_amount ()
     |> dashboard_response_or_error id
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -521,20 +554,20 @@ let handle_dashboard_ack_notification ?mcp_session_id params =
 
 let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
 
-let tool_call_outcome (json : Yojson.Safe.t) =
+let tool_call_outcome (json : Yojson.Safe.t) : Tool_result.tool_call_outcome =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt "error" fields with
-     | Some _ -> "error"
+     | Some _ -> Tool_result.Error
      | None ->
        (match List.assoc_opt "result" fields with
         | Some (`Assoc result_fields) ->
           (match List.assoc_opt "isError" result_fields with
-           | Some (`Bool true) -> "error"
-           | Some (`Bool false) -> "ok"
-           | _ -> "unknown")
-        | _ -> "unknown"))
-  | _ -> "unknown"
+           | Some (`Bool true) -> Tool_result.Error
+           | Some (`Bool false) -> Tool_result.Ok
+           | _ -> Tool_result.Unknown)
+        | _ -> Tool_result.Unknown))
+  | _ -> Tool_result.Unknown
 ;;
 
 let jsonrpc_id_label = function
@@ -543,6 +576,47 @@ let jsonrpc_id_label = function
   | `Intlit s -> s
   | `Float f -> Printf.sprintf "%0.0f" f
   | _ -> "?"
+;;
+
+let jsonrpc_request_id_attr = function
+  | `String s ->
+    let s = String.trim s in
+    if s = "" then None else Some s
+  | `Int i -> Some (string_of_int i)
+  | `Intlit s ->
+    let s = String.trim s in
+    if s = "" then None else Some s
+  | `Float f -> Some (Printf.sprintf "%0.0f" f)
+  | `Null -> None
+  | _ -> None
+;;
+
+let nonempty_opt = function
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+;;
+
+let otel_tool_request_context
+      ~id
+      ?mcp_session_id
+      ?mcp_protocol_version
+      ?otel_transport_context
+      request_json
+  =
+  let mcp_protocol_version =
+    match
+      Mcp_transport_protocol.protocol_version_from_request_meta_json request_json
+    with
+    | Some value -> Some value
+    | None -> nonempty_opt mcp_protocol_version
+  in
+  { Otel_dispatch_hook.jsonrpc_request_id = jsonrpc_request_id_attr id
+  ; mcp_session_id = nonempty_opt mcp_session_id
+  ; mcp_protocol_version
+  ; transport = otel_transport_context
+  }
 ;;
 
 let tool_profile_label = function
@@ -557,10 +631,7 @@ let mcp_tool_call_log_details ?outcome ~phase ~profile ~tool_name ~id ?mcp_sessi
      ; "tool_name", `String tool_name
      ; "phase", `String phase
      ; "request_id", `String (jsonrpc_id_label id)
-     ; ( "session_id"
-       , match mcp_session_id with
-         | Some session_id -> `String session_id
-         | None -> `Null )
+     ; ( "session_id", Json_util.string_opt_to_json mcp_session_id )
      ; "profile", `String (tool_profile_label profile)
      ]
      @
@@ -577,6 +648,8 @@ let handle_request
       ~sw
       ?(profile = Full)
       ?mcp_session_id
+      ?otel_mcp_protocol_version
+      ?otel_transport_context
       ?auth_token
       ?(internal_keeper_runtime = false)
       state
@@ -626,6 +699,7 @@ let handle_request
           else (
             try
               match req.method_ with
+              | "server/discover" -> handle_server_discover_eio ~profile id
               | "initialize" -> handle_initialize_eio ~profile id req.params
               | "initialized" | "notifications/initialized" -> make_response ~id `Null
               | "resources/list" ->
@@ -670,21 +744,45 @@ let handle_request
                      ?names
                      ~include_hidden
                      ~include_usage
-                     ~include_keeper_internal:internal_keeper_runtime
+                     ~include_agent_internal:internal_keeper_runtime
                      ?cursor
                      ?agent_id:auth_token
                      state
                      id)
               | "tools/call" ->
-                (match req.params with
-                 | Some params ->
-                   (try
-                      let name =
-                        Yojson.Safe.Util.(params |> member "name" |> to_string)
-                      in
-                      (* Issue #8699: exhaustive match on tool_profile.
-                               Catch-all `_ -> Full` would silently elevate any
-                               future restricted profile to full tool access
+                let operation_start_time = Eio.Time.now clock in
+                let otel_context =
+                  otel_tool_request_context
+                    ~id
+                    ?mcp_session_id
+                    ?mcp_protocol_version:otel_mcp_protocol_version
+                    ?otel_transport_context
+                    json
+                in
+                let failed_tool_call_error ?(tool_name = "") code message =
+                  Otel_dispatch_hook.with_request_context
+                    otel_context
+                    (fun () ->
+                       Mcp_server_eio_call_tool
+                       .record_mcp_server_operation_duration_sample
+                         ~tool_name
+                         ~success:false
+                         ~duration_seconds:
+                           (max 0.0 (Eio.Time.now clock -. operation_start_time));
+                       make_error_typed ~id code message)
+	                in
+	                (match req.params with
+	                 | Some params ->
+	                   let params_tool_name () =
+	                     match Json_util.get_string params "name" with
+	                     | Some name -> name
+	                     | None -> ""
+	                   in
+	                   (try
+	                      let name = params_tool_name () in
+	                      (* Issue #8699: exhaustive match on tool_profile.
+	                               Catch-all `_ -> Full` would silently elevate any
+	                               future restricted profile to full tool access
                                (fail-OPEN). Listing every constructor turns a
                                new profile into a compile error so the access
                                decision is reviewed at the boundary. *)
@@ -700,7 +798,11 @@ let handle_request
                              state
                              call_profile
                              name)
-                      then make_error_typed ~id Mcp_error_code.Method_not_found (unavailable_tool_message name)
+                      then
+                        failed_tool_call_error
+                          ~tool_name:name
+                          Mcp_error_code.Method_not_found
+                          (unavailable_tool_message name)
                       else (
                         Log.Mcp.emit
                           Log.Info
@@ -720,20 +822,24 @@ let handle_request
                               | Some s -> s
                               | None -> "none"));
                         let result =
-                          handle_call_tool_eio
-                            ~sw
-                            ~clock
-                            ~profile
-                            ?mcp_session_id
-                            ?auth_token
-                            ~internal_keeper_runtime
-                            state
-                            id
-                            params
+                          Otel_dispatch_hook.with_request_context
+                            otel_context
+                            (fun () ->
+                               handle_call_tool_eio
+                                 ~sw
+                                 ~clock
+                                 ~profile
+                                 ?mcp_session_id
+                                 ?auth_token
+                                 ~internal_keeper_runtime
+                                 state
+                                 id
+                                 params)
                         in
                         let outcome = tool_call_outcome result in
+                        let outcome_s = Tool_result.string_of_tool_call_outcome outcome in
                         Log.Mcp.emit
-                          Log.Info
+                          (Tool_result.log_level_of_tool_call_outcome outcome)
                           ~details:
                             (mcp_tool_call_log_details
                                ~phase:"completed"
@@ -741,17 +847,32 @@ let handle_request
                                ~tool_name:name
                                ~id
                                ?mcp_session_id
-                               ~outcome
+                               ~outcome:outcome_s
                                ())
                           (Printf.sprintf
                              "tools/call completed: %s (outcome=%s)"
                              name
-                             outcome);
+                             outcome_s);
                         result)
-                    with
-                    | Yojson.Safe.Util.Type_error (_, _) ->
-                      make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
-                 | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params")
+	                    with
+	                    | Yojson.Safe.Util.Type_error (_, _) ->
+	                      failed_tool_call_error
+	                        Mcp_error_code.Invalid_params
+	                        "Invalid params: name must be a string"
+	                    | Invalid_argument msg
+		                      when String.starts_with
+		                             ~prefix:"managed agent tool translation failed:"
+		                             msg ->
+		                      let name =
+		                        try params_tool_name () with
+		                        | Yojson.Safe.Util.Type_error (_, _) -> ""
+		                      in
+		                      failed_tool_call_error
+		                        ~tool_name:name
+		                        Mcp_error_code.Invalid_params
+	                        msg)
+	                 | None ->
+	                   failed_tool_call_error Mcp_error_code.Invalid_params "Missing params")
               | method_ when Mcp_sdk_adapter_masc.handles_method method_ ->
                 Mcp_sdk_adapter_masc.dispatch_request
                   ~handle_call_tool_eio
@@ -765,7 +886,7 @@ let handle_request
                 |> Option.value ~default:`Null
               | method_ -> make_error_typed ~id Mcp_error_code.Method_not_found ("Method not found: " ^ method_)
             with
-            | Coord.Not_initialized ->
+            | Workspace.Not_initialized ->
               make_error_typed
                 ~id
                 Mcp_error_code.Internal_error
@@ -824,7 +945,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
-  Log.Mcp.info "Default room: %s" Mcp_server.(state.room_config.Coord.base_path);
+  Log.Mcp.info "Default workspace: %s" Mcp_server.(state.workspace_config.Workspace.base_path);
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
   let read_framed_message_after_first_line first_line =
     let rec read_headers acc =

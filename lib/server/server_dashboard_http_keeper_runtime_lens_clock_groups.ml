@@ -1,20 +1,16 @@
 (** Runtime-lens clock-group projection and gap detection.
 
     Derives grouped clock edges (turns, batches, attempts, checkpoints,
-    compactions, memory injections, event-bus correlations) from the edge
+    compactions and event-bus correlations) from the edge
     stream produced by {!Server_dashboard_http_keeper_runtime_lens_clock_edges}. *)
 
 open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let json_string_opt = Json_util.string_opt_to_json
-
-let json_int_opt = Json_util.int_opt_to_json
-
-let edge_string key edge = json_string_member_opt key edge
-let edge_int key edge = json_int_member_opt key edge
-let edge_string_list key edge = json_string_list_member key edge
+let edge_string key edge = Json_util.get_string edge key
+let edge_int key edge = Json_util.get_int edge key
+let edge_string_list key edge = Json_util.get_string_list edge key
 
 let add_unique value values =
   if List.mem value values then values else values @ [ value ]
@@ -24,7 +20,7 @@ let add_unique_non_empty value values =
   if value = "" then values else add_unique value values
 
 let option_string_default default = function
-  | Some value when String.trim value <> "" -> value
+  | Some value when Option.is_some (String_util.trim_to_option value) -> value
   | Some _ | None -> default
 
 let option_int_string = function
@@ -57,7 +53,6 @@ let clock_group_terminal_event group_type event =
       ("checkpoint_saved" | "state_snapshot_sidecar_saved" | "working_state_sidecar_saved") )
     ->
     true
-  | "memory_injection", "memory_flushed" -> true
   | "compaction", ("context_compacted" | "event_bus_correlated") -> true
   | "event_bus_correlation", "event_bus_correlated" -> true
   | _ -> false
@@ -132,7 +127,7 @@ let runtime_lens_clock_groups_json scan =
   in
   let add_if_present edge group_type field =
     match edge_string field edge with
-    | Some group_id when String.trim group_id <> "" -> update_group group_type group_id edge
+    | Some group_id when Option.is_some (String_util.trim_to_option group_id) -> update_group group_type group_id edge
     | Some _ | None -> ()
   in
   Server_dashboard_http_keeper_runtime_lens_clock_edges.clock_edge_jsons scan
@@ -147,7 +142,6 @@ let runtime_lens_clock_groups_json scan =
     add_if_present edge "provider_attempt" "provider_attempt_id";
     add_if_present edge "checkpoint" "checkpoint_id";
     add_if_present edge "compaction" "compaction_id";
-    add_if_present edge "memory_injection" "memory_injection_id";
     add_if_present edge "event_bus_correlation" "event_bus_correlation_id");
   !ordered_keys
   |> List.filter_map (fun key -> Hashtbl.find_opt groups key)
@@ -160,8 +154,8 @@ let runtime_lens_clock_groups_json scan =
       ; "lanes", Json_util.json_string_list group.lanes
       ; "events", Json_util.json_string_list group.events
       ; "statuses", Json_util.json_string_list group.statuses
-      ; "first_observed_at", json_string_opt group.first_observed_at
-      ; "last_observed_at", json_string_opt group.last_observed_at
+      ; "first_observed_at", Json_util.string_opt_to_json group.first_observed_at
+      ; "last_observed_at", Json_util.string_opt_to_json group.last_observed_at
       ; "closed", `Bool (group.terminal_events <> [])
       ; "terminal_events", Json_util.json_string_list group.terminal_events
       ; "parent_event_ids", Json_util.json_string_list group.parent_event_ids
@@ -176,13 +170,7 @@ let clock_group_jsons scan =
   | `List groups -> groups
   | _ -> []
 
-let take_n n values =
-  let rec loop acc remaining = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | value :: rest -> loop (value :: acc) (remaining - 1) rest
-  in
-  loop [] n values
+let take_n = List.take
 
 let preview_values values =
   let first = take_n 4 values in
@@ -193,8 +181,8 @@ let clock_group_open_gap ~code ~severity ~lane ~label groups =
   let open_ids =
     groups
     |> List.filter_map (fun group ->
-      match json_bool_member_opt "closed" group, json_string_member_opt "group_id" group with
-      | Some false, Some group_id when String.trim group_id <> "" -> Some group_id
+      match Json_util.get_bool group "closed", Json_util.get_string group "group_id" with
+      | Some false, Some group_id -> String_util.trim_to_option group_id
       | _ -> None)
   in
   match open_ids with
@@ -214,7 +202,7 @@ let runtime_lens_clock_group_gaps scan =
   let groups = clock_group_jsons scan in
   let groups_of_type group_type =
     List.filter
-      (fun group -> json_string_member_opt "group_type" group = Some group_type)
+      (fun group -> Json_util.get_string group "group_type" = Some group_type)
       groups
   in
   let edge_ids =
@@ -229,13 +217,6 @@ let runtime_lens_clock_group_gaps scan =
     |> List.fold_left (fun acc value -> add_unique_non_empty value acc) []
   in
   []
-  |> (fun gaps ->
-       match
-         clock_group_open_gap ~code:"clock_tool_batch_open" ~severity:"warn"
-           ~lane:"tool_runtime" ~label:"tool_batch" (groups_of_type "tool_batch")
-       with
-       | Some gap -> gap :: gaps
-       | None -> gaps)
   |> (fun gaps ->
        match
          clock_group_open_gap ~code:"clock_provider_group_open"
@@ -283,9 +264,6 @@ let runtime_lens_clock_group_gaps scan =
 
 let runtime_lens_clock_gaps scan =
   let event_count = runtime_manifest_scan_event_count scan in
-  let has_tool_surface =
-    event_count Keeper_runtime_manifest.Tool_surface_selected > 0
-  in
   let checkpoint_saved_count =
     event_count Keeper_runtime_manifest.Checkpoint_saved
   in
@@ -303,14 +281,6 @@ let runtime_lens_clock_gaps scan =
                 "clock_edges contains the latest %d of %d manifest rows; \
                  increase the runtime-trace limit to inspect the full clock"
                 returned_row_count scan.total_rows)
-           gaps
-       else gaps)
-  |> (fun gaps ->
-       if scan.provider_started_count > 0 && not has_tool_surface then
-         add ~code:"tool_surface_missing" ~severity:"bad"
-           ~lane:"tool_runtime"
-           ~detail:
-             "provider attempt exists without a tool_surface_selected row"
            gaps
        else gaps)
   |> (fun gaps ->

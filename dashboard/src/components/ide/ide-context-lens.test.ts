@@ -12,7 +12,7 @@ import { ideContextFocus } from './ide-state'
 
 const annotation: IdeAnnotation = {
   id: 'ann-1',
-  file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+  file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
   line_start: 12,
   line_end: 14,
   keeper_id: 'sangsu',
@@ -40,6 +40,16 @@ const events: ReadonlyArray<RunActivityEvent> = [
     kind: 'board.comment.created',
     tags: ['pr:15000', 'goal:goal-ide'],
     timestamp_ms: 100,
+    // Structured surface classification (#20513 replaced regex/tag/text
+    // parsing with event.context for surface counts). Drives goal/task/
+    // board/pr/git surfaces; comment stays sourced from the annotation.
+    context: {
+      goal_id: 'goal-ide',
+      task_id: 'task-42',
+      board_post_id: 'post-1',
+      pr_id: '15000',
+      git_ref: 'abc123',
+    },
   },
 ]
 
@@ -48,18 +58,18 @@ const overlay: KeeperCursorOverlay = {
     'sangsu',
     {
       keeper_id: 'sangsu',
-      file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
       line: 12,
       column: 4,
       focus_mode: 'editing',
       last_update: 100,
-      tool_name: 'agent_tool_ide_runtime',
+      tool_name: 'keeper_tool_ide_runtime',
       turn: 7,
     },
   ]]),
   heatmap: new Map(),
   collisions: [],
-  active_file: 'lib/keeper/agent_tool_ide_runtime.ml',
+  active_file: 'lib/keeper/keeper_tool_ide_runtime.ml',
 }
 
 const thread: AnchoredThread = {
@@ -67,7 +77,7 @@ const thread: AnchoredThread = {
   kind: 'question',
   author_keeper_id: 'scholar',
   anchor: {
-    file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+    file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
     line_start: 19,
     line_end: 19,
     symbol_hint: 'fn:wireContext',
@@ -81,7 +91,7 @@ const thread: AnchoredThread = {
 describe('IdeContextLens', () => {
   it('derives linked surfaces from annotations, diff rows, activity, and cursors', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [annotation],
       diffRows,
       events,
@@ -113,11 +123,11 @@ describe('IdeContextLens', () => {
     expect(model.anchors.map(anchor => anchor.surface)).toContain('Git')
     expect(model.surfaces.find(surface => surface.id === 'line')?.routeLink).toMatchObject({
       label: 'Code',
-      params: { file: 'lib/keeper/agent_tool_ide_runtime.ml', line: '12' },
+      params: { file: 'lib/keeper/keeper_tool_ide_runtime.ml', line: '12' },
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
     expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',
@@ -132,7 +142,7 @@ describe('IdeContextLens', () => {
 
   it('does not claim telemetry links from local-only code evidence', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [annotation],
       diffRows,
       events: [],
@@ -153,7 +163,7 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
-        filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         annotations: [annotation],
         diffRows,
         events,
@@ -166,7 +176,7 @@ describe('IdeContextLens', () => {
     expect(container.querySelector('[data-testid="ide-context-lens"]')).not.toBeNull()
     expect(container.textContent).toContain('CONTEXT LENS')
     expect(container.textContent).toContain('11/12 linked')
-    expect(container.textContent).toContain('agent_tool_ide_runtime.ml')
+    expect(container.textContent).toContain('keeper_tool_ide_runtime.ml')
     expect(container.textContent).toContain('4 anchors')
     expect(container.textContent).toContain('goal goal-ide')
 
@@ -187,12 +197,12 @@ describe('IdeContextLens', () => {
     fireEvent.click(surfaceButtons.find(button => button.textContent === 'PR1')!)
     expect(activated[0]).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15000' },
+      params: { section: 'repositories', pr: '15000' },
     })
 
     fireEvent.click(surfaceButtons.find(button => button.textContent === 'Comment1')!)
     expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
       line: 12,
       surface: 'Comment',
       source_id: 'annotation-ann-1',
@@ -218,7 +228,7 @@ describe('IdeContextLens', () => {
         ...overlay.cursors,
         ['analyst', {
           keeper_id: 'analyst',
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 17,
           column: 2,
           focus_mode: 'reviewing',
@@ -231,18 +241,18 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
-        filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         annotations: extraAnnotations,
         diagnostics: [
           {
-            file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+            file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
             line: 21,
             severity: 1,
             source: 'ocamllsp',
             message: 'First diagnostic',
           },
           {
-            file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+            file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
             line: 22,
             severity: 2,
             source: 'ocamllsp',
@@ -275,7 +285,7 @@ describe('IdeContextLens', () => {
         ...overlay.cursors,
         ['analyst', {
           keeper_id: 'analyst',
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 17,
           column: 2,
           focus_mode: 'reviewing',
@@ -287,11 +297,11 @@ describe('IdeContextLens', () => {
     }
 
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: extraAnnotations,
       diagnostics: [
         {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 21,
           severity: 1,
           source: 'ocamllsp',
@@ -299,7 +309,7 @@ describe('IdeContextLens', () => {
           message: 'First diagnostic',
         },
         {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 22,
           severity: 2,
           source: 'ocamllsp',
@@ -315,7 +325,7 @@ describe('IdeContextLens', () => {
         target: 'PR #15000',
         timestamp_ms: 400,
         context: {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
           goal_id: 'goal-ide',
           task_id: 'task-42',
@@ -351,7 +361,7 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
-        filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         annotations: [annotation],
         diffRows: [],
         events: [],
@@ -365,7 +375,7 @@ describe('IdeContextLens', () => {
     fireEvent.click(button!)
 
     expect(ideContextFocus.value).toMatchObject({
-      file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+      file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
       line: 12,
       surface: 'Comment',
       source_id: 'annotation-ann-1',
@@ -375,10 +385,10 @@ describe('IdeContextLens', () => {
 
   it('links LSP diagnostics into file line anchors', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diagnostics: [{
-        file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: 22,
         severity: 2,
         source: 'ocamllsp',
@@ -404,7 +414,7 @@ describe('IdeContextLens', () => {
       params: {
         section: 'ide-shell',
         view: 'source',
-        file: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: '22',
         surface: 'LSP',
         label: 'This expression has type string but an int was …',
@@ -424,10 +434,10 @@ describe('IdeContextLens', () => {
 
   it('keeps diagnostic telemetry routes quiet without source metadata', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diagnostics: [{
-        file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: 22,
         severity: 1,
         message: 'Missing semicolon.',
@@ -448,7 +458,7 @@ describe('IdeContextLens', () => {
       line_end: 0,
     }
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [invalidLineAnnotation],
       diffRows: [],
       events: [],
@@ -466,7 +476,7 @@ describe('IdeContextLens', () => {
     ideContextFocus.value = null
     render(
       h(IdeContextLens, {
-        filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         annotations: [invalidLineAnnotation],
         diffRows: [],
         events: [],
@@ -487,7 +497,7 @@ describe('IdeContextLens', () => {
 
     render(
       h(IdeContextLens, {
-        filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+        filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
         annotations: [annotation],
         diffRows: [],
         events: [],
@@ -524,7 +534,7 @@ describe('IdeContextLens', () => {
       worker_run_id: 'wr-9',
     }
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [linkedAnnotation],
       diffRows: [],
       events: [],
@@ -558,7 +568,7 @@ describe('IdeContextLens', () => {
     })
     expect(model.surfaces.find(surface => surface.id === 'pr')?.routeLink).toMatchObject({
       label: 'PR',
-      params: { section: 'repositories', view: 'graph', pr: '15035' },
+      params: { section: 'repositories', pr: '15035' },
     })
     expect(model.surfaces.find(surface => surface.id === 'telemetry')?.routeLink).toMatchObject({
       label: 'Telemetry',
@@ -611,7 +621,7 @@ describe('IdeContextLens', () => {
 
   it('links conversation threads into board, comment, keeper, and line context', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [],
@@ -633,7 +643,7 @@ describe('IdeContextLens', () => {
 
   it('uses structured activity context as file, line, PR, task, goal, log, and git evidence', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -644,7 +654,7 @@ describe('IdeContextLens', () => {
         target: 'telemetry',
         timestamp_ms: 400,
         context: {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
           goal_id: 'goal-ide',
           task_id: 'task-42',
@@ -699,7 +709,7 @@ describe('IdeContextLens', () => {
       params: {
         section: 'ide-shell',
         view: 'source',
-        file: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: '27',
         surface: 'Comment',
         source_id: 'event-evt-context',
@@ -745,7 +755,7 @@ describe('IdeContextLens', () => {
 
   it('promotes tagged activity references into routeable IDE context links', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -768,6 +778,17 @@ describe('IdeContextLens', () => {
           'line:27',
         ].join(' '),
         tags: ['pr:15000'],
+        // Surface classification/count reads event.context (#20513); the
+        // detail text still feeds route-link refs (eventRouteRefs retained).
+        // pr_id selects the PR surface; session/op/wr light the runtime
+        // surface. line stays in detail (context.line without file_path is
+        // filtered out by deriveIdeContextLens).
+        context: {
+          pr_id: '15000',
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+        },
       }],
       overlay: { ...overlay, cursors: new Map() },
     })
@@ -800,7 +821,7 @@ describe('IdeContextLens', () => {
       params: {
         section: 'ide-shell',
         view: 'source',
-        file: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: '27',
         surface: 'PR',
       },
@@ -820,7 +841,7 @@ describe('IdeContextLens', () => {
 
   it('promotes tagged runtime references into runtime anchors', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -831,6 +852,14 @@ describe('IdeContextLens', () => {
         target: 'runtime scope',
         timestamp_ms: 400,
         detail: 'session:sess-9 op:op-9 wr:wr-9 line:27',
+        // Runtime surface classification reads event.context (#20513).
+        // line stays in detail (refs.line); context.line without file_path
+        // would be filtered out by deriveIdeContextLens.
+        context: {
+          session_id: 'sess-9',
+          operation_id: 'op-9',
+          worker_run_id: 'wr-9',
+        },
       }],
       overlay: { ...overlay, cursors: new Map() },
     })
@@ -859,7 +888,7 @@ describe('IdeContextLens', () => {
       params: {
         section: 'ide-shell',
         view: 'source',
-        file: 'lib/keeper/agent_tool_ide_runtime.ml',
+        file: 'lib/keeper/keeper_tool_ide_runtime.ml',
         line: '27',
         surface: 'Runtime',
       },
@@ -878,7 +907,7 @@ describe('IdeContextLens', () => {
 
   it('prefers structured activity context over tagged fallback references', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -890,7 +919,7 @@ describe('IdeContextLens', () => {
         timestamp_ms: 400,
         detail: 'pr:99999 log:turn-999',
         context: {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           pr_id: '15000',
           log_id: 'turn-9',
         },
@@ -910,7 +939,7 @@ describe('IdeContextLens', () => {
 
   it('keeps other-file activity out of the current-file lens', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -942,11 +971,11 @@ describe('IdeContextLens', () => {
 
   it('normalizes file paths before matching current-file lens inputs', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [{
         ...annotation,
         id: 'ann-backslash',
-        file_path: ' lib\\keeper\\agent_tool_ide_runtime.ml ',
+        file_path: ' lib\\keeper\\keeper_tool_ide_runtime.ml ',
       }],
       diffRows: [],
       events: [{
@@ -957,7 +986,7 @@ describe('IdeContextLens', () => {
         target: 'telemetry',
         timestamp_ms: 400,
         context: {
-          file_path: 'lib\\keeper\\agent_tool_ide_runtime.ml',
+          file_path: 'lib\\keeper\\keeper_tool_ide_runtime.ml',
           line: 27,
           log_id: 'turn-9',
         },
@@ -967,7 +996,7 @@ describe('IdeContextLens', () => {
         id: 'thread-backslash',
         anchor: {
           ...thread.anchor,
-          file_path: 'lib\\keeper\\agent_tool_ide_runtime.ml',
+          file_path: 'lib\\keeper\\keeper_tool_ide_runtime.ml',
         },
       }],
       overlay: {
@@ -976,7 +1005,7 @@ describe('IdeContextLens', () => {
           'sangsu',
           {
             ...overlay.cursors.get('sangsu')!,
-            file_path: 'lib\\keeper\\agent_tool_ide_runtime.ml',
+            file_path: 'lib\\keeper\\keeper_tool_ide_runtime.ml',
           },
         ]]),
       },
@@ -997,7 +1026,7 @@ describe('IdeContextLens', () => {
 
   it('does not turn unscoped event lines into current-file anchors', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -1024,7 +1053,7 @@ describe('IdeContextLens', () => {
 
   it('does not advertise delete-only diff rows as editor-focusable lines', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [{ kind: 'delete', oldLine: 13, newLine: null, text: '-let old = ...' }],
       events: [],
@@ -1042,7 +1071,7 @@ describe('IdeContextLens', () => {
 
   it('routes log context into the runtime audit focus', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -1053,7 +1082,7 @@ describe('IdeContextLens', () => {
         target: 'telemetry',
         timestamp_ms: 400,
         context: {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
           log_id: 'turn-9',
         },
@@ -1067,7 +1096,7 @@ describe('IdeContextLens', () => {
 
   it('routes telemetry-only context into event-log query focus', () => {
     const model = deriveIdeContextLens({
-      filePath: 'lib/keeper/agent_tool_ide_runtime.ml',
+      filePath: 'lib/keeper/keeper_tool_ide_runtime.ml',
       annotations: [],
       diffRows: [],
       events: [{
@@ -1078,7 +1107,7 @@ describe('IdeContextLens', () => {
         target: 'telemetry',
         timestamp_ms: 400,
         context: {
-          file_path: 'lib/keeper/agent_tool_ide_runtime.ml',
+          file_path: 'lib/keeper/keeper_tool_ide_runtime.ml',
           line: 27,
           log_id: 'turn-9',
         },

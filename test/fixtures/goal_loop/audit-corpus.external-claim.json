@@ -18,7 +18,7 @@
       "sha256": "b63b928da93d952b822ef50f62551481a777b6d1b38773b488126d24ad9413bb",
       "line_count": 606,
       "line_refs": [4, 9, 331, 334, 335, 336, 337, 340, 348, 352, 359, 382, 402, 529, 531, 589],
-      "claim": "Claims 206 baseline audit findings plus 8 live-log NEW_FINDING items and itemizes 19 finding IDs, but does not contain the full 206-row corpus."
+      "claim": "Claims 206 baseline audit findings plus 8 live-log NEW_FINDING items and itemizes 18 finding IDs, but does not provide complete row-level evidence."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/issues_analysis_done_vs_todo.md",
@@ -32,28 +32,28 @@
       "sha256": "9df57464415c79e849bd8821564052b7701ababdebb0c3c8047d796f3cb4af84",
       "line_count": 216,
       "line_refs": [16, 29, 60, 100, 156, 169, 172, 193, 215],
-      "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/cascade failures."
+      "claim": "Uses live incident logs to argue the 206-audit result is reproduced by production symptoms including turn-slot starvation, zero sub-op metrics, and provider/runtime failures."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/fundamental_roadmap.md",
       "sha256": "104fbd66def4a27f302091fe2dba527a41da57b61d9990cbe73c465b153640fa",
       "line_count": 1935,
       "line_refs": [3, 1934],
-      "claim": "Claims the roadmap is based on 206 audit findings, but does not contain the full 206-row corpus."
+      "claim": "Claims the roadmap is based on 206 audit findings, but does not provide complete row-level evidence."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/deep_audit_dashboard_heuristic.md",
       "sha256": "61f32a613162e3f6d91c58e543dcea4a1e4eb2e14b22308bccf83cc17a984717",
       "line_count": 821,
       "line_refs": [1, 3, 10, 13, 18, 24, 63, 74, 126],
-      "claim": "Audits dashboard, heuristic metrics, admission queue, resilience, cancellation, local runtime pool, bounded token heuristics, and LLM metric bridge for fake data, silent failures, and no-op recovery."
+      "claim": "Audits dashboard, admission queue, resilience, cancellation, local runtime pool, bounded token heuristics, and LLM metric bridge for fake data, silent failures, and no-op recovery."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/audit_derived_state.md",
       "sha256": "928c49553975b5a6d3de04a15285d4b4b2fa1b03fabfd7a7aa9ebf036836e73e",
       "line_count": 766,
       "line_refs": [1, 3, 4, 20, 44, 90],
-      "claim": "Claims 32 derived-state anti-patterns across masc-mcp, oas, and dashboard files, including 8 critical consistency risks."
+      "claim": "Claims 32 derived-state anti-patterns across masc, oas, and dashboard files, including 8 critical consistency risks."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/progress-evaluation.md",
@@ -74,7 +74,7 @@
       "sha256": "93d0ec27e77a575647edfb86cf71aa9309dfa523dd7d21e6cc9d5acbb1f758f8",
       "line_count": 299,
       "line_refs": [8, 10, 30, 46, 72, 86, 105, 146, 155, 157],
-      "claim": "Diagnoses simultaneous provider failures and cascade exhaustion as the reason keepers repeatedly die or restart without useful progress."
+      "claim": "Diagnoses simultaneous provider failures and runtime exhaustion as the reason keepers repeatedly die or restart without useful progress."
     },
     {
       "path": "prompt_corpus/GOAL_LOOP/RUTHLESS_JUDGMENT.md",
@@ -88,7 +88,7 @@
       "sha256": "8519894053b54bf096644fa34ebf3b74dd3d19354639ec623d78e91b451e14b5",
       "line_count": 298,
       "line_refs": [24, 53, 57, 62, 71, 87, 94, 131, 154, 210],
-      "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio cascade death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
+      "claim": "Synthesizes audit artifacts into ordered implementation dependencies, emphasizing string matching, Eio runtime death, telemetry gaps, fallback string drift, and dashboard context hardcoding."
     }
   ],
   "aggregate_claims": [
@@ -154,15 +154,6 @@
   ],
   "findings": [
     {
-      "finding_id": "R-FATAL-1",
-      "title": "acquire_sem_bounded_timeout_no_fallback",
-      "severity": "critical",
-      "patterns": ["keeper_skipping_turn"],
-      "actionability": "actionable",
-      "decision_id": "D-P1-1",
-      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [295, 340, 390]}
-    },
-    {
       "finding_id": "R-FATAL-5",
       "title": "pre_dispatch_gates_silent_skip",
       "severity": "critical",
@@ -191,7 +182,7 @@
     },
     {
       "finding_id": "CC-3",
-      "title": "cascade_pool_router_hardcoded",
+      "title": "runtime_pool_router_hardcoded",
       "severity": "warning",
       "patterns": [],
       "actionability": "actionable",
@@ -200,7 +191,7 @@
     },
     {
       "finding_id": "CD-5",
-      "title": "admission_queue_passthrough",
+      "title": "admission_queue_backpressure",
       "severity": "critical",
       "patterns": [],
       "actionability": "actionable",
@@ -269,15 +260,6 @@
       "actionability": "actionable",
       "decision_id": "D-EMERGENCY-1",
       "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [353, 382]}
-    },
-    {
-      "finding_id": "NF-3",
-      "title": "alive_but_stuck_no_recovery",
-      "severity": "critical",
-      "patterns": ["alive_but_stuck"],
-      "actionability": "actionable",
-      "decision_id": null,
-      "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [354]}
     },
     {
       "finding_id": "NF-4",

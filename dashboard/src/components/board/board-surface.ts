@@ -12,6 +12,7 @@ import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { RichComposer } from '../common/rich-composer'
+import { isSubmitEnter } from '../../lib/keyboard'
 import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
@@ -20,7 +21,7 @@ import { votePost } from '../../api/board'
 import { deleteBoardPost } from '../../api/actions'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
-import { MessageRoomTimeline } from './message-room-timeline'
+import { MessageWorkspaceTimeline } from './message-workspace-timeline'
 import { BoardCurationPanel } from './board-curation-panel'
 import { BoardKarmaPanel } from './board-karma-panel'
 import { MentionInbox } from './mention-inbox'
@@ -129,8 +130,8 @@ function filterBoardPosts(
   })
 }
 
-// ── Scroll sentinel (IntersectionObserver auto-load) ──────────────
-function ScrollSentinel({ onVisible }: { onVisible: () => void }) {
+// ── Scroll marker (IntersectionObserver auto-load) ──────────────
+function ScrollMarker({ onVisible }: { onVisible: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const cb = useCallback(onVisible, [onVisible])
   useEffect(() => {
@@ -215,7 +216,7 @@ function renderCategorySection(
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>
       ${hasMore ? html`
-        <${ScrollSentinel} onVisible=${() => {
+        <${ScrollMarker} onVisible=${() => {
           if (loadingMore) return
           expandCategory(category, limits, limit, posts.length)
         }} />
@@ -528,7 +529,7 @@ function SortBar() {
           value=${boardAuthorFilter.value}
           class="!bg-transparent !px-2.5 !py-1 !text-2xs !font-medium w-28"
           onKeyDown=${(e: KeyboardEvent) => {
-            if (e.key === 'Enter') {
+            if (isSubmitEnter(e)) {
               boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()
               refreshBoard()
             }
@@ -892,11 +893,11 @@ export function BoardSurface() {
     `
   }
 
-  if (focus === 'messages-room') {
+  if (focus === 'messages-workspace') {
     return html`
       <div>
         <${BoardSummary} />
-        <${MessageRoomTimeline} />
+        <${MessageWorkspaceTimeline} />
       </div>
     `
   }

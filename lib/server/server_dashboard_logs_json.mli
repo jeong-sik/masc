@@ -3,7 +3,7 @@
 val store_path : masc_root:string -> string
 
 val build
-  :  config:Coord.config
+  :  config:Workspace.config
   -> limit:int
   -> level_filter:string
   -> applied_level:Log.level

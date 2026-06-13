@@ -30,7 +30,9 @@ module W = Multimodal.Workspace
 module B = Multimodal.Multimodal_keeper_bridge
 module Wirein = Multimodal.Wirein_helpers
 module T = Multimodal.Tool_emission
-module Routes = Masc_mcp.Server_routes_http_routes_multimodal
+module Routes = Server_routes_http_routes_multimodal
+
+let emit = Multimodal.Keeper_emitter.emit
 
 let now = 1_700_001_000.0
 
@@ -95,7 +97,7 @@ let phase1_tool_surface_emits () =
         ~metadata:(`Assoc [ ("format", `String "md") ]);
     ]
   in
-  let wc = T.emit_from_tool_results ~working_context:None results in
+  let wc = T.emit_from_tool_results ~emit ~working_context:None results in
   let raws_in_wc =
     match wc with
     | Some (`Assoc kv) -> (

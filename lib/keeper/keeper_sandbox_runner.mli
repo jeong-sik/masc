@@ -31,8 +31,7 @@ type backend_command =
   { route_cwd : string
   ; cwd : unit -> string
   ; command_text : string
-  ; git_creds_enabled : bool
-  ; network_mode : Keeper_types.network_mode
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; trust : command_trust
   }
 
@@ -48,14 +47,9 @@ type route =
   | Sandbox_backend
 
 module type Backend = sig
-  val egress_policy_path :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
-    meta:Keeper_types.keeper_meta ->
-    Keeper_types.sandbox_profile * Keeper_types.network_mode
+    meta:Keeper_meta_contract.keeper_meta ->
+    Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
@@ -63,61 +57,44 @@ module type Backend = sig
   val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     string ->
     string
 
   val run_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
   val run_trusted_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     string
 end
 
 module Make (Backend : Backend) : sig
-  val egress_policy_path :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
-    meta:Keeper_types.keeper_meta ->
-    Keeper_types.sandbox_profile * Keeper_types.network_mode
+    meta:Keeper_meta_contract.keeper_meta ->
+    Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
@@ -125,60 +102,43 @@ module Make (Backend : Backend) : sig
   val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     string ->
     string
 
   val run_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
   val run_trusted_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     string
 end
 
-val egress_policy_path :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  string
-
 val effective_sandbox_profile :
-  meta:Keeper_types.keeper_meta ->
-  Keeper_types.sandbox_profile * Keeper_types.network_mode
+  meta:Keeper_meta_contract.keeper_meta ->
+  Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
 val ensure_runtime :
   timeout_sec:float -> (string list, string) result
@@ -186,74 +146,62 @@ val ensure_runtime :
 val command_uses_nested_runtime : string -> bool
 
 val private_workspace_cwd :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   string ->
   string
 
 val run_shell_command_with_status :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   (command_result, string) result
 
 val run_trusted_shell_command_with_status :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  git_creds_enabled:bool ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   (command_result, string) result
-
-val run_credentialed_bash :
-  turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  cwd:string ->
-  timeout_sec:float ->
-  cmd:string ->
-  unit ->
-  string
 
 val run_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   timeout_sec:float ->
   cmd:string ->
-  network_mode:Keeper_types.network_mode ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   string
 
 val uses_backend :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   bool
 
 val route_for :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   route
 
 val route_label : route -> string
 
 val route_via :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
   string
 
 val run_command_with_status :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   timeout_sec:float ->
   host:host_command ->
   backend:backend_command ->

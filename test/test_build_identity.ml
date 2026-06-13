@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let test_resolve_commit_prefers_env () =
   let probe_called = ref false in
@@ -84,45 +84,45 @@ let test_current_json_exposes_runtime_binary_identity () =
     (match json |> member "repo_root" with `Null | `String _ -> true | _ -> false)
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
-  (* Regression for the bug where running `cd ~/me && .../masc-mcp/main_eio.exe`
-     reported ~/me's commit instead of masc-mcp's. exe_dir must come first. *)
+  (* Regression for the bug where running `cd ~/me && .../masc/main_eio.exe`
+     reported ~/me's commit instead of masc's. exe_dir must come first. *)
   let result =
     Build_identity.pick_repo_candidates
-      ~exe_dir:"/Users/dev/masc-mcp/_build/default/bin"
+      ~exe_dir:"/Users/dev/masc/_build/default/bin"
       ~cwd:"/Users/dev/me"
   in
   Alcotest.(check (list string))
     "exe_dir before cwd"
-    [ "/Users/dev/masc-mcp/_build/default/bin"; "/Users/dev/me" ]
+    [ "/Users/dev/masc/_build/default/bin"; "/Users/dev/me" ]
     result
 
 let test_pick_repo_candidates_dedups_equal () =
   let result =
     Build_identity.pick_repo_candidates
-      ~exe_dir:"/Users/dev/masc-mcp"
-      ~cwd:"/Users/dev/masc-mcp"
+      ~exe_dir:"/Users/dev/masc"
+      ~cwd:"/Users/dev/masc"
   in
   Alcotest.(check (list string))
     "single entry when equal"
-    [ "/Users/dev/masc-mcp" ]
+    [ "/Users/dev/masc" ]
     result
 
 let test_pick_repo_candidates_not_sorted_alphabetically () =
   (* The old implementation used List.sort_uniq String.compare which
      sorted alphabetically, causing /Users/dancer/me to win over
-     /Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin
+     /Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin
      because the shorter prefix is lexicographically smaller. Assert
      that we now preserve the logical order instead. *)
   let result =
     Build_identity.pick_repo_candidates
-      ~exe_dir:"/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin"
+      ~exe_dir:"/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
       ~cwd:"/Users/dancer/me"
   in
   match result with
   | first :: _ ->
       Alcotest.(check string)
         "exe_dir wins over shorter cwd prefix"
-        "/Users/dancer/me/workspace/yousleepwhen/masc-mcp/_build/default/bin"
+        "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin"
         first
   | [] -> Alcotest.fail "pick_repo_candidates returned empty list"
 
@@ -151,13 +151,13 @@ let test_parse_dune_project_version () =
   Alcotest.(check (option string)) "version parsed"
     (Some "0.19.20")
     (Build_identity.parse_dune_project_version
-       "(lang dune 3.22)\n\n(name masc_mcp)\n(version 0.19.20)\n");
+       "(lang dune 3.22)\n\n(name masc)\n(version 0.19.20)\n");
   Alcotest.(check (option string)) "missing version" None
     (Build_identity.parse_dune_project_version "(lang dune 3.22)\n")
 
 let build_identity_probe_failure_count site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_build_identity_probe_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_build_identity_probe_failures
     ~labels:[("site", site)]
     ()
 

@@ -149,7 +149,7 @@ module Shell_timeout = struct
     [ Io; Read; Git_meta; Gh_min; User_max; Cleanup_rm ]
 
   (* [Gh_min] is the only read-only floor bucket — see .mli: operators
-     MUST NOT lower it via env (doing so cascades 401 retries, #8688).
+     MUST NOT lower it via env (doing so runtimes 401 retries, #8688).
      Exhaustive match (warning 4) so a new bucket forces a deliberate
      floor/non-floor classification here, once, rather than at every
      call site that branches on it. *)
@@ -202,7 +202,7 @@ module Shell_timeout = struct
     match timeout_floor bucket with
     | Some floor ->
       (* Read-only floor — see .mli.  Operators MUST NOT lower this
-         via env; doing so cascades 401 retries (#8688). *)
+         via env; doing so runtimes 401 retries (#8688). *)
       timeout_floor_default_sec floor
     | None ->
       let per_bucket_env = per_bucket_env_var ~bucket in
@@ -222,7 +222,7 @@ module Shell_timeout = struct
 end
 
 (* --------------------------------------------------------------- *)
-(* Doctor / observability surface                                  *)
+(* Diagnostics / observability surface                                  *)
 (* --------------------------------------------------------------- *)
 
 (* Helper: does an env var currently exist (non-empty after trim)? *)

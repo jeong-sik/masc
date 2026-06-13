@@ -1,18 +1,16 @@
-// Repository management surface -- registered repos, credentials, keeper access.
+// Repository management surface -- registered repos and keeper access.
 
 import { html } from 'htm/preact'
 import { RepoSidebar } from './repo-sidebar'
 import { RepoDetailPanel } from './repo-detail-panel'
 import { AddRepoDialog } from './add-repo-dialog'
-import { CredentialSettings } from './credential-settings'
 import { KeeperRepoMapping } from './keeper-repo-mapping'
-import { GitBranch, GitFork, KeyRound, ShieldCheck } from 'lucide-preact'
+import { GitBranch, ShieldCheck } from 'lucide-preact'
 import { replaceRoute, route } from '../router'
-import { GitGraphPanel } from './git-graph-panel'
 
-type RepositoryView = 'repos' | 'graph' | 'credentials' | 'mappings'
+type RepositoryView = 'repos' | 'mappings'
 
-const REPOSITORY_VIEWS: RepositoryView[] = ['repos', 'graph', 'credentials', 'mappings']
+const REPOSITORY_VIEWS: RepositoryView[] = ['repos', 'mappings']
 
 function currentView(): RepositoryView {
   const view = route.value.params.view
@@ -56,8 +54,6 @@ export function RepositoryManagement() {
         </div>
         <div class="flex flex-wrap items-center gap-2" role="tablist" aria-label="저장소 운영 보기">
           ${viewButton('repos', '저장소', html`<${GitBranch} size=${14} aria-hidden="true" />`)}
-          ${viewButton('graph', 'Git 그래프', html`<${GitFork} size=${14} aria-hidden="true" />`)}
-          ${viewButton('credentials', 'Credentials', html`<${KeyRound} size=${14} aria-hidden="true" />`)}
           ${viewButton('mappings', 'Keeper 접근', html`<${ShieldCheck} size=${14} aria-hidden="true" />`)}
         </div>
       </div>
@@ -72,12 +68,6 @@ export function RepositoryManagement() {
           </div>
         </div>
         <${AddRepoDialog} />
-      ` : view === 'graph' ? html`
-        <${GitGraphPanel} />
-      ` : view === 'credentials' ? html`
-        <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
-          <${CredentialSettings} />
-        </div>
       ` : html`
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
           <${KeeperRepoMapping} />

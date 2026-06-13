@@ -40,7 +40,7 @@ module E = Multimodal.Keeper_emitter
 module Wirein = Multimodal.Wirein_helpers
 module A = Multimodal.Artifact
 module Aid = Shared_types.Artifact_id
-module Multimodal_routes = Masc_mcp.Server_routes_http_routes_multimodal
+module Multimodal_routes = Server_routes_http_routes_multimodal
 
 let now = 1_700_000_000.0
 

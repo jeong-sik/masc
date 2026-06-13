@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_types)
+ (public_name masc.keeper_types)
+ (wrapped false)
+ (libraries agent_sdk)
+ (modules keeper_types))

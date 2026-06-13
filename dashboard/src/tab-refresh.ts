@@ -2,17 +2,7 @@ import type { RouteState } from './types'
 import { refreshExecution, refreshBoard, refreshGoals, refreshShell } from './store'
 import { requestNamespaceTruth } from './namespace-truth-store'
 import { refreshMissionSnapshot } from './mission-store'
-import { refreshOperatorRoomDigest, refreshOperatorSnapshot } from './operator-store'
-
-async function refreshActivityGraphSurface(): Promise<void> {
-  const { refreshActivityGraph } = await import('./components/activity-graph-store')
-  await refreshActivityGraph()
-}
-
-async function refreshGitGraphSurface(): Promise<void> {
-  const { refreshGitGraph } = await import('./components/git-graph-store')
-  await refreshGitGraph()
-}
+import { refreshOperatorWorkspaceDigest, refreshOperatorSnapshot } from './operator-store'
 
 async function refreshObservatoryPanel(): Promise<void> {
   const { refreshObservatorySurface } = await import('./components/observatory/observatory')
@@ -39,19 +29,9 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-async function refreshDoctorSurface(): Promise<void> {
-  const { refreshDoctor } = await import('./components/doctor-panel')
-  await refreshDoctor()
-}
-
 async function refreshSurfaceReadinessSurface(): Promise<void> {
   const { refreshSurfaceReadiness } = await import('./components/surface-readiness-panel')
   await refreshSurfaceReadiness()
-}
-
-async function refreshCascadeInspectorSurface(): Promise<void> {
-  const { refreshCascadeInspector } = await import('./components/cascade-inspector')
-  await refreshCascadeInspector()
 }
 
 type RefreshTask =
@@ -60,22 +40,19 @@ type RefreshTask =
   | 'missionSnapshot'
   | 'execution'
   | 'observatory'
-  | 'activityGraph'
-  | 'gitGraph'
   | 'board'
   | 'goals'
   | 'harness'
   | 'toolQuality'
   | 'inspector'
   | 'surfaceReadiness'
-  | 'cascadeInspector'
   | 'operatorSnapshot'
-  | 'operatorRoomDigest'
+  | 'operatorWorkspaceDigest'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
 //            each declare their own view-aware or static refresh plan.
-//   Tier 2 — hidden diagnostic sections (cascade-config / doctor /
+//   Tier 2 — hidden diagnostic sections (
 //            transport-health / feature-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
@@ -89,9 +66,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
     case 'monitoring':
       if (routeState.params.section === 'observatory') {
-        const view = routeState.params.view
-        if (view === 'activity' || view === 'graph') return ['namespaceTruth', 'activityGraph']
-        if (view === 'live') return ['namespaceTruth', 'execution', 'missionSnapshot']
         return ['namespaceTruth', 'observatory']
       }
       if (routeState.params.section === 'journey') {
@@ -102,9 +76,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'cognition') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
-      }
-      if (routeState.params.section === 'runtime' && routeState.params.view === 'inspector') {
-        return ['cascadeInspector']
       }
       // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
       if (routeState.params.section === 'fleet-health') {
@@ -125,16 +96,13 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.view === 'surfaces') {
         return ['surfaceReadiness']
       }
-      return ['namespaceTruth', 'operatorSnapshot', 'operatorRoomDigest']
+      return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
     case 'workspace':
       if (routeState.params.section === 'planning') {
         return ['goals', 'execution']
       }
       if (routeState.params.section === 'board') {
         return ['board']
-      }
-      if (routeState.params.section === 'repositories' && routeState.params.view === 'graph') {
-        return ['gitGraph']
       }
       return []
     case 'lab':
@@ -160,8 +128,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   // through that budgeted path instead of bypassing it.
   execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
-  activityGraph: () => { void refreshActivityGraphSurface() },
-  gitGraph: () => { void refreshGitGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
   harness: () => { void refreshHarnessLabSurface() },
@@ -169,12 +135,10 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   inspector: () => {
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
-    void refreshDoctorSurface()
   },
   surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
-  cascadeInspector: () => { void refreshCascadeInspectorSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
-  operatorRoomDigest: () => { void refreshOperatorRoomDigest({ force: true }) },
+  operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

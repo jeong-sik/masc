@@ -26,8 +26,8 @@ type cache_entry =
   }
 
 (** Get cache directory *)
-let cache_dir (config : Coord_utils.config) =
-  Filename.concat (Coord_utils.masc_dir config) "cache"
+let cache_dir (config : Workspace_utils.config) =
+  Filename.concat (Workspace_utils.masc_dir config) "cache"
 ;;
 
 (** Ensure cache directory exists *)
@@ -47,7 +47,7 @@ let sanitize_key key =
   if String.length safe > 64 then String.sub safe 0 64 else safe
 ;;
 
-(** Keep a readable filename prefix while reserving room for a collision-proof hash suffix. *)
+(** Keep a readable filename prefix while reserving workspace for a collision-proof hash suffix. *)
 let key_filename_prefix key =
   let safe = sanitize_key key in
   if String.length safe > 48 then String.sub safe 0 48 else safe
@@ -75,35 +75,26 @@ let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
     ; "value", `String entry.value
     ; "value_size", `Int (String.length entry.value)
     ; "created_at", `Float entry.created_at
-    ; ( "expires_at"
-      , match entry.expires_at with
-        | Some t -> `Float t
-        | None -> `Null )
+    ; ( "expires_at", Json_util.float_opt_to_json entry.expires_at )
     ; "tags", `List (List.map (fun t -> `String t) entry.tags)
     ]
 ;;
 
 (** Entry from JSON *)
 let entry_of_json (json : Yojson.Safe.t) : cache_entry option =
-  let module U = Yojson.Safe.Util in
-  try
-    let key = json |> U.member "key" |> U.to_string in
-    let value = json |> U.member "value" |> U.to_string in
-    let created_at = json |> U.member "created_at" |> U.to_float in
-    let expires_at =
-      match json |> U.member "expires_at" with
-      | `Null -> None
-      | `Float f -> Some f
-      | _ -> None
-    in
-    let tags = json |> U.member "tags" |> U.to_list |> List.map U.to_string in
+  let key = Json_util.get_string json "key" in
+  let value = Json_util.get_string json "value" in
+  let created_at = Json_util.get_float json "created_at" in
+  let expires_at = Json_util.get_float json "expires_at" in
+  let tags = Json_util.get_string_list json "tags" in
+  match key, value, created_at with
+  | Some key, Some value, Some created_at ->
     Some { key; value; created_at; expires_at; tags }
-  with
-  | U.Type_error (msg, _) ->
-    Log.Misc.error "JSON type error in entry_of_json: %s" msg;
-    None
-  | e ->
-    Log.Misc.error "Unexpected error in entry_of_json: %s" (Printexc.to_string e);
+  | _ ->
+    Log.Misc.error "JSON type error in entry_of_json: missing required fields (key=%s value=%s created_at=%s)"
+      (match key with Some s -> s | None -> "(absent)")
+      (match value with Some s -> s | None -> "(absent)")
+      (match created_at with Some s -> string_of_float s | None -> "(absent)");
     None
 ;;
 
@@ -158,7 +149,7 @@ let reset_cached_entry_count () = Atomic.set cached_entry_count (-1)
 let decrement_cached_entry_count () =
   (* Hand-rolled CAS loop replaced by [Lockfree_atomic.update].  The
      transform is intentionally a no-op when the counter sits at the
-     "unknown" sentinel (-1) so a stale decrement during cache reset
+     "unknown" marker (-1) so a stale decrement during cache reset
      does not push the cached count into bogus negative territory. *)
   Lockfree_atomic.update cached_entry_count (fun current ->
     if current < 0 then current else max 0 (current - 1))
@@ -349,7 +340,7 @@ let get config ~key : (cache_entry option, string) result =
   let cache_label = [ "cache", "eio" ] in
   match located with
   | None ->
-    Prometheus.inc_counter Prometheus.metric_cache_misses_total ~labels:cache_label ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_cache_misses_total ~labels:cache_label ();
     (* Trigger batch eviction check even on miss *)
     let _evicted = maybe_evict_expired config in
     Ok None
@@ -357,8 +348,8 @@ let get config ~key : (cache_entry option, string) result =
     (try
        if is_expired entry
        then (
-         Prometheus.inc_counter
-           Prometheus.metric_cache_misses_total
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_cache_misses_total
            ~labels:cache_label
            ();
          (* Auto-delete expired entries *)
@@ -366,7 +357,7 @@ let get config ~key : (cache_entry option, string) result =
          let _evicted = maybe_evict_expired config in
          Ok None)
        else (
-         Prometheus.inc_counter Prometheus.metric_cache_hits_total ~labels:cache_label ();
+         Otel_metric_store.inc_counter Otel_metric_store.metric_cache_hits_total ~labels:cache_label ();
          let _evicted = maybe_evict_expired config in
          Ok (Some entry))
      with

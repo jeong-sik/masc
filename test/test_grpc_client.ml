@@ -3,40 +3,47 @@
     Tests client-side serialization, response decoding, and transport
     selection logic without requiring a running gRPC server. *)
 
-module T = Masc_mcp.Masc_grpc_types
+module T = Masc_grpc_types
 
 (* ====== Client-side type round-trip tests ====== *)
 
-let test_join_response_roundtrip () =
-  let resp = T.JoinResponse.{
-    success = true;
-    message = "Welcome";
-    session_id = "grpc-abc-123";
-    active_agents = [{
-      T.name = "agent_code";
-      status = "active";
-      capabilities = ["code"];
-      last_heartbeat_ms = 1000L;
-      joined_at_ms = 500L;
-      current_task_id = "T-001";
-    }];
-  } in
-  let bytes = T.JoinResponse.to_bytes resp in
-  let decoded = T.JoinResponse.of_bytes bytes in
-  Alcotest.(check bool) "success" resp.success decoded.success;
-  Alcotest.(check string) "message" resp.message decoded.message;
-  Alcotest.(check string) "session_id" resp.session_id decoded.session_id;
-  Alcotest.(check int) "agent count" 1 (List.length decoded.active_agents);
-  let agent = List.hd decoded.active_agents in
+let test_status_agents_response_roundtrip () =
+  let resp =
+    T.StatusResponse.
+      { agents =
+          [ { T.name = "agent_code"
+            ; status = "active"
+            ; capabilities = [ "code" ]
+            ; last_heartbeat_ms = 1000L
+            ; session_bound_at_ms = 500L
+            ; current_task_id = "T-001"
+            }
+          ]
+      ; tasks = []
+      ; message_count = 0
+      ; workspace_path = "/tmp/grpc-client"
+      }
+  in
+  let bytes = T.StatusResponse.to_bytes resp in
+  let decoded = T.StatusResponse.of_bytes bytes in
+  Alcotest.(check int) "agent count" 1 (List.length decoded.agents);
+  let agent = List.hd decoded.agents in
   Alcotest.(check string) "agent name" "agent_code" agent.T.name;
   Alcotest.(check string) "agent task" "T-001" agent.T.current_task_id
 
-let test_leave_response_roundtrip () =
-  let resp = T.LeaveResponse.{ success = true; message = "Left room" } in
-  let bytes = T.LeaveResponse.to_bytes resp in
-  let decoded = T.LeaveResponse.of_bytes bytes in
-  Alcotest.(check bool) "success" true decoded.success;
-  Alcotest.(check string) "message" "Left room" decoded.message
+let test_tool_call_error_response_roundtrip () =
+  let resp =
+    T.ToolCallResponse.
+      { success = false
+      ; result_json = "{}"
+      ; error_message = "tool failed"
+      ; error_code = 500
+      }
+  in
+  let bytes = T.ToolCallResponse.to_bytes resp in
+  let decoded = T.ToolCallResponse.of_bytes bytes in
+  Alcotest.(check bool) "success" false decoded.success;
+  Alcotest.(check string) "message" "tool failed" decoded.error_message
 
 let test_heartbeat_ping_roundtrip () =
   let ping = T.HeartbeatPing.{
@@ -84,7 +91,7 @@ let test_tool_call_request_roundtrip () =
     agent_name = "agent_llm_a";
     session_id = "s-1";
     tool_name = "masc_status";
-    arguments_json = {|{"room":"main"}|};
+    arguments_json = {|{"workspace":"main"}|};
   } in
   let bytes = T.ToolCallRequest.to_bytes req in
   let decoded = T.ToolCallRequest.of_bytes bytes in
@@ -131,7 +138,7 @@ let test_status_response_roundtrip () =
     agents = [{
       T.name = "agent_llm_a"; status = "active";
       capabilities = ["code"; "review"];
-      last_heartbeat_ms = 1000L; joined_at_ms = 500L;
+      last_heartbeat_ms = 1000L; session_bound_at_ms = 500L;
       current_task_id = "";
     }];
     tasks = [{
@@ -139,14 +146,14 @@ let test_status_response_roundtrip () =
       assigned_to = "agent_llm_a"; priority = 2;
     }];
     message_count = 10;
-    room_path = "/tmp/test-room";
+    workspace_path = "/tmp/test-workspace";
   } in
   let bytes = T.StatusResponse.to_bytes resp in
   let decoded = T.StatusResponse.of_bytes bytes in
   Alcotest.(check int) "agents" 1 (List.length decoded.agents);
   Alcotest.(check int) "tasks" 1 (List.length decoded.tasks);
   Alcotest.(check int) "msg_count" 10 decoded.message_count;
-  Alcotest.(check string) "room_path" "/tmp/test-room" decoded.room_path;
+  Alcotest.(check string) "workspace_path" "/tmp/test-workspace" decoded.workspace_path;
   let task = List.hd decoded.tasks in
   Alcotest.(check string) "task_id" "T-1" task.T.id;
   Alcotest.(check int) "priority" 2 task.T.priority
@@ -157,20 +164,20 @@ let test_transport_from_env_default () =
   (* When MASC_AGENT_TRANSPORT is not set, should return Local *)
   let saved = Sys.getenv_opt "MASC_AGENT_TRANSPORT" in
   Unix.putenv "MASC_AGENT_TRANSPORT" "";
-  let t = Masc_mcp.Masc_grpc_transport.from_env () in
+  let t = Masc_grpc_transport.from_env () in
   (match saved with
    | Some v -> Unix.putenv "MASC_AGENT_TRANSPORT" v
    | None -> Unix.putenv "MASC_AGENT_TRANSPORT" "");
   Alcotest.(check string) "default is local"
-    "local" (Masc_mcp.Masc_grpc_transport.to_string t)
+    "local" (Masc_grpc_transport.to_string t)
 
 let test_transport_to_string () =
   Alcotest.(check string) "http"
-    "http" (Masc_mcp.Masc_grpc_transport.to_string Masc_mcp.Masc_grpc_transport.Http);
+    "http" (Masc_grpc_transport.to_string Masc_grpc_transport.Http);
   Alcotest.(check string) "grpc"
-    "grpc" (Masc_mcp.Masc_grpc_transport.to_string Masc_mcp.Masc_grpc_transport.Grpc);
+    "grpc" (Masc_grpc_transport.to_string Masc_grpc_transport.Grpc);
   Alcotest.(check string) "local"
-    "local" (Masc_mcp.Masc_grpc_transport.to_string Masc_mcp.Masc_grpc_transport.Local)
+    "local" (Masc_grpc_transport.to_string Masc_grpc_transport.Local)
 
 let test_subscribe_request_serde () =
   let req : T.SubscribeRequest.t = {
@@ -214,8 +221,8 @@ let test_heartbeat_ack_empty_directives () =
 let () =
   Alcotest.run "MASC gRPC Client" [
     "client-types", [
-      Alcotest.test_case "join response roundtrip" `Quick test_join_response_roundtrip;
-      Alcotest.test_case "leave response roundtrip" `Quick test_leave_response_roundtrip;
+      Alcotest.test_case "status agents response roundtrip" `Quick test_status_agents_response_roundtrip;
+      Alcotest.test_case "tool call error response roundtrip" `Quick test_tool_call_error_response_roundtrip;
       Alcotest.test_case "heartbeat ping roundtrip" `Quick test_heartbeat_ping_roundtrip;
       Alcotest.test_case "heartbeat ack roundtrip" `Quick test_heartbeat_ack_roundtrip;
       Alcotest.test_case "tool call response roundtrip" `Quick test_tool_call_response_roundtrip;

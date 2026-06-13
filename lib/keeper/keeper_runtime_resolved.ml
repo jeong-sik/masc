@@ -19,6 +19,7 @@ type t = {
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
   stream_idle_timeout_sec : float field;
+  execution_idle_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
@@ -66,18 +67,31 @@ let autonomous_max_turns_per_call_live () =
           (get_int ~default
              "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
 
+(* The idle loop guard must sit strictly above the graduated idle hook's
+   skip threshold ([Env_config_keeper.KeeperKeepalive.idle_skip_threshold],
+   default 4): the hook ends an idle run gracefully (Skip) at skip_at,
+   while the OAS guard aborts the run with IdleDetected at the guard
+   value. A guard <= skip_at makes Skip unreachable and turns die as
+   errors instead (the 2026-06-12 sangsu kmsg kills). The floor enforces
+   that contract at resolution time, so an env override cannot silently
+   reintroduce the dead zone. *)
+let idle_guard_floor () =
+  Env_config_keeper.KeeperKeepalive.idle_skip_threshold + 1
+
 let reactive_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
+  max (idle_guard_floor ())
+    (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
 
 let autonomous_max_idle_turns_live () =
-  max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
+  max (idle_guard_floor ())
+    (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
 
 let turn_timeout_sec_live () =
   (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec
      (range [60, timeout_hard_ceiling_sec=900], default 600). Drift here
      was the mathematical root of #10388 (1200 - 30 oas_guard = 1170 s
      budget). The 900 s ceiling was lifted from 600 in PR #13861 along
-     with the RFC-0012/0022 permission for per-cascade overrides. *)
+     with the RFC-0012/0022 permission for per-runtime overrides. *)
   Float.max 60.0
     (Float.min 900.0
        (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
@@ -85,12 +99,25 @@ let turn_timeout_sec_live () =
 let admission_wait_timeout_sec_live () =
   Float.max 5.0
     (Float.min 1200.0
-       (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+       (180.0))
 
 let stream_idle_timeout_sec_live () =
   Float.max 5.0
     (Float.min 600.0
        (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+
+let execution_idle_timeout_sec_of_raw = function
+  | None -> None
+  | Some raw -> (
+      match Float.of_string_opt (String.trim raw) with
+      | Some value when Float.is_finite value && value <= 0.0 -> None
+      | Some value when Float.is_finite value ->
+          Some (Float.max 5.0 (Float.min 600.0 value))
+      | Some _ | None -> None)
+
+let execution_idle_timeout_sec_live () =
+  execution_idle_timeout_sec_of_raw
+    (Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC")
 
 (* Per-call CLI subprocess idle timeout. Read fresh each turn rather than
    frozen at server boot — the value sits outside the keepalive budget
@@ -110,8 +137,9 @@ let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
 let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
   | Some raw ->
-      (* DET-OK: env override is parsed at the keeper runtime boundary; malformed
-         values resolve to wall-clock cap for compatibility with previous behavior. *)
+      (* DET-OK: env override is parsed at the keeper runtime boundary;
+         malformed values resolve to the turn budget for compatibility with
+         previous behavior. *)
       (match Float.of_string_opt (String.trim raw) with
        | Some parsed -> Some (Float.max 30.0 (Float.min turn_timeout_sec parsed))
        | None -> Some turn_timeout_sec)
@@ -120,8 +148,9 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override
    (same env var, same clamp [10, 600]). Mirrors the
    [oas_timeout_override_sec_live] / [stream_idle_timeout_sec_live]
-   idiom: read raw env, clamp, return option. Opt-in: unset → None
-   → cascade falls back to the per-attempt max_execution_time. *)
+   idiom: read raw env, clamp, return option. Opt-in: unset → None.
+   OAS applies this only to non-streaming sync body reads; streaming
+   liveness is progress-based. *)
 let body_timeout_override_sec_live () =
   match Env_config_core.raw_value_opt "MASC_KEEPER_BODY_TIMEOUT_SEC" with
   | Some raw ->
@@ -190,6 +219,15 @@ let freeze_from_current () =
       "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
       (stream_idle_timeout_sec_live ())
   in
+  let execution_idle_timeout_sec =
+    {
+      value = execution_idle_timeout_sec_live ();
+      source =
+        (match source_of_env_name "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+         | Some source -> source
+         | None -> Default);
+    }
+  in
   let body_timeout_override_sec =
     {
       value = body_timeout_override_sec_live ();
@@ -218,6 +256,7 @@ let freeze_from_current () =
     admission_wait_timeout_sec;
     oas_timeout_override_sec;
     stream_idle_timeout_sec;
+    execution_idle_timeout_sec;
     body_timeout_override_sec;
     oas_timeout_per_1k;
     oas_timeout_per_turn;
@@ -261,6 +300,7 @@ let to_yojson (runtime : t) =
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
       ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
+      ("execution_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.execution_idle_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("oas_timeout_per_1k", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_1k);
       ("oas_timeout_per_turn", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_turn);
@@ -290,14 +330,19 @@ let admission_wait_timeout_sec () =
 let stream_idle_timeout_sec () =
   (current ()).stream_idle_timeout_sec.value
 
+let execution_idle_timeout_sec () =
+  (current ()).execution_idle_timeout_sec.value
+
 let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
   Float.min total_timeout_s (stream_idle_timeout_sec ())
 
 let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value
 
-(* RFC-0156: OAS total timeout removed — turn_timeout_sec is the wall-clock
-   cap, stream_idle_timeout is the per-stream cap. Kept in lockstep with
+(* RFC-0156/RFC-020x: OAS total timeout removed — turn_timeout_sec is the
+   default provider-attempt timeout and first-attempt admission input, not a
+   cumulative hard kill for active streams or retry admission.
+   stream_idle_timeout is the per-stream idle cap. Kept in lockstep with
    [Env_config.KeeperKeepalive.oas_call_timeout_sec]. Historic names
    ([oas_timeout_for_estimated_input_tokens] /
    [oas_timeout_for_estimated_input_tokens_with_turn_budget]) ignored their

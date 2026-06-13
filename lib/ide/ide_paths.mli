@@ -32,17 +32,10 @@ val orphan_path : base_dir:string -> string
     loss is impossible. *)
 
 type partition =
-  | Legacy
+  Agent_observation.codebase_partition =
   | By_url of string
   | Orphan
 (** RFC-0128 §4.2 store partition selector.
-
-    [Legacy] selects the flat pre-RFC-0128 directory
-    [base_dir/.masc-ide/] (the historical location of
-    [annotations.jsonl] and [regions.jsonl]). New callers should not
-    pass this; it stays as the optional-arg default in PR-1b so
-    every existing call site keeps writing/reading where it used to,
-    and the cut-over to [By_url] happens in PR-1c.
 
     [By_url slug] selects [base_dir/.masc-ide/by-url/<slug>/]. The
     caller must obtain [slug] from {!canonical_url_of_remote}.
@@ -60,9 +53,9 @@ val partition_store_dir : base_dir:string -> partition -> string
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string
     into a host_path slug, e.g.
-    [https://github.com/jeong-sik/masc-mcp(.git)?] and
-    [git@github.com:jeong-sik/masc-mcp(.git)?] both produce
-    [Some "github.com_jeong-sik_masc-mcp"].
+    [https://github.com/jeong-sik/masc(.git)?] and
+    [git@github.com:jeong-sik/masc(.git)?] both produce
+    [Some "github.com_jeong-sik_masc"].
 
     Returns [None] when:
     - the input is empty

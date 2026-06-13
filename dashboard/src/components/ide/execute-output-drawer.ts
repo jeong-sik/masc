@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   streamExecuteOutput,
+  type ExecuteOutputLine,
   type ExecuteOutputStreamEvent,
 } from '../../api/execute-output'
 import { tasks } from '../../store'
@@ -55,6 +56,12 @@ function splitChunkLines(chunk: string): string[] {
   return lines
 }
 
+function outputLineFromExecuteLine(line: ExecuteOutputLine): OutputLine {
+  if (line.stream === 'stderr') return { text: line.text, stream: 'stderr' }
+  if (line.stream === 'stdout') return { text: line.text, stream: 'stdout' }
+  return { text: line.text, stream: 'meta' }
+}
+
 export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): OutputLine[] {
   if (event.type === 'error') {
     return [{ text: event.message ?? 'Execute output stream error', stream: 'stderr' }]
@@ -64,11 +71,22 @@ export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): Ou
   }
 
   const lines: OutputLine[] = []
-  for (const line of splitChunkLines(event.stdout_since ?? '')) {
-    lines.push({ text: line, stream: 'stdout' })
+  let usedStructuredLines = false
+  if (event.line) {
+    usedStructuredLines = true
+    lines.push(outputLineFromExecuteLine(event.line))
   }
-  for (const line of splitChunkLines(event.stderr_since ?? '')) {
-    lines.push({ text: line, stream: 'stderr' })
+  if (Array.isArray(event.lines)) {
+    usedStructuredLines = true
+    for (const line of event.lines) lines.push(outputLineFromExecuteLine(line))
+  }
+  if (!usedStructuredLines) {
+    for (const line of splitChunkLines(event.stdout_since ?? '')) {
+      lines.push({ text: line, stream: 'stdout' })
+    }
+    for (const line of splitChunkLines(event.stderr_since ?? '')) {
+      lines.push({ text: line, stream: 'stderr' })
+    }
   }
   const dropped =
     (event.bytes_dropped_stdout ?? 0) + (event.bytes_dropped_stderr ?? 0)

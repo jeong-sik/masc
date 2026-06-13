@@ -1,33 +1,5 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
-type keeper_internal_error =
-  | Keeper_tool_surface_empty of
-      { keeper_name : string
-      ; turn_lane : string
-      ; affordances : string list
-      ; fallback_used : bool
-      }
-  | Keeper_tool_surface_mismatch of
-      { keeper_name : string
-      ; required_tools : string list
-      ; missing_required_tools : string list
-      ; visible_tools : string list
-      }
-
-(** Prefix prepended to the JSON-encoded internal-error message. *)
-val keeper_internal_error_prefix : string
-
-(** Encode a [keeper_internal_error] as a JSON object suitable for log
-    payloads and dashboard surfaces. *)
-val keeper_internal_error_to_json : keeper_internal_error -> Yojson.Safe.t
-
-(** Wrap a [keeper_internal_error] inside [Agent_sdk.Error.Internal] so it
-    flows through the standard SDK error channel with a recognizable
-    prefix. *)
-val sdk_error_of_keeper_internal_error
-  :  keeper_internal_error
-  -> Agent_sdk.Error.sdk_error
-
 (** Coarse categorisation of [Agent_sdk.Error.sdk_error] (for dashboards). *)
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
@@ -47,8 +19,6 @@ type sdk_termination_semantics =
   | Oas_token_budget_exhausted
   | Oas_cost_budget_exhausted
   | Oas_cost_budget_unenforceable
-  | Oas_contract_violation
-  | Oas_tool_retry_exhausted
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
@@ -98,9 +68,9 @@ val checkpoint_persistence_error
   -> detail:string
   -> Agent_sdk.Error.sdk_error
 
-(** Map an optional cascade observation to a typed cascade outcome
-    ([Cascade_passed_to_next_model] / [Cascade_completed] /
-    [Cascade_not_observed]). *)
-val cascade_outcome_of_observation
-  :  Cascade_observation.cascade_observation option
-  -> Keeper_execution_receipt.cascade_outcome
+(** Map an optional runtime observation to a typed runtime outcome
+    ([Runtime_passed_to_next_model] / [Runtime_completed] /
+    [Runtime_failed] / [Runtime_not_observed]). *)
+val runtime_outcome_of_observation
+  :  Runtime_observation.runtime_observation option
+  -> Keeper_execution_receipt.runtime_outcome

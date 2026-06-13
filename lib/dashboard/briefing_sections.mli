@@ -4,10 +4,10 @@
     The full surface (section labels, signal classifiers, predicate
     helpers, per-section builders) is internal — only the top-level
     composer {!build_briefing_sections} is consumed externally by
-    [dashboard_mission_briefing.ml]. *)
+    [dashboard_briefing_sections.ml]. *)
 
 val build_briefing_sections :
-  mission_summary_json:Yojson.Safe.t ->
+  briefing_summary_json:Yojson.Safe.t ->
   sessions:Yojson.Safe.t list ->
   agents:Yojson.Safe.t list ->
   recent_messages:Yojson.Safe.t list ->

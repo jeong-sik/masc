@@ -3,7 +3,7 @@
     Non-yielding enqueue + background drain fiber.
     Dated_jsonl under [keepers_dir]/<name>/crash-events/.
     Callers must pass the cluster-scoped keepers directory
-    (e.g. [Filename.concat (Coord.masc_root_dir config) "keepers"]).
+    (e.g. [Workspace.keepers_runtime_dir config]).
     Separate from Keeper_registry to preserve its non-yielding contract.
 
     @since 3.0.0 *)

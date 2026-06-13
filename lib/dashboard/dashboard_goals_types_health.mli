@@ -10,7 +10,7 @@ val goal_health_reason :
   child_blocked:bool ->
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   stagnation_seconds:int ->
@@ -30,7 +30,7 @@ val tree_health :
 val tree_badges :
   pending_approvals:int ->
   sandbox_risk:bool ->
-  cascade_risk:bool ->
+  runtime_risk:bool ->
   fsm_risk:bool ->
   stalled:bool ->
   activity_unobserved:bool ->
@@ -38,10 +38,10 @@ val tree_badges :
 
 val approval_matches_goal : string -> Yojson.Safe.t -> bool
 
-val keeper_name_matches_meta : Keeper_types.keeper_meta list -> string -> bool
+val keeper_name_matches_meta : Keeper_meta_contract.keeper_meta list -> string -> bool
 
 val keeper_name_of_assignee :
-  Keeper_types.keeper_meta list -> string -> string option
+  Keeper_meta_contract.keeper_meta list -> string -> string option
 
 val goal_fsm_state_kind : Goal_phase.t -> string
 

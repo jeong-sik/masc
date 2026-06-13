@@ -1,7 +1,6 @@
 (** Sandbox configuration SSOT.
 
-    Mirrors {!Env_config_exec_timeout} (#10426) and the
-    {!Env_config_oas_bridge} precedent (#10094).  This module is the
+    Mirrors the {!Env_config_oas_bridge} precedent (#10094).  This module is the
     authoritative source for sandbox env settings + hardcoded
     constants used by keeper sandbox and docker playground execution
     paths — one typed surface so:
@@ -12,8 +11,7 @@
     2. Tests pin the default table once; drift is a compile or test
        failure rather than a silent budget shift.
     3. The {!Shell_timeout} sub-module exposes the typed-bucket
-       pattern from {!Env_config_exec_timeout} for shell timeout
-       buckets. *)
+       pattern for shell timeout buckets. *)
 
 (** {1 Hardening — security policy and resource limits} *)
 module Hardening : sig
@@ -77,7 +75,7 @@ module Cleanup : sig
       (5m). *)
 
   val managed_sleep_sec : unit -> int
-  (** Sentinel sleep duration for the [managed] container init loop
+  (** Marker sleep duration for the [managed] container init loop
       (currently [sleep 3600] in {!Keeper_sandbox_control}).
       Exposed here so a future PR can env-override; today this
       getter still returns the historical literal 3600 because no
@@ -94,8 +92,7 @@ module Runtime : sig
   val git_dispatch : unit -> bool
   (** When true, Execute commands beginning with ["git "] or
       ["gh "] run in a dedicated container with network egress and
-      read-only mounts from the selected root/keeper repo CLI identity
-      bundle.
+      read-only mounts from the selected credential bundle.
       Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool
@@ -119,7 +116,7 @@ end
 (** {1 Preflight — runtime feasibility check} *)
 module Preflight : sig
   val enabled : unit -> bool
-  (** Master switch for keeper_up / doctor preflight.
+  (** Master switch for keeper_up / diagnostics preflight.
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
 
   val min_timeout_sec : unit -> float
@@ -140,16 +137,15 @@ module Preflight : sig
       python3; node; npm; make; opam; dune; ssh]).
 
       INTENTIONALLY NOT env-overridable: an operator who removes
-      [gh] from the list would make doctor falsely report green
-      while runtime fails opaquely.  Exposed read-only so doctor
+      [gh] from the list would make diagnostics falsely report green
+      while runtime fails opaquely.  Exposed read-only so diagnostics
       and tests can iterate the canonical list. *)
 end
 
 (** {1 Shell_timeout — typed-bucket per-command timeout SSOT}
 
-    Mirrors {!Env_config_exec_timeout} but for command-class buckets
-    rather than per-call-site.  Each bucket names a class of shell
-    commands that share a budget. *)
+    Per-command-class timeout buckets for the keeper sandbox shell path.
+    Each bucket names a class of shell commands that share a budget. *)
 module Shell_timeout : sig
   type bucket =
     | Io
@@ -209,7 +205,7 @@ module Shell_timeout : sig
       5. {!global_default_sec}. *)
 end
 
-(** {1 Doctor / observability surface} *)
+(** {1 Diagnostics / observability surface} *)
 
 val effective_config_json : unit -> Yojson.Safe.t
 (** Returns a snapshot of every sandbox setting under two top-level

@@ -3,7 +3,7 @@
     Uses QCheck via qcheck-alcotest to verify structural properties
     of text normalization, stripping, and quality checks. *)
 
-module Tp = Masc_mcp.Keeper_text_processing
+module Tp = Masc.Keeper_text_processing
 
 (* ── Generators ── *)
 

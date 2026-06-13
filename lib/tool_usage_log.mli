@@ -13,14 +13,23 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
     [MASC_TOOL_USAGE_LOG_RETENTION_DAYS] controls opportunistic retention;
     default is 30 days, and values <= 0 disable pruning. *)
 
-val install : unit -> unit
-(** [install ()] registers a {!Tool_dispatch} observer that logs
+val install : on_io_failure:(site:string -> exn -> unit) -> unit
+(** [install ~on_io_failure] registers a {!Tool_dispatch} observer that logs
     System_internal tool calls to the JSONL store. Calls to non-System_internal
-    tools are ignored. *)
+    tools are ignored. [on_io_failure ~site exn] is invoked when a JSONL append
+    raises; the installer supplies keeper FD/disk pressure handling so this
+    module does not reference the keeper subsystem (Tool->Keeper dependency
+    direction). *)
 
-val log_call : tool_name:string -> success:bool -> caller:string option -> unit
-(** [log_call ~tool_name ~success ~caller] appends a single entry to the
-    JSONL store. Primarily used by the dispatch observer; exposed for testing. *)
+val log_call :
+  on_io_failure:(site:string -> exn -> unit) ->
+  tool_name:string ->
+  success:bool ->
+  caller:string option ->
+  unit
+(** [log_call ~on_io_failure ~tool_name ~success ~caller] appends a single
+    entry to the JSONL store. Primarily used by the dispatch observer; exposed
+    for testing. [on_io_failure] receives the append exception (if any). *)
 
 val source_metadata_json : masc_root:string -> Yojson.Safe.t
 (** [source_metadata_json ~masc_root] reports durable [.masc/tool_usage]

@@ -1,6 +1,9 @@
 # OCaml build artifacts
 _build/
 _build_*/
+# Dune build trace dumps (RFC-0209: env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
+_build-*/
+trace.csexp
 *.install
 *.merlin
 .merlin
@@ -30,7 +33,7 @@ Thumbs.db
 data/tool-metrics/
 
 # Local heartbeat model-pool override
-config/llm_cascade.json
+config/llm_runtime.json
 
 # Database files
 *.db
@@ -46,8 +49,8 @@ _coverage/
 
 
 # Downloaded release binary
-masc-mcp-macos-arm64
-masc-mcp-linux-x64
+masc-macos-arm64
+masc-linux-x64
 
 # Downloaded release binary
 figma-mcp-macos-arm64

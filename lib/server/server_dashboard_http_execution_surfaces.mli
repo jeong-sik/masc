@@ -64,7 +64,9 @@
 
 (** {1 Cache cells} *)
 
-val execution_cache : Server_dashboard_http_cache.cached_surface
+type cached_surface = Server_dashboard_http_cache.cached_surface
+
+val execution_cache : cached_surface
 (** Cached execution surface JSON.  Reached by
     [Server_dashboard_http_namespace_truth] (via the
     [Execution_surfaces] alias) for readiness gating —
@@ -132,7 +134,7 @@ val start_execution_refresh_loop :
 (** Forks the per-process execution-cache refresh fiber.
     Idempotent.  Default refresh interval keeps timeout
     < interval (60 s) so [Proactive_refresh]'s clamp
-    leaves room for the first build window after boot. *)
+    leaves workspace for the first build window after boot. *)
 
 val start_transport_health_refresh_loop :
   state:Mcp_server.server_state ->
@@ -206,7 +208,7 @@ val paused_of_lifecycle_event : string -> bool option
 val seed_execution_cache_for_test : unit -> unit
 
 val patch_surface_json_for_running_keepers :
-  Coord.config -> Yojson.Safe.t -> Yojson.Safe.t
+  Workspace.config -> Yojson.Safe.t -> Yojson.Safe.t
 
 val patch_keeper_row :
   keeper_name:string ->

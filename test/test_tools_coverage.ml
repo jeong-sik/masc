@@ -1,9 +1,18 @@
 (** Comprehensive Tests for Tools module - MCP Tool Definitions *)
 
 open Masc_domain
-open Masc_mcp.Tools
 
-let schema_inventory = all_schemas_extended
+let schema_inventory = Tools.all_schemas_extended
+let registered_schema_inventory = Masc.Config.raw_all_tool_schemas
+
+let find_schema_in schemas name =
+  List.find_opt
+    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+    schemas
+;;
+
+let find_schema_inventory_tool name = find_schema_in schema_inventory name
+let find_registered_tool name = find_schema_in registered_schema_inventory name
 
 (* ============================================================ *)
 (* Helper functions                                              *)
@@ -32,6 +41,16 @@ let get_json_assoc key obj =
        | Some (`Assoc a) -> Some a
        | _ -> None)
   | _ -> None
+
+let contains_substring ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  let rec loop index =
+    if index + needle_len > value_len then false
+    else if String.sub value index needle_len = needle then true
+    else loop (index + 1)
+  in
+  needle_len = 0 || loop 0
 
 (* ============================================================ *)
 (* 1. Schema Structure Tests                                     *)
@@ -75,29 +94,30 @@ let test_all_names_start_with_masc () =
   ) schema_inventory
 
 (* ============================================================ *)
-(* 2. find_tool Function Tests                                   *)
+(* 2. Schema Inventory Lookup Tests                              *)
 (* ============================================================ *)
 
-let test_find_tool_existing () =
-  let tools = ["masc_join"; "masc_leave"; "masc_status";
-               "masc_broadcast"; "masc_transition"] in
+let test_schema_inventory_lookup_existing () =
+  let tools =
+    [ "masc_start"; "masc_status"; "masc_broadcast"; "masc_transition" ]
+  in
   List.iter (fun name ->
-    match find_tool name with
+    match find_schema_inventory_tool name with
     | Some schema -> Alcotest.(check string) "found correct tool" name schema.name
     | None -> Alcotest.fail (Printf.sprintf "Tool %s not found" name)
   ) tools
 
-let test_find_tool_not_found () =
+let test_schema_inventory_lookup_not_found () =
   let invalid_tools = ["invalid_tool"; "masc"; ""; "MASC_STATUS"; "masc-status"] in
   List.iter (fun name ->
-    match find_tool name with
+    match find_schema_inventory_tool name with
     | None -> ()
     | Some _ -> Alcotest.fail (Printf.sprintf "Should not find tool %s" name)
   ) invalid_tools
 
-let test_find_tool_case_sensitive () =
+let test_schema_inventory_lookup_case_sensitive () =
   (* Tool names are case-sensitive *)
-  match find_tool "MASC_STATUS" with
+  match find_schema_inventory_tool "MASC_STATUS" with
   | None -> ()  (* Expected: not found because wrong case *)
   | Some _ -> Alcotest.fail "Tool lookup should be case-sensitive"
 
@@ -136,29 +156,21 @@ let test_required_field_is_list () =
 (* ============================================================ *)
 
 (* test_masc_init_schema removed: masc_init tool pruned *)
+(* test_masc_bind_schema and test_masc_unbind_schema removed with lifecycle collapse. *)
 
-let test_masc_join_schema () =
-  match find_tool "masc_join" with
-  | None -> Alcotest.fail "masc_join not found"
+let test_masc_start_schema () =
+  match find_registered_tool "masc_start" with
+  | None -> Alcotest.fail "masc_start not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has capabilities" true (List.mem_assoc "capabilities" props)
-      | None -> Alcotest.fail "masc_join missing properties"
-
-let test_masc_leave_schema () =
-  match find_tool "masc_leave" with
-  | None -> Alcotest.fail "masc_leave not found"
-  | Some schema ->
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "agent_name is required" true
-            (List.mem (`String "agent_name") reqs)
-      | None -> Alcotest.fail "masc_leave missing required field"
+          Alcotest.(check bool) "has path" true (List.mem_assoc "path" props);
+          Alcotest.(check bool) "has task_title" true
+            (List.mem_assoc "task_title" props)
+      | None -> Alcotest.fail "masc_start missing properties"
 
 let test_masc_status_schema () =
-  match find_tool "masc_status" with
+  match find_registered_tool "masc_status" with
   | None -> Alcotest.fail "masc_status not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -168,7 +180,7 @@ let test_masc_status_schema () =
       | None -> Alcotest.fail "masc_status missing properties"
 
 let test_masc_broadcast_schema () =
-  match find_tool "masc_broadcast" with
+  match find_registered_tool "masc_broadcast" with
   | None -> Alcotest.fail "masc_broadcast not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -178,15 +190,27 @@ let test_masc_broadcast_schema () =
       | None -> Alcotest.fail "masc_broadcast missing properties"
 
 let test_masc_transition_schema () =
-  match find_tool "masc_transition" with
+  match find_registered_tool "masc_transition" with
   | None -> Alcotest.fail "masc_transition not found"
   | Some schema ->
+      Alcotest.(check bool) "description omits task required_tools"
+        false
+        (contains_substring ~needle:"required_tools" schema.description);
+      Alcotest.(check bool) "description omits mandatory tools routing"
+        false
+        (contains_substring ~needle:"mandatory tools" schema.description);
+      Alcotest.(check bool) "description omits requires tools routing"
+        false
+        (contains_substring ~needle:"requires tools" schema.description);
+      Alcotest.(check bool) "description pins start before done"
+        true
+        (contains_substring ~needle:"action='start' before action='done'" schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has completion_contract" true
             (List.mem_assoc "completion_contract" props);
-          Alcotest.(check bool) "has evaluator_cascade" true
-            (List.mem_assoc "evaluator_cascade" props);
+          Alcotest.(check bool) "has evaluator_runtime" true
+            (List.mem_assoc "evaluator_runtime" props);
           Alcotest.(check bool) "has handoff_context" true
             (List.mem_assoc "handoff_context" props)
       | None -> Alcotest.fail "masc_transition missing properties");
@@ -198,19 +222,74 @@ let test_masc_transition_schema () =
       | None -> Alcotest.fail "masc_transition missing required field"
 
 let test_masc_add_task_schema () =
-  match find_tool "masc_add_task" with
+  match find_registered_tool "masc_add_task" with
   | None -> Alcotest.fail "masc_add_task not found"
   | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
-          Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
-          Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
-          Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props)
-      | None -> Alcotest.fail "masc_add_task missing properties"
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
+           Alcotest.(check bool) "has priority" true (List.mem_assoc "priority" props);
+           Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
+           Alcotest.(check bool) "has goal_id" true (List.mem_assoc "goal_id" props);
+           Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props);
+           (match List.assoc_opt "goal_id" props with
+            | Some goal_id_schema ->
+                let description =
+                  Option.value ~default:"" (get_json_string "description" goal_id_schema)
+                in
+                Alcotest.(check bool) "goal_id is optional in prose" true
+                  (contains_substring ~needle:"Optional structured goal link" description);
+                Alcotest.(check bool) "goal_id does not reference prompt markers" false
+                  (contains_substring ~needle:"<available_goals>" description);
+                Alcotest.(check bool) "goal_id does not label omitted links orphaned" false
+                  (contains_substring ~needle:"orphaned" description)
+            | None -> Alcotest.fail "masc_add_task missing goal_id property")
+       | None -> Alcotest.fail "masc_add_task missing properties");
+      (match get_json_list "required" schema.input_schema with
+       | Some reqs ->
+           Alcotest.(check bool) "title required" true
+             (List.mem (`String "title") reqs);
+           Alcotest.(check bool) "goal_id not required" false
+             (List.mem (`String "goal_id") reqs)
+       | None -> Alcotest.fail "masc_add_task missing required field")
+
+let test_masc_batch_add_tasks_schema () =
+  match find_registered_tool "masc_batch_add_tasks" with
+  | None -> Alcotest.fail "masc_batch_add_tasks not found"
+  | Some schema ->
+      (match get_json_assoc "properties" schema.input_schema with
+       | Some props ->
+           (match List.assoc_opt "tasks" props with
+            | Some tasks_schema ->
+                (match get_json_assoc "items" tasks_schema with
+                 | Some item_fields ->
+                     (match List.assoc_opt "properties" item_fields with
+                      | Some (`Assoc item_props) ->
+                          Alcotest.(check bool) "item has title" true
+                            (List.mem_assoc "title" item_props);
+                          Alcotest.(check bool) "item has goal_id" true
+                            (List.mem_assoc "goal_id" item_props)
+                      | _ -> Alcotest.fail "masc_batch_add_tasks item missing properties");
+                     (match List.assoc_opt "required" item_fields with
+                      | Some (`List item_reqs) ->
+                          Alcotest.(check bool) "item title required" true
+                            (List.mem (`String "title") item_reqs);
+                          Alcotest.(check bool) "item goal_id not required" false
+                            (List.mem (`String "goal_id") item_reqs)
+                      | _ -> Alcotest.fail "masc_batch_add_tasks item missing required")
+                 | None -> Alcotest.fail "masc_batch_add_tasks tasks missing items")
+            | None -> Alcotest.fail "masc_batch_add_tasks missing tasks property")
+       | None -> Alcotest.fail "masc_batch_add_tasks missing properties");
+      (match get_json_list "required" schema.input_schema with
+       | Some reqs ->
+           Alcotest.(check bool) "tasks required" true
+             (List.mem (`String "tasks") reqs);
+           Alcotest.(check bool) "top-level goal_id not required" false
+             (List.mem (`String "goal_id") reqs)
+       | None -> Alcotest.fail "masc_batch_add_tasks missing required field")
 
 let test_masc_goal_list_schema () =
-  match find_tool "masc_goal_list" with
+  match find_registered_tool "masc_goal_list" with
   | None -> Alcotest.fail "masc_goal_list not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -221,7 +300,7 @@ let test_masc_goal_list_schema () =
       | None -> Alcotest.fail "masc_goal_list missing properties"
 
 let test_masc_goal_upsert_schema () =
-  match find_tool "masc_goal_upsert" with
+  match find_registered_tool "masc_goal_upsert" with
   | None -> Alcotest.fail "masc_goal_upsert not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -242,7 +321,7 @@ let test_masc_goal_upsert_schema () =
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
 
 let test_masc_goal_transition_schema () =
-  match find_tool "masc_goal_transition" with
+  match find_registered_tool "masc_goal_transition" with
   | None -> Alcotest.fail "masc_goal_transition not found"
   | Some schema ->
       (match get_json_assoc "properties" schema.input_schema with
@@ -269,7 +348,7 @@ let test_masc_goal_transition_schema () =
       | None -> Alcotest.fail "masc_goal_transition missing required field"
 
 let test_masc_goal_verify_schema () =
-  match find_tool "masc_goal_verify" with
+  match find_registered_tool "masc_goal_verify" with
   | None -> Alcotest.fail "masc_goal_verify not found"
   | Some schema ->
       (match get_json_assoc "properties" schema.input_schema with
@@ -295,71 +374,6 @@ let test_masc_goal_verify_schema () =
             (List.mem (`String "decision") reqs)
       | None -> Alcotest.fail "masc_goal_verify missing required field"
 
-let test_remote_operator_action_schema_is_strict () =
-  let check_schema label schema =
-  match get_json_assoc "properties" schema.input_schema with
-  | Some props ->
-      (match List.assoc_opt "action_type" props with
-       | Some (`Assoc fields) ->
-           (match List.assoc_opt "enum" fields with
-            | Some (`List enums) ->
-                Alcotest.(check bool) (label ^ " excludes team_turn") false
-                  (List.mem (`String "team_turn") enums);
-                (* Issue #8417: [task_inject] has a real handler +
-                   approval contract; promoted into the strict enum so
-                   remote operator callers and the LLM judge can
-                   discover the capability. *)
-                Alcotest.(check bool) (label ^ " includes task_inject") true
-                  (List.mem (`String "task_inject") enums);
-                Alcotest.(check bool) (label ^ " excludes keeper_msg") false
-                  (List.mem (`String "keeper_msg") enums);
-                Alcotest.(check bool) (label ^ " excludes room_pause") false
-                  (List.mem (`String "room_pause") enums);
-                Alcotest.(check bool) (label ^ " excludes room_resume") false
-                  (List.mem (`String "room_resume") enums);
-                Alcotest.(check bool) (label ^ " excludes team_note") false
-                  (List.mem (`String "team_note") enums);
-                Alcotest.(check bool) (label ^ " excludes team_broadcast") false
-                  (List.mem (`String "team_broadcast") enums);
-                Alcotest.(check bool) (label ^ " excludes team_task_inject") false
-                  (List.mem (`String "team_task_inject") enums);
-                Alcotest.(check bool) (label ^ " excludes team_worker_spawn_batch") false
-                  (List.mem (`String "team_worker_spawn_batch") enums);
-                Alcotest.(check bool) (label ^ " excludes team_stop") false
-                  (List.mem (`String "team_stop") enums);
-                Alcotest.(check bool) (label ^ " includes social_sweep") true
-                  (List.mem (`String "social_sweep") enums);
-                Alcotest.(check bool) (label ^ " excludes autonomy_tick alias") false
-                  (List.mem (`String "autonomy_tick") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_probe") true
-                  (List.mem (`String "keeper_probe") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_recover") true
-                  (List.mem (`String "keeper_recover") enums);
-                Alcotest.(check bool) (label ^ " includes keeper_message") true
-                  (List.mem (`String "keeper_message") enums);
-                let retired_identity_login_prepare =
-                  "repo_cli_identity_" ^ "login_prepare"
-                in
-                let retired_identity_status = "repo_cli_identity_" ^ "status" in
-                Alcotest.(check bool)
-                  (label ^ " excludes retired repo CLI identity login prepare")
-                  false
-                  (List.mem (`String retired_identity_login_prepare) enums);
-                Alcotest.(check bool)
-                  (label ^ " excludes retired repo CLI identity status") false
-                  (List.mem (`String retired_identity_status) enums)
-            | _ -> Alcotest.failf "%s action_type missing enum" label)
-       | _ -> Alcotest.failf "%s action_type missing" label)
-  | None -> Alcotest.failf "%s masc_operator_action missing properties" label
-  in
-  let find_operator_action schemas label =
-    match List.find_opt (fun schema -> schema.name = "masc_operator_action") schemas with
-    | Some schema -> schema
-    | None -> Alcotest.failf "%s masc_operator_action schema not found" label
-  in
-  check_schema "local" (find_operator_action Masc_mcp.Tool_operator.schemas "local");
-  check_schema "remote" (find_operator_action Masc_mcp.Tool_operator.remote_schemas "remote")
-
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
     [
@@ -376,15 +390,17 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail
-            (Printf.sprintf "%s should be absent from schema inventory" name))
+            (Printf.sprintf
+               "%s should be absent from registered schema inventory"
+               name))
     retired_tools
 
 let test_masc_board_post_schema_supports_judgment () =
-  let schema = Masc_mcp.Tool_board.tool_post_create in
+  let schema = Board_tool.tool_post_create in
   match get_json_assoc "properties" schema.input_schema with
   | Some props ->
       Alcotest.(check bool) "has classification_reason" true
@@ -405,12 +421,12 @@ let test_masc_board_post_schema_supports_judgment () =
 (* ============================================================ *)
 
 let test_masc_agents_schema () =
-  match find_tool "masc_agents" with
+  match find_registered_tool "masc_agents" with
   | None -> Alcotest.fail "masc_agents not found"
   | Some _ -> ()
 
 let test_masc_register_capabilities_removed () =
-  match find_tool "masc_register_capabilities" with
+  match find_registered_tool "masc_register_capabilities" with
   | None -> ()
   | Some _ -> Alcotest.fail "masc_register_capabilities should be removed"
 
@@ -421,7 +437,7 @@ let test_masc_register_capabilities_removed () =
 (* ============================================================ *)
 
 let test_masc_plan_init_schema () =
-  match find_tool "masc_plan_init" with
+  match find_registered_tool "masc_plan_init" with
   | None -> Alcotest.fail "masc_plan_init not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -430,17 +446,17 @@ let test_masc_plan_init_schema () =
       | None -> Alcotest.fail "masc_plan_init missing properties"
 
 let test_masc_plan_update_schema () =
-  match find_tool "masc_plan_update" with
+  match find_registered_tool "masc_plan_update" with
   | None -> Alcotest.fail "masc_plan_update not found"
   | Some _ -> ()
 
 let test_masc_plan_get_schema () =
-  match find_tool "masc_plan_get" with
+  match find_registered_tool "masc_plan_get" with
   | None -> Alcotest.fail "masc_plan_get not found"
   | Some _ -> ()
 
 let test_masc_deliver_schema () =
-  match find_tool "masc_deliver" with
+  match find_registered_tool "masc_deliver" with
   | None -> Alcotest.fail "masc_deliver not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -468,78 +484,12 @@ let test_masc_deliver_schema () =
 
 (* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
 
-(* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
-
-let test_masc_persona_authoring_schemas () =
-  (match find_tool "masc_persona_schema" with
-  | None -> Alcotest.fail "masc_persona_schema not found"
-  | Some _ -> ());
-  (match find_tool "masc_persona_generate" with
-  | None -> Alcotest.fail "masc_persona_generate not found"
-  | Some schema -> (
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "generate has concept" true
-            (List.mem_assoc "concept" props);
-          Alcotest.(check bool) "generate omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
-          Alcotest.(check bool) "generate has alignment axis" true
-            (List.mem_assoc "alignment" props);
-          Alcotest.(check bool) "generate omits operating_style axis" false
-            (List.mem_assoc "operating_style" props);
-          Alcotest.(check bool) "generate has risk_posture axis" true
-            (List.mem_assoc "risk_posture" props);
-          let enum_strings name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "enum" fields with
-                 | Some (`List values) -> List.map Yojson.Safe.Util.to_string values
-                 | _ -> [])
-            | _ -> []
-          in
-          let default_string name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "default" fields with
-                 | Some (`String value) -> value
-                 | _ -> "")
-            | _ -> ""
-          in
-          let default_bool name =
-            match List.assoc_opt name props with
-            | Some (`Assoc fields) ->
-                (match List.assoc_opt "default" fields with
-                 | Some (`Bool value) -> value
-                 | _ -> false)
-            | _ -> false
-          in
-          let module Contract = Masc_mcp.Keeper_persona_authoring_contract in
-          Alcotest.(check (list string)) "alignment enum follows contract"
-            Contract.alignment_choices (enum_strings "alignment");
-          Alcotest.(check (list string)) "risk_posture enum follows contract"
-            Contract.risk_posture_choices (enum_strings "risk_posture");
-          Alcotest.(check string) "language default follows contract"
-            Contract.default_generation_language (default_string "language");
-          Alcotest.(check string) "cascade default follows contract"
-            Contract.default_generation_cascade_name (default_string "cascade_name");
-          Alcotest.(check bool) "proactive default follows contract"
-            Contract.default_proactive_enabled (default_bool "proactive_enabled")
-      | None -> Alcotest.fail "masc_persona_generate missing properties"));
-  match find_tool "masc_persona_save" with
-  | None -> Alcotest.fail "masc_persona_save not found"
-  | Some schema -> (
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "save has handle" true
-            (List.mem_assoc "handle" props);
-          Alcotest.(check bool) "save has profile" true
-            (List.mem_assoc "profile" props);
-          Alcotest.(check bool) "save has dry_run" true
-            (List.mem_assoc "dry_run" props)
-      | None -> Alcotest.fail "masc_persona_save missing properties")
+(* test_masc_persona_list_schema removed: persona list coverage is trivial.
+   Persona authoring schema/save tools were removed with their stale backing
+   surface. *)
 
 let test_masc_keeper_create_from_persona_schema () =
-  match find_tool "masc_keeper_create_from_persona" with
+  match find_registered_tool "masc_keeper_create_from_persona" with
   | None -> Alcotest.fail "masc_keeper_create_from_persona not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -548,18 +498,12 @@ let test_masc_keeper_create_from_persona_schema () =
             (List.mem_assoc "persona_name" props);
           Alcotest.(check bool) "has canonical tool_access" true
             (List.mem_assoc "tool_access" props);
-          Alcotest.(check bool) "omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
-          Alcotest.(check bool) "omits tool_also_allow" false
-            (List.mem_assoc "tool_also_allow" props);
-          Alcotest.(check bool) "omits tool_custom_allowlist" false
-            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
 
 let test_masc_keeper_up_schema () =
-  match find_tool "masc_keeper_up" with
+  match find_registered_tool "masc_keeper_up" with
   | None -> Alcotest.fail "masc_keeper_up not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -570,9 +514,9 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "mid_goal" props);
           Alcotest.(check bool) "has long_goal" true
             (List.mem_assoc "long_goal" props);
-          Alcotest.(check bool) "has sandbox_profile" true
+          Alcotest.(check bool) "omits sandbox_profile" false
             (List.mem_assoc "sandbox_profile" props);
-          Alcotest.(check bool) "has network_mode" true
+          Alcotest.(check bool) "omits network_mode" false
             (List.mem_assoc "network_mode" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props);
@@ -580,24 +524,36 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "autoboot_enabled" props);
           Alcotest.(check bool) "has canonical tool_access" true
             (List.mem_assoc "tool_access" props);
-          Alcotest.(check bool) "omits tool_preset" false
-            (List.mem_assoc "tool_preset" props);
-          Alcotest.(check bool) "omits tool_also_allow" false
-            (List.mem_assoc "tool_also_allow" props);
-          Alcotest.(check bool) "omits tool_custom_allowlist" false
-            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props);
-          Alcotest.(check bool) "omits presence_keepalive" false
-            (List.mem_assoc "presence_keepalive" props)
+            (List.mem_assoc "active_model" props)
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
+let test_keeper_sandbox_args_rejected () =
+  let args =
+    `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
+  in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "sandbox posture args should be rejected"
+  | Error msg ->
+      Alcotest.(check bool)
+        "sandbox_profile mentioned"
+        true
+        (contains_substring ~needle:"sandbox_profile" msg);
+      Alcotest.(check bool)
+        "network_mode mentioned"
+        true
+        (contains_substring ~needle:"network_mode" msg)
+
 let test_masc_keeper_msg_schema () =
-  match find_tool "masc_keeper_msg" with
+  match find_registered_tool "masc_keeper_msg" with
   | None -> Alcotest.fail "masc_keeper_msg not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -610,12 +566,14 @@ let test_masc_keeper_msg_schema () =
             (List.mem_assoc "new_mid_goal" props);
           Alcotest.(check bool) "omits new_long_goal" false
             (List.mem_assoc "new_long_goal" props);
-          Alcotest.(check bool) "has required_tools" true
-            (List.mem_assoc "required_tools" props)
+          Alcotest.(check bool) "omits required_tools" false
+            (List.mem_assoc "required_tools" props);
+          Alcotest.(check bool) "omits required_tool_names" false
+            (List.mem_assoc "required_tool_names" props)
       | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 let test_masc_keeper_repair_schema () =
-  match find_tool "masc_keeper_repair" with
+  match find_registered_tool "masc_keeper_repair" with
   | None -> Alcotest.fail "masc_keeper_repair not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -631,28 +589,6 @@ let test_masc_keeper_repair_schema () =
       | None -> Alcotest.fail "masc_keeper_repair missing properties"
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
-
-let test_masc_tool_admin_snapshot_schema () =
-  match find_tool "masc_tool_admin_snapshot" with
-  | None -> Alcotest.fail "masc_tool_admin_snapshot not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has include_hidden" true
-            (List.mem_assoc "include_hidden" props);
-          Alcotest.(check int) "admin snapshot property count" 1
-            (List.length props)
-      | None -> Alcotest.fail "masc_tool_admin_snapshot missing properties"
-
-let test_masc_tool_admin_update_schema () =
-  match find_tool "masc_tool_admin_update" with
-  | None -> Alcotest.fail "masc_tool_admin_update not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has section" true (List.mem_assoc "section" props);
-          Alcotest.(check bool) "has policy" true (List.mem_assoc "policy" props)
-      | None -> Alcotest.fail "masc_tool_admin_update missing properties"
 
 (* ============================================================ *)
 (* 14. Handover Tool Tests                                       *)
@@ -680,7 +616,7 @@ let test_legacy_swarm_tools_removed () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail (Printf.sprintf "%s should be removed from public schemas" name))
@@ -701,7 +637,7 @@ let test_legacy_mitosis_tools_removed () =
   in
   List.iter
     (fun name ->
-      match find_tool name with
+      match find_registered_tool name with
       | None -> ()
       | Some _ ->
           Alcotest.fail
@@ -719,22 +655,22 @@ let test_legacy_mitosis_tools_removed () =
 (* ============================================================ *)
 
 let test_masc_dashboard_schema () =
-  match find_tool "masc_dashboard" with
+  match find_registered_tool "masc_dashboard" with
   | None -> Alcotest.fail "masc_dashboard not found"
   | Some _ -> ()
 
 let test_masc_agent_fitness_schema () =
-  match find_tool "masc_agent_fitness" with
+  match find_registered_tool "masc_agent_fitness" with
   | None -> Alcotest.fail "masc_agent_fitness not found"
   | Some _ -> ()
 
 let test_masc_get_metrics_schema () =
-  match find_tool "masc_get_metrics" with
+  match find_registered_tool "masc_get_metrics" with
   | None -> Alcotest.fail "masc_get_metrics not found"
   | Some _ -> ()
 
 let test_masc_agent_card_schema () =
-  match find_tool "masc_agent_card" with
+  match find_registered_tool "masc_agent_card" with
   | None -> Alcotest.fail "masc_agent_card not found"
   | Some schema ->
       match get_json_assoc "properties" schema.input_schema with
@@ -802,10 +738,11 @@ let () =
       Alcotest.test_case "unique_names" `Quick test_schema_names_are_unique;
       Alcotest.test_case "masc_prefix" `Quick test_all_names_start_with_masc;
     ];
-    "find_tool", [
-      Alcotest.test_case "existing" `Quick test_find_tool_existing;
-      Alcotest.test_case "not_found" `Quick test_find_tool_not_found;
-      Alcotest.test_case "case_sensitive" `Quick test_find_tool_case_sensitive;
+    "schema_inventory_lookup", [
+      Alcotest.test_case "existing" `Quick test_schema_inventory_lookup_existing;
+      Alcotest.test_case "not_found" `Quick test_schema_inventory_lookup_not_found;
+      Alcotest.test_case "case_sensitive" `Quick
+        test_schema_inventory_lookup_case_sensitive;
     ];
     "input_schema", [
       Alcotest.test_case "type_is_object" `Quick test_input_schema_type_is_object;
@@ -813,16 +750,15 @@ let () =
       Alcotest.test_case "required_is_list" `Quick test_required_field_is_list;
     ];
     "core_tools", [
-      Alcotest.test_case "masc_join" `Quick test_masc_join_schema;
-      Alcotest.test_case "masc_leave" `Quick test_masc_leave_schema;
+      Alcotest.test_case "masc_start" `Quick test_masc_start_schema;
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
+      Alcotest.test_case "masc_batch_add_tasks" `Quick
+        test_masc_batch_add_tasks_schema;
       Alcotest.test_case "masc_board_post supports judgment" `Quick
         test_masc_board_post_schema_supports_judgment;
-      Alcotest.test_case "remote_operator_action_strict" `Quick
-        test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "retired front-door tools absent" `Quick
         test_retired_front_door_tools_absent_from_schema_inventory;
     ];
@@ -850,24 +786,17 @@ let () =
        bounded_run removed: pruned from registry *)
     (* spawn_runtime_tools group removed: masc_spawn deleted in RFC-0182. *)
     "keeper_runtime_tools", [
-      Alcotest.test_case "persona-authoring" `Quick
-        test_masc_persona_authoring_schemas;
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
+      Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
+        test_keeper_sandbox_args_rejected;
       Alcotest.test_case "keeper-msg" `Quick
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick
         test_masc_keeper_repair_schema;
     ];
-    "runtime_admin_tools", [
-      Alcotest.test_case "tool-admin-snapshot" `Quick
-        test_masc_tool_admin_snapshot_schema;
-      Alcotest.test_case "tool-admin-update" `Quick
-        test_masc_tool_admin_update_schema;
-    ];
-    (* Runtime verify stays on the runtime admin surface; no separate public group. *)
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
         test_legacy_swarm_tools_removed;

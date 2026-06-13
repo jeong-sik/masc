@@ -1,4 +1,4 @@
-(** Bridge between the OAS [agent_sdk] structured logger and the masc-mcp
+(** Bridge between the OAS [agent_sdk] structured logger and the masc
     structured log ring / JSONL sink.
 
     OAS exposes a composable [Log.sink = record -> unit] with pluggable
@@ -8,12 +8,12 @@
     silently dropped when no host plugs in.
 
     This module provides a single sink that forwards every OAS record
-    into [Log.emit] (the masc-mcp [masc_log] library, which is wrapped
+    into [Log.emit] (the masc [masc_log] library, which is wrapped
     false and exposes [Log] as the top-level module) with:
 
     - level translated 1:1 (Debug → Debug, Info → Info, ...)
     - [module_name] prefixed with ["oas:"] to preserve provenance and
-      keep oas records from colliding with masc-mcp's own Keeper /
+      keep oas records from colliding with masc's own Keeper /
       Server / Dashboard module names
     - [details] assembled from the record fields as a Yojson object so
       the existing JSONL sink (e.g. [<base_path>/.masc/logs/system_log_*.jsonl])
@@ -214,12 +214,34 @@ let render_message_with_summary (record : Agent_sdk.Log.record) =
     | [] -> base_message
     | summary ->
         Printf.sprintf "%s %s" base_message (String.concat " " summary)
+
+let emit_correction_pipeline_metric (record : Agent_sdk.Log.record) =
+  match record.module_name with
+  | "agent_tools" -> (
+      let details = details_of_fields record.fields in
+      match
+        ( first_detail_label details [ "tool_name"; "tool" ],
+          first_detail_label details [ "fixes"; "count" ] )
+      with
+      | Some tool_name, Some _fixes
+        when String.equal record.message
+               "correction_pipeline fixed tool input fields"
+             || String.equal record.message
+                  "tool %s: correction_pipeline fixed %d field(s)" ->
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_oas_correction_pipeline_fixes_total
+            ~labels:[ ("tool_name", tool_name) ]
+            ()
+      | _ -> ())
+  | _ -> ()
+
 (** Build the sink function.  Prefix the module name with ["oas:"] so a
     record emitted by [Agent_sdk.Log.create ~module_name:"agent"] lands
-    as ["oas:agent"] in the masc-mcp log stream, distinct from any
-    masc-mcp module called "agent". *)
+    as ["oas:agent"] in the masc log stream, distinct from any
+    masc module called "agent". *)
 let make_sink () : Agent_sdk.Log.sink =
  fun record ->
+  emit_correction_pipeline_metric record;
   let message = render_message_with_summary record in
   let details =
     match record.fields with

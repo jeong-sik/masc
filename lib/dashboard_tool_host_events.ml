@@ -30,14 +30,13 @@ type report = {
 
 
 let stringish_member_opt json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `String value -> String_util.trim_to_option value
-  | `Int value -> Some (Int.to_string value)
-  | `Intlit value -> String_util.trim_to_option value
-  | `Float value -> Some (Printf.sprintf "%.0f" value)
-  | `Null -> None
-  | _ -> None
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> None
+  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`Int value) -> Some (Int.to_string value)
+  | Some (`Intlit value) -> String_util.trim_to_option value
+  | Some (`Float value) -> Some (Printf.sprintf "%.0f" value)
+  | Some _ -> None
 
 let required_member json key =
   match stringish_member_opt json key with
@@ -45,13 +44,12 @@ let required_member json key =
   | None -> Error (Printf.sprintf "missing required field: %s" key)
 
 let parse_timeout_ms json =
-  let open Yojson.Safe.Util in
-  match json |> member "timeout_ms" with
-  | `Null -> None
-  | `Int value -> Some (max 1 value)
-  | `Intlit value -> (
+  match Json_util.assoc_member_opt "timeout_ms" json with
+  | None | Some `Null -> None
+  | Some (`Int value) -> Some (max 1 value)
+  | Some (`Intlit value) -> (
       Stdlib.int_of_string_opt (value))
-  | _ -> None
+  | Some _ -> None
 
 let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
     (report, string) Result.t =
@@ -154,7 +152,6 @@ let record ?fs config (report : report) =
 type assignment_snapshot = {
   agent_name : string;
   profile : string;
-  preset : string option;
   tool_count : int;
   assignment_id : string;
 }
@@ -163,7 +160,6 @@ let record_assignment ?fs config (snapshot : assignment_snapshot) =
   Telemetry_eio.track_tool_assigned ?fs config
     ~agent_id:snapshot.agent_name
     ~profile:snapshot.profile
-    ?preset:snapshot.preset
     ~tool_count:snapshot.tool_count
     ~assignment_id:snapshot.assignment_id
     ()

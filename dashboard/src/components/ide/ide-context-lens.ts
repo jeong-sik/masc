@@ -107,7 +107,6 @@ export interface IdeContextLensInput {
   readonly overlay: KeeperCursorOverlay
 }
 
-type EventSearchTextMap = ReadonlyMap<RunActivityEvent, string>
 
 export interface IdeContextLensProps extends IdeContextLensInput {
   readonly onAnchorActivate?: (anchor: IdeContextAnchor) => void
@@ -143,6 +142,11 @@ const SURFACE_ORDER: ReadonlyArray<IdeContextSurfaceId> = [
   'runtime',
   'telemetry',
 ]
+
+function isIdeContextSurfaceId(value: string): value is IdeContextSurfaceId {
+  return (SURFACE_ORDER as readonly string[]).includes(value)
+}
+
 const MAX_CONTEXT_ANCHORS = 6
 const MAX_CONTEXT_ROUTE_LINKS = 10
 const CONTEXT_ANCHOR_BUCKET_ORDER = [
@@ -197,9 +201,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     if (eventLine !== undefined && eventFile === undefined) return false
     return eventFile === undefined || matchesFilePath(eventFile)
   })
-  const eventSearchTextByEvent = new Map<RunActivityEvent, string>(
-    fileEvents.map(event => [event, eventSearchText(event)]),
-  )
   const changedRows = input.diffRows.filter(row => row.kind === 'add' || row.kind === 'delete')
   const changedLineCount = changedRows.length
   const activeLines = new Set<number>()
@@ -234,7 +235,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
     fileThreads,
     changedRows,
     fileEvents,
-    eventSearchTextByEvent,
   )
 
   const surfaces = SURFACE_ORDER.map(id => {
@@ -246,7 +246,6 @@ export function deriveIdeContextLens(input: IdeContextLensInput): IdeContextLens
       changedLineCount,
       activeLineCount: activeLines.size,
       events: fileEvents,
-      eventSearchTextByEvent,
     })
     const status: SurfaceStatus = count > 0 ? 'linked' : 'quiet'
     const action = count > 0 ? contextSurfaceAction(id, anchorCandidates) : null
@@ -308,39 +307,26 @@ function contextAnchorBuckets(anchor: IdeContextAnchor): ReadonlySet<ContextAnch
     // 2026-05-17 console). 근본 해결: RFC-0004 Phase A0.4 (Zod payload nested 검증)
     // 도입 시 null 자체가 표면에 못 들어옴 → 본 guard 제거.
     const label = (link.label ?? '').trim().toLowerCase()
-    if (label === 'goal') buckets.add('goal')
-    else if (label === 'task') buckets.add('task')
-    else if (label === 'board') buckets.add('board')
-    else if (label === 'comment') buckets.add('comment')
-    else if (label === 'pr') buckets.add('pr')
-    else if (label === 'git') buckets.add('git')
-    else if (label === 'log') buckets.add('log')
-    else if (label === 'telemetry') {
-      buckets.add('telemetry')
+    if (isIdeContextSurfaceId(label)) {
+      buckets.add(label)
       if (
-        link.params.session_id !== undefined
-        || link.params.operation_id !== undefined
-        || link.params.worker_run_id !== undefined
+        label === 'telemetry'
+        && (
+          link.params.session_id !== undefined
+          || link.params.operation_id !== undefined
+          || link.params.worker_run_id !== undefined
+        )
       ) {
         buckets.add('runtime')
       }
     }
-    else if (label === 'keeper') buckets.add('keeper')
   }
 
   // WORKAROUND: 같은 사유 (link.label null guard 위 참조). RFC-0004 Phase A0.4 도입 시 제거.
   const surface = (anchor.surface ?? '').trim().toLowerCase()
-  if (surface === 'lsp') buckets.add('lsp')
-  else if (surface === 'line') buckets.add('line')
-  else if (surface === 'goal') buckets.add('goal')
-  else if (surface === 'task') buckets.add('task')
-  else if (surface === 'board') buckets.add('board')
-  else if (surface === 'git') buckets.add('git')
-  else if (surface === 'pr') buckets.add('pr')
-  else if (surface === 'log') buckets.add('log')
-  else if (surface === 'runtime') buckets.add('runtime')
-  else if (surface === 'telemetry') buckets.add('telemetry')
-  else if (surface === 'comment' || surface === 'question' || surface === 'note' || surface === 'suggest') {
+  if (isIdeContextSurfaceId(surface)) {
+    buckets.add(surface)
+  } else if (surface === 'question' || surface === 'note' || surface === 'suggest') {
     buckets.add('comment')
   }
 
@@ -555,7 +541,6 @@ function surfaceCount(
     readonly changedLineCount: number
     readonly activeLineCount: number
     readonly events: ReadonlyArray<RunActivityEvent>
-    readonly eventSearchTextByEvent: EventSearchTextMap
   },
 ): number {
   if (id === 'lsp') return state.annotations.length + state.diagnostics.length
@@ -570,54 +555,24 @@ function surfaceCount(
   if (id === 'goal') {
     return state.annotations.filter(annotation => annotation.goal_id).length
       + state.events.filter(event => event.context?.goal_id).length
-      + countUnstructuredEventText(
-        state.events,
-        /\bgoal[:#/\s-]/,
-        event => !!event.context?.goal_id,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'task') {
     return state.annotations.filter(annotation => annotation.task_id).length
       + state.events.filter(event => event.context?.task_id).length
-      + countUnstructuredEventText(
-        state.events,
-        /\btask[:#/\s-]/,
-        event => !!event.context?.task_id,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'board') {
     return state.threads.length
       + state.annotations.filter(annotation => annotation.board_post_id).length
       + state.events.filter(event => event.context?.board_post_id).length
-      + countUnstructuredEventText(
-        state.events,
-        /\b(board|post)[:#/\s-]/,
-        event => !!event.context?.board_post_id,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'git') {
     return state.changedLineCount
       + state.annotations.filter(annotation => annotation.git_ref).length
       + state.events.filter(event => event.context?.git_ref).length
-      + countUnstructuredEventText(
-        state.events,
-        /\b(git|commit|branch|diff)[:#/\s-]/,
-        event => !!event.context?.git_ref,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'pr') {
     return state.annotations.filter(annotation => annotation.pr_id).length
       + state.events.filter(event => event.context?.pr_id).length
-      + countUnstructuredEventText(
-        state.events,
-        /\b(pr|pull[_\s-]?request|review)[:#/\s-]/,
-        event => !!event.context?.pr_id,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'comment') {
     return state.annotations.filter(annotation =>
@@ -625,12 +580,6 @@ function surfaceCount(
     ).length
       + state.threads.length
       + state.events.filter(event => event.context?.comment_id).length
-      + countUnstructuredEventText(
-        state.events,
-        /\b(comment|note|question)[:#/\s-]/,
-        event => !!event.context?.comment_id,
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'log') {
     return state.events.length + state.annotations.filter(annotation => annotation.log_id).length
@@ -642,16 +591,6 @@ function surfaceCount(
         || event.context?.operation_id
         || event.context?.worker_run_id,
       ).length
-      + countUnstructuredEventText(
-        state.events,
-        /\b(session|operation|op|worker_run|worker|wr)[:#/\s-]/,
-        event => Boolean(
-          event.context?.session_id
-          || event.context?.operation_id
-          || event.context?.worker_run_id,
-        ),
-        state.eventSearchTextByEvent,
-      )
   }
   if (id === 'telemetry') {
     return state.events.length + state.annotations.filter(annotationHasTelemetry).length
@@ -699,7 +638,6 @@ function buildAnchors(
   threads: ReadonlyArray<AnchoredThread>,
   changedRows: ReadonlyArray<UnifiedDiffRow>,
   events: ReadonlyArray<RunActivityEvent>,
-  eventSearchTextByEvent: EventSearchTextMap,
 ): ReadonlyArray<IdeContextAnchor> {
   const anchors: IdeContextAnchor[] = []
 
@@ -838,7 +776,7 @@ function buildAnchors(
     const refs = eventRouteRefs(event)
     const contextMeta = eventContextMeta(event, refs)
     const eventLine = eventLineForFile(event, filePath) ?? refs.line
-    const eventSurface = surfaceFromEvent(event, eventSearchTextByEvent)
+    const eventSurface = surfaceFromEvent(event)
     anchors.push({
       id: `event-${event.id}`,
       file_path: event.context?.file_path ?? filePath,
@@ -873,46 +811,7 @@ function buildAnchors(
   return anchors
 }
 
-function eventSearchText(event: RunActivityEvent): string {
-  return [
-    event.kind,
-    event.verb,
-    event.target,
-    event.detail,
-    event.context?.file_path,
-    event.context?.line !== undefined ? `line:${event.context.line}` : undefined,
-    event.context?.goal_id ? `goal:${event.context.goal_id}` : undefined,
-    event.context?.task_id ? `task:${event.context.task_id}` : undefined,
-    event.context?.board_post_id ? `board:${event.context.board_post_id}` : undefined,
-    event.context?.comment_id ? `comment:${event.context.comment_id}` : undefined,
-    event.context?.pr_id ? `pr:${event.context.pr_id}` : undefined,
-    event.context?.git_ref ? `git:${event.context.git_ref}` : undefined,
-    event.context?.log_id ? `log:${event.context.log_id}` : undefined,
-    event.context?.session_id ? `session:${event.context.session_id}` : undefined,
-    event.context?.operation_id ? `operation:${event.context.operation_id}` : undefined,
-    event.context?.worker_run_id ? `worker_run:${event.context.worker_run_id}` : undefined,
-    ...(event.tags ?? []),
-  ]
-    .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
-    .join(' ')
-    .toLowerCase()
-}
-
-function countUnstructuredEventText(
-  events: ReadonlyArray<RunActivityEvent>,
-  pattern: RegExp,
-  hasStructuredLink: (event: RunActivityEvent) => boolean,
-  eventSearchTextByEvent: EventSearchTextMap,
-): number {
-  return events.filter(event =>
-    !hasStructuredLink(event) && pattern.test(cachedEventSearchText(event, eventSearchTextByEvent)),
-  ).length
-}
-
-function surfaceFromEvent(
-  event: RunActivityEvent,
-  eventSearchTextByEvent?: EventSearchTextMap,
-): string {
+function surfaceFromEvent(event: RunActivityEvent): string {
   if (event.context?.comment_id) return 'Comment'
   if (event.context?.pr_id) return 'PR'
   if (event.context?.board_post_id) return 'Board'
@@ -927,16 +826,6 @@ function surfaceFromEvent(
   ) {
     return 'Runtime'
   }
-  const text = eventSearchTextByEvent
-    ? cachedEventSearchText(event, eventSearchTextByEvent)
-    : eventSearchText(event)
-  if (/\b(pr|pull[_\s-]?request|review)[:#/\s-]/.test(text)) return 'PR'
-  if (/\b(board|post)[:#/\s-]/.test(text)) return 'Board'
-  if (/\bgoal[:#/\s-]/.test(text)) return 'Goal'
-  if (/\btask[:#/\s-]/.test(text)) return 'Task'
-  if (/\b(git|commit|branch|diff)[:#/\s-]/.test(text)) return 'Git'
-  if (/\b(comment|note|question)[:#/\s-]/.test(text)) return 'Comment'
-  if (/\b(session|operation|op|worker_run|worker|wr)[:#/\s-]/.test(text)) return 'Runtime'
   return 'Log'
 }
 
@@ -949,10 +838,6 @@ function eventLineForFile(event: RunActivityEvent, filePath: string): number | u
   return normalizedFilePath !== null && normalizeIdeContextFilePath(eventFile) === normalizedFilePath
     ? positiveLine(line)
     : undefined
-}
-
-function cachedEventSearchText(event: RunActivityEvent, values: EventSearchTextMap): string {
-  return values.get(event) ?? eventSearchText(event)
 }
 
 function positiveLine(value: number | null | undefined): number | undefined {
@@ -1204,7 +1089,7 @@ export function routeLinksForContext(
       id: `pr:${prId}`,
       label: 'PR',
       tab: 'workspace',
-      params: { section: 'repositories', view: 'graph', pr: prId },
+      params: { section: 'repositories', pr: prId },
       evidence: `PR ${prId}`,
     })
   }
@@ -1214,7 +1099,7 @@ export function routeLinksForContext(
       id: `git:${gitRef}`,
       label: 'Git',
       tab: 'workspace',
-      params: { section: 'repositories', view: 'graph', ref: gitRef },
+      params: { section: 'repositories', ref: gitRef },
       evidence: `Git ${gitRef}`,
     })
   }
@@ -1273,4 +1158,3 @@ function cleanId(value: string | null | undefined): string | null {
   const trimmed = value?.trim()
   return trimmed ? trimmed : null
 }
-

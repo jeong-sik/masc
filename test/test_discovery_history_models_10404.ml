@@ -1,12 +1,12 @@
 (** #10404: pre-fix [Discovery_history.endpoint_to_record] kept only the
     head of the loaded model list, recording 'qwen3:8b' for every probe
-    while four cascades referenced 'qwen3.6:27b-coding-nvfp4'.  These
+    while four runtimes referenced 'qwen3.6:27b-coding-nvfp4'.  These
     tests pin the new [models : string list] field and verify the head
     backward-compatibility (model_id stays populated). *)
 
 open Alcotest
-module DH = Masc_mcp.Discovery_history
-module P = Masc_mcp.Prometheus
+module DH = Discovery_history
+module P = Otel_metric_store
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;
@@ -63,9 +63,6 @@ let test_single_model_round_trip () =
     (Astring.String.is_infix
        ~affix:"\"model_id\":\"qwen3.6:27b-coding-nvfp4\"" s)
 
-let text_has_literal text literal =
-  Astring.String.is_infix ~affix:literal text
-
 let test_failure_observer_increments_metric () =
   let labels = [("site", "unknown")] in
   let before =
@@ -109,13 +106,16 @@ let test_failure_observer_reraises_cancelled () =
   check bool "cancel is re-raised" true !raised
 
 let test_failure_metric_registered () =
-  let text = P.to_prometheus_text () in
-  check bool "has discovery history failure HELP" true
-    (text_has_literal text
-       ("# HELP " ^ P.metric_discovery_history_failures ^ " "));
-  check bool "has discovery history failure TYPE" true
-    (text_has_literal text
-       ("# TYPE " ^ P.metric_discovery_history_failures ^ " counter"))
+  let metric =
+    P.snapshot ()
+    |> List.find_opt (fun (m : P.metric) ->
+      String.equal m.name P.metric_discovery_history_failures && m.labels = [])
+  in
+  check bool "discovery history failure registered" true (Option.is_some metric);
+  check bool "discovery history failure registered as counter" true
+    (match metric with
+     | Some m -> m.metric_type = P.Counter
+     | None -> false)
 
 let () =
   run "discovery_history_models_10404" [

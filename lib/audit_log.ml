@@ -30,8 +30,6 @@ type governance_audit_decision =
 [@@deriving tla]
 
 type action =
-  | Join [@tla.symbol "join"]
-  | Leave [@tla.symbol "leave"]
   | ClaimTask [@tla.symbol "claim_task"]
   | StartTask [@tla.symbol "start_task"]
   | DoneTask [@tla.symbol "done_task"]
@@ -47,13 +45,14 @@ type action =
   | SearchRefinement [@tla.symbol "search_refinement"]
   | GovernanceDecision of governance_audit_decision [@tla.symbol "governance_decision"]
   | Custom of string [@tla.symbol "custom"]
+  | Unknown of string [@tla.symbol "unknown"]
 [@@deriving tla]
 
 type audit_entry = {
   timestamp: float;
   agent_id: string;
   action: action;
-  room_id: string option;
+  workspace_id: string option;
   details: Yojson.Safe.t;
   outcome: outcome;
   cost_estimate: float option;
@@ -89,8 +88,6 @@ let governance_audit_decision_of_string = function
   | value -> Governance_other value
 
 let action_to_string = function
-  | Join -> "join"
-  | Leave -> "leave"
   | ClaimTask -> "claim_task"
   | StartTask -> "start_task"
   | DoneTask -> "done_task"
@@ -107,30 +104,45 @@ let action_to_string = function
   | GovernanceDecision decision ->
       "governance_decision:" ^ governance_audit_decision_to_string decision
   | Custom name -> "custom:" ^ name
+  | Unknown raw -> raw
 
-let string_to_action = function
-  | "join" -> Join
-  | "leave" -> Leave
-  | "claim_task" -> ClaimTask
-  | "start_task" -> StartTask
-  | "done_task" -> DoneTask
-  | "cancel_task" -> CancelTask
-  | "release_task" -> ReleaseTask
-  | "broadcast" -> Broadcast
-  | "suspend" -> Suspend
-  | "auth_success" -> AuthSuccess
-  | "auth_failure" -> AuthFailure
-  | "circuit_open" -> CircuitOpen
-  | "circuit_close" -> CircuitClose
-  | "search_refinement" -> SearchRefinement
-  | s when String.length s > 10 && String.starts_with ~prefix:"tool_call:" s ->
-      ToolCall (String.sub s 10 (String.length s - 10))
-  | s when String.length s > 20 && String.starts_with ~prefix:"governance_decision:" s ->
-      let raw = String.sub s 20 (String.length s - 20) in
-      GovernanceDecision (governance_audit_decision_of_string raw)
-  | s when String.length s > 7 && String.starts_with ~prefix:"custom:" s ->
-      Custom (String.sub s 7 (String.length s - 7))
-  | s -> Custom s
+let unknown_action raw =
+  (* [Unknown] is the forward-compatible unknown-action variant for audit-log
+     wire strings. Keep this path named so the parser does not look like a
+     silent coercion to a normal concrete action. *)
+  Unknown raw
+
+let string_to_action s =
+  (* Split on first ':' to separate tag from payload for parameterized
+     variants.  Simple action names without ':' match directly.  This
+     replaces the old prefix+magic-length approach which was fragile:
+     magic numbers drifted from tag lengths, and a fixed-length prefix
+     could not account for variable-length payloads. *)
+  match String.index_opt s ':' with
+  | Some colon_pos ->
+    let tag = String.sub s 0 colon_pos in
+    let payload = String.sub s (colon_pos + 1) (String.length s - colon_pos - 1) in
+    (match tag with
+     | "tool_call" -> ToolCall payload
+     | "governance_decision" ->
+         GovernanceDecision (governance_audit_decision_of_string payload)
+     | "custom" -> Custom payload
+     | _ -> unknown_action s)
+  | None ->
+    (match s with
+     | "claim_task" -> ClaimTask
+     | "start_task" -> StartTask
+     | "done_task" -> DoneTask
+     | "cancel_task" -> CancelTask
+     | "release_task" -> ReleaseTask
+     | "broadcast" -> Broadcast
+     | "suspend" -> Suspend
+     | "auth_success" -> AuthSuccess
+     | "auth_failure" -> AuthFailure
+     | "circuit_open" -> CircuitOpen
+     | "circuit_close" -> CircuitClose
+     | "search_refinement" -> SearchRefinement
+     | _ -> unknown_action s)
 
 let outcome_to_json = function
   | Success -> `Assoc [("status", `String "success")]
@@ -144,7 +156,7 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
     ("agent_id", `String e.agent_id);
     ("action", `String (action_to_string e.action));
-    ("room_id", Json_util.string_opt_to_json e.room_id);
+    ("workspace_id", Json_util.string_opt_to_json e.workspace_id);
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
   ] in
@@ -166,28 +178,33 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     Returns Error with reason on parse failure (never silently drops). *)
 let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
   try
-    let module U = Yojson.Safe.Util in
-    let timestamp = json |> U.member "timestamp" |> U.to_float in
-    let agent_id = json |> U.member "agent_id" |> U.to_string in
-    let action = json |> U.member "action" |> U.to_string |> string_to_action in
-    let room_id = json |> U.member "room_id" |> U.to_string_option in
+    let timestamp = Json_util.get_float json "timestamp" in
+    let agent_id = Json_util.get_string json "agent_id" in
+    let action_raw = Json_util.get_string json "action" in
+    let workspace_id = Json_util.get_string json "workspace_id" in
     let details =
       match Safe_ops.json_member_opt "details" json with
       | Some v -> v
       | None -> `Null
     in
     let outcome =
-      let o = json |> U.member "outcome" in
-      let status = o |> U.member "status" |> U.to_string in
-      if status = "success" then Success
-      else
-        let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
-        Failure reason
+      match Json_util.get_object json "outcome" with
+      | Some o ->
+        let status = Json_util.get_string o "status" |> Option.value ~default:"" in
+        if status = "success" then Success
+        else
+          let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
+          Failure reason
+      | None -> Failure "missing outcome"
     in
     let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in
     let token_count = Safe_ops.json_int_opt "token_count" json in
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
-    Ok { timestamp; agent_id; action; room_id; details; outcome; cost_estimate; token_count; trace_id }
+    match timestamp, agent_id, action_raw with
+    | Some timestamp, Some agent_id, Some action_raw ->
+      let action = string_to_action action_raw in
+      Ok { timestamp; agent_id; action; workspace_id; details; outcome; cost_estimate; token_count; trace_id }
+    | _ -> Error "missing required fields (timestamp, agent_id, action)"
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Redact details field to prevent sensitive content leaking into logs *)
     let redacted = match json with
@@ -212,7 +229,7 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 (** {1 File Operations} *)
 
-type config = Coord_utils.config
+type config = Workspace_utils.config
 
 (** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
@@ -230,7 +247,7 @@ let audit_store_cache : Dated_jsonl.t StringMap.t ref = ref StringMap.empty
 let audit_store_cache_mu = Eio.Mutex.create ()
 
 let get_audit_store (config : config) : Dated_jsonl.t =
-  let base = Filename.concat (Coord_utils.masc_dir config) "audit" in
+  let base = Filename.concat (Workspace_utils.masc_dir config) "audit" in
   Eio_guard.with_mutex audit_store_cache_mu (fun () ->
     match StringMap.find_opt base !audit_store_cache with
     | Some store -> store
@@ -290,14 +307,6 @@ let audit_entry_id ~timestamp ~agent_id ~action =
   let hash = Digest.to_hex (Digest.string (agent_id ^ action_to_string action
                                            ^ Printf.sprintf "%.6f" timestamp)) in
   Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
-
-(** Format a Unix timestamp as ISO 8601 UTC string. *)
-let format_iso8601 ts =
-  let t = Int64.to_int (Int64.of_float ts) in
-  let tm = Unix.gmtime (float_of_int t) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 
 (** Map outcome + action to O2 severity string. *)
 let audit_severity ~action ~outcome =
@@ -378,7 +387,7 @@ let audit_event_json (entry : audit_entry) =
   let fields =
     [
       ("id", `String id);
-      ("ts", `String (format_iso8601 entry.timestamp));
+      ("ts", `String (Masc_domain.iso8601_of_unix_seconds entry.timestamp));
       ("actor", `String entry.agent_id);
       ("kind", `String kind);
       ("summary", `String (audit_summary ~action:entry.action ~details:entry.details));
@@ -441,7 +450,7 @@ let log_action
     (config : config)
     ~agent_id
     ~action
-    ?(room_id : string option)
+    ?(workspace_id : string option)
     ?(details : Yojson.Safe.t = `Null)
     ?(cost_estimate : float option)
     ?(token_count : int option)
@@ -452,7 +461,7 @@ let log_action
     timestamp = Time_compat.now ();
     agent_id;
     action;
-    room_id;
+    workspace_id;
     details;
     outcome;
     cost_estimate;
@@ -462,24 +471,16 @@ let log_action
   append_entry config entry;
   (* Publish to the MASC event bus for real-time SSE streaming. *)
   let id = audit_entry_id ~timestamp:entry.timestamp ~agent_id ~action in
-  let ts = format_iso8601 entry.timestamp in
+  let ts = Masc_domain.iso8601_of_unix_seconds entry.timestamp in
   let kind = action_to_string action in
   let severity = audit_severity ~action ~outcome in
   let summary = audit_summary ~action ~details in
   let target = audit_target ~action ~details in
   let payload_opt = if details = `Null then None else Some details in
-  Cascade_events.publish_audit_event ~id ~ts ~actor:agent_id ~kind ?target
+  Keeper_event_publisher.publish_audit_event ~id ~ts ~actor:agent_id ~kind ?target
     ~summary ~severity ?payload:payload_opt ()
 
 (** Convenience functions for common events *)
-
-let log_join config ~agent_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Join
-    ?cost_estimate ?token_count ~outcome:Success ()
-
-let log_leave config ~agent_id ?cost_estimate ?token_count () =
-  log_action config ~agent_id ~action:Leave
-    ?cost_estimate ?token_count ~outcome:Success ()
 
 let log_claim_task config ~agent_id ~task_id ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:ClaimTask
@@ -506,12 +507,12 @@ let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count 
     ~details:(`Assoc [("preview", `String preview)])
     ?cost_estimate ?token_count ~outcome:Success ()
 
-let log_suspend config ~agent_id ~target_agent ~reason ~rooms_affected ?cost_estimate ?token_count () =
+let log_suspend config ~agent_id ~target_agent ~reason ~workspaces_affected ?cost_estimate ?token_count () =
   log_action config ~agent_id ~action:Suspend
     ~details:(`Assoc [
       ("target_agent", `String target_agent);
       ("reason", `String reason);
-      ("rooms_affected", `Int rooms_affected);
+      ("workspaces_affected", `Int workspaces_affected);
     ])
     ?cost_estimate ?token_count ~outcome:Success ()
 

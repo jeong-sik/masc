@@ -27,20 +27,11 @@ let unknown_phase reason =
       ("summary", `Assoc [ ("reason", `String reason) ]);
     ]
 
-let known_corpus_blocker_json =
-  `Assoc
-    [
-      ("id", `String "strict_row_level_catalog_complete");
-      ("status", `String "BLOCKED");
-      ("issue", `String "#13265");
-      ("description", `String "strict 206-row audit corpus remains incomplete");
-    ]
-
 let fallback_status_json ~overall_status ~source ~reason =
   `Assoc
     [
       ("schema_version", `Int 1);
-      ("generated_at", `String (Keeper_types.now_iso ()));
+      ("generated_at", `String (Keeper_meta_contract.now_iso ()));
       ("loop_iteration", `String "unknown");
       ("overall_status", `String overall_status);
       ( "phases",
@@ -55,10 +46,10 @@ let fallback_status_json ~overall_status ~source ~reason =
       ("next_action", `Null);
       ("system_health_signals", `Assoc []);
       ("dashboard_source", source);
-      ("known_blockers", `List [ known_corpus_blocker_json ]);
+      ("known_blockers", `List []);
     ]
 
-let missing_status_json ~base_path =
+let missing_runtime_status_json ~base_path =
   let candidates = status_path_candidates ~base_path in
   let source =
     dashboard_source_json "runtime_status_missing"
@@ -83,7 +74,7 @@ let first_existing_path paths =
 
 let status_json_compute ~base_path () =
   match first_existing_path (status_path_candidates ~base_path) with
-  | None -> missing_status_json ~base_path
+  | None -> missing_runtime_status_json ~base_path
   | Some path -> (
       try
         let json = Yojson.Safe.from_string (Fs_compat.load_file path) in
@@ -111,8 +102,10 @@ let status_json_compute ~base_path () =
    #18993 / #18994 / #19007 / #19015 / #19023 / #19024).  TTL 5s
    because goal-loop status is the most live-feeling of the dashboard
    surfaces and the parse cost is small. *)
+let goal_loop_cache_ttl_s = 5.0
+
 let status_json ~base_path () =
   let cache_key = Printf.sprintf "goal_loop_status:%s" base_path in
-  Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:goal_loop_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       status_json_compute ~base_path ()))

@@ -1,6 +1,6 @@
 // preview/cb-group-f.jsx
 // Track 3 · OBSERVABILITY PLANE
-// O1 Cascade Inspector · O2 Audit Ledger · O3 Safe Autonomy · O4 Cost · O5 Heuristic + Stress
+// O1 Runtime Inspector · O2 Audit Ledger · O3 Safe Autonomy · O4 Cost · O5 Stress
 
 const P2f = window.MASC_P2;
 
@@ -12,13 +12,13 @@ function fmtMs(ms) {
   return `${m}m${s.toString().padStart(2, '0')}`;
 }
 
-// shared cascade card sub-component
-function CascadeCard({ c, hitModel, triedSet, showPool, compactModel = false }) {
+// shared runtime card sub-component
+function RuntimeCard({ c, hitModel, triedSet, showPool, compactModel = false }) {
   return (
-    <article className={`csc-card outcome-${c.outcome}`} aria-label={`${c.id} · ${c.cascade} · ${c.outcome === 'error' ? c.error_category : 'ok'} · ${c.hops.length} hops · ${fmtMs(c.total_ms)}`}>
+    <article className={`csc-card outcome-${c.outcome}`} aria-label={`${c.id} · ${c.runtime} · ${c.outcome === 'error' ? c.error_category : 'ok'} · ${c.hops.length} hops · ${fmtMs(c.total_ms)}`}>
       <div className="h" aria-hidden="true">
         <span className="id">{c.id}</span>
-        <span className="nm">{c.cascade}</span>
+        <span className="nm">{c.runtime}</span>
         {c.trigger && <span className="tg">· {c.trigger} · {c.at}</span>}
         <span className={`out ${c.outcome}`}>{c.outcome === 'error' ? c.error_category : 'ok'}</span>
       </div>
@@ -31,7 +31,7 @@ function CascadeCard({ c, hitModel, triedSet, showPool, compactModel = false }) 
           })}
         </div>
       )}
-      <ol className="hops" aria-label={`${c.hops.length} cascade hops`}>
+      <ol className="hops" aria-label={`${c.hops.length} runtime hops`}>
         {c.hops.map(h => (
           <li key={h.i} className="hop" aria-label={`Step ${h.i} · ${h.model} · ${h.status} · ${fmtMs(h.ms)}${h.reason ? ' · ' + h.reason : ''}`}>
             <span className="step" aria-hidden="true">{h.i}</span>
@@ -52,37 +52,37 @@ function CascadeCard({ c, hitModel, triedSet, showPool, compactModel = false }) 
   );
 }
 
-// O1-A · Cascade list
-function CascadeList() {
+// O1-A · Runtime list
+function RuntimeList() {
   return (
-    <div className="csc-list" role="list" aria-label={`${P2f.cascadeAudit.length} cascade runs`}>
-      {P2f.cascadeAudit.map(c => (
-        <div key={c.id} role="listitem"><CascadeCard c={c} /></div>
+    <div className="csc-list" role="list" aria-label={`${P2f.runtimeAudit.length} runtime runs`}>
+      {P2f.runtimeAudit.map(c => (
+        <div key={c.id} role="listitem"><RuntimeCard c={c} /></div>
       ))}
     </div>
   );
 }
 
-// O1-B · Cascade deep-dive
-function CascadeDeepDive() {
-  const c = P2f.cascadeAudit[0];
+// O1-B · Runtime deep-dive
+function RuntimeDeepDive() {
+  const c = P2f.runtimeAudit[0];
   const triedSet = new Set(c.hops.map(h => h.model));
   const hitModel = c.hops.find(h => h.status === 'hit')?.model;
   return (
-    <section aria-label={`Cascade deep dive · ${c.id} · ${c.error_category}`} style={{borderLeftWidth:'3px'}}>
-      <CascadeCard c={c} hitModel={hitModel} triedSet={triedSet} showPool />
+    <section aria-label={`Runtime deep dive · ${c.id} · ${c.error_category}`} style={{borderLeftWidth:'3px'}}>
+      <RuntimeCard c={c} hitModel={hitModel} triedSet={triedSet} showPool />
     </section>
   );
 }
 
-// O1-C · Cascade compare
-function CascadeCompare() {
-  const failed = P2f.cascadeAudit.find(c => c.outcome === 'error');
-  const ok = P2f.cascadeAudit.find(c => c.outcome === 'ok');
+// O1-C · Runtime compare
+function RuntimeCompare() {
+  const failed = P2f.runtimeAudit.find(c => c.outcome === 'error');
+  const ok = P2f.runtimeAudit.find(c => c.outcome === 'ok');
   return (
-    <div role="group" aria-label="Cascade comparison · success vs failure" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px'}}>
+    <div role="group" aria-label="Runtime comparison · success vs failure" style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px'}}>
       {[failed, ok].map(c => (
-        <CascadeCard key={c.id} c={c} compactModel />
+        <RuntimeCard key={c.id} c={c} compactModel />
       ))}
     </div>
   );
@@ -361,12 +361,12 @@ function CostMatrix() {
     return 'z4';
   };
   return (
-    <section aria-label={`Cost matrix · provider × model · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+    <section aria-label={`Cost matrix · runtime slot x capability tier · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
-        <span>provider × model · $ spent (24h)</span>
+        <span>runtime slot x capability tier · $ spent (24h)</span>
         <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>${P2f.costs.total_cost_usd.toFixed(2)}</span>
       </div>
-      <table className="cs-mat" aria-label="Provider × model cost matrix">
+      <table className="cs-mat" aria-label="Runtime slot x capability tier cost matrix">
         <thead>
           <tr>
             <th scope="col"></th>
@@ -429,31 +429,8 @@ function CostLatency() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// O5 · HEURISTIC + STRESS
+// O5 · STRESS
 // ═════════════════════════════════════════════════════════════════
-
-function HeuristicLog() {
-  return (
-    <section aria-label={`Heuristic firing log · ${P2f.heuristics.filter(h=>h.triggered).length} fired of ${P2f.heuristics.length}`} style={{background:'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--color-border-strong)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
-        <span>tail · keeper_hooks_oas.heuristics.jsonl</span>
-        <span style={{marginLeft:'auto',color:'var(--err-fg)'}}>{P2f.heuristics.filter(h=>h.triggered).length}/{P2f.heuristics.length} fired</span>
-      </div>
-      <div role="log" aria-live="polite" aria-label={`${P2f.heuristics.length} heuristic rows`}>
-        {P2f.heuristics.map((h, i) => (
-          <div key={i} role="listitem" aria-label={`${h.ts.replace('Z','')} · ${h.module} · ${h.site} · value ${h.value} threshold ${h.threshold} · ${h.triggered ? 'fire' : 'ok'}${h.detail ? ' · ' + h.detail : ''}`} className={`hr-row ${h.triggered ? 'fired' : ''}`}>
-            <span className="ts" aria-hidden="true">{h.ts.replace('Z','')}</span>
-            <span className="mod" aria-hidden="true">{h.module}</span>
-            <span className="site" aria-hidden="true">{h.site}<span className="det" style={{display:'block'}}>↳ {h.detail}</span></span>
-            <span className="num" aria-hidden="true">value · <span className={h.triggered?'over':''}>{h.value}</span></span>
-            <span className="num" aria-hidden="true">thr · {h.threshold}</span>
-            <span className={`fl ${h.triggered ? 't' : 'f'}`} aria-hidden="true">{h.triggered ? 'fire' : 'ok'}</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function StressBoard() {
   return (
@@ -464,13 +441,13 @@ function StressBoard() {
       </div>
       <div className="st-grid" role="list" aria-label="Stress cards">
         {P2f.stress.map((s, i) => (
-          <article key={i} role="listitem" aria-label={`${s.agent} · ${s.kind} · count ${s.count} · room ${s.room} · ${s.at.replace('Z','')}`} className={`scard ${s.kind}`}>
+          <article key={i} role="listitem" aria-label={`${s.agent} · ${s.kind} · count ${s.count} · workspace ${s.workspace} · ${s.at.replace('Z','')}`} className={`scard ${s.kind}`}>
             <div className="h" aria-hidden="true">
               <span className="ag">{s.agent}</span>
               <span className="at">{s.at.replace('Z','')}</span>
             </div>
             <span className="kind" aria-hidden="true">{s.kind}</span>
-            <span className="cn" aria-hidden="true">count · <span className="v">{s.count}</span> · room {s.room}</span>
+            <span className="cn" aria-hidden="true">count · <span className="v">{s.count}</span> · workspace {s.workspace}</span>
           </article>
         ))}
       </div>
@@ -478,44 +455,10 @@ function StressBoard() {
   );
 }
 
-function HeuristicByModule() {
-  const byMod = {};
-  P2f.heuristics.forEach(h => {
-    if (!byMod[h.module]) byMod[h.module] = { fired: 0, total: 0, sites: new Set() };
-    byMod[h.module].total++;
-    if (h.triggered) byMod[h.module].fired++;
-    byMod[h.module].sites.add(h.site);
-  });
-  const rows = Object.entries(byMod).sort((a,b) => b[1].fired - a[1].fired);
-  return (
-    <section aria-label={`Heuristic firing rate by module · ${rows.length} modules`} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
-      <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
-        <span>heuristic firing rate · by module</span>
-      </div>
-      <div role="list">
-        {rows.map(([mod, v]) => {
-          const pct = v.total > 0 ? v.fired / v.total * 100 : 0;
-          return (
-            <div key={mod} role="listitem" aria-label={`${mod} · ${v.fired} of ${v.total} fired (${pct.toFixed(0)}%) · sites ${[...v.sites].join(', ')}`} style={{display:'grid',gridTemplateColumns:'160px 80px 1fr 60px',gap:'8px',alignItems:'center',padding:'5px 8px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)'}}>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-primary)'}}>{mod}</span>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.fired}/{v.total} fired</span>
-              <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)'}}>
-                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--color-status-warn), var(--color-status-err))' : 'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
-              </div>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--color-accent-fg)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
-              <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
 Object.assign(window, {
-  CascadeList, CascadeDeepDive, CascadeCompare,
+  RuntimeList, RuntimeDeepDive, RuntimeCompare,
   AuditLedger, AuditByActor, AuditSummary,
   SafeAutoDashboard, SafeAutoByKeeper, SafeAutoTrend,
   CostPerAgent, CostMatrix, CostLatency,
-  HeuristicLog, StressBoard, HeuristicByModule,
+  StressBoard,
 });

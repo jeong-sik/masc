@@ -156,16 +156,16 @@ let make_seed ?capability_id ?(risk_class = Safe)
   }
 
 let spawned_agent_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent
+  Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let spawned_agent_prefixed_tools : string list =
-  prefixed_tool_names (Tool_catalog.tools_for_surface Tool_catalog.Spawned_agent)
+  prefixed_tool_names Tool_catalog_surfaces.spawned_agent_surface_tools
 
 let local_worker_public_tool_names : string list =
-  Tool_catalog.tools_for_surface Tool_catalog.Local_worker
+  Tool_catalog_surfaces.local_worker_surface_tools
 
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
-  Agent_tool_surfaces.local_worker_internal_schemas
+  Keeper_tool_surfaces.local_worker_internal_schemas
 
 (* RFC-0182: masc_spawn removed (dead). privileged_public_tool_names is
    currently empty — no remaining public tool requires Privileged
@@ -175,12 +175,7 @@ let privileged_public_tool_names : string list = []
 let privileged_keeper_tool_names : string list =
   [ "tool_execute"; "tool_edit_file"; "tool_write_file" ]
 
-(* Derived from Tool_catalog_surfaces.keeper_internal_replacement (SSOT).
-   Returns the masc_* backend name for aliased tools, identity otherwise. *)
-let keeper_backend_tool_name name =
-  match Tool_catalog_surfaces.keeper_internal_replacement name with
-  | Some masc_name -> masc_name
-  | None -> name
+let keeper_backend_tool_name name = name
 
 let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_schema list) :
     capability_seed list =
@@ -363,7 +358,7 @@ let public_raw_tool_schemas_from (public_tool_source_schemas : Masc_domain.tool_
    RFC-0084 §1.1 + §2.2 (PR-7) — Internal dispatch now flows through
    [Tool_dispatch.guarded_dispatch] which wraps [dispatch_structured]
    (pre-hook + handler + observer) with [Tool_telemetry.with_span].
-   The keeper turn loop in [agent_tool_remote_mcp_runtime.ml:164,218] routes through
+   The keeper turn loop in [keeper_tool_registered_runtime.ml:164,218] routes through
    the guarded entry so pre-hook chain ([governance_pipeline:203],
    [tool_input_validation:217]) covers keeper-originated calls.
    PR-8 wires the MCP server; PR-9 wires tag-dispatch fallback.
@@ -383,7 +378,7 @@ let visible_public_tool_schemas_from
 
 let local_worker_tool_schemas ?names () :
     (Masc_domain.tool_schema list, string) result =
-  Agent_tool_surfaces.local_worker_tool_schemas ?names ()
+  Keeper_tool_surfaces.local_worker_tool_schemas ?names ()
 
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_model_tools

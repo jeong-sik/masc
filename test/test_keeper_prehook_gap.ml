@@ -2,7 +2,7 @@ open Alcotest
 
 (** RFC-0084 §1.1 — Keeper Turn Pre-hook
 
-    PR-7 switched [lib/keeper/agent_tool_remote_mcp_runtime.ml:164,218] from
+    PR-7 switched [lib/keeper/keeper_tool_registered_runtime.ml:164,218] from
     [Tool_dispatch.dispatch] to [Tool_dispatch.guarded_dispatch]. The
     [guarded_dispatch] entry wraps pre-hook + handler + observer fan-out with
     [Tool_telemetry.with_span], so every
@@ -44,7 +44,7 @@ let pinned_dispatch_structured_callers = 0
 let test_keeper_prehook_runs () =
   (check int)
     "keeper turn pre-hook invocation count per turn \
-     (RFC-0084 §1.1 PR-7; agent_tool_remote_mcp_runtime.ml:164,218 → guarded_dispatch)"
+     (RFC-0084 §1.1 PR-7; keeper_tool_registered_runtime.ml:164,218 → guarded_dispatch)"
     1
     pinned_keeper_prehook_invocations_per_turn
 

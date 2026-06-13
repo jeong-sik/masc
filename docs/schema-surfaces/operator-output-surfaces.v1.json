@@ -76,7 +76,7 @@
       "stability": "operator_internal",
       "version_field": "schema",
       "external_refs": ["oas.raw_trace_record.v1"],
-      "notes": "Terminal keeper turn receipt, including tool contract and cascade outcome summary."
+      "notes": "Terminal keeper turn receipt, including completion contract and runtime outcome summary."
     },
     {
       "id": "masc.keeper_tool_call_log.jsonl.v1",
@@ -131,11 +131,11 @@
       "id": "masc.oas_bridge_events.v1",
       "kind": "event_bus",
       "owner": "MASC",
-      "producer": "Cascade/OAS event bridge",
+      "producer": "Runtime/OAS event bridge",
       "consumer": ["dashboard SSE bridge", "OAS event subscribers"],
       "wire_or_artifact": "OAS Custom events relayed into MASC surfaces",
       "schema_source": [
-        "lib/cascade/cascade_event_bridge.mli",
+        "lib/keeper/keeper_event_bridge.mli",
         "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
       ],
       "validator": "OAS integration bridge tests",

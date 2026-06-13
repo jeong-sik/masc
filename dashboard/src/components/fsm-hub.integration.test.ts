@@ -13,7 +13,7 @@
  * names or returns null where an array is expected, this file breaks
  * before production does.
  *
- * Background: masc-mcp #7315 (keeper wiring) + #7319 (KDP/KCL unstub)
+ * Background: masc #7315 (keeper wiring) + #7319 (KDP/KCL unstub)
  * + #7439 (valibot schema pilot). See API_CONTRACT.md.
  */
 
@@ -47,12 +47,12 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
   phase: 'running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
-  cascade: { state: 'idle' },
+  runtime: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
   invariants: {
     phase_turn_alignment: true,
-    no_cascade_before_measurement: true,
+    no_runtime_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
@@ -64,7 +64,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     turn_id: 353,
     ended_at: 1776234638.709722,
     decision_stage: 'tool_policy_selected',
-    cascade_state: 'done',
+    runtime_state: 'done',
     selected_model: 'provider-k-4.5',
   },
   recommended_actions: [],
@@ -74,7 +74,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     snapshot_to_json — the schema MUST accept this without transformation.
     FSM strings are lowercase snake_case because the observer serializes
     via `Keeper_state_machine.phase_to_string` (and the parallel
-    *_to_string for turn_phase / decision / cascade / compaction).  The
+    *_to_string for turn_phase / decision / runtime / compaction).  The
     capitalized `Stable` form lives in the TLA+ composite projection,
     not in the runtime JSON. */
 const REAL_COMPOSITE_PAYLOAD = {
@@ -84,12 +84,12 @@ const REAL_COMPOSITE_PAYLOAD = {
   phase: 'running',
   turn_phase: 'idle',
   decision: { stage: 'undecided' },
-  cascade: { state: 'idle' },
+  runtime: { state: 'idle' },
   compaction: { stage: 'accumulating' },
   measurement: { captured: false },
   invariants: {
     phase_turn_alignment: true,
-    no_cascade_before_measurement: true,
+    no_runtime_before_measurement: true,
     compaction_atomicity: true,
     event_priority_monotone: true,
     phase_derivation_agreement: true,
@@ -180,7 +180,7 @@ describe('FSM Hub integration — API response shape', () => {
       expect(REAL_COMPOSITE_SHAPE.phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.turn_phase).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.decision.stage).toBeDefined()
-      expect(REAL_COMPOSITE_SHAPE.cascade.state).toBeDefined()
+      expect(REAL_COMPOSITE_SHAPE.runtime.state).toBeDefined()
       expect(REAL_COMPOSITE_SHAPE.compaction.stage).toBeDefined()
     })
 
@@ -191,14 +191,14 @@ describe('FSM Hub integration — API response shape', () => {
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.turn_id).toBe('number')
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.ended_at).toBe('number')
         expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.decision_stage).toBe('string')
-        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.cascade_state).toBe('string')
+        expect(typeof REAL_COMPOSITE_SHAPE.last_outcome.runtime_state).toBe('string')
       }
     })
 
     it('all 4 invariants are boolean — InvariantsPanel renders 4/4 or partial', () => {
       const inv = REAL_COMPOSITE_SHAPE.invariants
       expect(typeof inv.phase_turn_alignment).toBe('boolean')
-      expect(typeof inv.no_cascade_before_measurement).toBe('boolean')
+      expect(typeof inv.no_runtime_before_measurement).toBe('boolean')
       expect(typeof inv.compaction_atomicity).toBe('boolean')
       expect(typeof inv.event_priority_monotone).toBe('boolean')
     })
@@ -210,7 +210,7 @@ describe('FSM Hub integration — API response shape', () => {
       phase: snap.phase,
       turn: snap.turn_phase,
       decision: snap.decision.stage,
-      cascade: snap.cascade.state,
+      runtime: snap.runtime.state,
       compaction: snap.compaction.stage,
       breaker: snap.circuit_breaker?.state ?? 'clean',
     })
@@ -230,7 +230,7 @@ describe('FSM Hub integration — API response shape', () => {
         ts: 110,
         turn: 'executing' satisfies KeeperCompositeSnapshot['turn_phase'],
         decision: 'guard_ok' satisfies KeeperCompositeSnapshot['decision']['stage'],
-        cascade: 'trying' satisfies KeeperCompositeSnapshot['cascade']['state'],
+        runtime: 'trying' satisfies KeeperCompositeSnapshot['runtime']['state'],
       }
       const segments = deriveSwimlaneSegments([obsIdle, obsLive], 'decision', 200)
       expect(segments).toHaveLength(2)

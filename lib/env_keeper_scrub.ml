@@ -1,94 +1,113 @@
-(* Exact keys copied from agent_llm_a-code's GHA_SUBPROCESS_SCRUB list at
-   src/utils/subprocessEnv.ts:15-53.
+(** Keeper subprocess env scrub / pass policy (RFC-0007 PR-1 / #9639 Cluster B).
 
-   Each group is documented in the reference. Rationale preserved so a
-   future reader can justify additions or removals. *)
+    Default-deny (allowlist) model: only explicitly permitted env vars cross
+    the keeper subprocess boundary. This eliminates the infinite-product-type
+    problem of maintaining an exhaustive denylist — new secrets are blocked by
+    default, and operators can extend the allowlist via
+    [MASC_KEEPER_ALLOW_EXTRA].
 
-let scrub : string list =
+    Keeper GitHub execution must use the selected MASC credential bundle,
+    never the operator's ambient GitHub token/config or SSH agent. *)
+
+(** Exact-match allowlist — env vars that are known-safe and required for
+    keeper / docker CLI / tool execution. *)
+let allow_exact : string list =
   [
-    (* Provider_a auth — MASC re-reads these per-request, subprocesses don't
-       need them and leaking them into a sandboxed container creates an
-       escape surface. *)
-    "ANTHROPIC_API_KEY";
-    "CLAUDE_CODE_OAUTH_TOKEN";
-    "ANTHROPIC_AUTH_TOKEN";
-    "ANTHROPIC_FOUNDRY_API_KEY";
-    "ANTHROPIC_CUSTOM_HEADERS";
+    (* Process basics *)
+    "PATH"; "HOME"; "TMPDIR"; "TMP"; "TEMP"
+  ; "LANG"; "LC_ALL"; "LC_CTYPE"
+  ; "USER"; "LOGNAME"; "SHELL"
+  ; "TERM"; "TERMINFO"; "PAGER"; "EDITOR"; "VISUAL"
+  ; "XDG_CONFIG_HOME"; "XDG_CACHE_HOME"; "XDG_DATA_HOME"
+  ; "OCAMLRUNPARAM"
+  ; "OPAMROOT"; "OPAM_SWITCH_PREFIX"
 
-    (* OTLP exporter headers — documented to carry Authorization: Bearer
-       tokens for monitoring backends; read in-process by the OTEL SDK. *)
-    "OTEL_EXPORTER_OTLP_HEADERS";
-    "OTEL_EXPORTER_OTLP_LOGS_HEADERS";
-    "OTEL_EXPORTER_OTLP_METRICS_HEADERS";
-    "OTEL_EXPORTER_OTLP_TRACES_HEADERS";
+    (* Docker CLI remote daemon connectivity *)
+  ; "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
 
-    (* Cloud provider creds — same pattern (lazy SDK reads). *)
-    "AWS_SECRET_ACCESS_KEY";
-    "AWS_SESSION_TOKEN";
-    "AWS_BEARER_TOKEN_BEDROCK";
-    "GOOGLE_APPLICATION_CREDENTIALS";
-    "AZURE_CLIENT_SECRET";
-    "AZURE_CLIENT_CERTIFICATE_PATH";
+    (* Corporate proxy / certificate — required in restricted network
+       environments. Values are not credentials by themselves. *)
+  ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"
+  ; "SSL_CERT_FILE"
 
-    (* GitHub Actions OIDC — consumed by the action's JS before the keeper
-       spawns; leaking these allows minting an App installation token. *)
-    "ACTIONS_ID_TOKEN_REQUEST_TOKEN";
-    "ACTIONS_ID_TOKEN_REQUEST_URL";
+    (* GitHub token for gh CLI / API access — explicitly projected by
+       operator into keeper secret dir, not ambient host token. *)
+  ; "GITHUB_TOKEN"; "GH_TOKEN"
 
-    (* GitHub Actions artifact/cache API — cache poisoning pivot. *)
-    "ACTIONS_RUNTIME_TOKEN";
-    "ACTIONS_RUNTIME_URL";
+    (* Git user identity — not credentials by themselves. *)
+  ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
+  ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"
 
-    (* Workflow-level duplicates — ALL_INPUTS contains api keys as JSON. *)
-    "ALL_INPUTS";
-    "OVERRIDE_GITHUB_TOKEN";
-    "DEFAULT_WORKFLOW_TOKEN";
-    "SSH_SIGNING_KEY";
-
-    (* Keeper GitHub work must use the MASC-owned identity bundle
-       selected by Repo_cli_credentials. Ambient host credentials would turn
-       keeper/root identity labels into a cosmetic boundary. *)
-    "GH_TOKEN";
-    "GITHUB_TOKEN";
-    "GH_CONFIG_DIR";
-    "SSH_AUTH_SOCK";
-    "GIT_CONFIG_GLOBAL";
-    "GIT_CONFIG_SYSTEM";
-    "GIT_CONFIG_COUNT";
-
-    (* Stress test 2026-05-26 — same-category extensions to the reference
-       list. The reference (agent_llm_a-code) inherits from gh CLI usage,
-       but these were missed: *)
-    (* gh Enterprise token: same role as GH_TOKEN, different env name. *)
-    "GH_ENTERPRISE_TOKEN";
-    (* gh endpoint host override — operator setting GH_HOST=evil.com
-       would redirect keeper API calls without changing token. *)
-    "GH_HOST";
-    (* git credential helper / SSH command override — these let a host
-       env subvert keeper identity by injecting an arbitrary askpass or
-       ssh binary. Same category as GIT_CONFIG_GLOBAL above. *)
-    "GIT_ASKPASS";
-    "GIT_SSH";
-    "GIT_SSH_COMMAND";
+    (* MASC operational — these are read by Env_config_core and friends.
+       Secrets that happen to share the [MASC_] prefix are blocked by
+       [deny_prefixes] below. *)
+  ; "MASC_BASE_PATH"; "MASC_BASE_PATH_INPUT"
+  ; "MASC_BASE_PATH_RESOLUTION_SOURCE"
+  ; "MASC_CONFIG_DIR"; "MASC_STORAGE_TYPE"; "MASC_MODEL_CATALOG"
+  ; "MASC_HOST"; "MASC_HTTP_PORT"; "MASC_HTTP_BASE_URL"; "MASC_URL"
+  ; "MASC_ORCHESTRATOR_ENABLED"; "MASC_DISABLE_HITL"
+  ; "MASC_LOG_LEVEL"; "MASC_LOG_ROUTINE_LEVEL"
+  ; "MASC_TELEMETRY_ENABLED"; "MASC_PARSE_WARN"; "MASC_GOVERNANCE_LEVEL"
+  ; "MASC_GIT_FETCH_TIMEOUT_SEC"
+  ; "MASC_DATA_DIR"; "MASC_PERSONAS_DIR"
+  ; "MASC_SECRET_DIR"
+  ; "MASC_KEEPER_SCRUB_EXTRA"
+  ; "MASC_TEST_FAKE_DOCKER_PATH"
   ]
 
-let pass : string list =
-  [
-    (* Git user identity is not a credential by itself. Git config
-       location/count env is intentionally scrubbed above because it can
-       inject credential helpers or host-global settings. *)
-    "GIT_AUTHOR_NAME";
-    "GIT_AUTHOR_EMAIL";
-    "GIT_COMMITTER_NAME";
-    "GIT_COMMITTER_EMAIL";
+(** Prefix allowlist — env families that are safe to pass through.
+    [MASC_KEEPER_] covers runtime knobs (timeouts, thresholds, flags).
+    [LC_] covers locale. *)
+let allow_prefixes : string list =
+  [ "LC_"
+  ; "MASC_KEEPER_"
+  ; "MASC_LOG_"
+  ; "MASC_TELEMETRY_"
+  ; "MASC_GIT_"
+  ; "MASC_ORCHESTRATOR_"
+  ; "MASC_WS_"
+  ; "MASC_WEBRTC_"
   ]
 
-let scrub_table =
-  let t = Hashtbl.create (List.length scrub) in
-  List.iter (fun k -> Hashtbl.replace t k ()) scrub;
+(** Prefix denials — even under the [MASC_] family, these carry host-server
+    tokens and must never reach a keeper subprocess or container. *)
+let deny_prefixes : string list =
+  [ "MASC_ADMIN_"; "MASC_INTERNAL_" ]
+
+(** Suffix denials — any key ending with these is treated as a credential
+    regardless of prefix. *)
+let deny_suffixes : string list =
+  [ "_API_KEY"; "_TOKEN"; "_SECRET"; "_PASSWORD"; "_CREDENTIALS" ]
+
+let extra_allow_keys () =
+  match Sys.getenv_opt "MASC_KEEPER_ALLOW_EXTRA" with
+  | None -> []
+  | Some raw ->
+    String.split_on_char ',' raw
+    |> List.map String.trim
+    |> List.filter (fun s -> s <> "")
+
+let allow_exact_table =
+  let t = Hashtbl.create (List.length allow_exact) in
+  List.iter (fun k -> Hashtbl.replace t k ()) allow_exact;
   t
 
-let is_scrubbed key = Hashtbl.mem scrub_table key
+let is_allowed_exact key = Hashtbl.mem allow_exact_table key
+
+let is_allowed_prefix key =
+  List.exists (fun prefix -> String.starts_with ~prefix key) allow_prefixes
+
+let is_denied_prefix key =
+  List.exists (fun prefix -> String.starts_with ~prefix key) deny_prefixes
+
+let is_denied_suffix key =
+  List.exists (fun suffix -> String.ends_with ~suffix key) deny_suffixes
+
+let is_allowed key =
+  (is_allowed_exact key
+   || is_allowed_prefix key
+   || List.mem key (extra_allow_keys ()))
+  && not (is_denied_prefix key || is_denied_suffix key)
 
 let key_of_entry entry =
   match String.index_opt entry '=' with
@@ -97,5 +116,5 @@ let key_of_entry entry =
 
 let filter_environment existing =
   Array.to_list existing
-  |> List.filter (fun e -> not (is_scrubbed (key_of_entry e)))
+  |> List.filter (fun e -> is_allowed (key_of_entry e))
   |> Array.of_list

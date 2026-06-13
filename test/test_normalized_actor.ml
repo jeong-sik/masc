@@ -1,5 +1,5 @@
 open Alcotest
-module Opc = Masc_mcp.Operator_pending_confirm
+module Opc = Operator_pending_confirm
 
 let na = Opc.normalized_actor
 

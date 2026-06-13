@@ -1,6 +1,6 @@
 (** Unit tests for Attempt_state — the shared retry/attempt record from #8930. *)
 
-open Masc_mcp.Attempt_state
+open Masc.Attempt_state
 
 let test_make_next_resets_on_new_generation () =
   let previous =

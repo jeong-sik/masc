@@ -19,7 +19,7 @@ open Dashboard_http_helpers
 
 let normalize_model_name s =
   let s = String.trim s in
-  Cascade_runtime_candidate.normalize_runtime_name_for_bucket s
+  Runtime_provider_binding.normalize_runtime_name_for_bucket s
 
 type keeper_gen_window_stats = {
   mutable turns: int;
@@ -64,57 +64,13 @@ let count_table_incr (tbl : (string, int) Hashtbl.t) (key : string) : unit =
     let cur = Option.value ~default:0 (Hashtbl.find_opt tbl key) in
     Hashtbl.replace tbl key (cur + 1)
 
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
-
 let truncate_text ~(max_len : int) (s : string) : string =
   let s = String.trim s in
-  let n = String.length s in
-  if n <= max_len then s
-  else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
+  match String_util.utf8_safe ~max_bytes:max_len ~suffix:"..." s with
+  | String_util.Untouched _ -> s
+  | String_util.Truncated { prefix; suffix; _ } -> prefix ^ suffix
 
-(* ASCII case-insensitive substring containment, byte-wise.
-
-   Empty needle returns [false] here (differs from the
-   [contains_casefold] convention elsewhere — preserved). *)
-let contains_ci (haystack : string) (needle : string) : bool =
-  let nlen = String.length needle in
-  let hlen = String.length haystack in
-  if nlen = 0 then false
-  else if nlen > hlen then false
-  else
-    let rec match_at i j =
-      if j = nlen then true
-      else if Char.lowercase_ascii (String.unsafe_get haystack (i + j))
-            <> Char.lowercase_ascii (String.unsafe_get needle j)
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hlen - nlen in
-    let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
+let contains_ci = String_util.contains_substring_ci
 
 (* Static replacement patterns hoisted to module load.
    [proactive_preview_similarity_stats] funnels into
@@ -160,18 +116,6 @@ let jaccard_similarity_text (a : string) (b : string) : float =
     let union = na + nb - inter in
     if union <= 0 then 0.0 else float_of_int inter /. float_of_int union
 
-let take_last (n : int) (xs : 'a list) : 'a list =
-  let n = max 0 n in
-  let len = List.length xs in
-  let drop = max 0 (len - n) in
-  let rec drop_n k ys =
-    if k <= 0 then ys
-    else
-      match ys with
-      | [] -> []
-      | _ :: tl -> drop_n (k - 1) tl
-  in
-  drop_n drop xs
 
 let proactive_preview_similarity_stats
     ?(window = 8)
@@ -181,7 +125,7 @@ let proactive_preview_similarity_stats
     previews
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
-    |> take_last window
+    |> List_util.take_last window
   in
   let sample_count = List.length previews in
   let rec pairwise acc = function
@@ -219,7 +163,7 @@ let create_keeper_24h_bucket_stats () : keeper_24h_bucket_stats =
   }
 
 let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
-  let open Yojson.Safe.Util in
+  let m key = Option.value ~default:`Null (Json_util.assoc_member_opt key j) in
   let has_int = function
     | `Int _ -> true
     | _ -> false
@@ -228,10 +172,10 @@ let metrics_row_has_context_snapshot (j : Yojson.Safe.t) : bool =
     | `Float _ | `Int _ -> true
     | _ -> false
   in
-  has_ratio (member "context_ratio" j)
-  && has_int (member "context_tokens" j)
-  && has_int (member "context_max" j)
-  && has_int (member "message_count" j)
+  has_ratio (m "context_ratio")
+  && has_int (m "context_tokens")
+  && has_int (m "context_max")
+  && has_int (m "message_count")
 
 let keeper_metrics_24h_json
     ~(metrics_lines : string list)
@@ -270,7 +214,7 @@ let keeper_metrics_24h_json
           if channel = "scheduled_autonomous" || channel = "proactive" then begin
             incr proactive_points;
             b.proactive_points <- b.proactive_points + 1;
-            let proactive_obj = Yojson.Safe.Util.member "proactive" j in
+            let proactive_obj = Option.value ~default:`Null (Json_util.assoc_member_opt "proactive" j) in
             let fallback_applied =
               Safe_ops.json_bool ~default:false "fallback_applied" proactive_obj
             in
@@ -428,7 +372,7 @@ let keeper_history_summary_json
     |> List.sort (fun (ka, va) (kb, vb) ->
          let c = compare vb va in
          if c <> 0 then c else String.compare ka kb)
-    |> Keeper_types.take 5
+    |> Keeper_types_profile.take 5
     |> List.map (fun (k, v) ->
          `Assoc [("keeper", `String k); ("count", `Int v)])
     |> fun xs -> `List xs
@@ -445,7 +389,7 @@ let top_counts_json
   |> List.sort (fun (ka, va) (kb, vb) ->
        let c = compare vb va in
        if c <> 0 then c else String.compare ka kb)
-  |> Keeper_types.take limit
+  |> Keeper_types_profile.take limit
   |> List.map (fun (k, v) ->
        `Assoc [ (name_key, `String k); ("count", `Int v) ])
 

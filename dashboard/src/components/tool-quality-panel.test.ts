@@ -42,9 +42,9 @@ const payloadWithMissingToolMetrics = {
   ],
 }
 
-const payloadWithCascadeBuckets = {
+const payloadWithRuntimeBuckets = {
   ...payload,
-  by_cascade: [
+  by_runtime: [
     {
       name: 'local_qwen3_27b_only',
       calls: 7,
@@ -184,8 +184,8 @@ describe('ToolQualityPanel', () => {
     expect(container.textContent).not.toContain('오류:')
   })
 
-  it('renders cascade buckets separately from the redacted runtime model lane', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithCascadeBuckets))
+  it('renders runtime buckets separately from the redacted runtime model lane', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithRuntimeBuckets))
     vi.stubGlobal('fetch', fetchMock)
     const { ToolQualityPanel } = await import('./tool-quality-panel')
 
@@ -195,7 +195,7 @@ describe('ToolQualityPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('캐스케이드별')
+    expect(container.textContent).toContain('런타임별')
     expect(container.textContent).toContain('local_qwen3_27b_only')
   })
 

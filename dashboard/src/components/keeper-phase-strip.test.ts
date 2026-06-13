@@ -1,47 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { toPascalPhase, eventLabel } from './keeper-phase-strip'
+import { eventLabel } from './keeper-phase-strip'
 
-// ================================================================
-// toPascalPhase
-// ================================================================
-
-describe('toPascalPhase', () => {
-  it('converts simple lowercase to PascalCase', () => {
-    expect(toPascalPhase('running')).toBe('Running')
-  })
-
-  it('converts snake_case to PascalCase', () => {
-    expect(toPascalPhase('handing_off')).toBe('HandingOff')
-  })
-
-  it('converts multi-segment snake_case', () => {
-    expect(toPascalPhase('a_b_c')).toBe('ABC')
-  })
-
-  it('handles already PascalCase input', () => {
-    expect(toPascalPhase('Running')).toBe('Running')
-  })
-
-  it('handles empty string', () => {
-    expect(toPascalPhase('')).toBe('')
-  })
-
-  it('handles mixed case', () => {
-    expect(toPascalPhase('HANDING_OFF')).toBe('HandingOff')
-  })
-
-  it('handles single underscore', () => {
-    expect(toPascalPhase('off_line')).toBe('OffLine')
-  })
-
-  it('handles no underscore', () => {
-    expect(toPascalPhase('dead')).toBe('Dead')
-  })
-
-  it('handles overflowing', () => {
-    expect(toPascalPhase('overflowed')).toBe('Overflowed')
-  })
-})
+// `toPascalPhase` was sunset 2026-05-28 — the same lowercase→PascalCase
+// normalization is now handled by `toKeeperPhase` (keeper-store-normalize),
+// which `getPhaseStyle` calls internally. Coverage for that path lives in
+// keeper-store-normalize.test.ts (closed-set parsing with compile-time
+// coverage check). The strip no longer ships a generic regex normalizer.
 
 // ================================================================
 // eventLabel
@@ -53,7 +17,7 @@ describe('eventLabel', () => {
   })
 
   it('extracts type from object', () => {
-    expect(eventLabel({ type: 'cascade_select' })).toBe('cascade_select')
+    expect(eventLabel({ type: 'runtime_select' })).toBe('runtime_select')
   })
 
   it('extracts type as string from number', () => {

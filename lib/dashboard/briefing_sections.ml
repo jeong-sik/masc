@@ -1,4 +1,4 @@
-(** Section builders for mission briefing (communication, alignment, watch). *)
+(** Section builders for briefing (communication, alignment, watch). *)
 
 open Briefing_json_helpers
 open Briefing_gaps
@@ -13,19 +13,19 @@ let section_label = function
   | Alignment -> "Alignment"
   | Watch -> "Watch Next"
 
-let has_operational_signal ~section ~room_health ~incident_count ~recommended_action_count =
-  let room_risky =
-    Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
+let has_operational_signal ~section ~workspace_health ~incident_count ~recommended_action_count =
+  let workspace_risky =
+    Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string workspace_health)
   in
   match section with
-  | Watch -> room_risky || incident_count > 0 || recommended_action_count > 0
-  | Communication | Alignment -> room_risky || incident_count > 0
+  | Watch -> workspace_risky || incident_count > 0 || recommended_action_count > 0
+  | Communication | Alignment -> workspace_risky || incident_count > 0
 
 let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
-    ~room_health ~incident_count ~recommended_action_count =
+    ~workspace_health ~incident_count ~recommended_action_count =
   let gap_count = count_metadata_gaps_for_section ~section metadata_gaps in
   let operational =
-    has_operational_signal ~section ~room_health ~incident_count
+    has_operational_signal ~section ~workspace_health ~incident_count
       ~recommended_action_count
   in
   let signal_class, evidence_quality =
@@ -55,7 +55,8 @@ let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
       ("authoritative", `Bool false);
     ]
 
-let int_field_direct ?(default = 0) key json = int_field ~default key json
+let int_field_direct ?(default = 0) key json =
+  Option.value ~default (Json_util.assoc_int_opt key json)
 
 let sum_int_field key items =
   List.fold_left (fun acc json -> acc + int_field_direct key json) 0 items
@@ -74,18 +75,17 @@ let evidence_add_if cond text items =
   if cond && text <> "" then text :: items else items
 
 let build_communication_section ~sessions ~recent_messages ~metadata_gaps
-    ~room_health ~incident_count ~recommended_action_count =
+    ~workspace_health ~incident_count ~recommended_action_count =
   let live_session_count = List.length sessions in
   let recent_message_count = List.length recent_messages in
   let broadcast_total = sum_int_field "broadcast_count" sessions in
-  let portal_total = sum_int_field "portal_count" sessions in
   let known_mode_count =
     count_matching_field "communication_mode" sessions ~predicate:(fun value ->
-        value <> "" && value <> "unknown")
+        not (is_missing_or_unknown value))
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Communication metadata_gaps in
   let positive_signal =
-    recent_message_count > 0 || broadcast_total > 0 || portal_total > 0
+    recent_message_count > 0 || broadcast_total > 0
   in
   let positive_evidence =
     []
@@ -93,8 +93,6 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
          (Printf.sprintf "Recent namespace messages recorded: %d" recent_message_count)
     |> evidence_add_if (broadcast_total > 0)
          (Printf.sprintf "Session broadcasts recorded: %d" broadcast_total)
-    |> evidence_add_if (portal_total > 0)
-         (Printf.sprintf "Portal messages recorded: %d" portal_total)
   in
   let inactivity_evidence =
     []
@@ -121,7 +119,7 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
     ("unclear", "Communication metadata is incomplete and no positive activity signal is recorded.", evidence)
   else if known_mode_count = 0 then
     ("unclear", "Communication mode is not recorded for the live sessions.", evidence)
-  else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string room_health)
+  else if Dashboard_utils.is_health_at_risk (Dashboard_utils.health_level_of_string workspace_health)
           || incident_count > 0 || recommended_action_count > 0
   then
     ("watch", "Live sessions exist without recorded communication activity while the namespace still has open operator attention.", evidence)
@@ -147,7 +145,8 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
   let bound_goal_count =
     List.fold_left
       (fun acc json ->
-        if String.equal (string_field "goal" json) "unassigned" then acc else acc + 1)
+        if String_util.trim_to_option (string_field "goal" json) = None then acc
+        else acc + 1)
       0 sessions
   in
   let metadata_evidence = evidence_of_metadata_gaps ~section:Alignment metadata_gaps in
@@ -175,15 +174,15 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
   else
     ("watch", "Some active agents are present without a bound focus.", evidence)
 
-let build_watch_section ~room_health ~incident_count ~recommended_action_count
+let build_watch_section ~workspace_health ~incident_count ~recommended_action_count
     ~top_attention_summary =
-  let room_health_level = Dashboard_utils.health_level_of_string room_health in
-  let risky_room =
-    Dashboard_utils.is_health_at_risk room_health_level
+  let workspace_health_level = Dashboard_utils.health_level_of_string workspace_health in
+  let risky_workspace =
+    Dashboard_utils.is_health_at_risk workspace_health_level
   in
   let evidence =
     []
-    |> evidence_add_if risky_room (Printf.sprintf "Namespace health is %s" room_health)
+    |> evidence_add_if risky_workspace (Printf.sprintf "Namespace health is %s" workspace_health)
     |> evidence_add_if (incident_count > 0)
          (Printf.sprintf "Incident count is %d" incident_count)
     |> evidence_add_if (recommended_action_count > 0)
@@ -193,11 +192,11 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
          top_attention_summary
     |> take 2
   in
-  if risky_room then
+  if risky_workspace then
     ( "risk",
       Printf.sprintf
         "Namespace health is %s with %d incidents and %d recommended actions."
-        room_health incident_count recommended_action_count,
+        workspace_health incident_count recommended_action_count,
       evidence )
   else if incident_count > 0 || recommended_action_count > 0 then
     ( "watch",
@@ -208,36 +207,36 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
   else
     ("ok", "No immediate operator action is flagged by the namespace summary.", evidence)
 
-let build_briefing_sections ~mission_summary_json ~sessions ~agents ~recent_messages
+let build_briefing_sections ~briefing_summary_json ~sessions ~agents ~recent_messages
     ~metadata_gaps =
-  let room_health = mission_summary_json |> string_field "room_health" in
-  let incident_count = mission_summary_json |> int_field "incident_count" in
+  let workspace_health = briefing_summary_json |> string_field "workspace_health" in
+  let incident_count = Option.value ~default:0 (Json_util.assoc_int_opt "incident_count" briefing_summary_json) in
   let recommended_action_count =
-    mission_summary_json |> int_field "recommended_action_count"
+    Option.value ~default:0 (Json_util.assoc_int_opt "recommended_action_count" briefing_summary_json)
   in
   let top_attention_summary =
-    mission_summary_json |> string_field "top_attention_summary"
+    briefing_summary_json |> string_field "top_attention_summary"
   in
   let communication_status, communication_summary, communication_evidence =
     build_communication_section ~sessions ~recent_messages ~metadata_gaps
-      ~room_health ~incident_count ~recommended_action_count
+      ~workspace_health ~incident_count ~recommended_action_count
   in
   let alignment_status, alignment_summary, alignment_evidence =
     build_alignment_section ~sessions ~agents ~metadata_gaps
   in
   let watch_status, watch_summary, watch_evidence =
-    build_watch_section ~room_health ~incident_count ~recommended_action_count
+    build_watch_section ~workspace_health ~incident_count ~recommended_action_count
       ~top_attention_summary
   in
   ( watch_summary,
     [
       annotate_section ~section:Communication ~status:communication_status
         ~summary:communication_summary ~evidence:communication_evidence
-        ~metadata_gaps ~room_health ~incident_count ~recommended_action_count;
+        ~metadata_gaps ~workspace_health ~incident_count ~recommended_action_count;
       annotate_section ~section:Alignment ~status:alignment_status
         ~summary:alignment_summary ~evidence:alignment_evidence ~metadata_gaps
-        ~room_health ~incident_count ~recommended_action_count;
+        ~workspace_health ~incident_count ~recommended_action_count;
       annotate_section ~section:Watch ~status:watch_status
         ~summary:watch_summary ~evidence:watch_evidence ~metadata_gaps
-        ~room_health ~incident_count ~recommended_action_count;
+        ~workspace_health ~incident_count ~recommended_action_count;
     ] )

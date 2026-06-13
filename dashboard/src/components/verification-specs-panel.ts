@@ -6,7 +6,7 @@
 // Surfaces formal verification coverage on the dashboard: which specs exist,
 // which have clean + buggy configs (bug-model pattern), and when they were
 // last modified.  Mirrors the managed-async-resource pattern used by
-// cascade-config-panel.ts.
+// runtime-config-panel.ts.
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'

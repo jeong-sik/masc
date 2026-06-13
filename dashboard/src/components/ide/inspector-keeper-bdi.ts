@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { useSignalValue } from './use-signal-value'
 import { activeKeeperName } from '../../keeper-state'
 import { get } from '../../api/core'
 import { bridgeBdiSnapshotsToTrace } from './bdi-snapshot-trace-bridge'
@@ -259,16 +260,8 @@ export function InspectorKeeperBDI({
   const keeperName = (pin?.keeperName ?? activeKeeper).trim()
   const [snapshot, setSnapshot] = useState<KeeperBdiSnapshot | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [, forceRender] = useState(0)
-
-  useEffect(() => {
-    const unsub = globalPresenceSnapshot.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
-  useEffect(() => {
-    const unsub = cursorOverlaySignal.subscribe(() => forceRender((t: number) => t + 1))
-    return () => unsub()
-  }, [])
+  useSignalValue(globalPresenceSnapshot)
+  useSignalValue(cursorOverlaySignal)
 
   useEffect(() => {
     if (!keeperName) {

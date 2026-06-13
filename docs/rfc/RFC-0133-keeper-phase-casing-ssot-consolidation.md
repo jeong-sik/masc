@@ -26,7 +26,7 @@ The keeper `phase` value travels through **two parallel pipelines** with differe
 
 | Surface | Field | Format on the wire | Format consumed |
 |---|---|---|---|
-| Backend `Keeper_state_machine.phase_to_string` (lib/keeper/keeper_state_machine.ml:21-35) | KSM phase | `lowercase` + `snake_case` (`running`, `handing_off`) | — |
+| Backend `Keeper_state_machine.phase_to_string` (lib/keeper_state/keeper_state_machine.ml:21-35) | KSM phase | `lowercase` + `snake_case` (`running`, `handing_off`) | — |
 | `KeeperCompositeSnapshotSchema.phase` (dashboard/src/api/schemas/keeper-composite.ts:41,204) | composite endpoint | raw `string()`, no normalization at parse | `snapshot.phase` lowercase as-emitted |
 | `Keeper.phase` (dashboard/src/types/core.ts:854-867) | flat keeper feed | TypeScript type declares `PascalCase` | `keeper.phase` PascalCase **after** `toKeeperPhase()` normalization |
 | `toKeeperPhase()` (dashboard/src/keeper-store-normalize.ts:35-70) | normalizer #1 | lowercase → PascalCase | applied to flat field only |
@@ -95,7 +95,7 @@ const KeeperCompositePhaseSchema = pipe(
 )
 ```
 
-Schema returns either a canonical `KeeperPhase` literal or a typed `{unknown: string}` carrier. Consumers `match` exhaustively; unknown variants surface explicitly in the UI rather than coercing to a sentinel.
+Schema returns either a canonical `KeeperPhase` literal or a typed `{unknown: string}` carrier. Consumers `match` exhaustively; unknown variants surface explicitly in the UI rather than coercing to a marker.
 
 ### 4.3 Display point
 
@@ -168,7 +168,7 @@ Each phase is a single atomic PR. No transitional shims between phases.
 ## 9. Evidence Record
 
 - Evidence:
-  - `lib/keeper/keeper_state_machine.ml:21-35` `phase_to_string` — backend lowercase 13-state emit.
+  - `lib/keeper_state/keeper_state_machine.ml:21-35` `phase_to_string` — backend lowercase 13-state emit.
   - `lib/keeper/keeper_composite_observer.ml:628` — composite passes the same value.
   - `dashboard/src/components/keeper-phase-strip.ts:15` — explicit "Server sends lowercase" witness comment.
   - `dashboard/src/keeper-store-normalize.ts:35-70` — normalizer #1.

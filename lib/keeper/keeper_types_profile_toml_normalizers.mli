@@ -1,8 +1,4 @@
-val default_cascade_name : unit -> string
-val phase_recovery_cascade_name : string
-val phase_buffer_cascade_name : string
-val phase_routing_cascade_names : string list
-val tool_required_cascade_name : string
+val default_runtime_id : unit -> string
 val min_keeper_context_tokens : int
 val max_keeper_context_tokens : int
 val alert_error_detail_max_chars : int
@@ -15,10 +11,8 @@ val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
 val approval_queue_stale_max_wait_sec : float
-val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int
-val legacy_provider_filter_name : string
 val prompt_render_max_bytes : int
 val bool_default_true_of_env : string -> bool
 val bool_of_env_default : string -> default:bool -> bool
@@ -32,13 +26,11 @@ val clamp_int : int -> min_v:int -> max_v:int -> int
 val validate_name : string -> bool
 val removed_keeper_input_key_names : string list
 val removed_keeper_msg_input_key_names : string list
-val removed_keeper_meta_key_names : string list
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 val reject_removed_keeper_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
-val utf8_safe_prefix_bytes : string -> max_bytes:int -> string
 val utf8_repair_string : string -> string
 val normalize_self_model_text : max_bytes:int -> string -> string
 val normalize_goal_horizon_text : ?max_len:int -> string -> string
@@ -72,8 +64,6 @@ val normalize_compaction_message_gate : int -> int
 val normalize_compaction_token_gate : int -> int
 val normalize_continuity_compaction_cooldown_sec : int -> int
 val default_keep_recent_tool_results : int
-val default_tool_heavy_msg_threshold : int
-val default_tool_heavy_ratio_floor : float
 val keep_recent_tool_results_max : int
 val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
 val normalize_proactive_idle_sec : int -> int
@@ -92,14 +82,8 @@ val keeper_proactive_min_interval_sec : unit -> int
 val keeper_proactive_task_cooldown_divisor : unit -> int
 val keeper_proactive_task_min_cooldown_sec : unit -> int
 val keeper_batch_limit : unit -> int
-val keeper_board_debounce_window_sec : unit -> float
-val keeper_tool_cost_max_usd : unit -> float option
-val keeper_max_tools_per_turn : unit -> int
-val keeper_retry_max_tools_per_turn : unit -> int
-val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_cascade : unit -> string
-val keeper_rule_reflect_repetition_threshold : unit -> float
+val keeper_llm_rerank_runtime : unit -> string
 val keeper_rule_plan_goal_alignment_threshold : unit -> float
 val keeper_rule_plan_response_alignment_threshold : unit -> float
 val keeper_rule_guardrail_repetition_threshold : unit -> float
@@ -110,12 +94,8 @@ val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
 val keeper_tool_search_top_k : unit -> int
 val keeper_status_fast_default : unit -> bool
-val keeper_slot_pool_size : unit -> int
-val keeper_slot_id : string -> int option
 val keeper_enable_thinking : unit -> bool
 val keeper_adaptive_thinking_enabled : unit -> bool
-val keeper_adaptive_thinking_mode : unit -> bool
-val keeper_room_signal_prompt_enabled_override : unit -> bool option
 val ensure_runtime_params_init : unit -> unit
 type sandbox_profile =
   Keeper_types_profile_sandbox.sandbox_profile =
@@ -137,7 +117,6 @@ val is_terminal : network_mode -> bool
 val is_active : network_mode -> bool
 val is_idle : network_mode -> bool
 val sandbox_profile_to_string : sandbox_profile -> string
-val reserved_cascade_names : string list
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list
 val valid_sandbox_profile_strings : string list
@@ -170,18 +149,13 @@ type keeper_profile_defaults =
   proactive_enabled : bool option;
   proactive_idle_sec : int option;
   proactive_cooldown_sec : int option;
-  room_signal_prompt_enabled : bool option;
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile :
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  repo_cli_identity : string option;
-  git_identity_mode : string option;
-  tool_preset : string option;
-  tool_preset_source : string option;
-  tool_also_allow : string list option;
+  tool_access : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
   telemetry_feedback_enabled : bool option;
@@ -190,8 +164,6 @@ type keeper_profile_defaults =
   per_provider_timeout : float option;
   always_approve : bool option;
   social_model : string option;
-  cascade_name : string option;
-  models : string list option;
   max_turns_per_call : int option;
   max_turns_per_call_scheduled_autonomous : int option;
   oas_env : (string * string) list;
@@ -213,13 +185,9 @@ val keeper_oas_context_of_defaults :
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_name_list_opt : string list -> string list option
-val normalize_cascade_name_opt : string option -> string option
-val normalize_git_identity_mode_opt : string option -> string option
 val normalize_social_model_opt : string option -> string option
 val valid_social_model_strings : string list
 val lower_string_list_opt : string list -> string list option
-val valid_tool_preset_raw_strings : string list
-val normalize_tool_preset_raw : string -> string option
 val first_some : 'a option -> 'a option -> 'a option
 val normalize_per_provider_timeout_opt :
   source:string -> float option -> float option

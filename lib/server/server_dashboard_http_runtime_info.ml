@@ -22,12 +22,31 @@ let dashboard_runtime_probe_runner_hook : (unit -> Yojson.Safe.t) option Atomic.
   Atomic.make None
 ;;
 
+let dashboard_runtime_provider_http_get_hook :
+  (url:string ->
+   headers:(string * string) list ->
+   timeout_sec:float ->
+   (int * (string * string) list * string, string) result)
+    option
+    Atomic.t
+  =
+  Atomic.make None
+;;
+
 let set_dashboard_runtime_probe_runner_for_tests hook =
   Atomic.set dashboard_runtime_probe_runner_hook (Some hook)
 ;;
 
 let clear_dashboard_runtime_probe_runner_for_tests () =
   Atomic.set dashboard_runtime_probe_runner_hook None
+;;
+
+let set_dashboard_runtime_provider_http_get_for_tests hook =
+  Atomic.set dashboard_runtime_provider_http_get_hook (Some hook)
+;;
+
+let clear_dashboard_runtime_provider_http_get_for_tests () =
+  Atomic.set dashboard_runtime_provider_http_get_hook None
 ;;
 
 let clear_dashboard_runtime_probe_cache_for_tests () =
@@ -106,6 +125,57 @@ let git_rev_parse_short_cancel_refresh dir =
     (fun () -> Hashtbl.remove git_rev_parse_short_in_flight dir)
 ;;
 
+let eio_switch_fork_unavailable = function
+  | Invalid_argument msg ->
+    String_util.contains_substring msg "Switch accessed from wrong domain"
+    || String_util.contains_substring msg "Switch finished"
+  | _ -> false
+;;
+
+(* Dashboard shell projections may run on Domain_pool worker domains.  Those
+   domains can read the stale cache, but they must not fork fibers on the
+   server root switch owned by the main Eio domain. *)
+let background_refresh_unavailable_domains : (int, unit) Hashtbl.t = Hashtbl.create 4
+let background_refresh_unavailable_domains_mu = Stdlib.Mutex.create ()
+
+let current_domain_id () = (Domain.self () :> int)
+
+let background_refresh_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.mem background_refresh_unavailable_domains (current_domain_id ()))
+;;
+
+let background_refresh_mark_domain_unavailable () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.replace background_refresh_unavailable_domains (current_domain_id ()) ())
+;;
+
+let background_refresh_clear_unavailable_domains_for_tests () =
+  Stdlib.Mutex.lock background_refresh_unavailable_domains_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock background_refresh_unavailable_domains_mu)
+    (fun () -> Hashtbl.clear background_refresh_unavailable_domains)
+;;
+
+let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
+  if background_refresh_domain_unavailable ()
+  then cancel_refresh dir
+  else match Eio_context.get_switch_opt () with
+  | None -> cancel_refresh dir
+  | Some sw ->
+    (try Eio.Fiber.fork ~sw run with
+     | exn when eio_switch_fork_unavailable exn ->
+       background_refresh_mark_domain_unavailable ();
+       cancel_refresh dir
+     | exn ->
+       cancel_refresh dir;
+       raise exn)
+;;
+
 let git_rev_parse_short_probe_argv dir =
   [ "git"; "-C"; dir; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
 ;;
@@ -151,12 +221,12 @@ let git_rev_parse_short_refresh dir =
 ;;
 
 let maybe_refresh_git_rev_parse_short_in_background dir =
-  match Eio_context.get_switch_opt () with
-  | None -> ()
-  | Some sw ->
-    if git_rev_parse_short_try_begin_refresh dir
-    then
-      Eio.Fiber.fork ~sw (fun () ->
+  if git_rev_parse_short_try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:git_rev_parse_short_cancel_refresh
+      (fun () ->
         try
           let _ = git_rev_parse_short_refresh dir in
           ()
@@ -294,7 +364,7 @@ let parse_ahead_behind raw =
     |> String.trim
     |> String.split_on_char '\t'
     |> List.concat_map (String.split_on_char ' ')
-    |> List.filter (fun part -> String.trim part <> "")
+    |> List.filter_map String_util.trim_to_option
   with
   | [ ahead; behind ] ->
     (match int_of_string_opt ahead, int_of_string_opt behind with
@@ -362,12 +432,12 @@ let git_upstream_status_refresh dir =
 ;;
 
 let maybe_refresh_git_upstream_status_in_background dir =
-  match Eio_context.get_switch_opt () with
-  | None -> ()
-  | Some sw ->
-    if git_upstream_status_try_begin_refresh dir
-    then
-      Eio.Fiber.fork ~sw (fun () ->
+  if git_upstream_status_try_begin_refresh dir
+  then
+    fork_background_refresh_or_cancel
+      ~dir
+      ~cancel_refresh:git_upstream_status_cancel_refresh
+      (fun () ->
         try
           let _ = git_upstream_status_refresh dir in
           ()
@@ -529,6 +599,7 @@ let deployment_state_json
 ;;
 
 let clear_git_rev_parse_short_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
   Stdlib.Mutex.lock git_rev_parse_short_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_rev_parse_short_mu)
@@ -547,6 +618,7 @@ let seed_git_rev_parse_short_cache_for_tests dir value ~refreshed_at =
 ;;
 
 let clear_git_upstream_status_cache_for_tests () =
+  background_refresh_clear_unavailable_domains_for_tests ();
   Stdlib.Mutex.lock git_upstream_status_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
@@ -641,8 +713,8 @@ let runtime_diagnostics_json () =
   let count kind =
     List.fold_left
       (fun acc json ->
-         match Yojson.Safe.Util.member "kind" json with
-         | `String value when String.equal value kind -> acc + 1
+         match Json_util.assoc_member_opt "kind" json with
+         | Some (`String value) when String.equal value kind -> acc + 1
          | _ -> acc)
       0
       diagnostics
@@ -650,16 +722,381 @@ let runtime_diagnostics_json () =
   `List diagnostics, count "external_signal", count "state_repair", count "agent_state"
 ;;
 
+type dashboard_runtime_provider_probe =
+  { runtime_id : string
+  ; json : Yojson.Safe.t
+  ; status : string
+  ; reachable : bool option
+  ; skipped : bool
+  }
+
+let runtime_inventory_source = "runtime.toml"
+
+let dashboard_runtime_probe_timeout_sec_float =
+  Float.of_int dashboard_runtime_probe_timeout_sec
+;;
+
+let dashboard_runtime_trim_trailing_slashes raw =
+  let raw = String.trim raw in
+  let rec loop idx =
+    if idx < 0
+    then ""
+    else if Char.equal raw.[idx] '/'
+    then loop (idx - 1)
+    else String.sub raw 0 (idx + 1)
+  in
+  loop (String.length raw - 1)
+;;
+
+let dashboard_runtime_append_probe_path base ~suffix =
+  let base = dashboard_runtime_trim_trailing_slashes base in
+  if String.equal base "" || String.ends_with ~suffix base
+  then base
+  else base ^ suffix
+;;
+
+let dashboard_runtime_probe_url ~(api_format : Runtime_schema.api_format) base_url =
+  match api_format with
+  | Runtime_schema.Ollama_api ->
+    let base = dashboard_runtime_trim_trailing_slashes base_url in
+    if String.ends_with ~suffix:"/api/tags" base
+    then base
+    else if String.ends_with ~suffix:"/api" base
+    then base ^ "/tags"
+    else base ^ "/api/tags"
+  | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+      dashboard_runtime_append_probe_path base_url ~suffix:"/models"
+;;
+
+let dashboard_runtime_url_for_json raw =
+  let uri = Uri.of_string raw in
+  Uri.with_uri ~userinfo:None ~query:None ~fragment:None uri |> Uri.to_string
+;;
+
+let dashboard_runtime_http_url_valid url =
+  let uri = Uri.of_string url in
+  match Option.map String.lowercase_ascii (Uri.scheme uri), Uri.host uri with
+  | Some ("http" | "https"), Some host when String.trim host <> "" -> true
+  | _ -> false
+;;
+
+let dashboard_runtime_provider_auth_kind = function
+  | None -> "none"
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  | Some (Runtime_schema.Inline _) -> "inline"
+;;
+
+let dashboard_runtime_header_is_auth name =
+  match String.lowercase_ascii (String.trim name) with
+  | "authorization" | "x-api-key" | "api-key" | "x-auth-token" -> true
+  | _ -> false
+;;
+
+let dashboard_runtime_non_auth_headers (provider : Runtime_schema.provider) =
+  match provider.headers with
+  | None -> []
+  | Some headers ->
+    List.filter (fun (name, _) -> not (dashboard_runtime_header_is_auth name)) headers
+;;
+
+let dashboard_runtime_credential_value = function
+  | Runtime_schema.Env key ->
+    (match Option.bind (Sys.getenv_opt key) String_util.trim_to_option with
+     | Some value -> Ok value
+     | None -> Error (Printf.sprintf "env credential %s is empty or unset" key))
+  | Runtime_schema.File path ->
+    (try
+       match Fs_compat.load_file path |> String_util.trim_to_option with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "credential file %s is empty" path)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Error (Printf.sprintf "credential file %s: %s" path (Printexc.to_string exn)))
+  | Runtime_schema.Inline value ->
+    (match String_util.trim_to_option value with
+     | Some value -> Ok value
+     | None -> Error "inline credential is empty")
+;;
+
+let dashboard_runtime_probe_headers (provider : Runtime_schema.provider) =
+  let base_headers =
+    [ "Accept", "application/json" ] @ dashboard_runtime_non_auth_headers provider
+  in
+  match provider.credentials with
+  | None -> Ok (false, base_headers)
+  | Some credential ->
+    (match dashboard_runtime_credential_value credential with
+     | Ok value -> Ok (true, ("Authorization", "Bearer " ^ value) :: base_headers)
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_probe_transport_kind = function
+  | Runtime_schema.Cli _ -> "cli"
+  | Runtime_schema.Http url
+    when Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt ->
+    "local"
+  | Runtime_schema.Http _ -> "http"
+;;
+
+let dashboard_runtime_probe_http_get ~url ~headers ~timeout_sec =
+  match Atomic.get dashboard_runtime_provider_http_get_hook with
+  | Some hook -> hook ~url ~headers ~timeout_sec
+  | None ->
+    let clock = Eio_context.get_clock_opt () in
+    (match Masc_http_client.get_response_sync ?clock ~timeout_sec ~url ~headers () with
+     | Ok response -> Ok (response.status, response.headers, response.body)
+     | Error _ as error -> error)
+;;
+
+let dashboard_runtime_header_value name headers =
+  let name = String.lowercase_ascii name in
+  headers
+  |> List.find_map (fun (k, v) ->
+    if String.equal name (String.lowercase_ascii k) then Some v else None)
+;;
+
+let dashboard_runtime_list_member_len key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`List items) -> Some (List.length items)
+  | _ -> None
+;;
+
+let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_format) body =
+  try
+    let json = Yojson.Safe.from_string body in
+    match api_format with
+    | Runtime_schema.Ollama_api -> dashboard_runtime_list_member_len "models" json
+    | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
+      (match dashboard_runtime_list_member_len "data" json with
+       | Some _ as value -> value
+       | None -> dashboard_runtime_list_member_len "models" json)
+  with
+  | Yojson.Json_error _ -> None
+;;
+
+let dashboard_runtime_status_of_http_status = function
+  | Some code when code >= 200 && code < 300 -> "reachable"
+  | Some 401 | Some 403 -> "auth_failed"
+  | Some 404 -> "endpoint_not_found"
+  | Some code when code >= 500 -> "server_error"
+  | Some _ -> "http_error"
+  | None -> "unknown_http_status"
+;;
+
+let dashboard_runtime_provider_probe_json
+    ?(http_get = dashboard_runtime_probe_http_get)
+    (rt : Runtime.t)
+  =
+  let runtime_kind = dashboard_runtime_probe_transport_kind rt.provider.transport in
+  let auth_kind = dashboard_runtime_provider_auth_kind rt.provider.credentials in
+  let credential_required = Option.is_some rt.provider.credentials in
+  let endpoint_url =
+    match rt.provider.transport with
+    | Runtime_schema.Http url -> Some (dashboard_runtime_url_for_json url)
+    | Runtime_schema.Cli _ -> None
+  in
+  let base_fields
+        ?probe_url
+        ?http_status
+        ?latency_ms
+        ?model_count
+        ?content_type
+        ?downloaded_bytes
+        ?error
+        ~auth_present
+        ~status
+        ~reachable
+        ()
+    =
+    [ "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "runtime_kind", `String runtime_kind
+    ; "transport", `String (match rt.provider.transport with Runtime_schema.Http _ -> "http" | Runtime_schema.Cli _ -> "cli")
+    ; "auth_kind", `String auth_kind
+    ; "credential_required", `Bool credential_required
+    ; "auth_present", `Bool auth_present
+    ; "status", `String status
+    ; "reachable", (match reachable with Some value -> `Bool value | None -> `Null)
+    ; "http_status", Json_util.int_opt_to_json http_status
+    ; "latency_ms", Json_util.float_opt_to_json latency_ms
+    ; "model_count", Json_util.int_opt_to_json model_count
+    ; "content_type", Json_util.string_opt_to_json content_type
+    ; "downloaded_bytes", Json_util.int_opt_to_json downloaded_bytes
+    ; "endpoint_url", Json_util.string_opt_to_json endpoint_url
+    ; "probe_url", Json_util.string_opt_to_json probe_url
+    ; "error", Json_util.string_opt_to_json error
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ]
+  in
+  let make ?probe_url ?http_status ?latency_ms ?model_count ?content_type
+      ?downloaded_bytes ?error ~auth_present ~status ~reachable ~skipped () =
+    { json =
+        `Assoc
+          (base_fields
+             ?probe_url
+             ?http_status
+             ?latency_ms
+             ?model_count
+             ?content_type
+             ?downloaded_bytes
+             ?error
+             ~auth_present
+             ~status
+             ~reachable
+             ())
+    ; runtime_id = rt.id
+    ; status
+    ; reachable
+    ; skipped
+    }
+  in
+  match rt.provider.transport with
+  | Runtime_schema.Cli _ ->
+    make
+      ~auth_present:false
+      ~status:"skipped_cli"
+      ~reachable:None
+      ~skipped:true
+      ~error:"CLI runtimes do not expose an HTTP reachability endpoint"
+      ()
+  | Runtime_schema.Http endpoint_url ->
+    let probe_url = dashboard_runtime_probe_url ~api_format:rt.provider.api_format endpoint_url in
+    let probe_url_json = dashboard_runtime_url_for_json probe_url in
+    if not (dashboard_runtime_http_url_valid probe_url)
+    then
+      make
+        ~probe_url:probe_url_json
+        ~auth_present:false
+        ~status:"invalid_endpoint"
+        ~reachable:(Some false)
+        ~skipped:false
+        ~error:"runtime endpoint is not an absolute http(s) URL"
+        ()
+    else (
+      match dashboard_runtime_probe_headers rt.provider with
+      | Error error ->
+        make
+          ~probe_url:probe_url_json
+          ~auth_present:false
+          ~status:"missing_auth"
+          ~reachable:(Some false)
+          ~skipped:false
+          ~error
+          ()
+      | Ok (auth_present, headers) ->
+        let started_at = Time_compat.now () in
+        (match
+           http_get ~url:probe_url ~headers
+             ~timeout_sec:dashboard_runtime_probe_timeout_sec_float
+         with
+         | Ok (http_status, response_headers, body) ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           let status = dashboard_runtime_status_of_http_status (Some http_status) in
+           let reachable = http_status >= 200 && http_status < 300 in
+           let model_count =
+             if reachable
+             then dashboard_runtime_model_count_of_body ~api_format:rt.provider.api_format body
+             else None
+           in
+           make
+             ~probe_url:probe_url_json
+             ~http_status
+             ~latency_ms
+             ?model_count
+             ?content_type:(dashboard_runtime_header_value "content-type" response_headers)
+             ?downloaded_bytes:(Some (String.length body))
+             ~auth_present
+             ~status
+             ~reachable:(Some reachable)
+             ~skipped:false
+             ()
+         | Error error ->
+           let latency_ms = (Time_compat.now () -. started_at) *. 1000.0 in
+           make
+             ~probe_url:probe_url_json
+             ~latency_ms
+             ~auth_present
+             ~status:"network_error"
+             ~reachable:(Some false)
+             ~skipped:false
+             ~error
+             ()))
+;;
+
+let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
+  let probes = List.map dashboard_runtime_provider_probe_json runtimes in
+  let count pred = probes |> List.filter pred |> List.length in
+  let skipped = count (fun p -> p.skipped) in
+  let reachable = count (fun p -> Option.equal Bool.equal p.reachable (Some true)) in
+  let failed = count (fun p -> Option.equal Bool.equal p.reachable (Some false)) in
+  let probed = List.length probes - skipped in
+  let status =
+    if failed = 0 && probed > 0
+    then "reachable"
+    else if failed = 0
+    then "no_http_runtimes"
+    else if reachable > 0
+    then "degraded"
+    else "unreachable"
+  in
+  let errors =
+    probes
+    |> List.filter_map (fun probe ->
+      match probe.reachable with
+      | Some false ->
+        Some (Printf.sprintf "%s: %s" probe.runtime_id probe.status)
+      | _ -> None)
+  in
+  `Assoc
+    [ "source", `String runtime_inventory_source
+    ; "status", `String status
+    ; "probe_ok", `Bool (failed = 0)
+    ; "checked_at", `String (Masc_domain.now_iso ())
+    ; ( "summary"
+      , `Assoc
+          [ "runtimes", `Int (List.length runtimes)
+          ; "probed", `Int probed
+          ; "reachable", `Int reachable
+          ; "failed", `Int failed
+          ; "skipped", `Int skipped
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "providers", `List (List.map (fun p -> p.json) probes)
+    ; "errors", Json_util.json_string_list errors
+    ; ( "observations"
+      , Json_util.json_string_list
+          [ Printf.sprintf
+              "runtime.toml provider reachability: %d reachable, %d failed, %d skipped"
+              reachable
+              failed
+              skipped
+          ] )
+    ; "limitations"
+      , Json_util.json_string_list
+          [ "Probe checks provider metadata endpoints only; it does not send a completion request."
+          ; "CLI runtimes are listed but not executed by the dashboard probe."
+          ]
+    ]
+;;
+
+let dashboard_runtime_probe_payload_json_for_tests ?default_id runtimes =
+  dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
+;;
+
 let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
   | Some hook -> hook ()
   | None ->
-    `Assoc
-      [ "source", `String "runtime"
-      ; "probe_ok", `Null
-      ; "status", `String "oas_owned"
-      ; "detail", `String "Concrete provider probes are owned by OAS."
-      ]
+    let runtimes = Runtime.get_runtimes () in
+    let default_id =
+      Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+    in
+    dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
 ;;
 
 let dashboard_runtime_probe_cached_value () =
@@ -706,6 +1143,45 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
           Atomic.set dashboard_runtime_probe_cache (Some { probe = fresh; refreshed_at });
           Atomic.set dashboard_runtime_probe_refresh_in_flight false;
           fresh, false, refreshed_at
+        | exception Eio.Mutex.Poisoned cause ->
+          Atomic.set dashboard_runtime_probe_refresh_in_flight false;
+          Log.Dashboard.warn
+            "runtime probe skipped: HTTP pool mutex poisoned (%s); \
+             returning degraded envelope"
+            (Printexc.to_string cause);
+          let degraded =
+            `Assoc
+              [ "source", `String runtime_inventory_source
+              ; "status", `String "unreachable"
+              ; "probe_ok", `Bool false
+              ; "checked_at", `String (Masc_domain.now_iso ())
+              ; ( "summary"
+                , `Assoc
+                    [ "runtimes", `Int 0
+                    ; "probed", `Int 0
+                    ; "reachable", `Int 0
+                    ; "failed", `Int 0
+                    ; "skipped", `Int 0
+                    ; "default_runtime_id", `Null
+                    ] )
+              ; "providers", `List []
+              ; "errors", `List [ `String "pool mutex poisoned; restart to recover" ]
+              ; ( "observations"
+                , `List
+                    [ `String
+                        (Printf.sprintf
+                           "Runtime probe failed: HTTP pool mutex poisoned (%s). \
+                            The pool recovers on next successful request; if this \
+                            persists, restart the server."
+                           (Printexc.to_string cause))
+                    ] )
+              ; "limitations"
+              , `List
+                  [ `String "Probe skipped due to poisoned pool mutex."
+                  ]
+              ]
+          in
+          degraded, false, 0.0
         | exception exn ->
           let bt = Printexc.get_raw_backtrace () in
           Atomic.set dashboard_runtime_probe_refresh_in_flight false;
@@ -739,7 +1215,108 @@ let dashboard_runtime_probe_http_json ?(force = false) () =
     ]
 ;;
 
-let runtime_resolution_json (config : Coord.config) =
+let runtime_endpoint_url_of_transport = function
+  | Runtime_schema.Http url -> Some url
+  | Runtime_schema.Cli _ -> None
+;;
+
+let runtime_transport_string = function
+  | Runtime_schema.Http _ -> "http"
+  | Runtime_schema.Cli _ -> "cli"
+;;
+
+let runtime_http_transport_is_loopback url =
+  Uri.of_string url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+;;
+
+let runtime_kind_of_transport = function
+  | Runtime_schema.Cli _ -> "cli"
+  | Runtime_schema.Http url when runtime_http_transport_is_loopback url -> "local"
+  | Runtime_schema.Http _ -> "http"
+;;
+
+let runtime_dashboard_kind_of_runtime_kind = function
+  | "local" -> "local"
+  | "cli" -> "cli"
+  | _ -> "cloud"
+;;
+
+let runtime_auth_kind_of_credential = function
+  | None -> "none"
+  | Some (Runtime_schema.Env key) -> "env:" ^ key
+  | Some (Runtime_schema.File path) -> "file:" ^ path
+  | Some (Runtime_schema.Inline _) -> "inline"
+;;
+
+let runtime_default_runtime_id () =
+  Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
+;;
+
+let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
+  let runtime_kind = runtime_kind_of_transport rt.provider.transport in
+  let models = [ rt.model.api_name ] in
+  `Assoc
+    [ "provider", `String rt.id
+    ; "runtime_id", `String rt.id
+    ; "provider_id", `String rt.provider.id
+    ; "provider_display_name", `String rt.provider.display_name
+    ; "model_id", `String rt.model.id
+    ; "model_api_name", `String rt.model.api_name
+    ; "protocol", `String rt.provider.protocol
+    ; "transport", `String (runtime_transport_string rt.provider.transport)
+    ; "kind", `String (runtime_dashboard_kind_of_runtime_kind runtime_kind)
+    ; "runtime_kind", `String runtime_kind
+    ; "auth_kind", `String (runtime_auth_kind_of_credential rt.provider.credentials)
+    ; "status", `String "configured"
+    ; "available", `Bool true
+    ; "is_default_runtime", `Bool (Option.equal String.equal default_id (Some rt.id))
+    ; "max_context", `Int rt.model.max_context
+    ; "tools_support", `Bool rt.model.tools_support
+    ; "thinking_support", `Bool rt.model.thinking_support
+    ; "streaming", `Bool rt.model.streaming
+    ; "model_count", `Int (List.length models)
+    ; "models", Json_util.json_string_list models
+    ; "source", `String runtime_inventory_source
+    ; "endpoint_url", Json_util.string_opt_to_json (runtime_endpoint_url_of_transport rt.provider.transport)
+    ; "note", `Null
+    ]
+;;
+
+let runtime_unique_count values =
+  values |> List.sort_uniq String.compare |> List.length
+;;
+
+let runtime_inventory_json () =
+  let runtimes = Runtime.get_runtimes () in
+  let default_id = runtime_default_runtime_id () in
+  let kind_of_runtime (rt : Runtime.t) =
+    runtime_kind_of_transport rt.provider.transport
+    |> runtime_dashboard_kind_of_runtime_kind
+  in
+  let count_models kind =
+    runtimes
+    |> List.filter (fun rt -> String.equal (kind_of_runtime rt) kind)
+    |> List.length
+  in
+  let provider_ids = List.map (fun (rt : Runtime.t) -> rt.provider.id) runtimes in
+  `Assoc
+    [ "updated_at", `String (Masc_domain.now_iso ())
+    ; "source", `String runtime_inventory_source
+    ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
+    ; ( "summary"
+      , `Assoc
+          [ "providers", `Int (runtime_unique_count provider_ids)
+          ; "runtimes", `Int (List.length runtimes)
+          ; "local_models", `Int (count_models "local")
+          ; "cloud_models", `Int (count_models "cloud")
+          ; "cli_models", `Int (count_models "cli")
+          ; "default_runtime_id", Json_util.string_opt_to_json default_id
+          ] )
+    ; "providers", `List (List.map (runtime_inventory_entry_json ~default_id) runtimes)
+    ]
+;;
+
+let runtime_resolution_json (config : Workspace.config) =
   let build = Build_identity.current () in
   let runtime_commit = build.binary_commit in
   let runtime_commit_known = Option.is_some runtime_commit in
@@ -799,7 +1376,7 @@ let runtime_resolution_json (config : Coord.config) =
          separate [add_binary_commit_unknown_warning] further down,
          forcing the dashboard reader to cross-reference two warnings
          to understand a single mismatch.  Inline the reason in the
-         sentinel itself so the warning is self-contained. *)
+         marker itself so the warning is self-contained. *)
       let runtime =
         match runtime_commit with
         | Some commit -> commit
@@ -852,7 +1429,7 @@ let runtime_resolution_json (config : Coord.config) =
         Printf.sprintf
           "Runtime source snapshot (%s) differs from server repo HEAD (%s), \
            but the binary commit is unknown. Rebuild/restart before trusting \
-           runtime proof."
+           runtime identity."
           runtime_head
           server_head
         :: acc
@@ -876,7 +1453,7 @@ let runtime_resolution_json (config : Coord.config) =
       Printf.sprintf
         "Server source branch %s is behind %s by %d commit(s); running runtime \
          identity (%s) differs from upstream %s. Fetch/build/restart from \
-         current main before trusting runtime proof."
+         current main before trusting runtime identity."
         branch
         upstream_ref
         behind
@@ -935,7 +1512,7 @@ let runtime_resolution_json (config : Coord.config) =
   in
   let add_repair_warning acc =
     if repair_count > 0
-    then Printf.sprintf "Recent room-state repair events detected (%d)." repair_count :: acc
+    then Printf.sprintf "Recent workspace-state repair events detected (%d)." repair_count :: acc
     else acc
   in
   let add_agent_issue_warning acc =
@@ -966,7 +1543,7 @@ let runtime_resolution_json (config : Coord.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -992,12 +1569,11 @@ let runtime_resolution_json (config : Coord.config) =
       ; ( "deployment_state"
         , deployment_state_json ~build ~server_repo_commit ~workspace_commit
             ~resolved_base_commit ~upstream_status ~source_mismatch )
-      ; "cdal", Server_routes_http_runtime.cdal_health_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )
 ;;
 
-let light_runtime_resolution_json (config : Coord.config) =
+let light_runtime_resolution_json (config : Workspace.config) =
   let build = Build_identity.current () in
   let base_path_input =
     Env_config_core.base_path_source_opt ()
@@ -1062,7 +1638,7 @@ let light_runtime_resolution_json (config : Coord.config) =
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
-      ; "data_root", path_item_json ~source:"runtime_data" (Coord.masc_root_dir config)
+      ; "data_root", path_item_json ~source:"runtime_data" (Workspace.masc_root_dir config)
       ; "prompt_markdown_dir", path_item_json ~source:"prompt_registry" prompt_markdown_dir
       ; ( "server_repo_path"
         , match server_repo_path with
@@ -1089,18 +1665,23 @@ let dashboard_tools_cache_ttl_sec = 30.0
 let dashboard_tools_cache_key ~base_path ~actor =
   Printf.sprintf "tools:%s:%s" base_path actor
 
-let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Safe.t =
+let dashboard_actor_name = function
+  | Some actor when String.trim actor <> "" -> actor
+  | Some _ | None -> "dashboard"
+;;
+
+let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
+  let actor_name = dashboard_actor_name actor in
   let ctx : Tool_misc.context =
-    { config; agent_name = Option.value ~default:"dashboard" actor }
+    { config; agent_name = actor_name }
   in
   let run phase f =
     match timing with
     | None -> f ()
     | Some t -> Server_timing.measure t phase f
   in
-  let actor_for_key = Option.value ~default:"dashboard" actor in
   let cache_key =
-    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_for_key
+    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_name
   in
   let compute () =
     let config_resolution =
@@ -1116,9 +1697,11 @@ let dashboard_tools_http_json ?actor ?timing (config : Coord.config) : Yojson.Sa
     in
     let usage =
       run Tools_compute (fun () ->
-        Tool_unified.summary_report ()
+        Tool_unified.summary_report
+          ~runtime_metrics:Runtime_observation.runtime_metrics_json
+          ()
         |> Tool_usage_log.attach_source_metadata
-             ~masc_root:(Coord.masc_root_dir config))
+             ~masc_root:(Workspace.masc_root_dir config))
     in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())

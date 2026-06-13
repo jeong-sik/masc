@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-30
 code_refs:
   - lib/keeper/keeper_composite_observer.ml
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_registry.ml
 ---
 
@@ -25,11 +25,11 @@ The keeper runtime exposes **6 orthogonal FSM axes** per entity and a **4-invari
 | KSM  | `keeper_state_machine.mli` (phase)  | Offline / Running / Failing / Overflowed / Compacting / HandingOff / Paused / Draining / Stopped / Crashed / Restarting / Dead / Zombie | `KeeperStateMachine.tla`               |
 | KTC  | `keeper_registry.mli:turn_phase`    | idle / prompting / executing / compacting / finalizing                    | `KeeperTurnCycle.tla`                  |
 | KDP  | `keeper_registry.mli:decision_stage`| undecided / guard_ok / gate_rejected / tool_policy_selected               | `KeeperDecisionPipeline.tla`           |
-| KCL  | `keeper_registry.mli:cascade_state` | idle / selecting / trying / done / exhausted                              | `KeeperCascadeLifecycle.tla`           |
+| KCL  | `keeper_registry.mli:runtime_state` | idle / selecting / trying / done / exhausted                              | `KeeperRuntimeLifecycle.tla`           |
 | KMC  | `keeper_registry.mli:compaction_stage` | accumulating / compacting / done                                        | `KeeperCompactionLifecycle.tla`        |
 | KCB  | `keeper_failure_circuit_breaker.ml` (counter-based) | clean / warning / cooling — `tripped` is unobservable because the mutator resets `consecutive_count` during the trip transition | `KeeperCircuitBreaker.tla`             |
 
-The joint invariants (`phase_turn_alignment`, `no_cascade_before_measurement`, `compaction_atomicity`, `event_priority_monotone`) are already wired into `fsm-hub-types.ts:InvariantViolationCounts` and tracked in `HubState.invariantViolations`.
+The joint invariants (`phase_turn_alignment`, `no_runtime_before_measurement`, `compaction_atomicity`, `event_priority_monotone`) are already wired into `fsm-hub-types.ts:InvariantViolationCounts` and tracked in `HubState.invariantViolations`.
 
 **Gap.** Both backend and dashboard are currently **per-keeper scoped**:
 
@@ -67,7 +67,7 @@ Evaluated and rejected:
 | Approach                      | Reason for rejection                                                            |
 | ----------------------------- | ------------------------------------------------------------------------------- |
 | Literal 3-D cube (three.js)   | Operators can't compare two cells at a glance under rotation; overkill for <100 cells. |
-| Parallel coordinates          | Good for continuous axes; discrete states render as overlapping horizontal bands. |
+| Parallel orchestrates          | Good for continuous axes; discrete states render as overlapping horizontal bands. |
 | UpSet plot                    | Strong for static co-occurrence, weak for temporal trajectories.                |
 | Cartesian product grid        | 12 × 5 × 4 × 5 × 3 = 3,600 cells; hits product-state explosion the spec is built to prevent. |
 
@@ -78,7 +78,7 @@ The chosen small-multiples matrix matches Bach et al. (2013) finding that small 
 The 4 joint invariants are rendered as a **top strip** above the matrix:
 
 ```
-[Phase ⇔ Turn: 0] [Cascade ordering: 2 ⚠] [Compaction atomicity: 0] [Event priority: 0]
+[Phase ⇔ Turn: 0] [Runtime ordering: 2 ⚠] [Compaction atomicity: 0] [Event priority: 0]
 ```
 
 When a count > 0, clicking it filters the matrix to show only keepers whose transitions contributed to that violation, and highlights offending cells in red. This is the one place the product state matters — it is where the joint spec is actually telling us something.
@@ -94,9 +94,9 @@ When a count > 0, clicking it filters the matrix to show only keepers whose tran
 | Component         | `dashboard/src/components/fleet-fsm-matrix.ts`     | new    |
 | Component tests   | `dashboard/src/components/fleet-fsm-matrix.test.ts`| new    |
 | Dashboard mount   | `agents-unified.ts`                                | extend (new sub-view or tab) |
-| Prometheus counter| `masc_fleet_invariant_violations_total{invariant}` | new (LT-13) |
-| Alerting rules    | `infrastructure/monitoring/cascade-alerts.yml`     | extend (LT-13) |
-| Grafana panel     | `infrastructure/monitoring/grafana-cascade-dashboard.json` | extend (LT-13) |
+| OTel counter      | `masc_fleet_invariant_violations_total{invariant}` | new (LT-13) |
+| Alerting rules    | backend-specific config                            | extend (LT-13) |
+| Dashboard panel   | backend-specific dashboard                         | extend (LT-13) |
 | Spec cross-check  | `docs/observability/composite-fsm-matrix-design.md`| this file |
 
 ## 4. Spec ↔ code contract
@@ -108,9 +108,9 @@ Any state-label change is forbidden in exactly one place and required in every o
 3. `dashboard/src/api/schemas/keeper-composite.ts` `fallback()` union.
 4. `fsm-hub-types.ts:displayState` mapping.
 5. `fleet-fsm-matrix.ts` color map (new).
-6. Grafana legend (new in LT-13).
+6. Dashboard legend (new in LT-13).
 
-`cascade-metrics.md` already documents this contract for the cascade axis; this doc extends it to all five.
+`runtime-metrics.md` already documents this contract for the runtime axis; this doc extends it to all five.
 
 ## 5. Stage plan (cron-driven)
 
@@ -120,10 +120,10 @@ Each 20-minute tick lands at most one PR. Order minimises rebase contention.
 | ---- | ----------------------------------------- | ------------------------------------------------------ |
 | T+1  | **LT-12** (this file)                     | Design doc only. 0 runtime change. Draft.              |
 | T+2  | **LT-15** drift audit table               | `docs/observability/fsm-spec-code-drift.md`. 0 runtime change. |
-| T+3  | **LT-13** invariant counts → Prometheus   | counter + alert + Grafana panel. Back-end + infra only.|
+| T+3  | **LT-13** invariant counts → OTel         | counter + alert + dashboard panel. Back-end + infra only.|
 | T+4  | **LT-16a** backend fleet endpoint         | `keeper_composite_observer:all_snapshots` + route.     |
 | T+5  | **LT-16b** frontend matrix component      | `fleet-fsm-matrix.ts` + tests + mount.                 |
-| T+6  | **LT-14** OAS silent FSMs → event_bus     | cascade fallback, content_replacement, slot_scheduler. |
+| T+6  | **LT-14** OAS silent FSMs → event_bus     | runtime fallback, content_replacement, slot_scheduler. |
 
 Each PR carries its own test suite. No PR merges without a TLA+ reference if it touches a state variant.
 
@@ -151,4 +151,4 @@ Each PR carries its own test suite. No PR merges without a TLA+ reference if it 
 - Statecharts Online (ch. 5, orthogonal states). https://statecharts.online/chapters/05-orthogonal-states.html
 - W3C SCXML §3.4 `<parallel>`.
 - `specs/keeper-state-machine/KeeperCompositeLifecycle.tla` — source of truth for invariants.
-- `docs/observability/cascade-metrics.md` — reference for the 5-surface consistency contract this doc extends.
+- `docs/observability/runtime-metrics.md` — reference for the 5-surface consistency contract this doc extends.

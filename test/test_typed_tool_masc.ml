@@ -1,6 +1,6 @@
 (** Tests for Typed_tool_masc — MASC typed tool bridge and broadcast PoC. *)
 
-open Masc_mcp
+open Masc
 
 let parse json =
   Agent_sdk.Tool_schema_gen.parse Tool_broadcast_typed.broadcast_schema json
@@ -49,7 +49,7 @@ let test_handler_success () =
   match Tool_broadcast_typed.handle_broadcast "hello @agent_llm_a" with
   | Ok output ->
     Alcotest.(check bool) "delivered" true output.delivered;
-    Alcotest.(check string) "message" "hello @agent_llm_a" output.room_message;
+    Alcotest.(check string) "message" "hello @agent_llm_a" output.broadcast_message;
     Alcotest.(check (option string)) "mention" (Some "agent_llm_a") output.mention
   | Error e -> Alcotest.fail ("handler failed: " ^ e)
 
@@ -60,19 +60,19 @@ let test_handler_empty () =
 
 let test_handler_trim () =
   match Tool_broadcast_typed.handle_broadcast "  trimmed  " with
-  | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.room_message
+  | Ok output -> Alcotest.(check string) "trimmed" "trimmed" output.broadcast_message
   | Error e -> Alcotest.fail e
 
 let test_encode_mention () =
   let output : Tool_broadcast_typed.broadcast_output =
-    { delivered = true; room_message = "hi"; mention = Some "alice" } in
+    { delivered = true; broadcast_message = "hi"; mention = Some "alice" } in
   let json = Tool_broadcast_typed.encode_broadcast output in
   let open Yojson.Safe.Util in
   Alcotest.(check string) "mention" "alice" (json |> member "mention" |> to_string)
 
 let test_encode_no_mention () =
   let output : Tool_broadcast_typed.broadcast_output =
-    { delivered = true; room_message = "hi"; mention = None } in
+    { delivered = true; broadcast_message = "hi"; mention = None } in
   let json = Tool_broadcast_typed.encode_broadcast output in
   let open Yojson.Safe.Util in
   Alcotest.(check bool) "delivered" true (json |> member "delivered" |> to_bool)
@@ -100,8 +100,8 @@ let test_e2e_coerced_input () =
     let result = Yojson.Safe.from_string content in
     let open Yojson.Safe.Util in
     Alcotest.(check bool) "delivered" true (result |> member "delivered" |> to_bool);
-    Alcotest.(check string) "room_message" "99"
-      (result |> member "room_message" |> to_string)
+    Alcotest.(check string) "broadcast_message" "99"
+      (result |> member "broadcast_message" |> to_string)
   | Error e -> Alcotest.fail ("expected coercion success: " ^ e.message)
 
 let test_e2e_handler_error () =
@@ -112,8 +112,7 @@ let test_e2e_handler_error () =
 
 let test_to_spec () =
   let spec = Typed_tool_masc.to_spec Tool_broadcast_typed.tool in
-  Alcotest.(check string) "name" "masc_broadcast_typed" spec.name;
-  Alcotest.(check bool) "requires_join" true spec.requires_join
+  Alcotest.(check string) "name" "masc_broadcast_typed" spec.name
 
 let test_params () =
   (* Issue #8595: was 2 (message + dead format). Now 1 — schema reflects

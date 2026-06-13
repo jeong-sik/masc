@@ -6,7 +6,7 @@ function ComposerPrompt() {
   const typed = useTyping([
     'keeper.claim("t-9f2a")',
     'keeper.retire("t-d551")',
-    'cascade.run(goal="goal-merge-blockers")',
+    'runtime.run(goal="goal-merge-blockers")',
     'suite.rerun("suite-merge-blockers")',
   ], 22);
   return (
@@ -34,7 +34,7 @@ function ComposerSuggest() {
   const sugs = [
     { kind:'fn',   name:'keeper.claim',      desc:'claim a task for a keeper' },
     { kind:'fn',   name:'keeper.retire',     desc:'retire a stalled keeper' },
-    { kind:'fn',   name:'cascade.run',       desc:'run the cascade chain' },
+    { kind:'fn',   name:'runtime.run',       desc:'run the runtime chain' },
     { kind:'task', name:'t-9f2a',            desc:'Rebase PR #9712 + green CI' },
     { kind:'goal', name:'goal-merge-blockers', desc:'Merge-blocker 해결' },
   ];
@@ -77,10 +77,10 @@ function ComposerMultiLine() {
     <div className="cb-board">
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-composer" role="region" aria-label="Multi-line command composer">
-        <pre aria-label="cascade.run(goal=&quot;goal-merge-blockers&quot;, providers=[provider-a, provider-b], dry_run=false)" style={{margin:0, font:'inherit', background:'transparent'}}>
+        <pre aria-label="runtime.run(goal=&quot;goal-merge-blockers&quot;, providers=[runtime-slot-a, runtime-slot-b], dry_run=false)" style={{margin:0, font:'inherit', background:'transparent'}}>
           <div className="line">
             <span className="prompt" aria-hidden="true">masc&gt;</span>
-            <span className="fn" aria-hidden="true">cascade.run</span>
+            <span className="fn" aria-hidden="true">runtime.run</span>
             <span aria-hidden="true">(</span>
           </div>
           <div className="line" style={{paddingLeft:18}} aria-hidden="true">
@@ -93,8 +93,8 @@ function ComposerMultiLine() {
             <span className="arg">providers</span>
             <span>=</span>
             <span>[</span>
-            <Chip kind="ghost">provider-a</Chip>
-            <Chip kind="ghost">provider-b</Chip>
+            <Chip kind="ghost">runtime-slot-a</Chip>
+            <Chip kind="ghost">runtime-slot-b</Chip>
             <span>]</span>
             <span>,</span>
           </div>
@@ -123,17 +123,17 @@ function StatusStandard() {
   return (
     <div className="cb-board">
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
-      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, provider-a ok, provider-b ok, provider-d degraded, provider-e offline, TPS 1.24s, time 16:32:45 UTC">
+      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, runtime-slot-a ok, runtime-slot-b ok, runtime-slot-c degraded, runtime-slot-d offline, TPS 1.24s, time 16:32:45 UTC">
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Build 2604">BUILD <span className="brass">2604</span></span>
         <span className="seg" role="group" aria-label="Version 0.42.1">v0.42.1</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" aria-hidden="true">PROVIDERS</span>
-        <span className="seg" role="group" aria-label="provider-a ok"><span className="on" aria-hidden="true">●</span>provider-a</span>
-        <span className="seg" role="group" aria-label="provider-b ok"><span className="on" aria-hidden="true">●</span>provider-b</span>
-        <span className="seg" role="group" aria-label="provider-d degraded" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>provider-d</span>
-        <span className="seg off" role="group" aria-label="provider-e offline"><span aria-hidden="true">●</span>provider-e</span>
+        <span className="seg" role="group" aria-label="runtime-slot-a ok"><span className="on" aria-hidden="true">●</span>runtime-slot-a</span>
+        <span className="seg" role="group" aria-label="runtime-slot-b ok"><span className="on" aria-hidden="true">●</span>runtime-slot-b</span>
+        <span className="seg" role="group" aria-label="runtime-slot-c degraded" style={{color:'var(--warn-fg)'}}><span aria-hidden="true">●</span>runtime-slot-c</span>
+        <span className="seg off" role="group" aria-label="runtime-slot-d offline"><span aria-hidden="true">●</span>runtime-slot-d</span>
         <span className="seg push-right" role="group" aria-label="TPS 1.24 seconds">TPS <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Clock 16:32:45 UTC">16:32:45Z</span>
@@ -160,14 +160,14 @@ function StatusVerbose() {
   return (
     <div className="cb-board">
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
-      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="Connected · goal goal-merge-blockers, task t-9f2a, keeper nick0cave, cascade hit at step 2 in 1.24s, suite 3 fail of 47 pass" style={{height:28, flexWrap:'wrap'}}>
+      <div className="cb-statusbar" role="status" aria-live="polite" aria-label="Connected · goal goal-merge-blockers, task t-9f2a, keeper nick0cave, runtime hit at step 2 in 1.24s, suite 3 fail of 47 pass" style={{height:28, flexWrap:'wrap'}}>
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Goal goal-merge-blockers">goal <span className="brass">goal-merge-blockers</span></span>
         <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--color-fg-secondary)'}}>t-9f2a</span></span>
         <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--color-accent-fg)'}}>nick0cave</span></span>
         <span className="sep" aria-hidden="true" />
-        <span className="seg" role="group" aria-label="Cascade hit at step 2 in 1.24 seconds">CASCADE hit@2 · <span className="brass">1.24s</span></span>
+        <span className="seg" role="group" aria-label="Runtime hit at step 2 in 1.24 seconds">RUNTIME hit@2 · <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Suite 3 fail of 47 pass">SUITE <span style={{color:'var(--err-fg)'}}>3 FAIL</span> / 47 PASS</span>
         <span className="seg push-right" aria-hidden="true">⌘K for commands</span>
@@ -202,7 +202,7 @@ function DrawerTask() {
             <dt>TOOL</dt><dd>tool.write_file</dd>
             <dt>DIFF</dt><dd>+18 −4 · keeper.ts</dd>
             <dt>STARTED</dt><dd>16:31:27Z</dd>
-            <dt>CASCADE</dt><dd>provider-b @step=2 · 1.24s</dd>
+            <dt>RUNTIME</dt><dd>runtime-slot-b @step=2 · 1.24s</dd>
           </dl>
         </section>
         <section aria-labelledby="drawer-task-review">
@@ -316,10 +316,10 @@ function DrawerKeeper() {
           <Dot kind="brass" beat style={{marginRight:6, verticalAlign:'middle'}} />
           nick0cave
         </div>
-        <div className="meta" role="group" aria-label="Keeper metadata: running, 8 tool calls in 60 seconds, provider-a model-a-haiku">
+        <div className="meta" role="group" aria-label="Keeper metadata: running, 8 tool calls in 60 seconds, runtime-slot-a capability-tier-a">
           <Chip kind="brass">RUNNING</Chip>
           <Chip kind="ghost">8 TOOL CALLS / 60s</Chip>
-          <Chip kind="ghost">provider-a · model-a-haiku</Chip>
+          <Chip kind="ghost">runtime-slot-a · capability-tier-a</Chip>
         </div>
       </div>
       <div className="body">
@@ -367,7 +367,7 @@ function DrawerKeeper() {
 // Mirrors production board.css (dashboard/src/styles/board.css, 59 lines).
 // Consumers of board.css in production:
 //   - dashboard/src/main.ts            (entry import)
-//   - dashboard/src/styles/global.css  (cascade root)
+//   - dashboard/src/styles/global.css  (runtime root)
 //   - dashboard/src/styles/ui.css      (.board-comment / .vote-btn typography)
 // Append-only: existing cb-group-c artboards above are unmodified.
 
@@ -379,7 +379,7 @@ function BoardPostCard() {
   // SSOT-token rendering: --accent-30 (legacy alias) → rgb(--color-accent-glow / .30),
   // --white-6 (legacy alias) → rgb(--color-fg-primary / .06).
   const posts = [
-    { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Cascade weight=0 trial: cli-tool-a regression?', votes: 12, replies: 4 },
+    { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Runtime weight=0 trial: descriptor-adapter-a regression?', votes: 12, replies: 4 },
     { id: 'p-842', author: 'masc-improver', t: '14m', title: 'Persona TOML reconcile drift — 2880 redundant writes/day',  votes: 7,  replies: 2 },
     { id: 'p-843', author: 'sangsu',        t: '38m', title: 'OAS pin SHA vs cap range drift checklist', votes: 5,  replies: 1 },
   ];
@@ -501,7 +501,7 @@ function BoardCommentThread() {
   // .board-comment .comment-text.expanded { max-height: none; }
   // .board-comment .comment-expand-btn:hover { text-decoration: underline; }
   const comments = [
-    { id:'c-1', author:'qa-king',  t:'4m', body:'Re-running suite-merge-blockers locally — 1 of 47 still red on cascade.run.', expanded:true },
+    { id:'c-1', author:'qa-king',  t:'4m', body:'Re-running suite-merge-blockers locally — 1 of 47 still red on runtime.run.', expanded:true },
     { id:'c-2', author:'sangsu',   t:'3m', body:'Drift detected at pipeline.ts L187 — signature mismatch. Truncated below.', expanded:false },
     { id:'c-3', author:'nick0cave', t:'1m', body:'Rebased on release-0.42 · re-running CI.', expanded:true },
   ];
@@ -569,7 +569,7 @@ function BoardMarkdownPreview() {
       <article
         className="board-post-preview"
         role="article"
-        aria-label="Markdown preview · cascade weight=0 trial proposal"
+        aria-label="Markdown preview · runtime weight=0 trial proposal"
         style={{
           padding:'10px 14px',
           background:'var(--color-bg-surface)',
@@ -579,16 +579,16 @@ function BoardMarkdownPreview() {
         }}>
         <div className="markdown-content" style={{overflowWrap:'anywhere', fontSize:12, lineHeight:1.55}}>
           <h3 style={{marginTop:0, marginBottom:'0.35rem', fontFamily:'var(--font-mono)', fontSize:13, color:'var(--color-fg-primary)'}}>
-            cascade weight=0 trial · proposal
+            runtime weight=0 trial · proposal
           </h3>
           <p style={{margin:'0.35rem 0', color:'var(--color-fg-secondary)'}}>
-            Drop <code style={{fontFamily:'var(--font-mono)', color:'var(--color-accent-fg)'}}>cli-tool-a</code>
-            from the cascade for 2 hours; measure rollout-thread-not-found rate against
+            Drop <code style={{fontFamily:'var(--font-mono)', color:'var(--color-accent-fg)'}}>descriptor-adapter-a</code>
+            from the runtime for 2 hours; measure rollout-thread-not-found rate against
             yesterday&apos;s baseline.
           </p>
           <ul style={{margin:'0.35rem 0', paddingLeft:18, color:'var(--color-fg-secondary)'}}>
-            <li>Hypothesis: agent-code internal 5-model rotation accounts for ~33% of cascade-fallback events.</li>
-            <li>Counter-hypothesis: removing it surfaces fallback elsewhere (cli-tool-b ReDoS).</li>
+            <li>Hypothesis: agent-code internal 5-model rotation accounts for ~33% of runtime-fallback events.</li>
+            <li>Counter-hypothesis: removing it surfaces fallback elsewhere (runtime-adapter-b ReDoS).</li>
           </ul>
           <blockquote
             style={{
@@ -612,10 +612,10 @@ function BoardMarkdownPreview() {
               fontFamily:'var(--font-mono)', fontSize:10,
               color:'var(--color-fg-secondary)',
             }}>
-{`# trial cascade
-cascade.run(
+{`# trial runtime
+runtime.run(
   goal="goal-merge-blockers",
-  providers=[provider-a, provider-b],   # cli-tool-a omitted
+  providers=[runtime-slot-a, runtime-slot-b],   # descriptor-adapter-a omitted
   dry_run=false,
 )
 # expected: rollout-thread-not-found  ↓ 30%

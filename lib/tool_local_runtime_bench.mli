@@ -2,7 +2,7 @@
 (** Tool_local_runtime_bench — concurrency benchmark against the
     local runtime pool.
 
-    {b Include cascade:} starts with [include Tool_local_runtime_http]
+    {b Include runtime:} starts with [include Tool_local_runtime_http]
     so the 2-layer chain
     ([Tool_local_runtime_core] -> [Tool_local_runtime_http] -> here)
     propagates through {!Tool_local_runtime}.

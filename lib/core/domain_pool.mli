@@ -1,4 +1,4 @@
-(** Domain_pool — masc-mcp policy layer over [Eio.Executor_pool].
+(** Domain_pool — masc policy layer over [Eio.Executor_pool].
 
     Wraps [Eio.Executor_pool] with three pieces of policy that the raw
     library leaves up to each caller:

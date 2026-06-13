@@ -319,7 +319,7 @@
       <div class="callout warning">
         <strong>Important:</strong>
         <code>provider_timeout</code>는 keeper death 원인이 아니라 provider/turn 증상이다. 단일 timeout evidence만 보고 "recoverable" 또는 "hopeless"를 결정하면 안 된다.
-        provider/cascade 상태, fallback 가능성, terminal fingerprint, slot/process liveness, repeated stale evidence를 함께 봐야 한다.
+        provider/runtime 상태, fallback 가능성, terminal fingerprint, slot/process liveness, repeated stale evidence를 함께 봐야 한다.
       </div>
     </section>
 
@@ -365,7 +365,7 @@ type operator_action =
   | No_action
   | Inspect_timeout_budget
   | Inspect_provider_health
-  | Fix_cascade_config
+  | Fix_runtime_config
   | Fix_tool_contract
   | Fix_runtime_environment
   | Resume_after_backoff
@@ -417,11 +417,11 @@ type decision = {
             <td>Transient upstream issue. Route away or retry after backoff.</td>
           </tr>
           <tr>
-            <td><code>cascade_config_exhausted</code></td>
-            <td>cascade policy</td>
+            <td><code>runtime_config_exhausted</code></td>
+            <td>runtime policy</td>
             <td><span class="warn">operator-visible pause possible</span></td>
             <td>all configured candidates missing auth, unavailable, or filtered with no fallback</td>
-            <td>Cascade has no callable providers. Fix config or credentials.</td>
+            <td>Runtime has no callable providers. Fix config or credentials.</td>
           </tr>
           <tr>
             <td><code>required_tool_contract</code></td>
@@ -472,7 +472,7 @@ type decision = {
         <div class="panel">
           <h3>Potentially hopeless without operator action</h3>
           <ul>
-            <li>all cascade candidates are missing credentials, hard-quotaed, or model-not-found</li>
+            <li>all runtime candidates are missing credentials, hard-quotaed, or model-not-found</li>
             <li>required tool contract cannot be satisfied by any selected provider</li>
             <li>timeout phase is <code>provider_step</code> and all fallback candidates are exhausted or disabled</li>
             <li>same terminal fingerprint repeats after cooldown windows</li>
@@ -512,7 +512,7 @@ type decision = {
             <td>P0-PIN</td>
             <td><span class="status done">merged</span></td>
             <td>Consume the OAS provider-timeout evidence release in MASC's downstream dependency pin.</td>
-            <td><code>#16191</code>: <code>scripts/oas-agent-sdk-pin.sh</code>, <code>dune-project</code>, <code>masc_mcp.opam</code>, generated docs and fingerprint</td>
+            <td><code>#16191</code>: <code>scripts/oas-agent-sdk-pin.sh</code>, <code>dune-project</code>, <code>masc.opam</code>, generated docs and fingerprint</td>
             <td><code>check-oas-pin</code>, <code>oas-drift-check</code>, and generated doc checks pass against OAS <code>main@308152ee</code> (<code>v0.196.1</code>).</td>
           </tr>
           <tr>

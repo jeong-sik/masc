@@ -6,7 +6,7 @@
       types: the values flowing between {!Worker_runtime},
       {!Worker_oas}, and {!Worker_runtime_helper_protocol}.
     - The MCP transport bridge ({!call_masc_tool},
-      {!join_worker}, {!leave_worker}, {!mcp_endpoint_url}):
+      {!mcp_endpoint_url}):
       a JSON-RPC client that lets a local worker call MASC
       tools without going through the HTTP server's auth
       machinery.
@@ -21,7 +21,7 @@
     [has_agent_name_field], [inject_default_agent_name],
     [extract_prompt_block], [masc_http_base_url],
     [request_id_matches], [normalize_mcp_body],
-    [extract_tool_text], [extract_jsonrpc_error],
+    [extract_tool_text], [extract_jsonrpc_error_detail],
     [post_json_via_eio], [call_jsonrpc],
     [tool_schema_of_name], [tool_defs_of_schemas],
     [followup_prompt], [split_top_level],
@@ -34,7 +34,7 @@
     and reaches a few additional helpers unqualified
     ({!list_masc_tools}, {!inject_default_agent_name},
     {!safe_text_for_followup}); those are pinned below at the
-    boundary the include cascade actually consumes. *)
+    boundary the include runtime actually consumes. *)
 
 (** {1 Worker run / meta types} *)
 
@@ -57,13 +57,12 @@ type run_result = {
   session_id : string;
   raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
   api_response : Agent_sdk.Types.api_response option;
-  proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
 }
 (** Summary of a finished worker run: aggregated text
     [output], the model id that handled the run,
     accumulated token / cost / tool-call counters, and the
-    optional OAS artifacts ([raw_trace_run], [api_response],
-    [proof]) attached when the worker ran through the OAS
+    optional OAS artifacts ([raw_trace_run], [api_response])
+    attached when the worker ran through the OAS
     SDK path.  Consumed by {!Worker_oas},
     {!Worker_runtime_helper_protocol}, and the run-result
     serializer. *)
@@ -90,14 +89,8 @@ type worker_container_meta = {
   effective_model : string;
   checkpoint_path : string;
   turn_log_path : string;
+  mcp_client_session_started_at : float option;
   last_run_at : float option;
-  disclosure_strategy : Keeper_disclosure_strategy.t option;
-      (** RFC-0084 host-config-cleanup-H — typed keeper disclosure
-          strategy (PR-13 surface).  [None] preserves today's
-          [Full_schema] behaviour; [Some s] is propagated through
-          [Worker_oas.build_agent ?disclosure_strategy] via the
-          PR-G OAS bridges.  JSON I/O round-trip is a deferred
-          follow-up cleanup. *)
 }
 (** Per-worker metadata persisted alongside the checkpoint
     file.  [version] is {!worker_container_version} at write
@@ -171,28 +164,6 @@ val call_masc_tool :
     transport / parse / RPC failure.  Re-raises
     [Eio.Cancel.Cancelled]. *)
 
-val join_worker :
-  sw:Eio.Switch.t ->
-  auth_token:string option ->
-  session_id:string ->
-  worker_name:string ->
-  (tool_exec_result, string) result
-(** Convenience wrapper around {!call_masc_tool} for the
-    [masc_join] tool.  Passes the canonical capability set
-    ([llama], [mcp-worker], [local-tool-loop]) so the room
-    routing knows this is a local worker, not a coordinating
-    keeper. *)
-
-val leave_worker :
-  sw:Eio.Switch.t ->
-  auth_token:string option ->
-  session_id:string ->
-  worker_name:string ->
-  (tool_exec_result, string) result
-(** Convenience wrapper around {!call_masc_tool} for the
-    [masc_leave] tool.  Pairs with {!join_worker} on worker
-    shutdown to retire the agent registration. *)
-
 (** {1 Default system prompt} *)
 
 val default_system_prompt :
@@ -205,7 +176,7 @@ val default_system_prompt :
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model
-    note, the assigned coord role) — both empty strings are
+    note, the assigned workspace role) — both empty strings are
     treated as missing. *)
 
 (** {1 Helpers reached through [include Worker_container_types]} *)
@@ -221,7 +192,7 @@ val list_masc_tools :
     [sw], [auth_token], and [session_id] are accepted for
     parity with {!call_masc_tool} but currently unused — the
     schema list is sourced directly from
-    [Agent_tool_surfaces.local_worker_tool_schemas].
+    [Keeper_tool_surfaces.local_worker_tool_schemas].
     [names] optionally restricts the set returned. *)
 
 val inject_default_agent_name :
@@ -241,6 +212,51 @@ val safe_text_for_followup : string -> string
     inclusion in a follow-up prompt.  Keeps the first 1200
     bytes after [String.trim] and appends ["...[truncated]"]
     when the input is longer.  Never raises. *)
+
+module For_testing : sig
+  val mcp_client_operation_duration_labels :
+    url:string ->
+    method_name:string ->
+    params:Yojson.Safe.t ->
+    ?error_type:string ->
+    ?rpc_response_status_code:string ->
+    unit ->
+    (string * string) list
+
+  val record_mcp_client_operation_duration :
+    url:string ->
+    method_name:string ->
+    params:Yojson.Safe.t ->
+    started_at:float ->
+    ?error_type:string ->
+    ?rpc_response_status_code:string ->
+    ?tool_result_is_error:bool ->
+    unit ->
+    unit
+
+  val mcp_client_session_duration_labels :
+    url:string ->
+    ?error_type:string ->
+    unit ->
+    (string * string) list
+
+  val record_mcp_client_session_duration :
+    url:string ->
+    started_at:float ->
+    ?error_type:string ->
+    unit ->
+    unit
+end
+
+val record_mcp_client_session_duration :
+  url:string ->
+  started_at:float ->
+  ?error_type:string ->
+  unit ->
+  unit
+(** Records [mcp.client.session.duration] for a bounded local-worker
+    MCP client session.  Labels follow the MCP semantic convention's
+    client session metric and intentionally omit [mcp.session.id]. *)
 
 val parse_text_tool_calls :
   string -> Agent_sdk.Types.content_block list
@@ -268,5 +284,5 @@ val worker_auth_token :
 (** Builds the canonical system prompt seeded into a freshly
     spawned local worker.  [role] and [selection_note] are
     optional contextual hints (the leader-selected model
-    note, the assigned coord role) — both empty strings are
+    note, the assigned workspace role) — both empty strings are
     treated as missing. *)

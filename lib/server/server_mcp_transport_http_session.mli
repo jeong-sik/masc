@@ -27,11 +27,24 @@ val is_valid_protocol_version : string -> bool
     per-session protocol version and tool profile.  All
     accessors below are thread-safe via internal CAS loops. *)
 
-val remember_protocol_version : string -> string -> unit
+val remember_protocol_version :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string -> string -> unit
 (** [remember_protocol_version session_id version] records the
     version when [is_valid_protocol_version version] is [true];
     silently no-ops on unknown versions (the upstream caller is
     expected to have validated first). *)
+
+val remember_protocol_version_if_initialize_succeeded :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
+  string ->
+  request_body:string ->
+  response_json:Yojson.Safe.t ->
+  unit
+(** [remember_protocol_version_if_initialize_succeeded session_id
+    ~request_body ~response_json] records initialize protocol/session
+    activity only when [response_json] is a successful JSON-RPC response.
+    Rejected initialize requests must not start session-duration state. *)
 
 val is_known_session : string -> bool
 (** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
@@ -42,11 +55,47 @@ val is_known_session : string -> bool
     completion. *)
 
 val remember_mcp_profile :
+  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string -> Server_mcp_transport_http_types.tool_profile -> unit
+(** [remember_mcp_profile session_id profile] records the transport
+    profile.  For sessions that have completed initialize, it also
+    refreshes activity/transport telemetry; uninitialized profile-only
+    ids do not start session-duration state. *)
 
 val forget_mcp_session : string -> unit
 (** Removes both the protocol-version and tool-profile entries
     for [session_id]. *)
+
+(** {1 Grace period}
+
+    Sessions whose SSE connection drops are kept for a configurable
+    grace period before reaping.  This prevents "Unknown Mcp-Session-Id"
+    errors when clients briefly disconnect and reconnect. *)
+
+val grace_period_seconds : float
+(** Seconds to keep a session after SSE disconnect.  Default 300 (5 min).
+    Configurable via [MASC_SESSION_SSE_GRACE_PERIOD_SEC] env var. *)
+
+(** {1 File persistence}
+
+    Session state (protocol version, profile, last-active timestamp)
+    is persisted to [\<base_path\>/.masc/mcp_transport_sessions.json].
+    On restart, [load_sessions_from_file] restores the state so the
+    grace period applies to recently-active sessions. *)
+
+val sessions_file_path : unit -> string
+(** Returns the path to the persistence file.  Exposed for testing. *)
+
+val save_sessions_to_file : unit -> unit
+(** Serialize current session state and write atomically to disk.
+    Called automatically by [reap_stale_sessions] after each cleanup.
+    Safe to call at any time — uses write-then-rename. *)
+
+val load_sessions_from_file : unit -> unit
+(** Load session state from disk into the in-memory registries.
+    Call once during server startup, before the MCP handler accepts
+    requests.  Errors (missing file, corrupt JSON) are silently
+    ignored — the server starts clean. *)
 
 val profile_label : Server_mcp_transport_http_types.tool_profile -> string
 (** Stable label for the MCP HTTP surface a session belongs to.
@@ -168,7 +217,7 @@ val default_base_path : unit -> string
 (** Resolves the launcher-guard-aware default base path.
     The server default starts from the deleted-cwd-safe current working
     directory and routes through
-    {!Coord_utils_backend_setup.resolve_server_default_base_path}.
+    {!Workspace_utils_backend_setup.resolve_server_default_base_path}.
 
     This intentionally avoids deriving the base path from [HOME]: a direct
     binary launch from a checkout should keep artifacts under the visible

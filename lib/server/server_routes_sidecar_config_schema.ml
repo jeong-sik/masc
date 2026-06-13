@@ -124,11 +124,11 @@ type declared_type =
 let parse_declared_type json : declared_type option =
   match json with
   | `Assoc _ ->
-    (match Yojson.Safe.Util.member "type" json with
-     | `String "string" -> Some `String
-     | `String "integer" -> Some `Integer
-     | `String "number" -> Some `Number
-     | `String "boolean" -> Some `Boolean
+    (match Json_util.assoc_member_opt "type" json with
+     | Some (`String "string") -> Some `String
+     | Some (`String "integer") -> Some `Integer
+     | Some (`String "number") -> Some `Number
+     | Some (`String "boolean") -> Some `Boolean
      | _ -> None)
   | _ -> None
 ;;
@@ -139,8 +139,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
   | Ok json_str ->
     (match Yojson.Safe.from_string json_str with
      | j ->
-       (match Yojson.Safe.Util.member "properties" j with
-        | `Assoc assoc ->
+       (match Json_util.assoc_member_opt "properties" j with
+        | Some (`Assoc assoc) ->
           List.filter_map
             (fun (k, v) -> Option.map (fun typ -> k, typ) (parse_declared_type v))
             assoc
@@ -153,9 +153,9 @@ let schema_field_types ?base_path id : (string * declared_type) list =
         counter + warn now distinguish "schema present but malformed"
         from "schema missing". [Eio.Cancel.Cancelled] is re-raised so
         cancellation semantics are preserved. Closed error_kind vocab
-        keeps Prometheus label cardinality bounded.
+        keeps Otel_metric_store label cardinality bounded.
         Same pattern as iter 28 (#15820, mcp-ws transport) and iter 29
-        (#15840, cascade_http_probe). *)
+        (#15840, runtime_http_probe). *)
      | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
      | exception Yojson.Json_error msg ->
        let preview_len = min 200 (String.length json_str) in
@@ -165,8 +165,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          id
          msg
          (String.sub json_str 0 preview_len);
-       Prometheus.inc_counter
-         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
          ~labels:[ "error_kind", "json_parse_error" ]
          ();
        []
@@ -178,8 +178,8 @@ let schema_field_types ?base_path id : (string * declared_type) list =
          id
          (Printexc.to_string exn)
          (String.sub json_str 0 preview_len);
-       Prometheus.inc_counter
-         Prometheus.metric_sidecar_schema_field_types_json_parse_failures
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_sidecar_schema_field_types_json_parse_failures
          ~labels:[ "error_kind", "other" ]
          ();
        [])

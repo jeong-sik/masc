@@ -28,8 +28,8 @@
 
 open Alcotest
 
-module D = Masc_mcp.Tool_inline_dispatch_extra
-module Prom = Masc_mcp.Prometheus
+module D = Masc.Mcp_tool_runtime_board
+module Metrics = Masc.Otel_metric_store
 
 (* --- helpers ----------------------------------------------------- *)
 
@@ -53,7 +53,7 @@ let meta_string_field name = function
   | _ -> None
 
 let counter_for ~tool ~field =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     "masc_board_actor_identity_spoof_total"
     ~labels:[ ("tool", tool); ("field", field) ]
     ()

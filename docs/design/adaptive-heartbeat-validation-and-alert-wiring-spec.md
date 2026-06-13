@@ -111,7 +111,7 @@ The following metrics must exist as machine-readable counters.
 Rules:
 
 - every safety counter must be queryable without log parsing
-- dashboard may summarize them, but Prometheus-style metric or equivalent numeric surface is the source of truth
+- dashboard may summarize them, but an OTel metric or equivalent numeric surface is the source of truth
 - any increment must annotate keeper name, state, and failure cohort in logs or structured event stream
 - injected validation runs must carry a machine-readable `planned_test=true` or equivalent annotation so planned suppression events do not increment `masc_keeper_unplanned_self_preservation_total`
 
@@ -125,7 +125,7 @@ These metrics are not required to stay zero, but they must exist for trend and r
 | `masc_keeper_presence_sync_duration_seconds` | p95 regression gate |
 | `masc_keeper_keepalive_cycle_duration_seconds` | p95 regression gate |
 | `masc_keeper_freshness_skip_total` | skip trend |
-| `masc_keeper_room_heartbeat_after_turn_total{result}` | domain separation audit |
+| `masc_keeper_workspace_heartbeat_after_turn_total{result}` | domain separation audit |
 | `masc_keeper_state_transition_total{from,to}` | state machine audit |
 | `masc_keeper_restart_total{failure_reason}` | crash pressure |
 | `masc_keeper_dead_tombstone_total` | exhausted keeper rate |
@@ -139,7 +139,7 @@ These metrics are not required to stay zero, but they must exist for trend and r
 | Harness | Current role | Required adaptive heartbeat assertions |
 |---|---|---|
 | `./scripts/harness_mcp_readpath_revalidation.sh` | MCP/dash cached read-path | required fields exist, cache stays fresh, transport-health remains queryable |
-| `./scripts/harness_keeper_continuity_validation.sh` | live keeper continuity proof | room presence continuity, restart ownership continuity, post-restart same-name recovery |
+| `./scripts/harness_keeper_continuity_validation.sh` | live keeper continuity proof | workspace presence continuity, restart ownership continuity, post-restart same-name recovery |
 | `./benchmarks/quick-bench.sh` | global latency | MCP/REST/SSE SLO guardrail |
 
 ### 5.2 Required Extensions
@@ -155,7 +155,7 @@ The current harnesses are necessary but not sufficient. Extend them as follows.
 
 `keeper_continuity_validation.sh`:
 
-- inject the specific scenario `turn succeeds but Room.heartbeat_in_room fails`, then assert freshness lease does not refresh
+- inject the specific scenario `turn succeeds but Workspace.heartbeat_in_workspace fails`, then assert freshness lease does not refresh
 - assert `Crashed` keeper is not relaunched by reconcile while registered
 - assert `Dead` keeper remains excluded from reconcile until TTL cleanup
 - assert TTL cleanup writes `meta.paused=true` before registry unregister; failed pause write must leave the keeper in `Dead`
@@ -170,7 +170,7 @@ Detailed script contract and scenario matrix are defined in `adaptive-heartbeat-
 
 This harness should inject or simulate:
 
-- repeated room heartbeat failures
+- repeated workspace heartbeat failures
 - restart-budget exhaustion
 - reconcile sweep while registered `Crashed`
 - self-preservation dominant cohort burst

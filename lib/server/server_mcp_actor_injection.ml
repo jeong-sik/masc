@@ -10,15 +10,16 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = fals
     ~agent_name body_str =
   try
     let json = Yojson.Safe.from_string body_str in
-    let open Yojson.Safe.Util in
-    let method_name = member "method" json |> to_string_option in
+    let method_name = Json_util.get_string json "method" in
     match method_name with
     | Some "tools/call" ->
-        let params = member "params" json in
-        let args = member "arguments" params in
+        let params = Json_util.assoc_member_opt "params" json
+          |> Option.value ~default:`Null in
+        let args = Json_util.assoc_member_opt "arguments" params
+          |> Option.value ~default:`Null in
         let existing_agent =
           Option.bind
-            (member "_agent_name" args |> to_string_option)
+            (Json_util.get_string args "_agent_name")
             (fun value ->
               let trimmed = String.trim value in
               if String.equal trimmed "" then
@@ -28,7 +29,7 @@ let inject_agent_name_into_body ?(rewrite_existing = false) ?(strip_token = fals
         in
         let existing_tool_agent_name =
           Option.bind
-            (member "agent_name" args |> to_string_option)
+            (Json_util.get_string args "agent_name")
             (fun value ->
               let trimmed = String.trim value in
               if String.equal trimmed "" then

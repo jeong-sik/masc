@@ -5,7 +5,7 @@ code_refs:
   - lib/sse.ml
   - lib/server/server_mcp_transport_ws.ml
   - lib/server/server_ws_standalone.ml
-  - lib/grpc/masc_grpc_service.ml
+  - lib/server/masc_grpc_service.ml
 ---
 
 # WS Slice-Indexed Fan-Out (RFC)
@@ -81,7 +81,7 @@ check.
   moving to parallel adds fiber setup cost that dominates for small
   fanouts.
 - Changing `Sse.subscribe_external` signature.  That module is
-  shared with gRPC (`lib/grpc/masc_grpc_service.ml:477`) and other
+  shared with gRPC (`lib/server/masc_grpc_service.ml:477`) and other
   non-dashboard subscribers.  Changing its contract ripples to code
   not covered by this migration.
 - Deleting the raw-SSE-forward path for unauthenticated sessions.
@@ -345,7 +345,7 @@ client-side migration to fully enumerate slice subscriptions.
 - `lib/sse.ml` — broadcast and external subscriber mechanism.
 - `lib/server/server_mcp_transport_ws.ml` — parse cache, bytes
   cache, subscribe/unsubscribe, send paths.
-- `lib/grpc/masc_grpc_service.ml` — the other external subscriber
+- `lib/server/masc_grpc_service.ml` — the other external subscriber
   (not affected by this RFC, but a shape reference for why the
   proposal stays WS-only).
 

@@ -14,6 +14,17 @@ let of_sandbox ~(sandbox : Keeper_sandbox.t) ~host_cwd
   | Keeper_sandbox.Docker ->
     docker ~host_cwd ~container_cwd:container_cwd_for_docker
 
+let profile_independent_cwd ~container_root ~host_cwd =
+  (* When Execute returns a container-side path for Docker keepers,
+     use it directly — the path is already correct in container terms
+     and doesn't need host-to-container conversion. *)
+  if String.length container_root = 0 then None
+  else if host_cwd = container_root then Some host_cwd
+  else
+    let prefix = container_root ^ "/" in
+    if String.starts_with ~prefix host_cwd then Some host_cwd
+    else None
+
 let keeper_visible = function
   | Local { abs } -> abs
   | Sandboxed { container_abs; _ } -> container_abs

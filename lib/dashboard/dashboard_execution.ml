@@ -2,23 +2,23 @@ include Dashboard_execution_helpers
 include Dashboard_execution_fixture
 include Dashboard_execution_builders
 
-let room_status_json (config : Coord.config) : Yojson.Safe.t =
-  let room_state_opt =
-    if Coord.is_initialized config then Some (Coord.read_state config) else None
+let workspace_status_json (config : Workspace.config) : Yojson.Safe.t =
+  let workspace_state_opt =
+    if Workspace.is_initialized config then Some (Workspace.read_state config) else None
   in
   let project =
-    match room_state_opt with
-    | Some room_state -> room_state.project
+    match workspace_state_opt with
+    | Some workspace_state -> workspace_state.project
     | None -> "default"
   in
   let paused =
-    match room_state_opt with
-    | Some room_state -> room_state.paused
+    match workspace_state_opt with
+    | Some workspace_state -> workspace_state.paused
     | None -> false
   in
   let tempo = Tempo.get_tempo config in
   `Assoc
-    [ "coordination_root", `String config.base_path
+    [ "workspace_root", `String config.base_path
     ; "workspace_path", `String config.workspace_path
     ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
     ; "cluster", `String (Env_config_core.cluster_name ())
@@ -30,28 +30,28 @@ let room_status_json (config : Coord.config) : Yojson.Safe.t =
 ;;
 
 let tasks_safe config =
-  if Coord.is_initialized config then Coord.get_tasks_safe config else []
+  if Workspace.is_initialized config then Workspace.get_tasks_safe config else []
 ;;
 
 let agents_safe config =
-  if Coord.is_initialized config then Coord.get_active_agents config else []
+  if Workspace.is_initialized config then Workspace.get_active_agents config else []
 ;;
 
 let messages_safe config =
-  if Coord.is_initialized config
-  then Coord.get_messages_raw config ~since_seq:0 ~limit:50
+  if Workspace.is_initialized config
+  then Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   else []
 ;;
 
 let assoc_upsert fields key value = (key, value) :: List.remove_assoc key fields
 
-let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
+let compact_keeper_trust_json ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   let runtime_trust =
     if Keeper_fd_pressure.active ()
     then Keeper_fd_pressure.degraded_trust_json ()
     else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
+  let member key = Option.value ~default:`Null (Json_util.assoc_member_opt key runtime_trust) in
   `Assoc
     [ "disposition", member "disposition"
     ; "disposition_reason", member "disposition_reason"
@@ -73,23 +73,23 @@ let reconcile_keeper_attention_fields_with_trust fields trust =
   | `Assoc _ ->
     let upsert key value fields = assoc_upsert fields key value in
     fields
-    |> upsert "disposition" (Yojson.Safe.Util.member "disposition" trust)
+    |> upsert "disposition" (Option.value ~default:`Null (Json_util.assoc_member_opt "disposition" trust))
     |> upsert
          "disposition_reason"
-         (Yojson.Safe.Util.member "disposition_reason" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "disposition_reason" trust))
     |> upsert
          "operator_disposition"
-         (Yojson.Safe.Util.member "operator_disposition" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition" trust))
     |> upsert
          "operator_disposition_reason"
-         (Yojson.Safe.Util.member "operator_disposition_reason" trust)
-    |> upsert "needs_attention" (Yojson.Safe.Util.member "needs_attention" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "operator_disposition_reason" trust))
+    |> upsert "needs_attention" (Option.value ~default:`Null (Json_util.assoc_member_opt "needs_attention" trust))
     |> upsert
          "attention_reason"
-         (Yojson.Safe.Util.member "attention_reason" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "attention_reason" trust))
     |> upsert
          "next_human_action"
-         (Yojson.Safe.Util.member "next_human_action" trust)
+         (Option.value ~default:`Null (Json_util.assoc_member_opt "next_human_action" trust))
   | _ -> fields
 ;;
 
@@ -136,8 +136,8 @@ let format_slow_render_timings (t : render_phase_timings_ms) =
 let render_phase_seconds ms = if ms <= 0.0 then 0.0 else ms /. 1000.0
 
 let observe_render_phase phase ms =
-  Prometheus.observe_histogram
-    Prometheus.metric_dashboard_execution_render_phase_sec
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_dashboard_execution_render_phase_sec
     ~labels:[ "phase", phase ]
     (render_phase_seconds ms)
 ;;
@@ -148,12 +148,12 @@ let dashboard_snapshot_latency_seconds_buckets =
 
 let observe_dashboard_snapshot_latency ms =
   let seconds = render_phase_seconds ms in
-  Prometheus.observe_histogram
-    Prometheus.metric_dashboard_snapshot_latency_seconds
+  Otel_metric_store.observe_histogram
+    Otel_metric_store.metric_dashboard_snapshot_latency_seconds
     seconds;
   let inc_bucket le =
-    Prometheus.inc_counter
-      Prometheus.metric_dashboard_snapshot_latency_seconds_bucket
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_dashboard_snapshot_latency_seconds_bucket
       ~labels:[ "le", le ]
       ()
   in
@@ -163,7 +163,7 @@ let observe_dashboard_snapshot_latency ms =
   inc_bucket "+Inf"
 ;;
 
-let dashboard_all_zero_labels = [ "keeper_name", "__dashboard__" ]
+let dashboard_all_zero_labels = [ "keeper", "__dashboard__" ]
 
 let render_sub_operation_timings_all_zero (t : render_phase_timings_ms) =
   t.n_keepers > 0
@@ -176,8 +176,8 @@ let render_sub_operation_timings_all_zero (t : render_phase_timings_ms) =
 
 let record_dashboard_all_zero_metric t =
   let value = if render_sub_operation_timings_all_zero t then 1.0 else 0.0 in
-  Prometheus.set_gauge
-    Prometheus.metric_dashboard_metric_all_zeros
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_dashboard_metric_all_zeros
     ~labels:dashboard_all_zero_labels
     value
 ;;
@@ -191,7 +191,7 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
   observe_render_phase "enrich" t.enrich_ms;
   (* Idle renders (n_keepers = 0) would otherwise inject a fake 0s sample
      that drags the per-keeper average toward zero and hides slow renders.
-     Observe once per keeper so Prometheus [sum / count] yields the actual
+     Observe once per keeper so Otel_metric_store [sum / count] yields the actual
      average per-keeper enrich time, weighted by fleet size, instead of
      averaging render-level means (a 1-keeper render and a 100-keeper
      render contributing equally). *)
@@ -206,9 +206,7 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
 ;;
 
 let assoc_member_if_object key json =
-  match Yojson.Safe.Util.member key json with
-  | `Assoc _ as value -> Some value
-  | _ -> None
+  Json_util.get_object json key
 ;;
 
 let existing_keeper_trust_json keeper_json =
@@ -223,8 +221,7 @@ let upsert_keeper_trust_fields fields trust =
   reconcile_keeper_attention_fields_with_trust fields trust
 ;;
 
-let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
-  let open Yojson.Safe.Util in
+let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yojson.Safe.t) =
   match keeper_json with
   | `Assoc fields ->
     (* The upstream operator snapshot already carries these for most keeper rows.
@@ -234,12 +231,12 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
     (match existing_diagnostic, existing_trust with
      | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
      | _ ->
-       (match member "name" keeper_json with
+       (match Option.value ~default:`Null (Json_util.assoc_member_opt "name" keeper_json) with
         | `String name ->
-          (match Keeper_types.read_meta_resolved config name with
+          (match Keeper_meta_store.read_meta_resolved config name with
            | Ok (Some (_resolved_name, meta)) ->
              let keepalive_running =
-               match member "keepalive_running" keeper_json with
+               match Option.value ~default:`Null (Json_util.assoc_member_opt "keepalive_running" keeper_json) with
                | `Bool value -> value
                | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
              in
@@ -250,7 +247,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
                    ~meta
-                   ~agent_status:(member "agent" keeper_json)
+                   ~agent_status:(Option.value ~default:`Null (Json_util.assoc_member_opt "agent" keeper_json))
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
@@ -295,11 +292,11 @@ let keeper_runtime_trust_json keeper =
 ;;
 
 let lowercase_json_string key json =
-  string_field_opt key json |> Option.map String.lowercase_ascii
+  Json_util.get_string json key |> Option.map String.lowercase_ascii
 ;;
 
 let terminal_reason_json trust = member_assoc "latest_terminal_reason" trust
-let terminal_reason_code trust = terminal_reason_json trust |> string_field_opt "code"
+let terminal_reason_code trust = terminal_reason_json trust |> (fun j -> Json_util.get_string j "code")
 
 let terminal_reason_severity trust =
   terminal_reason_json trust |> lowercase_json_string "severity"
@@ -307,7 +304,7 @@ let terminal_reason_severity trust =
 
 let terminal_reason_disposition trust =
   terminal_reason_json trust
-  |> string_field_opt "disposition"
+  |> (fun j -> Json_util.get_string j "disposition")
   |> Option.map Keeper_turn_disposition.of_wire
 ;;
 
@@ -346,7 +343,7 @@ let keeper_queue_severity keeper trust =
         | Some "alert" -> "bad"
         | Some ("blocked" | "pause") -> "warn"
         | _ ->
-          if Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+          if Option.is_some (Json_util.assoc_string_opt "runtime_blocker_class" keeper)
           then "bad"
           else "warn"))
 ;;
@@ -364,12 +361,12 @@ let first_text values =
 let keeper_queue_summary keeper trust =
   let terminal = terminal_reason_json trust in
   first_text
-    [ string_field_opt "attention_reason" trust
-    ; string_field_opt "summary" terminal
-    ; string_field_opt "runtime_blocker_summary" keeper
-    ; string_field_opt "operator_disposition_reason" trust
-    ; string_field_opt "disposition_reason" trust
-    ; string_field_opt "latest_next_action" trust
+    [ Json_util.assoc_string_opt "attention_reason" trust
+    ; Json_util.assoc_string_opt "summary" terminal
+    ; Json_util.assoc_string_opt "runtime_blocker_summary" keeper
+    ; Json_util.assoc_string_opt "operator_disposition_reason" trust
+    ; Json_util.assoc_string_opt "disposition_reason" trust
+    ; Json_util.assoc_string_opt "latest_next_action" trust
     ; Some "keeper needs operator attention"
     ]
   |> Option.value ~default:"keeper needs operator attention"
@@ -379,12 +376,12 @@ let keeper_queue_last_seen keeper trust =
   let latest_causal = member_assoc "latest_causal_event" trust in
   let last_seen_at =
     latest_iso_timestamp
-      [ string_field_opt "ts" latest_causal
-      ; string_field_opt "observed_at" latest_causal
-      ; string_field_opt "last_autonomous_action_at" keeper
-      ; string_field_opt "last_heartbeat" keeper
-      ; string_field_opt "updated_at" keeper
-      ; string_field_opt "created_at" keeper
+      [ Json_util.assoc_string_opt "ts" latest_causal
+      ; Json_util.assoc_string_opt "observed_at" latest_causal
+      ; Json_util.assoc_string_opt "last_autonomous_action_at" keeper
+      ; Json_util.assoc_string_opt "last_heartbeat" keeper
+      ; Json_util.assoc_string_opt "updated_at" keeper
+      ; Json_util.assoc_string_opt "created_at" keeper
       ]
   in
   last_seen_at, Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0
@@ -393,7 +390,7 @@ let keeper_queue_last_seen keeper trust =
 let build_keeper_execution_queue keepers =
   keepers
   |> List.filter_map (fun keeper ->
-    match string_field_opt "name" keeper with
+    match Json_util.assoc_string_opt "name" keeper with
     | None -> None
     | Some keeper_name ->
       let trust = keeper_runtime_trust_json keeper in
@@ -403,7 +400,7 @@ let build_keeper_execution_queue keepers =
         || terminal_reason_requires_attention trust
       in
       let runtime_blocked =
-        Option.is_some (string_field_opt "runtime_blocker_class" keeper)
+        Option.is_some (Json_util.assoc_string_opt "runtime_blocker_class" keeper)
       in
       if not (trust_needs_attention || runtime_blocked)
       then None
@@ -413,12 +410,12 @@ let build_keeper_execution_queue keepers =
         let last_seen_at, last_seen_ts = keeper_queue_last_seen keeper trust in
         let terminal_code = terminal_reason_code trust in
         let next_human_action =
-          match string_field_opt "next_human_action" trust with
+          match Json_util.assoc_string_opt "next_human_action" trust with
           | Some _ as value -> value
           | None ->
-            (match string_field_opt "latest_next_action" trust with
+            (match Json_util.assoc_string_opt "latest_next_action" trust with
              | Some _ as value -> value
-             | None -> terminal_reason_json trust |> string_field_opt "next_action")
+             | None -> terminal_reason_json trust |> Json_util.assoc_string_opt "next_action")
         in
         let intervene_handoff =
           handoff_json
@@ -453,10 +450,10 @@ let build_keeper_execution_queue keepers =
                 ; "target_id", `String keeper_name
                 ; "linked_session_id", `Null
                 ; "linked_operation_id", `Null
-                ; "last_seen_at", json_string_option last_seen_at
+                ; "last_seen_at", Json_util.string_opt_to_json last_seen_at
                 ; "attention_reason", member_assoc "attention_reason" trust
-                ; "next_human_action", json_string_option next_human_action
-                ; "terminal_reason_code", json_string_option terminal_code
+                ; "next_human_action", Json_util.string_opt_to_json next_human_action
+                ; "terminal_reason_code", Json_util.string_opt_to_json terminal_code
                 ; "runtime_trust", trust
                 ; "top_handoff", command_handoff
                 ; "intervene_handoff", intervene_handoff
@@ -476,12 +473,15 @@ let merge_execution_queue left right =
 
 let model_map_of_keeper_rows keepers =
   let model_map : (string, string) Hashtbl.t = Hashtbl.create 8 in
-  let open Yojson.Safe.Util in
   List.iter
     (function
       | `Assoc _ as keeper_json ->
-        (match member "name" keeper_json, member "active_model" keeper_json with
-         | `String _, `String _ | `String _, _ | _, `String _ | _, _ -> ())
+        (match Json_util.assoc_member_opt "name" keeper_json,
+               Json_util.assoc_member_opt "active_model" keeper_json with
+         | Some (`String _), Some (`String _)
+         | Some (`String _), _
+         | _, Some (`String _)
+         | _, _ -> ())
       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ())
     keepers;
   model_map
@@ -543,11 +543,8 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
     [ "name", `String agent.name
     ; "agent_type", `String agent.agent_type
     ; "status", `String (Masc_domain.string_of_agent_status agent.status)
-    ; ( "current_task"
-      , match agent.current_task with
-        | Some task -> `String task
-        | None -> `Null )
-    ; "joined_at", `String agent.joined_at
+    ; ( "current_task", Json_util.string_opt_to_json agent.current_task )
+    ; "session_bound_at", `String agent.session_bound_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
     ; "emoji", `String profile.emoji
@@ -578,7 +575,7 @@ let message_json (message : Masc_domain.message) =
 let render_timeout_s = Env_config_runtime.Dashboard.render_timeout_sec
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
-  let ctx : _ Operator_control.context =
+  let ctx : _ Tool_operator.context =
     { config
     ; agent_name = effective_actor
     ; sw
@@ -651,7 +648,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
         ~config
         ~actor:(Some effective_actor)
         (fun actor_name ->
-           Operator_control.snapshot_json
+           Dashboard_projection_cache.operator_snapshot_json
              ~actor:actor_name
              ~view:"summary"
              ~include_messages:false
@@ -726,7 +723,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let active_ops =
       List.filter
         (fun (op : operation_context) ->
-           let status = string_field_opt "status" op.json in
+           let status = Json_util.assoc_string_opt "status" op.json in
            status = Some "active" || status = Some "paused")
         operation_contexts
     in
@@ -736,11 +733,11 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
-      ; "status", room_status_json config
+      ; "status", workspace_status_json config
       ; ( "projection_diagnostics"
         , `Assoc
             [ "surface", `String "execution"
-            ; "coordination_root", `String config.base_path
+            ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "persistence_sanitized_count", `Int utf8_repair.repaired_reads
             ; "persistence_sanitized_bytes", `Int utf8_repair.repaired_bytes
@@ -845,6 +842,6 @@ let json ?actor ?fixture ?(light = true) ~config ~sw ~clock ~proc_mgr () =
          [ "generated_at", `String (Masc_domain.now_iso ())
          ; ( "error"
            , `String (Printf.sprintf "render timed out after %.0fs" render_timeout_s) )
-         ; "status", room_status_json config
+         ; "status", workspace_status_json config
          ])
 ;;

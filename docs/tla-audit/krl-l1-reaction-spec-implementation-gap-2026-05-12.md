@@ -17,7 +17,7 @@ KRL preamble lists five OCaml "mirror" entry points; **three of them do not exis
 | `lib/keeper/keeper_task_dispatch.ml` | ❌ MISSING | No file. |
 | `lib/keeper/keeper_board_observer.ml` | ❌ MISSING | No file. `board_cursor_*` *is* used by `lib/keeper/keeper_world_observation.ml` + defined in `lib/keeper/keeper_registry.{ml,mli}` — but as opaque state, not as the per-stimulus board-observer FSM the spec models. |
 
-Cross-checked with `rg` across `lib/`: **no module implements the KRL reaction/receipt FSM**. Of the five spec concepts, `goal_phase` (10 files under `lib/goal/`, `lib/coord_goals*`, `lib/dashboard/dashboard_goals.ml`, etc.) and `board_cursor` (3 files under `lib/keeper/`) appear as data-shape references in adjacent subsystems; `task_state`, `verifier_reaction`, `receipt_issued` are entirely absent. The reaction/receipt liveness FSM itself has no runtime — spec is design ground.
+Cross-checked with `rg` across `lib/`: **no module implements the KRL reaction/receipt FSM**. Of the five spec concepts, `goal_phase` (10 files under `lib/goal/`, `lib/workspace_goals*`, `lib/dashboard/dashboard_goals.ml`, etc.) and `board_cursor` (3 files under `lib/keeper/`) appear as data-shape references in adjacent subsystems; `task_state`, `verifier_reaction`, `receipt_issued` are entirely absent. The reaction/receipt liveness FSM itself has no runtime — spec is design ground.
 
 ## Comparison to iter 56 KAL audit
 

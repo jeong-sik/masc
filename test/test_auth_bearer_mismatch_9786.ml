@@ -4,8 +4,8 @@ module Types = Masc_domain
 
    #9786: agent A presents a token that resolves to credential
    owner B.  The Auth layer rejects with an [Unauthorized] error
-   but the failure was invisible to Prometheus — dashboards could
-   only see downstream cascades (masc_claim_next failures, keeper
+   but the failure was invisible to Otel_metric_store — dashboards could
+   only see downstream runtimes (keeper_task_claim failures, keeper
    degraded proactive state) with no upstream cause.
 
    This test pins the new
@@ -26,12 +26,12 @@ module Types = Masc_domain
         blame to the right agent pair.
 *)
 
-open Masc_mcp
-module Prom = Prometheus
+open Masc
+module Metrics = Otel_metric_store
 
 let mismatch_total ~expected ~actual =
-  Prom.metric_value_or_zero
-    Prom.metric_auth_bearer_token_mismatch
+  Metrics.metric_value_or_zero
+    Metrics.metric_auth_bearer_token_mismatch
     ~labels:[
       ("expected_agent", expected);
       ("actual_agent", actual);

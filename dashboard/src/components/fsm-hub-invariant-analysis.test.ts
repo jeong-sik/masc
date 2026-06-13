@@ -11,12 +11,12 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
     phase: 'running',
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -49,7 +49,7 @@ describe('invariantRows', () => {
     const rows = invariantRows(makeSnapshot({
       invariants: {
         phase_turn_alignment: false,
-        no_cascade_before_measurement: true,
+        no_runtime_before_measurement: true,
         compaction_atomicity: true,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
@@ -63,7 +63,7 @@ describe('invariantRows', () => {
     const rows = invariantRows(makeSnapshot())
     const labels = rows.map(r => r.label)
     expect(labels).toContain('단계 ⇔ 턴')
-    expect(labels).toContain('Cascade 순서')
+    expect(labels).toContain('Runtime 순서')
     expect(labels).toContain('압축 원자성')
     expect(labels).toContain('이벤트 우선순위')
     expect(labels).toContain('Phase 유도 일치')
@@ -82,7 +82,7 @@ describe('invariantRows', () => {
       phase: 'running',
       invariants: {
         phase_turn_alignment: true,
-        no_cascade_before_measurement: true,
+        no_runtime_before_measurement: true,
         compaction_atomicity: false,
         event_priority_monotone: true,
         phase_derivation_agreement: true,
@@ -114,7 +114,7 @@ describe('deriveOperationalInsight', () => {
       makeSnapshot({
         invariants: {
           phase_turn_alignment: false,
-          no_cascade_before_measurement: true,
+          no_runtime_before_measurement: true,
           compaction_atomicity: true,
           event_priority_monotone: true,
           phase_derivation_agreement: true,
@@ -127,17 +127,17 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('Spec drift')
   })
 
-  it('reports error when Failing and cascade exhausted', () => {
+  it('reports error when Failing and runtime exhausted', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
         phase: 'failing',
-        cascade: { state: 'exhausted' },
+        runtime: { state: 'exhausted' },
       }),
       noObservations,
       now,
     )
     expect(insight.tone).toBe('error')
-    expect(insight.headline).toContain('cascade exhaustion')
+    expect(insight.headline).toContain('runtime exhaustion')
   })
 
   it('reports warn when gate_rejected', () => {
@@ -249,7 +249,7 @@ describe('deriveOperationalInsight', () => {
           turn_id: 1,
           ended_at: now - 60,
           decision_stage: 'undecided',
-          cascade_state: 'done',
+          runtime_state: 'done',
           selected_model: null,
         },
       }),
@@ -257,7 +257,7 @@ describe('deriveOperationalInsight', () => {
       now,
     )
     expect(insight.tone).toBe('ok')
-    expect(insight.headline).toContain('Idle')
+    expect(insight.headline).toContain('대기')
   })
 
   it('reports ok when not live without last_outcome', () => {
@@ -267,13 +267,13 @@ describe('deriveOperationalInsight', () => {
       now,
     )
     expect(insight.tone).toBe('ok')
-    expect(insight.detail).toContain('not captured')
+    expect(insight.detail).toContain('아직 완료된 turn')
   })
 
-  it('reports info when cascade is selecting', () => {
+  it('reports info when runtime is selecting', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        cascade: { state: 'selecting' },
+        runtime: { state: 'selecting' },
       }),
       noObservations,
       now,
@@ -282,10 +282,10 @@ describe('deriveOperationalInsight', () => {
     expect(insight.headline).toContain('Provider')
   })
 
-  it('reports info when cascade is trying', () => {
+  it('reports info when runtime is trying', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({
-        cascade: { state: 'trying' },
+        runtime: { state: 'trying' },
       }),
       noObservations,
       now,
@@ -299,7 +299,7 @@ describe('deriveOperationalInsight', () => {
       makeSnapshot({
         is_live: true,
         turn_phase: 'executing',
-        cascade: { state: 'done' },
+        runtime: { state: 'done' },
       }),
       noObservations,
       now,
@@ -358,12 +358,12 @@ describe('deriveOperationalInsight', () => {
       noObservations,
       now,
     )
-    expect(insight.nextStep).toContain('first live turn')
+    expect(insight.nextStep).toContain('첫 live turn')
   })
 
   it('gives correct nextStep for Failing+exhausted', () => {
     const insight = deriveOperationalInsight(
-      makeSnapshot({ phase: 'failing', cascade: { state: 'exhausted' } }),
+      makeSnapshot({ phase: 'failing', runtime: { state: 'exhausted' } }),
       noObservations,
       now,
     )
@@ -379,7 +379,7 @@ describe('deriveOperationalInsight', () => {
           turn_id: 1,
           ended_at: now - 60,
           decision_stage: 'undecided',
-          cascade_state: 'done',
+          runtime_state: 'done',
           selected_model: null,
         },
       }),
@@ -424,7 +424,7 @@ describe('deriveOperationalInsight', () => {
       noObservations,
       now,
     )
-    expect(insight.nextStep).toContain('cascade routing')
+    expect(insight.nextStep).toContain('runtime routing')
   })
 
   it('gives correct nextStep for exhausted turn', () => {

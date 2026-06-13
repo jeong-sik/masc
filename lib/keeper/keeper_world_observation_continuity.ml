@@ -1,6 +1,8 @@
 (** See [keeper_world_observation_continuity.mli] for the contract. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_context_runtime
 
@@ -11,7 +13,7 @@ open Keeper_context_runtime
    any signal, and the catch-all [| _ -> ] silently swallowed every
    non-Cancelled exception. *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ContinuitySummarySource)
     ~help:
       "Total [read_continuity_summary] returns, classified by label \
@@ -25,7 +27,7 @@ let () =
 
 let record_continuity_summary_source ~(keeper_name : string)
     ~(source : Keeper_continuity_summary_source.t) =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ContinuitySummarySource)
     ~labels:
       [ ("source", Keeper_continuity_summary_source.to_label source)
@@ -34,7 +36,7 @@ let record_continuity_summary_source ~(keeper_name : string)
     ()
 
 (** Read continuity summary from checkpoint messages or meta fallback. *)
-let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : string =
+let read_continuity_summary ~(config : Workspace.config) ~(meta : keeper_meta) : string =
   let render_bounded_snapshot snapshot =
     keeper_state_snapshot_to_summary_text snapshot
     |> Keeper_memory_policy.cap_continuity_summary_text
@@ -53,12 +55,9 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
         ~source:Keeper_continuity_summary_source.Progress_snapshot;
       render_bounded_snapshot snapshot
     | None ->
-      let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
         let resolution =
-          Keeper_context_runtime.resolve_max_context_resolution
-            ~requested_override:meta.max_context_override
-            cascade_models
+          Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
         in
         resolution.effective_budget
       in
@@ -111,11 +110,10 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Keeper.warn
-      "keeper:%s read_continuity_summary caught exception in fallback \
+    Log.Keeper.warn ~keeper_name:meta.name
+      "read_continuity_summary caught exception in fallback \
        chain (%s) -- using meta_fallback; investigate progress \
        snapshot or checkpoint store"
-      meta.name
       (Printexc.to_string exn);
     meta_fallback ~source:Keeper_continuity_summary_source.Meta_fallback_exception
 ;;

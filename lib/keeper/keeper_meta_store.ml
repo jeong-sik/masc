@@ -4,11 +4,12 @@
     their public API while durable meta storage is separated from the
     compatibility facade. *)
 
+
 open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
-let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
+let runtime_meta_write_sync_hook : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) ref =
   ref (fun _ _ -> ())
 ;;
 
@@ -16,19 +17,18 @@ let register_runtime_meta_write_sync f = runtime_meta_write_sync_hook := f
 
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
-let read_meta_file_path path : (keeper_meta option, string) result =
+let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
   then Ok None
   else (
     match Safe_ops.read_json_file_safe path with
     | Error e -> Error e
     | Ok json ->
-      let json, _scrubbed = scrub_persisted_keeper_meta_json ~path json in
       warn_unknown_keeper_meta_keys ~path json;
       (match meta_of_json json with
        | Ok meta -> Ok (Some meta)
        | Error e ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
@@ -61,7 +61,7 @@ let persisted_keeper_names config =
   let dir = keeper_dir config in
   match Safe_ops.list_dir_safe dir with
   | Error e ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
@@ -118,7 +118,7 @@ let keepalive_keeper_names config =
          treat a corrupt meta file as if the keeper was deleted,
          hiding the operational issue. Now logs and excludes so the
          degraded state is operator-visible. *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "keepalive_read")]
         ();
@@ -150,7 +150,7 @@ let persistent_agent_names config =
          Error was silently collapsed into None. Operator can't
          distinguish "keeper intentionally not persistent" from
          "meta file is corrupt and we couldn't read it". *)
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "persistent_read")]
         ();
@@ -161,7 +161,7 @@ let persistent_agent_names config =
       None)
 ;;
 
-let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
+let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
   let requested_name = String.trim name in
   if requested_name = ""
   then Ok None
@@ -170,7 +170,7 @@ let read_meta_resolved config name : ((string * keeper_meta) option, string) res
     |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
 
-let read_meta config name : (keeper_meta option, string) result =
+let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =
   let requested_name = String.trim name in
   let path = keeper_meta_path config requested_name in
   if keeper_debug
@@ -186,11 +186,30 @@ let read_meta config name : (keeper_meta option, string) result =
   | Error _ as err -> err
 ;;
 
+let read_effective_meta_resolved config name
+    : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
+  match read_meta_resolved config name with
+  | Error _ as err -> err
+  | Ok None -> Ok None
+  | Ok (Some (resolved_name, meta)) -> (
+      match Keeper_meta_contract.effective_meta_result meta with
+      | Ok meta -> Ok (Some (resolved_name, meta))
+      | Error msg -> Error msg)
+;;
+
+let read_effective_meta config name
+    : (Keeper_meta_contract.keeper_meta option, string) result =
+  match read_effective_meta_resolved config name with
+  | Ok (Some (_resolved_name, meta)) -> Ok (Some meta)
+  | Ok None -> Ok None
+  | Error _ as err -> err
+;;
+
 (** Read keeper meta only if the file's mtime has changed since [last_mtime].
     Returns [Some (meta, new_mtime)] when the file changed, [None] when
     unchanged. Avoids parsing JSON on every heartbeat cycle when no
     operator has modified the meta file. *)
-let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * float) option =
+let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contract.keeper_meta * float) option =
   let requested_name = String.trim name in
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
@@ -206,7 +225,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
            (* Issue #8377: was [_ -> None] which silently treated a
               read/parse failure as "no change". Now logs so an
               operator can correlate stale UI with bad meta JSON. *)
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MetaReadFailures)
              ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
              ();
@@ -219,18 +238,6 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
       | _ -> None)
   in
   read_candidate requested_name
-;;
-
-let current_utc_timestamp () =
-  let t = Unix.gmtime (Unix.gettimeofday ()) in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (t.tm_year + 1900)
-    (t.tm_mon + 1)
-    t.tm_mday
-    t.tm_hour
-    t.tm_min
-    t.tm_sec
 ;;
 
 let is_missing_progress_file_error exn =
@@ -246,7 +253,7 @@ let refresh_progress_updated_line config name =
   let progress_path = Keeper_types_support.keeper_progress_path config name in
   if Fs_compat.file_exists progress_path then try
     let content = Fs_compat.load_file progress_path in
-    let now_str = current_utc_timestamp () in
+    let now_str = Masc_domain.now_iso () in
     let updated =
       String.split_on_char '\n' content
       |> List.map (fun line ->
@@ -260,13 +267,12 @@ let refresh_progress_updated_line config name =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn when is_missing_progress_file_error exn -> ()
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ProgressUpdatedLineFailures)
       ~labels:[("keeper", name)]
       ();
-    Log.Keeper.warn
-      "keeper:%s progress Updated line refresh failed for %s: %s"
-      name
+    Log.Keeper.warn ~keeper_name:name
+      "progress Updated line refresh failed for %s: %s"
       progress_path
       (Printexc.to_string exn)
 ;;
@@ -281,7 +287,7 @@ let persist_meta config path persisted =
   | Error msg -> Error (Printf.sprintf "failed to write meta %s: %s" path msg)
 ;;
 
-let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
+let write_meta ?(force = false) config (m : Keeper_meta_contract.keeper_meta) : (unit, string) result =
   let path = keeper_meta_path config m.name in
   if force
   then (
@@ -320,17 +326,16 @@ let is_version_conflict_error msg =
 
 (* #9769 root fix: CAS retry with explicit field ownership. The
    turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
-   so its retry does not clobber heartbeat-owned fields ([joined_room_ids],
-   [last_seen_seq_by_room]). *)
+   now only carries the disk meta_version forward. *)
 let write_meta_with_merge
       ?(max_retries = 3)
-      ~(merge : latest:keeper_meta -> caller:keeper_meta -> keeper_meta)
+      ~(merge : latest:Keeper_meta_contract.keeper_meta -> caller:Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta)
       config
-      (m : keeper_meta)
+      (m : Keeper_meta_contract.keeper_meta)
   : (unit, string) result
   =
   let path = keeper_meta_path config m.name in
-  let rec attempt n (caller : keeper_meta) =
+  let rec attempt n (caller : Keeper_meta_contract.keeper_meta) =
     match write_meta config caller with
     | Ok () -> Ok ()
     | Error msg when n >= max_retries -> Error msg
@@ -338,9 +343,9 @@ let write_meta_with_merge
     | Error _ ->
       (match read_meta_file_path path with
        | Ok (Some latest) ->
-         Prometheus.inc_counter
-           Prometheus.metric_write_meta_cas_retry_total
-           ~labels:[("keeper_name", caller.name)]
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_write_meta_cas_retry_total
+           ~labels:[("keeper", caller.name)]
            ();
          Log.Keeper.info
            "write_meta CAS retry %d/%d for %s (caller had %d, disk %d; field-level merge)"

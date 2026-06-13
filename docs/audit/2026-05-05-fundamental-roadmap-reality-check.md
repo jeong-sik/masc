@@ -14,11 +14,11 @@ This document exists so the next agent (or human) does not re-execute a 26-week 
 | File | Roadmap claim | Actual (HEAD `5806519c0b`) | Status |
 |---|---|---|---|
 | `lib/config/env_config_keeper.ml` | 2,278 lines, "117 env var, 6 domains, CRITICAL" | **949 lines** | ❌ **STALE** — 58% reduction already landed |
-| `lib/keeper/keeper_unified_turn.ml` | "20+ gate cascade, all silent skip" | 2,289 lines, **gates record FSM transitions + Prometheus metrics** (see §2) | ❌ **OUTDATED PREMISE** |
+| `lib/keeper/keeper_unified_turn.ml` | "20+ gate runtime, all silent skip" | 2,289 lines, **gates record FSM transitions + Otel_metric_store metrics** (see §2) | ❌ **OUTDATED PREMISE** |
 | `lib/keeper/keeper_turn.ml` | "500+ 줄, Godfile" | 615 lines | ✅ confirmed in-range |
 | `lib/keeper/keeper_prompt.ml` | "수백 줄, 5+ templates" | 244 lines | ⚠️ smaller than implied; ROI of externalization is low |
-| `lib/cascade/cascade_catalog_runtime.ml` | 34KB, hardcoded tiers/models/providers | 972 lines (~38KB) | ✅ size-confirmed; content claim §3 needs separate check |
-| `lib/cascade/capabilities.ml` | "40+ model prefix-match cases hardcoded" | **File does not exist on `main`** | ❌ **STALE** — file is gone; **but its content migrated** (see §8 gap #6: `lib/provider_adapter.ml:365-405` holds 9 model literals — gpt-5.x/provider-f-2.5 list) |
+| `lib/runtime/runtime_catalog_runtime.ml` | 34KB, hardcoded tiers/models/providers | 972 lines (~38KB) | ✅ size-confirmed; content claim §3 needs separate check |
+| `lib/runtime/capabilities.ml` | "40+ model prefix-match cases hardcoded" | **File does not exist on `main`** | ❌ **STALE** — file is gone; **but its content migrated** (see §8 gap #6: `lib/provider_adapter.ml:365-405` holds 9 model literals — gpt-5.x/provider-f-2.5 list) |
 | `oas/lib/llm_provider/backend_openai.ml` | "48KB monolith, 10+ providers" | 1,550 lines, dispatches Provider-D/Provider-A/Provider-F/Ollama/Provider-K (5 providers, not 10+) | ⚠️ partially confirmed |
 | `oas/lib/llm_provider/backend_provider-a.ml` | "doesn't exist yet" implied | **210 lines, already separate file** | ❌ **STALE** — split already partially done |
 | `oas/lib/llm_provider/backend_provider-f.ml` | implied non-existent | **363 lines** | ❌ **STALE** |
@@ -41,7 +41,7 @@ Direct read of `lib/keeper/keeper_unified_turn.ml` (2,289 lines on HEAD `5806519
 |---|---|
 | Pre-dispatch terminal observation is recorded (8 sites) | `lib/keeper/keeper_unified_turn.ml:60,159,188,324,419,468,...` |
 | Phase gating transitions FSM to `Done` | `lib/keeper/keeper_unified_turn.ml:203,2279` |
-| Ollama saturation increments Prometheus counter | `lib/keeper/keeper_unified_turn.ml:344` (`Prometheus.metric_keeper_ollama_saturation_skip`) |
+| Ollama saturation increments Otel_metric_store counter | `lib/keeper/keeper_unified_turn.ml:344` (`Otel_metric_store.metric_keeper_ollama_saturation_skip`) |
 
 **Conclusion**: the "silent skip → returns `Ok meta` with no logic" pattern the roadmap targets does not match the current file. Each of the gates the roadmap names already records observations and transitions FSMs. Whether the *logic* inside each gate is correct is a separate question — but the framing "silent" is wrong.
 
@@ -62,7 +62,7 @@ The roadmap cites 7 PRs. Status as of 2026-05-05 (fetched via `gh pr view <N> --
 | #12971 | fix: replace fake arithmetic with Beta distribution in meta cognition | **MERGED** | 2026-05-05 |
 | #12986 | chore(dashboard): remove fabricated telemetry placeholders | **MERGED** | 2026-05-05 |
 | #12988 | chore(task_dispatch): convert backend_state ref to Atomic.t | **OPEN** | — |
-| #12990 | refactor(cascade): externalize scoring magic numbers | **MERGED** | 2026-05-05 |
+| #12990 | refactor(runtime): externalize scoring magic numbers | **MERGED** | 2026-05-05 |
 | #12992 | fix(test): unblock main build (thompson_confidence + Feature_flag_registry) | **MERGED** | 2026-05-05 |
 
 **6 of 7 already merged.** The roadmap's Phase 1-4 work is partially done — re-applying its prescriptions wholesale would create regressions.
@@ -78,8 +78,8 @@ The roadmap proposes new architecture without acknowledging RFCs already drafted
 | `RFC-0008` | CredentialProvider trait | Phase 2-2 (Provider backend separation) |
 | `RFC-0019` | Keeper credential unification | Phase 2-2 |
 | `RFC-0020` | Keeper event queue layer separation | Phase 3-2 (Event-driven Queue) |
-| `RFC-0022` | Cascade attempt liveness contract | Phase 1-1 (Livelock FSM) |
-| `RFC-0024` | Ollama cascade integration | Phase 1-1 (Ollama gate) |
+| `RFC-0022` | Runtime attempt liveness contract | Phase 1-1 (Livelock FSM) |
+| `RFC-0024` | Ollama runtime integration | Phase 1-1 (Ollama gate) |
 | `RFC-0026` | Work-conserving keeper admission | Phase 1-2 (Admission queue) |
 
 `docs/rfc/` lists 22 active RFCs (0001–0026 with gaps). Any new design doc must cross-reference these — `~/me/scripts/pr-rfc-check.sh` enforces this for PRs.
@@ -93,9 +93,8 @@ The roadmap proposes 5 *new* specs (`GatePipeline`, `LivelockFSM`, `LockFreeHold
 ```
 specs/auth/AuthIdentityFSM.tla
 specs/boundary/AuditLog.tla
-specs/boundary/CascadeKeeperRecovery.tla         ← partial overlap with Recovery.tla proposal
-specs/boundary/CascadeStrategy.tla
-specs/boundary/KeeperEmptyToolUniverse.tla
+specs/boundary/RuntimeKeeperRecovery.tla         ← partial overlap with Recovery.tla proposal
+specs/boundary/RuntimeStrategy.tla
 specs/boundary/ToolCallContract_TTrace_1776849071.tla
 specs/checkpoint-trim/CheckpointTrim.tla
 specs/closure/ContractClosure.tla
@@ -103,7 +102,7 @@ specs/task-lifecycle/TaskLifecycle.tla
 docs/MASC_A2A.tla
 ```
 
-`KeeperCompositeLifecycle.tla` (mentioned in `~/.../memory/MEMORY.md`, 449 LOC) acts as observer over 5 sub-FSMs; this means the roadmap's "GatePipeline" / "LivelockFSM" / "Recovery" should likely *extend* `KeeperCompositeLifecycle.tla` and `CascadeKeeperRecovery.tla` rather than create from scratch.
+`KeeperCompositeLifecycle.tla` (mentioned in `~/.../memory/MEMORY.md`, 449 LOC) acts as observer over 5 sub-FSMs; this means the roadmap's "GatePipeline" / "LivelockFSM" / "Recovery" should likely *extend* `KeeperCompositeLifecycle.tla` and `RuntimeKeeperRecovery.tla` rather than create from scratch.
 
 ---
 
@@ -111,11 +110,10 @@ docs/MASC_A2A.tla
 
 `.github/workflows/`:
 ```
-approve-agent-pr.yml      ci-cancel-closed-pr.yml
-ci.yml                    dashboard-lighthouse.yml
-dashboard-ws-load.yml     deploy-railway.yml
-main-nightly-health.yml   odoc.yml
-perf-baseline.yml         pr-automation.yml
+ci-cancel-closed-pr.yml   ci.yml
+dashboard-lighthouse.yml  dashboard-ws-load.yml
+deploy-railway.yml        main-nightly-health.yml
+odoc.yml                  perf-baseline.yml
 ```
 
 **No `fundamental-check.yml`-style guard** for: model-name hardcoding regression, `Math.random` in source, oversized files, new `Mutex` introductions without RFC. Sprint 0 closes this gap.
@@ -124,7 +122,7 @@ perf-baseline.yml         pr-automation.yml
 
 ## 7. Concurrency primitive distribution
 
-Current count over `lib/keeper/` + `lib/cascade/`:
+Current count over `lib/keeper/` + `lib/runtime/`:
 
 | Pattern | Files containing it |
 |---|---|
@@ -144,7 +142,7 @@ Despite §1-§4 staleness, these claims survived verification and are real engin
 | 1 | **`lib/cancellation.ml` does not call `Eio.Cancel.cancel`** | line 135 `Atomic.set t.cancelled true;` is the only termination signal. Fibers continue on cooperatively cancellable points only. |
 | 2 | **`lib/resilience/recovery.ml` Strategy GADT defined, executed in 1 site** | line 26 `type _ strategy =`, line 60 `strategy_to_tla_symbol`. Only `lib/resilience/resilience_runtime.ml` consumes it. `keeper_turn` paths bypass it. |
 | 3 | **`oas/lib/llm_provider/backend_openai.ml` couples 5 providers in dispatch** | 1,550 lines; routes to Provider-A/Provider-F/Ollama/Provider-K despite separate `backend_*.ml` files (210/363/641/452 lines) existing. No `backend.mli` signature unifies them. No `backend_router.ml`. |
-| 4 | **Mutex/Atomic ratio 54:31** in keeper+cascade hot paths | counted above. CAS-friendly cases (read-heavy, short critical sections) remain. |
+| 4 | **Mutex/Atomic ratio 54:31** in keeper+runtime hot paths | counted above. CAS-friendly cases (read-heavy, short critical sections) remain. |
 | 5 | **`fundamental-check` CI gate absent** | listed `.github/workflows/*.yml` does not include hardcoding/silent-failure/Godfile-size regression. |
 | 6 | **`lib/provider_adapter.ml:365-405` model literal list** | discovered when the Sprint-0 lint ran on its own author worktree: 9 quoted model strings (`"gpt-5.2"`..`"gpt-5.5"`, `"provider-f-2.5-flash"`..`"provider-f-2.5-pro"`) sit in a 1,623-line file. The lost `capabilities.ml` content migrated here. Grandfathered in `scripts/lint/no-roadmap-stale-hardcoding.allowlist` for now; cleanup queued in Sprint 2/3 (backend dispatch separation + Catalog routing). |
 
@@ -158,7 +156,7 @@ The plan **deliberately does not pursue** these roadmap items:
 
 - **Phase 5-1 `env_config_keeper.ml` decomposition (6 weeks)** — already 949 lines (down from claimed 2,278); ROI is low.
 - **Phase 2-5 `keeper_prompt.ml` external templates** — 244 lines; template-engine infrastructure exceeds value.
-- **Phase 3-3 Fair Scheduler (Token Bucket + DRR)** — current evidence (memory `feedback_semaphore_tier_is_architectural_anti_pattern.md`, 2026-05-05) recommends *multi-cascade fanout / deadline scheduling / per-provider token bucket*, not weighted-DRR. Different shape.
+- **Phase 3-3 Fair Scheduler (Token Bucket + DRR)** — current evidence (memory `feedback_semaphore_tier_is_architectural_anti_pattern.md`, 2026-05-05) recommends *multi-runtime fanout / deadline scheduling / per-provider token bucket*, not weighted-DRR. Different shape.
 - **Phase 1-1 Livelock FSM new spec** — RFC-0022 already drafted; should extend, not replace.
 - **Phase 4-1 Math.random removal in `cb-shared.jsx` / `StatusTray.jsx`** — PR #12986 already removed fabricated telemetry placeholders. Remaining instances need a fresh sweep, not the roadmap's prescribed code.
 

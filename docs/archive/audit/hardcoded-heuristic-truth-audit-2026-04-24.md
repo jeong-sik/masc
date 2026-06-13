@@ -1,6 +1,6 @@
 # Hardcoded / Heuristic Truth Audit - 2026-04-24
 
-Scope: active `masc-mcp` source, tests, scripts, and CI surfaces. The goal is to
+Scope: active `masc` source, tests, scripts, and CI surfaces. The goal is to
 separate confirmed semantic debt from broad grep noise, then remove the most
 dangerous hardcoded boundary.
 
@@ -21,13 +21,13 @@ avoid reintroducing the same stringly-typed or advisory truth paths.
 
 `lib/keeper/keeper_tool_registry.ml` used to decide whether a mutating tool
 could keep the same turn open by matching concrete tool names. That was a real
-drift risk: coordination aliases and keeper aliases could diverge without
+drift risk: workspace collaboration aliases and keeper aliases could diverge without
 compiler help.
 
 This branch moves the decision to typed `Tool_catalog.effect_domain` metadata:
 
 - `Read_only`
-- `Masc_coordination`
+- `Masc_workspace collaboration`
 - `Playground_write`
 - `Host_repo_write`
 

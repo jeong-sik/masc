@@ -132,32 +132,20 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
     ("task_title", `String task_title);
     ("request_kind", `String request_kind);
     ("request_summary", `String request_summary);
-    ( "next_action",
-      match next_action with
-      | Some action -> `String action
-      | None -> `Null );
+    ( "next_action", Json_util.string_opt_to_json next_action );
     (* Keeper name: file-based storage has no dedicated keeper field,
        but the verifier is a keeper when assigned. Surface None when
        unassigned rather than inventing a value. *)
-    ("keeper",
-     match req.verifier with
-     | Some v -> `String v
-     | None -> `Null);
+    ("keeper", Json_util.string_opt_to_json req.verifier);
     ("status", `String status);
-    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
+    ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
     ("submitted_by", `String req.worker);
-    ("approved_by",
-     match approved_by with
-     | Some v -> `String v
-     | None -> `Null);
+    ("approved_by", Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      `List (List.map (fun s -> `String s) contract));
     ("required_evidence",
      `List (List.map (fun s -> `String s) evidence));
-    ("verdict",
-     match verdict_opt with
-     | Some v -> `String v
-     | None -> `Null);
+    ("verdict", Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);
   ]
 
@@ -198,15 +186,8 @@ let sort_desc (requests : V.verification_request list)
   List.sort (fun (a : V.verification_request) b ->
     compare b.V.created_at a.V.created_at) requests
 
-let take n lst =
-  let rec aux acc n = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> aux (x :: acc) (n - 1) rest
-  in
-  aux [] n lst
+let take = List.take
 
-let now_iso () = Masc_domain.now_iso ()
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
 (* Compute the request-listing projection from an already-loaded list.
@@ -217,7 +198,7 @@ let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
   let sorted = sort_desc filtered in
   let trimmed = take limit sorted in
   `Assoc
-    ([ ("updated_at", `String (now_iso ()))
+    ([ ("updated_at", `String (Masc_domain.now_iso ()))
      ; ("total", `Int (List.length filtered))
      ; ("requests", `List (List.map request_to_json trimmed))
      ]
@@ -250,12 +231,9 @@ let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
     ("request_id", `String req.id);
     ("task_id", `String req.task_id);
     ("task_title", `String task_title);
-    ("keeper",
-     match approved_by with
-     | Some v -> `String v
-     | None -> `Null);
+    ("keeper", Json_util.string_opt_to_json approved_by);
     ("verdict_reason", `String verdict_reason);
-    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
+    ("created_at", `String (Masc_domain.iso8601_of_unix_seconds req.created_at));
   ]
 
 let is_rejected (req : V.verification_request) : bool =
@@ -290,7 +268,7 @@ let summary_json_of_requests ~recent all : Yojson.Safe.t =
     |> List.map rejection_row_json
   in
   `Assoc
-    ([ ("updated_at", `String (now_iso ()))
+    ([ ("updated_at", `String (Masc_domain.now_iso ()))
      ; ("total", `Int total)
      ; ( "by_status"
        , `Assoc

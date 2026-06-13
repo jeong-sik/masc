@@ -4,7 +4,7 @@
 
 open Alcotest
 
-module S = Masc_mcp.Server_state_product
+module S = Masc.Server_state_product
 open S.Lifecycle
 open S.Backend
 open S.Lazy_task_queue

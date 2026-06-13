@@ -20,7 +20,8 @@ type scope = {
   category : category;
 }
 
-val scope_of_task : default_repo:string -> Masc_domain.task -> scope
+val scope_of_task :
+  ?task_goal_index:(string, string list) Hashtbl.t -> default_repo:string -> Masc_domain.task -> scope
 
 type caps = {
   max_global : int option;
@@ -37,8 +38,10 @@ type active_item = {
 }
 
 val task_is_active_wip : Masc_domain.task -> bool
-val active_item_of_task : default_repo:string -> Masc_domain.task -> active_item
-val active_items_of_tasks : default_repo:string -> Masc_domain.task list -> active_item list
+val active_item_of_task :
+  ?task_goal_index:(string, string list) Hashtbl.t -> default_repo:string -> Masc_domain.task -> active_item
+val active_items_of_tasks :
+  ?task_goal_index:(string, string list) Hashtbl.t -> default_repo:string -> Masc_domain.task list -> active_item list
 
 type reject_reason =
   | Global_cap

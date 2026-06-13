@@ -139,7 +139,7 @@ Why this is an anti-pattern:
 
 Fix options:
   1. Sound-partial parser: return `option` (None for unknown). Caller chooses
-     fail-open / fail-closed policy. See lib/coord/event_kind.mli for the
+     fail-open / fail-closed policy. See lib/workspace/event_kind.mli for the
      reference template.
   2. Explicit `Unknown of string` variant: preserves the wire string for
      diagnosis while making the unknown case visible to downstream matches.

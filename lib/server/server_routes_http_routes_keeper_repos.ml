@@ -29,12 +29,6 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
       ("repositories", `List (List.map (fun s -> `String s) m.repository_ids));
       ("allowed_repos", `List (List.map (fun s -> `String s) m.repository_ids));
       ("allow_all", `Bool allow_all);
-      ( "credential_id",
-        match m.mapped_credential_id with
-        | Some id ->
-            let trimmed = String.trim id in
-            if trimmed <> "" then `String trimmed else `Null
-        | None -> `Null );
     ]
 
 let mapping_of_json keeper_id (json : Yojson.Safe.t) :
@@ -51,14 +45,6 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
     | Some _ -> Error (Printf.sprintf "field %s must be an array of strings" key)
     | None -> Error (Printf.sprintf "missing field %s" key)
   in
-  let optional_string_field fields key =
-    match List.assoc_opt key fields with
-    | None | Some `Null -> Ok None
-    | Some (`String s) ->
-        let s = String.trim s in
-        Ok (if s = "" then None else Some s)
-    | Some _ -> Error (Printf.sprintf "field %s must be a string or null" key)
-  in
   match json with
   | `Assoc fields -> (
       let repository_ids =
@@ -66,19 +52,13 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
         | Some _ -> list_field fields "repositories"
         | None -> list_field fields "repos"
       in
-      match (repository_ids, optional_string_field fields "credential_id") with
-      | Ok repository_ids, Ok credential_id ->
-          Ok
-            {
-              Repo_manager_types.keeper_id;
-              repository_ids;
-              mapped_credential_id = credential_id;
-            }
-      | Error msg, _ | _, Error msg -> Error msg)
+      match repository_ids with
+      | Ok repository_ids -> Ok { Repo_manager_types.keeper_id; repository_ids }
+      | Error msg -> Error msg)
   | _ -> Error "expected JSON object body"
 
 let handle_list_mappings state req reqd =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
       Http.Response.json_value ~status:`Internal_server_error ~request:req
@@ -94,7 +74,7 @@ let handle_list_mappings state req reqd =
         reqd
 
 let handle_get_mapping state keeper_id req reqd =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
       Http.Response.json_value ~status:`Internal_server_error ~request:req
@@ -122,31 +102,8 @@ let handle_get_mapping state keeper_id req reqd =
                ])
             reqd)
 
-let credential_type_label = function
-  | Repo_manager_types.Github -> "GitHub"
-  | Repo_manager_types.Gitlab -> "GitLab"
-  | Repo_manager_types.Local -> "Local"
-
-let validate_mapping_credential ~base_path
-    (mapping : Repo_manager_types.keeper_repo_mapping) =
-  match mapping.mapped_credential_id with
-  | None -> Ok ()
-  | Some credential_id -> (
-      match Credential_store.find ~base_path credential_id with
-      | Error msg ->
-          Error
-            (Printf.sprintf "credential_id %s not found: %s" credential_id msg)
-      | Ok credential ->
-          if credential.cred_type = Repo_manager_types.Github then Ok ()
-          else
-            Error
-              (Printf.sprintf
-                 "credential_id %s is %s; keeper credential must be of type \
-                  GitHub"
-                 credential_id (credential_type_label credential.cred_type)))
-
 let handle_save_mapping state keeper_id req reqd =
-  let base_path = state.Mcp_server.room_config.base_path in
+  let base_path = state.Mcp_server.workspace_config.base_path in
   Http.Request.read_body_async reqd (fun body_str ->
       let response status message =
         Http.Response.json_value ~status ~request:req
@@ -159,14 +116,11 @@ let handle_save_mapping state keeper_id req reqd =
           match mapping_of_json keeper_id json with
           | Error msg -> response `Bad_request msg
           | Ok mapping -> (
-              match validate_mapping_credential ~base_path mapping with
+              match Keeper_repo_mapping.save_mapping ~base_path mapping with
               | Error msg -> response `Bad_request msg
-              | Ok () -> (
-                  match Keeper_repo_mapping.save_mapping ~base_path mapping with
-                  | Error msg -> response `Bad_request msg
-                  | Ok () ->
-                      Http.Response.json_value ~request:req
-                        (mapping_json mapping) reqd))))
+              | Ok () ->
+                  Http.Response.json_value ~request:req
+                    (mapping_json mapping) reqd)))
 
 let add_routes router =
   router

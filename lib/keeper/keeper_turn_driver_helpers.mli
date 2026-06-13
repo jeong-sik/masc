@@ -3,66 +3,10 @@
     See [.ml] for rationale. No behavior change from pre-RFC-0048 inline
     definitions. *)
 
-val required_tool_names_for_no_tool_error :
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  tools:Agent_sdk.Tool.t list ->
-  string list
-
-val materialized_tool_names_after_lane :
-  effective_tools:Agent_sdk.Tool.t list ->
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  string list
-
 val resolved_tool_lane_label :
   effective_tools:Agent_sdk.Tool.t list ->
   runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
   string
-
-val missing_required_tool_names_after_lane :
-  required_tool_names:string list ->
-  effective_tools:Agent_sdk.Tool.t list ->
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  string list
-
-val missing_required_tool_names_after_lane_by_name :
-  required_tool_names:string list ->
-  materialized_tool_names:string list ->
-  string list
-
-val required_tool_lane_unavailable_error :
-  lane:string ->
-  missing_required_tools:string list ->
-  materialized_tools:string list ->
-  Agent_sdk.Error.sdk_error
-
-val provider_rejection_for_required_tool_unsupported :
-  provider_label:string ->
-  missing_required_tools:string list ->
-  Cascade_error_classify.provider_rejection
-
-val no_tool_capable_provider_of_pre_dispatch_rejections :
-  cascade_name:Cascade_name.t ->
-  configured_labels:string list ->
-  runtime_manifest_required_tool_names:string list ->
-  runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  tools:Agent_sdk.Tool.t list ->
-  required_lane_provider_rejections:Cascade_error_classify.provider_rejection list ->
-  pre_dispatch_provider_rejections:Cascade_error_classify.provider_rejection list ->
-  Cascade_error_classify.masc_internal_error option
-
-type empty_candidate_classification =
-  | Tool_capability_empty
-  | Provider_unavailable
-
-val classify_empty_candidates :
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  original_candidate_count:int ->
-  tool_filtered_candidate_count:int ->
-  empty_candidate_classification
-
-val empty_candidate_classification_code :
-  empty_candidate_classification -> string
 
 val fail_open_health_filtered_candidates :
   tool_filtered_candidates:'a list ->
@@ -72,18 +16,9 @@ val fail_open_health_filtered_candidates :
     ~health_filtered_candidates] preserves health-filtered candidates unless
     the health/cooldown filter would empty an otherwise tool-capable candidate
     set. In that all-cooldown case it returns the pre-health-filter candidates
-    plus [true], allowing the cascade to attempt at least one provider and
+    plus [true], allowing the runtime to attempt at least one provider and
     surface the real upstream result instead of stopping at
     [no_providers_available]. *)
-
-val provider_rejections_for_no_tool_error :
-  keeper_name:string ->
-  ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  tools:Agent_sdk.Tool.t list ->
-  require_tool_choice_support:bool ->
-  require_tool_support:bool ->
-  Cascade_runtime_candidate.t list ->
-  Cascade_error_classify.provider_rejection list
 
 val apply_stream_idle_timeout_default : float option -> float option
 

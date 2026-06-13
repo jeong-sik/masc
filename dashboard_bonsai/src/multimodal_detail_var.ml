@@ -6,7 +6,7 @@
 
     Detail and provenance are now [_ fetch_state] (Idle/Loading/Loaded/
     NotFound/Error) so the panel can render distinct UI for each phase
-    instead of collapsing all failure modes into a perpetual loading
+    instead of collapsing all failure modes into a stuck loading
     spinner. *)
 
 let selected_id_var : string option Bonsai.Expert.Var.t =

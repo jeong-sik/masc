@@ -56,7 +56,7 @@ StartBroadcast ==
     /\ broadcast_idx' = 1
     /\ UNCHANGED <<stream_depth, client_alive, broadcast_blocked>>
 
-\* Push event to current client (stream has room)
+\* Push event to current client (stream has workspace)
 PushEvent ==
     /\ broadcast_idx > 0
     /\ broadcast_idx <= NumClients

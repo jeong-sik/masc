@@ -32,7 +32,7 @@ export function isObservedStall(
     if (value === 'finalizing') return observedForSec >= 30
     return false
   }
-  if (key === 'cascade') {
+  if (key === 'runtime') {
     if (value === 'selecting') return observedForSec >= 30
     if (value === 'trying') return observedForSec >= 45
     return false
@@ -62,7 +62,7 @@ function laneMeaning(
         case 'running':
           return snapshot.is_live
             ? { tone: 'info', meaning: 'parent lifecycle 정상 — live turn 진행 중' }
-            : { tone: 'ok', meaning: 'live turn 없음 — 다음 observation cycle 대기' }
+            : { tone: 'ok', meaning: 'keeper 는 살아있고 현재 진행 중인 turn 은 없음' }
         case 'failing':
           return { tone: 'error', meaning: 'parent lifecycle degraded — healthy turn 재개 전 해소 필요' }
         case 'overflowed':
@@ -79,7 +79,7 @@ function laneMeaning(
     case 'turn':
       switch (value) {
         case 'idle':
-          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'turn context 존재하지만 work 미진행' : 'in-flight turn 관측되지 않음' }
+          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'turn context 존재하지만 work 미진행' : '현재 진행 중인 turn 없음' }
         case 'prompting':
           return { tone: 'info', meaning: 'prompt assembly 가 turn input 준비 중' }
         case 'executing':
@@ -94,7 +94,7 @@ function laneMeaning(
     case 'decision':
       switch (value) {
         case 'undecided':
-          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'decision work 미커밋' : 'idle snapshot 은 의도적으로 decision state 비움' }
+          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'decision work 미커밋' : '진행 중인 turn 이 없어 결정 단계 없음' }
         case 'guard_ok':
           return { tone: 'info', meaning: 'guardrail 통과 — turn 계속 진행 허용' }
         case 'gate_rejected':
@@ -104,25 +104,25 @@ function laneMeaning(
         default:
           return { tone: 'info', meaning: 'decision state 관측됨' }
       }
-    case 'cascade':
+    case 'runtime':
       switch (value) {
         case 'idle':
-          return { tone: 'ok', meaning: 'provider failover work 비활성' }
+          return { tone: 'ok', meaning: 'provider/runtime 실행 중 아님' }
         case 'selecting':
           return { tone: 'info', meaning: 'provider routing 이 다음 execution path 선택 중' }
         case 'trying':
           return { tone: 'info', meaning: 'provider execution 진행 중' }
         case 'done':
-          return { tone: 'ok', meaning: 'cascade 가 이번 turn 의 provider 결과 수락' }
+          return { tone: 'ok', meaning: 'runtime 가 이번 turn 의 provider 결과 수락' }
         case 'exhausted':
-          return { tone: 'error', meaning: 'cascade 옵션 모두 소진 — 사용 가능한 path 없음' }
+          return { tone: 'error', meaning: 'runtime 옵션 모두 소진 — 사용 가능한 path 없음' }
         default:
-          return { tone: 'info', meaning: 'cascade state 관측됨' }
+          return { tone: 'info', meaning: 'runtime state 관측됨' }
       }
     case 'compaction':
       switch (value) {
         case 'accumulating':
-          return { tone: 'ok', meaning: 'memory 가 compaction 후보 수집 중 — 아직 실행 안 함' }
+          return { tone: 'ok', meaning: '메모리 누적 중 — compaction 실행 중 아님' }
         case 'compacting':
           return { tone: 'warn', meaning: 'memory compaction 이 context state 를 rewrite 중' }
         case 'done':
@@ -137,7 +137,7 @@ function laneMeaning(
         case 'clean':
           return { tone: 'ok', meaning: 'circuit breaker clean — 최근 tool failure streak 없음' }
         case 'warning':
-          return { tone: 'warn', meaning: '연속된 tool failure 누적 중 — class 가 동일하게 유지되면 trip 가능' }
+          return { tone: 'warn', meaning: '동일 유형 도구 실패가 누적 중 — 계속되면 breaker 작동 가능' }
         case 'cooling':
           return { tone: 'info', meaning: 'breaker 가 과거에 trip — 현재 reset 됐고 active streak 없음' }
         default:

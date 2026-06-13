@@ -1,53 +1,16 @@
 module Types = Masc_domain
 
-open Masc_mcp
+open Masc
 open Test_operator_control_support
-
-module CT = Cdal_types
-
-let make_review_required_verdict ?(run_id = "review-run-001") () :
-    CT.contract_verdict =
-  let gap : CT.completeness_gap =
-    {
-      artifact = "evidence/review_warning.json";
-      reason =
-        "review_requirement present but only warning-style review evidence exists";
-      impact = CT.Blocks_verdict;
-    }
-  in
-  let basis_input =
-    Printf.sprintf "%s|%s|%s"
-      "md5:review-contract"
-      CT.loader_semantics_version_phase1
-      CT.schema_compat_mode_v1
-  in
-  let basis_hash = "md5:" ^ (Digest.string basis_input |> Digest.to_hex) in
-  let verdict_without_hash : CT.contract_verdict =
-    {
-      run_id;
-      contract_id = "md5:review-contract";
-      claim_scope = CT.claim_scope_phase1;
-      judgment_basis_hash = basis_hash;
-      judgment_hash = "";
-      loader_semantics_version = CT.loader_semantics_version_phase1;
-      schema_compat_mode = CT.schema_compat_mode_v1;
-      status = CT.Inconclusive;
-      findings = [];
-      completeness_gaps = [ gap ];
-      check_results = [];
-    }
-  in
-  let judgment_hash = CT.compute_judgment_hash verdict_without_hash in
-  { verdict_without_hash with judgment_hash }
 
 let claim_and_start config ~agent_name ~task_id =
   (match
-     Coord.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()
+     Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Claim ()
    with
   | Ok _ -> ()
   | Error err -> Alcotest.fail (Masc_domain.show_masc_error err));
   match
-    Coord.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Start ()
+    Workspace.transition_task_r config ~agent_name ~task_id ~action:Masc_domain.Start ()
   with
   | Ok _ -> ()
   | Error err -> Alcotest.fail (Masc_domain.show_masc_error err)
@@ -60,9 +23,9 @@ let test_task_inject_executes_immediately () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      (* See test setup: room init side effect is the fixture under test. *)
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      (* See test setup: workspace init side effect is the fixture under test. *)
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let action_json =
         Operator_control.action_json ctx
@@ -97,7 +60,7 @@ let test_task_inject_executes_immediately () =
       Alcotest.(check int) "pending confirm count" 0 (List.length pending_confirms);
       Alcotest.(check bool) "result present" true
         (Yojson.Safe.Util.member "result" action_json <> `Null);
-      let tasks = Coord.get_tasks_raw config in
+      let tasks = Workspace.get_tasks_raw config in
       Alcotest.(check int) "task injected" 1 (List.length tasks))
 
 let test_digest_defaults_to_root_target () =
@@ -108,8 +71,8 @@ let test_digest_defaults_to_root_target () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       let digest_json =
         match Operator_control.digest_json ctx with
@@ -124,8 +87,6 @@ let test_operator_action_rejects_legacy_action_aliases () =
     [
       "autonomy_tick";
       "keeper_msg";
-      "room_pause";
-      "room_resume";
       "team_note";
       "team_broadcast";
       "team_task_inject";
@@ -151,8 +112,8 @@ let test_operator_action_rejects_legacy_action_aliases () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
       let ctx = operator_ctx env sw config "operator" in
       List.iter
         (fun action_type ->

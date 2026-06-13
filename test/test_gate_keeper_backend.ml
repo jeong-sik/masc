@@ -1,25 +1,40 @@
 open Alcotest
-open Masc_mcp
+open Masc
+
+module K = Keeper_chat_store
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end else
+      Sys.remove path
+
+let temp_base_path prefix =
+  Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
 
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
-      ~channel:"  discord  " ~channel_room_id:" thread-9 "
+      ~channel:"  discord  " ~channel_workspace_id:" thread-9 "
       ~channel_user_id:" user-42 "
   in
   check string "stable external actor session key"
     "gate:discord:thread-9:user-42" agent_name
 
-let test_agent_name_for_channel_actor_separates_rooms () =
+let test_agent_name_for_channel_actor_separates_workspaces () =
   let left =
     Gate_keeper_backend.agent_name_for_channel_actor
-      ~channel:"discord" ~channel_room_id:"room-a" ~channel_user_id:"user-42"
+      ~channel:"discord" ~channel_workspace_id:"workspace-a" ~channel_user_id:"user-42"
   in
   let right =
     Gate_keeper_backend.agent_name_for_channel_actor
-      ~channel:"discord" ~channel_room_id:"room-b" ~channel_user_id:"user-42"
+      ~channel:"discord" ~channel_workspace_id:"workspace-b" ~channel_user_id:"user-42"
   in
-  check bool "different external rooms should not share keeper session"
+  check bool "different external workspaces should not share keeper session"
     true (left <> right)
 
 let test_contextualize_message_includes_external_metadata () =
@@ -28,13 +43,14 @@ let test_contextualize_message_includes_external_metadata () =
       ~channel:"discord"
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice"
-      ~channel_room_id:"room-9"
+      ~channel_workspace_id:"workspace-9"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "message envelope"
     {|[External channel context]
 channel: discord
-room_id: room-9
+workspace_id: workspace-9
 user_id: user-42
 user_name: Alice
 
@@ -48,13 +64,14 @@ let test_contextualize_message_sanitizes_context_lines () =
       ~channel:"discord\nbot"
       ~channel_user_id:"user-42"
       ~channel_user_name:"Alice\tOps"
-      ~channel_room_id:"room-9\rthread"
+      ~channel_workspace_id:"workspace-9\rthread"
+      ~metadata:[]
       ~content:"hello keeper"
   in
   check string "sanitized context"
     {|[External channel context]
 channel: discord bot
-room_id: room-9 thread
+workspace_id: workspace-9 thread
 user_id: user-42
 user_name: Alice Ops
 
@@ -62,16 +79,85 @@ user_name: Alice Ops
 hello keeper|}
     rendered
 
+let test_persist_connector_assistant_reply_records_lane_reply () =
+  let base_dir = temp_base_path "gate-keeper-reply" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "discord-reply-keeper" in
+      K.append_user_message ~base_dir ~keeper_name
+        ~content:"<@bot> factorio?"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~conversation_id:"discord:guild-1:channel:chan-9" ();
+      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+        ~keeper_name ~source:"discord"
+        ~conversation_id:"discord:guild-1:channel:chan-9"
+        ~reply:"already answered" ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; assistant ] ->
+          check string "user line first" "user" (K.Role.to_label user.K.role);
+          check string "assistant reply persisted" "assistant" (K.Role.to_label assistant.K.role);
+          check string "assistant lane" "discord"
+            (Option.value assistant.K.source ~default:"");
+          check string "assistant conversation id"
+            "discord:guild-1:channel:chan-9"
+            (Option.value assistant.K.conversation_id ~default:"");
+          check string "assistant content" "already answered" assistant.K.content
+      | messages ->
+          failf "expected 2 chat messages, got %d" (List.length messages))
+
+let test_persist_connector_assistant_reply_ignores_empty_reply () =
+  let base_dir = temp_base_path "gate-keeper-empty-reply" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "discord-empty-reply-keeper" in
+      Gate_keeper_backend.persist_connector_assistant_reply ~base_dir
+        ~keeper_name ~source:"discord" ~reply:"   " ();
+      check int "empty reply does not create chat file" 0
+        (List.length (K.load ~base_dir ~keeper_name)))
+
+let test_contextualize_message_includes_channel_metadata () =
+  let rendered =
+    Gate_keeper_backend.contextualize_message
+      ~channel:"discord"
+      ~channel_user_id:"user-42"
+      ~channel_user_name:"Alice"
+      ~channel_workspace_id:"thread-9"
+      ~metadata:
+        [
+          ("discord.guild_id", "guild-1");
+          ("discord.bound_channel_id", "parent-1");
+          ("discord.binding_via_parent", "true");
+        ]
+      ~content:"hello from a thread"
+  in
+  check string "metadata envelope"
+    {|[External channel context]
+channel: discord
+workspace_id: thread-9
+user_id: user-42
+user_name: Alice
+
+[External channel metadata]
+discord.guild_id: guild-1
+discord.bound_channel_id: parent-1
+discord.binding_via_parent: true
+
+[User message]
+hello from a thread|}
+    rendered
+
 let test_parse_keeper_chat_stream_request_accepts_connector_context () =
   let body =
-    {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_room_id":"room-9"}|}
+    {|{"name":"luna","message":"hello","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request body with
   | Ok payload ->
       check string "channel" "discord" payload.channel;
       check string "user id" "user-42" payload.channel_user_id;
       check string "user name" "Alice" payload.channel_user_name;
-      check string "room id" "room-9" payload.channel_room_id
+      check string "workspace id" "workspace-9" payload.channel_workspace_id
   | Error err -> fail ("expected connector context to parse: " ^ err)
 
 let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
@@ -82,18 +168,18 @@ let test_parse_keeper_chat_stream_request_rejects_partial_connector_context () =
   | Ok _ -> fail "expected partial connector context to be rejected"
   | Error err ->
       check string "validation message"
-        "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
+        "channel, channel_user_id, and channel_workspace_id are required when connector context is supplied"
         err
 
 let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
   let cases =
     [
       ( "models",
-        {|{"name":"luna","message":"hello","models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
       ( "allowed_models",
-        {|{"name":"luna","message":"hello","allowed_models":["provider_k:legacy"]}|} );
+        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
       ( "active_model",
-        {|{"name":"luna","message":"hello","active_model":"provider_k:legacy"}|} );
+        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
     ]
   in
   List.iter
@@ -103,7 +189,7 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
       | Error err ->
           check string ("legacy field rejected: " ^ field)
             (Printf.sprintf
-               "legacy keeper model args removed for masc_keeper_msg: %s. Use cascade_name; concrete provider/model identity is OAS-owned."
+               "removed keeper model args for masc_keeper_msg: %s. Use runtime_id; concrete provider/model identity is resolved from the default runtime."
                field)
             err)
     cases
@@ -111,8 +197,8 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
 (* ── Filesystem-safe sanitizer ──────────────────────────────────────── *)
 
 let test_filesystem_safe_normal () =
-  let result = Gate_keeper_backend.filesystem_safe_or_unknown "room-123" in
-  check string "safe chars preserved" "room-123" result
+  let result = Gate_keeper_backend.filesystem_safe_or_unknown "workspace-123" in
+  check string "safe chars preserved" "workspace-123" result
 
 let test_filesystem_safe_strips_path_traversal () =
   let result = Gate_keeper_backend.filesystem_safe_or_unknown "../../etc/passwd" in
@@ -159,7 +245,7 @@ let test_agent_name_blocks_path_traversal () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
       ~channel:"../etc"
-      ~channel_room_id:"../../../tmp"
+      ~channel_workspace_id:"../../../tmp"
       ~channel_user_id:"attack"
   in
   let has_slash = String.contains agent_name '/' in
@@ -170,7 +256,7 @@ let test_agent_name_blocks_path_traversal () =
 let test_agent_name_normal_values_unchanged () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
-      ~channel:"discord" ~channel_room_id:"123" ~channel_user_id:"456"
+      ~channel:"discord" ~channel_workspace_id:"123" ~channel_user_id:"456"
   in
   check string "normal values pass through" "gate:discord:123:456" agent_name
 
@@ -178,7 +264,7 @@ let test_agent_name_special_chars_sanitized () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
       ~channel:"my chan"
-      ~channel_room_id:"thread#1"
+      ~channel_workspace_id:"thread#1"
       ~channel_user_id:"user@2"
   in
   check string "special chars become underscore"
@@ -227,12 +313,18 @@ let () =
         [
           test_case "agent name is stable" `Quick
             test_agent_name_for_channel_actor;
-          test_case "agent name separates rooms" `Quick
-            test_agent_name_for_channel_actor_separates_rooms;
+          test_case "agent name separates workspaces" `Quick
+            test_agent_name_for_channel_actor_separates_workspaces;
           test_case "contextualized message keeps external metadata" `Quick
             test_contextualize_message_includes_external_metadata;
           test_case "context envelope sanitizes metadata lines" `Quick
             test_contextualize_message_sanitizes_context_lines;
+          test_case "persists connector assistant reply" `Quick
+            test_persist_connector_assistant_reply_records_lane_reply;
+          test_case "skips empty connector assistant reply" `Quick
+            test_persist_connector_assistant_reply_ignores_empty_reply;
+          test_case "context envelope includes channel metadata" `Quick
+            test_contextualize_message_includes_channel_metadata;
           test_case "stream request accepts connector context" `Quick
             test_parse_keeper_chat_stream_request_accepts_connector_context;
           test_case "stream request rejects partial connector context" `Quick

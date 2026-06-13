@@ -9,13 +9,56 @@
     temp directory with the expected structure.
 *)
 
-module Tool_library = Masc_mcp.Tool_library
+module Tool_library = Masc.Tool_library
 
 let msg_contains ~needle haystack =
   let lc = String.lowercase_ascii haystack in
   let ln = String.lowercase_ascii needle in
   try ignore (Str.search_forward (Str.regexp_string ln) lc 0); true
   with Not_found -> false
+
+let required_schema name =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name name)
+      Tool_library.schemas
+  with
+  | Some schema -> schema
+  | None -> Alcotest.failf "missing schema for %s" name
+
+let schema_required_fields (schema : Masc_domain.tool_schema) =
+  match schema.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "required" fields with
+     | Some (`List values) ->
+       List.map
+         (function
+           | `String value -> value
+           | other ->
+             Alcotest.failf
+               "%s required contains non-string: %s"
+               schema.name
+               (Yojson.Safe.to_string other))
+         values
+     | Some other ->
+       Alcotest.failf
+         "%s required is not a list: %s"
+         schema.name
+         (Yojson.Safe.to_string other)
+     | None -> [])
+  | other ->
+    Alcotest.failf
+      "%s input_schema is not an object: %s"
+      schema.name
+      (Yojson.Safe.to_string other)
+
+let schema_has_property (schema : Masc_domain.tool_schema) property =
+  match schema.input_schema with
+  | `Assoc fields ->
+    (match List.assoc_opt "properties" fields with
+     | Some (`Assoc properties) -> List.mem_assoc property properties
+     | _ -> false)
+  | _ -> false
 
 let test_counter = ref 0
 
@@ -212,6 +255,17 @@ let test_search_empty_query () =
     Alcotest.(check bool) "error mentions query" true (msg_contains ~needle:"query" msg)
   )
 
+let test_search_schema_allows_runtime_query_rejection () =
+  let schema = required_schema "masc_library_search" in
+  Alcotest.(check bool)
+    "query property remains documented"
+    true
+    (schema_has_property schema "query");
+  Alcotest.(check bool)
+    "query is not validation-required"
+    false
+    (List.mem "query" (schema_required_fields schema))
+
 let test_search_with_query () =
   with_temp_base_path (fun ctx ->
     let args = `Assoc [("query", `String "test")] in
@@ -348,6 +402,10 @@ let () =
     ]);
     ("library_search", [
       Alcotest.test_case "empty query" `Quick test_search_empty_query;
+      Alcotest.test_case
+        "schema lets runtime reject empty query"
+        `Quick
+        test_search_schema_allows_runtime_query_rejection;
       Alcotest.test_case "with query" `Quick test_search_with_query;
     ]);
     ("library_promote", [

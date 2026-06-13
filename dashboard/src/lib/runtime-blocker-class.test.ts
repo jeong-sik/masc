@@ -19,7 +19,7 @@ describe('asKeeperRuntimeBlockerClass', () => {
   })
 
   it('trims surrounding whitespace before membership check — parity with asString/asNullableString', () => {
-    expect(asKeeperRuntimeBlockerClass('cascade_exhausted ')).toBe('cascade_exhausted')
+    expect(asKeeperRuntimeBlockerClass('runtime_exhausted ')).toBe('runtime_exhausted')
     expect(asKeeperRuntimeBlockerClass('  sdk_max_turns_exceeded\t')).toBe('sdk_max_turns_exceeded')
     expect(asKeeperRuntimeBlockerClass('   ')).toBeNull()
   })
@@ -38,10 +38,10 @@ describe('isKeeperRuntimeBlockerClass', () => {
     // The type guard's job is to convert `string` into `KeeperRuntimeBlockerClass`
     // inside the truthy branch. The assertion below would fail to compile if
     // narrowing did not happen — `string` is not assignable to the union.
-    const candidate: string = 'cascade_exhausted'
+    const candidate: string = 'runtime_exhausted'
     if (isKeeperRuntimeBlockerClass(candidate)) {
       const narrowed: KeeperRuntimeBlockerClass = candidate
-      expect(narrowed).toBe('cascade_exhausted')
+      expect(narrowed).toBe('runtime_exhausted')
     } else {
       throw new Error('expected narrowing to succeed')
     }

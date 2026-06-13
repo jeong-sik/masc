@@ -1,0 +1,277 @@
+(** Discord_gateway_state — pure state machine for the Discord
+    Gateway v10 lifecycle.
+
+    Zero I/O. All inputs are typed events (parsed frames + clock
+    ticks + supervision signals); all outputs are typed effects
+    ({!effect}) that the I/O layer (Discord_gateway_client) interprets.
+
+    Rationale (RFC-0203 §Modules):
+
+    - Phase 1.6 unit tests drive this module with recorded fixture
+      frames; no live WSS required.
+    - Reconnect / resume / heartbeat correctness is a pure
+      transition-function property — easier to TLA+-spec than the
+      Eio fiber that wraps it (CLAUDE.md §"TLA+ Bug Model patterns").
+    - I/O layer becomes thin: read a frame, call {!step}, execute the
+      returned {!effect} list, repeat.
+
+    Closed sums everywhere. New opcode / state / effect must be added
+    explicitly; warning [-w +4] (fragile match) blocks catch-all
+    [_ -> Ok ()] anti-patterns (RFC-0203 §Non-goals).
+
+    See also:
+    - docs/rfc/RFC-0203-discord-builtin-gateway.md §Modules
+    - Discord Developer Docs — Gateway v10 opcodes and lifecycle *)
+
+(** {1 Identity} *)
+
+(** The protocol version we speak. Pinned, single-valued (Discord
+    promises v10 stability; future bumps are a separate RFC). *)
+val protocol_version : int  (** [10]. *)
+
+(** {1 Opcodes — closed sum of the ones we handle} *)
+
+(** Discord Gateway opcodes. Closed sum: only the opcodes this client
+    speaks or interprets are listed. Frames carrying unknown opcodes
+    surface as {!Decode_error} in {!parse_frame}, not as a catch-all
+    arm — RFC-0203 §Non-goals "no catch-all [_ -> Ok ()] on opcode
+    dispatch". *)
+type opcode =
+  | Op_dispatch          (** 0 — server → client event. *)
+  | Op_heartbeat         (** 1 — bidirectional liveness ping. *)
+  | Op_identify          (** 2 — client → server authentication. *)
+  | Op_status_update     (** 3 — client → server presence update. *)
+  | Op_resume            (** 6 — client → server replay request. *)
+  | Op_reconnect         (** 7 — server tells us to disconnect+resume. *)
+  | Op_invalid_session   (** 9 — server rejects our session; may be resumable. *)
+  | Op_hello             (** 10 — server → client on connect, carries [heartbeat_interval]. *)
+  | Op_heartbeat_ack     (** 11 — server acknowledges our heartbeat. *)
+
+val opcode_to_int : opcode -> int
+val opcode_of_int : int -> (opcode, string) result
+(** Total inverse. [Error] for any unknown opcode (decoded but
+    rejected). *)
+
+(** {1 Intents} *)
+
+(** Re-exported from Discord_gateway_client. Closed sum. *)
+type intent =
+  | Guilds
+  | Guild_messages
+  | Message_content
+  | Guild_message_reactions
+  | Direct_messages
+  | Direct_message_reactions
+
+val intents_bitmask : intent list -> int
+
+(** {1 Dispatched events surfaced to caller} *)
+
+(** Re-exported from Discord_gateway_client. Closed sum. *)
+type dispatched_event =
+  | Ready of
+      { session_id : string
+      ; resume_gateway_url : string
+      ; bot_user_id : string
+      }
+  | Message_create of
+      { channel_id : string
+      ; guild_id : string option
+        (** Guild snowflake when Discord includes one. Direct messages and
+            some partial payloads omit it. *)
+      ; message_id : string
+      ; author_id : string
+      ; author_name : string option
+        (** Display name: [author.global_name] when set, else
+            [author.username]; [None] only when the payload carries
+            neither (RFC-0223 P1). *)
+      ; content : string
+      ; mention_user_ids : string list
+            (* RFC-0232 §3.3: the structured [mentions] member ids are
+               kept at decode instead of being reduced to a bot bool;
+               the gate maps what its bindings can resolve. *)
+      ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+        (** [true] only when message [content] contains a literal
+            Discord user mention for the bot, e.g. [<@123>] /
+            [<@!123>]. Discord may also include the bot in
+            [mentions] for reply-pings; those stay [mentions_bot]
+            but do not start a [Mention_only] turn by themselves. *)
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
+      }
+  | Reaction_add of
+      { channel_id : string
+      ; message_id : string
+      ; user_id : string
+      ; emoji : string
+      }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
+  | Thread_removed of
+      { thread_id : string
+      }
+      (** A Discord thread was deleted or archived. The state machine
+          removes it from [thread_parents]; the I/O layer should clean
+          its mutable registries accordingly. *)
+  | Ignored of string  (** Known dispatch type we deliberately don't surface. *)
+
+(** {1 Inbound frame — what comes off the wire} *)
+
+(** A Discord Gateway frame after JSON parse. Opcode-tagged.
+    Sequence number [s] is only present for dispatch frames. *)
+type frame =
+  { op : opcode
+  ; s : int option       (** Sequence number (op 0 dispatches only). *)
+  ; t : string option    (** Dispatch event name (op 0 dispatches only). *)
+  ; d : Yojson.Safe.t    (** Payload. *)
+  }
+
+(** {1 Connection lifecycle states} *)
+
+(** Where we are in the connection's life. Closed sum.
+
+    Transition diagram (only legal transitions exist):
+    {v
+        Disconnected --[connect_requested]--> Awaiting_hello
+        Awaiting_hello --[Op_hello]--> Identifying | Resuming
+        Identifying --[READY dispatch]--> Connected
+        Resuming --[RESUMED dispatch]--> Connected
+        Resuming --[Op_invalid_session resumable=false]--> Identifying
+        Connected --[Op_reconnect]--> Reconnect_pending
+        Connected --[heartbeat ack timeout]--> Reconnect_pending
+        Reconnect_pending --[backoff elapsed]--> Awaiting_hello
+        any --[fatal]--> Failed
+    v} *)
+type connection_state =
+  | Disconnected
+  | Awaiting_hello       (** WSS connected, waiting for op 10. *)
+  | Identifying          (** Sent op 2, waiting for READY. *)
+  | Resuming             (** Sent op 6, waiting for RESUMED or op 9. *)
+  | Connected of { session_id : string; last_seq : int option }
+  | Reconnect_pending of { backoff_until_mono : float; resumable : bool }
+  | Failed of string     (** Non-recoverable. Supervisor escalates. *)
+
+(** {1 Input — what feeds the state machine} *)
+
+(** Discord presence status values for STATUS_UPDATE (opcode 3).
+    Used to control the bot's visual status in the member list. *)
+type presence_status =
+  | Online    (** Green circle — bot is active. *)
+  | Idle      (** Yellow moon — bot has been inactive. *)
+  | Dnd        (** Red circle — bot should not be disturbed. *)
+  | Invisible  (** Appears offline but can still receive events. *)
+
+val presence_status_to_string : presence_status -> string
+
+(** All events the state machine consumes. Closed sum. *)
+type input =
+  | Connect_requested          (** External: start a connection. *)
+  | Frame_received of frame    (** Parsed inbound frame. *)
+  | Frame_parse_error of string (** Decoded JSON, failed schema. *)
+  | Wss_closed of { code : int; reason : string }
+  | Heartbeat_tick             (** Clock fired heartbeat interval. *)
+  | Heartbeat_ack_timeout      (** No ack within 2x interval. *)
+  | Backoff_elapsed            (** Reconnect timer fired. *)
+  | Status_change of presence_status
+      (** External: update bot presence. Only effective in [Connected] state. *)
+
+(** {1 Output — what the state machine asks the I/O layer to do} *)
+
+(** Side effects the I/O layer must perform. Closed sum.
+
+    Named [gateway_effect] (not [effect]) because [effect] is a
+    reserved keyword in OCaml 5 (algebraic effect handlers). *)
+type gateway_effect =
+  | Open_wss of { url : string }
+  | Close_wss of { code : int; reason : string }
+  | Send_frame of frame
+  | Schedule_heartbeat of { interval_ms : int }
+  | Schedule_backoff of { delay_ms : int }
+  | Emit_event of dispatched_event   (** Surface to caller's on_event. *)
+  | Emit_ambient of dispatched_event
+      (** Record-only delivery (RFC-0226): a [Message_create] that
+          failed [trigger_policy] but is not the bot's own echo. The
+          I/O layer persists it to the bound keeper's lane history;
+          it must not start a turn. *)
+  | Log of { level : [ `Info | `Warn | `Error ]; message : string }
+
+(** {1 Configuration} *)
+
+type config =
+  { token : string
+  ; intents : intent list
+  ; bot_user_id : string option  (** Filled in after first READY. *)
+  ; trigger_policy : trigger_policy
+  }
+
+and trigger_policy =
+  | Mention_only
+  | Mention_or_thread
+      (** Mention in regular channels, auto-respond in Discord threads. *)
+  | User_only of string  (** Discord user snowflake. *)
+  | All
+
+val parse_trigger_policy : string -> (trigger_policy, string) result
+(** Decodes [DISCORD_TRIGGER_POLICY] env value. Accepts exactly
+    ["mention_only"], ["mention_or_thread"], ["user_only:<snowflake>"], ["all"]. Anything
+    else returns [Error] — no string-classifier inference
+    (RFC-0203 §Non-goals). *)
+
+val trigger_policy_to_string : trigger_policy -> string
+(** Inverse of {!parse_trigger_policy}. Used for diagnostics and API exposure. *)
+
+(** {1 The state machine itself} *)
+
+type t
+(** Opaque state. Carries [connection_state], [config], last sequence,
+    reconnect backoff history (for exponential growth), bot identity. *)
+
+val create : config:config -> t
+
+val state : t -> connection_state
+val config : t -> config
+val resume_context : t -> (string * int option) option
+
+(** {2 Transition function} *)
+
+val step : t -> now_mono:float -> input -> t * gateway_effect list
+(** Pure transition. Given current state and an input, returns the
+    new state and the effects the I/O layer must run, in order.
+
+    - [now_mono] is the monotonic clock at input arrival, used to
+      compute heartbeat intervals and reconnect backoff deadlines.
+    - The effect list may be empty; never [None].
+    - Reentrant. No global state.
+
+    This is the SUT for Phase 1.6 unit tests. *)
+
+(** {1 Frame parsing — what the I/O layer calls before [step]} *)
+
+val parse_frame : Yojson.Safe.t -> (frame, string) result
+(** Parse a Discord Gateway JSON envelope into a typed {!frame}.
+    Rejects unknown opcodes (caller should pass the result through
+    [step] as either [Frame_received] on [Ok] or [Frame_parse_error]
+    on [Error]). *)
+
+val encode_frame : frame -> Yojson.Safe.t
+(** Serialize a typed frame back to JSON for outbound writes. *)
+
+(** {1 Decoding dispatch payloads} *)
+
+val decode_dispatch :
+  bot_user_id:string option ->
+  event_name:string ->
+  payload:Yojson.Safe.t ->
+  (dispatched_event, string) result
+(** Decode an op 0 dispatch by event name (Discord's frame.t field,
+    renamed [event_name] here to avoid clashing with our opaque
+    [type t]). Unknown event names return [Ok (Ignored name)] —
+    known unknowns, not a silent swallow. JSON shape errors return
+    [Error]. *)

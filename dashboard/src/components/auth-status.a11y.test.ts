@@ -16,12 +16,14 @@ vi.mock('../store', () => ({
 vi.mock('../api/core', () => ({
   clearStoredToken: vi.fn(),
   currentDashboardActor: vi.fn().mockReturnValue('test'),
+  dashboardBearerToken: vi.fn().mockReturnValue(null),
   isRemoteAccess: vi.fn().mockReturnValue(false),
   setStoredToken: vi.fn(),
 }))
 vi.mock('../api/mcp', () => ({ resetMcpClientState: vi.fn() }))
 vi.mock('../lib/dashboard-auth-access', () => ({
   dashboardAuthAccess: vi.fn().mockReturnValue({ allowed: true, reason: null }),
+  cleanErrorMessage: vi.fn((v: string | null | undefined) => v ?? null),
 }))
 vi.mock('../lib/dashboard-actor', () => ({
   hasDashboardActorQueryParam: vi.fn().mockReturnValue(false),

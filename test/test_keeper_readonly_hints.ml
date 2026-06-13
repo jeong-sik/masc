@@ -1,4 +1,4 @@
-(** Regression guard for [Agent_tool_command_runtime.readonly_hint_of_category].
+(** Regression guard for [Keeper_tool_command_runtime.readonly_hint_of_category].
 
     The prior form only named the blocked category; small-LLM keepers
     then retried the same chaining/redirect command. 2026-04-17/18 logs
@@ -6,8 +6,8 @@
     rejections with no wire-level rewrite. Each active category now
     carries an explicit Good:/Bad: example; this test locks that in. *)
 
-module Shell = Masc_mcp.Agent_tool_command_runtime
-module Worker = Masc_mcp.Worker_dev_tools
+module Shell = Masc.Keeper_tool_command_runtime
+module Policy = Exec_policy
 
 let contains needle haystack =
   let nlen = String.length needle in
@@ -48,24 +48,24 @@ let test_unknown_category_falls_back () =
 
 let tool_suggestion_of_diagnosis = function
   | None -> None
-  | Some diagnosis -> diagnosis.Masc_mcp.Exec_core.tool_suggestion
+  | Some diagnosis -> diagnosis.Masc.Exec_core.tool_suggestion
 
 let test_block_reason_diagnoses_use_public_tool_suggestions () =
   Alcotest.(check (option string))
     "direct dune suggests public Execute"
     (Some "Execute")
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason Worker.Direct_dune_invocation));
+       (Shell.diagnosis_of_block_reason Policy.Direct_dune_invocation));
   Alcotest.(check (option string))
-    "unsafe redirect suggests public WriteFile"
-    (Some "WriteFile")
+    "unsafe redirect suggests public Write"
+    (Some "Write")
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason Worker.Unsafe_redirect));
+       (Shell.diagnosis_of_block_reason Policy.Unsafe_redirect));
   Alcotest.(check (option string))
-    "unknown command does not suggest internal shell"
+    "empty command does not suggest internal shell"
     None
     (tool_suggestion_of_diagnosis
-       (Shell.diagnosis_of_block_reason (Worker.Command_not_allowed "foo")))
+       (Shell.diagnosis_of_block_reason Policy.Empty_command))
 
 let () =
   Alcotest.run "keeper_readonly_hints" [

@@ -44,20 +44,20 @@ jobs:
 
       - name: Prepare binary for Docker
         run: |
-          cp _build/default/bin/main_eio.exe masc-mcp-linux-x64
-          chmod +x masc-mcp-linux-x64
-          ls -la masc-mcp-linux-x64
+          cp _build/default/bin/main_eio.exe masc-linux-x64
+          chmod +x masc-linux-x64
+          ls -la masc-linux-x64
 
       - name: Verify Linux binary format
         run: |
           set -euo pipefail
-          file masc-mcp-linux-x64
-          file masc-mcp-linux-x64 | grep -q 'ELF 64-bit'
+          file masc-linux-x64
+          file masc-linux-x64 | grep -q 'ELF 64-bit'
 
-      - name: Create Railway LLM cascade config
+      - name: Create Railway LLM runtime config
         run: |
           mkdir -p config
-          cat > config/llm_cascade.json << 'CASCADEJSON'
+          cat > config/llm_runtime.json << 'LLM_RUNTIME_JSON'
           {
             "governance_judge_models": ["glm:glm-4.7-flash"],
             "operator_judge_models": ["glm:glm-4.7-flash"],
@@ -67,16 +67,16 @@ jobs:
             "classification_models": ["glm:glm-4.7-flash"],
             "verifier_models": ["glm:glm-4.7-flash"]
           }
-          CASCADEJSON
+          LLM_RUNTIME_JSON
 
       - name: Build deployment image
-        run: docker build -t masc-mcp-railway-smoke .
+        run: docker build -t masc-railway-smoke .
 
       - name: Check shared library resolution
         run: |
-          docker run --rm -i masc-mcp-railway-smoke sh -s <<'SH'
+          docker run --rm -i masc-railway-smoke sh -s <<'SH'
             set -e
-            out="$(ldd /app/masc-mcp)"
+            out="$(ldd /app/masc)"
             printf "%s\n" "$out"
             ! printf "%s\n" "$out" | grep -q "not found"
           SH
@@ -84,7 +84,7 @@ jobs:
       - name: Smoke deployment image
         run: |
           set -euo pipefail
-          cid="$(docker run -d --network host -e PORT=18080 masc-mcp-railway-smoke /app/masc-mcp --port 18080 --base-path /app)"
+          cid="$(docker run -d --network host -e PORT=18080 masc-railway-smoke /app/masc --port 18080 --base-path /app)"
           trap 'docker logs "$cid" || true; docker rm -f "$cid" || true' EXIT
 
           for attempt in $(seq 1 30); do
@@ -104,12 +104,12 @@ jobs:
           # Railway CLI respects .gitignore. Instead of mutating .gitignore
           # (which could affect later steps), force-add the binary to git's
           # index so Railway includes it in the upload.
-          git add -f masc-mcp-linux-x64
+          git add -f masc-linux-x64
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        run: railway up --service masc-mcp --ci
+        run: railway up --service masc --ci
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

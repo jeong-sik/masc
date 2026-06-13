@@ -9,24 +9,35 @@
     Uses structured [Agent_sdk.Error.sdk_error] pattern matching. *)
 val is_transient_network_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] when a typed internal runner exception preserves a transient
+    transport failure that was raised inside [runtime_runner.execute]. *)
+val is_transient_internal_runner_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when an OAS timeout message describes an execution budget expiry,
     not a transport-level timeout. *)
 val is_structural_oas_timeout_message : string -> bool
 
-(** Detect server-side request body parse errors (e.g. Ollama yyjson
-    rejecting a malformed request body).  The LLM never
-    processed the request, so committed tool results are not at risk
-    of duplication.  Used to auto-recover reconcile-safe tools instead
-    of requiring manual reconcile. *)
+(** Detect request body parse errors from either the provider or the API
+    (e.g. Ollama yyjson rejecting a malformed request body or the API
+    rejecting invalid JSON).  The LLM never processed the request, so
+    committed tool results are not at risk of duplication.  Used to
+    auto-recover reconcile-safe tools instead of requiring manual reconcile. *)
 val is_server_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when the provider/tooling violated a required tool-use contract
-    by returning text/no-op where a ToolUse block was required. *)
-val is_required_tool_contract_violation : Agent_sdk.Error.sdk_error -> bool
+(** [true] for provider-side request-body parse rejections. *)
+val is_provider_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
+
+(** [true] for model/API-side request-body parse rejections reported as
+    [InvalidRequest]. *)
+val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the keeper should preserve liveness and skip consecutive
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
+
+(** [true] for accept-rejected responses tagged by the built-in keeper
+    progress contract as no usable text/tool/non-terminal progress. *)
+val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR because the
@@ -48,8 +59,21 @@ val post_commit_failure_kind_of_error :
     mutating tool call succeeded but the turn failed before a clean result. *)
 val is_ambiguous_side_effect_error : Agent_sdk.Error.sdk_error -> bool
 
+val ambiguous_side_effect_commit_tools :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> string list
+
+val has_ambiguous_side_effect_commit :
+  tool_names:string list ->
+  Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when a structured error indicates context overflow. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
+
+(** [true] when the error is a completion contract violation.
+    Contract violations should cap rotation because retrying the same
+    or different runtime will not satisfy the contract. *)
+val is_completion_contract_violation : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused
     to request human input.  Not a failure; a special stop condition. *)
@@ -64,34 +88,20 @@ val extract_input_required
   :  Agent_sdk.Error.sdk_error
   -> Agent_sdk.Error.input_required option
 
-(** [true] when an error represents terminal cascade exhaustion or a
-    final accept-rejected result from the MASC OAS boundary. *)
-val is_cascade_exhausted_error : Agent_sdk.Error.sdk_error -> bool
-
-(** [true] when the rotation-cap fast-fail should fire: the error is a
-    [required_tool_contract_violation], at least one cascade rotation has
-    already been attempted ([List.length attempted_cascades >= 2]; the list is
-    seeded with the initial cascade name so length=1 means no rotations yet),
-    and no untried fallback cascade remains. *)
-val should_cap_rotation_for_contract_violation :
-  attempted_cascades:string list ->
-  fallback_not_yet_tried:bool ->
-  Agent_sdk.Error.sdk_error ->
-  bool
+(** [true] when an error represents terminal runtime exhaustion. *)
+val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
 (** Classification of why a degraded retry is being attempted. Closed
     set; producer-side is [keeper_error_classify]. Wire form is the
     lowercase string via [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
-  | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
-  | Cascade_candidates_filtered
-  | Required_tool_contract_violation
-  | Cascade_exhausted
+  | Runtime_candidates_filtered
+  | Runtime_exhausted
   | Capacity_backpressure
   | Rate_limit
   | Server_error
@@ -99,32 +109,30 @@ type degraded_retry_reason =
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
-val normalized_cascade_name : catalog_names:string list -> string -> string
-(** Normalize a cascade name for rotation matching. When the input is a bare
-    catalog name (stripped of [tier.]/[tier-group.] prefix), requalifies it
-    with the canonical prefix so downstream [Cascade_name.of_string_exn] does
-    not crash. *)
+val normalized_runtime_id : catalog_names:string list -> string -> string
+(** Normalize a runtime name for rotation matching.
+    All runtime names are plain provider:model strings. *)
 
 type degraded_retry =
-  { next_cascade : string
+  { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
 
-(** Opportunistically fail open to a broader cascade when the current
-    effective cascade is temporarily unavailable (for example cooldown /
+(** Opportunistically fail open to a broader runtime when the current
+    effective runtime is temporarily unavailable (for example cooldown /
     phase-buffer bootstrap fallback). *)
-val fallback_cascade_for_unavailable_profile :
-  base_cascade:string ->
-  effective_cascade:string ->
+val fallback_runtime_for_unavailable_profile :
+  base_runtime:string ->
+  effective_runtime:string ->
   string option
 
-(** Classifies an SDK error into a fallback reason label when the cascade
-    failure is recoverable via [fallback_cascade] or [degraded_rotation].
+(** Classifies an SDK error into a fallback reason label when the runtime
+    failure is recoverable via [fallback_runtime] or [degraded_rotation].
     Returns [None] for terminal errors (e.g. accept-rejected, ambiguous
     post-commit) that should not trigger same-turn escalation.
 
     Status-code-aware rotation: raw API errors that are not wrapped in a MASC
-    internal error are also classified when a different cascade may succeed:
+    internal error are also classified when a different runtime may succeed:
     - [RateLimited] (non-hard-quota) → ["rate_limit"]
     - [Overloaded] and Cloudflare 524 → ["capacity_backpressure"]
     - [ServerError] with status >= 500 → ["server_error"]
@@ -133,39 +141,36 @@ val fallback_cascade_for_unavailable_profile :
     Exposed for unit tests; production callers go through
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)
-val recoverable_cascade_failure_reason :
+val recoverable_runtime_failure_reason :
   Agent_sdk.Error.sdk_error -> degraded_retry_reason option
 
-(** Returns the one-shot degraded retry lane for recoverable whole-cascade
-    failures. Required-tool turns stay terminal, and already-degraded lanes
-    do not broaden further. *)
+(** Returns the one-shot degraded retry lane for recoverable whole-runtime
+    failures. Already-degraded lanes do not broaden further. *)
 val degraded_retry_after_recoverable_error :
-  effective_cascade:string ->
-  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
+  effective_runtime:string ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 
-(** Returns the next untried cascade in the same-turn recovery group for a
-    whole-cascade failure. [rotation_cascades], when provided, is the
-    runtime/catalog-owned candidate order and is used as-is; otherwise the
-    legacy base/tool_required group is used for required-tool turns and the
-    base/default/phase-recovery group is used for optional/text turns.
-    Required-tool turns keep the tool requirement and leave concrete provider
-    filtering to the cascade resolver.
+(** Returns the next untried runtime in the same-turn recovery group for a
+    whole-runtime failure. Uses the default degraded rotation candidate set
+    (base/default/phase-recovery).
 
     [fallback_hint], when provided, is prepended to the candidate list so
     that single-provider profiles can declare an immediate escalation
-    target via [cascade.toml]. The hint is normalized and deduplicated like
-    any other candidate; if it duplicates the effective cascade or has
+    target via [runtime.toml]. The hint is normalized and deduplicated like
+    any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
+
+    Non-contract errors (provider timeout, rate limit, server error) allow
+    cycling through candidates again when all are exhausted, because the
+    same runtime may succeed on a subsequent attempt. Contract violations
+    cap rotation — retrying cannot satisfy the contract.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
-  ?rotation_cascades:string list ->
   ?fallback_hint:string ->
-  base_cascade:string ->
-  effective_cascade:string ->
-  tool_requirement:Keeper_agent_tool_surface.tool_requirement ->
-  attempted_cascades:string list ->
+  base_runtime:string ->
+  effective_runtime:string ->
+  attempted_runtimes:string list ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry option
 
@@ -190,7 +195,7 @@ val summarize_post_commit_failure :
 
 val is_provider_timeout_error : Agent_sdk.Error.sdk_error -> bool
 (** True when [err] is a provider-timeout class failure (deadline,
-    cascade timeout, budget retry). Live caller:
+    runtime timeout, budget retry). Live caller:
     [keeper_unified_turn.ml] degraded-retry classification. *)
 
 val is_receipt_lost_error : Agent_sdk.Error.sdk_error -> bool

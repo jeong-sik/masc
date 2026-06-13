@@ -14,7 +14,7 @@ Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directiv
 
 | Dir | Total | `CHECK_DEADLOCK FALSE` present | Missing CD |
 |---|---:|---:|---:|
-| `specs/cascade/` | 1 | 1 | 0 |
+| `specs/runtime/` | 1 | 1 | 0 |
 | `specs/multimodal/` | 2 | 2 | 0 |
 | `specs/bug-models/` | 25 | 23 | 2 |
 | `specs/server-state/` | 1 | 0 | 1 |
@@ -34,7 +34,7 @@ Same procedure: extract `NextBuggy` shape, cross-check `CHECK_DEADLOCK` directiv
 | `specs/bug-models/AmbiguousPartialCommitBug-buggy.cfg` | `StartTurn ∨ ReadOnlyToolCall ∨ MutatingToolCall ∨ TurnSuccess ∨ BugProviderError ∨ Done` (no `Next`) | **D′ (enumerated-replace)** | **12** | `Invariant Safety is violated` — 87 distinct states, 27 left on queue. NOT deadlock. |
 | `specs/bug-models/AuthIdentityFSM-buggy.cfg` | `Next ∨ SilentRewrite` | D (add-bug) | **12** | `Invariant SafetyInvariant is violated`. |
 | `specs/server-state/ServerState-buggy.cfg` | `Next ∨ BugAction` | D | **12** | `Invariant InvariantViolated is violated`. |
-| `specs/admission-queue/AdmissionQueue-buggy.cfg` | `Next ∨ FdGuardSkip ∨ ReleaseSkipped` | D | **12** | `Invariant CascadeNameCanonical is violated`. |
+| `specs/admission-queue/AdmissionQueue-buggy.cfg` | `Next ∨ FdGuardSkip ∨ ReleaseSkipped` | D | **12** | `Invariant RuntimeNameCanonical is violated`. |
 | `specs/auth/AuthIdentityFSM-buggy.cfg` | `Next ∨ SilentRewrite` (duplicate of `specs/bug-models/`) | D | **12** | `Invariant SafetyInvariant is violated`. |
 | `specs/task-lifecycle/TaskLifecycle-buggy.cfg` | `NextClean ∨ BugSkipVerification ∨ BugSkipClaim` (`NextClean` is the clean transition disjunction) | **D** (effective add-bug — `NextClean` ≈ `Next` rename) | **12** | `Invariant InProgressRequiresClaim is violated`. |
 | `specs/keeper-turn-fsm/KeeperTurnFSM-buggy.cfg` | `Next ∨ StopSignalSwallowedAsDone ∨ SilentReceiptDrop` | D | **12** | `Invariant StopSignalRespected is violated`. |
@@ -45,7 +45,7 @@ All 7 exit with **TLC exit code 12** = invariant violation. **No deadlock**.
 
 1. **`AmbiguousPartialCommitBug-buggy.cfg` is *effective* add-bug despite literally being replace-bug.** The `NextBuggy` definition enumerates every clean action by name plus the single bug substitution (`ProviderError` → `BugProviderError`); no clean action is *dropped*, only one is *replaced* with a buggy variant. The system can always advance, so no stuck phase forms. This identifies a sub-shape of Class E that iter 98 did not anticipate: **enumerated-replace** (writes out all of `Next`'s disjuncts by hand). Functionally Class D, structurally Class E.
 2. **`TaskLifecycle-buggy.cfg` uses a renamed clean transition (`NextClean`)**, then `NextBuggy == NextClean \/ Bug...`. Functionally add-bug. The rename appears to be stylistic (the spec uses `NextClean`/`NextBuggy` rather than `Next`/`NextBuggy`).
-3. **Genuine Class E is `replace-bug WITH dropped clean actions`** — both forms above keep all clean transitions available. The OPB pre-iter-97 pattern was the only known instance where *the bug model drops clean actions that would otherwise prevent stuck phases* (`WatchdogEmit` + `Recycle` were both removed). With OPB closed and these 7 non-KSM cfgs empirically clear, **the masc-mcp corpus has no remaining Class E instances at this commit**.
+3. **Genuine Class E is `replace-bug WITH dropped clean actions`** — both forms above keep all clean transitions available. The OPB pre-iter-97 pattern was the only known instance where *the bug model drops clean actions that would otherwise prevent stuck phases* (`WatchdogEmit` + `Recycle` were both removed). With OPB closed and these 7 non-KSM cfgs empirically clear, **the masc corpus has no remaining Class E instances at this commit**.
 4. **iter 98's Class D 6 KSM specs (deferred-as-likely-safe) gain a *parallel-corpus* empirical foothold.** All 7 non-KSM add-bug-shape cfgs exited cleanly via invariant violation. This does not *prove* iter 98's KSM Class D 6 are safe — each spec's deadlock-freeness is its own theorem — but it confirms the shape-class hypothesis holds across 7 independent specs without exception. Per-spec verification of the KSM Class D 6 remains valuable but lower priority.
 
 ## Combined corpus picture (67 cfgs, 14 spec dirs)
@@ -85,7 +85,7 @@ Same reasoning as iter 98: pre-emptive `CHECK_DEADLOCK FALSE` widening to the 13
 
 ## Verification
 
-- Corpus enumeration: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
-- Missing-CD detection: `for d in specs/cascade specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do for f in "$d"/*-buggy.cfg; do grep -q CHECK_DEADLOCK "$f" || echo "$f"; done; done` → 7 paths.
+- Corpus enumeration: `for d in specs/runtime specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do ls $d/*-buggy.cfg; done | wc -l` → 35.
+- Missing-CD detection: `for d in specs/runtime specs/multimodal specs/bug-models specs/server-state specs/state-product specs/admission-queue specs/auth specs/task-lifecycle specs/keeper-turn-fsm; do for f in "$d"/*-buggy.cfg; do grep -q CHECK_DEADLOCK "$f" || echo "$f"; done; done` → 7 paths.
 - TLC runs: 7 invocations of `tlc -config <spec>-buggy.cfg <spec>.tla`, each `exit 12` with invariant-violation diagnostic. Total wall time ~30s.
 - Base: `162f89631` (iter 97 #15008 in base; iter 98 #15011 — this memo extends #15011's argument).

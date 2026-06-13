@@ -7,12 +7,12 @@
     [Eio.Time.Timeout] into an error result.
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
-    [caller] (#10094) is a free-form identifier ("auto_responder",
-    "tool_deep_review", ...) that flows into the timeout label so
-    operators can distinguish fantasy budgets from intentional ones
-    when both fire timeouts in the same session.  Callers must
-    pass [~caller] explicitly or use {!run_with_caller}, which
-    accepts a typed caller and pulls the configured budget from
+    [caller] (#10094) is a free-form identifier
+    ("anti_rationalization", "governance_judge", ...) that flows into
+    the timeout label so operators can distinguish which trusted OAS
+    caller timed out at which configured budget.  Callers must pass
+    [~caller] explicitly or use {!run_with_caller}, which accepts a
+    typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
 let min_timeout_s = 0.0
 let routine_cancel_inner_substring = "Eio__core__Fiber.Not_first"
@@ -22,10 +22,10 @@ let is_routine_fast_cancel ~bucket ~inner_str =
   && String_util.contains_substring inner_str routine_cancel_inner_substring
 
 let run_safe ~caller ~timeout_s fn =
-  if not (Float.is_finite timeout_s) || Float.compare timeout_s min_timeout_s <= 0 then
+  if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
     invalid_arg
       (Printf.sprintf
-         "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
+         "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
   let clock_opt =
@@ -60,19 +60,18 @@ let run_safe ~caller ~timeout_s fn =
   with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see
-       WHICH caller is timing out at WHICH configured budget — log
-       lines alone collapsed all 27 [auto_responder] 60s-timeouts
-       and the 1 [tool_deep_review] 180s-timeout into the same
-       "after N.Ns" string. *)
+       WHICH caller is timing out at WHICH configured budget instead
+       of collapsing all OAS timeouts into the same "after N.Ns"
+       string. *)
     let wall = elapsed () in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_timeout
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_timeout
       ~labels:[
         ("caller", caller);
         ("timeout_s", Printf.sprintf "%.1f" timeout_s);
       ] ();
     (* #18476: wall-clock overshoot detection. Eio cancel propagation
-       through the cascade runner's nested Switch layers can take
+       through the runtime runner's nested Switch layers can take
        significant time after the budget fires.  Log the overshoot
        ratio so operators can distinguish "timeout fired at 45s" from
        "timeout fired but cleanup took 121s". *)
@@ -80,7 +79,7 @@ let run_safe ~caller ~timeout_s fn =
     if overshoot_ratio > 2.0 then
       Log.Misc.warn
         "masc_oas_bridge: timeout overshoot — budget=%.1fs wall=%.1fs \
-         (ratio=%.1fx, caller=%s). Cancel propagation through cascade \
+         (ratio=%.1fx, caller=%s). Cancel propagation through runtime \
          runner Switch hierarchy is delayed."
         timeout_s wall overshoot_ratio caller
     else
@@ -91,10 +90,10 @@ let run_safe ~caller ~timeout_s fn =
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.
-       Bucket boundaries are kept identical so PromQL can union the two
+       Bucket boundaries are kept identical so metric queries can union the two
        sources into one bimodal view (fast/short_tail/mid_tail/long_mid/
        long_tail). [inner=...] surfaces the parent fiber's exception payload
-       so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs cascade-rotation
+       so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs runtime-rotation
        can be told apart at the WARN line. *)
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
@@ -110,8 +109,8 @@ let run_safe ~caller ~timeout_s fn =
       | Failure msg -> "Failure(" ^ msg ^ ")"
       | _ -> Printexc.to_string inner_exn
     in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_cancel
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_cancel
       ~labels:[
         ("caller", caller);
         ("bucket", bucket);
@@ -133,21 +132,16 @@ let run_safe ~caller ~timeout_s fn =
        classifier can route bridge-boundary failures off the
        [Reason_internal_error] catch-all. *)
     Error
-      (Cascade_error_classify.sdk_error_of_masc_internal_error
-         (Cascade_error_classify.Internal_bridge_exception
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Internal_bridge_exception
             { caller; exn_repr = Printexc.to_string exn }))
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels
-    the resulting Prometheus counter.  Replaces the seven hardcoded
-    [run_safe ~timeout_s:N.N] literals scattered across the lib
-    tree.  The original tuned values for persona authoring / deep_review
-    / anti_rationalization are preserved as per-caller defaults;
-    the two fantasy 60s budgets ([auto_responder],
-    [dashboard_provider_runs]) are raised to the global default
-    (300s) since the original 60s did not match observed p50
-    latency.  See [Env_config_oas_bridge] for the full table and
-    env-var override layout. *)
+    the resulting Otel_metric_store counter.  The remaining trusted OAS
+    callers are evaluator/advisory flows with caller-specific defaults
+    owned by [Env_config_oas_bridge]; removed runtime-invocation
+    surfaces must not reappear as hidden timeout configuration. *)
 let run_with_caller ~caller fn =
   let timeout_s = Env_config_oas_bridge.timeout_sec ~caller () in
   run_safe ~caller:(Env_config_oas_bridge.caller_key caller) ~timeout_s fn

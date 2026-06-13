@@ -15,21 +15,21 @@ import {
   goalTreeLoading as treeLoading,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
-import { coordinationFsmSnapshot } from '../../store'
+import { workspaceFsmSnapshot } from '../../store'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { executionOutcomeLabel } from '../fsm-hub-types'
 import { operatorDispositionReasonLabel } from '../fsm-hub-types'
-import { cascadeOutcomeLabel } from '../fsm-hub-types'
+import { runtimeOutcomeLabel } from '../fsm-hub-types'
 import { ringFocusClasses } from '../common/ring'
 import { trustDispositionLabel } from '../fsm-hub-types'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 import type {
   DashboardGoalDetailResponse,
-  DashboardCoordinationFsmViolation,
+  DashboardWorkspaceFsmViolation,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
   GoalFsmProjection,
@@ -173,7 +173,7 @@ function badgeLabel(badge: string): string {
   switch (badge) {
     case 'awaiting_approval': return '승인 대기'
     case 'sandbox': return '샌드박스'
-    case 'cascade': return 'Cascade'
+    case 'runtime': return 'Runtime'
     case 'task_verification_pending': return 'Task 검증 대기'
     case 'stalled': return '정체'
     case 'activity_unobserved': return '활동 관측 부족'
@@ -185,7 +185,7 @@ function badgeLabel(badge: string): string {
 function badgeClass(badge: string): string {
   switch (badge) {
     case 'awaiting_approval':
-    case 'cascade':
+    case 'runtime':
     case 'task_verification_pending':
     case 'stalled':
       return 'border-warn/30 bg-warn/10 text-warn'
@@ -215,10 +215,6 @@ function healthLabel(health: GoalTreeNode['health']): string {
 // 4-entry inline label literal that also lived in
 // `keeper-detail-alert-strip.ts:201-205`. Same map, single SSOT.
 
-function compactTrustList(items: readonly string[] | null | undefined): string[] {
-  return (items ?? []).map(item => item.trim()).filter(Boolean)
-}
-
 function healthClass(health: GoalTreeNode['health']): string {
   switch (health) {
     case 'done': return 'border-[var(--color-ok-border)] bg-[var(--color-ok-soft)] text-[var(--color-ok-fg)]'
@@ -245,7 +241,6 @@ function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
 
 function humanizeBlockingReason(reason: string): string {
   switch (reason) {
-    case 'tool_required_unsatisfied': return '필요한 도구가 충족되지 않음'
     case 'tool_route_recoverable_failure': return '도구 라우팅 복구 필요'
     case 'degraded_retry': return '재시도 중 (성능 저하)'
     case 'reaction_chain_break': return '반응 체인 단절'
@@ -369,7 +364,7 @@ const EMPTY_GOAL_VERIFICATION_SUMMARY: GoalVerificationSummary = {
 }
 
 function verificationPrincipalLabel(principal: GoalVerificationRequest['requested_by']) {
-  return `${principal.kind}:${principal.display_name ?? principal.id}`
+  return principal.display_name ?? principal.id
 }
 
 function verificationStatusLabel(
@@ -447,7 +442,7 @@ function GoalVerificationEvidencePanel({
       ${policy && policy.eligible_principals.length > 0 ? html`
         <div class="mt-3 flex flex-wrap gap-1.5">
           ${policy.eligible_principals.map(principal => html`
-            <span key=${`${principal.kind}:${principal.id}`} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
+            <span key=${principal.id} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
               ${verificationPrincipalLabel(principal)}
             </span>
           `)}
@@ -458,7 +453,7 @@ function GoalVerificationEvidencePanel({
           ${votes.map(vote => {
             const evidenceRefs = vote.evidence_refs ?? []
             return html`
-              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
+              <div key=${`${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
                   <span class="${DECK_CHIP} uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${vote.decision}</span>
@@ -692,8 +687,8 @@ function GoalBadges({ badges }: { badges: string[] }) {
   `
 }
 
-function coordinationViolationsForGoal(goalId: string): DashboardCoordinationFsmViolation[] {
-  const violations = coordinationFsmSnapshot.value?.violations ?? []
+function workspaceViolationsForGoal(goalId: string): DashboardWorkspaceFsmViolation[] {
+  const violations = workspaceFsmSnapshot.value?.violations ?? []
   return violations.filter(violation => violation.refs?.goal_id === goalId)
 }
 
@@ -882,7 +877,6 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           goal_id: node.id,
           action,
           actor: {
-            kind: 'operator',
             id: actorId,
             display_name: actorId,
           },
@@ -950,8 +944,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const hasContent = node.children.length > 0 || node.tasks.length > 0
   const isSelected = selectedGoalId.value === node.id
   const verificationSummary = node.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
-  const coordinationViolations = coordinationViolationsForGoal(node.id)
-  const coordinationHasError = coordinationViolations.some(v => v.severity === 'error')
+  const workspaceViolations = workspaceViolationsForGoal(node.id)
+  const workspaceHasError = workspaceViolations.some(v => v.severity === 'error')
   const indent = depth * 20
   const headerBase = isSelected
     ? TREE_NODE_CARD_ACTIVE
@@ -1030,12 +1024,12 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
                 approval ${node.pending_approval_count}
               </span>
             ` : null}
-            ${coordinationViolations.length > 0 ? html`
+            ${workspaceViolations.length > 0 ? html`
               <span
-                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
+                class="rounded-[var(--r-1)] border px-2 py-0.5 text-3xs font-medium ${workspaceHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
                 title="Goal x Task x Board x Reward"
               >
-                FSM ${coordinationViolations.length}
+                FSM ${workspaceViolations.length}
               </span>
             ` : null}
             ${node.blocking_source !== 'none' ? html`
@@ -1158,20 +1152,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || execution?.mutation_guard_summary?.trim()
     || execution?.sandbox_summary?.trim()
     || null
-  const runtimeProofStatus = execution?.runtime_proof_status?.trim() || null
-  const toolContractResult = execution?.tool_contract_result?.trim() || null
-  const requiredTools = compactTrustList(execution?.required_tools)
-  const missingRequiredTools = compactTrustList(execution?.missing_required_tools)
-  const requestedTools = compactTrustList(execution?.requested_tools)
-  const toolsUsed = compactTrustList(execution?.tools_used)
-  const unexpectedTools = compactTrustList(execution?.unexpected_tools)
-  const requestedToolCount = execution?.requested_tool_count
-  const toolsUsedCount = execution?.tools_used_count
-  const unexpectedToolCount = execution?.unexpected_tool_count
-  const providerAttempts = execution?.provider_attempt_count
-  const providerFallback = execution?.provider_fallback_applied
-  const providerSelectedModel = execution?.provider_selected_model?.trim() || null
-  const executionCascadeOutcome = execution?.cascade_outcome?.trim() || null
+  const runtimeAttemptCount = execution?.provider_attempt_count
+  const runtimeFailoverApplied = execution?.provider_fallback_applied
+  const runtimeSelectedLane = execution?.provider_selected_model?.trim() || null
+  const executionRuntimeOutcome = execution?.runtime_outcome?.trim() || null
   const sandboxRoot = execution?.sandbox_root?.trim() || null
   const latestTerminalCode = trust?.latest_terminal_reason?.code?.trim() || null
   const latestTerminalSummary = trust?.latest_terminal_reason?.summary?.trim() || null
@@ -1190,20 +1174,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
     || Boolean(trust?.next_human_action)
     || Boolean(latestTerminalCode)
     || Boolean(latestNextAction)
-    || Boolean(runtimeProofStatus)
-    || Boolean(toolContractResult)
-    || requiredTools.length > 0
-    || missingRequiredTools.length > 0
-    || requestedTools.length > 0
-    || toolsUsed.length > 0
-    || unexpectedTools.length > 0
-    || typeof requestedToolCount === 'number'
-    || typeof toolsUsedCount === 'number'
-    || typeof unexpectedToolCount === 'number'
-    || typeof providerAttempts === 'number'
-    || providerFallback === true
-    || Boolean(providerSelectedModel)
-    || Boolean(executionCascadeOutcome)
+    || typeof runtimeAttemptCount === 'number'
+    || runtimeFailoverApplied === true
+    || Boolean(runtimeSelectedLane)
+    || Boolean(executionRuntimeOutcome)
     || Boolean(sandboxRoot)
     || trustHasPendingFirstEvidence(trust?.approval_state ?? null)
 
@@ -1232,10 +1206,10 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
         <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
-        <div>캐스케이드</div>
-        <div class="text-right text-text-body">${keeper.cascade_name ?? executionCascadeOutcome ?? '-'}</div>
+        <div>런타임</div>
+        <div class="text-right text-text-body">${keeper.runtime_id ?? executionRuntimeOutcome ?? '-'}</div>
         <div>결과</div>
-        <div class="text-right text-text-body" title=${keeper.cascade_outcome ?? executionCascadeOutcome ?? ''}>${cascadeOutcomeLabel(keeper.cascade_outcome ?? executionCascadeOutcome) ?? '-'}</div>
+        <div class="text-right text-text-body" title=${keeper.runtime_outcome ?? executionRuntimeOutcome ?? ''}>${runtimeOutcomeLabel(keeper.runtime_outcome ?? executionRuntimeOutcome) ?? '-'}</div>
       </div>
       ${shouldShowTrustSummary ? html`
         <div class="mt-3 rounded-[var(--r-1)] border border-card-border/50 bg-[var(--color-bg-surface)] p-3">
@@ -1262,40 +1236,16 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             ${pendingApprovalBlocker ? html`
               <span>승인 차단 ${pendingApprovalBlocker}</span>
             ` : null}
-            ${runtimeProofStatus ? html`
-              <span>증명 ${runtimeProofStatus}</span>
-            ` : null}
-            ${toolContractResult ? html`
-              <span>계약 ${toolContractResult}</span>
-            ` : null}
-            ${missingRequiredTools.length > 0 ? html`
-              <span class="text-[var(--color-status-err)]" title=${missingRequiredTools.join(', ')}>누락 ${missingRequiredTools.join(', ')}</span>
-            ` : null}
-            ${requiredTools.length > 0 ? html`
-              <span title=${requiredTools.join(', ')}>필요 ${requiredTools.join(', ')}</span>
-            ` : null}
-            ${toolsUsed.length > 0 ? html`
-              <span title=${toolsUsed.join(', ')}>사용 ${toolsUsed.join(', ')}</span>
-            ` : null}
-            ${unexpectedTools.length > 0 ? html`
-              <span class="text-[var(--color-status-err)]" title=${unexpectedTools.join(', ')}>외부 ${unexpectedTools.join(', ')}</span>
-            ` : null}
-            ${requestedTools.length > 0 ? html`
-              <span title=${requestedTools.join(', ')}>요청 ${requestedTools.join(', ')}</span>
-            ` : null}
-            ${typeof toolsUsedCount === 'number' || typeof requestedToolCount === 'number' || typeof unexpectedToolCount === 'number' ? html`
-              <span>도구 카운트 ${toolsUsedCount ?? '-'}/${requestedToolCount ?? '-'}${typeof unexpectedToolCount === 'number' ? ` · 외부 ${unexpectedToolCount}` : ''}</span>
-            ` : null}
-            ${typeof providerAttempts === 'number' || providerFallback === true || providerSelectedModel ? html`
+            ${typeof runtimeAttemptCount === 'number' || runtimeFailoverApplied === true || runtimeSelectedLane ? html`
               <span>
-                provider
-                ${typeof providerAttempts === 'number' ? ` ${providerAttempts}회` : ''}
-                ${providerFallback === true ? ' fallback' : ''}
-                ${providerSelectedModel ? ` ${providerSelectedModel}` : ''}
+                runtime
+                ${typeof runtimeAttemptCount === 'number' ? ` ${runtimeAttemptCount}회` : ''}
+                ${runtimeFailoverApplied === true ? ' failover' : ''}
+                ${runtimeSelectedLane ? ` ${runtimeSelectedLane}` : ''}
               </span>
             ` : null}
-            ${executionCascadeOutcome ? html`
-              <span>cascade ${executionCascadeOutcome}</span>
+            ${executionRuntimeOutcome ? html`
+              <span>runtime ${executionRuntimeOutcome}</span>
             ` : null}
             ${sandboxRoot ? html`
               <span title=${sandboxRoot}>sandbox ${sandboxRoot}</span>

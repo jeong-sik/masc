@@ -23,7 +23,7 @@ val ollama_default_url : string
 val ollama_port_needle : string
 
 (** Ollama native API path for the running-models ("process status")
-    endpoint. Used by {!Cascade_http_probe} and
+    endpoint. Used by {!Runtime_http_probe} and
     {!Tool_local_runtime_probe}. *)
 val ollama_api_ps_path : string
 
@@ -49,14 +49,14 @@ val chat_completions_path : string
 (** [/v1/models]. *)
 val openai_models_path : string
 
-(** {1 CLI sentinel transport} *)
+(** {1 CLI transport discriminator} *)
 
 (** ["cli:"] — prefix marking a CLI-backed transport (e.g.
     [cli:agent_code]). *)
-val cli_sentinel_prefix : string
+val cli_transport_prefix : string
 
-(** Strict prefix match for {!cli_sentinel_prefix}. *)
-val is_cli_sentinel_url : string -> bool
+(** Strict prefix match for {!cli_transport_prefix}. *)
+val is_cli_transport_url : string -> bool
 
 (** {1 Local LLM URL} *)
 

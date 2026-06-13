@@ -11,7 +11,7 @@
     Tokens SSOT:
       - dashboard/design-system/source_styles/tokens.generated.css
 
-    cascade chain (W05 orphan-triage cleared in PR #11317 — LIVE):
+    runtime chain (W05 orphan-triage cleared in PR #11317 — LIVE):
       dashboard/src/main.ts -> dashboard/src/styles/global.css:30
         @import "./live-monitor.css";
       live-monitor.css depends on @keyframes livePulse + activityFadeIn
@@ -385,7 +385,7 @@
     <section class="pv-banner" role="note">
       <div class="h">Production source: src/styles/live-monitor.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
       <div class="l">
-        cascade chain (LIVE per orphan-triage PR #11317):
+        runtime chain (LIVE per orphan-triage PR #11317):
         dashboard/src/main.ts → dashboard/src/styles/global.css:30 → @import "./live-monitor.css"
         — depends on @keyframes livePulse + activityFadeIn (keyframes.css:71-79).
         Read-only mirror — no production CSS modified by this preview · Phase 0 audit PR #11300.
@@ -487,7 +487,7 @@
             <div class="lm-activity-item lm-event-broadcast lm-activity-item-new">
               <span class="ts">10:42:13</span>
               <span><span class="lm-kind-chip lm-event-broadcast">broadcast</span></span>
-              <span class="body">@sangsu fixing OAS pin bump cascade — keeper-coord W06 freeze in 5m</span>
+              <span class="body">@sangsu fixing OAS pin bump runtime — keeper-workspace W06 freeze in 5m</span>
             </div>
             <div class="lm-activity-item lm-event-task">
               <span class="ts">10:42:01</span>
@@ -497,12 +497,12 @@
             <div class="lm-activity-item lm-event-keeper">
               <span class="ts">10:41:48</span>
               <span><span class="lm-kind-chip lm-event-keeper">keeper</span></span>
-              <span class="body">spark heartbeat resumed · last gap 18s · cascade pin spark-only</span>
+              <span class="body">spark heartbeat resumed · last gap 18s · runtime pin spark-only</span>
             </div>
             <div class="lm-activity-item lm-event-system">
               <span class="ts">10:41:30</span>
               <span><span class="lm-kind-chip lm-event-system">system</span></span>
-              <span class="body">cascade.toml hot-reload · 3 keepers re-pinned · weights 2/4/1</span>
+              <span class="body">runtime.toml hot-reload · 3 keepers re-pinned · weights 2/4/1</span>
             </div>
             <div class="lm-activity-item lm-event-broadcast">
               <span class="ts">10:41:12</span>
@@ -564,7 +564,7 @@
               <span class="name">sangsu</span>
               <span class="meta">
                 <span class="lm-lat">lat <span class="v">142ms</span></span>
-                <span>· cascade spark</span>
+                <span>· runtime spark</span>
                 <span>· turn 14</span>
               </span>
               <div class="lm-signal-bar">
@@ -579,7 +579,7 @@
               <span class="name">nick0cave (hover)</span>
               <span class="meta">
                 <span class="lm-lat">lat <span class="v">98ms</span></span>
-                <span>· cascade cli-tool-b</span>
+                <span>· runtime runtime-adapter-b</span>
               </span>
               <div class="lm-signal-bar">
                 <span class="seg on" style="height: 4px;"></span>
@@ -593,7 +593,7 @@
               <span class="name">archivist</span>
               <span class="meta">
                 <span class="lm-lat">lat <span class="v">311ms</span></span>
-                <span>· cascade ollama</span>
+                <span>· runtime ollama</span>
               </span>
               <div class="lm-signal-bar">
                 <span class="seg on" style="height: 4px;"></span>
@@ -623,7 +623,7 @@
               <span class="name">sangsu (selected)</span>
               <span class="meta">
                 <span class="lm-lat">lat <span class="v">142ms</span></span>
-                <span>· cascade spark</span>
+                <span>· runtime spark</span>
                 <span>· turn 14</span>
               </span>
               <div class="lm-signal-bar">
@@ -638,7 +638,7 @@
               <span class="name">curator</span>
               <span class="meta">
                 <span class="lm-lat">lat <span class="v">208ms</span></span>
-                <span>· cascade cli-tool-c</span>
+                <span>· runtime runtime-adapter-b</span>
               </span>
               <div class="lm-signal-bar">
                 <span class="seg on" style="height: 4px;"></span>
@@ -698,7 +698,7 @@
               </div>
               <div class="lm-focus-card">
                 <span class="name">nick0cave</span>
-                <span class="meta"><span class="lm-lat">lat <span class="v">98ms</span></span><span>· cli-tool-b</span></span>
+                <span class="meta"><span class="lm-lat">lat <span class="v">98ms</span></span><span>· runtime-adapter-b</span></span>
               </div>
             </div>
           </div>

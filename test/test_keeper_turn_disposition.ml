@@ -19,11 +19,12 @@
     3. Projection: [of_termination_code] is deterministic and total
        over [Keeper_turn_terminal_code.t]. *)
 
-module D = Masc_mcp.Keeper_turn_disposition
-module Code = Masc_mcp.Keeper_turn_terminal_code
-module Legacy = Masc_mcp.Keeper_turn_terminal
-module Registry = Masc_mcp.Keeper_registry
-module Unified_types = Masc_mcp.Keeper_unified_turn_types
+module D = Masc.Keeper_turn_disposition
+module Code = Masc.Keeper_turn_terminal_code
+module Legacy = Masc.Keeper_turn_terminal
+module KTD = Masc.Keeper_turn_driver
+module Registry = Masc.Keeper_registry
+module Unified_types = Masc.Keeper_unified_turn_types
 
 (* ===== Byte-compat oracle ====================================== *)
 (* For every legacy wire code, build the corresponding disposition,
@@ -37,8 +38,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
-  ; "required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "post_commit_ambiguous", D.Post_commit_ambiguous
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "" }
@@ -145,8 +144,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Required_tool_use_no_tool_call", D.Required_tool_use_no_tool_call
-  ; "Required_tool_use_unsatisfied", D.Required_tool_use_unsatisfied
   ; "Post_commit_ambiguous", D.Post_commit_ambiguous
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
@@ -213,9 +210,6 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; ( "Tool_required_unsatisfied"
-    , Code.Tool_required_unsatisfied "x"
-    , D.Required_tool_use_unsatisfied )
   ; ( "Ambiguous/timeout"
     , Code.Ambiguous_partial_commit_post_commit_timeout
     , D.Post_commit_ambiguous )
@@ -249,7 +243,35 @@ let test_projection () =
     runtime_codes_to_projection
 ;;
 
-let check_cascade_failure_reason raw_error expected_code =
+let test_provider_timeout_terminal_is_provider_error () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Provider_timeout
+         { budget_sec = 555.0
+         ; keeper_turn_timeout_sec = 600.0
+         ; estimated_input_tokens = 4302
+         ; source = "first_attempt_adaptive_timeout"
+         ; remaining_turn_budget_sec = Some 45.0
+         ; min_required_sec = 15.0
+         ; phase = "runtime_attempt_watchdog"
+         })
+  in
+  let terminal =
+    Legacy.of_failure
+      ~raw_error:(Agent_sdk.Error.to_string err)
+      err
+  in
+  Alcotest.(check string)
+    "provider timeout terminal code"
+    "provider_timeout"
+    (Legacy.code terminal);
+  Alcotest.(check string)
+    "provider timeout disposition"
+    "provider_timeout"
+    (D.to_wire terminal.disposition)
+;;
+
+let check_runtime_failure_reason raw_error expected_code =
   let terminal = Legacy.of_code raw_error in
   match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
   | Some (Registry.Provider_runtime_error { code; detail }) ->
@@ -262,28 +284,18 @@ let check_cascade_failure_reason raw_error expected_code =
     Alcotest.failf
       "expected Provider_runtime_error, got %s"
       (Registry.failure_reason_to_string other)
-  | None -> Alcotest.fail "expected structured cascade failure reason"
+  | None -> Alcotest.fail "expected structured runtime failure reason"
 ;;
 
-let test_registry_failure_reason_preserves_no_provider_cascade_reason () =
+let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
   let raw_error =
     "Internal error: [masc_oas_error] \
-     {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tier.strict_tool_candidates\",\
+     {\"kind\":\"runtime_exhausted\",\"runtime_id\":\"runtime.strict_tool_candidates\",\
      \"reason\":\"no_providers_available\"}"
   in
-  check_cascade_failure_reason
+  check_runtime_failure_reason
     raw_error
-    "cascade_exhausted_no_providers_available"
-;;
-
-let test_registry_failure_reason_buckets_cascade_liveness_reason () =
-  let raw_error =
-    "Internal error: [masc_oas_error] \
-     {\"kind\":\"cascade_exhausted\",\"cascade_name\":\"tier-group.ollama_cloud_stable\",\
-     \"reason\":{\"tag\":\"other_detail\",\"message\":\"Cascade attempt liveness guard \
-     killed runtime lane tier-group.ollama_cloud_stable: inter_chunk_idle\"}}"
-  in
-  check_cascade_failure_reason raw_error "cascade_exhausted_inter_chunk_idle"
+    "runtime_exhausted_no_providers_available"
 ;;
 
 let () =
@@ -324,16 +336,16 @@ let () =
             "every runtime variant projects deterministically"
             `Quick
             test_projection
+        ; Alcotest.test_case
+            "provider timeout is provider error, not turn wall-clock"
+            `Quick
+            test_provider_timeout_terminal_is_provider_error
         ] )
     ; ( "registry failure reason"
       , [ Alcotest.test_case
-            "structured cascade no-provider reason is preserved"
+            "structured runtime no-provider reason is preserved"
             `Quick
-            test_registry_failure_reason_preserves_no_provider_cascade_reason
-        ; Alcotest.test_case
-            "structured cascade liveness reason is bucketed"
-            `Quick
-            test_registry_failure_reason_buckets_cascade_liveness_reason
+            test_registry_failure_reason_preserves_no_provider_runtime_reason
         ] )
     ]
 ;;

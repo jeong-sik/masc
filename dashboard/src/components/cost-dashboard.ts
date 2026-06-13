@@ -16,19 +16,11 @@ import { computed } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
-  fetchHeuristics,
-  fetchHeuristicCoverage,
-  fetchStress,
   fetchAuditLedger,
   fetchKeeperDecisions,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
-  type HeuristicEvent,
-  type HeuristicCoverage,
-  type CoverageSite,
-  type StressEvent,
-  type AgentStressRow,
   type AuditEntry,
   type KeeperDecision,
   type DashboardFeedMetadata,
@@ -36,7 +28,7 @@ import {
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { StatTile } from './common/stat-tile'
 import { FilterChips } from './common/filter-chips'
-import { formatCost, formatPct1 } from '../lib/format-number'
+import { formatCost, formatPct1, formatTokens } from '../lib/format-number'
 import { unixSecondsToDate } from '../lib/format-time'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import { replaceRoute, route } from '../router'
@@ -57,9 +49,6 @@ import {
   viewMode,
   modelState,
   keeperState,
-  heuristicState,
-  stressState,
-  coverageState,
   auditLedgerState,
   keeperDecisionsState,
   windowMinutes,
@@ -208,39 +197,6 @@ async function loadKeeperMetrics(window: number) {
   }
 }
 
-async function loadHeuristics(limit = 100) {
-  heuristicState.value = { status: 'loading' }
-  try {
-    const resp = await fetchHeuristics(limit)
-    heuristicState.value = { status: 'loaded', data: resp.events, limit: resp.limit, meta: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'heuristic metrics 불러오기 실패'
-    heuristicState.value = { status: 'error', message }
-  }
-}
-
-async function loadStress(limit = 100) {
-  stressState.value = { status: 'loading' }
-  try {
-    const resp = await fetchStress(limit)
-    stressState.value = { status: 'loaded', events: resp.events, board: resp.agent_stress, limit: resp.limit, meta: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
-    stressState.value = { status: 'error', message }
-  }
-}
-
-async function loadHeuristicCoverage(limit = 100) {
-  coverageState.value = { status: 'loading' }
-  try {
-    const resp = await fetchHeuristicCoverage(limit)
-    coverageState.value = { status: 'loaded', data: resp }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'heuristic coverage 불러오기 실패'
-    coverageState.value = { status: 'error', message }
-  }
-}
-
 async function loadAuditLedger(limit = 50) {
   auditLedgerState.value = { status: 'loading' }
   try {
@@ -271,13 +227,6 @@ function loadActiveView(window: number, view: CostView) {
       void loadKeeperMetrics(window)
     }
   }
-  if (view === 'heuristics') {
-    void loadHeuristics()
-    void loadHeuristicCoverage()
-  }
-  if (view === 'stress') {
-    void loadStress()
-  }
   if (view === 'audit') {
     void loadAuditLedger()
   }
@@ -293,21 +242,46 @@ const modelTotals = computed(() => {
   let totalCost = 0
   let totalIn = 0
   let totalOut = 0
+  let totalCache = 0
+  let totalCacheCreation = 0
+  let totalReasoning = 0
+  let totalSuccess = 0
+  let totalError = 0
   let p50Sum = 0
   let p50Count = 0
   let p95Max = 0
+  let ttfrcSum = 0
+  let ttfrcCount = 0
   for (const m of data) {
     totalCost += m.total_cost_usd ?? 0
     totalIn += m.total_input_tokens ?? 0
     totalOut += m.total_output_tokens ?? 0
+    totalCache += m.total_cache_read_tokens ?? 0
+    totalCacheCreation += m.total_cache_creation_tokens ?? 0
+    totalReasoning += m.total_reasoning_tokens ?? 0
+    totalSuccess += m.success_count ?? 0
+    totalError += m.error_count ?? 0
     if (m.p50_latency_ms != null) {
       p50Sum += m.p50_latency_ms
       p50Count += 1
     }
     if (m.p95_latency_ms != null && m.p95_latency_ms > p95Max) p95Max = m.p95_latency_ms
+    // Aggregate TTFRC from recent entries
+    if (m.recent_entries) {
+      for (const e of m.recent_entries) {
+        if (e.streaming_ttfrc_ms != null) {
+          ttfrcSum += e.streaming_ttfrc_ms
+          ttfrcCount += 1
+        }
+      }
+    }
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
+  const cacheRatio = totalIn > 0 ? totalCache / totalIn : null
+  const reasoningRatio = totalOut > 0 ? totalReasoning / totalOut : null
+  const errorRate = (totalSuccess + totalError) > 0 ? totalError / (totalSuccess + totalError) : null
+  const avgTtfrc = ttfrcCount > 0 ? Math.round(ttfrcSum / ttfrcCount) : null
+  return { totalCost, totalIn, totalOut, totalCache, totalCacheCreation, totalReasoning, totalSuccess, totalError, cacheRatio, reasoningRatio, errorRate, avgTtfrc, p50Avg, p95Max, count: data.length }
 })
 
 const keeperTotals = computed(() => {
@@ -331,11 +305,36 @@ const keeperTotals = computed(() => {
     if (k.p95_latency_ms != null && k.p95_latency_ms > p95Max) p95Max = k.p95_latency_ms
   }
   const p50Avg = p50Count > 0 ? Math.round(p50Sum / p50Count) : 0
-  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
+  return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length, totalSuccess: 0, totalError: 0, errorRate: null, avgTtfrc: null, totalCache: 0, totalCacheCreation: 0, totalReasoning: 0, cacheRatio: null, reasoningRatio: null }
 })
 
 function ThRight({ children }: { children: unknown }) {
   return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
+}
+
+function cacheRatioColor(ratio: number | null): string {
+  if (ratio == null) return ''
+  if (ratio >= 0.8) return 'text-[var(--color-status-ok)]'
+  if (ratio >= 0.5) return 'text-[var(--color-status-warn)]'
+  return 'text-[var(--color-status-err)]'
+}
+
+function reasoningRatioColor(ratio: number | null): string {
+  if (ratio == null) return ''
+  if (ratio >= 0.5) return 'text-[var(--color-status-warn)]'
+  return ''
+}
+
+function coverageBadgeClass(status: string | null | undefined): string {
+  if (status === 'full') return 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
+  if (status === 'partial') return 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
+  return 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]'
+}
+
+function usageTrustBadge(trust: string | null | undefined): { label: string; cls: string } {
+  if (trust === 'trusted') return { label: 'trusted', cls: 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]' }
+  if (trust === 'untrusted') return { label: 'untrusted', cls: 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' }
+  return { label: 'missing', cls: 'bg-[var(--color-bg-surface)] text-text-muted' }
 }
 
 function ModelRow({
@@ -348,11 +347,37 @@ function ModelRow({
   const cost = model.total_cost_usd ?? 0
   const inTok = model.total_input_tokens ?? 0
   const outTok = model.total_output_tokens ?? 0
+  const cacheRead = model.total_cache_read_tokens ?? null
+  const cacheCreation = model.total_cache_creation_tokens ?? null
+  const reasoning = model.total_reasoning_tokens ?? null
+  const thinkingFrac = model.thinking_fraction ?? null
+  const coverage = model.coverage_status ?? null
   const p50 = model.p50_latency_ms ?? null
   const p95 = model.p95_latency_ms ?? null
   const costPct = maxCost > 0 ? (cost / maxCost) * 100 : 0
   const p95Pct = maxP95 > 0 && p95 != null ? (p95 / maxP95) * 100 : 0
   const overBudget = p95 != null && p95 > 8000
+
+  const cacheRatio = inTok > 0 && cacheRead != null ? cacheRead / inTok : null
+  const reasoningRatio = outTok > 0 && reasoning != null ? reasoning / outTok : null
+
+  // Error rate
+  const errCount = model.error_count ?? 0
+  const succCount = model.success_count ?? 0
+  const totalTurns = errCount + succCount
+  const errRate = totalTurns > 0 ? errCount / totalTurns : null
+
+  // Average TTFRC from recent entries
+  const ttfrcEntries = model.recent_entries?.filter(e => e.streaming_ttfrc_ms != null) ?? []
+  const avgTtfrc = ttfrcEntries.length > 0
+    ? Math.round(ttfrcEntries.reduce((sum, e) => sum + (e.streaming_ttfrc_ms ?? 0), 0) / ttfrcEntries.length)
+    : null
+
+  // Derive latest usage_trust from recent_entries
+  const latestTrust = model.recent_entries?.length
+    ? (model.recent_entries[model.recent_entries.length - 1]?.usage_trust ?? null)
+    : null
+  const trustBadge = usageTrustBadge(latestTrust)
 
   return html`
     <tr class="border-b border-[var(--color-border-default)]/40 align-baseline">
@@ -361,6 +386,18 @@ function ModelRow({
       </th>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(inTok)}</td>
       <td class="px-2 py-1.5 text-right font-mono text-xs">${formatCostTokens(outTok)}</td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${cacheRatioColor(cacheRatio)}">
+        ${cacheRatio != null ? formatPct1(cacheRatio) : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${cacheCreation != null ? formatTokens(cacheCreation) : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${reasoningRatioColor(reasoningRatio)}">
+        ${reasoning != null ? html`${formatTokens(reasoning)}${reasoningRatio != null ? html` <span class="text-text-muted">(${formatPct1(reasoningRatio)})</span>` : ''}` : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${thinkingFrac != null ? formatPct1(thinkingFrac) : html`<span class="text-text-disabled">—</span>`}
+      </td>
       <td class="px-2 py-1.5 text-right font-mono text-xs text-[var(--color-accent-fg)]">
         ${formatCost(cost)}
       </td>
@@ -382,6 +419,20 @@ function ModelRow({
             style=${`width: ${p95Pct.toFixed(1)}%`}
           ></div>
         </div>
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs">
+        ${avgTtfrc != null ? html`<span class="text-text-muted">${avgTtfrc}ms</span>` : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-right font-mono text-xs ${errRate != null && errRate > 0.1 ? 'text-[var(--color-status-err)]' : errRate != null && errRate > 0 ? 'text-[var(--color-status-warn)]' : ''}">
+        ${errRate != null ? formatPct1(errRate) : html`<span class="text-text-disabled">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-center">
+        ${coverage != null
+          ? html`<span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${coverageBadgeClass(coverage)}">${coverage}</span>`
+          : html`<span class="text-text-disabled text-2xs">—</span>`}
+      </td>
+      <td class="px-2 py-1.5 text-center">
+        <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${trustBadge.cls}">${trustBadge.label}</span>
       </td>
     </tr>
   `
@@ -603,223 +654,6 @@ function FeedSourceStrip({ meta }: { meta: DashboardFeedMetadata }) {
     <div class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2 font-mono text-2xs text-text-muted">
       ${items.join(' · ')}
     </div>
-  `
-}
-
-function HeuristicLog({ events, limit, meta }: { events: HeuristicEvent[]; limit: number; meta: DashboardFeedMetadata }) {
-  const fmtTime = (ts: number): string => {
-    const d = unixSecondsToDate(ts)
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  }
-
-  const triggeredCount = events.filter(e => e.triggered).length
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
-      <${FeedSourceStrip} meta=${meta} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
-        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Heuristic events">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-              <th scope="col" class="px-2 py-1.5 text-left">module</th>
-              <th scope="col" class="px-2 py-1.5 text-left">site</th>
-              <th scope="col" class="px-2 py-1.5 text-right">value</th>
-              <th scope="col" class="px-2 py-1.5 text-right">threshold</th>
-              <th scope="col" class="px-2 py-1.5 text-center">state</th>
-              <th scope="col" class="px-2 py-1.5 text-left">provenance</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${events.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs ${e.triggered ? 'bg-[var(--color-status-err)]/5' : ''}">
-                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
-                <td class="px-2 py-1.5 text-text-strong">${e.module}</td>
-                <td class="px-2 py-1.5 text-text-muted">${e.site}</td>
-                <td class="px-2 py-1.5 text-right font-mono">${e.raw_value.toFixed(3)}</td>
-                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.threshold.toFixed(3)}</td>
-                <td class="px-2 py-1.5 text-center">
-                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${e.triggered ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
-                    ${e.triggered ? 'TRIGGERED' : 'ok'}
-                  </span>
-                </td>
-                <td class="px-2 py-1.5 text-text-muted">${e.provenance.type}${e.provenance.detail ? ` · ${e.provenance.detail}` : ''}</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `
-}
-
-function StressBoard({ rows, events, limit, meta }: { rows: AgentStressRow[]; events: StressEvent[]; limit: number; meta: DashboardFeedMetadata }) {
-  const fmtTime = (ts: number): string => {
-    const d = unixSecondsToDate(ts)
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  }
-
-  const fmtKind = (kind: StressEvent['kind']): string => {
-    switch (kind.type) {
-      case 'failure_streak': return `failure_streak · ${kind.count ?? '?'}`
-      case 'turn_failure': return `turn_failure · c=${kind.consecutive ?? '?'} t=${kind.threshold ?? '?'}`
-      case 'fallback_approval': return 'fallback_approval'
-      case 'timeout': return 'timeout'
-      case 'parse_degraded': return 'parse_degraded'
-      case 'task_released': return 'task_released'
-      default: return kind.type
-    }
-  }
-
-  const severityClass = (kind: StressEvent['kind']): string => {
-    switch (kind.type) {
-      case 'failure_streak':
-      case 'turn_failure':
-        return 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]'
-      case 'timeout':
-      case 'parse_degraded':
-        return 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
-      default:
-        return 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
-    }
-  }
-
-  const pressureTone = (value: number): string => {
-    if (value >= 0.75) return 'text-[var(--color-status-err)]'
-    if (value >= 0.45) return 'text-[var(--color-status-warn)]'
-    return 'text-[var(--color-status-ok)]'
-  }
-
-  const sourceHint = (row: AgentStressRow): string => {
-    return [
-      row.budget_pressure_source ? `budget=${row.budget_pressure_source}` : '',
-      row.ctx_pressure_source ? `ctx=${row.ctx_pressure_source}` : '',
-      row.queue_depth_source ? `queue=${row.queue_depth_source}` : '',
-    ].filter(Boolean).join(' · ')
-  }
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${rows.length} agents · ${events.length} events`}>
-      <${FeedSourceStrip} meta=${meta} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">stress board · ${rows.length} agents · ${events.length} events</span>
-        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Agent stress board">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
-              <th scope="col" class="px-2 py-1.5 text-right">budget</th>
-              <th scope="col" class="px-2 py-1.5 text-right">context</th>
-              <th scope="col" class="px-2 py-1.5 text-right">queue</th>
-              <th scope="col" class="px-2 py-1.5 text-left">blocked</th>
-              <th scope="col" class="px-2 py-1.5 text-left">source</th>
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.map((row, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
-                <td class="px-2 py-1.5 text-text-strong">${row.agent}</td>
-                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.budget_pressure)}`}>${formatPct1(row.budget_pressure)}</td>
-                <td class=${`px-2 py-1.5 text-right font-mono ${pressureTone(row.ctx_pressure)}`}>${formatPct1(row.ctx_pressure)}</td>
-                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${row.queue_depth}</td>
-                <td class="px-2 py-1.5 text-text-muted">${row.blocked_on ?? '—'}</td>
-                <td class="px-2 py-1.5 text-text-muted">${sourceHint(row)}</td>
-                <td class="px-2 py-1.5 font-mono text-text-muted">${row.ts > 0 ? fmtTime(row.ts) : '—'}</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Recent stress events">
-          <thead>
-            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-              <th scope="col" class="px-2 py-1.5 text-left">time</th>
-              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
-              <th scope="col" class="px-2 py-1.5 text-left">room</th>
-              <th scope="col" class="px-2 py-1.5 text-left">kind</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${events.map((e, i) => html`
-              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
-                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
-                <td class="px-2 py-1.5 text-text-strong">${e.agent_name}</td>
-                <td class="px-2 py-1.5 font-mono text-text-muted">${e.room_id}</td>
-                <td class="px-2 py-1.5">
-                  <span class="inline-block rounded-[var(--r-1)] px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
-                    ${fmtKind(e.kind)}
-                  </span>
-                </td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  `
-}
-
-function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
-  const byModule = coverage.sites.reduce((acc, site) => {
-    const arr = acc.get(site.module) ?? []
-    arr.push(site)
-    acc.set(site.module, arr)
-    return acc
-  }, new Map<string, CoverageSite[]>())
-
-  const sortedModules = Array.from(byModule.entries()).sort((a, b) => b[1].length - a[1].length)
-
-  return html`
-    <section class="flex flex-col gap-2" aria-label="Heuristic by module">
-      <${FeedSourceStrip} meta=${coverage} />
-      <div class="flex items-center justify-between rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
-        <span class="font-mono text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.decision_shape_count} decision shapes · ${coverage.mixed_outcome_sites} mixed sites</span>
-      </div>
-      <div class="flex flex-col gap-2">
-        ${sortedModules.map(([moduleName, sites]) => {
-          const totalCount = sites.reduce((s, x) => s + x.count, 0)
-          const totalTriggered = sites.reduce((s, x) => s + x.triggered_count, 0)
-          return html`
-            <div key=${moduleName} class="rounded-[var(--r-1)] border border-card-border/60 bg-[var(--backdrop-deep)]">
-              <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-1.5">
-                <span class="text-xs font-semibold text-text-strong">${moduleName}</span>
-                <span class="font-mono text-2xs text-text-muted">${sites.length} sites · ${totalCount} obs · ${totalTriggered} triggered</span>
-              </div>
-              <div class="overflow-x-auto">
-                <table class="w-full" aria-label=${`Heuristic sites for ${moduleName}`}>
-                  <thead>
-                    <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-[var(--track-caps)] text-text-muted">
-                      <th scope="col" class="px-2 py-1 text-left">site</th>
-                      <th scope="col" class="px-2 py-1 text-right">count</th>
-                      <th scope="col" class="px-2 py-1 text-right">triggered</th>
-                      <th scope="col" class="px-2 py-1 text-right">rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${sites.sort((a, b) => b.count - a.count).map((s, i) => html`
-                      <tr key=${i} class="border-b border-[var(--color-border-default)]/20 text-2xs">
-                        <td class="px-2 py-1 text-text-muted">${s.site}</td>
-                        <td class="px-2 py-1 text-right font-mono">${s.count}</td>
-                        <td class="px-2 py-1 text-right font-mono ${s.triggered_count > 0 ? 'text-[var(--color-status-err)]' : ''}">${s.triggered_count}</td>
-                        <td class="px-2 py-1 text-right font-mono text-text-muted">${s.count > 0 ? formatPct1(s.triggered_count / s.count) : '0.0%'}</td>
-                      </tr>
-                    `)}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `
-        })}
-      </div>
-    </section>
   `
 }
 
@@ -1235,6 +1069,29 @@ function CostDashboardContent({ view }: { view: CostView }) {
               delta=${{ direction: 'flat', text: 'aggregated window' }}
             />
             <${StatTile}
+              label="Cache Hit Ratio"
+              value=${mode === 'model' && modelTotals.value?.cacheRatio != null ? formatPct1(modelTotals.value.cacheRatio) : '—'}
+              status=${mode === 'model' && modelTotals.value?.cacheRatio != null ? (modelTotals.value.cacheRatio >= 0.8 ? 'ok' : modelTotals.value.cacheRatio >= 0.5 ? 'warn' : 'crit') : undefined}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalCache)} cached` : 'keeper view' }}
+            />
+            <${StatTile}
+              label="Reasoning Ratio"
+              value=${mode === 'model' && modelTotals.value?.reasoningRatio != null ? formatPct1(modelTotals.value.reasoningRatio) : '—'}
+              delta=${{ direction: 'flat', text: mode === 'model' && modelTotals.value ? `${formatTokens(modelTotals.value.totalReasoning)} total` : 'keeper view' }}
+            />
+            <${StatTile}
+              label="Error Rate"
+              value=${t.errorRate != null ? formatPct1(t.errorRate) : '—'}
+              status=${t.errorRate != null ? (t.errorRate > 0.1 ? 'crit' : t.errorRate > 0 ? 'warn' : 'ok') : undefined}
+              delta=${{ direction: 'flat', text: `${t.totalError} errors / ${t.totalSuccess} success` }}
+            />
+            <${StatTile}
+              label="Avg TTFRC"
+              value=${t.avgTtfrc != null ? `${t.avgTtfrc}ms` : '—'}
+              status=${t.avgTtfrc != null && t.avgTtfrc > 3000 ? 'warn' : undefined}
+              delta=${{ direction: 'flat', text: 'streaming first chunk' }}
+            />
+            <${StatTile}
               label="p50 Latency (avg)"
               value=${`${Math.round(t.p50Avg)}ms`}
               delta=${{ direction: 'flat', text: 'across entries' }}
@@ -1275,11 +1132,23 @@ function CostDashboardContent({ view }: { view: CostView }) {
                   <th scope="col" class="px-2 py-1.5 text-left">${mode === 'model' ? 'runtime' : 'keeper'}</th>
                   <${ThRight}>in tok</${ThRight}>
                   <${ThRight}>out tok</${ThRight}>
+                  ${mode === 'model' ? html`
+                    <${ThRight}>cache%</${ThRight}>
+                    <${ThRight}>creation</${ThRight}>
+                    <${ThRight}>reason</${ThRight}>
+                    <${ThRight}>think%</${ThRight}>
+                  ` : null}
                   <${ThRight}>$ cost</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">cost</th>
                   <${ThRight}>p50</${ThRight}>
                   <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
+                  ${mode === 'model' ? html`
+                    <${ThRight}>ttfrc</${ThRight}>
+                    <${ThRight}>err%</${ThRight}>
+                    <${ThRight}>coverage</${ThRight}>
+                    <${ThRight}>trust</${ThRight}>
+                  ` : null}
                   ${mode === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">runtime cost</th>` : null}
                 </tr>
               </thead>
@@ -1291,48 +1160,6 @@ function CostDashboardContent({ view }: { view: CostView }) {
             </table>
           </div>
         `}
-      </section>
-    `
-  }
-
-  if (view === 'heuristics') {
-    if (heuristicState.value.status === 'idle') {
-      void loadHeuristics()
-      void loadHeuristicCoverage()
-    }
-    return html`
-      <section class="flex flex-col gap-4" aria-label="휴리스틱">
-        <header class="flex items-baseline justify-between gap-3">
-          <h2 class="text-base font-semibold text-text-strong">휴리스틱</h2>
-        </header>
-        ${heuristicState.value.status === 'loaded'
-          ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} meta=${heuristicState.value.meta} />`
-          : heuristicState.value.status === 'error'
-            ? html`<${ErrorState} message=${heuristicState.value.message} onRetry=${() => void loadHeuristics()} />`
-            : html`<${LoadingState} />`}
-        ${coverageState.value.status === 'loaded'
-          ? html`<${HeuristicByModule} coverage=${coverageState.value.data} />`
-          : coverageState.value.status === 'error'
-            ? html`<${ErrorState} message=${coverageState.value.message} onRetry=${() => void loadHeuristicCoverage()} />`
-            : html`<${LoadingState} />`}
-      </section>
-    `
-  }
-
-  if (view === 'stress') {
-    if (stressState.value.status === 'idle') {
-      void loadStress()
-    }
-    return html`
-      <section class="flex flex-col gap-4" aria-label="스트레스">
-        <header class="flex items-baseline justify-between gap-3">
-          <h2 class="text-base font-semibold text-text-strong">스트레스 이벤트</h2>
-        </header>
-        ${stressState.value.status === 'loaded'
-          ? html`<${StressBoard} rows=${stressState.value.board} events=${stressState.value.events} limit=${stressState.value.limit} meta=${stressState.value.meta} />`
-          : stressState.value.status === 'error'
-            ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
-            : html`<${LoadingState} />`}
       </section>
     `
   }

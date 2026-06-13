@@ -146,9 +146,16 @@ let maybe_configured_fields ~include_configured enabled =
 let tcp_port_reachable (_port : int) : bool = false
 ;;
 
+let get_ws_session_count () =
+  match Transport_bridge.provider_by_name "ws" with
+  | Some m ->
+      let module M = (val m : Transport_bridge.PROVIDER) in
+      M.session_count ()
+  | None -> 0
+
 let websocket_discovery_json (ctx : http_context) =
-  let enabled = Server_ws_standalone.is_enabled () in
-  let port = Server_ws_standalone.configured_port () in
+  let enabled = Transport_metrics.ws_enabled () in
+  let port = Env_config.Transport.ws_port in
   let reachable = Transport_metrics.ws_listening () || tcp_port_reachable port in
   let base_fields =
     [ "enabled", `Bool enabled ]
@@ -158,7 +165,7 @@ let websocket_discovery_json (ctx : http_context) =
       ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
       ; "mode", `String "standalone"
       ; "discovery_path", `String "/ws"
-      ; "session_count", `Int (Server_mcp_transport_ws.session_count ())
+      ; "session_count", `Int (get_ws_session_count ())
       ]
   in
   let fields =
@@ -173,6 +180,31 @@ let websocket_discovery_json (ctx : http_context) =
   `Assoc fields
 ;;
 
+type webrtc_status =
+  { ice_server_urls : string list
+  ; pending_offers : int
+  ; active_peers : int
+  ; live_connections : int
+  ; connected_channels : int
+  }
+
+let grpc_service_name = ref "MascGrpcService"
+let grpc_health_service_name = ref "grpc.health.v1.Health"
+
+let default_webrtc_status () =
+  { ice_server_urls = []
+  ; pending_offers = 0
+  ; active_peers = 0
+  ; live_connections = 0
+  ; connected_channels = 0
+  }
+
+let webrtc_status_callback = ref default_webrtc_status
+
+let register_grpc_service_name name = grpc_service_name := name
+let register_grpc_health_service_name name = grpc_health_service_name := name
+let register_webrtc_status fn = webrtc_status_callback := fn
+
 let enabled_protocols_json () =
   let protocols =
     List.fold_left
@@ -185,15 +217,16 @@ let enabled_protocols_json () =
 ;;
 
 let transport_status_json (ctx : http_context) =
-  let grpc_enabled = Masc_grpc_server.is_enabled () in
-  let grpc_port = Masc_grpc_server.configured_port () in
+  let grpc_enabled = Env_config.Transport.grpc_enabled () in
+  let grpc_port = Env_config.Transport.grpc_port in
   let grpc_reachable =
     Transport_metrics.grpc_listening () || tcp_port_reachable grpc_port
   in
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
-  let webrtc_enabled = Server_webrtc_transport.is_enabled () in
+  let webrtc_enabled = Env_config.Transport.webrtc_enabled () in
+  let w_status = !webrtc_status_callback () in
   `Assoc
     [ "streamable_http_default", `Bool true
     ; "legacy_endpoints_deprecated", `Bool true
@@ -217,8 +250,8 @@ let transport_status_json (ctx : http_context) =
              ; "reachable", `Bool grpc_reachable
              ; "listen_status", `String (Atomic.get Transport_metrics.grpc_listen_status)
              ; "port", `Int grpc_port
-             ; "service", `String Masc_grpc_service.service_name
-             ; "health_service", `String Masc_grpc_server.health_service_name
+             ; "service", `String !grpc_service_name
+             ; "health_service", `String !grpc_health_service_name
              ]
            @
            if grpc_enabled
@@ -240,12 +273,12 @@ let transport_status_json (ctx : http_context) =
                , `List
                    (List.map
                       (fun url -> `String url)
-                      (Server_webrtc_transport.configured_ice_server_urls ())) )
-             ; "pending_offers", `Int (Server_webrtc_transport.pending_offer_count ())
-             ; "active_peers", `Int (Server_webrtc_transport.active_peer_count ())
-             ; "live_connections", `Int (Server_webrtc_transport.live_webrtc_count ())
+                      w_status.ice_server_urls) )
+             ; "pending_offers", `Int w_status.pending_offers
+             ; "active_peers", `Int w_status.active_peers
+             ; "live_connections", `Int w_status.live_connections
              ; ( "connected_channels"
-               , `Int (Server_webrtc_transport.connected_channel_count ()) )
+               , `Int w_status.connected_channels )
              ]
            @
            if webrtc_enabled
@@ -255,3 +288,4 @@ let transport_status_json (ctx : http_context) =
     ; "enabled_protocols", enabled_protocols_json ()
     ]
 ;;
+

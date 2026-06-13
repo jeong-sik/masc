@@ -140,7 +140,7 @@ val slot_scheduler_observed
 
 (** [agent_completed] and [agent_failed] carry a variable-shape
     payload tail beyond the three base fields ([agent_name],
-    [task_id], [elapsed_s]).  The tail comes from cascade-local
+    [task_id], [elapsed_s]).  The tail comes from runtime-local
     helpers ([agent_completed_result_fields] /
     [agent_failed_error_fields]) that close over [Agent_sdk]
     variant types.  To keep [Sse_event] free of [Agent_sdk]

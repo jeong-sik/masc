@@ -22,7 +22,7 @@ type node_status =
   (* Operation lifecycle *)
   | Running | Paused | Stopped | Finalized
   (* Generic / fallback *)
-  | Observed | Coord | Unset
+  | Observed | Workspace | Unset
 
 val node_status_to_string : node_status -> string
 
@@ -52,7 +52,7 @@ type event = {
   seq : int;
   ts_ms : int;
   ts_iso : string;
-  room_id : string;
+  workspace_id : string;
   kind : string;
   actor : entity_ref option;
   subject : entity_ref option;

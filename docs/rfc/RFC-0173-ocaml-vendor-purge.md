@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 ~ RFC-0172 (client-agnostic family) |
 | Scope | 241 `.ml`/`.mli` files in `lib/`, `bin/`, `test/` |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 
@@ -23,7 +23,7 @@ Apply hyphen-free underscore mapping (no `-` in any replacement, so OCaml identi
 | `openai` (word) | `provider_d` |
 | `xai` (word) | `provider_e` |
 | `gemini` | `provider_f` |
-| `deepseek` | `provider_g` |
+| `deepseek` | `deepseek` |
 | `qwen` (word) | `provider_h` |
 | `groq` (word) | `provider_i` |
 | `mistral` (word) | `provider_j` |
@@ -65,7 +65,7 @@ The initial sweep converted these external SDK module references and was immedia
 | `Ollama`, `ollama` (LLM serving framework) | Not a vendor — already kept by RFC-0168~0172. |
 | `keeper_identity*` `'llama'` literal | Animal name in keeper nickname pool. |
 
-These 209 files retain references because they ultimately call into the external SDK closed-sum variants. Removing the SDK boundary is out of scope for masc-mcp.
+These 209 files retain references because they ultimately call into the external SDK closed-sum variants. Removing the SDK boundary is out of scope for masc.
 
 ## 5. Verification
 
@@ -90,7 +90,7 @@ All 7 rejection signatures: NO.
 
 ## 7. Trade-off acknowledgement
 
-This is the technical boundary of vendor purge within masc-mcp. Further removal would require:
+This is the technical boundary of vendor purge within masc. Further removal would require:
 
 1. Forking `agent_sdk.llm_provider` and renaming its variant constructors, OR
 2. Wrapping every SDK call site with a local typed adapter (lib/sdk_facade with vendor-agnostic variant names).

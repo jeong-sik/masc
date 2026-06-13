@@ -32,7 +32,7 @@ module Float = Stdlib.Float
 
     Tool outputs above [default_externalize_threshold_bytes] are stored
     in the content-addressed blob store ([Tool_blob_store]) and the
-    OAS [content] field carries a sentinel marker
+    OAS [content] field carries a blob marker
     ([Tool_output.encode_for_oas (Stored {...})]). Smaller outputs flow
     through unchanged.
 
@@ -149,15 +149,10 @@ let oas_error_class_of_tool_failure_class = function
 
 let param_type_of_string = Agent_sdk.Mcp.json_schema_type_to_param_type
 
-let string_of_json_member key json =
-  match Yojson.Safe.Util.member key json with
-  | `String value -> Some value
-  | _ -> None
-
 let type_string_of_schema_property prop =
-  match Yojson.Safe.Util.member "type" prop with
-  | `String value -> Some value
-  | `List values ->
+  match Json_util.assoc_member_opt "type" prop with
+  | Some (`String value) -> Some value
+  | Some (`List values) ->
       List.find_map
         (function
           | `String value when not (String.equal value "null") -> Some value
@@ -167,15 +162,14 @@ let type_string_of_schema_property prop =
 
 let params_of_json_schema schema =
   let __t0 = Mtime_clock.now () in
-  let open Yojson.Safe.Util in
   (* [required] is conceptually a set (membership semantics, no ordering
      or duplicates) — materialise as Hashtbl so the per-property check
      below is O(1) instead of O(R) per property.  Per-call savings scale
      with property × required-field count; this helper fires from
      [oas_tool_of_masc] per OAS conversion. *)
   let required_set =
-    match schema |> member "required" with
-    | `List items ->
+    match Json_util.get_array schema "required" with
+    | Some (`List items) ->
         (* Constant initial size 16: avoid the extra [List.length items]
            pass (which itself is O(R)) before [List.iter].  Hashtbl
            auto-resizes — sizing exactly to the input only saves a
@@ -191,8 +185,8 @@ let params_of_json_schema schema =
     | _ -> Hashtbl.create 0
   in
   let result =
-    match schema |> member "properties" with
-    | `Assoc pairs ->
+    match Json_util.get_object schema "properties" with
+    | Some (`Assoc pairs) ->
         List.map
           (fun (name, prop) ->
             let param_type =
@@ -202,7 +196,7 @@ let params_of_json_schema schema =
               |> param_type_of_string
             in
             let description =
-              string_of_json_member "description" prop
+              Json_util.get_string prop "description"
               |> Option.value ~default:""
             in
             let required = Hashtbl.mem required_set name in
@@ -210,8 +204,8 @@ let params_of_json_schema schema =
           pairs
     | _ -> []
   in
-  Prometheus_hotpath.observe
-    ~metric:Prometheus_hotpath.metric_oas_params_of_schema_sec
+  Otel_metric_hotpath.observe
+    ~metric:Otel_metric_hotpath.metric_oas_params_of_schema_sec
     ~start:__t0;
   result
 
@@ -295,3 +289,6 @@ let oas_tool_of_masc ~name ~description ~input_schema
     to_oas_typed_result (handler json_args)
   in
   Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+
+let () =
+  Runtime_agent.set_oas_tool_of_masc_hook oas_tool_of_masc

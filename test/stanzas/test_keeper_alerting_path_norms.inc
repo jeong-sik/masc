@@ -1,6 +1,6 @@
 ; Per-file dune stanza for the [Keeper_alerting_path] root /
 ; allowed-norms boundary regression suite.  Lives here per
-; test/stanzas/README.md to avoid the conflict-cascade hotspot
+; test/stanzas/README.md to avoid the conflict-runtime hotspot
 ; in the legacy grouped (tests ...) stanza.
 
 (test

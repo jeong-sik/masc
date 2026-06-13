@@ -8,7 +8,7 @@ export type CompositeObservation = {
   phase: KeeperCompositeSnapshot['phase']
   turn: KeeperCompositeSnapshot['turn_phase']
   decision: KeeperCompositeSnapshot['decision']['stage']
-  cascade: KeeperCompositeSnapshot['cascade']['state']
+  runtime: KeeperCompositeSnapshot['runtime']['state']
   compaction: KeeperCompositeSnapshot['compaction']['stage']
   // 6th axis (LT-16-KCB Phase 3). Unknown backend-ahead values are kept
   // as raw strings; only a missing rollout-era key falls back to `clean`.
@@ -25,7 +25,7 @@ export function extractLaneValue(
     case 'phase': return snapshot.phase
     case 'turn': return snapshot.turn_phase
     case 'decision': return snapshot.decision.stage
-    case 'cascade': return snapshot.cascade.state
+    case 'runtime': return snapshot.runtime.state
     case 'compaction': return snapshot.compaction.stage
     case 'breaker': return snapshot.circuit_breaker?.state ?? 'clean'
   }
@@ -105,7 +105,7 @@ export const MAX_TRANSITION_HISTORY = 20
 
 const ZERO_VIOLATIONS: InvariantViolationCounts = {
   phase_turn_alignment: 0,
-  no_cascade_before_measurement: 0,
+  no_runtime_before_measurement: 0,
   compaction_atomicity: 0,
   event_priority_monotone: 0,
   phase_derivation_agreement: 0,
@@ -139,14 +139,14 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
   { field: 'KSM', key: 'phase' },
   { field: 'KTC', key: 'turn' },
   { field: 'KDP', key: 'decision' },
-  { field: 'KCL', key: 'cascade' },
+  { field: 'KCL', key: 'runtime' },
   { field: 'KMC', key: 'compaction' },
   { field: 'KCB', key: 'breaker' },
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
   phase_turn_alignment: '단계 ⇔ 턴',
-  no_cascade_before_measurement: 'Cascade 순서',
+  no_runtime_before_measurement: 'Runtime 순서',
   compaction_atomicity: '압축 원자성',
   event_priority_monotone: '이벤트 우선순위',
   phase_derivation_agreement: 'Phase 유도 일치',
@@ -156,7 +156,7 @@ export const LANE_LABELS: Record<LaneKey, string> = {
   phase: 'Keeper 생명주기',
   turn: '턴 주기',
   decision: '의사결정',
-  cascade: '캐스케이드',
+  runtime: '런타임',
   compaction: '컨텍스트 압축',
   breaker: '서킷 브레이커',
 }
@@ -230,8 +230,8 @@ export function displayState(value: string): string {
 /** Korean labels for `last_failure_reason` cohort bases. Backend emits
  *  the value via `Keeper_registry_types.failure_reason_to_string`
  *  (lib/keeper/keeper_registry_types.ml:104-135) in the parametric
- *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`,
- *  `tool_required_unsatisfied(code:detail)`). The 11 closed-sum bases
+ *  format `<base>(<detail>)` (e.g. `heartbeat_consecutive_failures(3)`).
+ *  The closed-sum bases
  *  match the `failure_reason_to_string` base prefixes (line 104-135).
  *  Note: `failure_reason_cohort_key` (line 146-159) uses shortened
  *  keys (`heartbeat_failures`, `turn_failures`) for metric grouping
@@ -246,8 +246,8 @@ const FAILURE_REASON_BASE_LABELS = {
   stale_turn_timeout: 'Stale 턴 시간 초과',
   stale_termination_storm: 'Stale 종료 폭주',
   stale_fleet_batch: 'Fleet stale 배치',
-  provider_runtime_error: 'Provider 런타임 오류',
-  tool_required_unsatisfied: '필수 도구 미충족',
+  provider_runtime_error: '런타임 호출 오류',
+  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   ambiguous_partial_commit: '부분 commit 모호',
   fiber_unresolved: 'Fiber 미해결',
   exception: '런타임 예외',
@@ -304,55 +304,6 @@ export function executionOutcomeLabel(value: string | null | undefined): string 
 }
 
 
-/** Korean labels for the three tool-surface axes emitted by
- *  `lib/keeper/keeper_agent_tool_surface.ml`:
- *  - `tool_requirement` (3 values, line 24-27):
- *    required / optional / none.
- *  - `tool_surface_class` (3 values, line 103-107, RFC-0065 §3.2.2):
- *    none / public_only / mixed.
- *  - `turn_lane` (6 values, line 57-63):
- *    pre_dispatch / text_only / tool_required / tool_optional /
- *    tool_disabled / retry.
- *  Tooltips in `fsm-hub.ts:159-160` and stale-cause parts list in
- *  `fleet-fsm-matrix.ts:289-295` currently interpolate these as raw
- *  English tokens. Each helper keeps the raw token as fallback so a
- *  backend-ahead variant still surfaces verbatim. */
-const TOOL_REQUIREMENT_LABELS: Record<string, string> = {
-  required: '필수',
-  optional: '선택',
-  none: '없음',
-}
-
-const TOOL_SURFACE_CLASS_LABELS: Record<string, string> = {
-  none: '도구 없음',
-  public_only: '공개 도구만',
-  mixed: '혼합 도구',
-}
-
-const TURN_LANE_LABELS: Record<string, string> = {
-  pre_dispatch: '디스패치 전',
-  text_only: '텍스트 전용',
-  tool_required: '도구 필수',
-  tool_optional: '도구 선택',
-  tool_disabled: '도구 비활성',
-  retry: '재시도',
-}
-
-export function toolRequirementLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TOOL_REQUIREMENT_LABELS[value] ?? value
-}
-
-export function toolSurfaceClassLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TOOL_SURFACE_CLASS_LABELS[value] ?? value
-}
-
-export function turnLaneLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TURN_LANE_LABELS[value] ?? value
-}
-
 /** Korean labels for `trust.disposition`. Backend emits 4 closed-sum
  *  values via `display_disposition_of_operator`
  *  (lib/keeper/keeper_runtime_trust_snapshot.ml:687-697):
@@ -375,98 +326,10 @@ export function trustDispositionLabel(value: string | null | undefined): string 
   return TRUST_DISPOSITION_LABELS[value] ?? value
 }
 
-/** Discriminated verdict for the keeper detail alert strip.
+/** Scope tag for runtime-outcome rendering.
  *
- *  The strip previously rendered `trustSummary` (the disposition reason
- *  / attention reason / mutation guard summary, joined via `||`) and
- *  `runtime_proof_status` (the tool contract result) as two sibling
- *  spans labelled "검증" and "증명". The two fields are independent on
- *  the wire — a keeper can simultaneously surface
- *  `attention_reason = completion_contract_violation` (verdict failure) and
- *  `tool_contract_result = satisfied_execution` (tools that *were*
- *  called fulfilled their contract). With sibling rendering this
- *  appeared as "검증 · completion_contract_violation" *and* "증명 ·
- *  satisfied_execution" at the same time, which an operator reads as
- *  the surface contradicting itself.
- *
- *  This union collapses the two facets into a single typed verdict
- *  with explicit kind precedence (`failed > pending > verified >
- *  no_verdict`) and renders the tool contract as scope-tagged
- *  evidence ("도구 계약") rather than a sibling "증명" claim. The
- *  rendering site uses an exhaustive switch over `kind` so adding a
- *  new arm in the future fails the build instead of silently
- *  reintroducing the `||` fallthrough. */
-export type KeeperVerdict =
-  | {
-      kind: 'failed'
-      reasonLabel: string
-      toolContract: { code: string; label: string } | null
-    }
-  | {
-      kind: 'pending'
-      reasonLabel: string | null
-      toolContract: { code: string; label: string } | null
-    }
-  | {
-      kind: 'verified'
-      reasonLabel: string | null
-      toolContract: { code: string; label: string } | null
-    }
-  | {
-      kind: 'no_verdict'
-      toolContract: { code: string; label: string } | null
-    }
-
-/** Trust disposition values that imply a failed verdict. The backend
- *  closed-sum is Alert | Blocked | Pause | Pass (see
- *  `TRUST_DISPOSITION_LABELS`). Alert and Blocked are unambiguous
- *  failures; Pause is treated as failure for verdict purposes because
- *  the keeper has stopped pending operator action. Pass is the only
- *  positive verdict. */
-const FAILED_TRUST_DISPOSITIONS = new Set<string>(['Alert', 'Blocked', 'Pause'])
-
-/** Compute the verdict from independent trust fields with explicit
- *  precedence. Inputs intentionally mirror the call site so the
- *  helper has no implicit dependency on the wider `Keeper` shape. */
-export function computeKeeperVerdict(input: {
-  trustDisposition: string | null
-  trustSummary: string | null
-  toolContractResult: string | null
-}): KeeperVerdict {
-  const toolContractCode = input.toolContractResult?.trim() || null
-  const toolContract = toolContractCode
-    ? {
-        code: toolContractCode,
-        label: toolContractLabel(toolContractCode) ?? toolContractCode,
-      }
-    : null
-  const trustDisposition = input.trustDisposition?.trim() || null
-  const trustSummary = input.trustSummary?.trim() || null
-
-  if (trustDisposition && FAILED_TRUST_DISPOSITIONS.has(trustDisposition)) {
-    return {
-      kind: 'failed',
-      reasonLabel: trustSummary ?? (trustDispositionLabel(trustDisposition) ?? trustDisposition),
-      toolContract,
-    }
-  }
-  if (trustDisposition === 'Pass') {
-    return { kind: 'verified', reasonLabel: trustSummary, toolContract }
-  }
-  if (trustSummary) {
-    // Disposition unknown, but the trust subsystem already surfaced a
-    // human-readable summary — treat as pending rather than verified
-    // so the operator does not see a green check while the FSM is
-    // still settling.
-    return { kind: 'pending', reasonLabel: trustSummary, toolContract }
-  }
-  return { kind: 'no_verdict', toolContract }
-}
-
-/** Scope tag for cascade-outcome rendering.
- *
- *  `cascade_outcome` is emitted per-provider-attempt (the last hop in
- *  a cascade ladder), while `stop_cause` is emitted per-turn (the
+ *  `runtime_outcome` is emitted per-provider-attempt (the last hop in
+ *  a runtime ladder), while `stop_cause` is emitted per-turn (the
  *  terminal verdict for the whole turn budget). Rendering the
  *  per-attempt success under the generic "런타임 레인" label next to
  *  a per-turn failure such as `turn_timeout` reads as a
@@ -477,10 +340,10 @@ export function computeKeeperVerdict(input: {
  *  terminal failure — the attempt-level success is still preserved
  *  inside the stop-cause line via the `code · summary` columns, just
  *  not re-rendered as a competing top-level lane. */
-export type CascadeAttemptScope = 'attempt' | 'turn'
+export type RuntimeAttemptScope = 'attempt' | 'turn'
 
-export interface CascadeAttemptObservation {
-  scope: CascadeAttemptScope
+export interface RuntimeAttemptObservation {
+  scope: RuntimeAttemptScope
   outcome: string | null
   attempts: number | null
   fallbackApplied: boolean
@@ -498,10 +361,9 @@ export interface CascadeAttemptObservation {
 const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'turn_timeout',
   'turn_wall_clock_timeout',
-  'cascade_exhausted',
+  'runtime_exhausted',
   'heartbeat_consecutive_failures',
   'turn_consecutive_failures',
-  'tool_required_unsatisfied',
   'provider_runtime_error',
   'fiber_unresolved',
   'stale_turn_timeout',
@@ -511,37 +373,6 @@ export function isTurnTerminalFailureCode(code: string | null | undefined): bool
   if (!code) return false
   return TURN_TERMINAL_FAILURE_CODES.has(code)
 }
-
-
-/** Korean labels for `execution.tool_contract_result`. Backend emits 11
- *  closed-sum values via `Keeper_execution_receipt.tool_contract_result_to_string`
- *  (lib/keeper/keeper_execution_receipt.ml:181-193). The labels are
- *  intentionally NOT folded into `STATE_DISPLAY_NAMES` because that map
- *  is the shared FSM-axis facade and accepting generic keys like
- *  `unknown` / `violated` there would risk collisions with future axes
- *  that emit the same English token. Consumers route through
- *  {!toolContractLabel} instead so the chip surface (turn-fsm-detail-panel,
- *  fleet-fsm-matrix) shows Korean for known wire values and the raw
- *  token for unknown ones, matching the `displayState` fallback shape. */
-const TOOL_CONTRACT_LABELS: Record<string, string> = {
-  unknown: '도구 계약 미상',
-  not_dispatched: '도구 호출 미발생',
-  violated: '도구 계약 위반',
-  tool_surface_mismatch: '도구 표면 불일치',
-  no_tool_capable_provider: '도구 가능 provider 없음',
-  missing_required_tool_use: '필수 도구 호출 누락',
-  claim_only_after_owned_task: 'claim 전용 (소유 task 후)',
-  needs_execution_progress: '실행 진척 필요',
-  passive_only: 'passive 만 수행',
-  satisfied_completion: '계약 충족 (완료)',
-  satisfied_execution: '계약 충족 (실행)',
-}
-
-export function toolContractLabel(value: string | null | undefined): string | null {
-  if (!value) return null
-  return TOOL_CONTRACT_LABELS[value] ?? value
-}
-
 
 
 /** Korean labels for `execution.operator_disposition`. Backend emits 8
@@ -554,7 +385,7 @@ const OPERATOR_DISPOSITION_LABELS: Record<string, string> = {
   pass: '진행',
   pause_human: '운영자 일시정지',
   alert_exhausted: '경보 소진',
-  fail_open_next_cascade: '다음 cascade 로 fail-open',
+  fail_open_next_runtime: '다음 runtime 로 fail-open',
   pass_next_model: '다음 모델로 진행',
   user_cancelled: '사용자 취소',
   skipped: '건너뜀',
@@ -575,18 +406,17 @@ export function operatorDispositionLabel(value: string | null | undefined): stri
  *  by #16355. */
 const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   healthy: '정상',
-  cascade_exhausted: '캐스케이드 소진',
+  runtime_exhausted: '런타임 후보 소진',
   preflight_config_error: '실행 전 설정 오류',
   degraded_retry: '저하 상태 재시도',
-  cascade_fallback: '캐스케이드 폴백',
-  provider_runtime_error: 'Provider 런타임 오류',
+  runtime_fallback: '런타임 폴백',
+  provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
-  tool_required_unsatisfied: '필수 도구 미충족',
   tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   turn_livelock_blocked: '턴 livelock 차단',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
-  unmapped_cascade_state: '매핑되지 않은 cascade 상태',
+  unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 
 export function operatorDispositionReasonLabel(
@@ -596,24 +426,24 @@ export function operatorDispositionReasonLabel(
   return OPERATOR_DISPOSITION_REASON_LABELS[value] ?? value
 }
 
-/** Korean labels for `execution.cascade.outcome` /
- *  `keeper.cascade_outcome`. Backend emits 4 closed-sum values via
- *  `Keeper_execution_receipt.cascade_outcome_to_string`
+/** Korean labels for `execution.runtime.outcome` /
+ *  `keeper.runtime_outcome`. Backend emits 4 closed-sum values via
+ *  `Keeper_execution_receipt.runtime_outcome_to_string`
  *  (lib/keeper/keeper_execution_receipt.ml:144-149). Kept separate
  *  from `STATE_DISPLAY_NAMES` because `completed` and
  *  `not_observed` are generic tokens other axes may emit (same
  *  isolation pattern as TOOL_CONTRACT_LABELS in #16374 and
  *  OPERATOR_DISPOSITION_LABELS in #16377). */
-const CASCADE_OUTCOME_LABELS: Record<string, string> = {
+const RUNTIME_OUTCOME_LABELS: Record<string, string> = {
   passed_to_next_model: '다음 모델로 진행',
   completed: '완료',
   not_observed: '관측되지 않음',
   not_dispatched: '디스패치 안 됨',
 }
 
-export function cascadeOutcomeLabel(value: string | null | undefined): string | null {
+export function runtimeOutcomeLabel(value: string | null | undefined): string | null {
   if (!value) return null
-  return CASCADE_OUTCOME_LABELS[value] ?? value
+  return RUNTIME_OUTCOME_LABELS[value] ?? value
 }
 
 /** Korean labels for `execution.terminal_reason_code`. Backend emits this
@@ -625,7 +455,7 @@ export function cascadeOutcomeLabel(value: string | null | undefined): string | 
  *  - `Keeper_agent_error.to_terminal_reason_code` (lib/keeper/keeper_agent_error.ml:134-143)
  *    maps Agent SDK Retry variants to `api_error_*` codes
  *    (`api_error_server:<http_status>` is parameterized).
- *  - `Keeper_agent_run` emits `"completed"` on Cascade_runner.Completed.
+ *  - `Keeper_agent_run` emits `"completed"` on Runtime_runner.Completed.
  *  - `keeper_execution_receipt.ml:492` recognises the
  *    `completion_contract_violation:<detail>` prefix.
  *  Kept separate from `STATE_DISPLAY_NAMES` because generic tokens like
@@ -683,7 +513,7 @@ export type StateEntries = {
   phase: number
   turn: number
   decision: number
-  cascade: number
+  runtime: number
   compaction: number
 }
 
@@ -695,7 +525,7 @@ export type SwimlaneSegment = {
   value: string
 }
 
-/** Cross-panel hover coordination payload. When a swimlane segment is
+/** Cross-panel hover workspace payload. When a swimlane segment is
     under the cursor, the SwimlaneTimeline publishes which lane, value,
     and time window it covers, and downstream panels (TransitionTrail,
     PipelineStep) highlight rows that overlap. */

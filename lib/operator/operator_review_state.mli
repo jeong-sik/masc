@@ -26,7 +26,7 @@ type review_decision = {
 
 (** {1 Path} *)
 
-val review_state_path : Coord_utils.config -> string
+val review_state_path : Workspace_utils.config -> string
 
 (** {1 Serialisation} *)
 
@@ -42,7 +42,7 @@ val compare_review_decision :
 
 (** Read all stored review decisions (raw order, no filtering). *)
 val read_review_decisions :
-  Coord_utils.config -> review_decision list
+  Workspace_utils.config -> review_decision list
 
 (** {1 Queries} *)
 
@@ -53,7 +53,7 @@ val recent_review_decisions :
   ?limit:int ->
   ?target_type:string ->
   ?target_id:string ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   review_decision list
 
 (** JSON array of {!recent_review_decisions}. *)
@@ -61,5 +61,5 @@ val recent_review_decisions_json :
   ?limit:int ->
   ?target_type:string ->
   ?target_id:string ->
-  Coord_utils.config ->
+  Workspace_utils.config ->
   Yojson.Safe.t

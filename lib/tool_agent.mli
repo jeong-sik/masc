@@ -2,7 +2,7 @@
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -20,16 +20,6 @@ val valid_agent_card_action_strings : string list
 val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 val schemas : Masc_domain.tool_schema list
-
-(** Handle masc_agents *)
-val handle_agents :
-  ?tool_name:string -> ?start_time:float ->
-  context -> Yojson.Safe.t -> Tool_result.result
-
-(** Handle masc_agent_update *)
-val handle_agent_update :
-  ?tool_name:string -> ?start_time:float ->
-  context -> Yojson.Safe.t -> Tool_result.result
 
 (** Handle masc_get_metrics *)
 val handle_get_metrics :

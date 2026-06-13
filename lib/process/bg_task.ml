@@ -104,7 +104,7 @@ let set_sidecar_failure_observer f =
    drain-pipe read errors.  Labels are closed-vocabulary:
    [fd_kind = "stdout" | "stderr"] (call-site tagged) and
    [err_kind = "unix_error" | "other"] (typed match arm).
-   Cardinality bound: 2 × 2 = 4.  See top-level Prometheus
+   Cardinality bound: 2 × 2 = 4.  See top-level Otel_metric_store
    module for the registered counter. *)
 let drain_failure_observer :
     ((fd_kind:string -> err_kind:string -> unit) option) Atomic.t =
@@ -216,7 +216,9 @@ let start_exit_watcher st =
        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
            with_reg (fun () -> release_lifetime_guard st)
-       | exception exn -> observe_sidecar_failure ~site:"waitpid" exn
+       | exception exn ->
+           observe_sidecar_failure ~site:"waitpid" exn;
+           with_reg (fun () -> release_lifetime_guard st)
      in
      wait)
 

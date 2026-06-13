@@ -79,7 +79,7 @@ DECISIONS: tuple[DecisionSpec, ...] = (
     DecisionSpec(
         decision_id="D-P1-1",
         priority="P1",
-        finding_ids=("NF-3", "R-FATAL-1"),
+        finding_ids=("R-FATAL-1",),
         action="Execute recovery strategy and add keeper fallback ladder",
         owner="keeper",
         estimated_hours=16,

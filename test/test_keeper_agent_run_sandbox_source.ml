@@ -8,7 +8,9 @@
 open Alcotest
 
 let target_file = "lib/keeper/keeper_agent_run.ml"
-let run_tools_file = "lib/keeper/keeper_run_tools.ml"
+let receipt_file = "lib/keeper/keeper_agent_run_receipt.ml"
+let run_tools_setup_file = "lib/keeper/keeper_run_tools_setup.ml"
+let run_tools_hooks_file = "lib/keeper/keeper_run_tools_hooks.ml"
 
 let load_source rel =
   let source_root =
@@ -75,13 +77,16 @@ let test_cli_transport_cwd_is_keeper_sandbox_root () =
     true
     (contains
        ~needle:
-         "let keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta"
+         "let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta"
        src);
   check
     bool
-    "CLI transport cwd uses keeper sandbox root"
+    "keeper-visible sandbox root is derived from keeper meta"
     true
-    (contains ~needle:"cwd = Some keeper_sandbox_root" src);
+    (contains
+       ~needle:
+         "Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta"
+       src);
   check
     int
     "CLI transport cwd must not fall back to process cwd"
@@ -90,7 +95,7 @@ let test_cli_transport_cwd_is_keeper_sandbox_root () =
 ;;
 
 let test_execution_receipt_reports_keeper_visible_sandbox_root () =
-  let src = load_source target_file in
+  let src = load_source receipt_file in
   check
     bool
     "receipt reports keeper-visible sandbox root"
@@ -107,7 +112,7 @@ let test_runtime_contract_sandbox_root_is_keeper_visible () =
      The fix routes the sandbox_root field through
      [Keeper_sandbox.keeper_visible_root_abs_of_meta] so Docker keepers see
      [container_root] and Local keepers keep the host path. *)
-  let src = load_source target_file in
+  let src = load_source run_tools_hooks_file in
   check
     bool
     "runtime_contract sandbox_root routes through keeper_visible_root_abs_of_meta"
@@ -124,47 +129,45 @@ let test_runtime_contract_sandbox_root_is_keeper_visible () =
        src)
 ;;
 
-let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
+let test_keeper_tools_cleanup_is_retained_and_invoked () =
   let agent_src = load_source target_file in
-  let run_tools_src = load_source run_tools_file in
+  let run_tools_setup_src = load_source run_tools_setup_file in
+  let run_tools_hooks_src = load_source run_tools_hooks_file in
   check
     bool
     "run setup retains the full keeper tool bundle"
     true
-    (contains ~needle:"Keeper_tools_oas_bundle.make_tool_bundle" run_tools_src);
+    (contains ~needle:"Keeper_tools_oas_bundle.make_tool_bundle" run_tools_setup_src);
   check
     bool
-    "run setup exposes the bundle cleanup callback"
+    "run setup exposes the cleanup callback"
     true
-    (contains ~needle:"cleanup = keeper_tool_bundle.cleanup" run_tools_src);
+    (contains ~needle:"cleanup = keeper_tools_cleanup" run_tools_hooks_src);
   check
     bool
     "agent run reads setup cleanup callback"
     true
-    (contains ~needle:"s.Keeper_run_tools.cleanup ()" agent_src);
+    (contains ~needle:"Turn_helpers.cleanup_agent_setup ~keeper_name:meta.name s" agent_src);
   check
     int
-    "agent run defines cleanup once and references it from both result and exception branches"
+    "agent run defines cleanup once and passes it to the cleanup wrapper"
     3
     (count_occurrences ~needle:"cleanup_agent_setup" agent_src);
   check
     bool
-    "agent run preserves exception propagation after cleanup"
+    "agent run delegates result and exception cleanup to helper"
     true
     (contains_ordered
        ~needles:
-         [ "let backtrace = Printexc.get_raw_backtrace ()"
-         ; "cleanup_agent_setup ();"
-         ; "Printexc.raise_with_backtrace e backtrace"
+         [ "let cleanup_agent_setup () ="
+         ; "Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup"
          ]
        agent_src);
   check
     int
-    "agent run re-raises the original exception with its captured backtrace"
-    1
-    (count_occurrences
-       ~needle:"Printexc.raise_with_backtrace e backtrace"
-       agent_src)
+    "agent run no longer hand-rolls exception cleanup"
+    0
+    (count_occurrences ~needle:"Printexc.raise_with_backtrace e backtrace" agent_src)
 ;;
 
 let () =
@@ -186,7 +189,7 @@ let () =
         ; test_case
             "keeper tool bundle cleanup is retained and invoked"
             `Quick
-            test_keeper_tool_bundle_cleanup_is_retained_and_invoked
+            test_keeper_tools_cleanup_is_retained_and_invoked
         ] )
     ]
 ;;

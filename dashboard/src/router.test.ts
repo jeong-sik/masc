@@ -27,8 +27,8 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('board')
   })
 
-  it('redirects removed warroom params to operations', () => {
-    navigate('command', { section: 'warroom', surface: 'swarm' })
+  it('redirects removed operations params to operations', () => {
+    navigate('command', { section: 'operations', surface: 'swarm' })
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
     expect(route.value.params.surface).toBeUndefined()
@@ -47,10 +47,10 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('operations')
   })
 
-  it('redirects retired activity links to observatory on the monitoring surface', () => {
+  it('falls back invalid activity section to default agents section', () => {
     navigate('monitoring', { section: 'activity', ag_range: '24h' })
     expect(route.value.tab).toBe('monitoring')
-    expect(route.value.params.section).toBe('observatory')
+    expect(route.value.params.section).toBe('agents')
     expect(route.value.params.range).toBe('24h')
     expect(route.value.params.ag_range).toBeUndefined()
   })
@@ -59,7 +59,7 @@ describe('navigate', () => {
     navigate('monitoring', { section: 'git-graph' })
     expect(route.value.tab).toBe('workspace')
     expect(route.value.params.section).toBe('repositories')
-    expect(route.value.params.view).toBe('graph')
+    expect(route.value.params.view).toBeUndefined()
   })
 
   it('redirects retired goal-loop links into planning goal-loop view', () => {

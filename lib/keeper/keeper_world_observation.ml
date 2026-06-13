@@ -1,11 +1,13 @@
 (** Keeper_world_observation — Structured world state for keeper cycles.
 
-    Extracts and normalizes observation signals from room state, keeper meta,
+    Extracts and normalizes observation signals from workspace state, keeper meta,
     and context so the unified prompt and turn runner consume a single snapshot.
 
     @since Unified Keeper Loop *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_memory
 
 type pending_board_event =
@@ -28,20 +30,18 @@ type world_observation =
   { pending_mentions : (string * string) list
   ; pending_board_events : pending_board_event list
   ; pending_scope_messages : (string * string) list
-  ; message_cursor_updates : (string * int) list
   ; idle_seconds : int
   ; active_goals : string list
   ; continuity_summary : string
   ; context_ratio : float
-  ; economic_pressure : Agent_economy.pressure_mode
   ; unclaimed_task_count : int
   ; claimable_task_count : int
   ; provider_capacity_blocked_task_count : int
   ; failed_task_count : int
   ; pending_verification_count : int
   ; backlog_updated_since_last_scheduled_autonomous : bool
-  ; active_agent_count : int
-  ; last_turn_budget : (int * int) option
+  ; running_keeper_fiber_count : int
+  ; connected_surfaces : Gate_surface.surface_presence list
   }
 
 type keeper_cycle_channel =
@@ -116,13 +116,11 @@ type board_signal_match = Board_signal.match_result =
 module Message_scope = Keeper_world_observation_message_scope
 module Inputs = Keeper_world_observation_inputs
 
-let scope_message_feed_enabled = Message_scope.scope_message_feed_enabled
-let self_identity_tokens = Message_scope.self_identity_tokens
+let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 let collect_message_scope = Message_scope.collect_message_scope
-let apply_message_cursor_updates = Message_scope.apply_message_cursor_updates
 let read_backlog_counts = Inputs.read_backlog_counts
-let count_active_agents = Inputs.count_active_agents
+let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let read_context_ratio = Inputs.read_context_ratio
 let board_signal_match = Board_signal.match_signal
@@ -143,10 +141,10 @@ let pending_board_event_of_board_signal
       ~continuity_summary
       ~(meta : keeper_meta)
       ~(arrived_at : float)
-      (signal : Board_dispatch.keeper_board_signal)
+      (signal : Board_dispatch.board_signal)
   : pending_board_event
   =
-  let self_tokens = self_identity_tokens meta in
+  let self_ids = self_ids meta in
   let matched = board_signal_match ~continuity_summary ~meta ~signal in
   let post_snapshot =
     match Board_dispatch.get_post ~post_id:signal.post_id with
@@ -172,7 +170,7 @@ let pending_board_event_of_board_signal
     match signal.kind with
     | Board_dispatch.Board_post_created -> false, 0, None, None
     | Board_dispatch.Board_comment_added ->
-      (match check_self_comment_status ~self_tokens ~post_id:signal.post_id with
+      (match check_self_comment_status ~self_ids ~post_id:signal.post_id with
        | `New_external (count, author, preview) -> true, count, Some author, Some preview
        | `No_new_external ->
          true, 0, Some signal.author, Some (short_preview ~max_len:60 signal.content)
@@ -226,7 +224,6 @@ let collect_board_events_with_cursor_policy
   : pending_board_event list * int * int
   =
   try
-    let broad_scope = scope_message_feed_enabled meta in
     let cursor_ts, cursor_post_id =
       Keeper_registry.get_board_cursor ~base_path meta.name
     in
@@ -236,11 +233,11 @@ let collect_board_events_with_cursor_policy
       else Time_compat.now () -. bootstrap_window_sec, None
     in
     let posts = list_board_posts_after_cursor base_cursor in
-    let self_tokens = self_identity_tokens meta in
+    let self_ids = self_ids meta in
     let recent =
       List.filter
         (fun (p : Board.post) ->
-           not (is_self_author ~self_tokens (Board.Agent_id.to_string p.author)))
+           not (is_self_author ~self_ids (Board.Agent_id.to_string p.author)))
         posts
     in
     let new_count = List.length recent in
@@ -261,21 +258,20 @@ let collect_board_events_with_cursor_policy
                 targets)
            recent)
     in
-    let event_limit = Keeper_config.keeper_board_event_limit () in
-    let rec consume_posts remaining last_cursor acc = function
+    let rec consume_posts last_cursor acc = function
       | [] -> List.rev acc, last_cursor
       | (p : Board.post) :: rest ->
         let post_id = Board.Post_id.to_string p.id in
         let next_cursor = board_cursor_token_of_post p in
-        let comment_status = check_self_comment_status ~self_tokens ~post_id in
+        let comment_status = check_self_comment_status ~self_ids ~post_id in
         (match comment_status with
          | `No_new_external ->
            Log.Keeper.debug
              "board dedup: skipping post_id=%s (no new external since my comment)"
              post_id;
-           consume_posts remaining (Some next_cursor) acc rest
+           consume_posts (Some next_cursor) acc rest
          | `Never ->
-           let signal : Board_dispatch.keeper_board_signal =
+           let signal : Board_dispatch.board_signal =
              { kind = Board_dispatch.Board_post_created
              ; post_id
              ; author = Board.Agent_id.to_string p.author
@@ -286,18 +282,16 @@ let collect_board_events_with_cursor_policy
              }
            in
            let matched = board_signal_match ~continuity_summary ~meta ~signal in
-           if not (matched.explicit_mention || broad_scope)
+           if not matched.explicit_mention
            then (
              Log.Keeper.debug
-               "board dedup: skipping post_id=%s (no mention and no prior keeper \
-                participation)"
+               "board dedup: skipping post_id=%s (no explicit mention and no prior \
+                keeper participation)"
                post_id;
-             consume_posts remaining (Some next_cursor) acc rest)
-           else if remaining <= 0
-           then List.rev acc, last_cursor
+             consume_posts (Some next_cursor) acc rest)
            else
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -316,10 +310,8 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest
          | `New_external (count, ext_author, ext_preview) ->
-           if remaining <= 0
-           then List.rev acc, last_cursor
-           else (
-             let signal : Board_dispatch.keeper_board_signal =
+           (
+             let signal : Board_dispatch.board_signal =
                { kind = Board_dispatch.Board_post_created
                ; post_id
                ; author = Board.Agent_id.to_string p.author
@@ -331,7 +323,7 @@ let collect_board_events_with_cursor_policy
              in
              let matched = board_signal_match ~continuity_summary ~meta ~signal in
              consume_posts
-               (remaining - 1)
+               
                (Some next_cursor)
                ({ post_id
                 ; author = Board.Agent_id.to_string p.author
@@ -350,7 +342,7 @@ let collect_board_events_with_cursor_policy
                 :: acc)
                rest))
     in
-    let final_events, last_cursor = consume_posts event_limit None [] recent in
+    let final_events, last_cursor = consume_posts None [] recent in
     if advance_cursor
     then (
       match last_cursor with
@@ -378,9 +370,9 @@ let collect_board_events_with_cursor_policy
       | None ->
         if final_events <> []
         then (
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
-            ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Cursor_stale)) ]
+            ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Cursor_stale)) ]
             ();
           Log.Keeper.warn
             "board cursor not updated for %s despite %d events processed"
@@ -390,9 +382,9 @@ let collect_board_events_with_cursor_policy
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
-      ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Board_events)) ]
+      ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
       ();
     Log.Keeper.warn "board event collection failed: %s" (Printexc.to_string exn);
     [], 0, 0
@@ -427,13 +419,12 @@ let collect_board_events_without_advancing_cursor
 include Keeper_world_observation_provider_cooldown
 
 let observe
-      ~allowed_tool_names
       ~(pending_board_events : pending_board_event list option)
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_mentions, pending_scope_messages, message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( unclaimed_task_count
@@ -442,18 +433,15 @@ let observe
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
   in
-  let active_agent_count = count_active_agents ~config in
+  let running_keeper_fiber_count = count_running_keeper_fibers ~config in
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
-  let economic_pressure =
-    Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
-  in
   let pending_board_events =
     match pending_board_events with
     | Some events -> events
@@ -466,27 +454,23 @@ let observe
   { pending_mentions
   ; pending_board_events
   ; pending_scope_messages
-  ; message_cursor_updates
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
   ; continuity_summary
   ; context_ratio
-  ; economic_pressure
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
   ; failed_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
-  ; active_agent_count
-  ; last_turn_budget = None
+  ; running_keeper_fiber_count
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 
-let observe_direct_keeper_msg
-      ~allowed_tool_names
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
+let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   : world_observation
   =
   let ( unclaimed_task_count
@@ -495,7 +479,7 @@ let observe_direct_keeper_msg
       , pending_verification_count
       , backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let provider_capacity_blocked_task_count =
     provider_capacity_blocked_task_count ~meta ~claimable_task_count ()
@@ -503,32 +487,29 @@ let observe_direct_keeper_msg
   { pending_mentions = []
   ; pending_board_events = []
   ; pending_scope_messages = []
-  ; message_cursor_updates = []
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
   ; context_ratio = read_context_ratio ~config ~meta
-  ; economic_pressure =
-      Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   ; unclaimed_task_count
   ; claimable_task_count
   ; provider_capacity_blocked_task_count
   ; failed_task_count
   ; pending_verification_count
   ; backlog_updated_since_last_scheduled_autonomous
-  ; active_agent_count = count_active_agents ~config
-  ; last_turn_budget = None
+  ; running_keeper_fiber_count = count_running_keeper_fibers ~config
+  ; connected_surfaces =
+      Gate_surface.connected_surfaces_for_keeper ~keeper_name:meta.name
   }
 ;;
 
 let durable_signal_present
-      ~allowed_tool_names
       ~pending_board_events
-      ~(config : Coord.config)
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
   : bool
   =
-  let pending_mentions, pending_scope_messages, _message_cursor_updates =
+  let pending_mentions, pending_scope_messages =
     collect_message_scope ~config ~meta
   in
   let ( _unclaimed_task_count
@@ -537,7 +518,7 @@ let durable_signal_present
       , pending_verification_count
       , _backlog_updated_since_last_scheduled_autonomous )
     =
-    read_backlog_counts ~allowed_tool_names ~config ~meta
+    read_backlog_counts ~config ~meta
   in
   let pending_board_events =
     match pending_board_events with
@@ -589,6 +570,7 @@ let effective_scheduled_autonomous_cooldown
       ~(base_cooldown : int)
       ~(since_last : int)
       ?(consecutive_noop_count = 0)
+      ?(board_health_score : float option)
       ()
   : int
   =
@@ -604,13 +586,24 @@ let effective_scheduled_autonomous_cooldown
   (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
   let floor = min min_cooldown effective_base in
-  if since_last <= effective_base
-  then effective_base
+  (* Board health score adjustment: unhealthy board (<0.3) → 2x cooldown
+     (less polling), healthy board (>0.7) → 0.5x (more polling when the
+     board is thriving). Neutral/None → 1.0x. *)
+  let health_multiplier =
+    match board_health_score with
+    | None -> 1.0
+    | Some h when h < 0.3 -> 2.0
+    | Some h when h > 0.7 -> 0.5
+    | Some _ -> 1.0
+  in
+  let health_base = max 1 (int_of_float (Float.round (float_of_int effective_base *. health_multiplier))) in
+  if since_last <= health_base
+  then health_base
   else (
-    let decay_periods = (since_last - effective_base) / max 1 effective_base in
+    let decay_periods = (since_last - health_base) / max 1 health_base in
     let capped_periods = min decay_periods 4 in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
-    max floor (int_of_float (float_of_int effective_base *. factor)))
+    max floor (int_of_float (Float.round (float_of_int health_base *. factor))))
 ;;
 
 let entropic_oscillation_interval_sec = 600
@@ -623,7 +616,8 @@ let should_inject_entropic_oscillation ~since_last_scheduled_autonomous ~draw_pe
 ;;
 
 let keeper_cycle_decision
-      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_cascade)
+      ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
+      ?(reactive_wake = false)
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
@@ -685,11 +679,19 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }
       else (
+        (* Read latest board curation snapshot for health-based
+           cooldown adjustment. *)
+        let board_health_score =
+          match Board_curation.latest_snapshot () with
+          | Some { health_score = Some h; _ } -> Some h
+          | _ -> None
+        in
         let effective_cooldown =
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
+            ?board_health_score
             ()
         in
         let task_cooldown_divisor =
@@ -752,29 +754,42 @@ let keeper_cycle_decision
                ~since_last_scheduled_autonomous
                ~draw_percent:(Random.int 100)
         in
+        (* Reactive-wake gate (thundering-herd fix). When this evaluation runs
+           because an external broadcast woke the keeper early ([reactive_wake]),
+           the GLOBAL task backlog must not, on its own, drive a turn: otherwise
+           a single task release/add broadcasts to every keeper and all of them
+           run a full LLM turn against the shared (claimable-by-anyone) pool — N
+           turns for work at most one keeper can claim. Global backlog is instead
+           picked up on the keeper's own cadence (sleep Timeout) and by the
+           supervisor sweep. Per-keeper signals (mention/board/scope) are handled
+           by the Reactive channel above and are unaffected. Time-based liveness
+           reasons (bootstrap / min_interval / idle_gate+cooldown / oscillation)
+           key on the keeper's own clock, so they stay ungated. *)
+        let backlog_drives_turn =
+          (not reactive_wake) && (backlog_fresh || backlog_elapsed)
+        in
         let should_run =
           is_bootstrap
           || should_oscillate
           || min_interval_elapsed
           || (proactive_work_ready
-              && (backlog_fresh
-                  || backlog_elapsed
-                  || (idle_gate_elapsed && cooldown_elapsed)))
+              && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
         in
-        let cascade_name = cascade_name_of_meta meta in
+        let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(Cascade_name.of_string_exn cascade_name)
+              ~keeper_name:meta.name
+              ~runtime_id:(runtime_id)
           else None
         in
         let provider_cooldown_fail_open =
           match provider_cooldown_remaining_sec with
           | Some _ ->
-            fallback_cascade_for_provider_cooldown
-              ~base_cascade:cascade_name
-              ~effective_cascade:cascade_name
+            fallback_runtime_for_provider_cooldown
+              ~base_runtime:runtime_id
+              ~effective_runtime:runtime_id
           | None -> None
         in
         let verdict =
@@ -830,10 +845,10 @@ let keeper_cycle_decision
                    tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string ObservationQueryFailures)
                 ~labels:
-                  [ ("operation", Keeper_observation_query_operation.(to_label Empty_run_reasons))
+                  [ ("operation", Runtime_observation_query_operation.(to_label Empty_run_reasons))
                   ]
                 ();
               Log.Keeper.warn "unreachable: should_run=true but run_reasons is empty";

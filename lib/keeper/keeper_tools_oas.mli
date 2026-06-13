@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as [Agent_sdk.Tool.t] for [Agent.run].
 
-    Bridges [Agent_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
+    Bridges [Keeper_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
     to [Agent_sdk.Tool.t list] via [Tool_bridge.oas_tool_of_masc]. Tool
     execution reads the current context from [ctx_snapshot]
     (immutable), enabling [Agent.run] to manage messages while
@@ -41,8 +41,6 @@ val max_consecutive_failures : int
 
 (** Thread-safe per-tool consecutive-failure counters shared by the
     handler closures in one tool bundle. *)
-type workflow_rejection_block = Keeper_tools_oas_workflow.workflow_rejection_block
-
 type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
 
 type failure_counts
@@ -61,17 +59,6 @@ val workflow_rejection_count_record : failure_counts -> string -> int
 
 val workflow_rejection_count_reset : failure_counts -> unit
 
-val workflow_rejection_scope_block_get
-  :  failure_counts
-  -> string
-  -> Keeper_tools_oas_workflow.workflow_rejection_block option
-
-val workflow_rejection_scope_block_record
-  :  failure_counts
-  -> string
-  -> Keeper_tools_oas_workflow.workflow_rejection_info
-  -> int
-
 (** Test-only: inject a failure counter with [blocked_at] set to
     [failure_count_ttl_seconds + 60] seconds in the past.
     The next [failure_count_get] call for [key] will treat it as
@@ -82,12 +69,6 @@ val inject_stale_failure_count_for_test : failure_counts -> string -> int -> uni
     for suites that assert the first occurrence of a tool failure emits
     at ERROR. *)
 val reset_tool_retry_dedupe_for_testing : unit -> unit
-
-(** Test-only: inject a scope block with [blocked_at] set to
-    [workflow_block_ttl_seconds + 60] seconds in the past.
-    The next [workflow_rejection_scope_block_get] call for [key]
-    will treat it as expired and return [None]. *)
-val inject_stale_workflow_block_for_test : failure_counts -> string -> unit
 
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
@@ -105,8 +86,8 @@ val normalize_tool_result
     required self-correction without parsing nested tool-specific payloads. *)
 
 (** Promote a tool-specific [recovery_plan] out of a deterministic
-    failure payload so required-tool turns can route the next call
-    without scraping nested detail text. *)
+    failure payload so the next call can route without scraping nested
+    detail text. *)
 
 (** Error-class string for transient mutex contention failures. *)
 val transient_mutex_contention_error_class : string
@@ -135,9 +116,9 @@ val transient_mutex_contention_tool_error
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
     INTERNAL tool name (telemetry SSOT). [~input_schema] is the
-    internal tool schema used for pre-execution validation after
-    [?translate_input] reshapes incoming JSON from a public alias
-    schema to the internal payload (identity by default). *)
+    internal tool schema used for pre-execution validation. Public aliases
+    validate their LLM-facing payload before translation to the internal
+    payload. *)
 
 (** Build the keeper's full [tool_bundle]: internal tools +
     alias-registered (public name) tools that translate input to

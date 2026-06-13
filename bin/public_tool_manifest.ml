@@ -6,7 +6,7 @@ let json_list values =
 
 let () =
   let public_tool_names =
-    Masc_mcp.Tool_catalog.public_mcp_tools
+    Tool_catalog.public_mcp_tools
     |> sorted_unique
   in
   `Assoc [ ("public_tool_names", json_list public_tool_names) ]

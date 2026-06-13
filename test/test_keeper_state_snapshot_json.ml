@@ -8,8 +8,9 @@
     5. patch_checkpoint_last_assistant stores structured JSON when flag is on
     6. Structured JSON takes priority over text fallback in dual-source read *)
 
-module KMP = Masc_mcp.Keeper_memory_policy
-module KCC = Masc_mcp.Keeper_context_core
+module KMP = Masc.Keeper_memory_policy
+module KCC = Masc.Keeper_context_core
+module KRT = Masc.Keeper_agent_run_response_text
 
 let contains_substring text needle =
   let text_len = String.length text in
@@ -118,6 +119,148 @@ let test_envelope_empty_snapshot_returns_none () =
   let restored = KMP.snapshot_of_structured_working_context json in
   Alcotest.(check bool) "empty snapshot in envelope -> None" true (restored = None)
 
+let test_structured_state_schema_parse_raw_snapshot_json () =
+  let json =
+    `Assoc
+      [ ("progress", `String "Structured progress")
+      ; ("decisions", `List [ `String "No blocker" ])
+      ]
+  in
+  match KMP.structured_state_snapshot_schema.parse json with
+  | Error msg -> Alcotest.fail ("schema parse returned Error: " ^ msg)
+  | Ok snap ->
+      Alcotest.(check (option string))
+        "progress"
+        (Some "Structured progress")
+        snap.progress;
+      Alcotest.(check (list string))
+        "decisions"
+        [ "No blocker" ]
+        snap.decisions
+
+let test_parse_structured_reply_accepts_envelope_json_fence () =
+  let original =
+    make_snapshot
+      ~goal:(Some "Structured goal")
+      ~progress:(Some "Parsed from fenced envelope")
+      ~done_summary:None
+      ~next_summary:None
+      ~next_items:[]
+      ~decisions:[]
+      ~open_questions:[]
+      ~constraints:[]
+      ()
+  in
+  let raw =
+    "```json\n"
+    ^ Yojson.Safe.to_string (KMP.structured_working_context_of_snapshot original)
+    ^ "\n```"
+  in
+  match KMP.parse_structured_state_snapshot_from_reply raw with
+  | None -> Alcotest.fail "structured reply parse returned None"
+  | Some snap ->
+      Alcotest.(check (option string))
+        "goal"
+        (Some "Structured goal")
+        snap.goal;
+      Alcotest.(check (option string))
+        "progress"
+        (Some "Parsed from fenced envelope")
+        snap.progress
+
+let test_finalizer_uses_structured_state_source () =
+  let raw =
+    {|{"progress":"Structured progress","decisions":["No blocker"]}|}
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"test"
+      ~goal:"Fix structured state"
+      ~actual_keeper_tool_names:[ "masc_tasks" ]
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:raw
+      ()
+  in
+  let
+    { KRT.state_snapshot
+    ; state_snapshot_source
+    ; response_text
+    }
+    =
+    finalized
+  in
+  Alcotest.(check string)
+    "source"
+    "model_structured_state"
+    state_snapshot_source;
+  Alcotest.(check (option string))
+    "progress"
+    (Some "Structured progress")
+    state_snapshot.progress;
+  Alcotest.(check string)
+    "visible response"
+    "Structured progress"
+    response_text;
+  Alcotest.(check (list string))
+    "decisions"
+    [ "No blocker" ]
+    state_snapshot.decisions;
+  Alcotest.(check bool)
+    "no synthetic marker"
+    false
+    (List.exists
+       (fun text -> contains_substring text "[SYNTHETIC]")
+       state_snapshot.decisions)
+
+let test_finalizer_prefers_reported_state_snapshot () =
+  let reported_state_snapshot =
+    make_snapshot
+      ~goal:(Some "Tool state goal")
+      ~progress:(Some "Reported through keeper_report_state")
+      ~done_summary:None
+      ~next_summary:None
+      ~next_items:[]
+      ~decisions:[ "Tool state wins" ]
+      ~open_questions:[]
+      ~constraints:[]
+      ()
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:(Some reported_state_snapshot)
+      ~keeper_name:"test"
+      ~goal:"Fallback goal"
+      ~actual_keeper_tool_names:[ "keeper_report_state" ]
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:"Visible reply"
+      ()
+  in
+  let
+    { KRT.state_snapshot
+    ; state_snapshot_source
+    ; response_text
+    }
+    =
+    finalized
+  in
+  Alcotest.(check string)
+    "source"
+    "model_structured_state_tool"
+    state_snapshot_source;
+  Alcotest.(check (option string))
+    "progress"
+    (Some "Reported through keeper_report_state")
+    state_snapshot.progress;
+  Alcotest.(check string)
+    "visible response"
+    "Visible reply"
+    response_text;
+  Alcotest.(check (list string))
+    "decisions"
+    [ "Tool state wins" ]
+    state_snapshot.decisions
+
 (* ── patch_checkpoint_last_assistant tests ────────────────────────── *)
 
 let make_test_checkpoint ?(working_context = None) ~response_text () =
@@ -143,6 +286,7 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     top_k = None;
     min_p = None;
     enable_thinking = None;
+    preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
@@ -259,6 +403,28 @@ let test_text_parse_matches_json_parse () =
        Alcotest.(check (list string)) "open_questions" text_snap.open_questions json_snap.open_questions;
        Alcotest.(check (list string)) "constraints" text_snap.constraints json_snap.constraints)
 
+let test_budget_synthesis_does_not_invent_next_items () =
+  let snapshot =
+    KMP.synthesize_state_from_run_result
+      ~goal:"Fix task"
+      ~tools_used:["tool_execute"; "tool_read_file"]
+      ~stop_reason:"budget_exhausted"
+      ~response_text:"Continuation checkpoint saved; keeper remains scheduled"
+  in
+  Alcotest.(check (list string)) "no invented next_items" [] snapshot.next_items;
+  Alcotest.(check (option string)) "budget continuation is not done" None
+    snapshot.done_summary;
+  Alcotest.(check bool)
+    "checkpoint resume summary present"
+    true
+    (match snapshot.next_summary with
+     | Some text -> contains_substring text "OAS checkpoint"
+     | None -> false);
+  Alcotest.(check (list string))
+    "budget continuation does not invent decisions"
+    []
+    snapshot.decisions
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -278,6 +444,22 @@ let () =
           Alcotest.test_case "wrong version -> None" `Quick test_envelope_wrong_version_returns_none;
           Alcotest.test_case "missing version -> None" `Quick test_envelope_missing_version_returns_none;
           Alcotest.test_case "empty in envelope -> None" `Quick test_envelope_empty_snapshot_returns_none;
+          Alcotest.test_case
+            "schema parses raw snapshot json"
+            `Quick
+            test_structured_state_schema_parse_raw_snapshot_json;
+          Alcotest.test_case
+            "reply parser accepts fenced envelope"
+            `Quick
+            test_parse_structured_reply_accepts_envelope_json_fence;
+          Alcotest.test_case
+            "finalizer keeps structured source"
+            `Quick
+            test_finalizer_uses_structured_state_source;
+          Alcotest.test_case
+            "finalizer prefers reported state"
+            `Quick
+            test_finalizer_prefers_reported_state_snapshot;
         ] );
       ( "patch_checkpoint",
         [
@@ -288,5 +470,9 @@ let () =
       ( "dual_source",
         [
           Alcotest.test_case "text matches json" `Quick test_text_parse_matches_json_parse;
+          Alcotest.test_case
+            "budget synthesis does not invent next items"
+            `Quick
+            test_budget_synthesis_does_not_invent_next_items;
         ] );
     ]

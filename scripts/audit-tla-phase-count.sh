@@ -40,7 +40,7 @@ done
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SPEC_DIR="${REPO_ROOT}/specs/keeper-state-machine"
-SSOT_FILE="${REPO_ROOT}/lib/keeper/keeper_state_machine.ml"
+SSOT_FILE="${REPO_ROOT}/lib/keeper_registry/keeper_state_machine.ml"
 
 VERBOSE=0
 while [[ $# -gt 0 ]]; do
@@ -55,7 +55,18 @@ module_file() {
   local normalized
   normalized="$(printf '%s' "${module_name}" \
     | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
-  printf '%s/lib/keeper/%s.ml' "${REPO_ROOT}" "${normalized}"
+  local candidate
+  for candidate in \
+    "${REPO_ROOT}/lib/keeper_registry/${normalized}.ml" \
+    "${REPO_ROOT}/lib/keeper_state/${normalized}.ml" \
+    "${REPO_ROOT}/lib/keeper/${normalized}.ml"
+  do
+    if [[ -f "${candidate}" ]]; then
+      printf '%s' "${candidate}"
+      return 0
+    fi
+  done
+  printf '%s/lib/keeper_registry/%s.ml' "${REPO_ROOT}" "${normalized}"
 }
 
 # Resolve the file that actually defines concrete `phase` constructors.
@@ -136,7 +147,7 @@ phase_file() {
     local alias_file
     alias_file="$(printf '%s' "${alias_module}" \
       | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/')"
-    file="${REPO_ROOT}/lib/keeper/${alias_file}.ml"
+    file="$(module_file "${alias_file}")"
     depth=$((depth + 1))
   done
 
@@ -219,7 +230,7 @@ while IFS= read -r entry; do
   fi
 
   # Domain disambiguation: "phase" is overloaded in this codebase —
-  # cascade FSM has 6 phases, turn cycle has 3 axes, decision pipeline
+  # runtime FSM has 6 phases, turn cycle has 3 axes, decision pipeline
   # has 5, etc.  Any subset/projection count is ≤7 and is never a
   # keeper-count drift signal.  Only flag values in the range
   # [SSOT_COUNT-3 .. SSOT_COUNT+5] so we catch realistic stale keeper

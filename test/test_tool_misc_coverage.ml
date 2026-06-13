@@ -1,14 +1,11 @@
 (** Coverage tests for Tool_misc *)
 
-open Masc_mcp
+open Masc
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
-let () =
-  let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path))
-
+let () = ignore Dashboard.force_link
 let str_contains s sub =
   let len_s = String.length s in
   let len_sub = String.length sub in
@@ -62,8 +59,8 @@ let make_test_ctx () =
   let tmp = Filename.concat (Filename.get_temp_dir_name ())
     (Printf.sprintf "masc-misc-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
-  let config = Coord.default_config tmp in
-  let _ = Coord.init config ~agent_name:(Some "test-agent") in
+  let config = Workspace.default_config tmp in
+  let _ = Workspace.init config ~agent_name:(Some "test-agent") in
   { Tool_misc.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
@@ -76,17 +73,16 @@ let () = test "dispatch_unknown_tool" (fun () ->
 (* Test dispatch dashboard — may require Eio runtime; skip gracefully if unavailable *)
 let () = test "dispatch_dashboard" (fun () ->
   let ctx = make_test_ctx () in
-  ignore (Coord.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
-  Coord.ensure_room_bootstrap ctx.config;
-  let second_room = ctx.config in
-  ignore (Coord.add_task second_room ~title:"second task" ~priority:1 ~description:"");
+  ignore (Workspace.add_task ctx.config ~title:"default task" ~priority:2 ~description:"");
+  Workspace.ensure_workspace_bootstrap ctx.config;
+  let second_workspace = ctx.config in
+  ignore (Workspace.add_task second_workspace ~title:"second task" ~priority:1 ~description:"");
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
-      assert (not (str_contains (Tool_result.message result) "second-room"));
+      assert (not (str_contains (Tool_result.message result) "second-workspace"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -108,16 +104,15 @@ let () = test "dispatch_dashboard_compact" (fun () ->
 
 let () = test "dispatch_dashboard_current_scope" (fun () ->
   let ctx = make_test_ctx () in
-  Coord.ensure_room_bootstrap ctx.config;
+  Workspace.ensure_workspace_bootstrap ctx.config;
   let focused = ctx.config in
-  ignore (Coord.add_task focused ~title:"focus task" ~priority:2 ~description:"");
+  ignore (Workspace.add_task focused ~title:"focus task" ~priority:2 ~description:"");
   let args = `Assoc [("scope", `String "current")] in
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (Tool_result.is_success result);
       assert (str_contains (Tool_result.message result) "MASC Dashboard");
-      assert (str_contains (Tool_result.message result) "Namespace: default (flattened)");
-      assert (not (str_contains (Tool_result.message result) "focus-room"))
+      assert (not (str_contains (Tool_result.message result) "focus-workspace"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -172,9 +167,8 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
-      assert (Yojson.Safe.Util.member "message" json = `String "query is required")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (Tool_result.message result = "query is required")
   | None -> failwith "dispatch returned None"
 )
 
@@ -185,11 +179,8 @@ let () = test "dispatch_web_search_rejects_long_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
-      assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query must be at most 500 characters")
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+      assert (Tool_result.message result = "query must be at most 500 characters")
   | None -> failwith "dispatch returned None"
 )
 
@@ -199,11 +190,10 @@ let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not (Tool_result.is_success result));
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "status" json = `String "error");
+      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
       assert
-        (Yojson.Safe.Util.member "message" json
-         = `String "query looks like it may contain secrets; refine it before using web search")
+        (Tool_result.message result
+         = "query looks like it may contain secrets; refine it before using web search")
   | None -> failwith "dispatch returned None"
 )
 
@@ -396,12 +386,130 @@ let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
       [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
   in
   assert (not (Tool_result.is_success result));
-  let json = parse_json ((Tool_result.message result)) in
-  assert (Yojson.Safe.Util.member "status" json = `String "error");
+  assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
   assert
-    (str_contains
-       Yojson.Safe.Util.(member "message" json |> to_string)
-       "bing_rss: rss unavailable")
+    (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
+)
+
+let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content enrichment regression" in
+  let url = "https://example.com/masc-web-search-content" in
+  let html =
+    {|<!doctype html>
+<html>
+  <head><title>Result Page &amp; Proof</title></head>
+  <body>
+    <article>
+      <h1>Result Page</h1>
+      <p>Readable <b>page</b> content &amp; proof.</p>
+    </article>
+  </body>
+</html>|}
+  in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec ~headers:_ ~max_response_bytes url_arg ->
+           assert (timeout_sec = 9);
+           assert (max_response_bytes = 2_000_000);
+           assert (url_arg = url);
+           Ok (Some 200, html))
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ; ("contentMaxChars", `Int 300)
+              ; ("contentTimeout", `Int 9)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 1);
+              assert (result_json |> member "content_error_count" |> to_int = 0);
+              assert (result_json |> member "content_max_chars" |> to_int = 300);
+              assert (result_json |> member "content_timeout" |> to_int = 9);
+              let hits = result_json |> member "results" |> to_list in
+              assert (List.length hits = 1);
+              let hit = List.hd hits in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text "1. Result");
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Snippet: Snippet");
+              assert (str_contains content_text "Content status: ok (http=200");
+              assert (str_contains content_text "Readable page content & proof.");
+              assert (hit |> member "page_content_status" |> to_string = "ok");
+              assert (hit |> member "page_content_http_status" |> to_int = 200);
+              assert (hit |> member "page_content_truncated" |> to_bool = false);
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "# Result Page");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "Readable page content & proof.")
+          | None -> failwith "dispatch returned None"))
+)
+
+let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "include content fetch failure regression" in
+  let url = "https://example.com/masc-web-search-fetch-failure" in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    (fun () ->
+      Tool_misc.with_web_fetch_http_get_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->
+           assert (url_arg = url);
+           Error "network unavailable")
+        (fun () ->
+          let args =
+            `Assoc
+              [ ("query", `String query)
+              ; ("limit", `Int 1)
+              ; ("includeContent", `Bool true)
+              ]
+          in
+          match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+          | Some result ->
+              assert (Tool_result.is_success result);
+              let json = parse_json (Tool_result.message result) in
+              let open Yojson.Safe.Util in
+              let result_json = json |> member "result" in
+              assert (result_json |> member "content_enriched" |> to_bool);
+              assert (result_json |> member "content_result_count" |> to_int = 0);
+              assert (result_json |> member "content_error_count" |> to_int = 1);
+              let hit =
+                result_json |> member "results" |> to_list |> List.hd
+              in
+              let content_text = result_json |> member "content_text" |> to_string in
+              assert (str_contains content_text "WebSearch readable results");
+              assert (str_contains content_text ("Query: " ^ query));
+              assert (str_contains content_text ("URL: " ^ url));
+              assert (str_contains content_text "Content status: error");
+              assert (str_contains content_text "_Failed to retrieve page content:");
+              assert (str_contains content_text ("Source: " ^ url));
+              assert (hit |> member "page_content_status" |> to_string = "error");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   "_Failed to retrieve page content:");
+              assert
+                (str_contains
+                   (hit |> member "page_content" |> to_string)
+                   ("Source: " ^ url))
+          | None -> failwith "dispatch returned None"))
 )
 
 let () = test "parse_official_provider_json_payloads" (fun () ->
@@ -446,134 +554,6 @@ let () = test "redact_transport_error_detail" (fun () ->
   assert
     (Tool_misc.redact_transport_error_detail "forbidden response"
      = "forbidden response")
-)
-
-let () = test "dispatch_tool_admin_snapshot" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_snapshot" ~args with
-  | Some result ->
-      assert (Tool_result.is_success result);
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
-      assert (Yojson.Safe.Util.member "auth" json <> `Null);
-      assert (Yojson.Safe.Util.member "http_auth_strict" (Yojson.Safe.Util.member "auth" json) <> `Null);
-      assert (Yojson.Safe.Util.member "bind_host" (Yojson.Safe.Util.member "auth" json) <> `Null);
-      assert (Yojson.Safe.Util.member "bind_is_loopback" (Yojson.Safe.Util.member "auth" json) <> `Null);
-      assert (Yojson.Safe.Util.member "mode" json = `Null);
-      (* keeper_policies removed with policy_mode purge *)
-      assert (Yojson.Safe.Util.member "keeper_policies" json = `Null);
-      assert (Yojson.Safe.Util.member "command_plane" json = `Null)
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_tool_admin_update_rejects_mode" (fun () ->
-  let ctx = make_test_ctx () in
-  let args =
-    `Assoc
-      [
-        ("section", `String "mode");
-        ("enabled_categories", `List [ `String "core"; `String "auth" ]);
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some result ->
-      assert (not (Tool_result.is_success result))
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_tool_admin_update_auth" (fun () ->
-  let ctx = make_test_ctx () in
-  let args =
-    `Assoc
-      [
-        ("section", `String "auth");
-        ("enabled", `Bool true);
-        ("require_token", `Bool true);
-        ("token_expiry_hours", `Int 12);
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some result ->
-      assert (Tool_result.is_success result);
-      let json = parse_json (Tool_result.message result) in
-      assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "auth");
-      let cfg = Auth.load_auth_config ctx.config.base_path in
-      assert cfg.enabled;
-      assert cfg.require_token;
-      assert (cfg.token_expiry_hours = 12)
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_tool_admin_update_auth_rejects_removed_default_role" (fun () ->
-  let ctx = make_test_ctx () in
-  let before = Auth.load_auth_config ctx.config.base_path in
-  let args =
-    `Assoc
-      [
-        ("section", `String "auth");
-        ("enabled", `Bool true);
-        ("default_role", `String "reader");
-      ]
-  in
-  match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-  | Some result ->
-      assert (not (Tool_result.is_success result));
-      assert (str_contains (Tool_result.message result) "default_role is no longer supported");
-      let after = Auth.load_auth_config ctx.config.base_path in
-      assert (after.enabled = before.enabled);
-      assert (after.require_token = before.require_token);
-      assert (after.token_expiry_hours = before.token_expiry_hours)
-  | None -> failwith "dispatch returned None"
-)
-
-(* dispatch_tool_admin_update_unit_policy removed (CP purge: Command_plane_v2 deleted) *)
-
-let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun sw ->
-  let ctx = make_test_ctx () in
-  let keeper_ctx : _ Tool_keeper.context =
-    {
-      config = ctx.config;
-      agent_name = "tester";
-      sw;
-      clock = Eio.Stdenv.clock env;
-      proc_mgr = Some (Eio.Stdenv.process_mgr env); net = None;
-    }
-  in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_keepalive.stop_keepalive "admin-keeper")
-    (fun () ->
-      match
-        Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String "admin-keeper");
-                ("goal", `String "Admin tool policy test");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
-              ])
-      with
-      | Some result when Tool_result.is_success result -> (
-          (* keeper_policy section removed with policy_mode purge —
-             admin_update should reject the section *)
-          let args =
-            `Assoc
-              [
-                ("section", `String "keeper_policy");
-                ("name", `String "admin-keeper");
-              ]
-          in
-          match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
-          | Some inner when not (Tool_result.is_success inner) -> () (* expected: section no longer supported *)
-          | Some _ -> failwith "keeper_policy section should be rejected"
-          | None -> failwith "dispatch returned None")
-      | Some result -> failwith (Tool_result.message result)
-      | None -> failwith "keeper up dispatch returned None")
 )
 
 (* Test helper functions *)

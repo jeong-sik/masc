@@ -5,7 +5,7 @@
     - Safety: Post-check prevents silent constraint violations
     - Soundness: Typed comparisons with explicit error handling
 
-    Designed based on MAGI review (Provider_f + Qwen3 formal verification).
+    Designed based on MAGI review (Gemini + Qwen3 formal verification).
 *)
 
 (* Fiber-safe random state for jitter calculation *)
@@ -73,9 +73,9 @@ module Usage_history = struct
   let max_samples_per_agent = 64
   let min_samples_for_p95 = 10
   let unknown_agent_fallback = 1024
-  (* RFC-0028 §4.2.  Conservative upper bound for one cascade turn's
+  (* RFC-0028 §4.2.  Conservative upper bound for one runtime turn's
      output tokens against current defaults (model-d-mini / qwen3-9B /
-     qwen3-35B-A3B).  No formal heuristic_metrics evidence is
+     qwen3-35B-A3B).  No formal distribution evidence is
      attached today — this gap is acknowledged in the RFC.  Re-measure
      once distribution data lands. *)
 
@@ -183,7 +183,7 @@ let retryable_error_re =
 
 (** Hard quota/capacity exhaustion is not retryable inside this
     same-agent bounded loop.  Cross-provider fallback and long
-    cooldown decisions are owned by keeper/cascade classifiers. *)
+    cooldown decisions are owned by keeper/runtime classifiers. *)
 let hard_quota_error_indicators = [
   "hard_quota";
   "terminalquotaerror";
@@ -372,9 +372,7 @@ let result_to_json result =
   `Assoc [
     ("status", `String status_str);
     ("reason", `String result.reason);
-    ("final_output", match result.final_output with
-      | Some s -> `String s
-      | None -> `Null);
+    ("final_output", Json_util.string_opt_to_json result.final_output);
     ("stats", `Assoc [
       ("turns", `Int result.stats.turns);
       ("tokens_in", `Int result.stats.tokens_in);
@@ -385,15 +383,16 @@ let result_to_json result =
       ("elapsed_seconds", `Float (Time_compat.now () -. result.stats.start_time));
     ]);
     ("history", `List history_json);
-    ("warning", match result.warning with
-      | Some w -> `String w
-      | None -> `Null);
+    ("warning", Json_util.string_opt_to_json result.warning);
   ]
 
 (** Parse retry config from JSON *)
 let retry_config_of_json json =
-  let open Yojson.Safe.Util in
-  let retry = json |> member "retry" in
+  let retry =
+    match Json_util.assoc_member_opt "retry" json with
+    | None | Some `Null -> `Null
+    | Some v -> v
+  in
   if retry = `Null then
     default_retry_config
   else
@@ -413,17 +412,11 @@ let constraints_of_json json =
   if json = `Null then
     default_constraints
   else
-    let open Yojson.Safe.Util in
-    let get_int_opt key = Safe_ops.json_int_opt key json in
-    let get_float_opt key =
-      try Some (json |> member key |> to_float)
-      with Yojson.Safe.Util.Type_error _ -> None
-    in
     {
-      max_turns = get_int_opt "max_turns";
-      max_tokens = get_int_opt "max_tokens";
-      max_cost_usd = get_float_opt "max_cost_usd";
-      max_time_seconds = get_float_opt "max_time_seconds";
+      max_turns = Safe_ops.json_int_opt "max_turns" json;
+      max_tokens = Safe_ops.json_int_opt "max_tokens" json;
+      max_cost_usd = Json_util.get_float json "max_cost_usd";
+      max_time_seconds = Json_util.get_float json "max_time_seconds";
       hard_max_iterations =
         Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
       retry = retry_config_of_json json;
@@ -431,28 +424,45 @@ let constraints_of_json json =
 
 (** Parse goal from JSON *)
 let goal_of_json json =
-  let open Yojson.Safe.Util in
-  let path = json |> member "path" |> to_string in
-  let cond = json |> member "condition" in
+  let path = Json_util.get_string_with_default json ~key:"path" ~default:"" in
+  let cond =
+    match Json_util.assoc_member_opt "condition" json with
+    | None | Some `Null -> `Null
+    | Some v -> v
+  in
+  let safe_member key v =
+    match Json_util.assoc_member_opt key v with
+    | Some v -> v
+    | None -> `Null
+  in
+  let get_float_or key v =
+    Json_util.get_float v key |> Option.value ~default:0.0
+  in
   let condition =
-    if member "eq" cond <> `Null then
-      Eq (member "eq" cond)
-    else if member "neq" cond <> `Null then
-      Neq (member "neq" cond)
-    else if member "lt" cond <> `Null then
-      Lt (member "lt" cond |> to_float)
-    else if member "lte" cond <> `Null then
-      Lte (member "lte" cond |> to_float)
-    else if member "gt" cond <> `Null then
-      Gt (member "gt" cond |> to_float)
-    else if member "gte" cond <> `Null then
-      Gte (member "gte" cond |> to_float)
-    else if member "between" cond <> `Null then
-      match member "between" cond |> to_list with
-      | low :: high :: _ -> Between (low |> to_float, high |> to_float)
-      | _ -> invalid_arg "Bounded.rule_of_yojson: 'between' array must have at least 2 elements"
-    else if member "in" cond <> `Null then
-      In (member "in" cond |> to_list)
+    if Json_util.assoc_member_opt "eq" cond <> None then
+      Eq (safe_member "eq" cond)
+    else if Json_util.assoc_member_opt "neq" cond <> None then
+      Neq (safe_member "neq" cond)
+    else if Json_util.assoc_member_opt "lt" cond <> None then
+      Lt (get_float_or "lt" cond)
+    else if Json_util.assoc_member_opt "lte" cond <> None then
+      Lte (get_float_or "lte" cond)
+    else if Json_util.assoc_member_opt "gt" cond <> None then
+      Gt (get_float_or "gt" cond)
+    else if Json_util.assoc_member_opt "gte" cond <> None then
+      Gte (get_float_or "gte" cond)
+    else if Json_util.assoc_member_opt "between" cond <> None then
+      let to_float_raw = function
+        | `Float f -> f
+        | `Int i -> float_of_int i
+        | _ -> 0.0
+      in
+      (match safe_member "between" cond with
+       | `List (low :: high :: _) ->
+         Between (to_float_raw low, to_float_raw high)
+       | _ -> invalid_arg "Bounded.rule_of_yojson: 'between' array must have at least 2 elements")
+    else if Json_util.assoc_member_opt "in" cond <> None then
+      In (match safe_member "in" cond with `List l -> l | v -> [v])
     else
       Eq (`Bool true)  (* Default: look for truthy value *)
   in

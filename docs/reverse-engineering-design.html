@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MASC-MCP Reverse Engineering Design Map</title>
+  <title>MASC Reverse Engineering Design Map</title>
   <style>
     :root {
       --ink: #1f2933;
@@ -13,7 +13,7 @@
       --panel: #ffffff;
       --server: #266e73;
       --keeper: #8c4a23;
-      --coord: #5966a8;
+      --workspace: #5966a8;
       --common: #4f6b3f;
       --gap: #b3261e;
       --warn: #9a6a00;
@@ -126,7 +126,7 @@
       vertical-align: 1px;
     }
     .tag.big { background: var(--keeper); }
-    .tag.mid { background: var(--coord); }
+    .tag.mid { background: var(--workspace); }
     .tag.common { background: var(--common); }
     .tag.server { background: var(--server); }
     .tag.gap { background: var(--gap); }
@@ -153,7 +153,7 @@
       padding: 12px;
     }
     .node.keeper { border-top-color: var(--keeper); }
-    .node.coord { border-top-color: var(--coord); }
+    .node.workspace { border-top-color: var(--workspace); }
     .node.common { border-top-color: var(--common); }
     .node.gap { border-top-color: var(--gap); }
     .node h4 { margin: 0 0 6px; font-size: 0.92rem; }
@@ -378,15 +378,15 @@
 <body>
   <div class="shell">
     <aside>
-      <div class="nav-title">MASC-MCP 설계도</div>
+      <div class="nav-title">MASC 설계도</div>
       <nav class="nav">
         <a href="#summary">요약</a>
         <a href="#layers">모듈 계층</a>
         <a href="#front-door">프론트도어</a>
         <a href="#mcp-flow">MCP Tool Call</a>
         <a href="#keeper-flow">Keeper Turn</a>
-        <a href="#coord-flow">Task / Goal</a>
-        <a href="#cascade-flow">Cascade / OAS</a>
+        <a href="#workspace-flow">Task / Goal</a>
+        <a href="#runtime-flow">Runtime / OAS</a>
         <a href="#dashboard-flow">Dashboard</a>
         <a href="#truth-flow">Persistence Truth</a>
         <a href="#matrix">기능 매핑</a>
@@ -398,7 +398,7 @@
       </nav>
       <div class="legend">
         <div class="key"><span class="swatch" style="background: var(--keeper)"></span>Big module / keeper core</div>
-        <div class="key"><span class="swatch" style="background: var(--coord)"></span>Mid module / coordination</div>
+        <div class="key"><span class="swatch" style="background: var(--workspace)"></span>Mid module / workspace collaboration</div>
         <div class="key"><span class="swatch" style="background: var(--common)"></span>Common substrate</div>
         <div class="key"><span class="swatch" style="background: var(--server)"></span>Server / dashboard</div>
         <div class="key"><span class="swatch" style="background: var(--gap)"></span>Gap / refactor pressure</div>
@@ -407,7 +407,7 @@
 
     <main>
       <section id="summary">
-        <h1>MASC-MCP 역공학 설계도</h1>
+        <h1>MASC 역공학 설계도</h1>
         <p class="subtitle">
           문서가 약속하는 제품 경계와 현재 OCaml 코드의 실제 실행 흐름을 맞춰 본 리팩토링용 지도입니다.
           목적은 구현을 설명하는 문서가 아니라, 큰 모듈을 자를 때 깨지면 안 되는 순서와 소유 경계를 드러내는 것입니다.
@@ -415,14 +415,14 @@
         <div class="meta">
           <span class="pill">기준 커밋 <code>23a5dd15218a</code></span>
           <span class="pill">생성일 2026-05-18</span>
-          <span class="pill">대상 <code>masc-mcp</code></span>
+          <span class="pill">대상 <code>masc</code></span>
           <span class="pill">산출물 <code>docs/reverse-engineering-design.html</code></span>
         </div>
 
         <div class="grid three tight">
           <div class="card">
             <h3><span class="tag big">Big</span>현재 제품의 중심축</h3>
-            <p>Repo coordination, Keeper runtime, Dashboard/operator read visibility가 canonical front door입니다. Command Plane과 team-session은 역사/호환 맥락으로 밀려났습니다.</p>
+            <p>Repo workspace collaboration, Keeper runtime, Dashboard/operator read visibility가 canonical front door입니다. Command Plane과 team-session은 역사/호환 맥락으로 밀려났습니다.</p>
             <span class="ref">docs/spec/01-system-overview.md:136, docs/COMMAND-PLANE-RUNBOOK.md:6</span>
           </div>
           <div class="card">
@@ -448,8 +448,8 @@
               <span class="chip">HTTP/MCP server</span>
               <span class="chip">Dashboard read models</span>
               <span class="chip">Keeper lifecycle/FSM</span>
-              <span class="chip">Cascade/OAS execution</span>
-              <span class="chip">Task/Goal coordination</span>
+              <span class="chip">Runtime/OAS execution</span>
+              <span class="chip">Task/Goal workspace collaboration</span>
             </div>
           </div>
           <div class="layer">
@@ -473,7 +473,7 @@
               <span class="chip">JSONL / date-split append</span>
               <span class="chip">capability registry</span>
               <span class="chip">SSE freshness</span>
-              <span class="chip">Prometheus / audit rows</span>
+              <span class="chip">legacy metrics backend / audit rows</span>
               <span class="chip">TLA mirrors</span>
             </div>
           </div>
@@ -482,7 +482,7 @@
 
       <section id="front-door">
         <h2>프론트도어 순서도</h2>
-        <p class="section-intro">현재 supported entry는 repo coordination, keeper runtime, dashboard/operator visibility입니다. Command Plane은 removed/compatibility 응답으로 다뤄야 합니다.</p>
+        <p class="section-intro">현재 supported entry는 repo workspace collaboration, keeper runtime, dashboard/operator visibility입니다. Command Plane은 removed/compatibility 응답으로 다뤄야 합니다.</p>
         <div class="flow row">
           <div class="node">
             <h4>Client</h4>
@@ -502,13 +502,13 @@
           </div>
           <div class="node keeper">
             <h4>State surfaces</h4>
-            <p>Coord, Keeper, Board, Goal, Cascade, Dashboard projections.</p>
+            <p>Workspace, Keeper, Board, Goal, Runtime, Dashboard projections.</p>
           </div>
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Server bootstraps runtime state.</strong><span><code>Server_runtime_bootstrap.run</code> initializes Eio resources, server state, startup tasks, keepers, and the HTTP accept loop.</span><span class="ref">lib/server/server_runtime_bootstrap.mli:1, :38, :130</span></div></div>
           <div class="step"><div><strong>Base path is normalized before runtime assembly.</strong><span><code>bin/main_eio.ml</code> validates explicit base path, prevents source repo runtime-root misuse, creates <code>&lt;base&gt;/.masc</code>, locks port/base path, then exports <code>MASC_BASE_PATH</code>.</span><span class="ref">bin/main_eio.ml:521, :577, :606</span></div></div>
-          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, room, dashboard, provider, cascade, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
+          <div class="step"><div><strong>Route table is composed once.</strong><span><code>Server_routes_http.make_routes</code> wires frontend, workspace, dashboard, provider, runtime, activity, sidecar, repositories, workspace, IDE, credentials, keeper repos.</span><span class="ref">lib/server/server_routes_http.ml:9-41</span></div></div>
           <div class="step"><div><strong>HTTP auth wraps route handlers.</strong><span><code>Server_auth</code> centralizes token extraction, role/permission checks, public-read rules, CORS, and admin/tool auth combinators.</span><span class="ref">lib/server/server_auth.mli:1, :56, :237, :283</span></div></div>
           <div class="step"><div><strong>Command Plane compatibility must not become a front door again.</strong><span>H2 gateway responds to <code>/api/v1/command-plane*</code> with removed-surface response.</span><span class="ref">lib/server/server_h2_gateway.ml:984-985, :1023-1024</span></div></div>
         </div>
@@ -520,8 +520,8 @@
           <div class="node server"><h4>POST /mcp</h4><p>Accept/session/protocol negotiation.</p></div>
           <div class="node server"><h4>JSON-RPC dispatch</h4><p><code>initialize</code>, <code>tools/list</code>, <code>tools/call</code>, resources, prompts.</p></div>
           <div class="node common"><h4>Tool envelope</h4><p>Timeout, read-only retry, telemetry, runtime-MCP keeper trace.</p></div>
-          <div class="node coord"><h4>Tool_dispatch</h4><p>Token + tag registry + pre hooks + dispatch observers.</p></div>
-          <div class="node keeper"><h4>Handler module</h4><p>Coord, task, keeper, board, cascade, operator, code, local runtime.</p></div>
+          <div class="node workspace"><h4>Tool_dispatch</h4><p>Token + tag registry + pre hooks + dispatch observers.</p></div>
+          <div class="node keeper"><h4>Handler module</h4><p>Workspace, task, keeper, board, runtime, operator, code, local runtime.</p></div>
         </div>
         <div class="grid two">
           <div class="card">
@@ -551,14 +551,14 @@
           <div class="node keeper"><h4>Board/event triage</h4><p>mentions, board events, scope messages.</p></div>
           <div class="node keeper"><h4>Unified turn</h4><p>phase gate, prompt, tool surface, budget, retry.</p></div>
           <div class="node common"><h4>OAS Agent.run</h4><p>provider stream, tools, checkpoint, raw trace.</p></div>
-          <div class="node coord"><h4>Post-turn</h4><p>receipt, manifest, registry, task/goal effects.</p></div>
+          <div class="node workspace"><h4>Post-turn</h4><p>receipt, manifest, registry, task/goal effects.</p></div>
         </div>
         <div class="sequence">
           <div class="step"><div><strong>Keepalive fiber reads current keeper meta and syncs registry.</strong><span>Disk meta mtime gate avoids reparse storms; registry remains dashboard live source.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1706-1748</span></div></div>
           <div class="step"><div><strong>Heartbeat freshness and failure thresholds are checked.</strong><span>Consecutive heartbeat failures set structured failure reason and crash the fiber for supervisor restart.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1761-1781</span></div></div>
           <div class="step"><div><strong>Board events are collected before dispatch.</strong><span>Warmup controls whether keeper can act on events; pending events feed the unified turn.</span><span class="ref">lib/keeper/keeper_heartbeat_loop.ml:1801-1810</span></div></div>
-          <div class="step"><div><strong><code>run_keeper_cycle</code> brackets the turn.</strong><span>Phase/cascade gates, event-bus tracking, OAS timeout/retry, post-turn lifecycle, and task acquisition live here.</span><span class="ref">lib/keeper/keeper_unified_turn.ml:122, :198, :611, :893, :2360, :2464</span></div></div>
-          <div class="step"><div><strong><code>Keeper_turn_driver.run_named</code> enters the OAS cascade loop.</strong><span>Resolves providers, enforces tool support and admission queue, then calls OAS Agent.run.</span><span class="ref">lib/keeper/keeper_turn_driver.mli:145-210</span></div></div>
+          <div class="step"><div><strong><code>run_keeper_cycle</code> brackets the turn.</strong><span>Phase/runtime gates, event-bus tracking, OAS timeout/retry, post-turn lifecycle, and task acquisition live here.</span><span class="ref">lib/keeper/keeper_unified_turn.ml:122, :198, :611, :893, :2360, :2464</span></div></div>
+          <div class="step"><div><strong><code>Keeper_turn_driver.run_named</code> enters the OAS runtime loop.</strong><span>Resolves providers, enforces tool support and admission queue, then calls OAS Agent.run.</span><span class="ref">lib/keeper/keeper_turn_driver.mli:145-210</span></div></div>
           <div class="step"><div><strong>Receipt and FSM audit close the turn.</strong><span>Receipt outcome is typed and checked against TLA receipt vocabulary; registry turn state is reset on finish.</span><span class="ref">lib/keeper/keeper_execution_receipt.mli:1-40, lib/keeper/keeper_registry.mli:222-227</span></div></div>
         </div>
         <div class="callout">
@@ -566,13 +566,13 @@
         </div>
       </section>
 
-      <section id="coord-flow">
+      <section id="workspace-flow">
         <h2>Task / Goal 순서도</h2>
         <div class="grid two">
           <div class="card">
             <h3>Task lifecycle</h3>
             <div class="sequence">
-              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_next</code>, <code>masc_transition</code> enter <code>Tool_task</code>, then Coord JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
+              <div class="step"><div><strong>Add / claim</strong><span><code>masc_add_task</code>, <code>masc_claim_next</code>, <code>masc_transition</code> enter <code>Tool_task</code>, then Workspace JSONL-backed operations.</span><span class="ref">lib/tool_task.mli:10-20, lib/task_dispatch.mli:1-21</span></div></div>
               <div class="step"><div><strong>Transition</strong><span><code>masc_transition</code> validates action and status, with verification/approval gates where enabled.</span><span class="ref">lib/tool_task.mli:17, lib/task_dispatch.mli:91-116</span></div></div>
               <div class="step"><div><strong>Verification</strong><span>Submit-for-verification, approve, reject, PR evidence, and anti-rationalization verdicts are task lifecycle side effects.</span><span class="ref">lib/tool_task.ml:350, :1268, :1326</span></div></div>
             </div>
@@ -581,8 +581,8 @@
             <h3>Goal lifecycle</h3>
             <div class="sequence">
               <div class="step"><div><strong>Goal store</strong><span>Durable state is <code>&lt;base&gt;/.masc/goals.json</code>, with version and phase/status compatibility bridge.</span><span class="ref">lib/goal/goal_store.mli:1-20, :180-200</span></div></div>
-              <div class="step"><div><strong>Goal tools</strong><span><code>masc_goal_list/upsert/transition/verify/review</code> are parsed and authorized in <code>Coord_goals</code>.</span><span class="ref">lib/coord_goals.mli:1-7, :53-84</span></div></div>
-              <div class="step"><div><strong>Completion gates</strong><span>Completion checks task coverage, sub-goals, verification votes, and optional approval.</span><span class="ref">lib/coord_goals.mli:53-72</span></div></div>
+              <div class="step"><div><strong>Goal tools</strong><span><code>masc_goal_list/upsert/transition/verify/review</code> are parsed and authorized in <code>Workspace_goals</code>.</span><span class="ref">lib/workspace_goals.mli:1-7, :53-84</span></div></div>
+              <div class="step"><div><strong>Completion gates</strong><span>Completion checks task coverage, sub-goals, verification votes, and optional approval.</span><span class="ref">lib/workspace_goals.mli:53-72</span></div></div>
             </div>
           </div>
         </div>
@@ -591,14 +591,14 @@
         </div>
       </section>
 
-      <section id="cascade-flow">
-        <h2>Cascade / OAS Boundary 순서도</h2>
+      <section id="runtime-flow">
+        <h2>Runtime / OAS Boundary 순서도</h2>
         <div class="flow row">
-          <div class="node coord"><h4>MASC decision</h4><p>task, goal, keeper profile, tool requirements.</p></div>
-          <div class="node common"><h4>Cascade runtime</h4><p>named cascade -> model labels -> provider configs.</p></div>
-          <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy, required tool support.</p></div>
+          <div class="node workspace"><h4>MASC decision</h4><p>task, goal, keeper profile, tool surface.</p></div>
+          <div class="node common"><h4>Runtime runtime</h4><p>named runtime -> model labels -> provider configs.</p></div>
+          <div class="node keeper"><h4>Tool lane filter</h4><p>runtime MCP policy and resolved tool surface.</p></div>
           <div class="node common"><h4>OAS execution</h4><p>Agent.run, context, checkpoint, provider stream.</p></div>
-          <div class="node coord"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
+          <div class="node workspace"><h4>MASC projection</h4><p>receipt, manifest, dashboard redacted runtime lane.</p></div>
         </div>
         <div class="grid two">
           <div class="card">
@@ -608,8 +608,8 @@
           </div>
           <div class="card">
             <h3>Code seams</h3>
-            <p><code>Cascade_runtime</code> is MASC's SSOT for named cascade resolution. <code>Cascade_runner</code> is the facade over OAS config/run/checkpoint. <code>Keeper_turn_driver</code> is the keeper-facing named cascade execution entry.</p>
-            <span class="ref">lib/cascade/cascade_runtime.mli:1-11, lib/cascade/cascade_runner.mli:1-14, lib/keeper/keeper_turn_driver.mli:1-10</span>
+            <p><code>Runtime_runtime</code> is MASC's SSOT for named runtime resolution. <code>Runtime_runner</code> is the facade over OAS config/run/checkpoint. <code>Keeper_turn_driver</code> is the keeper-facing named runtime execution entry.</p>
+            <span class="ref">lib/runtime/runtime_runtime.mli:1-11, lib/runtime/runtime_runner.mli:1-14, lib/keeper/keeper_turn_driver.mli:1-10</span>
           </div>
         </div>
       </section>
@@ -620,7 +620,7 @@
           <div class="node server"><h4>SPA shell</h4><p>v1 navigation and legacy redirects.</p></div>
           <div class="node server"><h4>REST hydrate</h4><p>canonical read models under <code>/api/v1/dashboard/*</code>.</p></div>
           <div class="node common"><h4>SSE freshness</h4><p>task, agent, board, decision, operator events.</p></div>
-          <div class="node coord"><h4>Mutation routes</h4><p>Only guarded admin/operator actions.</p></div>
+          <div class="node workspace"><h4>Mutation routes</h4><p>Only guarded admin/operator actions.</p></div>
           <div class="node gap"><h4>Compatibility</h4><p>mission/execution/proof/config remain supporting read models.</p></div>
         </div>
         <div class="sequence">
@@ -638,7 +638,7 @@
         <div class="flow row">
           <div class="node common"><h4>base_path</h4><p>Runtime root selection.</p></div>
           <div class="node common"><h4>config_root</h4><p><code>MASC_CONFIG_DIR</code> or <code>&lt;base&gt;/.masc/config</code>.</p></div>
-          <div class="node coord"><h4>Coord files</h4><p>tasks, goals, board, agents, messages.</p></div>
+          <div class="node workspace"><h4>Workspace files</h4><p>tasks, goals, board, agents, messages.</p></div>
           <div class="node keeper"><h4>Keeper stores</h4><p>meta, manifests, receipts, checkpoints, tool calls.</p></div>
           <div class="node common"><h4>Audit JSONL</h4><p>dated append, atomic writer, retention.</p></div>
         </div>
@@ -646,14 +646,14 @@
           <thead><tr><th>Truth surface</th><th>Current code owner</th><th>Contract</th></tr></thead>
           <tbody>
             <tr><td><code>.masc/goals.json</code></td><td><code>Goal_store</code></td><td>Versioned JSON with phase/status bridge; raw writes require external locking.</td></tr>
-            <tr><td>Task backlog</td><td><code>Coord</code> via <code>Task_dispatch.Jsonl</code></td><td>Single JSONL/file backend today; future backend pivot is explicit.</td></tr>
+            <tr><td>Task backlog</td><td><code>Workspace</code> via <code>Task_dispatch.Jsonl</code></td><td>Single JSONL/file backend today; future backend pivot is explicit.</td></tr>
             <tr><td>Keeper runtime</td><td><code>Keeper_registry</code> + keeper meta stores</td><td>In-memory live state plus disk meta; registry is dashboard live truth.</td></tr>
-            <tr><td>Execution receipts</td><td><code>Keeper_execution_receipt</code></td><td>Typed terminal outcome, TLA receipt mapping, tool/cascade/sandbox evidence.</td></tr>
+            <tr><td>Execution receipts</td><td><code>Keeper_execution_receipt</code></td><td>Typed terminal outcome, TLA receipt mapping, tool/runtime/sandbox evidence.</td></tr>
             <tr><td>Append logs</td><td><code>Jsonl_atomic</code>, <code>Dated_jsonl</code></td><td>In-process mutex serialization; cross-process race protection is not in scope.</td></tr>
             <tr><td>Config root</td><td><code>Config_dir_resolver</code></td><td><code>MASC_CONFIG_DIR</code> wins; checked-in repo config is seed, not active fallback.</td></tr>
             <tr><td>Bearer auth</td><td><code>Auth</code> + <code>Server_auth</code></td><td>Raw tokens live under <code>&lt;base&gt;/.masc/auth</code>; credentials are hashed and role/permission-gated.</td></tr>
-            <tr><td>Keeper GitHub credentials</td><td><code>Credential_materializer</code> + <code>Keeper_host_config_provider</code></td><td>Materialized <code>hosts.yml</code> with <code>oauth_token</code> is required for Docker portability; host keyring-only auth is stale.</td></tr>
-            <tr><td>Metrics</td><td><code>Prometheus</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as cascade metric names.</td></tr>
+            <tr><td>Repository git</td><td><code>Repo_git</code> + repository routes</td><td>Repository operations run with non-interactive git environment only; repo-manager does not own GitHub identity materialization.</td></tr>
+            <tr><td>Metrics</td><td><code>legacy metrics backend</code> + domain metric modules</td><td>In-process metrics endpoint, with some transitional split ownership such as runtime metric names.</td></tr>
           </tbody>
         </table>
       </section>
@@ -672,9 +672,9 @@
           </thead>
           <tbody>
             <tr>
-              <td>Repo coordination</td>
-              <td><code>Tool_coord</code>, <code>Tool_task</code>, <code>Coord</code></td>
-              <td><code>Task_dispatch</code>, <code>coord_task_*</code></td>
+              <td>Repo workspace collaboration</td>
+              <td><code>Tool_workspace</code>, <code>Tool_task</code>, <code>Workspace</code></td>
+              <td><code>Task_dispatch</code>, <code>workspace_task_*</code></td>
               <td><code>Masc_domain.task_status</code>, file locks</td>
               <td>start/status -> claim -> current_task -> heartbeat -> transition -> verification/done</td>
             </tr>
@@ -683,14 +683,14 @@
               <td><code>Keeper_heartbeat_loop</code>, <code>Keeper_unified_turn</code>, <code>Keeper_registry</code></td>
               <td><code>Keeper_post_turn</code>, <code>Keeper_turn_driver</code>, <code>Keeper_execution_receipt</code></td>
               <td><code>Keeper_turn_fsm</code>, <code>Keeper_state_machine</code>, TLA specs</td>
-              <td>heartbeat -> event triage -> phase/cascade gate -> OAS run -> receipt -> registry/task update</td>
+              <td>heartbeat -> event triage -> phase/runtime gate -> OAS run -> receipt -> registry/task update</td>
             </tr>
             <tr>
-              <td>Cascade execution</td>
-              <td><code>Cascade_runner</code>, <code>Keeper_turn_driver</code></td>
-              <td><code>Cascade_runtime</code>, <code>Cascade_oas_runner</code>, <code>Cascade_fsm</code></td>
+              <td>Runtime execution</td>
+              <td><code>Runtime_runner</code>, <code>Keeper_turn_driver</code></td>
+              <td><code>Runtime_runtime</code>, <code>Runtime_oas_runner</code>, <code>Runtime_fsm</code></td>
               <td>OAS compat, provider registry, runtime MCP policy</td>
-              <td>cascade name -> provider configs -> tool lane filter -> Agent.run -> redacted MASC projection</td>
+              <td>runtime name -> provider configs -> tool lane filter -> Agent.run -> redacted MASC projection</td>
             </tr>
             <tr>
               <td>Dashboard/operator</td>
@@ -701,17 +701,17 @@
             </tr>
             <tr>
               <td>Goal tree</td>
-              <td><code>Goal_store</code>, <code>Coord_goals</code></td>
+              <td><code>Goal_store</code>, <code>Workspace_goals</code></td>
               <td><code>Goal_phase</code>, <code>Goal_verification</code></td>
               <td>task coverage, verification policy, JSON state version</td>
               <td>upsert -> transition -> await verification/approval -> quorum -> completed/rejected</td>
             </tr>
             <tr>
-              <td>Credential / sandbox</td>
-              <td><code>Keeper_sandbox_runtime</code>, <code>Credential_materializer</code></td>
-              <td>repo mapping, host config provider, docker read/execution</td>
-              <td>Auth tokens, <code>GH_CONFIG_DIR</code>, mount specs</td>
-              <td>credential record -> materialize on disk -> Docker-safe mount -> keeper git/gh action</td>
+              <td>Repo sandbox</td>
+              <td><code>Keeper_sandbox_runtime</code>, <code>Playground_repo_readiness</code></td>
+              <td>repo mapping, sandbox read/execution</td>
+              <td>Auth tokens, repository config</td>
+              <td>repository mapping -> optional clone -> ordinary sandbox execution</td>
             </tr>
           </tbody>
         </table>
@@ -778,8 +778,8 @@
             </tr>
             <tr>
               <td>Metrics SSOT is transitional.</td>
-              <td><code>Cascade_metrics</code> owns cascade names while <code>Prometheus.ml</code> still mirrors registration for <code>/metrics</code>.</td>
-              <td>Move metric definitions to domain modules and keep Prometheus as registry/exporter only.</td>
+              <td><code>Runtime_metrics</code> owns runtime names while the OTel exporter mirrors registration for backend delivery.</td>
+              <td>Move metric definitions to domain modules and keep the exporter as registry/exporter only.</td>
               <td><span class="heat med">Medium</span></td>
             </tr>
           </tbody>
@@ -821,7 +821,7 @@
               <td>boot smoke + health/startup route tests</td>
             </tr>
             <tr>
-              <td><code>tool_task.ml</code> / <code>coord_task.ml</code></td>
+              <td><code>tool_task.ml</code> / <code>workspace_task.ml</code></td>
               <td>1,496 / 1,214</td>
               <td>tool parsing, lifecycle status, verification, anti-rationalization, SSE</td>
               <td>typed lifecycle reducer before tool handler refactor</td>
@@ -839,21 +839,21 @@
               <td>1,651 / server auth facade</td>
               <td>credentials, aliases, token hashes, internal keeper token, role/tool permission, dashboard actor</td>
               <td>request identity reducer + credential store adapter</td>
-              <td>auth doctor tests + dashboard auth route tests + keeper internal token tests</td>
+              <td>auth diagnostics tests + dashboard auth route tests + keeper internal token tests</td>
             </tr>
             <tr>
-              <td><code>coord_goals.ml</code> / <code>goal_store.ml</code></td>
+              <td><code>workspace_goals.ml</code> / <code>goal_store.ml</code></td>
               <td>1,095 / goal store typed state</td>
               <td>parsing, lifecycle, task coverage, verification quorum, approval</td>
               <td>pure goal transition reducer + store I/O adapter</td>
               <td>goal tools tests + dashboard planning projection</td>
             </tr>
             <tr>
-              <td><code>prometheus.ml</code> + metric modules</td>
+              <td><code>legacy metrics backend module</code> + metric modules</td>
               <td>large registry</td>
               <td>metric declaration, registration, exporter, domain labels</td>
-              <td>domain-owned metric descriptors, exporter-only Prometheus registry</td>
-              <td>metrics endpoint snapshot + cascade metric tests</td>
+              <td>domain-owned metric descriptors, exporter-only legacy metrics backend registry</td>
+              <td>metrics endpoint snapshot + runtime metric tests</td>
             </tr>
           </tbody>
         </table>
@@ -930,7 +930,7 @@
               </li>
               <li>
                 <strong>Tool authorization and join guards run before dispatch</strong>
-                <span><code>Auth.authorize_tool_v2</code>, room initialization, and join requirements can short-circuit into structured tool errors.</span>
+                <span><code>Auth.authorize_tool_v2</code>, workspace initialization, and join requirements can short-circuit into structured tool errors.</span>
                 <code>lib/mcp_server_eio_execute.ml:482-520, :760-799</code>
               </li>
               <li>
@@ -946,7 +946,7 @@
               </div>
               <div>
                 <h4>보존해야 할 동작</h4>
-                <p>HTTP bearer owner가 <code>_agent_name</code>을 덮어쓰는 순서, internal keeper runtime surface, join-required error copy, chunked JSON fallback.</p>
+                <p>HTTP bearer owner가 <code>_agent_name</code>을 덮어쓰는 순서, internal keeper runtime surface, bind-required error copy, chunked JSON fallback.</p>
               </div>
               <div>
                 <h4>검증</h4>
@@ -956,7 +956,7 @@
           </article>
 
           <article class="logic-card">
-            <h3><span class="tag big">Keeper</span>Heartbeat / Unified Turn / Cascade</h3>
+            <h3><span class="tag big">Keeper</span>Heartbeat / Unified Turn / Runtime</h3>
             <ol class="logic-steps">
               <li>
                 <strong>Keepalive launch passes spawn admission before fork</strong>
@@ -994,8 +994,8 @@
                 <code>lib/keeper/keeper_heartbeat_loop.ml:1813-1831</code>
               </li>
               <li>
-                <strong>Semaphore slot wrapper calls unified turn</strong>
-                <span><code>run_keeper_cycle_with_slot</code> wraps liveness pulses and delegates to <code>Keeper_unified_turn.run_keeper_cycle</code>.</span>
+                <strong>Holder diagnostics call unified turn</strong>
+                <span><code>run_keeper_cycle</code> wraps liveness pulses and delegates to <code>Keeper_unified_turn.run_keeper_cycle</code>.</span>
                 <code>lib/keeper/keeper_heartbeat_loop.ml:582-607</code>
               </li>
               <li>
@@ -1015,18 +1015,18 @@
               </li>
               <li>
                 <strong>Timed provider run starts with OTel and registry attempt markers</strong>
-                <span>Turn timeout, retry timing, max idle turns, required tool mode, and provider-attempt state are prepared before OAS call.</span>
+                <span>Turn timeout, retry timing, max idle turns, tool surface mode, and provider-attempt state are prepared before OAS call.</span>
                 <code>lib/keeper/keeper_unified_turn.ml:893-970</code>
               </li>
               <li>
-                <strong>Cascade runtime resolves providers and runtime MCP policy</strong>
+                <strong>Runtime runtime resolves providers and runtime MCP policy</strong>
                 <span>Keeper-internal tools force materialized runtime tool support; provider configs are filtered before attempts.</span>
-                <code>lib/keeper/keeper_turn_driver.ml:153-246, lib/cascade/cascade_oas_runner.ml:65-117, :384-430</code>
+                <code>lib/keeper/keeper_turn_driver.ml:153-246, lib/runtime/runtime_oas_runner.ml:65-117, :384-430</code>
               </li>
               <li>
                 <strong>OAS Agent.run is the concrete execution boundary</strong>
                 <span>MASC builds or resumes an OAS agent, then runs streaming or non-streaming Agent.run and captures proof when a contract exists.</span>
-                <code>lib/cascade/cascade_runner.ml:494-540</code>
+                <code>lib/runtime/runtime_runner.ml:494-540</code>
               </li>
               <li>
                 <strong>Receipt is authoritative turn evidence</strong>
@@ -1034,7 +1034,7 @@
                 <code>lib/keeper/keeper_agent_run.ml:1867-2087, :2149-2189</code>
               </li>
               <li>
-                <strong>Cascade loop is guarded by admission queue permit</strong>
+                <strong>Runtime loop is guarded by admission queue permit</strong>
                 <span>Provider cycles, filtered-empty retries, and exhausted fallbacks all run inside host-resource admission control.</span>
                 <code>lib/keeper/keeper_turn_driver.ml:1360-1398</code>
               </li>
@@ -1055,17 +1055,17 @@
               </div>
               <div>
                 <h4>검증</h4>
-                <p><code>test_keeper_unified.ml</code>, keeper FSM correspondence tests, event queue tests, receipt authoritative tests, <code>KeeperTaskAcquisition.tla</code>, cascade runtime MCP tests.</p>
+                <p><code>test_keeper_unified.ml</code>, keeper FSM correspondence tests, event queue tests, receipt authoritative tests, <code>KeeperTaskAcquisition.tla</code>, runtime runtime MCP tests.</p>
               </div>
             </div>
           </article>
 
           <article class="logic-card">
-            <h3><span class="tag mid">Coord</span>Task / Goal / Verification</h3>
+            <h3><span class="tag mid">Workspace</span>Task / Goal / Verification</h3>
             <ol class="logic-steps">
               <li>
                 <strong>Tool layer parses transition intent and gates verifier agents</strong>
-                <span><code>tool_task</code> validates action, notes, completion contract, evaluator cascade, handoff context, expected version, and force.</span>
+                <span><code>tool_task</code> validates action, notes, completion contract, evaluator runtime, handoff context, expected version, and force.</span>
                 <code>lib/tool_task.ml:1020-1057</code>
               </li>
               <li>
@@ -1074,29 +1074,29 @@
                 <code>lib/tool_task.ml:1085-1145</code>
               </li>
               <li>
-                <strong>Claim validates initialization, identity, join, and required tools</strong>
-                <span><code>claim_task_r</code> locks backlog, validates joined agent, checks do-not-reclaim, ownership conflicts, and required-tool guards.</span>
-                <code>lib/coord/coord_task_claim.ml:234-315</code>
+                <strong>Claim validates initialization, identity, join, and ownership</strong>
+                <span><code>claim_task_r</code> locks backlog, validates bound agent, checks do-not-reclaim, and rejects ownership conflicts.</span>
+                <code>lib/workspace/workspace_task_claim.ml:234-315</code>
               </li>
               <li>
                 <strong>Claim-next preserves active owned work</strong>
                 <span>Existing Claimed/InProgress work is returned instead of implicitly released, preventing hot-potato keeper loops.</span>
-                <code>lib/coord/coord_task_schedule.ml:473-535</code>
+                <code>lib/workspace/workspace_task_schedule.ml:473-535</code>
               </li>
               <li>
                 <strong>Transition reducer owns status/action legality</strong>
-                <span><code>transition_task_r</code> locks backlog, validates expected version, finds the task, and calls <code>Coord_task_lifecycle.decide</code>.</span>
-                <code>lib/coord/coord_task.ml:49-115, :157-193</code>
+                <span><code>transition_task_r</code> locks backlog, validates expected version, finds the task, and calls <code>Workspace_task_lifecycle.decide</code>.</span>
+                <code>lib/workspace/workspace_task.ml:49-115, :157-193</code>
               </li>
               <li>
                 <strong>Verification side effects are prepared around backlog mutation</strong>
                 <span>Submit callbacks create verification requests before status mutation; verdict callbacks persist pass/fail before approval or rejection mutates task state.</span>
-                <code>lib/tool_task.ml:1206-1246, lib/coord/coord_task.ml:279-411</code>
+                <code>lib/tool_task.ml:1206-1246, lib/workspace/workspace_task.ml:279-411</code>
               </li>
               <li>
                 <strong>Invalid transitions return remediation, not just failure</strong>
                 <span>Ownership mismatch and state/action combinations produce targeted recovery hints for keepers.</span>
-                <code>lib/coord/coord_task.ml:193-245</code>
+                <code>lib/workspace/workspace_task.ml:193-245</code>
               </li>
               <li>
                 <strong>Goal state is JSON-backed and lock-updated</strong>
@@ -1106,12 +1106,12 @@
               <li>
                 <strong>Goal transition validates actor, readiness, policy, and phase</strong>
                 <span>Request-complete checks readiness, computes effective verifier policy, then calls <code>Goal_phase.decide_transition</code>.</span>
-                <code>lib/coord_goals.ml:573-623</code>
+                <code>lib/workspace_goals.ml:573-623</code>
               </li>
               <li>
                 <strong>Verification open writes request then moves phase</strong>
                 <span>Request creator is excluded from policy snapshot, goal phase becomes AwaitingVerification, and goal events are emitted.</span>
-                <code>lib/coord_goals.ml:623-710</code>
+                <code>lib/workspace_goals.ml:623-710</code>
               </li>
               <li>
                 <strong>Goal votes are locked, eligibility-checked, and quorum-evaluated</strong>
@@ -1160,7 +1160,7 @@
               </li>
               <li>
                 <strong>Dashboard warms bootstrap routes and synthesizes initializing envelopes</strong>
-                <span>Shell, project snapshot, namespace truth, room truth, execution, planning, and mission are warm-path API reads.</span>
+                <span>Shell, project snapshot, namespace truth, workspace truth, execution, planning, and mission are warm-path API reads.</span>
                 <code>dashboard/src/api/core.ts:272-415</code>
               </li>
               <li>
@@ -1344,11 +1344,11 @@
               <td>Keeper turn</td>
               <td><code>keeper_heartbeat_loop.ml</code>, <code>keeper_unified_turn.ml</code>, <code>keeper_turn_driver.ml</code></td>
               <td>Turn pipeline modules with typed step records</td>
-              <td>spawn admission, event queue payload, manifest rows, event ordering, cascade admission, receipt authority, post-turn lifecycle, task acquisition guard</td>
+              <td>spawn admission, event queue payload, manifest rows, event ordering, runtime admission, receipt authority, post-turn lifecycle, task acquisition guard</td>
             </tr>
             <tr>
               <td>Task/goal lifecycle</td>
-              <td><code>tool_task.ml</code>, <code>coord_task*.ml</code>, <code>coord_goals.ml</code>, <code>goal_verification.ml</code></td>
+              <td><code>tool_task.ml</code>, <code>workspace_task*.ml</code>, <code>workspace_goals.ml</code>, <code>goal_verification.ml</code></td>
               <td>domain reducers plus persistence adapters</td>
               <td>version lock, ownership, verification redirect, verification orphan recovery, quorum and approval semantics, manual reject vs quorum fail semantics</td>
             </tr>
@@ -1385,7 +1385,7 @@
               <td><code>task-387</code> first snapshot</td>
               <td>Six WBS lanes from #16077 and explicit file manifest</td>
               <td><a href="generated/reverse-engineering/symbol-graph.v1.json"><code>docs/generated/reverse-engineering/symbol-graph.v1.json</code></a></td>
-              <td>Every WBS slice names at least one guard test or an omission row. Current snapshot is a static seed; live LSP invocation is recorded as an omission. Snapshot ranges are bound to the JSON <code>base_commit</code>, not live current-main coordinates.</td>
+              <td>Every WBS slice names at least one guard test or an omission row. Current snapshot is a static seed; live LSP invocation is recorded as an omission. Snapshot ranges are bound to the JSON <code>base_commit</code>, not live current-main orchestrates.</td>
             </tr>
             <tr>
               <td><code>task-411</code> landing gate</td>
@@ -1407,7 +1407,7 @@
 
         <div class="callout">
           <strong>Root:</strong>
-          GitHub <a href="https://github.com/jeong-sik/masc-mcp/issues/16077">#16077</a>,
+          GitHub <a href="https://github.com/jeong-sik/masc/issues/16077">#16077</a>,
           MASC Goal <code>goal-refactor-wbs-20260518</code>,
           documentation tasks <code>task-362</code>..<code>task-363</code>.
         </div>
@@ -1417,37 +1417,37 @@
           <tbody>
             <tr>
               <td>MCP request admission을 transport-neutral reducer로 만든다.</td>
-              <td><code>goal-refactor-mcp-context-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16080">GitHub #16080</a></td>
+              <td><code>goal-refactor-mcp-context-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16080">GitHub #16080</a></td>
               <td><code>task-364</code> H1/H2 parity<br><code>task-365</code> request context<br><code>task-366</code> actor/token reducer<br><code>task-367</code> caller identity FSM</td>
               <td>initialize, unknown session, protocol mismatch, bad Accept, DELETE, streaming branch를 먼저 고정한 뒤 reducer를 추출한다.</td>
             </tr>
             <tr>
               <td>Keeper turn을 typed pipeline으로 나누되 liveness와 receipt authority를 보존한다.</td>
-              <td><code>goal-refactor-keeper-turn-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16079">GitHub #16079</a></td>
+              <td><code>goal-refactor-keeper-turn-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16079">GitHub #16079</a></td>
               <td><code>task-368</code> spawn no-fork<br><code>task-369</code> event queue payload<br><code>task-370</code> receipt fixtures<br><code>task-371</code> heartbeat seam<br><code>task-372</code> TurnPlan records</td>
               <td>spawn admission, wake hint vs payload, receipt append order, event intake, ProviderAttempt/PostTurn record를 독립 PR로 자른다.</td>
             </tr>
             <tr>
               <td>Task/Goal lifecycle을 pure reducer + persistence adapter로 정렬한다.</td>
-              <td><code>goal-refactor-task-goal-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16078">GitHub #16078</a></td>
+              <td><code>goal-refactor-task-goal-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16078">GitHub #16078</a></td>
               <td><code>task-373</code> Done-to-verification<br><code>task-374</code> orphan recovery<br><code>task-375</code> task executor<br><code>task-376</code> goal reject semantics</td>
               <td>Done redirect와 verification callback ordering을 먼저 증명하고, manual reject vs quorum fail 의미를 이름 붙인 뒤 reducer를 분리한다.</td>
             </tr>
             <tr>
               <td>Dashboard runtime truth를 read-model modules로 분리하고 transport parity를 고정한다.</td>
-              <td><code>goal-refactor-dashboard-readmodel-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16081">GitHub #16081</a></td>
+              <td><code>goal-refactor-dashboard-readmodel-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16081">GitHub #16081</a></td>
               <td><code>task-377</code> auth material parity<br><code>task-378</code> shell fetch SSOT<br><code>task-379</code> WS/SSE slice parity<br><code>task-380</code> DashboardSurface</td>
               <td>HTTP/SSE/WS token material, shell fetch duplication, backend slice와 frontend hydrator mapping을 고정한 뒤 기존 root JSON field를 보존하는 additive <code>dashboard_surface_envelope</code>부터 도입한다.</td>
             </tr>
             <tr>
               <td>JSONL writer contract를 하나로 수렴하되 파일 경로와 row schema는 보존한다.</td>
-              <td><code>goal-refactor-jsonl-substrate-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16082">GitHub #16082</a></td>
+              <td><code>goal-refactor-jsonl-substrate-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16082">GitHub #16082</a></td>
               <td><code>task-381</code> store inventory<br><code>task-382</code> writer fixtures<br><code>task-383</code> shared adapter<br><code>task-384</code> audit/read fixtures</td>
-              <td>audit, telemetry, board, cascade, receipts, goal events, trajectory store를 인벤토리화하고 per-path append contract를 테스트로 잠근다.</td>
+              <td>audit, telemetry, board, runtime, receipts, goal events, trajectory store를 인벤토리화하고 per-path append contract를 테스트로 잠근다.</td>
             </tr>
             <tr>
               <td>LSP 기반 역공학 lane을 만들어 다음 설계도 갱신을 자동화한다.</td>
-              <td><code>goal-refactor-lsp-atlas-20260518</code><br><a href="https://github.com/jeong-sik/masc-mcp/issues/16083">GitHub #16083</a></td>
+              <td><code>goal-refactor-lsp-atlas-20260518</code><br><a href="https://github.com/jeong-sik/masc/issues/16083">GitHub #16083</a></td>
               <td><code>task-385</code> LSP handshake<br><code>task-386</code> symbol graph design<br><code>task-387</code> first graph snapshot</td>
               <td>기존 <code>/api/v1/ide/lsp</code> 위에 read-only exporter contract를 두고 file/symbol/range/reference/test-owner JSON을 만든다. 설계 SSOT: <a href="design/lsp-symbol-graph-exporter.md">LSP Symbol Graph Exporter</a>.</td>
             </tr>
@@ -1581,7 +1581,7 @@
             <tr>
               <td><code>task-381</code></td>
               <td>JSONL store shapes와 path contract를 inventory한다.</td>
-              <td>audit, telemetry, board, cascade, receipt, goal, trajectory paths와 row schema를 표로 만든다.</td>
+              <td>audit, telemetry, board, runtime, receipt, goal, trajectory paths와 row schema를 표로 만든다.</td>
               <td>inventory table and path existence check.</td>
             </tr>
             <tr>

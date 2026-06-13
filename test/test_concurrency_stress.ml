@@ -10,7 +10,7 @@
 
 open Alcotest
 
-module Session = Masc_mcp.Session
+module Session = Masc.Session
 module Types = Masc_domain
 module Env_config = Env_config
 
@@ -107,9 +107,9 @@ let test_zombie_detection_concurrent () =
   (* Concurrent zombie/fresh checks *)
   let checker () =
     for _ = 1 to 100 do
-      if Coord_resilience.Zombie.is_zombie stale_time then
+      if Workspace_resilience.Zombie.is_zombie stale_time then
         Atomic.incr zombie_checks;
-      if not (Coord_resilience.Zombie.is_zombie fresh_time) then
+      if not (Workspace_resilience.Zombie.is_zombie fresh_time) then
         Atomic.incr fresh_checks
     done
   in

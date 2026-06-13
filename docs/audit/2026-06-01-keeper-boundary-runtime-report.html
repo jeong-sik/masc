@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Boundary Runtime Audit - Sandbox, Tool Surface, Model Runtime</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17212b;
+      --muted: #5d6a75;
+      --line: #d9e0e7;
+      --soft: #f5f7f9;
+      --panel: #ffffff;
+      --bad: #b42318;
+      --warn: #a15c00;
+      --ok: #087443;
+      --info: #2459a6;
+      --code: #26313d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      color: var(--ink);
+      background: #eef2f5;
+    }
+    .page-header {
+      padding: 36px 40px 28px;
+      background: #14202b;
+      color: #fff;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 30px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+    .page-header p {
+      max-width: 1120px;
+      margin: 0;
+      color: #d8e2ec;
+      font-size: 15px;
+    }
+    .page-main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 28px 24px 56px;
+    }
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      margin: 0 0 18px;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 21px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 20px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+    p { margin: 8px 0; }
+    ul, ol { margin: 8px 0 8px 22px; padding: 0; }
+    li { margin: 5px 0; }
+    code {
+      color: var(--code);
+      background: #eef3f7;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.95em;
+    }
+    pre {
+      overflow-x: auto;
+      background: #101820;
+      color: #e6edf3;
+      border-radius: 8px;
+      padding: 14px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: var(--soft); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfd;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid currentColor;
+      white-space: nowrap;
+    }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .ok { color: var(--ok); }
+    .info { color: var(--info); }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; color: var(--muted); }
+    .finding {
+      border-left: 4px solid var(--warn);
+      padding: 10px 12px;
+      background: #fffaf2;
+      margin: 12px 0;
+    }
+    .finding.critical {
+      border-left-color: var(--bad);
+      background: #fff5f3;
+    }
+    .finding.good {
+      border-left-color: var(--ok);
+      background: #f2fbf7;
+    }
+    @media (max-width: 900px) {
+      .page-header { padding: 28px 22px 22px; }
+      .page-main { padding: 18px 12px 36px; }
+      .grid { grid-template-columns: 1fr; }
+      .section { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <h1>Keeper Boundary Runtime Audit</h1>
+    <p>Sandbox 설정, Tool Surface 가시성, Model-Provider Runtime 관측성을 코드 경로와 live evidence로 대조한 보고서 및 실행 계획서.</p>
+  </div>
+
+  <div class="page-main">
+    <div class="section">
+      <h2>Executive Verdict</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Sandbox</h3>
+          <p><span class="badge bad">NOT GREEN</span></p>
+          <p>코드는 TOML 기반 sandbox overlay를 갖고 있고 docker route 테스트도 있다. 그러나 live surface는 아직 서로 다르다. `analyst.toml`은 docker인데 `masc_keeper_sandbox_status`는 local로 보이고, 직전 execution receipt는 docker로 기록됐다.</p>
+        </div>
+        <div class="card">
+          <h3>Tool Surface</h3>
+          <p><span class="badge warn">PARTIAL</span></p>
+          <p>Keeper는 도구를 실제로 보고 실행한다. Echo/Analyst 모두 allowed tools 39개, 최근 receipt는 `satisfied_execution`이다. Historical coverage gap이 현재 health를 계속 붙잡는 판정 버그는 active-gap 기준으로 패치됐다. live runtime 반영 후 `tool_call_io`, `trajectory_tool_call`, `execution_receipt`는 최신 성공 row가 과거 gap보다 새로우면 `ok`로 회복되어야 한다.</p>
+        </div>
+        <div class="card">
+          <h3>Model Runtime</h3>
+          <p><span class="badge bad">NOT VERIFIED</span></p>
+          <p>Keeper status는 `runtime_id=ollama_cloud.deepseek-v4-pro`를 들고 있지만 `selected_model=null`, `attempt_count=0`, `runtime_outcome=not_observed`다. MASC가 실제 provider/model 실행을 검증했다고 말할 수 없다.</p>
+        </div>
+      </div>
+      <p><strong>최종 판정:</strong> 운영은 재기동과 일부 self-repair가 계속 일어나는 중이지만, 현재 상태는 “잘 되고 있음”이 아니라 “불안정하게 살아 있고 증거 surface가 갈라져 있음”이다.</p>
+      <p class="small">Generated: 2026-06-01 16:56 KST. Source worktree: `6c0950fd09`. Live runtime/root: `24cde720f7` and still behind `origin/main` by 1 at last root checkout probe.</p>
+    </div>
+
+    <div class="section">
+      <h2>Evidence Snapshot</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Surface</th>
+            <th>Observed result</th>
+            <th>Interpretation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>`/health?full=1`</td>
+            <td>`keeper_fibers=0`, fleet `blocked`, blocker `no_executable_keeper_fibers`, config schema `ok`, parse errors `0`.</td>
+            <td>Config parse 자체는 복구됐지만, 마지막 probe 시점에는 keepalive fleet가 다시 뜨지 못했다.</td>
+          </tr>
+          <tr>
+            <td>Runtime/source commits</td>
+            <td>Report source worktree `6c0950fd09`; live root checkout `24cde720f7`; runtime build reports commit from repo head, binary commit is not proven.</td>
+            <td>현재성 검증이 실패하는 핵심 원인. 같은 코드 기준에서 판단하고 있지 않다.</td>
+          </tr>
+          <tr>
+            <td>`masc_keeper_sandbox_status(include_preflight=true)`</td>
+            <td>15 keepers all `sandbox_profile=local`, `effective_mode=local`, no Docker preflight.</td>
+            <td>Sandbox status surface 기준으로는 Keeper가 docker를 모른다.</td>
+          </tr>
+          <tr>
+            <td>`masc_keeper_status analyst`</td>
+            <td>Top-level sandbox says local, but latest decision/runtime_contract says docker; tool route evidence includes `via=docker` for Grep/Read/Execute.</td>
+            <td>Receipt/runtime lens와 sandbox status lens가 같은 truth를 말하지 않는다.</td>
+          </tr>
+          <tr>
+            <td>`masc_keeper_status echo`</td>
+            <td>allowed tools 39, latest receipt `satisfied_execution`, 30 tools used, sandbox local, model observability unverified.</td>
+            <td>Tool execution works, but model/runtime observation remains absent.</td>
+          </tr>
+          <tr>
+            <td>`/api/v1/dashboard/telemetry/summary`</td>
+            <td>Before this slice, `tool_call_io`, `trajectory_tool_call`, `tool_usage`, `execution_receipt` showed coverage gaps even when newer successful rows existed; `oas_event` was ok.</td>
+            <td>Dashboard summary now separates historical `coverage_gap_count` from `active_coverage_gap_count`; only active gaps can force source health to `coverage_gap`.</td>
+          </tr>
+          <tr>
+            <td>`masc_keeper_persona_audit(include_ok=false)`</td>
+            <td>Total 16, ok 0, with issues 16. Main issues: stale active goals 15, keepalive not running 3, registry missing 2, paused 1.</td>
+            <td>Fleet-level done criteria is not met even after config parse recovery.</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>[근거]</h3>
+      <ul>
+        <li>Command: `curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq ...`; checked 2026-06-01 16:56 KST; confidence High for live health, Medium for binary identity because health itself says binary commit is unproven.</li>
+        <li>Command: `masc_keeper_sandbox_status(include_preflight=true)`; checked 2026-06-01 16:54 KST; confidence High for that surface, Medium overall because other surfaces disagree.</li>
+        <li>Command: `masc_keeper_status echo/analyst`; checked 2026-06-01 16:54 KST; confidence High for receipt/status payload, Medium overall because runtime restarted during audit.</li>
+        <li>Command: `git fetch origin main`, `git merge --ff-only origin/main`, `git rev-parse --short=10 HEAD`; checked 2026-06-01 16:50 KST; confidence High for report worktree source.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Code-Level Trace</h2>
+
+      <h3>1. Sandbox Authority Path</h3>
+      <p>The intended path is:</p>
+      <pre>TOML keeper profile
+  -> Keeper_types_profile_toml_parser
+  -> Keeper_runtime.ensure_keeper_meta overlay
+  -> Keeper_registry/meta
+  -> Keeper_sandbox_control + agent tool backends
+  -> execution receipt + dashboard/status</pre>
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Role</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>`lib/keeper/keeper_types_profile_toml_parser.ml:123-133`</td>
+            <td>Rejects removed `keeper.model`; requires `keeper.runtime_id`.</td>
+            <td>Config migration is sharp. During audit this blocker appeared, then config was repaired to `runtime_id`.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_meta_contract.ml` and `lib/keeper/keeper_meta_json_parse.ml:166-172`</td>
+            <td>Persisted meta JSON must include `tool_access` as a canonical string array.</td>
+            <td>Meta files without `tool_access` hard-fail. Tests now cover defaults for fixtures, but production decode still rejects missing field.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_runtime.ml:140-152`, `580-604`</td>
+            <td>Runtime reconcile should use the same declarative runtime source and update registry meta.</td>
+            <td>If status reads stale registry meta, TOML docker can still appear as live local.</td>
+          </tr>
+          <tr>
+            <td>`test/test_keeper_sandbox_docker_route.ml:191-207`, `2290-2318`</td>
+            <td>Tests now prove fixture defaults and docker routing for Execute/Grep/Read paths.</td>
+            <td>Good coverage exists, but it does not prove the live status surfaces are converged.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="finding critical">
+        <strong>Finding S1:</strong> Sandbox truth is split. `analyst.toml` declares docker, the latest receipt records docker, but `masc_keeper_sandbox_status` and top-level `masc_keeper_status` report local. This is the exact “Keeper does not know Sandbox” failure mode.
+      </div>
+
+      <h3>2. Tool Execution Path</h3>
+      <p>The current audit path is the tool call log plus hook/runtime events. The old dashboard projection that rebuilt allowed/requested/materialized tool summaries was removed.</p>
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Role</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>`lib/keeper/keeper_tool_policy.ml:385-399`</td>
+            <td>Computes allowed tool names from keeper meta and policy.</td>
+            <td>Depends on meta/tool_access being readable and current.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_run_tools_setup.ml:698-887`</td>
+            <td>Builds allowed tools, advisory tool affordances, missing tools, lane, surface class.</td>
+            <td>Good core logic, but last-turn filtering and fallback make exact visible/materialized counts easy to misread.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_run_tools_hooks.ml:636-652`, `684-730`</td>
+            <td>Threads sandbox/profile context into tool-call context.</td>
+            <td>Dashboard evidence comes from receipts and actual tool-call logs.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_execution_receipt.ml:524-570`</td>
+            <td>Stores tool contract, tool surface, sandbox summary, runtime summary in receipt.</td>
+            <td>Receipt is the strongest proof surface, but dashboard summaries may redact or stale-read it.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/agent_tool_descriptor.ml` and `test/test_agent_tool_descriptor_registry_integrity.ml`</td>
+            <td>Descriptor spine now records executor/backend/sandbox/runtime handler labels.</td>
+            <td>This is useful evidence; keep it as the canonical route proof.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="finding good">
+        <strong>Finding T1:</strong> Tools are not simply missing. Echo and Analyst can see and execute tools; recent receipts show `satisfied_execution` and descriptor route evidence.
+      </div>
+      <div class="finding warn">
+        <strong>Finding T2:</strong> Tool observability had stale red health. `tool_usage_append_failed`, `tool_call_io_append_failed`, `trajectory_append_failed`, and `execution_receipt_append_failed` remain retained as historical evidence, but dashboard health now treats them as active only until a newer durable source row proves recovery.
+      </div>
+
+      <h3>3. Model-Provider Runtime Path</h3>
+      <p>The intended path is:</p>
+      <pre>keeper.runtime_id in TOML
+  -> Keeper_meta_contract.runtime_id_of_meta
+  -> Keeper_agent_run
+  -> Keeper_turn_driver.run_named
+  -> Runtime.get_runtime_by_id + provider config
+  -> Agent/OAS response observation
+  -> receipt runtime.selected_model + model metrics</pre>
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Role</th><th>Risk</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>`lib/keeper/keeper_meta_contract.ml:612-630`</td>
+            <td>Per-keeper runtime id resolves from profile defaults, then global default.</td>
+            <td>Correct direction: no silent default substitution.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_turn_driver.ml:99-132`</td>
+            <td>Trims requested runtime id, fails fast if missing, builds runtime candidate.</td>
+            <td>Good control-plane behavior; does not by itself prove provider/model execution.</td>
+          </tr>
+          <tr>
+            <td>`lib/keeper/keeper_agent_run_receipt.ml:146-205`</td>
+            <td>Receipt `runtime_selected_model` comes from runtime observation.</td>
+            <td>If observation is absent, receipt reports `selected_model=null` and attempts 0.</td>
+          </tr>
+          <tr>
+            <td>`lib/dashboard_provider_runs.ml:361-377`, `lib/model_inference_metrics_json.ml:140-147`</td>
+            <td>Public dashboard redacts provider/model into runtime lanes and may report model_count 0.</td>
+            <td>Good privacy boundary, but weak operator proof unless paired with a verified/raw internal evidence link.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="finding critical">
+        <strong>Finding R1:</strong> Keeper does not currently know the actual provider/model runtime. Status shows `selected_model=null`, `attempt_count=0`, `runtime_outcome=not_observed`, and “Provider/model identity is owned by OAS.”
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Failure Matrix</h2>
+      <table>
+        <thead>
+          <tr><th>ID</th><th>Severity</th><th>Issue</th><th>Immediate next check</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>F0</td>
+            <td><span class="badge bad">P0</span></td>
+            <td>Runtime/source drift and restarts: report worktree, root checkout, and running process are not on a single stable commit.</td>
+            <td>`git -C root status`, `/health?full=1`, restart only after root matches `origin/main`.</td>
+          </tr>
+          <tr>
+            <td>F1</td>
+            <td><span class="badge bad">P0</span></td>
+            <td>Fleet currently blocked or flapping. Last health: no executable keeper fibers.</td>
+            <td>Wait for startup once; if still 0 fibers, inspect keeper supervisor/fiber startup logs.</td>
+          </tr>
+          <tr>
+            <td>F2</td>
+            <td><span class="badge bad">P0</span></td>
+            <td>Sandbox truth split: sandbox status says local, receipt says docker for Analyst.</td>
+            <td>Compare `masc_keeper_sandbox_status analyst` with `masc_keeper_status analyst.runtime_trust.latest_decision.runtime_contract`.</td>
+          </tr>
+          <tr>
+            <td>F3</td>
+            <td><span class="badge warn">P1</span></td>
+            <td>Tool execution works but durable telemetry appenders are unhealthy.</td>
+            <td>Tail `Telemetry_coverage_gap` by source and repair the first live append exception.</td>
+          </tr>
+          <tr>
+            <td>F4</td>
+            <td><span class="badge bad">P0</span></td>
+            <td>Model/provider runtime identity is unverified at Keeper boundary.</td>
+            <td>Force one small runtime turn and require receipt with non-null provider/model observation or an explicit provider blocker.</td>
+          </tr>
+          <tr>
+            <td>F5</td>
+            <td><span class="badge warn">P1</span></td>
+            <td>Persona audit has 0/16 ok: stale goals, registry missing, paused keeper, keepalive gaps.</td>
+            <td>Clear stale goal IDs and registry mismatch after F0/F1 stabilize.</td>
+          </tr>
+          <tr>
+            <td>F6</td>
+            <td><span class="badge warn">P2</span></td>
+            <td>Docs still mention stale runtime capacity routes while current dashboard routes moved.</td>
+            <td>Update `docs/DASHBOARD-INTEGRATION.md` and route references after live route sweep.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+	    <div class="section">
+	      <h2>Execution Plan</h2>
+	      <ol>
+        <li><strong>Stabilize commit truth.</strong> Bring root checkout to current `origin/main`, rebuild/restart once, and require `/health?full=1` to report the same commit as `git rev-parse origin/main`. Do not evaluate Keeper behavior while runtime is warming or flapping.</li>
+        <li><strong>Repair fleet boot first.</strong> After restart, wait one startup window. If `keeper_fibers=0`, inspect supervisor startup logs and meta decode errors. Acceptance: `keeper_fleet_safety.status` is `ok` or a bounded degraded state with named keepers, not `no_executable_keeper_fibers`.</li>
+        <li><strong>Converge sandbox truth.</strong> Make `masc_keeper_sandbox_status`, `masc_keeper_status.policy`, `runtime_trust.runtime_contract`, and receipt sandbox summary read the same overlay source. Acceptance: Analyst TOML docker yields status docker and receipt docker, or an explicit local override is shown with source.</li>
+        <li><strong>Lock tool surface evidence.</strong> Treat descriptor route evidence as canonical and make coverage gap health active-only. Acceptance: `tool_usage`, `tool_call_io`, `trajectory_tool_call`, and `execution_receipt` are `ok` or carry `active_coverage_gap_count &gt; 0` with a fresh, actionable error for the failing source.</li>
+        <li><strong>Make runtime identity observable.</strong> Add internal-safe provider/model attribution to runtime observation and receipt. Public dashboards may keep redacted runtime lanes, but Keeper status must say either `verified=true` with source or a concrete provider blocker. Acceptance: one controlled turn produces non-null runtime observation or a named failure class.</li>
+        <li><strong>Clean persona/fleet drift.</strong> Remove stale active goal IDs, restore missing registry entries, decide whether `tech_glutton` should stay paused, and create or remove missing `base` runtime meta. Acceptance: `masc_keeper_persona_audit(include_ok=false)` returns only intentional issues.</li>
+        <li><strong>Clean docs/routes.</strong> Update stale capacity/dashboard route docs after the live route sweep. Acceptance: docs do not point operators to 404/410 endpoints for runtime capacity or dashboard batch state.</li>
+	      </ol>
+	    </div>
+
+	    <div class="section">
+	      <h2>Implementation Update</h2>
+	      <table>
+	        <thead>
+	          <tr><th>Slice</th><th>Status</th><th>Code/doc change</th><th>Remaining acceptance</th></tr>
+	        </thead>
+	        <tbody>
+	          <tr>
+	            <td>P0 sandbox truth split</td>
+	            <td><span class="badge good">patched</span></td>
+	            <td>`Keeper_meta_contract.effective_meta_result` now overlays TOML-owned keeper fields onto persisted runtime meta. `Keeper_meta_store.read_effective_meta*` is the status-facing read API. `masc_keeper_sandbox_status`, `masc_keeper_status`, keeper list rows, and operator diagnostics now consume effective meta.</td>
+	            <td>After rebuild/restart, `masc_keeper_sandbox_status(name="analyst")` and `masc_keeper_status(name="analyst").sandbox_profile` must both report `docker` when Analyst TOML declares docker.</td>
+	          </tr>
+	          <tr>
+	            <td>Regression guard</td>
+	            <td><span class="badge good">added</span></td>
+	            <td>`test_keeper_effective_meta_overlay` proves raw runtime JSON with local defaults is overlaid by TOML `sandbox_profile=docker`, Docker default network `none`, and TOML `tool_access` before status surfaces read it.</td>
+	            <td>Focused Dune build/test must stay green for `test_keeper_effective_meta_overlay` and affected library modules.</td>
+	          </tr>
+	          <tr>
+	            <td>Boundary docs</td>
+	            <td><span class="badge good">updated</span></td>
+	            <td>`docs/KEEPER-SANDBOX-BOUNDARY-POLICY.md` now names effective meta as the required read path for status/list/operator/sandbox-status surfaces.</td>
+	            <td>Future sandbox/status changes should extend the effective meta contract instead of reading raw persisted JSON for TOML-owned fields.</td>
+	          </tr>
+	          <tr>
+	            <td>Runtime/provider observability</td>
+	            <td><span class="badge good">patched</span></td>
+	            <td>`Runtime_agent.run` now materializes a terminal runtime observation for completed and partial-completed OAS turns. `Keeper_execution_receipt.to_json` preserves `runtime.selected_model`, and `Keeper_runtime_trust_snapshot` falls back from decision telemetry to latest receipt runtime model for `selected_model`, `active_model`, and `execution.provider_selected_model`.</td>
+	            <td>After rebuild/restart, one controlled keeper turn must produce non-null runtime observation or a typed provider blocker in the live receipt/status surface.</td>
+	          </tr>
+	          <tr>
+	            <td>Runtime observability regression guard</td>
+	            <td><span class="badge good">added</span></td>
+	            <td>`test_runtime_provider_auth_headers` proves runtime-agent terminal observations carry runtime id, selected model, one attempt, and `runtime_agent_terminal` source. `test_keeper_runtime_trust_snapshot` proves receipt runtime model attribution feeds trust snapshot when decision telemetry is absent.</td>
+	            <td>Focused Dune build/test must stay green for `test_runtime_provider_auth_headers` and `test_keeper_runtime_trust_snapshot`.</td>
+	          </tr>
+	          <tr>
+	            <td>Telemetry append gaps</td>
+	            <td><span class="badge good">patched</span></td>
+	            <td>`Telemetry_unified.summary_json`, `Dashboard_tool_source_freshness`, and `Tool_usage_log.source_metadata_json` now keep historical `coverage_gaps` visible while filtering health through active gaps only. A source row whose timestamp is equal to or newer than the gap timestamp proves recovery; source summaries expose `coverage_gap_count` and `active_coverage_gap_count`. Regression tests cover recovered `tool_call_io` summary and tool-quality aggregate behavior.</td>
+	            <td>After rebuild/restart, `/api/v1/dashboard/telemetry/summary` should report `active_coverage_gap_count=0` for recovered lanes. If a lane still reports `coverage_gap`, the gap must be newer than the latest durable source row and include the single actionable append error.</td>
+	          </tr>
+	        </tbody>
+	      </table>
+	    </div>
+
+	    <div class="section">
+	      <h2>Acceptance Checks</h2>
+      <pre>git -C /Users/dancer/me/workspace/yousleepwhen/masc fetch origin main
+git -C /Users/dancer/me/workspace/yousleepwhen/masc status --short --branch
+curl -fsS 'http://127.0.0.1:8935/health?full=1' | jq '{build, keeper_fibers, keeper_fleet_safety, keeper_config_schema_status}'
+masc_keeper_sandbox_status(name="analyst", include_preflight=true)
+masc_keeper_status(name="analyst", fast=true)
+masc_keeper_status(name="echo", fast=true)
+curl -fsS 'http://127.0.0.1:8935/api/v1/dashboard/telemetry/summary' | jq '.sources[] | {source, health, stale_reason, latest_ts_iso, coverage_gap_count, active_coverage_gap_count}'
+curl -fsS 'http://127.0.0.1:8935/api/v1/models/metrics' | jq '{total_entries,total_error_entries,models}'
+masc_keeper_persona_audit(include_ok=false)</pre>
+      <p>Pass condition: source commit truth stable, keeper fibers executable, sandbox surfaces converged, tool telemetry gap closed or sharply explained, runtime model observation verified or explicitly blocked.</p>
+    </div>
+  </div>
+</body>
+</html>

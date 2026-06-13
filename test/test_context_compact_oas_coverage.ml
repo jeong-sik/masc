@@ -7,15 +7,23 @@
 open Alcotest
 
 module Types = Agent_sdk.Types
-module Compact = Masc_mcp.Context_compact_oas
-module Scoring = Masc_mcp.Context_compact_oas
+module Compact = Masc.Context_compact_oas
+module Scoring = Masc.Context_compact_oas
 
 let msg role text : Agent_sdk.Types.message =
   { role; content = [Types.Text text]; name = None; tool_call_id = None; metadata = [] }
 
 let tool_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
   { role = Types.Tool;
-    content = [Types.ToolResult { tool_use_id = id; content = text; is_error = false; json = None }];
+    content =
+      [ Types.ToolResult
+          { tool_use_id = id
+          ; content = text
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ];
     name = None; tool_call_id = None; metadata = [] }
 
 let tool_use_msg ?(id = "tool-1") ?(name = "grep_search") () : Agent_sdk.Types.message =

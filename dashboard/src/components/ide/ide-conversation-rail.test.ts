@@ -3,6 +3,7 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import {
+  boardKindFromPost,
   conversationContextSummary,
   IdeConversationRail,
   postsToAnchoredThreads,
@@ -32,7 +33,7 @@ function stubEmptyConversationFetch(): void {
         headers: { 'Content-Type': 'application/json' },
       })
     }
-    if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+    if (url.startsWith('/api/v1/runtime/strategy_trace')) {
       return new Response(JSON.stringify({ updated_at: null, total_events: 0, events: [] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -174,7 +175,7 @@ describe('IdeConversationRail', () => {
     expect(postsToAnchoredThreads(posts)).toEqual([])
   })
 
-  it('orders thread, decision, and cascade replay items on one timeline', () => {
+  it('orders thread and decision replay items on one timeline', () => {
     const items = replayRailItems(
       [{
         id: 'thread-old',
@@ -208,22 +209,12 @@ describe('IdeConversationRail', () => {
         duration_ms: null,
         match_count: null,
       }],
-      [{
-        ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-        cascade_name: 'primary',
-        strategy: 'ranked',
-        cycle: 1,
-        candidates_in: 3,
-        candidates_out: 2,
-        backoff_ms: 0,
-        kind: 'ordered',
-      }],
     )
 
-    expect(items.map(item => item.source)).toEqual(['cascade', 'decision', 'thread'])
+    expect(items.map(item => item.source)).toEqual(['decision', 'thread'])
   })
 
-  it('uses one replay cursor for thread, decision, and cascade rail items', async () => {
+  it('uses one replay cursor for thread and decision rail items', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify({ posts: [
@@ -268,22 +259,6 @@ describe('IdeConversationRail', () => {
           generated_at: null,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
-        return new Response(JSON.stringify({
-          updated_at: '2026-05-05T10:04:00Z',
-          total_events: 1,
-          events: [{
-            ts: Date.UTC(2026, 4, 5, 10, 2, 0) / 1000,
-            cascade_name: 'primary',
-            strategy: 'ranked',
-            cycle: 1,
-            candidates_in: 3,
-            candidates_out: 2,
-            backoff_ms: 0,
-            kind: 'ordered',
-          }],
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
       return new Response('{}', { status: 404 })
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -294,7 +269,6 @@ describe('IdeConversationRail', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('new thread body')
       expect(container.textContent).toContain('turn_completed')
-      expect(container.textContent).toContain('primary')
     })
 
     const slider = container.querySelector('[role="slider"]') as HTMLElement
@@ -305,18 +279,15 @@ describe('IdeConversationRail', () => {
       expect(container.textContent).toContain('old thread body')
       expect(container.textContent).toContain('1/2 threads')
       expect(container.textContent).toContain('0/1 decisions')
-      expect(container.textContent).toContain('0/1 cascade')
     })
     expect(container.textContent).not.toContain('new thread body')
     expect(container.textContent).not.toContain('turn_completed')
-    expect(container.textContent).not.toContain('primary')
 
     render(null, container)
   })
 
-  it('renders route links for keeper decision and cascade replay entries', async () => {
+  it('renders route links for keeper decision replay entries', async () => {
     const decisionTs = Date.UTC(2026, 4, 5, 10, 1, 0) / 1000
-    const cascadeTs = Date.UTC(2026, 4, 5, 10, 2, 0) / 1000
     cursorOverlaySignal.value = {
       cursors: new Map([[
         'scholar',
@@ -359,22 +330,6 @@ describe('IdeConversationRail', () => {
           generated_at: null,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
-        return new Response(JSON.stringify({
-          updated_at: '2026-05-05T10:04:00Z',
-          total_events: 1,
-          events: [{
-            ts: cascadeTs,
-            cascade_name: 'primary',
-            strategy: 'ranked',
-            cycle: 1,
-            candidates_in: 3,
-            candidates_out: 2,
-            backoff_ms: 0,
-            kind: 'ordered',
-          }],
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }
       return new Response('{}', { status: 404 })
     }))
 
@@ -383,7 +338,6 @@ describe('IdeConversationRail', () => {
 
     await waitFor(() => {
       expect(container.textContent).toContain('turn_completed')
-      expect(container.textContent).toContain('primary')
     })
 
     const decisionCard = container.querySelector<HTMLElement>('[data-replay-source="decision"]')
@@ -407,19 +361,6 @@ describe('IdeConversationRail', () => {
     fireEvent.click(decisionLinks.find(link => link.textContent === 'Keeper')!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
 
-    const cascadeCard = container.querySelector<HTMLElement>('[data-replay-source="cascade"]')
-    expect(cascadeCard).not.toBeNull()
-    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.textContent).toBe('CTX 1')
-    expect(cascadeCard?.querySelector('.ide-conversation-context-badge')?.getAttribute('title'))
-      .toBe('Linked context: Telemetry')
-    const cascadeLinks = [...cascadeCard!.querySelectorAll<HTMLButtonElement>('.ide-conversation-route-link')]
-    expect(cascadeLinks.map(link => link.textContent)).toEqual(['Telemetry'])
-
-    fireEvent.click(cascadeLinks[0]!)
-    expect(routeHashParams().get('q')).toBe(
-      `cascade primary strategy:ranked cycle:1 kind:ordered ts:${cascadeTs}`,
-    )
-
     render(null, container)
   })
 
@@ -428,6 +369,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/board')) {
         return new Response(JSON.stringify({ posts: [{
           id: 'thread-line',
+          hearth: 'question',
           author: 'scholar',
           title: 'Review lib/runtime.ml:42',
           body: 'question fn:run about this line',
@@ -443,7 +385,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       return new Response('{}', { status: 404 })
@@ -500,7 +442,7 @@ describe('IdeConversationRail', () => {
       if (url.startsWith('/api/v1/dashboard/keeper-decisions')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.startsWith('/api/v1/cascade/strategy_trace')) {
+      if (url.startsWith('/api/v1/runtime/strategy_trace')) {
         return new Response(JSON.stringify({ events: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       return new Response('{}', { status: 404 })
@@ -540,7 +482,7 @@ describe('IdeConversationRail', () => {
     expect(window.location.hash).toBe('#workspace?section=board&post=thread-line&comment=comment-1')
 
     fireEvent.click(links.find(link => link.textContent === 'PR')!)
-    expect(window.location.hash).toBe('#workspace?section=repositories&view=graph&pr=15035')
+    expect(window.location.hash).toBe('#workspace?section=repositories&pr=15035')
 
     fireEvent.click(links.find(link => link.textContent === 'Keeper')!)
     expect(window.location.hash).toBe('#monitoring?section=agents&view=keepers&keeper=scholar')
@@ -561,3 +503,39 @@ describe('IdeConversationRail', () => {
   })
 })
 
+describe('boardKindFromPost', () => {
+  function stubPost(hearth: string | null): BoardPost {
+    return {
+      id: 'p-1',
+      author: 'keeper',
+      title: 'title',
+      body: 'body',
+      content: 'content',
+      tags: [],
+      votes: 0,
+      comment_count: 0,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      hearth,
+    } as BoardPost
+  }
+
+  it('maps known hearth values to ThreadKind', () => {
+    expect(boardKindFromPost(stubPost('approve'))).toBe('approve')
+    expect(boardKindFromPost(stubPost('flag'))).toBe('flag')
+    expect(boardKindFromPost(stubPost('question'))).toBe('question')
+    expect(boardKindFromPost(stubPost('suggest'))).toBe('suggest')
+    expect(boardKindFromPost(stubPost('note'))).toBe('note')
+  })
+
+  it('is case-insensitive for hearth', () => {
+    expect(boardKindFromPost(stubPost('APPROVE'))).toBe('approve')
+    expect(boardKindFromPost(stubPost('Flag'))).toBe('flag')
+  })
+
+  it('defaults to note for unknown or missing hearth', () => {
+    expect(boardKindFromPost(stubPost(null))).toBe('note')
+    expect(boardKindFromPost(stubPost(''))).toBe('note')
+    expect(boardKindFromPost(stubPost('unknown'))).toBe('note')
+  })
+})

@@ -1,6 +1,6 @@
 (* A3 approval_policy — pure decide (Capability.t list -> Verdict.t).
 
-   Fail-closed: the rule cascade never produces [Allow] on an unknown
+   Fail-closed: the rule runtime never produces [Allow] on an unknown
    construct.  [Ask] is always the default bucket when no explicit
    rule has fired. *)
 
@@ -61,24 +61,18 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
 
 (* Highest program risk observed in the full cap tree. *)
 let max_risk (caps : Capability.t list) : Exec_program.risk_class =
-  let bump (acc : Exec_program.risk_class) (r : Exec_program.risk_class) : Exec_program.risk_class =
-    match acc, r with
-    | `Privileged, _ | _, `Privileged -> `Privileged
-    | `Audited, _ | _, `Audited -> `Audited
-    | `Safe, `Safe -> `Safe
-  in
   let rec scan acc = function
     | [] -> acc
     | Capability.Exec_program (b, _) :: rest ->
-      scan (bump acc (Exec_program.risk_class b)) rest
+      scan (Exec_program.risk_class_max acc (Exec_program.risk_class b)) rest
     | Capability.Git _ :: rest ->
       (* git is Audited by vocabulary; already classified through
          Exec_program above for the Exec_program fallback path.  Kept explicit
          here so a future refactor of Git_op doesn't lose the risk
          contribution. *)
-      scan (bump acc `Audited) rest
+      scan (Exec_program.risk_class_max acc `Audited) rest
     | Capability.Pipeline_fold inner :: rest ->
-      scan (bump (scan acc inner) `Safe) rest
+      scan (Exec_program.risk_class_max (scan acc inner) `Safe) rest
     | (Capability.Read_path _ | Capability.Write_path _
       | Capability.Env_set _) :: rest ->
       scan acc rest

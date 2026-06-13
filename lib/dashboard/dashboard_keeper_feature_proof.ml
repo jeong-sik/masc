@@ -1,21 +1,18 @@
 (** Dashboard keeper feature proof report.
 
     This read model is intentionally narrow: it does not claim a feature
-    works from configuration alone. A feature is proved only when runtime
-    keeper meta or tool-call quality records show recent executable use. *)
+    works from configuration alone. A feature is proved only when persisted
+    runtime keeper meta or decision-log evidence shows current behavior. *)
 
 type status = Pass | Warn | Fail
 
-type tool_stat = { name : string; calls : int; success_pct : float }
-
 type keeper_snapshot = {
   keeper_name : string;
-  meta : Keeper_types.keeper_meta option;
+  meta : Keeper_meta_contract.keeper_meta option;
   read_error : string option;
 }
 
 module Decision = Dashboard_keeper_decision_log_proof
-module Failure = Dashboard_keeper_tool_failure_proof
 
 let status_to_string = function
   | Pass -> "pass"
@@ -32,8 +29,6 @@ let overall_status statuses =
   else if List.exists (( = ) Warn) statuses then Warn
   else Pass
 
-let clamp_float ~low ~high value = max low (min high value)
-
 let evidence_ref ~kind ~id ~value =
   `Assoc [
     ("kind", `String kind);
@@ -45,38 +40,7 @@ let route_evidence path =
   evidence_ref ~kind:"route" ~id:path ~value:path
 
 let keeper_meta_evidence =
-  evidence_ref ~kind:"store" ~id:"keeper_meta" ~value:"Keeper_types.read_meta"
-
-let tool_stat_json ?failure_classes stat =
-  let fields = [
-    ("name", `String stat.name);
-    ("calls", `Int stat.calls);
-    ("success_pct", `Float stat.success_pct);
-  ] in
-  match failure_classes with
-  | Some classes -> `Assoc (fields @ [("failure_classes", classes)])
-  | None -> `Assoc fields
-
-let tool_stat_of_keeper_stat (stat : Failure.tool_keeper_stat) =
-  { name = stat.name; calls = stat.calls; success_pct = stat.success_pct }
-
-let latest_success_after_last_failure (stat : Failure.tool_keeper_stat) =
-  match stat.latest_success_ts with
-  | None -> false
-  | Some latest_success ->
-    (match stat.latest_failure_ts with
-     | None -> true
-     | Some latest_failure -> latest_success >= latest_failure)
-
-let accepts_latest_recovery (spec : Dashboard_keeper_feature_catalog.feature_spec) =
-  String.equal spec.id "approval_tools"
-
-let tool_stat_passes ~success_threshold_pct spec
-    (stat : Failure.tool_keeper_stat) =
-  stat.calls > 0
-  && (stat.success_pct >= success_threshold_pct
-      || (accepts_latest_recovery spec
-          && latest_success_after_last_failure stat))
+  evidence_ref ~kind:"store" ~id:"keeper_meta" ~value:"Keeper_meta_store.read_meta"
 
 let uniq_sorted names =
   names
@@ -84,10 +48,10 @@ let uniq_sorted names =
   |> List.sort_uniq String.compare
 
 let load_keeper_snapshots config =
-  Keeper_types.keeper_names config
+  Keeper_meta_store.keeper_names config
   |> uniq_sorted
   |> List.map (fun keeper_name ->
-    match Keeper_types.read_meta config keeper_name with
+    match Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> { keeper_name; meta = Some meta; read_error = None }
     | Ok None ->
       {
@@ -120,11 +84,6 @@ let count_meta snapshots =
   |> List.filter (fun snapshot -> Option.is_some snapshot.meta)
   |> List.length
 
-let snapshot_keeper_names snapshots =
-  snapshots
-  |> List.map (fun snapshot -> snapshot.keeper_name)
-  |> uniq_sorted
-
 let meta_feature_json
       ~id
       ~label
@@ -141,10 +100,6 @@ let meta_feature_json
     ("label", `String label);
     ("status", `String (status_to_string status));
     ("summary", `String summary);
-    ("required_tools", `List []);
-    ("passing_tools", `List []);
-    ("weak_tools", `List []);
-    ("missing_tools", `List []);
     ("keeper_evidence",
      `Assoc [
        ("keeper_count", `Int (keeper_count snapshots));
@@ -207,7 +162,7 @@ let runtime_liveness_feature snapshots =
     ~id:"runtime_liveness"
     ~label:"Persisted keeper runtime turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta -> meta.Keeper_types.runtime.usage.total_turns > 0)
+    ~predicate:(fun meta -> meta.runtime.usage.total_turns > 0)
     ~summary_label:"keepers have persisted runtime turns"
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/execution"]
     ~next_action:
@@ -263,10 +218,6 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
           (List.length observed) total
           Decision.persistent_turn_window_hours
           Decision.recent_turn_max_age_hours));
-    ("required_tools", `List []);
-    ("passing_tools", `List []);
-    ("weak_tools", `List []);
-    ("missing_tools", `List []);
     ("keeper_evidence",
      `Assoc [
        ("keeper_count", `Int total);
@@ -297,8 +248,8 @@ let autonomous_tool_feature snapshots =
     ~label:"Autonomous tool turns"
     ~eligible:(fun _snapshot -> true)
     ~predicate:(fun meta ->
-       meta.Keeper_types.runtime.autonomous_action_count > 0
-       && meta.Keeper_types.runtime.autonomous_tool_turn_count > 0)
+       meta.runtime.autonomous_action_count > 0
+       && meta.runtime.autonomous_tool_turn_count > 0)
     ~summary_label:"keepers have autonomous action and tool-turn counters"
     ~evidence_refs:[keeper_meta_evidence]
     ~next_action:
@@ -309,14 +260,14 @@ let board_reactive_feature snapshots =
     ~id:"board_reactive_autonomy"
     ~label:"Board-reactive turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta -> meta.Keeper_types.runtime.board_reactive_turn_count > 0)
+    ~predicate:(fun meta -> meta.runtime.board_reactive_turn_count > 0)
     ~summary_label:"keepers have board-reactive turn counters"
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/board"]
     ~next_action:
       "Post board events and confirm every active keeper records board-reactive turns."
 
 let timestamp_within_window ?window_hours ~now ts =
-  (* Reject zero/negative timestamps (sentinel/unset) and future timestamps
+  (* Reject zero/negative timestamps (marker/unset) and future timestamps
      (clock skew or corrupted logs). Without the [ts <= now] guard, any
      future timestamp would satisfy the recency check because [now -. ts]
      would be negative and trivially [<= hours *. 3600.0]. *)
@@ -348,17 +299,17 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
     snapshots
     |> List.filter (fun snapshot ->
       match snapshot.meta with
-      | Some meta -> meta.Keeper_types.proactive.enabled
+      | Some meta -> meta.proactive.enabled
       | None -> false)
   in
   let total = keeper_count enabled in
   let has_recent_meta_evidence meta =
-    meta.Keeper_types.runtime.proactive_rt.count_total > 0
+    meta.Keeper_meta_contract.runtime.proactive_rt.count_total > 0
     && timestamp_within_window ?window_hours ~now
-         meta.Keeper_types.runtime.proactive_rt.last_ts
+         meta.Keeper_meta_contract.runtime.proactive_rt.last_ts
     && not
-         (meta.Keeper_types.runtime.proactive_rt.last_outcome
-          = Keeper_types.Proactive_error)
+         (meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome
+          = Keeper_meta_contract.Proactive_error)
   in
   let has_recent_decision_evidence snapshot =
     match (decision_stat_for snapshot.keeper_name).latest_ts_unix with
@@ -396,12 +347,12 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       let stat = decision_stat_for snapshot.keeper_name in
       let meta_count =
         match snapshot.meta with
-        | Some meta -> meta.Keeper_types.runtime.proactive_rt.count_total
+        | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.count_total
         | None -> 0
       in
       let meta_last_ts =
         match snapshot.meta with
-        | Some meta -> meta.Keeper_types.runtime.proactive_rt.last_ts
+        | Some meta -> meta.Keeper_meta_contract.runtime.proactive_rt.last_ts
         | None -> 0.0
       in
       let meta_recent =
@@ -413,8 +364,8 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         match snapshot.meta with
         | Some meta ->
           Some
-            (Keeper_types.proactive_cycle_outcome_to_string
-               meta.Keeper_types.runtime.proactive_rt.last_outcome)
+            (Keeper_meta_contract.proactive_cycle_outcome_to_string
+               meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome)
         | None -> None
       in
       `Assoc [
@@ -423,9 +374,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         ( "meta_last_proactive_ts",
           if meta_last_ts > 0.0 then `Float meta_last_ts else `Null );
         ( "meta_last_proactive_outcome",
-          match meta_outcome with
-          | Some outcome -> `String outcome
-          | None -> `Null );
+          Json_util.string_opt_to_json meta_outcome );
         ("meta_evidence_within_window", `Bool meta_recent);
         ("decision_log", Decision.scheduled_evidence_json stat);
       ])
@@ -442,10 +391,6 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
           (match window_hours with
            | Some hours -> Printf.sprintf " in the last %.1fh" hours
            | None -> "")));
-    ("required_tools", `List []);
-    ("passing_tools", `List []);
-    ("weak_tools", `List []);
-    ("missing_tools", `List []);
     ("keeper_evidence",
      `Assoc [
        ("keeper_count", `Int (keeper_count enabled));
@@ -467,75 +412,6 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
         "Fix scheduler or per-keeper blockers until every proactive-enabled keeper has meta or decision-log evidence for scheduled autonomous cycles." );
   ]
 
-let tool_feature_json
-      ~success_threshold_pct
-      ~keeper_names
-      failure_table
-      (tool_stats : (string, Failure.tool_keeper_stat) Hashtbl.t)
-      (spec : Dashboard_keeper_feature_catalog.feature_spec)
-  =
-  let passing, weak, missing =
-    spec.required_tools
-    |> List.fold_left (fun (passing, weak, missing) tool_name ->
-      match Hashtbl.find_opt tool_stats tool_name with
-      | Some (keeper_stat : Failure.tool_keeper_stat)
-        when tool_stat_passes ~success_threshold_pct spec keeper_stat ->
-        let stat = tool_stat_of_keeper_stat keeper_stat in
-        (stat :: passing, weak, missing)
-      | Some (keeper_stat : Failure.tool_keeper_stat) when keeper_stat.calls > 0 ->
-        let stat = tool_stat_of_keeper_stat keeper_stat in
-        (passing, stat :: weak, missing)
-      | _ -> (passing, weak, tool_name :: missing))
-      ([], [], [])
-  in
-  let passing = List.rev passing in
-  let weak = List.rev weak in
-  let missing = List.rev missing in
-  let required_count = List.length spec.required_tools in
-  let status =
-    if required_count > 0 && List.length passing = required_count then Pass
-    else if passing <> [] || weak <> [] then Warn
-    else Fail
-  in
-  `Assoc [
-    ("id", `String spec.id);
-    ("label", `String spec.label);
-    ("status", `String (status_to_string status));
-    ("summary",
-     `String
-       (Printf.sprintf
-          "%d/%d required tools meet %.1f%% success threshold%s; %d weak; %d missing"
-          (List.length passing)
-          required_count
-          success_threshold_pct
-          (if accepts_latest_recovery spec
-           then " or latest-success recovery"
-           else "")
-          (List.length weak)
-          (List.length missing)));
-    ("required_tools", Json_util.json_string_list spec.required_tools);
-    ("passing_tools", `List (List.map tool_stat_json passing));
-    ( "weak_tools",
-      `List
-        (List.map
-           (fun stat ->
-              tool_stat_json
-                ~failure_classes:(Failure.classes_json failure_table stat.name)
-                stat)
-           weak) );
-    ("missing_tools", Json_util.json_string_list missing);
-    ( "keeper_evidence",
-      Failure.keeper_evidence_json tool_stats
-        ~keeper_names ~required_tools:spec.required_tools );
-    ( "evidence_refs",
-      `List [
-        route_evidence "/api/v1/dashboard/tool-quality";
-        evidence_ref ~kind:"store" ~id:"keeper_tool_call_log"
-          ~value:"Keeper_tool_call_log.read_recent/read_window";
-      ] );
-    ("next_action", `String spec.next_action);
-  ]
-
 let status_of_feature_json json =
   match Safe_ops.json_string_opt "status" json with
   | Some "pass" -> Pass
@@ -548,36 +424,8 @@ let count_status needle statuses =
   |> List.filter (fun status -> status_rank status = status_rank needle)
   |> List.length
 
-let keeper_tool_sample_summary
-      (tool_stats : (string, Failure.tool_keeper_stat) Hashtbl.t)
-  =
-  let calls, successes =
-    Hashtbl.fold
-      (fun _tool_name (stat : Failure.tool_keeper_stat) (calls, successes) ->
-         (calls + stat.calls, successes + stat.successes))
-      tool_stats
-      (0, 0)
-  in
-  let success_rate =
-    if calls = 0 then 0.0
-    else
-      let pct = Float.of_int successes /. Float.of_int calls *. 100.0 in
-      Float.round (pct *. 100.0) /. 100.0
-  in
-  calls, success_rate
-
-let json
-      ~config
-      ?(n = 5000)
-      ?window_hours
-      ?(success_threshold_pct = 80.0)
-      ?now
-      ()
-  =
+let json ~config ?window_hours ?now () =
   let now = Option.value ~default:(Unix.gettimeofday ()) now in
-  let success_threshold_pct =
-    clamp_float ~low:0.0 ~high:100.0 success_threshold_pct
-  in
   (* Normalize at the public boundary so feature helpers never see a
      non-positive window. Callers passing [Some h] with [h <= 0.0] from
      CLI/config are treated the same as [None] (no recency check)
@@ -589,10 +437,6 @@ let json
     | Some _ | None -> None
   in
   let snapshots = load_keeper_snapshots config in
-  let keeper_names = snapshot_keeper_names snapshots in
-  let tool_stats, failure_table =
-    Failure.keeper_stats_and_failures_by_tool ~n ?window_hours ~keeper_names ()
-  in
   let features =
     [
       runtime_liveness_feature snapshots;
@@ -601,19 +445,12 @@ let json
       board_reactive_feature snapshots;
       scheduled_proactive_feature ~config ?window_hours ~now snapshots;
     ]
-    @ List.map
-        (tool_feature_json ~success_threshold_pct ~keeper_names failure_table
-           tool_stats)
-        Dashboard_keeper_feature_catalog.tool_features
   in
   let statuses = List.map status_of_feature_json features in
   let overall = overall_status statuses in
   let pass_count = count_status Pass statuses in
   let warn_count = count_status Warn statuses in
   let fail_count = count_status Fail statuses in
-  let tool_sample_total, tool_sample_success_rate =
-    keeper_tool_sample_summary tool_stats
-  in
   `Assoc [
     ("generated_at", `String (Masc_domain.now_iso ()));
     ("status", `String (status_to_string overall));
@@ -627,25 +464,6 @@ let json
        ("gap_count", `Int (warn_count + fail_count));
        ("keeper_count", `Int (keeper_count snapshots));
        ("keeper_meta_count", `Int (count_meta snapshots));
-       ("tool_sample_total", `Int tool_sample_total);
-       ("tool_sample_success_rate", `Float tool_sample_success_rate);
-       ("success_threshold_pct", `Float success_threshold_pct);
-     ]);
-    ("tool_quality",
-     `Assoc [
-       ("route", `String "/api/v1/dashboard/tool-quality");
-       ("scope", `String "known_keepers");
-       ("sample_total", `Int tool_sample_total);
-       ("success_rate", `Float tool_sample_success_rate);
-       ("sampling_mode",
-        `String
-          (match window_hours with
-           | Some _ -> "window_hours"
-           | None -> "recent_n"));
-       ("sample_limit",
-        (match window_hours with
-         | Some _ -> `Null
-         | None -> `Int n));
        ("window_hours",
         (match window_hours with
          | Some hours -> `Float hours
@@ -654,7 +472,6 @@ let json
     ("features", `List features);
     ("evidence_refs",
      `List [
-       route_evidence "/api/v1/dashboard/tool-quality";
        route_evidence "/api/v1/dashboard/execution";
        keeper_meta_evidence;
      ]);

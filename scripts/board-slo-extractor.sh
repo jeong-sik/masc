@@ -192,7 +192,7 @@ m_execute_failure_pct() {
   ' "${files[@]}" 2>/dev/null || echo "null"
 }
 
-m_cascade_audit_failure_pct() {
+m_runtime_audit_failure_pct() {
   [[ -d "$LOGS_DIR" ]] || { echo "null"; return; }
   local files=()
   local file
@@ -210,7 +210,7 @@ m_cascade_audit_failure_pct() {
       else 0 end;
     [ .[]
       | select(ts_epoch >= $cutoff)
-      | select((.details.event // .event // "") == "cascade_attempt_terminal")
+      | select((.details.event // .event // "") == "runtime_attempt_terminal")
     ] as $rows
     | ($rows | length) as $total
     | if $total == 0 then empty
@@ -312,7 +312,7 @@ m_dashboard_proof_endpoints() {
 m_live_defect_issues() {
   [[ "$OFFLINE_MODE" -eq 0 ]] || { echo "null"; return; }
   command -v gh >/dev/null || { echo "null"; return; }
-  gh issue list --repo jeong-sik/masc-mcp --label live-defect --state open --json number 2>/dev/null \
+  gh issue list --repo jeong-sik/masc --label live-defect --state open --json number 2>/dev/null \
     | jq 'length' || echo "null"
 }
 
@@ -332,7 +332,7 @@ emit_json() {
     --argjson warn_error_window "$(m_warn_error_window)" \
     --arg tool_call_success_pct "$(m_tool_call_success_pct)" \
     --arg execute_failure_pct "$(m_execute_failure_pct)" \
-    --arg cascade_audit_failure_pct "$(m_cascade_audit_failure_pct)" \
+    --arg runtime_audit_failure_pct "$(m_runtime_audit_failure_pct)" \
     --argjson docker_false_positive_24h "$(m_docker_false_positive_24h)" \
     --argjson live_defect_signatures "$(m_live_defect_signatures)" \
     --argjson docker_playground_worktrees "$(m_docker_playground_worktrees)" \
@@ -353,7 +353,7 @@ emit_json() {
          warn_error_window: $warn_error_window,
          tool_call_success_pct: ($tool_call_success_pct | tonumber? // null),
          execute_failure_pct: ($execute_failure_pct | tonumber? // null),
-         cascade_audit_failure_pct: ($cascade_audit_failure_pct | tonumber? // null),
+         runtime_audit_failure_pct: ($runtime_audit_failure_pct | tonumber? // null),
          docker_false_positive_24h: $docker_false_positive_24h,
          live_defect_signatures: $live_defect_signatures,
          docker_playground_worktrees: $docker_playground_worktrees,
@@ -377,7 +377,7 @@ emit_table() {
         ["warn_error_window", ($m.warn_error_window|tostring), "<= 6500"],
         ["tool_call_success_pct", ($m.tool_call_success_pct|tostring), ">= 90"],
         ["execute_failure_pct", ($m.execute_failure_pct|tostring), "<= 20"],
-        ["cascade_audit_failure_pct", ($m.cascade_audit_failure_pct|tostring), "<= 10"],
+        ["runtime_audit_failure_pct", ($m.runtime_audit_failure_pct|tostring), "<= 10"],
         ["docker_false_positive_24h", ($m.docker_false_positive_24h|tostring), "0"],
         ["live_defect_open", ($m.live_defect_open|tostring), "each linked"]
       ]

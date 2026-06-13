@@ -1,11 +1,13 @@
-(* SearchFiles operation setup:
-    coreutils resolution, Prometheus metric, history observation,
+(* Grep operation setup:
+    coreutils resolution, Otel_metric_store metric, history observation,
     and the shared process-result renderer.
 
-    Extracted from the SearchFiles dispatcher as part of godfile near-threshold split. *)
+    Extracted from the Grep dispatcher as part of godfile near-threshold split. *)
 
 open Keeper_types
-open Agent_tool_shared_runtime
+open Keeper_meta_contract
+open Keeper_types_profile
+open Keeper_tool_shared_runtime
 
 (* RFC-0084 host-config-cleanup-C — coreutils path migration.
    Resolve the 6 absolute binary paths once at module-init time
@@ -16,19 +18,19 @@ open Agent_tool_shared_runtime
    this module's call sites. *)
 let coreutils = (Host_config.host ()).coreutils
 
-(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the metric name
+(* Domain-owned Otel_metric_store metric (RFC-0043 Phase 0): the metric name
    and registration live next to the bumper here rather than in the
-   central prometheus.ml registry, keeping that file under the
+   central otel_metric_store.ml registry, keeping that file under the
    godfile-size-regression cap. *)
 let metric_bash_history_append_failures =
   "masc_bash_history_append_failures_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:metric_bash_history_append_failures
     ~help:
       "Total bash-history audit append failures observed at \
-       SearchFiles setup. Bash_history.append returned Error (Sys_error \
+       Grep setup. Bash_history.append returned Error (Sys_error \
        from open/write/close). Decoupled from tool-call success/failure. \
        No labels."
     ()
@@ -43,7 +45,7 @@ let observe_history_append ~root ~keeper_name entry =
   match Masc_exec.Bash_history.append ~base_path:root ~keeper_name entry with
   | Ok () -> ()
   | Error exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         metric_bash_history_append_failures ();
       Log.KeeperExec.warn
         "bash_history.append failed: keeper=%s base=%s exn=%s"
@@ -57,7 +59,7 @@ let render_completed_process_result
       ~root ~keeper_name ~op
       ?cwd ~cmd ?(extra = []) st out =
   let success = st = Unix.WEXITED 0 in
-  let cmd_prefix = Agent_tool_execute_command_words.cmd_prefix cmd in
+  let cmd_prefix = Keeper_tool_command_words.cmd_prefix cmd in
   let elapsed_ms =
     List.find_map (fun (k, v) ->
       if k = "execution_time_ms" then
@@ -97,10 +99,7 @@ let render_completed_process_result
        ~extra:([
            "op", `String op;
            "cmd", `String cmd;
-           ( "cwd",
-             match cwd with
-             | Some dir -> `String dir
-             | None -> `Null );
+           ( "cwd", Json_util.string_opt_to_json cwd );
          ] @ extra_with_via @ insight_extra)
        ~status:st
        ~output:out

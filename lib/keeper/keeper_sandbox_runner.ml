@@ -25,8 +25,7 @@ type backend_command =
   { route_cwd : string
   ; cwd : unit -> string
   ; command_text : string
-  ; git_creds_enabled : bool
-  ; network_mode : Keeper_types.network_mode
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; trust : command_trust
   }
 
@@ -42,14 +41,9 @@ type route =
   | Sandbox_backend
 
 module type Backend = sig
-  val egress_policy_path :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    string
-
   val effective_sandbox_profile :
-    meta:Keeper_types.keeper_meta ->
-    Keeper_types.sandbox_profile * Keeper_types.network_mode
+    meta:Keeper_meta_contract.keeper_meta ->
+    Keeper_types_profile_sandbox.sandbox_profile * Keeper_types_profile_sandbox.network_mode
 
   val ensure_runtime :
     timeout_sec:float -> (string list, string) result
@@ -57,54 +51,41 @@ module type Backend = sig
   val command_uses_nested_runtime : string -> bool
 
   val private_workspace_cwd :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     string ->
     string
 
   val run_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
 
   val run_trusted_shell_command_with_status :
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    git_creds_enabled:bool ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     (command_result, string) result
-
-  val run_credentialed_bash :
-    turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
-    cwd:string ->
-    timeout_sec:float ->
-    cmd:string ->
-    unit ->
-    string
 
   val run_bash :
     turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
-    config:Coord.config ->
-    meta:Keeper_types.keeper_meta ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
     cwd:string ->
     timeout_sec:float ->
     cmd:string ->
-    network_mode:Keeper_types.network_mode ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
     string
 end
 
 module Make (Backend : Backend) = struct
-  let egress_policy_path = Backend.egress_policy_path
   let effective_sandbox_profile = Backend.effective_sandbox_profile
   let ensure_runtime = Backend.ensure_runtime
   let command_uses_nested_runtime = Backend.command_uses_nested_runtime
@@ -112,7 +93,6 @@ module Make (Backend : Backend) = struct
   let run_shell_command_with_status = Backend.run_shell_command_with_status
   let run_trusted_shell_command_with_status =
     Backend.run_trusted_shell_command_with_status
-  let run_credentialed_bash = Backend.run_credentialed_bash
   let run_bash = Backend.run_bash
 end
 
@@ -129,7 +109,6 @@ let of_docker_result
   }
 
 module Docker_backend = struct
-  let egress_policy_path = Keeper_sandbox_docker.egress_policy_path
   let effective_sandbox_profile = Keeper_sandbox_docker.effective_sandbox_profile
   let ensure_runtime = Keeper_sandbox_docker.ensure_keeper_sandbox_runtime
   let command_uses_nested_runtime =
@@ -137,19 +116,16 @@ module Docker_backend = struct
   let private_workspace_cwd = Keeper_sandbox_docker.docker_private_workspace_cwd
 
   let run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd
-      ~git_creds_enabled ~network_mode =
+      ~network_mode =
     Keeper_sandbox_docker.run_docker_shell_command_with_status
-      ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
     |> Result.map of_docker_result
 
   let run_trusted_shell_command_with_status ~config ~meta ~cwd ~timeout_sec ~cmd
-      ~git_creds_enabled ~network_mode =
+      ~network_mode =
     Keeper_sandbox_docker.run_trusted_docker_shell_command_with_status
-      ~config ~meta ~cwd ~timeout_sec ~cmd ~git_creds_enabled ~network_mode
+      ~config ~meta ~cwd ~timeout_sec ~cmd ~network_mode
     |> Result.map of_docker_result
-
-  let run_credentialed_bash =
-    Keeper_sandbox_docker.run_docker_credentialed_bash
 
   let run_bash = Keeper_sandbox_docker.run_docker_bash
 end
@@ -173,8 +149,8 @@ let in_playground ~config ~meta ~cwd =
 
 let uses_backend ~config:_ ~meta ~cwd:_ =
   match effective_sandbox_profile ~meta with
-  | Keeper_types.Docker, _ -> true
-  | Keeper_types.Local, _ -> false
+  | Keeper_types_profile_sandbox.Docker, _ -> true
+  | Keeper_types_profile_sandbox.Local, _ -> false
 
 let route_for ~config ~meta ~cwd =
   if uses_backend ~config ~meta ~cwd then Sandbox_backend else Host
@@ -212,7 +188,6 @@ let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
       ~cwd
       ~timeout_sec
       ~cmd:backend.command_text
-      ~git_creds_enabled:backend.git_creds_enabled
       ~network_mode:backend.network_mode
   with
   | Ok result ->

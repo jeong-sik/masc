@@ -6,7 +6,7 @@
 
     @see KeeperCompositeLifecycle.tla I4 EventPriorityMonotone *)
 
-module Obs = Masc_mcp.Keeper_composite_observer
+module Obs = Masc.Keeper_composite_observer
 
 let gen_event_priority_state =
   QCheck.Gen.(

@@ -17,7 +17,7 @@
 
     Phase 0 audit (#11300) classified chat.css as "orphan". The W08 triage
     PR (#11317) falsified that — chat.css is LIVE through the global.css
-    @import cascade and powers the production chat surface in
+    @import runtime and powers the production chat surface in
     dashboard/src/components/chat/primitives.ts (chat-transcript / -bubble
     / -avatar / -role-chip / -detail-panel / -detail-callout). This page
     visualises every production selector and @utility variant so the
@@ -340,8 +340,8 @@
     .ch-drift tbody tr:last-child td { border-bottom: 0; }
     .ch-drift td.use { color: var(--color-fg-muted); }
 
-    /* cascade chain banner (W08-specific) */
-    .ch-cascade {
+    /* runtime chain banner (W08-specific) */
+    .ch-runtime {
       display: flex; align-items: center; gap: 8px;
       flex-wrap: wrap;
       font-family: var(--font-mono);
@@ -349,15 +349,15 @@
       color: var(--color-fg-secondary);
       letter-spacing: var(--track-wide);
     }
-    .ch-cascade .step {
+    .ch-runtime .step {
       padding: 4px 8px;
       border: 1px solid var(--color-border-default);
       border-radius: var(--r-0);
       background: var(--color-bg-page);
       color: var(--color-fg-primary);
     }
-    .ch-cascade .arrow { color: var(--color-fg-disabled); }
-    .ch-cascade .target {
+    .ch-runtime .arrow { color: var(--color-fg-disabled); }
+    .ch-runtime .target {
       border-color: var(--color-accent-fg-dim);
       background: rgb(var(--color-accent-glow) / .14);
       color: var(--color-fg-primary);
@@ -393,7 +393,7 @@
         (<code>#11300</code>) classified <code>chat.css</code> as orphan;
         the W08 triage pass (<code>#11317</code>) falsified that — the file is
         loaded through <code>global.css</code>'s <code>@import</code>
-        cascade and is consumed by
+        runtime and is consumed by
         <code>dashboard/src/components/chat/primitives.ts</code>. This
         preview reproduces every production selector with SSOT tokens so
         the drift catalog is auditable from the design-system gallery.</p>
@@ -402,9 +402,9 @@
     <section class="pv-banner" role="note">
       <div class="h">Production source: src/styles/chat.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
       <div class="l">
-        Loaded via <strong>main.ts → global.css @import → chat.css</strong> · cascade chain confirmed by W08 triage (#11317), correcting Phase 0 orphan classification (#11300) · read-only mirror, no production CSS modified by this preview · drift fix follows in Phase 2
+        Loaded via <strong>main.ts → global.css @import → chat.css</strong> · runtime chain confirmed by W08 triage (#11317), correcting Phase 0 orphan classification (#11300) · read-only mirror, no production CSS modified by this preview · drift fix follows in Phase 2
       </div>
-      <div class="ch-cascade" aria-label="chat.css load chain">
+      <div class="ch-runtime" aria-label="chat.css load chain">
         <span class="step">dashboard/src/main.ts</span>
         <span class="arrow">→</span>
         <span class="step">styles/global.css</span>
@@ -436,7 +436,7 @@
               <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
                 <div class="ch-meta"><span class="name">@masc-improver</span> <span class="ch-role-chip assistant">Assistant</span> <span class="ts">10:32:14</span></div>
                 <div class="ch-bubble assistant">
-                  Picked up <code>OAS-1132</code>: cascade fail-closed for unknown→permissive default. Drafting boundary patch + property test sweep.
+                  Picked up <code>OAS-1132</code>: runtime fail-closed for unknown→permissive default. Drafting boundary patch + property test sweep.
                 </div>
               </div>
             </div>
@@ -451,14 +451,14 @@
               <div class="ch-avatar" aria-hidden="true">S</div>
               <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
                 <div class="ch-meta"><span class="name">system</span> <span class="ch-role-chip">System</span> <span class="ts">10:33:02</span></div>
-                <div class="ch-bubble system">cascade.toml hot-reload picked up at 10:33:01 · 6 keepers signalled.</div>
+                <div class="ch-bubble system">runtime.toml hot-reload picked up at 10:33:01 · 6 keepers signalled.</div>
               </div>
             </div>
             <div class="ch-row">
               <div class="ch-avatar error" aria-hidden="true">!</div>
               <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
-                <div class="ch-meta"><span class="name">@cli-tool-a</span> <span class="ch-role-chip error">Error</span> <span class="ts">10:33:18</span></div>
-                <div class="ch-bubble error">rollout-thread-not-found · cascade fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark.</div>
+                <div class="ch-meta"><span class="name">@descriptor-adapter-a</span> <span class="ch-role-chip error">Error</span> <span class="ts">10:33:18</span></div>
+                <div class="ch-bubble error">rollout-thread-not-found · runtime fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark.</div>
               </div>
             </div>
           </div>
@@ -496,7 +496,7 @@
           <!-- mirrors production .chat-bubble.user (right-aligned, accent gradient) -->
           <div style="display: flex; justify-content: flex-end;">
             <div class="ch-bubble user">
-              cascade narrow 적용 후 oas_timeout_budget 11/h → 0/h. 측정 데이터 첨부했어요. 머지 가능?
+              runtime narrow 적용 후 oas_timeout_budget 11/h → 0/h. 측정 데이터 첨부했어요. 머지 가능?
             </div>
           </div>
           <div class="ch-toks">
@@ -535,7 +535,7 @@
           <!-- mirrors production .chat-bubble.system (left-aligned, no per-tone bg/border override) -->
           <div style="display: flex; justify-content: flex-start;">
             <div class="ch-bubble system">
-              cascade.toml hot-reload at 10:33:01 · 6 keepers signalled. governance_judge weight 0 → 0.5.
+              runtime.toml hot-reload at 10:33:01 · 6 keepers signalled. governance_judge weight 0 → 0.5.
             </div>
           </div>
           <div class="ch-toks">
@@ -554,7 +554,7 @@
           <!-- mirrors production .chat-bubble.error (left-aligned, deep red gradient) -->
           <div style="display: flex; justify-content: flex-start;">
             <div class="ch-bubble error">
-              rollout-thread-not-found · cascade fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark · operator approval required.
+              rollout-thread-not-found · runtime fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark · operator approval required.
             </div>
           </div>
           <div class="ch-toks">
@@ -655,7 +655,7 @@
     "status": "running",
     "task": "OAS-1132 fail-closed sweep",
     "heartbeat": "2026-04-28T10:32:48+09:00",
-    "cascade_pin": "model-d-spark"
+    "runtime_pin": "capability-tier-c"
   }
 }</pre>
           </div>
@@ -680,7 +680,7 @@
           </div>
           <div style="height: 6px;"></div>
           <div class="ch-detail-callout">
-            <strong>note</strong> · cascade chain: main.ts → global.css @import → chat.css. orphan classification falsified by W08 triage (#11317).
+            <strong>note</strong> · runtime chain: main.ts → global.css @import → chat.css. orphan classification falsified by W08 triage (#11317).
           </div>
           <div class="ch-toks">
             <span class="pv-tok">background: linear-gradient(180deg, rgba(18,42,33,.55), rgba(10,25,20,.48))</span>

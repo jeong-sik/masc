@@ -39,7 +39,7 @@ export function categorizeCrashReason(reason: string | null | undefined): Superv
   const lower = reason.toLowerCase()
   // Defensive exact-match: if backend emits the category name directly
   // (e.g. "heartbeat" instead of "heartbeat_timeout"), prefer that
-  // over prefix heuristic so "heartbeat" does not collide with an
+  // over prefix matching so "heartbeat" does not collide with an
   // unrelated longer prefix.
   if (CRASH_CATEGORY_KEYS.includes(lower as SupervisorCrashCategory)) return lower as SupervisorCrashCategory
   for (const { prefix, category } of CRASH_PREFIX_MAP) {

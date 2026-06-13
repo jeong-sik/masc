@@ -12,12 +12,12 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_untrusted of string list
 
 val observed_triggers_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
 val observed_affordances_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
+  ?meta:Keeper_meta_contract.keeper_meta ->
   Keeper_world_observation.world_observation ->
   string list
 
@@ -29,8 +29,7 @@ val classify_usage_trust :
 
 val usage_trust_is_trusted : usage_trust -> bool
 
-val estimate_trusted_usage_cost_usd :
-  usage_trusted:bool ->
+val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
 
@@ -61,7 +60,7 @@ val record_turn_latency_bucket : keeper:string -> latency_ms:int -> unit
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  cascade_profile:string ->
+  runtime_profile:string ->
   latency_ms:int ->
   unit
 
@@ -90,10 +89,10 @@ val accountability_evidence_refs :
 val scheduled_autonomous_outcome_of_result :
   has_text:bool ->
   has_tool_calls:bool ->
-  Keeper_types.proactive_cycle_outcome
+  Keeper_meta_contract.proactive_cycle_outcome
 
 val scheduled_autonomous_outcome_for_result :
-  Keeper_agent_run.run_result -> Keeper_types.proactive_cycle_outcome
+  Keeper_agent_run.run_result -> Keeper_meta_contract.proactive_cycle_outcome
 
 val turn_mode_to_string : turn_mode -> string
 val turn_mode_of_string : string -> turn_mode option

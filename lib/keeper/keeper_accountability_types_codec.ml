@@ -2,7 +2,7 @@
    for the accountability ledger.
    Extracted from keeper_accountability.ml during godfile decomposition.
    Contains claim/resolution types, JSON serialization, Dated_jsonl store
-   management, Prometheus emit-skip counter, and window entry reader. *)
+   management, Otel_metric_store emit-skip counter, and window entry reader. *)
 
 type claim_kind = Keeper_accountability_claim_types.claim_kind =
   | Task_commitment
@@ -72,7 +72,7 @@ let is_keeper_agent_name agent_name =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name agent_name)
 ;;
 
-(** #10314: surface accountability ledger emit drops as a Prometheus
+(** #10314: surface accountability ledger emit drops as a Otel_metric_store
     counter so operators can distinguish "no emits because no work"
     from "no emits because the agent_name gate rejected the call".
 
@@ -92,7 +92,7 @@ let is_keeper_agent_name agent_name =
 let accountability_emit_skip_metric = "masc_accountability_emit_skip_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:accountability_emit_skip_metric
     ~help:
       "Total accountability ledger calls dropped before append because a precondition \
@@ -103,7 +103,7 @@ let () =
 ;;
 
 let record_emit_skip ~kind ~reason =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     accountability_emit_skip_metric
     ~labels:[ "kind", kind; "reason", reason ]
     ()
@@ -125,7 +125,7 @@ let accountability_dir base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "accountability"
 ;;
 
-let get_store (config : Coord_query.config) : Dated_jsonl.t =
+let get_store (config : Workspace_query.config) : Dated_jsonl.t =
   let base_path = config.base_path in
   Eio.Mutex.use_rw ~protect:true store_cache_mu (fun () ->
     match Hashtbl.find_opt store_cache base_path with
@@ -151,17 +151,7 @@ let json_int_opt key json =
 
 let json_bool key ~default json = Safe_ops.json_bool ~default key json
 
-let json_string_list key json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`List items) ->
-       List.filter_map (function
-         | `String s -> Some s
-         | _ -> None) items
-     | _ -> [])
-  | _ -> []
-;;
+let json_string_list key json = Safe_ops.json_string_list key json
 
 let option_string_field key = function
   | Some value ->
@@ -222,18 +212,6 @@ let event_date_string ts =
     (tm.Unix.tm_year + 1900)
     (tm.Unix.tm_mon + 1)
     tm.Unix.tm_mday
-;;
-
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
 ;;
 
 let claim_event_of_json json =
@@ -300,7 +278,7 @@ let resolution_event_of_json json =
   | _ -> None
 ;;
 
-let read_window_entries (config : Coord_query.config) =
+let read_window_entries (config : Workspace_query.config) =
   (match !window_read_count_for_testing_ref with
    (* tla-lint: allow-mutation: test hook — opt-in counter for window-read assertions *)
    | Some count -> window_read_count_for_testing_ref := Some (count + 1)

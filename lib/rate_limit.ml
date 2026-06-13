@@ -1,4 +1,4 @@
-(** Rate Limiting for masc-mcp
+(** Rate Limiting for masc
 
     Provides token bucket rate limiting per client/agent.
 

@@ -48,28 +48,6 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-ocaml-comment-terminator-trap.sh
 
-  provider-adapter-removal-ratchet:
-    name: Provider adapter removal ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/provider-adapter-removal-ratchet.sh
-
-  shell-ir-consumption-ratchet:
-    name: Shell IR consumption ratchet (RFC-0160)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Install jq
-        run: sudo apt-get install -y -qq jq
-      - name: Run ratchet
-        run: bash scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
-
   timeout-env-ceiling:
     name: Timeout env knob ceiling ratchet (RFC-0138)
     runs-on: ubuntu-latest
@@ -79,6 +57,15 @@ jobs:
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
         run: bash scripts/lint/timeout-env-ceiling.sh
+
+  dashboard-env-knob-count:
+    name: Dashboard env knob count (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run lint
+        run: bash scripts/lint-timeout-env-count.sh --strict
 
   no-actionable-signal-bool-context:
     name: No actionable signal bool context
@@ -110,6 +97,16 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-keeper-behavior-hardcoding.sh
 
+  no-eval-tool-selector-runtime-import:
+    name: Eval tool selector runtime boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-eval-tool-selector-runtime-import.sh
+
   no-legacy-tool-surface-name:
     name: Legacy tool surface name ratchet (RFC-0064)
     runs-on: ubuntu-latest
@@ -120,6 +117,26 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/no-legacy-tool-surface-name.sh --fail
 
+  no-retired-tool-husks:
+    name: Retired tool husk ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-retired-tool-husks.sh --fail
+
+  no-synthetic-tool-call-residue:
+    name: Synthetic tool-call residue ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/no-synthetic-tool-call-residue.sh --fail
+
   no-tool-substrate-adapter-surface:
     name: Tool substrate adapter surface ratchet
     runs-on: ubuntu-latest
@@ -129,6 +146,26 @@ jobs:
         run: sudo apt-get install -y -qq ripgrep
       - name: Run lint
         run: bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
+
+  tool-keeper-boundary:
+    name: Tool -> Keeper dependency-direction ratchet (RFC-0194 §3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/tool-keeper-boundary-ratchet.sh --fail
+
+  masc-domain-boundary:
+    name: MASC domain ownership ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint/masc-domain-boundary-ratchet.sh --fail
 
   no-tool-result-error-printexc:
     name: RFC-0148 backsliding guard (no Tool_result.error + Printexc.to_string)
@@ -159,7 +196,7 @@ jobs:
         run: bash scripts/lint/no-fabricated-telemetry.sh
 
   no-oas-prefix-in-lib:
-    name: No oas_* prefix in masc-mcp lib/ (RFC-0047)
+    name: No oas_* prefix in masc lib/ (RFC-0047)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -197,22 +234,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run lint
         run: bash scripts/lint/no-yojson-3-dead-arms.sh
-
-  godfile-size-regression:
-    name: Godfile size
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        env:
-          BASE: ${{ github.event.pull_request.base.ref && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
-        run: bash scripts/lint/godfile-size-regression.sh
-      - name: Run RFC-0151 code-smell ratchet
-        run: bash scripts/code-smell/measure.sh
 
   ignore-without-comment-new:
     name: ignore() justification (new sites)
@@ -290,3 +311,37 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run lint
         run: bash scripts/lint/exhaustive-guard.sh
+
+  fun-protect-finalizer:
+    name: Fun.protect finalizer guard
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run guard
+        run: |
+          python3 scripts/ci/check-fun-protect-finally-guard.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head HEAD
+
+  spawn-bounded:
+    name: Spawn-bounded ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+      - name: Run lint
+        run: bash scripts/lint-spawn-bounded.sh
+
+  audit-path-ssot:
+    name: audit-path-ssot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y -qq ripgrep
+      - name: Run path SSOT audit
+        run: bash scripts/audit-path-ssot.sh

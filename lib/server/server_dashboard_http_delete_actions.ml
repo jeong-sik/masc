@@ -20,7 +20,7 @@ type agent_purge_cleanup_result =
   { agent_name : string
   ; pending_confirms_removed : int
   ; heartbeats_stopped : int
-  ; coord_leave_result : string
+  ; workspace_unbind_result : string
   }
 
 type agent_purge_cleanup_target =
@@ -86,8 +86,8 @@ let credential_aliases agent_name =
 ;;
 
 let agent_file_path config agent_name =
-  Filename.concat (Coord.agents_dir config)
-    (Coord.safe_filename agent_name ^ ".json")
+  Filename.concat (Workspace.agents_dir config)
+    (Workspace.safe_filename agent_name ^ ".json")
 ;;
 
 let resolve_keeper_purge_target config requested_name =
@@ -106,9 +106,9 @@ let resolve_keeper_purge_target config requested_name =
   let rec loop = function
     | [] -> None
     | candidate :: rest -> (
-      let candidate_meta_path = Keeper_types.keeper_meta_path config candidate in
+      let candidate_meta_path = Keeper_types_profile.keeper_meta_path config candidate in
       let candidate_toml_path = Config_dir_resolver.keeper_toml_path_opt candidate in
-      match Keeper_types.read_meta_resolved config candidate with
+      match Keeper_meta_store.read_meta_resolved config candidate with
       | Ok (Some (resolved_name, meta)) ->
         Some
           {
@@ -151,7 +151,7 @@ let resolve_keeper_purge_target config requested_name =
 
 let plain_agent_candidate_names config requested_name =
   let trimmed = String.trim requested_name in
-  let resolved = Coord.resolve_agent_name config trimmed in
+  let resolved = Workspace.resolve_agent_name config trimmed in
   [ trimmed; resolved ]
   |> List.filter (fun value -> value <> "")
   |> Json_util.dedupe_keep_order
@@ -180,13 +180,13 @@ let agent_purge_cleanup_result_to_json
     { agent_name
     ; pending_confirms_removed
     ; heartbeats_stopped
-    ; coord_leave_result
+    ; workspace_unbind_result
     } =
   `Assoc
     [ ("agent_name", `String agent_name)
     ; ("pending_confirms_removed", `Int pending_confirms_removed)
     ; ("heartbeats_stopped", `Int heartbeats_stopped)
-    ; ("coord_leave_result", `String coord_leave_result)
+    ; ("workspace_unbind_result", `String workspace_unbind_result)
     ]
 ;;
 
@@ -209,7 +209,7 @@ let resolve_agent_purge_targets config agent_names =
        let alias = String.trim requested_name in
        if alias <> ""
        then (
-         let agent_name = Coord.resolve_agent_name config alias |> String.trim in
+         let agent_name = Workspace.resolve_agent_name config alias |> String.trim in
          if agent_name <> "" then add_alias ~agent_name alias));
   !order
   |> List.rev
@@ -236,14 +236,14 @@ let purge_agent_filesystem_artifacts config agent_names =
          |> List.fold_left ( + ) 0
        in
        let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-       let coord_leave_result =
-         Coord.leave ~stop_heartbeats:false config ~agent_name
+       let workspace_unbind_result =
+         Workspace.end_session ~stop_heartbeats:false config ~agent_name
        in
        let aliases_label = String.concat "," aliases in
        Log.Misc.info
-         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d coord_leave=%S"
+         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
          agent_name aliases_label pending_confirms_removed heartbeats_stopped
-         coord_leave_result;
+         workspace_unbind_result;
        aliases
        |> List.iter (fun alias ->
             remove_path_if_exists ~context:"agent_purge"
@@ -256,17 +256,17 @@ let purge_agent_filesystem_artifacts config agent_names =
        { agent_name
        ; pending_confirms_removed
        ; heartbeats_stopped
-       ; coord_leave_result
+       ; workspace_unbind_result
        })
 ;;
 
 let purge_keeper_artifacts config requested_name
     ({ keeper_name; agent_name; trace_id; toml_path } : keeper_purge_target) =
-  let keeper_dir = Keeper_types.keeper_dir config in
+  let keeper_dir = Keeper_fs.keeper_dir config in
   let keeper_runtime_dir = Filename.concat keeper_dir keeper_name in
   let cleanup_names =
     [ requested_name; keeper_name; agent_name ]
-    |> List.filter (fun value -> String.trim value <> "")
+    |> List.filter_map String_util.trim_to_option
     |> Json_util.dedupe_keep_order
   in
   cleanup_names
@@ -286,7 +286,7 @@ let purge_keeper_artifacts config requested_name
   List.iter
     (remove_path_if_exists ~context:"keeper_purge")
     [
-      Keeper_types.keeper_meta_path config keeper_name;
+      Keeper_types_profile.keeper_meta_path config keeper_name;
       Keeper_types_support.keeper_metrics_path config keeper_name;
       Keeper_types_support.keeper_memory_bank_path config keeper_name;
       Keeper_types_support.keeper_generation_index_path config keeper_name;
@@ -337,8 +337,8 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "task_id")
              | Some task_id ->
-             let config = state.Mcp_server.room_config in
-             match Task_dispatch.delete_task config ~task_id with
+             let config = state.Mcp_server.workspace_config in
+             match Task.Dispatch.delete_task config ~task_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error err ->
                  respond_error ~status:`Not_found ~request:req reqd
@@ -359,7 +359,7 @@ let add_delete_action_routes router =
              | None ->
                  respond_error ~request:req reqd (invalid_request "goal_id")
              | Some goal_id ->
-             let config = state.Mcp_server.room_config in
+             let config = state.Mcp_server.workspace_config in
              match Goal_store.delete_goal config ~goal_id with
              | Ok () -> respond_ok ~request:req reqd
              | Error msg ->
@@ -379,7 +379,7 @@ let add_delete_action_routes router =
              | None ->
                respond_error ~request:req reqd (invalid_request "agent_name")
              | Some requested_name ->
-               let config = state.Mcp_server.room_config in
+               let config = state.Mcp_server.workspace_config in
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
@@ -427,21 +427,6 @@ let add_delete_action_routes router =
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "agent_name")
          )
-       ) request reqd)
-
-  |> Http.Router.post "/api/v1/dashboard/goals/sweep" (fun request reqd ->
-       with_token_permission_auth ~permission:Masc_domain.CanAdmin
-         (fun state _agent_name _req reqd ->
-         let config = state.Mcp_server.room_config in
-         let sweep_config = Goal_janitor.runtime_config () in
-         let result = Goal_janitor.run ~config:sweep_config config in
-         Http.Response.json_value ~compress:true ~request
-           (`Assoc
-              [
-                ("ok", `Bool true);
-                ("result", Goal_janitor.sweep_result_to_yojson result);
-              ])
-           reqd
        ) request reqd)
 
   (* ── Board moderation routes (Phase 2) ───────────────────────────── *)
@@ -555,7 +540,7 @@ let add_delete_action_routes router =
                        let note = Safe_ops.json_string_opt "note" json in
                        let actor =
                          match Safe_ops.json_string_opt "actor" json with
-                         | Some a when String.trim a <> "" -> a
+                         | Some a -> (match String_util.trim_to_option a with Some trimmed -> trimmed | None -> agent_name)
                          | _ -> agent_name
                        in
                        (match Board_moderation.record_action ~target_kind ~target_id

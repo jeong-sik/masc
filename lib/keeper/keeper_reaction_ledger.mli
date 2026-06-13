@@ -13,7 +13,6 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Alive_but_stuck_recovery
   | Stay_silent_recovery
   | Unknown of string
 
@@ -60,7 +59,7 @@ val record_board_cursor_ack :
     ack row. *)
 
 val record_execution_receipt_reaction :
-  Coord.config ->
+  Workspace.config ->
   keeper_name:string ->
   trace_id:string ->
   ?turn_count:int ->

@@ -66,7 +66,7 @@
         <tbody>
           <tr>
             <td>Pass selected `repoId` through IDE APIs</td>
-            <td>`dashboard/src/api/ide.ts`, `code-document-store.ts`, `ide-data-coordinator.ts`, API tests</td>
+            <td>`dashboard/src/api/ide.ts`, `code-document-store.ts`, `ide-data-workspace-store.ts`, API tests</td>
             <td>Fixed locally: annotation and region GET/write/delete URLs include `repo_id` after repo selection.</td>
           </tr>
           <tr>
@@ -199,12 +199,12 @@ pnpm exec tsc --noEmit --pretty false</pre>
       <h2>Live Probe Checklist</h2>
       <pre>curl -fsS http://127.0.0.1:8935/health | jq '{status, transport, paths, startup, subsystems}'
 
-curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard" \
+curl -fsS -H "Authorization: Bearer $MASC_TOKEN" -H "X-MASC-Agent: dashboard" \
   'http://127.0.0.1:8935/api/v1/dashboard/shell?light=true' \
   | jq '{counts, auth, configured_keepers, projection_diagnostics}'
 
-curl -fsS -H "Authorization: Bearer $MASC_MCP_TOKEN" -H "X-MASC-Agent: dashboard" \
-  'http://127.0.0.1:8935/api/v1/ide/annotations?repo_id=masc-mcp&amp;file_path=README.md' \
+curl -fsS -H "Authorization: Bearer $MASC_TOKEN" -H "X-MASC-Agent: dashboard" \
+  'http://127.0.0.1:8935/api/v1/ide/annotations?repo_id=masc&amp;file_path=README.md' \
   | jq '{ok, count: (.data | length)}'</pre>
     </section>
   </main>

@@ -190,7 +190,7 @@
   min-height: 0;
 }
 .dr-output-bar,
-.dr-cascade-bar,
+.dr-runtime-bar,
 .dr-audit-bar,
 .dr-cost-bar {
   display: flex;
@@ -203,7 +203,7 @@
   flex: 0 0 auto;
 }
 .dr-output-bar .lbl,
-.dr-cascade-bar .lbl,
+.dr-runtime-bar .lbl,
 .dr-audit-bar .lbl,
 .dr-cost-bar .lbl {
   color: var(--color-fg-muted);
@@ -212,7 +212,7 @@
   font-size: var(--fs-9);
 }
 .dr-output-bar .meta,
-.dr-cascade-bar .meta,
+.dr-runtime-bar .meta,
 .dr-audit-bar .meta,
 .dr-cost-bar .meta {
   margin-left: auto;
@@ -253,14 +253,14 @@
 .dr-out-l.lv-info .lv { color: var(--color-fg-disabled); }
 .dr-out-l.lv-info .x  { color: var(--color-fg-secondary); }
 
-/* ─── CASCADE ─────────────────────────────────────────────── */
-.dr-cascade {
+/* ─── RUNTIME ─────────────────────────────────────────────── */
+.dr-runtime {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
-.dr-cascade-body {
+.dr-runtime-body {
   flex: 1;
   overflow-y: auto;
   padding: 8px 14px;

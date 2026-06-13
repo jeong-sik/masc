@@ -12,7 +12,7 @@
 
     Spec lines 10-13 already cite this module:
     "Modeled from: lib/keeper/keeper_post_turn.ml, lib/keeper/keeper_rollover.ml,
-    lib/keeper/keeper_types.mli".  This block is the reverse-direction
+    lib/keeper_types/keeper_types.mli".  This block is the reverse-direction
     citation so code search for "KeeperGenerationLineage" lands here.
 
     Spec semantics modelled (TLA+ -> OCaml):
@@ -43,7 +43,33 @@
     runtime — this is the generation contract the rollover enforces. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_core
+
+let log_orphan_tool_result_repair
+    ~keeper_name
+    ~site
+    (stats : Keeper_context_core.tool_pair_repair_stats) =
+  if Keeper_context_core.tool_pair_repair_stats_changed stats then
+    Log.Harness.emit
+      Log.Warn
+      ~details:
+        (`Assoc
+            [ "keeper_name", `String keeper_name
+            ; "site", `String site
+            ; "dropped_tool_results", `Int stats.dropped_tool_results
+            ; ( "dropped_tool_result_ids"
+              , `List
+                  (List.map
+                     (fun tool_use_id -> `String tool_use_id)
+                     stats.dropped_tool_result_ids) )
+            ])
+      (Printf.sprintf
+         "orphan_tool_result_repair keeper=%s site=%s dropped_tool_results=%d"
+         keeper_name
+         site
+         stats.dropped_tool_results)
 
 type handoff_rollover = {
   updated_meta : keeper_meta;
@@ -68,18 +94,16 @@ type handoff_rollover = {
 let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   match klass with
   | Sdk_token_budget_exceeded -> true
-  | Cascade_exhausted _
+  | Runtime_exhausted _
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Oas_agent_execution_timeout
-  | Autonomous_slot_wait_timeout
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
   | Turn_timeout
   | Turn_livelock_blocked
   | Completion_contract_violation
-  | No_tool_capable_provider
   | Stay_silent_loop
   | Fiber_unresolved
   | Stale_turn_timeout
@@ -88,7 +112,6 @@ let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   | Sdk_cost_budget_exceeded
   | Sdk_unrecognized_stop_reason
   | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
@@ -99,7 +122,7 @@ type rollover_gate_decision =
   | Go of string
 
 let append_lineage_artifacts_best_effort
-    ~(config : Coord.config)
+    ~(config : Workspace.config)
     ~(parent : keeper_meta)
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
@@ -116,13 +139,12 @@ let append_lineage_artifacts_best_effort
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RolloverFailures)
         ~labels:[("keeper", child.name); ("site", "lineage_append")]
         ();
-      Log.Keeper.warn
-        "keeper:%s lineage append skipped after rollover trace=%s->%s: %s"
-        child.name
+      Log.Keeper.warn ~keeper_name:child.name
+        "lineage append skipped after rollover trace=%s->%s: %s"
         parent_trace_id
         (Keeper_id.Trace_id.to_string child.runtime.trace_id)
         (Printexc.to_string exn)
@@ -249,24 +271,34 @@ let maybe_rollover_oas_handoff
            single fleet-wide invariant: any lifecycle callback that
            can't reach the registry must surface as a counter+warn and
            durable telemetry gap, never silently abort the rollover. *)
-        (try on_started ()
-         with
-         | exn ->
-             Keeper_callback_failure.record ~base_dir ~meta:base_meta
-               ~callback:"on_handoff_started" exn);
+        let () =
+          Cancel_safe.observe
+            ~on_exn:(fun exn ->
+              Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+                ~labels:[ ("keeper", base_meta.name); ("callback", "on_handoff_started") ] ();
+              Keeper_callback_failure.record ~base_dir ~meta:base_meta
+                ~callback:"on_handoff_started" exn)
+            on_started
+        in
         (try
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir
           in
           let save_ctx =
+            let messages, pair_repair_stats =
+              repair_orphan_tool_result_messages_with_stats
+                (messages_of_context ctx)
+            in
+            log_orphan_tool_result_repair
+              ~keeper_name:base_meta.agent_name
+              ~site:"handoff_rollover"
+              pair_repair_stats;
             {
               ctx with
               checkpoint =
                 {
                   (checkpoint_of_context ctx) with
-                  messages =
-                    repair_orphan_tool_result_messages
-                      (messages_of_context ctx);
+                  messages;
                 };
             }
           in
@@ -274,26 +306,26 @@ let maybe_rollover_oas_handoff
                   ~max_checkpoint_messages:base_meta.compaction.max_checkpoint_messages
                   ~session:new_session
                   ~agent_name:base_meta.agent_name
-                  ~model ~ctx:save_ctx ~generation:next_generation with
+                  ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
                 ();
-              Log.Keeper.error
-                "keeper:%s OAS handoff rollover ABORTED — checkpoint save failed: %s"
-                base_meta.name e;
+              Log.Keeper.error ~keeper_name:base_meta.name
+                "OAS handoff rollover ABORTED — checkpoint save failed: %s"
+                e;
               { rollover_base with attempted = true; failure_reason = Some e }
           | Ok _checkpoint ->
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
-                 Prometheus.inc_counter
+                 Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string RolloverFailures)
                    ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
                    ();
-                 Log.Keeper.error
-                   "keeper:%s OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
-                   base_meta.name new_trace_id err;
+                 Log.Keeper.error ~keeper_name:base_meta.name
+                   "OAS handoff rollover ABORTED — generated invalid trace_id %s: %s"
+                   new_trace_id err;
                  { rollover_base with
                    attempted = true;
                    failure_reason = Some err;
@@ -331,15 +363,15 @@ let maybe_rollover_oas_handoff
                        ("trigger_reason", `String trigger_reason);
                      ]
                  in
-                 Log.Keeper.info
-                   "keeper:%s OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
-                   base_meta.name (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
+                 Log.Keeper.info ~keeper_name:base_meta.name
+                   "OAS handoff rollover trace=%s->%s gen=%d->%d ratio=%.3f trigger=%s"
+                   (Keeper_id.Trace_id.to_string prev_trace_id) new_trace_id current_generation
                    next_generation ratio trigger_reason;
                  (* OAS owns checkpoint/session continuity.
                     MASC lineage telemetry is append-only best-effort data and
                     must never roll back a successful rollover. *)
                  let lineage_config =
-                   Coord.default_config (Filename.dirname (Filename.dirname base_dir))
+                   Workspace.default_config (Filename.dirname (Filename.dirname base_dir))
                  in
                  append_lineage_artifacts_best_effort
                    ~config:lineage_config

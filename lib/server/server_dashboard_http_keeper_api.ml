@@ -5,6 +5,12 @@
 
 include Server_dashboard_http_keeper_api_post
 
+let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
+
+(* Maximum number of trajectory/trace entries returned per query. *)
+let trajectory_max_limit = 500
+
 let handle_keeper_get_subroutes state req request reqd =
   let req_path = Http.Request.path req in
   let prefix = keeper_api_prefix in
@@ -25,18 +31,38 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
     else
-      let base_dir = state.Mcp_server.room_config.base_path in
+      let base_dir = state.Mcp_server.workspace_config.base_path in
       let messages =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
         (Keeper_chat_store.to_json_array messages)
+  else if ends_with "/person-notes" then
+    (* RFC-0229 P2: keeper-authored person notes for the roster pane.
+       Read-only fold over the notes store; same shape as the tool
+       surface ([{speaker_id, note}]). *)
+    let name = extract_name "/person-notes" in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else
+      let base_dir = state.Mcp_server.workspace_config.base_path in
+      let notes = Keeper_person_notes.notes ~base_dir ~keeper_name:name in
+      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+        (`List
+          (List.map
+             (fun (speaker_id, note) ->
+               `Assoc
+                 [ ("speaker_id", `String speaker_id)
+                 ; ("note", `String note)
+                 ])
+             notes))
   else if ends_with keeper_suffix_checkpoints then
     let name = extract_name keeper_suffix_checkpoints in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
+      let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.workspace_config name in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
@@ -54,10 +80,10 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let limit =
         Server_utils.int_query_param req "limit" ~default:200
-        |> max 1 |> min 500
+        |> max 1 |> min trajectory_max_limit
       in
       let st, json =
-        keeper_runtime_trace_json state.Mcp_server.room_config name
+        keeper_runtime_trace_json state.Mcp_server.workspace_config name
           ?trace_id ?turn_id ~limit ()
       in
       let status : Httpun.Status.t =
@@ -69,7 +95,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let config = state.Mcp_server.room_config in
+      let config = state.Mcp_server.workspace_config in
       let (st, json) =
         Dashboard_http_keeper.keeper_config_json config name
       in
@@ -82,7 +108,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let config = state.Mcp_server.room_config in
+      let config = state.Mcp_server.workspace_config in
       let (st, json) =
         Dashboard_http_keeper.keeper_bdi_snapshot_json config name
       in
@@ -100,8 +126,8 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
-      let config = state.Mcp_server.room_config in
-      let masc_root = Coord.masc_root_dir config in
+      let config = state.Mcp_server.workspace_config in
+      let masc_root = Workspace.masc_root_dir config in
       let window_hours =
         Server_utils.int_query_param req "window_hours"
           ~default:24
@@ -117,7 +143,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Printf.sprintf "keeper:tool-stats:%s:%s:%d" masc_root name window_hours
       in
       let json =
-        Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+        Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
             let since =
               Time_compat.now ()
@@ -142,7 +168,6 @@ let handle_keeper_get_subroutes state req request reqd =
               | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
               | None -> None
             in
-            let freshness_slo_s = 300.0 in
             let dashboard_surface = "/api/v1/keepers/:name/tool-stats" in
             let coverage_gaps =
               Telemetry_coverage_gap.read_recent ~masc_root ~n:32
@@ -181,14 +206,12 @@ let handle_keeper_get_subroutes state req request reqd =
               ("durable_store", `String (Trajectory.trajectories_dir masc_root name));
               ("dashboard_surface", `String dashboard_surface);
               ("freshness_slo_s", `Float freshness_slo_s);
-              ( "latest_ts_unix",
-                match latest_ts with Some ts -> `Float ts | None -> `Null );
+              ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
               ( "latest_ts_iso",
                 match latest_ts with
                 | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
                 | None -> `Null );
-              ( "latest_age_s",
-                match latest_age_s with Some age -> `Float age | None -> `Null );
+              ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
               ("health", `String health);
               ( "stale_reason",
                 if stale_reason = "" then `Null else `String stale_reason );
@@ -223,8 +246,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let entries =
         Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
       in
-      let config = state.Mcp_server.room_config in
-      let masc_root = Coord.masc_root_dir config in
+      let config = state.Mcp_server.workspace_config in
+      let masc_root = Workspace.masc_root_dir config in
       let latest_ts =
         List.fold_left
           (fun acc json ->
@@ -236,7 +259,6 @@ let handle_keeper_get_subroutes state req request reqd =
             | None -> acc)
           None entries
       in
-      let freshness_slo_s = 300.0 in
       let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
       let latest_age_s =
         match latest_ts with
@@ -276,18 +298,119 @@ let handle_keeper_get_subroutes state req request reqd =
         ("durable_store", `String (Filename.concat masc_root "tool_calls"));
         ("dashboard_surface", `String dashboard_surface);
         ("freshness_slo_s", `Float freshness_slo_s);
-        ( "latest_ts_unix",
-          match latest_ts with Some ts -> `Float ts | None -> `Null );
+        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
         ( "latest_ts_iso",
           match latest_ts with
           | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
           | None -> `Null );
-        ( "latest_age_s",
-          match latest_age_s with Some age -> `Float age | None -> `Null );
+        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
         ("health", `String health);
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
         ("coverage_gaps", `List coverage_gaps);
+        ("entries", `List entries);
+      ] in
+      Http.Response.json_value ~compress:true ~request:req json reqd
+  else if ends_with "/turn-records" then
+    (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
+       consecutive-pair block diffs so the dashboard stays a renderer
+       of the tested OCaml diff (views derive; no view-side repair). *)
+    let name = extract_name "/turn-records" in
+    if String.length name = 0 then
+      respond_error reqd "keeper name is required"
+    else if not (Keeper_config.validate_name name) then
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
+    else
+      let limit =
+        Server_utils.int_query_param req "limit" ~default:50
+        |> max 1 |> min trajectory_max_limit
+      in
+      let config = state.Mcp_server.workspace_config in
+      let store = Keeper_types_support.keeper_turn_record_store config name in
+      let raw_rows = Dated_jsonl.read_recent store limit in
+      (* Strict decode: malformed rows are counted and reported, never
+         repaired or silently dropped (RFC-0233 §4). *)
+      let records_rev, skipped_rows =
+        List.fold_left
+          (fun (acc, skipped) json ->
+            match Turn_record.of_json json with
+            | Ok record -> (record :: acc, skipped)
+            | Error _ -> (acc, skipped + 1))
+          ([], 0) raw_rows
+      in
+      let records = List.rev records_rev in
+      let block_json = Turn_record.prompt_block_to_json in
+      let entries =
+        Turn_record.entries_with_diffs records
+        |> List.map (fun ((record : Turn_record.t), diff) ->
+             let diff_vs_prev =
+               match diff with
+               | Some (d : Turn_record.block_diff) ->
+                 `Assoc
+                   [ ("added", `List (List.map block_json d.added))
+                   ; ("removed", `List (List.map block_json d.removed))
+                   ; ( "changed"
+                     , `List
+                         (List.map
+                            (fun (prev_b, next_b) ->
+                              `Assoc
+                                [ ("prev", block_json prev_b)
+                                ; ("next", block_json next_b)
+                                ])
+                            d.changed) )
+                   ]
+               | None -> `Null
+             in
+             `Assoc
+               [ ("record", Turn_record.to_json record)
+               ; ("diff_vs_prev", diff_vs_prev)
+               ])
+      in
+      let latest_ts =
+        List.fold_left
+          (fun acc (r : Turn_record.t) ->
+            match acc with
+            | Some existing when existing >= r.ts -> acc
+            | _ -> Some r.ts)
+          None records
+      in
+      let latest_age_s =
+        match latest_ts with
+        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+        | None -> None
+      in
+      let health, stale_reason =
+        match latest_age_s with
+        | None -> ("empty", "no_entries")
+        | Some age when age > freshness_slo_s ->
+            ("stale", "freshness_slo_exceeded")
+        | Some _ -> ("ok", "")
+      in
+      let json = `Assoc [
+        ("keeper", `String name);
+        ("count", `Int (List.length records));
+        ("skipped_rows", `Int skipped_rows);
+        ("source", `String "turn_record");
+        ("producer", `String "keeper_agent_run.run_turn|keeper_turn_record_writer");
+        ( "durable_store",
+          `String
+            (Filename.concat
+               (Workspace.masc_root_dir config)
+               (Printf.sprintf "keepers/%s/turn-records" name)) );
+        ("dashboard_surface", `String "/api/v1/keepers/:name/turn-records");
+        ("freshness_slo_s", `Float freshness_slo_s);
+        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
+        ( "latest_ts_iso",
+          match latest_ts with
+          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+          | None -> `Null );
+        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
+        ("health", `String health);
+        ( "stale_reason",
+          if stale_reason = "" then `Null else `String stale_reason );
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
@@ -301,15 +424,14 @@ let handle_keeper_get_subroutes state req request reqd =
            [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
         reqd
     else
-      let config = state.Mcp_server.room_config in
-      (match Keeper_types.read_meta config name with
+      let config = state.Mcp_server.workspace_config in
+      (match Keeper_meta_store.read_meta config name with
        | Error e ->
          respond_error ~status:`Internal_server_error reqd e
        | Ok None ->
          respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
        | Ok (Some m) ->
          let trajectory_default_limit = 50 in
-         let trajectory_max_limit = 500 in
          let trace_id =
            Keeper_id.Trace_id.to_string m.runtime.trace_id
          in
@@ -336,7 +458,7 @@ let handle_keeper_get_subroutes state req request reqd =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
          in
-         let masc_root = Coord.masc_root_dir config in
+         let masc_root = Workspace.masc_root_dir config in
          let trajectory_lines =
            Trajectory.read_all_lines ~masc_root ~keeper_name:m.name
              ~trace_id
@@ -380,7 +502,7 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:20
         |> max 1 |> min 50
       in
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
       let phase_str = match phase with
         | Some p -> `String (Keeper_state_machine.phase_to_string p)
@@ -421,16 +543,16 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       let limit =
         Server_utils.int_query_param req "limit" ~default:10
         |> max 1 |> min 100
       in
       (* Use keeper name as agent_name for eval lookup.
          Keepers may also have a separate agent_name — look up both. *)
-      let config = state.Mcp_server.room_config in
+      let config = state.Mcp_server.workspace_config in
       let agent_name_opt =
-        match Keeper_types.read_meta config name with
+        match Keeper_meta_store.read_meta config name with
         | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
         | _ -> None
       in
@@ -468,24 +590,16 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
       let stats = Thompson_sampling.get_stats name in
-      let meta = Keeper_types.read_meta
-          state.Mcp_server.room_config name in
-      let tool_count = match meta with
-        | Ok (Some m) ->
-          List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names m)
-        | _ -> 0
-      in
-      let recovery_floor_count =
-        List.length (Keeper_tool_policy.failing_minimum_tool_names ())
-      in
+      let meta = Keeper_meta_store.read_meta
+          state.Mcp_server.workspace_config name in
       let turn_outcome : [`Ok | `Failed] option =
-        match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
+        match Keeper_registry.get ~base_path:state.Mcp_server.workspace_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
           Some `Failed
         | Some _ -> Some `Ok
@@ -498,39 +612,22 @@ let handle_keeper_get_subroutes state req request reqd =
           ~phase:current
           ~thompson_alpha:stats.alpha
           ~thompson_beta:stats.beta
-          ~tool_count
-          ~recovery_floor_count
           ()
       in
-      let cascade_fsm_mermaid =
+      let runtime_fsm_mermaid =
         match meta with
         | Ok (Some m) ->
-          let routing =
-            Keeper_cascade_routing.select_cascade
-              ~base_cascade:(Keeper_types.cascade_name_of_meta m) ~phase:current
-          in
           let models = [ "candidate" ] in
           let provider_health = [] in
-          (* Slot occupancy from the local runtime pool. The cascade FSM
-             shares these slots across all keepers, so rendering the
-             fleet-global (used, capacity) is the honest value — a
-             per-cascade split would claim an isolation the runtime does
-             not actually provide. *)
-          let slot_state =
-            let used = Local_runtime_pool.allocated_slots () in
-            let max = Local_runtime_pool.configured_capacity () in
-            if max > 0 then Some (used, max) else None
-          in
-          Keeper_decision_audit.cascade_fsm_to_mermaid
+          Keeper_decision_audit.runtime_fsm_to_mermaid
             ~provider_health
-            ?slot_state
-            ~effective_cascade_reason:routing.reason
+            ~effective_runtime_reason:"runtime"
             ~models ~last_provider_result:None ()
         | _ ->
-          Keeper_decision_audit.cascade_fsm_to_mermaid
+          Keeper_decision_audit.runtime_fsm_to_mermaid
             ~models:[] ~last_provider_result:None ()
       in
-      let cascade_models = [] in
+      let runtime_models = [] in
       let last_provider = `Null in
       (* Memory tier usage: join kind_caps (policy) with kind_counts (bank
          summary). Each kind reports used / cap so the dashboard tier
@@ -549,7 +646,7 @@ let handle_keeper_get_subroutes state req request reqd =
         | Ok (Some _) ->
           (match
              Keeper_memory.read_keeper_memory_summary_result
-               state.Mcp_server.room_config
+               state.Mcp_server.workspace_config
                ~name ~max_bytes:120_000 ~max_lines:200 ~recent_limit:0
            with
            | Ok summary ->
@@ -572,9 +669,7 @@ let handle_keeper_get_subroutes state req request reqd =
           ]) caps)
       in
       let memory_kind_usage_error_class_json : Yojson.Safe.t =
-        match memory_kind_usage_error_class with
-        | Some label -> `String label
-        | None -> `Null
+        Json_util.string_opt_to_json memory_kind_usage_error_class
       in
       (* Compaction sub-FSM: only emit a diagram when the keeper is in
          the [Compacting] phase. The three nodes mirror
@@ -600,13 +695,11 @@ let handle_keeper_get_subroutes state req request reqd =
         "current_phase", `String phase_str;
         "mermaid", `String mermaid;
         "decision_pipeline_mermaid", `String decision_pipeline_mermaid;
-        "cascade_fsm_mermaid", `String cascade_fsm_mermaid;
+        "runtime_fsm_mermaid", `String runtime_fsm_mermaid;
         "compaction_submachine_mermaid", compaction_submachine_mermaid;
         "thompson_alpha", `Float stats.alpha;
         "thompson_beta", `Float stats.beta;
-        "tool_count", `Int tool_count;
-        "recovery_floor_count", `Int recovery_floor_count;
-        "cascade_models", `List (List.map (fun s -> `String s) cascade_models);
+        "runtime_models", `List (List.map (fun s -> `String s) runtime_models);
         "last_provider_result", last_provider;
         "memory_kind_usage", memory_kind_usage;
         "memory_kind_usage_error_class", memory_kind_usage_error_class_json;
@@ -627,7 +720,7 @@ let handle_keeper_get_subroutes state req request reqd =
        (LT-16b, upcoming). *)
     let json =
       Server_dashboard_http.dashboard_fleet_composite_json
-        ~config:state.Mcp_server.room_config ()
+        ~config:state.Mcp_server.workspace_config ()
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/composite" then
@@ -638,7 +731,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
          respond_error ~status:`Not_found reqd
@@ -646,20 +739,20 @@ let handle_keeper_get_subroutes state req request reqd =
        | Some entry ->
          let json =
            Server_dashboard_http.dashboard_keeper_composite_json
-             ~config:state.Mcp_server.room_config entry
+             ~config:state.Mcp_server.workspace_config entry
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)
   else if req_path = prefix ^ "regime" then
     (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
        purity contract as the composite route above, uses the
        [Keeper_behavioral_regime_observer] pure projection. *)
-    let base_path = state.Mcp_server.room_config.base_path in
+    let base_path = state.Mcp_server.workspace_config.base_path in
     let snapshots =
       Keeper_behavioral_regime_observer.all_snapshots ~base_path ()
     in
     let json =
       `Assoc [
-        "generated_at", `Float (Unix.gettimeofday ());
+        "generated_at", `String (Masc_domain.now_iso ());
         "count", `Int (List.length snapshots);
         "snapshots",
           `List
@@ -675,7 +768,7 @@ let handle_keeper_get_subroutes state req request reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
-      let base_path = state.Mcp_server.room_config.base_path in
+      let base_path = state.Mcp_server.workspace_config.base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
          respond_error ~status:`Not_found reqd

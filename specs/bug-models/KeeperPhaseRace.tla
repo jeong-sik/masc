@@ -1,18 +1,18 @@
 ---- MODULE KeeperPhaseRace ----
-\* Bug Model: Keeper failure cascade contract (rescoped per #9006).
+\* Bug Model: Keeper failure runtime contract (rescoped per #9006).
 \*
 \* Original spec modelled a phase race against a mutable phase variable
 \* (running -> failing -> cooldown -> handing_off -> idle). That race is
 \* structurally impossible in the current runtime: phase is *derived*
 \* from a `conditions` record by `derive_phase` at
-\* lib/keeper/keeper_state_machine.ml:derive_phase; events update conditions
-\* via lib/keeper/keeper_state_machine.ml:update_conditions and the new phase
-\* is derived by lib/keeper/keeper_state_machine.ml:apply_event. There
+\* lib/keeper_registry/keeper_state_machine.ml:derive_phase; events update conditions
+\* via lib/keeper_registry/keeper_state_machine.ml:update_conditions and the new phase
+\* is derived by lib/keeper_registry/keeper_state_machine.ml:apply_event. There
 \* is no event handler that writes `phase` directly, so two handlers
 \* cannot race a `phase` write.
 \*
 \* The closest live analog — and what this spec now models — is the
-\* fail-cascade contract in lib/keeper/keeper_heartbeat_snapshot.ml:max_consecutive_turn_failures
+\* fail-runtime contract in lib/keeper/keeper_heartbeat_snapshot.ml:max_consecutive_turn_failures
 \* (call site inside run_heartbeat_loop, see `start_keepalive`):
 \*
 \*   let turn_fail_count = (* read consecutive turn failures *) in
@@ -32,7 +32,7 @@
 \*   2. A successful turn observed by the keepalive loop resets
 \*      turn_fail_count to 0 BEFORE the threshold check, so a single
 \*      success after N-1 failures cannot leak into a crash.
-\*   3. Once the cascade fires, the registry carries
+\*   3. Once the runtime fires, the registry carries
 \*      Turn_consecutive_failures(n) with n at or above the threshold;
 \*      it is not possible to record a value below threshold as the
 \*      crash reason.
@@ -48,7 +48,7 @@
 \*
 \* What this spec is NOT:
 \*   - Not the 12-phase keeper FSM (KeeperStateMachine.tla owns that).
-\*   - Not the cascade strategy (CascadeStrategy.tla owns that).
+\*   - Not the runtime strategy (RuntimeStrategy.tla owns that).
 \*   - Not directly about derive_phase races (no such race exists).
 
 EXTENDS Naturals
@@ -80,7 +80,7 @@ Init ==
     /\ recorded_failure_n = 0
     /\ observations = 0
 
-\* -- Normal cascade actions --------------------------------
+\* -- Normal runtime actions --------------------------------
 
 \* TurnSucceeds: keepalive observes a successful turn, counter resets
 \* BEFORE any threshold check would fire on this iteration.
@@ -103,7 +103,7 @@ TurnFailsBelowThreshold ==
 
 \* TurnFailsAtOrAboveThreshold: failure pushes counter to Threshold or
 \* beyond. The runtime stamps Turn_consecutive_failures(n) AND raises
-\* Keeper_fiber_crash. After this, the cascade is terminal in this
+\* Keeper_fiber_crash. After this, the runtime is terminal in this
 \* model (the supervisor restart path is owned by KeeperStateMachine).
 TurnFailsAtOrAboveThreshold ==
     /\ ~crashed
@@ -114,7 +114,7 @@ TurnFailsAtOrAboveThreshold ==
     /\ crashed' = TRUE
     /\ observations' = observations + 1
 
-\* CrashedStutter: once crashed, the cascade does not re-fire.
+\* CrashedStutter: once crashed, the runtime does not re-fire.
 CrashedStutter ==
     /\ crashed
     /\ UNCHANGED vars
@@ -137,12 +137,12 @@ Spec == Init /\ [][Next]_vars
 
 \* -- Safety Invariants -------------------------------------
 
-\* If the cascade fired, the recorded n must be at or above threshold.
+\* If the runtime fired, the recorded n must be at or above threshold.
 \* Catches an off-by-one regression that would stamp a sub-threshold n.
 CrashImpliesThreshold ==
     crashed => recorded_failure_n >= Threshold
 
-\* Recorded failure n is stamped only when the cascade fires.
+\* Recorded failure n is stamped only when the runtime fires.
 RecordOnlyOnCrash ==
     recorded_failure_n > 0 => crashed
 
@@ -150,11 +150,11 @@ RecordOnlyOnCrash ==
 CounterBoundedByObservations ==
     turn_fail_count <= observations
 
-\* -- Bug Model: cascade fires below threshold --------------
+\* -- Bug Model: runtime fires below threshold --------------
 
 \* Bug: a refactor introduces an off-by-one in the threshold check
 \* (e.g. `turn_fail_count > max - 1` becomes `turn_fail_count >= max - 1`).
-\* The cascade fires one failure earlier than intended; recorded_failure_n
+\* The runtime fires one failure earlier than intended; recorded_failure_n
 \* lands below the threshold contract. CrashImpliesThreshold MUST catch.
 BuggyEarlyCrash ==
     /\ ~crashed

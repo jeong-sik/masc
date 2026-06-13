@@ -13,8 +13,8 @@
 
 open Alcotest
 
-module Transport = Masc_mcp.Transport
-module Sdk_tool_contract = Masc_mcp.Sdk_tool_contract
+module Transport = Masc.Transport
+module Sdk_tool_contract = Masc.Sdk_tool_contract
 
 (* ============================================================
    protocol Tests
@@ -232,7 +232,7 @@ let test_request_no_id () =
 let test_request_with_params () =
   let req : Transport.request = {
     id = Some "req-002";
-    method_name = "masc_join";
+    method_name = "masc_start";
     params = `Assoc [("agent_name", `String "agent_llm_a")];
     headers = [];
   } in
@@ -405,10 +405,10 @@ let test_jsonrpc_serialize_response_no_id () =
      with Not_found -> false)
 
 let test_jsonrpc_make_request_basic () =
-  let json = Transport.JsonRpc.make_request ~method_name:"masc_join" ~params:(`Assoc []) () in
+  let json = Transport.JsonRpc.make_request ~method_name:"masc_start" ~params:(`Assoc []) () in
   let json_str = Yojson.Safe.to_string json in
   check bool "has method" true
-    (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
+    (try let _ = Str.search_forward (Str.regexp "masc_start") json_str 0 in true
      with Not_found -> false)
 
 let test_jsonrpc_make_request_with_id () =
@@ -457,13 +457,8 @@ let test_rest_tool_to_endpoint_claim () =
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
 
-let test_rest_tool_to_endpoint_join () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_join" in
-  check string "method" "POST" (Transport.Rest.method_to_string m);
-  check string "path" "/mcp" path
-
-let test_rest_tool_to_endpoint_leave () =
-  let (m, path) = Transport.Rest.tool_to_endpoint "masc_leave" in
+let test_rest_tool_to_endpoint_start () =
+  let (m, path) = Transport.Rest.tool_to_endpoint "masc_start" in
   check string "method" "POST" (Transport.Rest.method_to_string m);
   check string "path" "/mcp" path
 
@@ -527,7 +522,7 @@ let test_rest_parse_request_tasks () =
 
 let test_rest_parse_request_agents () =
   let req = Transport.Rest.parse_request ~http_method:"GET" ~path:"/api/v1/agents" ~query_params:[] ~body:"" in
-  check string "method_name" "masc_who" req.method_name
+  check string "method_name" "masc_agents" req.method_name
 
 let test_rest_parse_request_operator_snapshot () =
   let req =
@@ -621,7 +616,7 @@ let test_rest_parse_request_roundtrips_direct_bindings () =
     [
       "masc_status";
       "masc_tasks";
-      "masc_who";
+      "masc_agents";
       "masc_messages";
       "masc_operator_snapshot";
       "masc_operator_digest";
@@ -658,14 +653,14 @@ let test_rest_generate_openapi_paths () =
     (try let _ = Str.search_forward (Str.regexp "masc_status") json_str 0 in true
      with Not_found -> false);
   check bool "has join" true
-    (try let _ = Str.search_forward (Str.regexp "masc_join") json_str 0 in true
+    (try let _ = Str.search_forward (Str.regexp "masc_start") json_str 0 in true
      with Not_found -> false)
 
 let test_rest_generate_openapi_document () =
   let open Yojson.Safe.Util in
   let doc = Transport.Rest.generate_openapi_document () in
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
-  check string "info.version matches repo version" Masc_mcp.Version.version
+  check string "info.version matches repo version" Masc.Version.version
     (doc |> member "info" |> member "version" |> to_string);
   check string "bearer security scheme type" "http"
     (doc |> member "components" |> member "securitySchemes"
@@ -727,13 +722,13 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
-  check_operation_tags "masc_join" [ "masc" ];
+  check_operation_tags "masc_agents" [ "masc" ];
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list
   in
-  check bool "status has no sdk alias masc_room_status" false
+  check bool "status has no sdk alias masc_workspace_status" false
     (List.exists
-       (fun row -> row |> member "name" |> to_string = "masc_room_status")
+       (fun row -> row |> member "name" |> to_string = "masc_workspace_status")
        sdk_aliases);
   let add_task_entry = operation_entry "masc_add_task" in
   check int "add_task has no fake rest binding"
@@ -981,8 +976,7 @@ let () =
       test_case "tasks" `Quick test_rest_tool_to_endpoint_tasks;
       test_case "add_task" `Quick test_rest_tool_to_endpoint_add_task;
       test_case "claim" `Quick test_rest_tool_to_endpoint_claim;
-      test_case "join" `Quick test_rest_tool_to_endpoint_join;
-      test_case "leave" `Quick test_rest_tool_to_endpoint_leave;
+      test_case "start" `Quick test_rest_tool_to_endpoint_start;
       test_case "broadcast" `Quick test_rest_tool_to_endpoint_broadcast;
       test_case "operator snapshot" `Quick
         test_rest_tool_to_endpoint_operator_snapshot;

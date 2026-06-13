@@ -3,8 +3,8 @@
    See keeper_fsm_guard_runtime.mli for the contract. *)
 
 let bump_counter ~action ~stage =
-  Prometheus.inc_counter
-    Prometheus.metric_fsm_guard_violation
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_fsm_guard_violation
     ~labels:[ "action", action; "stage", stage ]
     ()
 ;;
@@ -15,12 +15,12 @@ let bump_counter ~action ~stage =
    raise on a forbidden pair.  Historically that raise was [Assert_failure]
    (PPX-injected) or [Invalid_argument] (validators embedding the pair in a
    string).  As of RFC-0072 Phase 5 the validators raise typed exceptions
-   ([Keeper_registry.Cascade_transition_violation] /
+   ([Keeper_registry.Runtime_transition_violation] /
    [Turn_phase_transition_violation]); naming those here would create a
    module dependency cycle ([Keeper_registry] already depends on this
    module), so the catch is widened to all exceptions.  The counter is
    bumped and the exception re-raised with its original backtrace intact
-   ([bump_counter] runs a [Prometheus.inc_counter] call in between, which
+   ([bump_counter] runs a [Otel_metric_store.inc_counter] call in between, which
    would otherwise clobber [Printexc]'s current backtrace). *)
 let wrap_unit ~action ~stage thunk =
   try thunk () with

@@ -46,7 +46,7 @@
     symlinks — pure lexical normalisation"), so we do not test
     symlink behavior here. *)
 
-module P = Masc_mcp.Keeper_tool_policy
+module P = Masc.Keeper_tool_policy
 
 (* ── (1) writable prefixes ───────────────────────────────────────── *)
 
@@ -121,7 +121,7 @@ let test_dotdot_at_root_drops () =
     not (P.is_masc_write_allowed "../../etc/passwd"))
 
 let test_root_overshoot_drops_to_writable_prefix () =
-  (* Codex review caught that test_dotdot_at_root_drops above
+  (* Review caught that test_dotdot_at_root_drops above
      can't distinguish "[..] beyond root drops" from "[/etc/]
      just isn't writable" — both produce false.
 

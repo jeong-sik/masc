@@ -5,18 +5,13 @@
     keepalive start, and response JSON generation. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
-(* #8605 family: warn-and-default parser for profile_defaults.tool_preset
-   lifted to [Keeper_preset_defaults] so this file and
-   [agent_tool_persona_runtime] share one SSOT instead of two diverging copies
-   (#8923). *)
-let preset_of_defaults defaults =
-  Keeper_preset_defaults.preset_of_defaults_warn
-    ~call_site:"keeper_turn_up_create"
-    ~defaults_tool_preset:defaults.tool_preset
 
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
@@ -53,12 +48,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Some ids -> ids
     | None -> Option.value ~default:[] p.profile_defaults.active_goal_ids
   in
-  let selected_cascade_name =
-    match p.cascade_name_opt, p.profile_defaults.cascade_name with
-    | Some name, _ -> name
-    | None, Some name -> name
-    | None, None -> Keeper_config.default_cascade_name ()
-  in
   let active_goal_ids_error =
     match p.active_goal_ids_opt with
     | None -> None
@@ -75,14 +64,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                (String.concat ", " missing))
   in
   let sandbox_profile =
-    resolve_sandbox_profile
-      ~preferred:p.sandbox_profile_opt
-      ~fallback:p.profile_defaults.sandbox_profile
+    resolve_sandbox_profile ~fallback:p.profile_defaults.sandbox_profile
   in
   let network_mode =
     resolve_network_mode
       ~sandbox_profile
-      ~preferred:p.network_mode_opt
       ~fallback:p.profile_defaults.network_mode
   in
   let mention_targets =
@@ -99,16 +85,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   | Some msg -> tool_result_error msg
   | None ->
     match
-      validate_sandbox_settings
-        ~config:ctx.config
-        ~keeper_name:p.name
-        ~repo_cli_identity:p.profile_defaults.repo_cli_identity
-        ~sandbox_profile
-        ~network_mode
-        ~allowed_paths
+      validate_sandbox_settings ~allowed_paths
     with
     | Error err ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels:[("keeper", p.name); ("event", "create_sandbox_validation")]
           ();
@@ -118,10 +98,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
     | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
+            ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
+            ~sandbox_profile
         with
         | Error err ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string LifecycleDispatchRejections)
               ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
               ();
@@ -134,7 +115,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             in
             let active_keepers = Keeper_registry.count_running () in
             if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleDispatchRejections)
                 ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
                 ();
@@ -188,28 +169,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 match p.tool_access_opt with
                 | Some access -> access
                 | None ->
-                    let tool_preset =
-                      Option.value ~default:Research
-                        (Dashboard_utils.first_some p.tool_preset_opt
-                           (preset_of_defaults p.profile_defaults))
-                    in
-                    let tool_also_allow =
-                      resolve_tool_name_list
-                        ~preferred:p.tool_also_allow_opt
-                        ~fallback:p.profile_defaults.tool_also_allow
-                    in
-                    Preset { preset = tool_preset; also_allow = tool_also_allow }
-              in
-              let room_signal_prompt_enabled =
-                match keeper_room_signal_prompt_enabled_override () with
-                | Some value -> value
-                | None ->
-                    Option.value
-                      ~default:
-                        (tool_access_default_room_signal_prompt_enabled
-                           ~default:default_room_signal_prompt_enabled
-                           tool_access)
-                      p.profile_defaults.room_signal_prompt_enabled
+                    (match p.profile_defaults.tool_access with
+                     | Some tools -> normalize_tool_names tools
+                     | None -> [])
               in
               let tool_denylist =
                 resolve_tool_name_list
@@ -294,44 +256,18 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   ~fallback_message:env_message_gate
                   ~fallback_token:env_token_gate
               in
-              let cascade_models =
-                Cascade_runtime.models_of_cascade_name
-                  (Cascade_name.of_string_exn selected_cascade_name)
-              in
-              (match
-                 Keeper_turn_helpers.ensure_local_discovery_ready
-                   cascade_models
-               with
-               | Ok () -> ()
-               | Error msg ->
-                   Log.Keeper.warn
-                     "create_keeper local discovery refresh incomplete for \
-                      name=%s: %s"
-                     p.name
-                     msg;
-                   Prometheus.inc_counter
-                     Keeper_metrics.(to_string LocalDiscoveryFailures)
-                     ~labels:
-                       [
-                         ("keeper", p.name);
-                         ("site", "create_local_discovery_refresh");
-                       ]
-                     ());
               let primary_max_context =
                 match p.max_context_override_opt with
                 | Some v -> v
-                | None ->
-                    let resolved =
-                      Cascade_runtime.resolve_max_cascade_context cascade_models
-                    in
-                    Cascade_runtime.clamp_context_for_pure_local_labels
-                      ~labels:cascade_models ~max_context:resolved
+                (* Boundary: Keeper consumes an opaque context budget, not a
+                   provider/model identity. *)
+                | None -> Runtime.default_max_context ()
               in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
               | Error err ->
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string LifecycleDispatchRejections)
                     ~labels:[("keeper", p.name); ("event", "create_invalid_trace_id")]
                     ();
@@ -353,13 +289,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                       (* Surface masc-improver/sangsu sandbox boot
                          silent-failure (2026-05-05).  Keeper_fs.ensure_dir
                          raises on filesystem error; the previous [ignore]
-                         discarded it.  Now we log + emit a Prometheus
+                         discarded it.  Now we log + emit a Otel_metric_store
                          counter so the dashboard makes failure visible
                          without aborting keeper boot. *)
                       Log.Keeper.error
                         "create_keeper sandbox bundle init raised: keeper=%s exn=%s"
                         p.name (Printexc.to_string exn);
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string LifecycleDispatchRejections)
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_init_raised")]
@@ -371,7 +307,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                       Log.Keeper.warn
                         "create_keeper sandbox bundle path missing post-init: keeper=%s path=%s"
                         p.name bp;
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string LifecycleDispatchRejections)
                         ~labels:[("keeper", p.name);
                                  ("event", "sandbox_bundle_missing_post_init")]
@@ -422,20 +358,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
+        persona = Some persona_extended;
         goal;
         short_goal;
         mid_goal;
         long_goal;
 
         social_model;
-        cascade_ref =
-          Some Cascade_ref.{
-            group = Cascade_name.of_string_exn selected_cascade_name;
-            item = None;
-          };
-        (* RFC-0041 (post-step-4): cascade_ref is the SSOT; the legacy
-           cascade_name field was removed from keeper_meta. *)
-        models = [];
         will;
         needs;
         desires;
@@ -445,12 +374,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         network_mode;
         allowed_paths;
         tool_access;
-        tool_preset_source = p.profile_defaults.tool_preset_source;
         tool_denylist;
         mention_targets;
-        room_signal_prompt_enabled;
-        joined_room_ids = [];
-        last_seen_seq_by_room = [];
         proactive = {
           enabled = proactive_enabled;
           idle_sec = proactive_idle_sec;
@@ -471,10 +396,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             Keeper_context_core.default_max_checkpoint_messages;
           keep_recent_tool_results =
             Keeper_config.default_keep_recent_tool_results;
-          tool_heavy_msg_threshold =
-            Keeper_config.default_tool_heavy_msg_threshold;
-          tool_heavy_ratio_floor =
-            Keeper_config.default_tool_heavy_ratio_floor;
         };
         auto_handoff;
         handoff_threshold;
@@ -491,7 +412,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
-        per_provider_timeout_s = p.profile_defaults.per_provider_timeout;
         always_approve = p.profile_defaults.always_approve;
         runtime = {
           usage = {
@@ -501,7 +421,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             total_tokens = 0;
             total_cost_usd = 0.0;
             last_turn_ts = 0.0;
-            last_model_used = "";
             last_input_tokens = 0;
             last_output_tokens = 0;
             last_total_tokens = 0;
@@ -538,12 +457,13 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           board_reactive_turn_count = 0;
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
+          last_seen_message_seq = 0;
           last_speech_act = "";
           last_social_transition_reason = "";
 	          last_active_desire = "";
 	          last_current_intention = "";
 	          last_blocker = None;
-	          last_cascade_attempt = None;
+	          last_runtime_attempt = None;
 	          last_need = "";
 	          last_turn_tool_calls = [];
 	        };
@@ -558,7 +478,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~session
             ~agent_name:meta.agent_name
-            ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
             ~ctx:ctx0
             ~generation:0
         with
@@ -569,7 +488,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       match init_save_result with
       | Error e ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", p.name); ("site", Keeper_checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
@@ -579,10 +498,32 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" e)
       | Ok _ ->
+      let runtime_assignment_result =
+        match p.runtime_id_opt with
+        | None -> Ok ()
+        | Some runtime_id ->
+          Runtime.set_runtime_id_for_keeper
+            ~keeper_name:p.name
+            ~runtime_id
+            ()
+      in
+      (match runtime_assignment_result with
+       | Error e ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string LifecycleDispatchRejections)
+           ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
+           ();
+         Log.Keeper.error
+           "create_keeper failed: runtime assignment error for name=%s: %s"
+           p.name
+           e;
+         Progress.stop_tracking task_id;
+         tool_result_error e
+       | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
       | Error e ->
-        Prometheus.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;
@@ -590,18 +531,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        (* Auto-generate credential file if missing (#A10) *)
-        let agent_name = Keeper_identity.keeper_agent_name p.name in
-        (match Auth.ensure_keeper_credential ctx.config.base_path ~agent_name with
-         | Ok _ ->
-             Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name
-         | Error err ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string LifecycleDispatchRejections)
-               ~labels:[("keeper", agent_name); ("event", "create_credential_ensure")]
-               ();
-             Log.Keeper.warn "create_keeper: credential ensure failed for %s: %s"
-               agent_name (Masc_domain.show_masc_error err));
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         start_keepalive ctx meta;
@@ -627,9 +556,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("needs", `String meta.needs);
           ("desires", `String meta.desires);
           ("instructions", `String meta.instructions);
-          ("cascade_name", `String (cascade_name_of_meta meta));
           ("social_model", `String meta.social_model);
-          ("tool_access", tool_access_to_json meta.tool_access);
+          ("tool_access", Json_util.json_string_list meta.tool_access);
           ("tool_denylist",
             `List (List.map (fun value -> `String value) meta.tool_denylist));
           ("proactive_enabled", `Bool meta.proactive.enabled);
@@ -644,4 +572,4 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok (Yojson.Safe.to_string json))

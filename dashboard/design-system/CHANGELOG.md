@@ -52,7 +52,7 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
   - `src/components/ide/keeper-line-ownership-store.ts` publishes dashboard snapshots for the IDE blame gutter; the editor mock now consumes the store instead of hardcoded row ownership.
 
 - **Anchored thread rail substrate**
-  - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus coordination.
+  - `design-system/headless-core/anchored-thread-rail.ts` implements RFC 0021's current-file thread scoping, line lookup, and focus workspace collaboration.
   - `src/components/ide/anchored-thread-rail-store.ts` publishes dashboard snapshots for the CONVERSATION rail; the rail mock now consumes the store instead of hardcoded card fields.
 
 - **Run activity store substrate**
@@ -182,14 +182,14 @@ Stage: legacy alias cleanup + KeeperBadge migration completion + token codificat
 
 - **Default theme is now strictly dark.** Removed the `@media (prefers-color-scheme: light)` auto-flip block in `tokens.css`. The dark-fantasy stack is the canonical default; light surfaces require an explicit `data-theme="paper"` (or `"light"`) on `<html>`. Honors original SPEC intent — `prefers-color-scheme` was leaking OS preference into the design and overriding the brand palette on light-mode laptops.
 
-- **`colors_and_type.css` is now a thin façade** over `source_styles/tokens.css` to eliminate cascade drift between the historical 159-line file and the 921-line SSOT.
+- **`colors_and_type.css` is now a thin façade** over `source_styles/tokens.css` to eliminate runtime drift between the historical 159-line file and the 921-line SSOT.
   - All `--color-*` semantic aliases now resolve through `tokens.css`.
   - Legacy short-form aliases (`--color-bg`, `--color-text`, `--color-border`) preserved for back-compat but marked `@deprecated` in comments — to be removed in v0.3.
   - Migration path documented in SPEC §7.1.4.
 
 - **`preview/index.html` link order**
   - Now imports `tokens.css` first, then `type_layer.css`, then `primitives.css`.
-  - `colors_and_type.css` deliberately not re-imported to avoid double-cascade. SPEC §7.1.4.
+  - `colors_and_type.css` deliberately not re-imported to avoid double-runtime. SPEC §7.1.4.
 
 ### Reference rewiring
 
@@ -215,7 +215,7 @@ Stage: cockpit zones complete.
   - **I0** IDE backbone (3 variants): branch selector, keeper multi-select, operator nudge log.
   - **G1-G3** Work: Goal Zone, Task Zone, Accountability (8 variants).
   - **C1-C3** Comms: Board Zone, Messages, Composer v2 (9 variants).
-  - **O1-O5** Observability: Cascade, Audit, Safe Autonomy, Cost & Latency, Heuristic + Stress (15 variants).
+  - **O1-O5** Observability: Runtime, Audit, Safe Autonomy, Cost & Latency, Heuristic + Stress (15 variants).
   - **K1-K4** Cognition: Keeper Inspector v2, Decisions / Memory, Institution Episodes, Autoresearch (10 variants).
 
 - **Phase 3 — Code IDE plane** (`code-mode.jsx`, E1..E5, 20 variants)

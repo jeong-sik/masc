@@ -7,6 +7,21 @@ export interface RefreshOptions {
   light?: boolean
 }
 
+// --- Shared signal / evidence primitives (SSOT) ---
+// Mission and execution domains extend these with domain-specific values.
+
+/** Core signal truth values shared across mission and execution domains. */
+export type SignalTruthCore = 'live' | 'stale'
+/** Mission-domain signal truth (extends core with archived, unknown). */
+export type MissionSignalTruth = SignalTruthCore | 'archived' | 'unknown'
+/** Execution-domain signal truth (extends core with absent). */
+export type ExecutionSignalTruth = SignalTruthCore | 'absent'
+
+/** Core evidence source values shared across domains. */
+export type EvidenceSourceCore = 'message' | 'presence' | 'none'
+/** Mission-domain evidence source (extends core with session). */
+export type MissionEvidenceSource = EvidenceSourceCore | 'session'
+
 // --- Core entities ---
 
 export interface Agent {
@@ -111,7 +126,7 @@ export interface Message {
   content: string
   timestamp?: string
   type?: string
-  room?: string
+  workspace?: string
 }
 
 // --- Board ---
@@ -128,7 +143,7 @@ export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' 
 
 export interface BoardContributorQuality {
   score: number
-  band?: 'low' | 'watch' | 'strong' | 'excellent' | string
+  band?: 'low' | 'watch' | 'strong' | 'excellent'
   source?: string
   completion_rate?: number
   response_rate?: number
@@ -145,7 +160,7 @@ export interface BoardActorIdentity {
   key: string
   display_name: string
   raw: string
-  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent' | string
+  source?: 'keeper_registry_agent_name' | 'keeper_registry_name' | 'keeper_alias_contract' | 'raw_agent'
   runtime_agent_name?: string
 }
 
@@ -259,7 +274,7 @@ export interface BoardCurationHealthComponent {
 export interface BoardKarmaLedgerEvent {
   recipient: string
   voter: string
-  target_kind: 'post' | 'comment' | string
+  target_kind: 'post' | 'comment'
   target_id: string
   delta: number
   ts: number
@@ -372,11 +387,11 @@ export interface KeeperMetricPoint {
   total_tokens: number | null
   wall_tokens_per_second: number | null
   inference_telemetry: InferenceTelemetry | null
-  cascade_name?: string | null
-  cascade_outcome?: string | null
-  cascade_selected_model?: string | null
-  cascade_attempt_count?: number | null
-  cascade_strategy?: string | null
+  runtime_id?: string | null
+  runtime_outcome?: string | null
+  runtime_selected_model?: string | null
+  runtime_attempt_count?: number | null
+  runtime_strategy?: string | null
   fallback_applied: boolean
   fallback_hops: number
   fallback_from: string | null
@@ -397,7 +412,6 @@ export interface ProviderHealth {
 export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'ambiguous_post_commit_timeout',
   'ambiguous_post_commit_failure',
-  'autonomous_slot_wait_timeout',
   'admission_queue_wait_timeout',
   'turn_timeout_after_queue_wait',
   'turn_timeout',
@@ -407,10 +421,9 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   // omission caused silent string-fallback narrowing on the wire.
   'turn_livelock_blocked',
   'completion_contract_violation',
-  'cascade_exhausted',
-  'no_tool_capable_provider',
+  'runtime_exhausted',
   'provider_runtime_error',
-  'tool_required_unsatisfied',
+  'tool_route_recoverable_failure',
   'fiber_unresolved',
   'stale_turn_timeout',
   'stale_termination_storm',
@@ -433,13 +446,40 @@ export const KEEPER_RUNTIME_BLOCKER_CLASSES = [
   'sdk_cost_budget_exceeded',
   'sdk_unrecognized_stop_reason',
   'sdk_idle_detected',
-  'sdk_tool_retry_exhausted',
   'sdk_guardrail_violation',
   'sdk_tripwire_violation',
   'sdk_exit_condition_met',
 ] as const
 
 export type KeeperRuntimeBlockerClass = (typeof KEEPER_RUNTIME_BLOCKER_CLASSES)[number]
+
+export type KeeperLiveActivitySource =
+  | 'keeper_meta'
+  | 'tool_call'
+  | 'approval_pending'
+
+export interface KeeperLiveActivity {
+  source?: KeeperLiveActivitySource | null
+  at?: string | null
+  age_s?: number | null
+  tool?: string | null
+  turn?: number | null
+  keeper_turn_id?: number | null
+}
+
+export interface KeeperCurrentGate {
+  kind?: 'approval_required' | string | null
+  source?: string | null
+  id?: string | null
+  tool?: string | null
+  risk?: string | null
+  turn_id?: number | null
+  at?: string | null
+  age_s?: number | null
+  disposition?: string | null
+  disposition_reason?: string | null
+}
+
 // Wire emit: `lib/keeper/keeper_status_bridge.ml:720` —
 //   `pause_state = if meta.paused then "paused" else "active"`.
 // Closed 2-arm; the previous `| string` catch-all hid the fact that
@@ -476,7 +516,7 @@ export interface KeeperTrustLatestEvent {
   goal_ids?: string[]
   title: string
   summary: string
-  severity: 'ok' | 'warn' | 'bad' | string
+  severity: 'ok' | 'warn' | 'bad'
   next_human_action?: string | null
 }
 
@@ -495,20 +535,10 @@ export interface KeeperTrustApprovalState {
 }
 
 export interface KeeperTrustExecutionSummary {
-  tool_contract_result?: string | null
-  runtime_proof_status?: string | null
-  required_tools?: string[] | null
-  missing_required_tools?: string[] | null
-  requested_tools?: string[] | null
-  tools_used?: string[] | null
-  unexpected_tools?: string[] | null
-  requested_tool_count?: number | null
-  tools_used_count?: number | null
-  unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null
-  cascade_outcome?: string | null
+  runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
   mutation_guard_summary?: string | null
@@ -518,7 +548,7 @@ export interface KeeperTrustExecutionSummary {
 export interface KeeperTrustTerminalReason {
   code?: string | null
   source?: string | null
-  severity?: 'ok' | 'warn' | 'bad' | string | null
+  severity?: 'ok' | 'warn' | 'bad' | null
   summary?: string | null
   next_action?: string | null
 }
@@ -539,23 +569,10 @@ export interface KeeperTrustSummary {
 }
 
 // Dashboard rendering union returned by `deriveLifecycleState`
-// (keeper-store-normalize.ts). The first 8 are dashboard-classified
-// metrics-driven labels; the last 5 are backend FSM phase names that
-// leak through when `isKeeperOffline(keeper)` is true and the body
-// returns `keeperDisplayStatus(keeper)` directly.
-//
-// Pre-honest version of this type was just the first 8; the
-// `keeperDisplayStatus(keeper) as KeeperLifecycleState` cast lied about
-// the runtime shape (`'paused'`, `'crashed'`, `'dead'`, `'zombie'`, and
-// `'unknown'` can leak through). Downstream consumers
-// (`keeperStateTone` in components/common/status-chip.ts) already
-// handle the FSM-name vocabulary, so the right fix is to widen the
-// type to match reality rather than narrow the runtime via a lossy
-// mapping.
-//
-// `PipelineStage` (this file, ~line 709) is the typed backend mirror
-// for a different axis (pipeline_stage_of_phase, 10-value union); these
-// two unions deliberately overlap on the FSM-name tail.
+// (keeper-store-normalize.ts). This is a display union, not the backend
+// keeper FSM. Offline-detail rendering may surface terminal sub-states
+// from `keeperDisplayStatus`; keep the accepted set explicit instead
+// of trusting arbitrary wire strings.
 export type KeeperLifecycleState =
   | 'active'
   | 'compacting'
@@ -565,8 +582,7 @@ export type KeeperLifecycleState =
   | 'offline'
   | 'unbooted'
   | 'stopped'
-  // Backend FSM phase names that leak through deriveLifecycleState's
-  // `isKeeperOffline` branch via keeperDisplayStatus(keeper).
+  // Offline-detail sub-states emitted by keeperDisplayStatus.
   | 'paused'
   | 'crashed'
   | 'dead'
@@ -594,13 +610,12 @@ export interface Goal {
 }
 
 export interface GoalVerifierPrincipal {
-  kind: 'operator' | 'keeper' | string
   id: string
   display_name?: string | null
 }
 
 export interface GoalVerifierPolicy {
-  inherit_mode: 'extend' | 'replace' | string
+  inherit_mode: 'extend' | 'replace'
   principals: GoalVerifierPrincipal[]
   required_verdicts?: number | null
 }
@@ -676,17 +691,26 @@ export type KeeperConversationSource =
 
 export type KeeperConversationDelivery =
   | 'history'
+  | 'queued'
   | 'sending'
   | 'streaming'
   | 'delivered'
   | 'timeout'
   | 'error'
+  // Stream ended without a terminal RUN_FINISHED / RUN_ERROR event —
+  // the transport was cut mid-response, so the text may be incomplete.
+  | 'interrupted'
 
 interface KeeperConversationUsage {
   inputTokens?: number | null
   outputTokens?: number | null
   totalTokens?: number | null
 }
+
+// RFC-0232 P2: producer-typed turn outcome carried in the reply payload
+// (`turn_outcome`). `continuation_checkpoint` marks the synthetic
+// resume-next-cycle notice; everything else is model output.
+export type KeeperTurnOutcome = 'visible_reply' | 'continuation_checkpoint'
 
 export interface KeeperConversationDetails {
   traceId?: string | null
@@ -699,14 +723,42 @@ export interface KeeperConversationDetails {
   skillReason?: string | null
   stateBlock?: string | null
   replyText?: string | null
+  turnOutcome?: KeeperTurnOutcome | null
   rawPayload?: unknown
+}
+
+export interface KeeperConversationAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
 }
 
 export type KeeperConversationStreamState =
   | 'opening'
+  | 'thinking'
   | 'streaming'
   | 'finalizing'
   | null
+
+export interface SurfaceRef {
+  kind: 'dashboard' | 'discord' | 'slack' | 'github' | 'webhook' | 'agent' | 'gate' | string
+  session_id?: string
+  guild_id?: string
+  channel_id?: string
+  parent_channel_id?: string
+  thread_id?: string
+  team_id?: string
+  thread_ts?: string
+  repo?: string
+  notification_id?: string
+  source?: string
+  event_id?: string
+  label?: string
+  address?: Record<string, string>
+}
 
 export interface KeeperConversationEntry {
   id: string
@@ -718,8 +770,10 @@ export interface KeeperConversationEntry {
   timestamp?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
+  attachments?: KeeperConversationAttachment[]
   details?: KeeperConversationDetails | null
   error?: string | null
+  surface?: SurfaceRef | null
 }
 
 export interface KeeperStatusDetail {
@@ -734,7 +788,7 @@ export interface KeeperStatusDetail {
 // Backend SSOT: `Keeper_status_runtime.pipeline_stage_of_phase`
 // (lib/keeper/keeper_status_runtime.ml:537) deterministic mapping from
 // the 13-state KeeperPhase, post-RFC-0046 (#14707). Emits 10 distinct
-// values; `unknown` is a dashboard-side sentinel for missing data
+// values; `unknown` is a dashboard-side marker for missing data
 // (`asString(row.pipeline_stage) ?? 'unknown'`). Removed legacy
 // `thinking` / `tool_use` (= trajectory content_type, never
 // pipeline_stage) and `scheduled_autonomous` (= turn channel, never
@@ -897,6 +951,8 @@ export interface Keeper {
   name: string
   keeper_id?: string | null
   pipeline_stage?: PipelineStage
+  pipeline_stage_detail?: string | null
+  lifecycle_phase?: KeeperPhase | null
   phase?: KeeperPhase | null
   runtime_class?: 'keeper'
   paused?: boolean
@@ -913,13 +969,11 @@ export interface Keeper {
   last_model_used?: string
   last_model_used_label?: string | null
   next_model_hint?: string | null
-  cascade_name?: string | null
-  cascade_ref?: CascadeRef | null
-  cascade_canonical?: string | null
-  selected_cascade_canonical?: string | null
+  runtime_id?: string | null
+  runtime_ref?: RuntimeRef | null
+  runtime_canonical?: string | null
+  selected_runtime_canonical?: string | null
   status: string
-  presence_keepalive?: boolean
-  presence_keepalive_sec?: number
   keepalive_running?: boolean
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
@@ -945,10 +999,9 @@ export interface Keeper {
     mid?: string | null
     long?: string | null
   } | null
-  sandbox_profile?: 'local' | 'docker' | string | null
+  sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
-  effective_sandbox_image?: string | null
   blocked_task_count?: number | null
   goal_progress?: {
     active_goal_count?: number
@@ -998,6 +1051,10 @@ export interface Keeper {
   total_tokens?: number
   last_latency_ms?: number
   last_activity_ago_s?: number
+  last_activity_at?: string | null
+  last_activity_source?: KeeperLiveActivitySource | null
+  live_activity?: KeeperLiveActivity | null
+  current_gate?: KeeperCurrentGate | null
   context_ratio?: number
   context_tokens?: number
   context_max?: number
@@ -1187,6 +1244,8 @@ interface KeeperConfigPrompt {
     }
   }
   effective_system_prompt: string
+  unified_system_prompt: string
+  unified_user_message_preview: string
 }
 
 interface KeeperConfigExecution {
@@ -1195,11 +1254,12 @@ interface KeeperConfigExecution {
   active_model_label?: string | null
   last_model_used_label?: string | null
   per_provider_timeout_sec?: number | null
-  per_provider_timeout_mode: 'override' | 'turn_budget_heuristic' | string
+  per_provider_timeout_mode: 'override' | 'turn_budget_default'
   verify: boolean
-  selected_cascade_name: string
-  selected_cascade_canonical: string
-  cascade_ref?: CascadeRef | null
+  selected_runtime_id: string
+  selected_runtime_canonical: string
+  runtime_options: string[]
+  runtime_ref?: RuntimeRef | null
 }
 
 interface KeeperConfigCompaction {
@@ -1216,7 +1276,7 @@ interface KeeperConfigProactive {
   cooldown_sec: number
 }
 
-export interface CascadeRef {
+export interface RuntimeRef {
   group: string
   item: string | null
 }
@@ -1260,8 +1320,6 @@ interface KeeperConfigRuntime {
   keepalive_running: boolean
   registry_state?: string | null
   fiber_health: string
-  presence_keepalive: boolean
-  presence_keepalive_sec: number
   runtime_blocker_class?: KeeperRuntimeBlockerClass | null
   active_model_label?: string | null
   last_model_used_label?: string | null
@@ -1269,9 +1327,9 @@ interface KeeperConfigRuntime {
   runtime_blocker_continue_gate?: boolean | null
 }
 
-interface KeeperConfigCoordination {
+interface KeeperConfigWorkspace {
   mention_targets: string[]
-  joined_room_ids: string[]
+  bound_workspace_ids: string[]
   active_goal_ids: string[]
   active_goals: KeeperConfigActiveGoal[]
   active_goal_count: number
@@ -1294,8 +1352,6 @@ interface KeeperConfigSources {
   precedence: string[]
   has_live_override: boolean
   override_fields: string[]
-  cascade_catalog_source_kind: 'json' | 'toml' | null
-  cascade_catalog_source_path: string | null
 }
 
 interface KeeperConfigMetrics {
@@ -1313,21 +1369,6 @@ interface KeeperConfigMetrics {
   last_total_tokens_per_sec: number | null
   last_output_tokens_per_sec: number | null
   compaction_count: number
-}
-
-export interface KeeperSandboxEnvironment {
-  base_path?: string | null
-  project_root?: string | null
-  docker_playground_enabled: boolean
-  docker_container_name?: string | null
-  container_playground_root?: string | null
-  docker_image?: string | null
-  pids_limit?: number | null
-  memory?: string | null
-  tmpfs_size?: string | null
-  seccomp_profile?: string | null
-  require_rootless: boolean
-  require_userns: boolean
 }
 
 export interface KeeperHookSlot {
@@ -1352,9 +1393,6 @@ export interface KeeperConfig {
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   sandbox_last_error?: string | null
-  effective_sandbox_image?: string | null
-  private_workspace_root?: string | null
-  sandbox_environment?: KeeperSandboxEnvironment
   allowed_paths: string[]
   effective_allowed_paths: string[]
   prompt: KeeperConfigPrompt
@@ -1366,7 +1404,7 @@ export interface KeeperConfig {
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null
-  coordination: KeeperConfigCoordination
+  workspace: KeeperConfigWorkspace
   tools: KeeperConfigTools
   sources: KeeperConfigSources
   metrics: KeeperConfigMetrics

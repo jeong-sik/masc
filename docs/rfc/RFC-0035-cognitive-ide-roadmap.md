@@ -10,7 +10,7 @@
   #13779 event-stream-temporal-sync, #13781 event-stream-gradient-attraction
 - **Out of scope**: dashboard credential/identity (RFC-0008 territory), oas/agent_sdk
   bumps (handled separately under `chore(oas)` PRs), cross-repo work outside
-  `masc-mcp` and `oas`.
+  `masc` and `oas`.
 
 ## Problem
 
@@ -79,7 +79,7 @@ further code is written.
 | 05 | Design Metrology (color/layout drift) | tooling | likely in `dashboard/` test harness | deferred (P2) |
 | 06 | FSM-based Tools / Structured Execute | lib | overlaps with `agent_tool_execute_*`, `tool_*` | partial — already exists, audit pending |
 | 07 | Transformer→IDE direct mapping | dashboard | overlaps with cockpit | deferred (P3) |
-| 08 | Minority opinion (1..N agents) | lib | overlaps with `cascade_*` | partial — already exists |
+| 08 | Minority opinion (1..N agents) | lib | overlaps with `runtime_*` | partial — already exists |
 | 09 | Goal-driven design | lib | overlaps with `goal_loop`, `goals.json` | partial — already exists |
 | 10 | Orthogonal information UI | dashboard | TBD | deferred (P2) |
 
@@ -173,6 +173,6 @@ opened in parallel.
 - **Wait until in-flight PRs merge.** Rejected: the Master Report's confidence
   ladder asks for PR-1 work to land *concurrently* with the dashboard layer
   so that the ranker is ready when the cockpit needs to call it.
-- **Open the RFC against `~/me/docs/rfc/` instead of `masc-mcp/docs/rfc/`.**
-  Rejected: the RFC's enforcement target is `masc-mcp` modules, so it must
+- **Open the RFC against `~/me/docs/rfc/` instead of `masc/docs/rfc/`.**
+  Rejected: the RFC's enforcement target is `masc` modules, so it must
   live in the same repo as the code it governs.

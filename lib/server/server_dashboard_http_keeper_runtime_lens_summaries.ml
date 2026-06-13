@@ -11,7 +11,7 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
     entries
     |> List.find_opt (fun json ->
       String.equal
-        (Option.value ~default:"" (json_string_member_opt "tool" json))
+        (Option.value ~default:"" (Json_util.get_string json "tool"))
         "keeper_task_claim"
       && tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json)
   in
@@ -24,69 +24,60 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
       | _ -> `Assoc []
     in
     let claim_scope =
-      match json_assoc_member_opt "claim_scope" output with
+      match Json_util.assoc_member_opt "claim_scope" output with
       | Some scope -> scope
       | None -> `Assoc []
     in
-    let claimed_task = json_assoc_member_opt "claimed_task" output in
+    let claimed_task = Json_util.assoc_member_opt "claimed_task" output in
     `Assoc
       [ ("present", `Bool true)
       ; ("source", `String "keeper_task_claim_tool_call")
       ; ("status", `String (claim_status_of_output output))
-      ; ("result", json_string_opt (json_string_member_opt "result" output))
-      ; ("mode", json_string_opt (json_string_member_opt "mode" claim_scope))
-      ; ( "scoped",
-          match json_bool_member_opt "scoped" claim_scope with
-          | Some value -> `Bool value
-          | None -> `Null )
+      ; ("result", Json_util.string_opt_to_json (Json_util.get_string output "result"))
+      ; ("mode", Json_util.string_opt_to_json (Json_util.get_string claim_scope "mode"))
+      ; ( "scoped", Json_util.bool_opt_to_json (Json_util.get_bool claim_scope "scoped") )
       ; ( "active_goal_ids",
-          Json_util.json_string_list (json_string_list_member "active_goal_ids" claim_scope) )
+          Json_util.json_string_list (Json_util.get_string_list claim_scope "active_goal_ids") )
       ; ( "effective_goal_ids",
           Json_util.json_string_list
-            (json_string_list_member "effective_goal_ids" claim_scope) )
+            (Json_util.get_string_list claim_scope "effective_goal_ids") )
       ; ( "fallback_reason",
-          json_string_opt (json_string_member_opt "fallback_reason" claim_scope) )
+          Json_util.string_opt_to_json (Json_util.get_string claim_scope "fallback_reason") )
       ; ( "matched_goal_id",
-          json_string_opt (json_string_member_opt "matched_goal_id" claim_scope) )
-      ; ( "excluded_count",
-          match json_int_member_opt "excluded_count" claim_scope with
-          | Some value -> `Int value
-          | None -> `Null )
+          Json_util.string_opt_to_json (Json_util.get_string claim_scope "matched_goal_id") )
+      ; ( "excluded_count", Json_util.int_opt_to_json (Json_util.get_int claim_scope "excluded_count") )
       ; ( "claimed_task_id",
           match claimed_task with
-          | Some task -> json_string_opt (json_string_member_opt "task_id" task)
+          | Some task -> Json_util.string_opt_to_json (Json_util.get_string task "task_id")
           | None -> `Null )
       ; ( "claimed_goal_id",
           match claimed_task with
-          | Some task -> json_string_opt (json_string_member_opt "goal_id" task)
+          | Some task -> Json_util.string_opt_to_json (Json_util.get_string task "goal_id")
           | None -> `Null )
-      ; ("trace_id", json_string_opt (json_string_member_opt "trace_id" call))
-      ; ( "keeper_turn_id",
-          match json_int_member_opt "keeper_turn_id" call with
-          | Some value -> `Int value
-          | None -> `Null )
+      ; ("trace_id", Json_util.string_opt_to_json (Json_util.get_string call "trace_id"))
+      ; ( "keeper_turn_id", Json_util.int_opt_to_json (Json_util.get_int call "keeper_turn_id") )
       ]
 
 let find_override_field_source field sources =
-  match Yojson.Safe.Util.member "override_field_sources" sources with
-  | `List values ->
+  match Json_util.assoc_member_opt "override_field_sources" sources with
+  | Some (`List values) ->
     List.find_opt
-      (fun value -> json_string_member_opt "field" value = Some field)
+      (fun value -> Json_util.get_string value "field" = Some field)
       values
-  | _ -> None
+  | None | Some _ -> None
 
 let config_drift_summary_json ~config ~keeper_name =
-  match Keeper_types.read_meta config keeper_name with
+  match Keeper_meta_store.read_meta config keeper_name with
   | Error message ->
     `Assoc
       [ ("present", `Bool false)
       ; ("status", `String "read_error")
       ; ("error", `String message)
       ; ("has_live_override", `Bool false)
-      ; ("cascade_override", `Bool false)
+      ; ("runtime_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
-      ; ("live_cascade_name", `Null)
+      ; ("default_runtime_id", `Null)
+      ; ("live_runtime_id", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
       ]
@@ -96,43 +87,43 @@ let config_drift_summary_json ~config ~keeper_name =
       ; ("status", `String "keeper_missing")
       ; ("error", `Null)
       ; ("has_live_override", `Bool false)
-      ; ("cascade_override", `Bool false)
+      ; ("runtime_override", `Bool false)
       ; ("override_fields", `List [])
-      ; ("default_cascade_name", `Null)
-      ; ("live_cascade_name", `Null)
+      ; ("default_runtime_id", `Null)
+      ; ("live_runtime_id", `Null)
       ; ("active_config_root", `Null)
       ; ("active_config_root_source", `Null)
       ]
   | Ok (Some meta) ->
     let sources = Keeper_status_bridge.source_provenance_json config meta in
-    let override_fields = json_string_list_member "override_fields" sources in
-    let cascade_detail = find_override_field_source "model.cascade_name" sources in
-    let default_cascade_name, live_cascade_name =
-      match cascade_detail with
+    let override_fields = Json_util.get_string_list sources "override_fields" in
+    let runtime_detail = find_override_field_source "model.runtime_id" sources in
+    let default_runtime_id, live_runtime_id =
+      match runtime_detail with
       | Some detail ->
-        ( Yojson.Safe.Util.member "default_value" detail |> json_string_value_opt,
-          Yojson.Safe.Util.member "live_value" detail |> json_string_value_opt )
+        ( Json_util.get_string detail "default_value",
+          Json_util.get_string detail "live_value" )
       | None -> (None, None)
     in
-    let cascade_override = Option.is_some cascade_detail in
+    let runtime_override = Option.is_some runtime_detail in
     `Assoc
       [ ("present", `Bool true)
-      ; ("status", `String (if cascade_override then "drift" else "ok"))
+      ; ("status", `String (if runtime_override then "drift" else "ok"))
       ; ("error", `Null)
       ; ( "has_live_override",
           `Bool
             (Option.value
-               (json_bool_member_opt "has_live_override" sources)
+               (Json_util.get_bool sources "has_live_override")
                ~default:false) )
-      ; ("cascade_override", `Bool cascade_override)
+      ; ("runtime_override", `Bool runtime_override)
       ; ("override_fields", Json_util.json_string_list override_fields)
-      ; ("default_cascade_name", json_string_opt default_cascade_name)
-      ; ("live_cascade_name", json_string_opt live_cascade_name)
+      ; ("default_runtime_id", Json_util.string_opt_to_json default_runtime_id)
+      ; ("live_runtime_id", Json_util.string_opt_to_json live_runtime_id)
       ; ( "active_config_root",
-          json_string_opt (json_string_member_opt "active_config_root" sources) )
+          Json_util.string_opt_to_json (Json_util.get_string sources "active_config_root") )
       ; ( "active_config_root_source",
-          json_string_opt
-            (json_string_member_opt "active_config_root_source" sources) )
+          Json_util.string_opt_to_json
+            (Json_util.get_string sources "active_config_root_source") )
       ; ( "default_manifest_path",
-          json_string_opt (json_string_member_opt "default_manifest_path" sources) )
+          Json_util.string_opt_to_json (Json_util.get_string sources "default_manifest_path") )
       ]

@@ -17,9 +17,7 @@ let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity
 include Operator_control_snapshot_action_log
 
 let get_payload args =
-  match U.member "payload" args with
-  | `Assoc _ as payload -> payload
-  | _ -> `Assoc []
+  Json_util.get_object args "payload" |> Option.value ~default:(`Assoc [])
 ;;
 
 let merge_json_objects left right =
@@ -42,7 +40,7 @@ let operator_server_profile_json = Operator_control_snapshot_runtime_status.oper
 
 
 let recent_messages_json config =
-  Coord.get_messages_raw config ~since_seq:0 ~limit:20
+  Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   |> List.map Masc_domain.message_to_yojson
   |> fun rows -> `List rows
 ;;
@@ -65,6 +63,60 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
+(* PR-C2: encapsulate [Eio.Semaphore.acquire]/[release] inside a single
+   helper scope so the slot is released even when the body raises
+   non-Cancelled exceptions (which the previous on_release callback could
+   not guarantee -- a [Log.Dashboard.info] failure inside the callback
+   would skip the release and leak the slot).
+
+   - [wait_ms] measures contention on the acquire call.
+   - [work_ms] measures the body's wall time.
+   - The 500ms threshold log fires only on the *normal-exit* path:
+     Cancelled propagation skips the log to avoid double-reporting;
+     the exception itself carries the unwind trace.
+
+   No typed state machine is introduced -- the slot itself is
+   encapsulated by the helper, so there is no counter/state to
+   desynchronise.  Mirrors PR-B/PR-C1 in spirit (no separate counter
+   for the per-fiber slot) but expressed as a scope rather than a
+   state transition. *)
+let with_keeper_slot ~sem ~name f =
+  let t_wait_start = Time_compat.now () in
+  Eio.Semaphore.acquire sem;
+  let t_work_start = Time_compat.now () in
+  let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
+  (* fun-protect-finally-ok: Eio.Semaphore.release is non-suspending
+     (Atomic.incr + run-queue wake, no fiber switch). *)
+  Fun.protect
+
+    ~finally:(fun () -> Eio.Semaphore.release sem)
+    (fun () ->
+       try
+         let v = f () in
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms"
+             name
+             wait_ms
+             work_ms;
+         v
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
+         if work_ms > 500.0 || wait_ms > 500.0
+         then
+           Log.Dashboard.info
+             "[keepers_json:%s] wait=%.0fms work=%.0fms (exn: %s)"
+             name
+             wait_ms
+             work_ms
+             (Printexc.to_string exn);
+         raise exn)
+;;
+
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 let degraded_keeper_snapshot_row = Operator_control_snapshot_trust.degraded_keeper_snapshot_row
 let keepers_json
@@ -76,7 +128,7 @@ let keepers_json
   let names =
     match keeper_names with
     | Some n -> n
-    | None -> Keeper_types.keeper_names config
+    | None -> Keeper_meta_store.keeper_names config
   in
   (* Parallel keeper I/O with concurrency cap: at most
      _keeper_snapshot_max_concurrency fibers run simultaneously.
@@ -90,36 +142,35 @@ let keepers_json
     (List.mapi
        (fun idx name () ->
           Eio.Switch.run
-          @@ fun keeper_sw ->
-          (* Two-phase timing so we can distinguish semaphore contention
-            from per-keeper I/O cost when dashboard snapshots stall.
-            Emits [keepers_json:NAME wait=… work=…] only when either
-            half exceeds the same 500ms threshold used by the outer
-            [timed] helper, keeping the log quiet on healthy snapshots. *)
-          let t_wait_start = Time_compat.now () in
-          Eio.Semaphore.acquire keeper_sem;
-          let t_work_start = Time_compat.now () in
-          let wait_ms = (t_work_start -. t_wait_start) *. 1000.0 in
-          Eio.Switch.on_release keeper_sw (fun () ->
-            Eio.Semaphore.release keeper_sem;
-            let work_ms = (Time_compat.now () -. t_work_start) *. 1000.0 in
-            if work_ms > 500.0 || wait_ms > 500.0
-            then
-              Log.Dashboard.info
-                "[keepers_json:%s] wait=%.0fms work=%.0fms"
-                name
-                wait_ms
-                work_ms);
-          (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
-            Threshold 300ms — lower than outer 500ms for more data. *)
-          let dt_meta = ref 0.0 in
-          let dt_agent = ref 0.0 in
-          let dt_ka = ref 0.0 in
-          let dt_audit = ref 0.0 in
-          let dt_profile = ref 0.0 in
-          let dt_phase = ref 0.0 in
-          let dt_trust = ref 0.0 in
-          let dt_activity = ref 0.0 in
+          @@ fun _keeper_sw ->
+          (* PR-C2: pair acquire/release inside a single [with_keeper_slot]
+            scope instead of the previous
+            [Eio.Switch.on_release (fun () -> Eio.Semaphore.release ...)]
+            pattern.  The on_release callback is *cancel-safe* (it fires on
+            both normal exit and Cancel.Cancelled unwind) but its [release]
+            was *not exception-safe* -- a [Log.Dashboard.info] failure inside
+            the callback would skip the release and leak the slot.  Fun.protect
+            is exception-safe, never double-releases, and matches PR-B's
+            typed-state pattern (no separate counter, lifecycle absorbed by
+            the helper).
+
+            Two-phase timing: [wait_ms] measures semaphore contention
+            (acquire delay), [work_ms] measures per-keeper I/O cost.
+            We log only when either half exceeds 500ms so healthy
+            snapshots stay quiet.  The log is part of the *success path*
+            inside [with_keeper_slot]; Cancelled propagation skips it. *)
+          with_keeper_slot ~sem:keeper_sem ~name (fun () ->
+            let t_work_start = Time_compat.now () in
+            (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
+              Threshold 300ms — lower than outer 500ms for more data. *)
+            let dt_meta = ref 0.0 in
+            let dt_agent = ref 0.0 in
+            let dt_ka = ref 0.0 in
+            let dt_audit = ref 0.0 in
+            let dt_profile = ref 0.0 in
+            let dt_phase = ref 0.0 in
+            let dt_trust = ref 0.0 in
+            let dt_activity = ref 0.0 in
           let emit_timing_log total_work =
             if total_work > 0.3
             then
@@ -141,7 +192,7 @@ let keepers_json
           results.(idx)
           <- (try
                 let t0 = Time_compat.now () in
-                match Keeper_types.read_meta config name with
+                match Keeper_meta_store.read_meta config name with
                 | Error _ | Ok None -> None
                 | Ok (Some meta) ->
                   dt_meta := Time_compat.now () -. t0;
@@ -198,9 +249,10 @@ let keepers_json
                            @ [ "runtime_trust", runtime_trust ])))
                   else (
                     let t_agent = Time_compat.now () in
+                    let agent_status_cache_ttl_s = 2.0 in
                     let agent_json =
                       let cache_key = "kas:" ^ meta.agent_name in
-                      Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
+                      Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
                         Keeper_status_runtime.parse_agent_status
                           config
                           ~agent_name:meta.agent_name)
@@ -219,7 +271,7 @@ let keepers_json
                     in
                     let now_ts = Time_compat.now () in
                     let created_ts =
-                      Coord_resilience.Time.parse_iso8601_opt meta.created_at
+                      Workspace_resilience.Time.parse_iso8601_opt meta.created_at
                       |> Option.value ~default:0.0
                     in
                     let last_turn_ago_s =
@@ -271,67 +323,23 @@ let keepers_json
                     in
                     let t_audit = Time_compat.now () in
                     let audit_json = cached_tool_audit_json ~lightweight config meta in
-                    let allowed_tool_names =
-                      match U.to_list (U.member "allowed_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
-                    in
                     let recent_tool_names =
-                      match U.to_list (U.member "recent_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
+                      Json_util.get_string_list audit_json "recent_tool_names"
                     in
                     let latest_tool_names =
-                      match U.to_list (U.member "latest_tool_names" audit_json) with
-                      | l ->
-                        List.filter_map
-                          (function
-                            | `String s -> Some s
-                            | _ -> None)
-                          l
-                      | exception U.Type_error _ -> []
+                      Json_util.get_string_list audit_json "latest_tool_names"
                     in
                     let latest_tool_call_count =
-                      match
-                        U.to_option
-                          U.to_int
-                          (U.member "latest_tool_call_count" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_int audit_json "latest_tool_call_count"
                     in
                     let latest_action_source =
-                      match
-                        U.to_option
-                          U.to_string
-                          (U.member "latest_action_source" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "latest_action_source"
                     in
                     let tool_audit_source =
-                      match
-                        U.to_option U.to_string (U.member "tool_audit_source" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "tool_audit_source"
                     in
                     let tool_audit_at =
-                      match
-                        U.to_option U.to_string (U.member "tool_audit_at" audit_json)
-                      with
-                      | v -> v
-                      | exception U.Type_error _ -> None
+                      Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let delivery_surface_view =
@@ -455,11 +463,6 @@ let keepers_json
                            ; ( "mention_reactive_turn_count"
                              , `Int meta.runtime.mention_reactive_turn_count )
                            ; "noop_turn_count", `Int meta.runtime.noop_turn_count
-                           ; ( "allowed_tool_names"
-                             , `List
-                                 (List.map
-                                    (fun value -> `String value)
-                                    allowed_tool_names) )
                            ; ( "latest_tool_names"
                              , `List
                                  (List.map (fun value -> `String value) latest_tool_names)
@@ -473,19 +476,19 @@ let keepers_json
                                  (fun value -> `Int value)
                                  latest_tool_call_count )
                            ; ( "latest_action_source"
-                             , string_option_to_json latest_action_source )
-                           ; "tool_audit_source", string_option_to_json tool_audit_source
-                           ; "tool_audit_at", string_option_to_json tool_audit_at
+                             , Json_util.string_opt_to_json latest_action_source )
+                           ; "tool_audit_source", Json_util.string_opt_to_json tool_audit_source
+                           ; "tool_audit_at", Json_util.string_opt_to_json tool_audit_at
                            ; ( "last_speech_act"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value = String.trim meta.runtime.last_speech_act in
                                   if value = "" then None else Some value) )
                            ; ( "delivery_surface_view"
-                             , string_option_to_json delivery_surface_view )
+                             , Json_util.string_opt_to_json delivery_surface_view )
                            ; ( "delivery_surface_view_source"
-                             , string_option_to_json delivery_surface_view_source )
+                             , Json_util.string_opt_to_json delivery_surface_view_source )
                            ; ( "last_social_transition_reason"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.last_social_transition_reason
                                   in
@@ -494,107 +497,22 @@ let keepers_json
                            ; "proactive_idle_sec", `Int meta.proactive.idle_sec
                            ; "proactive_cooldown_sec", `Int meta.proactive.cooldown_sec
                            ; ( "turn_budget"
-                             , let t_profile = Time_compat.now () in
-                               let cache_key = "kpd:" ^ meta.name in
-                               let result =
-                                 Dashboard_cache.get_or_compute
-                                   cache_key
-                                   ~ttl:10.0
-                                   (fun () ->
-                                      let profile =
-                                        Keeper_types_profile.load_keeper_profile_defaults
-                                          meta.name
-                                      in
-                                      let env_reactive =
-                                        Env_config_keeper.KeeperKeepalive
-                                        .oas_max_turns_per_call
-                                      in
-                                      let env_autonomous =
-                                        Env_config_keeper.KeeperKeepalive
-                                        .oas_max_turns_per_call_scheduled_autonomous
-                                      in
-                                      let reactive_effective =
-                                        Keeper_types_profile.effective_max_turns_per_call
-                                          profile
-                                      in
-                                      let reactive_source =
-                                        max_turns_override_source
-                                          profile.max_turns_per_call
-                                      in
-                                      let autonomous_effective =
-                                        Keeper_types_profile
-                                        .effective_max_turns_per_call_scheduled_autonomous
-                                          profile
-                                      in
-                                      let autonomous_source =
-                                        max_turns_override_source
-                                          profile.max_turns_per_call_scheduled_autonomous
-                                      in
-                                      let raw_override_int = function
-                                        | Some n -> `Int n
-                                        | None -> `Null
-                                      in
-                                      let manifest_path_json =
-                                        match profile.manifest_path with
-                                        | Some p -> `String p
-                                        | None -> `Null
-                                      in
-                                      `Assoc
-                                        [ ( "reactive"
-                                          , `Assoc
-                                              [ "value", `Int reactive_effective
-                                              ; "source", `String reactive_source
-                                              ; "env_default", `Int env_reactive
-                                              ; ( "env_var"
-                                                , `String
-                                                    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" )
-                                              ; ( "raw_override"
-                                                , raw_override_int
-                                                    profile.max_turns_per_call )
-                                              ] )
-                                        ; ( "scheduled_autonomous"
-                                          , `Assoc
-                                              [ "value", `Int autonomous_effective
-                                              ; "source", `String autonomous_source
-                                              ; "env_default", `Int env_autonomous
-                                              ; ( "env_var"
-                                                , `String
-                                                    "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS"
-                                                )
-                                              ; ( "raw_override"
-                                                , raw_override_int
-                                                    profile
-                                                      .max_turns_per_call_scheduled_autonomous
-                                                )
-                                              ] )
-                                        ; "manifest_path", manifest_path_json
-                                        ; ( "clamp_min"
-                                          , `Int
-                                              Keeper_runtime_resolved
-                                              .max_turns_per_call_min )
-                                        ; ( "clamp_max"
-                                          , `Int
-                                              Keeper_runtime_resolved
-                                              .max_turns_per_call_max )
-                                        ])
-                               in
-                               dt_profile := Time_compat.now () -. t_profile;
-                               result )
+                             , `String "disabled — governed by timeout_sec" )
                            ; ( "last_proactive_reason"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.proactive_rt.last_reason
                                   in
                                   if value = "" then None else Some value) )
                            ; ( "last_proactive_preview"
-                             , string_option_to_json
+                             , Json_util.string_opt_to_json
                                  (let value =
                                     String.trim meta.runtime.proactive_rt.last_preview
                                   in
                                   if value = "" then None else Some value) )
                            ; ( "last_blocker"
                              , match meta.runtime.last_blocker with
-                               | Some info -> Keeper_types.blocker_info_to_json info
+                               | Some info -> Keeper_meta_contract.blocker_info_to_json info
                                | None -> `Null )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
@@ -652,7 +570,7 @@ let keepers_json
                   "keepers_json fiber error (%s): %s"
                   name
                   (Printexc.to_string exn);
-                None))
+                None)))
        names);
   let rows = Array.to_list results |> List.filter_map Fun.id in
   `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
@@ -672,7 +590,7 @@ let _snapshot_recent_completed_limit () =
 
 (* sessions_json removed — team session cleanup. Sessions always return []. *)
 
-let room_json = Operator_control_snapshot_room.room_json
+let workspace_json = Operator_control_snapshot_workspace.workspace_json
 
 (* snapshot_view variant + parser extracted to
    [Operator_control_snapshot_view] (godfile decomp). *)
@@ -692,7 +610,7 @@ let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_o
    The include flows through to [Operator_control] via the existing
    include chain ([Operator_control_action] -> ...). *)
 include Operator_control_snapshot_cache
-let namespace_scope_cache_segment (_config : Coord_utils.config) = "default"
+let namespace_scope_cache_segment (_config : Workspace_utils.config) = "default"
 
 let snapshot_json
       ?actor
@@ -832,7 +750,7 @@ let snapshot_json
       result
     in
     let config = ctx.config in
-    let initialized = Coord.is_initialized config in
+    let initialized = Workspace.is_initialized config in
     ignore (initialized, _snapshot_session_window_seconds (), _snapshot_session_limit ());
     let trace_id = trace_id "ops" in
     let actor_name = normalized_actor ~context_actor:ctx.agent_name actor in
@@ -867,22 +785,22 @@ let snapshot_json
           | Summary | Full -> true
           | Sessions | Keepers | Messages -> false
         then (
-          let room_attention =
-            build_room_attention_items config |> List.sort compare_attention
+          let workspace_attention =
+            build_workspace_attention_items config |> List.sort compare_attention
           in
-          let room_recommendation_items = room_recommendations config in
-          [ "attention_summary", summary_of_attention_items room_attention
+          let workspace_recommendation_items = workspace_recommendations config in
+          [ "attention_summary", summary_of_attention_items workspace_attention
           ; ( "recommendation_summary"
-            , summary_of_recommendations ~actor:actor_name room_recommendation_items )
+            , summary_of_recommendations ~actor:actor_name workspace_recommendation_items )
           ])
         else [])
     in
     let keeper_names =
-      if initialized && include_keepers then Keeper_types.keeper_names config else []
+      if initialized && include_keepers then Keeper_meta_store.keeper_names config else []
     in
     let persistent_keeper_names =
       if initialized && include_keepers
-      then Keeper_types.persistent_agent_names config
+      then Keeper_meta_store.persistent_agent_names config
       else []
     in
     let result =
@@ -893,7 +811,7 @@ let snapshot_json
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
          ; "admission_queue", Admission_queue.snapshot_json ()
-         ; "root", room_json config
+         ; "workspace", workspace_json config
          ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
             let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in

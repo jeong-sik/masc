@@ -4,7 +4,6 @@ last_verified: 2026-05-20
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
-  - dashboard/src/components/control.ts
   - dashboard/src/components/work.ts
   - dashboard/src/components/lab.ts
   - lib/dashboard/dashboard_surface_readiness.ml
@@ -51,10 +50,10 @@ code_refs:
 - `monitoring`
   - `#monitoring?section=agents` — Keeper Operations (default)
   - `#monitoring?section=fleet-health` — Tool Monitor
-  - `#monitoring?section=runtime` — Cascade & Runtime
+  - `#monitoring?section=runtime` — Runtime & Runtime
   - `#monitoring?section=observatory` — Evidence Timeline
-  - `#monitoring?section=cascade-config` (hidden diagnostic)
-  - `#monitoring?section=doctor` (hidden diagnostic)
+  - `#monitoring?section=runtime-config` (hidden diagnostic)
+  - `#monitoring?section=diagnostics` (hidden diagnostic)
   - `#monitoring?section=transport-health` (hidden diagnostic)
   - `#monitoring?section=feature-health` (hidden diagnostic)
   - `#monitoring?section=journey` (hidden diagnostic)
@@ -90,9 +89,9 @@ code_refs:
 - `monitoring:attribution -> monitoring:fleet-health&view=attribution`
 - `monitoring:fsm-hub -> monitoring:agents&view=fsm`
 - `monitoring:metrics -> monitoring:runtime`
-- `monitoring:cascade-inspector -> monitoring:runtime&view=inspector`
+- `monitoring:runtime-inspector -> monitoring:runtime&view=inspector`
 - `monitoring:cost -> monitoring:runtime&view=cost`
-- `monitoring:git-graph -> workspace:repositories&view=graph`
+- `monitoring:git-graph -> workspace:repositories`
 - `command:intervene -> command:operations`
 - `command:governance -> command:operations`
 - `command:connectors -> connectors:connector-status`
@@ -110,15 +109,15 @@ code_refs:
 - visible Monitor sidebar는 네 개의 primary lane만 가진다.
   - Keeper Operations: attention-first keeper/agent list and selected detail.
   - Tool Monitor: compact tool operations board plus tool-quality, governance, attribution, and event-log lenses.
-  - Cascade & Runtime: provider/cascade health and advanced runtime sub-views.
+  - Runtime & Runtime: provider/runtime health and advanced runtime sub-views.
   - Evidence Timeline: default evidence track timeline with explicit Activity Graph and Live lenses.
-- `cascade-config`, `doctor`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
+- `runtime-config`, `diagnostics`, `transport-health`, `feature-health`, `journey`, `cognition`은 routeable compatibility/diagnostic/deep-link surface로 남지만 primary sidebar에는 노출하지 않는다.
 - Keeper Cognition은 top-level Monitor sibling이 아니라 Keeper Operations의 selected keeper detail/deep-link path로 취급한다.
 - Keeper Operations selected detail은 `Cognition`, `Tool Access`, `Runtime Trace` lens를 통해 hidden/deep-link surfaces로 연결한다.
 - Tool Monitor default view는 full telemetry/full quality panels를 나란히 터뜨리지 않고 tool success, failures, attention tools, failure categories, and lane links만 먼저 보여준다.
 - Evidence Timeline default view는 Activity Graph card panels를 자동으로 붙이지 않는다. Activity Graph는 `#monitoring?section=observatory&view=activity`, Live는 `#monitoring?section=observatory&view=live`에서만 열린다.
-- Transport/Feature/Doctor 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
-- Cascade & Runtime default view는 OAS/cascade signal을 먼저 보여주고 `transport-health`, `doctor`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
+- Transport/Feature/Diagnostics 상세는 Monitor daily default가 아니라 diagnostics/admin 성격이다. Monitor에는 degraded badge나 diagnostic link만 노출한다.
+- Runtime & Runtime default view는 OAS/runtime signal을 먼저 보여주고 `transport-health`, `diagnostics`, `feature-health`를 hidden diagnostics link 묶음으로 노출한다.
 
 ## Canonical Read Models
 - `GET /api/v1/dashboard/shell`
@@ -145,15 +144,15 @@ code_refs:
   - read-only CLI equivalent: `masc-keeper-feature-proof --base-path <runtime-root>`
 - `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
   - runtime cost/latency view
-- `GET /api/v1/dashboard/keeper-decisions`, `GET /api/v1/dashboard/heuristics`, `GET /api/v1/dashboard/heuristics/coverage`, `GET /api/v1/dashboard/stress`
-  - runtime decision, heuristic, and stress feeds; payloads expose `dashboard_surface`, `source`, and `retention` so the Cost/Runtime subviews can distinguish visible read-model state from the backing JSONL logs
+- `GET /api/v1/dashboard/keeper-decisions`
+  - runtime decision and heuristic feeds; payloads expose `dashboard_surface`, `source`, and `retention` so the Cost/Runtime subviews can distinguish visible read-model state from the backing JSONL logs
 - `GET /api/v1/providers`
   - runtime provider inventory
-- `GET /api/v1/cascade/config`, `GET /api/v1/cascade/config/raw`
-  - runtime cascade config inspector read models
-- `GET /api/v1/cascade/client_capacity`, `GET /api/v1/cascade/client_capacity/history`, `GET /api/v1/cascade/slo`
-  - runtime cascade capacity + SLO view
-- `GET /api/v1/cascade/strategy_trace`, `GET /api/v1/cascade/health`
+- `GET /api/v1/runtime/config`, `GET /api/v1/runtime/config/raw`
+  - runtime runtime config inspector read models
+- `GET /api/v1/runtime/client_capacity`, `GET /api/v1/runtime/client_capacity/history`, `GET /api/v1/runtime/slo`
+  - runtime runtime capacity + SLO view
+- `GET /api/v1/runtime/strategy_trace`, `GET /api/v1/runtime/health`
   - runtime inspector view
 - `GET /api/v1/operator/digest`
   - operations read model
@@ -167,8 +166,6 @@ code_refs:
   - workspace named board spaces
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
-- `GET /api/v1/git/graph`
-  - workspace repository graph view
 - `GET /api/v1/repositories`, `GET /api/v1/workspace/tree`
   - workspace repository registry and source tree browser read models
 - `GET /api/v1/verification/requests`, `GET /api/v1/verification/summary`
@@ -189,7 +186,8 @@ code_refs:
   - canonical surface inventory + readiness refs
 
 ## Supporting / Compatibility Read Models
-- `GET /api/v1/dashboard/mission`
+- `GET /api/v1/dashboard/briefing`
+- `GET /api/v1/dashboard/briefing/sections`
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`
@@ -206,8 +204,8 @@ code_refs:
 - 현재 v1 shell이 직접 반응하는 최소 이벤트 클래스:
   - `broadcast`
   - `task_*`
-  - `agent_joined`
-  - `agent_left`
+  - `agent_bound`
+  - `agent_unbound`
   - `board_post`
   - `board_comment`
   - `decision_*`

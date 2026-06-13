@@ -49,9 +49,6 @@ val percentile_int : int list -> pct:float -> int option
 (** Nearest-rank percentile over a non-empty sorted copy of [values].
     Returns [None] for the empty list. *)
 
-val json_int_opt : int option -> Yojson.Safe.t
-(** [Some v -> `Int v | None -> `Null]. *)
-
 val safe_age_seconds_opt :
   now_ts:float -> event_ts:float -> int option
 (** Bounded non-negative age in seconds; [None] for NaN/Inf inputs. *)
@@ -63,7 +60,7 @@ val keeper_tail_lines_or_empty :
     explicitly instead of flowing through the removed global silent
     fallback. *)
 
-(** {1 JSON field accessors (sentinel-tolerant)} *)
+(** {1 JSON field accessors (marker-tolerant)} *)
 
 val json_list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Extract a [`List] field; returns [[]] on missing/wrong-type. *)

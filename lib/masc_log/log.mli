@@ -167,7 +167,7 @@ module Make (_ : sig val name : string end) : LOGGER
 
 (** {1 Pre-defined module loggers} *)
 
-module Coord : LOGGER
+module Workspace : LOGGER
 module Mcp : LOGGER
 module Auth : LOGGER
 module Retry : LOGGER
@@ -193,10 +193,10 @@ module Transport : LOGGER
 module Gc : LOGGER
 module Reputation : LOGGER
 module Keeper : LOGGER
-module Cascade : LOGGER
-(** RFC-0058 Phase 8.1.5: cascade-domain namespace for catalog,
+module Runtime : LOGGER
+(** RFC-0058 Phase 8.1.5: runtime-domain namespace for catalog,
     routing, and partial-parse events. Separated from {!Keeper} so
-    alerting/dashboard filters can target cascade subsystem without
+    alerting/dashboard filters can target runtime subsystem without
     keeper-domain false positives. *)
 module Memory : LOGGER
 module Mention : LOGGER
@@ -217,7 +217,7 @@ module MemoryJsonl : LOGGER
 module AutoResponder : LOGGER
 module Env : LOGGER
 module Level2 : LOGGER
-module RoomTask : LOGGER
+module TaskState : LOGGER
 module Inline : LOGGER
 module Protocol : LOGGER
 module AlwaysOn : LOGGER
@@ -230,3 +230,27 @@ module Planner : LOGGER
 module Compact : LOGGER
 module Harness : LOGGER
 module Discovery : LOGGER
+
+(** {2 Logging-consistency migration modules}
+
+    Added by [refactor/logging-consistency-harness]. The first group replaces
+    former [Log.info ~ctx:"<name>"] call sites; each [name] preserves the exact
+    component string operators see ([ts] [LEVEL] [<name>]). The second group
+    replaces former raw-stderr / [Logs.*] sites that carried no context and are
+    named after their domain. See [docs/LOGGING.md]. *)
+module Otel : LOGGER
+module Agent_health : LOGGER
+module Relay : LOGGER
+module Runtime_verify : LOGGER
+module Checkpoint : LOGGER
+module Jsonl_atomic : LOGGER
+module Mcp_transport : LOGGER
+module Startup : LOGGER
+module Model_inference_metrics : LOGGER
+module Oas_worker_exec : LOGGER
+module Oas_event : LOGGER
+module H2_gateway : LOGGER
+module Voice : LOGGER
+module Exec_tap : LOGGER
+module Tool_validation : LOGGER
+module Discord : LOGGER

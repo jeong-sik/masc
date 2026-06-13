@@ -5,14 +5,14 @@
 
 open Alcotest
 
-module Prometheus = Masc_mcp.Prometheus
-module TM = Masc_mcp.Transport_metrics
+module Otel_metric_store = Masc.Otel_metric_store
+module TM = Masc.Transport_metrics
 
 let test_default_latency () =
   (* With no broadcast data, latency avg = 0. *)
-  let sum = Prometheus.metric_value_or_zero
-    Prometheus.metric_sse_broadcast_duration () in
-  let count = Prometheus.metric_value_or_zero
+  let sum = Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_sse_broadcast_duration () in
+  let count = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds_count" () in
   let avg = if count > 0.0 then sum /. count else 0.0 in
   check bool "avg latency is a valid float" true (avg >= 0.0)
@@ -20,11 +20,11 @@ let test_default_latency () =
 let test_high_latency_detected () =
   (* Inject high latency observations to push avg above 0.5s *)
   for _ = 1 to 10 do
-    Prometheus.observe_histogram "masc_sse_broadcast_duration_seconds" 1.0
+    Otel_metric_store.observe_histogram "masc_sse_broadcast_duration_seconds" 1.0
   done;
-  let sum = Prometheus.metric_value_or_zero
+  let sum = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds" () in
-  let count = Prometheus.metric_value_or_zero
+  let count = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds_count" () in
   let avg = if count > 0.0 then sum /. count else 0.0 in
   check bool "avg latency exceeds threshold" true (avg > 0.4)

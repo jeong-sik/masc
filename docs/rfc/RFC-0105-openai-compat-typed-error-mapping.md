@@ -33,7 +33,7 @@ audit confirms the closeout — that file is clean. This RFC scopes the
 follow-up to the one remaining lossful boundary and proposes a typed
 mapping there, independent of RFC-0098's already-completed work.
 
-## 2. Evidence (measured 2026-05-17, masc-mcp main @ `f2f3963165`)
+## 2. Evidence (measured 2026-05-17, masc main @ `f2f3963165`)
 
 ### 2.1 transport_http confirmation (no work needed)
 
@@ -67,10 +67,10 @@ correct HTTP status selection.
 The lossful string then propagates through two further layers, each
 adding more flattening:
 
-**`route_cascade` signature** (`server_openai_compat.ml:101-125`):
+**`route_runtime` signature** (`server_openai_compat.ml:101-125`):
 
 ```ocaml
-let route_cascade ~message ~system_prompt ~max_tokens ~temperature
+let route_runtime ~message ~system_prompt ~max_tokens ~temperature
   : (string, string) result =
   ...
   | Error err ->
@@ -83,16 +83,16 @@ function boundary, not just at the conversion call.
 **`handle_chat_completions` Error arm** (`server_openai_compat.ml:185-190`):
 
 ```ocaml
-match route_cascade ... with
+match route_runtime ... with
 | Ok reply ->
   (`OK, completion_response ~model ~content:reply)
 | Error e ->
   (`Internal_server_error,                            (* always 500 *)
    error_response ~status:"server_error"               (* always server_error *)
-     ~message:(Printf.sprintf "Cascade error: %s" e))
+     ~message:(Printf.sprintf "Runtime error: %s" e))
 ```
 
-All cascade errors flatten to HTTP **500 / "server_error"**, regardless
+All runtime errors flatten to HTTP **500 / "server_error"**, regardless
 of whether the underlying `sdk_error` was auth, rate-limit, timeout,
 validation, or model-not-found.
 
@@ -133,7 +133,7 @@ RFC-0098 §8 originally listed three call sites:
 
 1. The retired proactive exec call site — no longer exists in main (moved to
    typed `Agent_sdk.Error.t`).
-2. `Llm_orchestration.run_prompt_cascade` — same.
+2. `Llm_orchestration.run_prompt_runtime` — same.
 3. `server_mcp_transport_http` mapping — turned out to need no work
    (already typed via PR-1/2/3/4).
 
@@ -163,7 +163,7 @@ type http_status =
   | `Too_many_requests     (* 429: rate-limit / quota *)
   | `Internal_server_error (* 500: unclassified backend failure *)
   | `Bad_gateway           (* 502: upstream provider error *)
-  | `Service_unavailable   (* 503: provider unavailable / cascade exhausted *)
+  | `Service_unavailable   (* 503: provider unavailable / runtime exhausted *)
   | `Gateway_timeout       (* 504: structural timeout from oas_bridge *)
   ]
 
@@ -186,10 +186,10 @@ intended forcing function.
 
 ### 4.2 Callsite changes
 
-**`route_cascade` widens the Error tag from `string` to `t`:**
+**`route_runtime` widens the Error tag from `string` to `t`:**
 
 ```ocaml
-let route_cascade ~message ~system_prompt ~max_tokens ~temperature
+let route_runtime ~message ~system_prompt ~max_tokens ~temperature
   : (string, Openai_compat_error_map.t) result =
   ...
   | Error err -> Error (Openai_compat_error_map.of_sdk_error err)
@@ -238,10 +238,10 @@ let error_response ~(status : string) ?(code : string option) ~(message : string
 
 - [x] `Openai_compat_error_map.of_sdk_error` is total (exhaustive
       `match` over `Agent_sdk.Error.sdk_error`, no catch-all `_ ->`).
-- [x] `route_cascade` signature returns `(string, Openai_compat_error_map.t) result`
+- [x] `route_runtime` signature returns `(string, Openai_compat_error_map.t) result`
       (typed Error tag, not `string`).
 - [x] `handle_chat_completions` Error arm uses `mapped.http_status`
-      (no `\`Internal_server_error` hardcode for cascade errors).
+      (no `\`Internal_server_error` hardcode for runtime errors).
 - [x] `error_response` envelope populates `code` field with `openai_code`
       when present (no permanent `\`Null`).
 - [x] `rg -n "Agent_sdk.Error.to_string" lib/server/server_openai_compat.ml` returns 0 matches. *Scope clarification (added in closeout)*: the lossful boundary this RFC targets is the typed→string collapse at the caller site. The mapping module `lib/server/openai_compat_error_map.ml` legitimately uses `Agent_sdk.Error.to_string` to populate the structured `message` field — that is a typed→structured projection (typed `http_status`/`kind`/`code` preserved alongside human-readable text), not the collapse this RFC eliminates. Acceptance therefore narrows to the caller file.
@@ -254,9 +254,9 @@ let error_response ~(status : string) ?(code : string option) ~(message : string
 1. **Unit (pure)**: `test/server/test_openai_compat_error_map.ml` —
    table-driven Alcotest covering each `sdk_error` variant. Asserts
    `(http_status, openai_kind, openai_code option)` triple per variant.
-2. **Boundary (no integration)**: `test/server/test_route_cascade_error_typed.ml`
+2. **Boundary (no integration)**: `test/server/test_route_runtime_error_typed.ml`
    — stub `Masc_oas_bridge.run_with_caller` returns each `sdk_error`
-   variant, assert `route_cascade` propagates the *typed* mapping
+   variant, assert `route_runtime` propagates the *typed* mapping
    unchanged. Asserts return type is `Openai_compat_error_map.t`, not
    `string`.
 3. **No integration test**: handle_chat_completions wire-up is verified
@@ -325,8 +325,8 @@ apply.
   - 9-row closed polymorphic variant `http_status` upcastable to
     `Httpun.Status.t` via `:>` coercion (closed-variant subset).
 - `lib/server/server_openai_compat.{ml,mli}`
-  - `route_cascade` Error tag widened: `(string, Openai_compat_error_map.t) result`.
-  - `handle_chat_completions` cascade Error arm consumes typed mapping
+  - `route_runtime` Error tag widened: `(string, Openai_compat_error_map.t) result`.
+  - `handle_chat_completions` runtime Error arm consumes typed mapping
     → per-variant `http_status` / `openai_kind` / `openai_code` / `message`
     instead of blanket HTTP 500 / `"server_error"`.
   - `error_response` gains optional `?code` parameter; envelope `"code"`

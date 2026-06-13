@@ -3,8 +3,8 @@
 
 open Alcotest
 
-module TM = Masc_mcp.Transport_metrics
-module Prometheus = Masc_mcp.Prometheus
+module TM = Masc.Transport_metrics
+module Otel_metric_store = Masc.Otel_metric_store
 module U = Yojson.Safe.Util
 
 let temp_dir () =
@@ -43,37 +43,22 @@ let with_env name value_opt f =
    ============================================================ *)
 
 let test_init () =
-  let text = Prometheus.to_prometheus_text () in
-  check bool "sse sessions metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_sse_sessions_total") text 0 in
-       true
-     with Not_found -> false);
-  check bool "grpc active streams metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_grpc_active_streams_total") text 0 in
-       true
-     with Not_found -> false);
-  check bool "agent heartbeat age metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_agent_heartbeat_age_seconds") text 0 in
-       true
-     with Not_found -> false);
-  check bool "http accept metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_http_accepts_total") text 0 in
-       true
-     with Not_found -> false);
-  check bool "ws hello latency metric registered" true
-    (try
-       let _ = Str.search_forward
-         (Str.regexp_string "masc_ws_dashboard_hello_latency_seconds") text 0 in
-       true
-     with Not_found -> false)
+  let has_metric name =
+    Otel_metric_store.snapshot ()
+    |> List.exists (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
+  in
+  (* Counters zero-fill at module init (declare_counter); gauges and
+     histograms are lazy — they appear on first set/observe.  The
+     registration sweep this test originally asserted died with the
+     retired scrape backend (RFC-0217). *)
+  check bool "http accept counter zero-filled" true
+    (has_metric "masc_http_accepts_total");
+  TM.set_grpc_active_streams 0;
+  check bool "grpc active streams gauge appears once set" true
+    (has_metric "masc_grpc_active_streams_total");
+  TM.observe_ws_dashboard_hello_latency ~success:true 0.0;
+  check bool "ws hello latency appears once observed" true
+    (has_metric "masc_ws_dashboard_hello_latency_seconds")
 
 (* ============================================================
    SSE Metrics
@@ -81,61 +66,61 @@ let test_init () =
 
 let test_sse_sessions () =
   TM.set_sse_sessions ~kind:"observer" 10;
-  TM.set_sse_sessions ~kind:"coordinator" 5;
-  let obs = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
+  TM.set_sse_sessions ~kind:"agent_stream" 5;
+  let obs = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
     ~labels:[("kind", "observer")] () in
-  let coord = Prometheus.metric_value_or_zero "masc_sse_sessions_total"
-    ~labels:[("kind", "coordinator")] () in
+  let workspace = Otel_metric_store.metric_value_or_zero "masc_sse_sessions_total"
+    ~labels:[("kind", "agent_stream")] () in
   check (float 0.01) "observer sessions" 10.0 obs;
-  check (float 0.01) "coordinator sessions" 5.0 coord
+  check (float 0.01) "agent_stream sessions" 5.0 workspace
 
 let test_broadcast_duration () =
   TM.observe_broadcast_duration 0.05;
   TM.observe_broadcast_duration 0.15;
-  let sum = Prometheus.metric_value_or_zero
+  let sum = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds" () in
-  let count = Prometheus.metric_value_or_zero
+  let count = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_duration_seconds_count" () in
   check bool "broadcast sum > 0" true (sum > 0.0);
   check bool "broadcast count >= 2" true (count >= 2.0)
 
 let test_broadcast_events_counter () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_events_total" () in
   TM.observe_broadcast_duration 0.01;
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_sse_broadcast_events_total" () in
   check bool "broadcast events incremented" true (after > before)
 
 let test_sse_idle_evicted () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_sse_idle_evictions_total" () in
   TM.inc_sse_idle_evicted ();
   TM.inc_sse_idle_evicted ();
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_sse_idle_evictions_total" () in
   check (float 0.01) "idle evicted delta" 2.0 (after -. before)
 
 let test_sse_reject_labelled () =
-  let before_cooldown = Prometheus.metric_value_or_zero
+  let before_cooldown = Otel_metric_store.metric_value_or_zero
     "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
-  let before_window = Prometheus.metric_value_or_zero
+  let before_window = Otel_metric_store.metric_value_or_zero
     "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
   TM.inc_sse_reject ~reason:"session_cooldown";
   TM.inc_sse_reject ~reason:"window_limit";
   TM.inc_sse_reject ~reason:"session_cooldown";
-  let after_cooldown = Prometheus.metric_value_or_zero
+  let after_cooldown = Otel_metric_store.metric_value_or_zero
     "masc_sse_rejects_total" ~labels:[("reason", "session_cooldown")] () in
-  let after_window = Prometheus.metric_value_or_zero
+  let after_window = Otel_metric_store.metric_value_or_zero
     "masc_sse_rejects_total" ~labels:[("reason", "window_limit")] () in
   check (float 0.01) "session_cooldown delta" 2.0 (after_cooldown -. before_cooldown);
   check (float 0.01) "window_limit delta" 1.0 (after_window -. before_window)
 
 let test_sse_reconnect () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_sse_reconnects_total" () in
   TM.inc_sse_reconnect ();
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_sse_reconnects_total" () in
   check (float 0.01) "reconnect delta" 1.0 (after -. before)
 
@@ -145,38 +130,38 @@ let test_sse_reconnect () =
 
 let test_grpc_active_streams () =
   TM.set_grpc_active_streams 3;
-  let v = Prometheus.metric_value_or_zero
+  let v = Otel_metric_store.metric_value_or_zero
     "masc_grpc_active_streams_total" () in
   check (float 0.01) "grpc active streams" 3.0 v
 
 let test_grpc_heartbeat_latency () =
   TM.observe_grpc_heartbeat_latency 0.002;
   TM.observe_grpc_heartbeat_latency 0.008;
-  let sum = Prometheus.metric_value_or_zero
+  let sum = Otel_metric_store.metric_value_or_zero
     "masc_grpc_heartbeat_latency_seconds" () in
   check bool "heartbeat latency sum > 0" true (sum > 0.0)
 
 let test_grpc_subscribers () =
   TM.set_grpc_subscribers 7;
-  let v = Prometheus.metric_value_or_zero
+  let v = Otel_metric_store.metric_value_or_zero
     "masc_grpc_subscribers_total" () in
   check (float 0.01) "grpc subscribers" 7.0 v
 
 let test_grpc_events_delivered () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_grpc_events_delivered_total" () in
   TM.inc_grpc_events_delivered ~delta:5 ();
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_grpc_events_delivered_total" () in
   check (float 0.01) "grpc events delta" 5.0 (after -. before)
 
 let test_grpc_events_dropped () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_grpc_events_dropped_total" () in
   TM.inc_grpc_events_dropped ();
   TM.inc_grpc_events_dropped ();
   TM.inc_grpc_events_dropped ();
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_grpc_events_dropped_total" () in
   check (float 0.01) "three drop observations advance counter by 3"
     3.0 (after -. before)
@@ -189,31 +174,31 @@ let test_grpc_runtime_listening_cache () =
 
 let test_ws_sessions () =
   TM.set_ws_sessions 4;
-  let v = Prometheus.metric_value_or_zero
+  let v = Otel_metric_store.metric_value_or_zero
     "masc_ws_sessions_total" () in
   check (float 0.01) "ws sessions" 4.0 v
 
 let test_ws_dashboard_hello_latency () =
-  let metric = Prometheus.metric_ws_dashboard_hello_latency_seconds in
+  let metric = Otel_metric_store.metric_ws_dashboard_hello_latency_seconds in
   let success_labels = [ ("outcome", "success") ] in
   let error_labels = [ ("outcome", "error") ] in
-  let success_before = Prometheus.metric_value_or_zero metric ~labels:success_labels () in
+  let success_before = Otel_metric_store.metric_value_or_zero metric ~labels:success_labels () in
   let success_count_before =
-    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
+    Otel_metric_store.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
   in
-  let error_before = Prometheus.metric_value_or_zero metric ~labels:error_labels () in
+  let error_before = Otel_metric_store.metric_value_or_zero metric ~labels:error_labels () in
   let error_count_before =
-    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
+    Otel_metric_store.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
   in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.25;
   TM.observe_ws_dashboard_hello_latency ~success:false (-1.0);
-  let success_after = Prometheus.metric_value_or_zero metric ~labels:success_labels () in
+  let success_after = Otel_metric_store.metric_value_or_zero metric ~labels:success_labels () in
   let success_count_after =
-    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
+    Otel_metric_store.metric_value_or_zero (metric ^ "_count") ~labels:success_labels ()
   in
-  let error_after = Prometheus.metric_value_or_zero metric ~labels:error_labels () in
+  let error_after = Otel_metric_store.metric_value_or_zero metric ~labels:error_labels () in
   let error_count_after =
-    Prometheus.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
+    Otel_metric_store.metric_value_or_zero (metric ^ "_count") ~labels:error_labels ()
   in
   check (float 0.001) "success latency sum delta" 0.25 (success_after -. success_before);
   check
@@ -233,14 +218,14 @@ let test_ws_enabled_blank_env_matches_runtime () =
     check bool "transport metrics treats blank as enabled" true
       (TM.ws_enabled ());
     check bool "runtime server treats blank as enabled" true
-      (Masc_mcp.Server_ws_standalone.is_enabled ()))
+      (Server_ws_standalone.is_enabled ()))
 
 let test_ws_enabled_normalized_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
       (TM.ws_enabled ());
     check bool "runtime server normalizes false env" false
-      (Masc_mcp.Server_ws_standalone.is_enabled ()))
+      (Server_ws_standalone.is_enabled ()))
 
 let test_ws_runtime_listening_cache () =
   TM.set_ws_runtime_listening true;
@@ -250,10 +235,10 @@ let test_ws_runtime_listening_cache () =
 
 let test_http_listener_state_json () =
   let accepts_before =
-    Prometheus.metric_total Prometheus.metric_http_accepts
+    Otel_metric_store.metric_total Otel_metric_store.metric_http_accepts
   in
   let errors_before =
-    Prometheus.metric_total Prometheus.metric_http_accept_errors
+    Otel_metric_store.metric_total Otel_metric_store.metric_http_accept_errors
   in
   TM.record_http_listener_started ~mode:"auto";
   TM.record_http_accept ~mode:"auto";
@@ -294,17 +279,17 @@ let test_http_listener_state_json () =
 
 let test_agent_heartbeat_age () =
   TM.set_agent_heartbeat_age ~agent_name:"dreamer" 42.5;
-  let v = Prometheus.metric_value_or_zero
+  let v = Otel_metric_store.metric_value_or_zero
     "masc_agent_heartbeat_age_seconds"
     ~labels:[("agent_name", "dreamer")] () in
   check (float 0.01) "dreamer heartbeat age" 42.5 v
 
 let test_agent_stale_counter () =
-  let before = Prometheus.metric_value_or_zero
+  let before = Otel_metric_store.metric_value_or_zero
     "masc_agent_stale_total" () in
   TM.inc_agent_stale ();
   TM.inc_agent_stale ();
-  let after = Prometheus.metric_value_or_zero
+  let after = Otel_metric_store.metric_value_or_zero
     "masc_agent_stale_total" () in
   check (float 0.01) "stale count increment" 2.0 (after -. before)
 
@@ -315,41 +300,41 @@ let test_agent_stale_counter () =
 let test_transport_health_json () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  ignore (Masc_mcp.Sse.close_all_clients ());
+  ignore (Masc.Sse.close_all_clients ());
   let base_dir = temp_dir () in
-  let config = Masc_mcp.Coord.default_config base_dir in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "tester"));
+  let config = Masc.Workspace.default_config base_dir in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer "observer-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Observer "observer-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator "coordinator-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Agent_stream "agent_stream-session"
        ~last_event_id:0);
   ignore
-    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Presence "presence-session"
+    (Masc.Sse.register ~kind:Masc.Sse.Presence "presence-session"
        ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
-  Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth 4.0;
-  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_retries
+  Otel_metric_store.set_gauge Otel_metric_store.metric_oas_sse_relay_queue_depth 4.0;
+  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
     ~labels:[ ("stage", "append") ] ~delta:2.0 ();
-  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_retries
+  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_retries
     ~labels:[ ("stage", "broadcast") ] ~delta:1.0 ();
-  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
-  Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
-  Prometheus.inc_counter Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
+  Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   let hello_latency_sum_before =
-    Prometheus.metric_total Prometheus.metric_ws_dashboard_hello_latency_seconds
+    Otel_metric_store.metric_total Otel_metric_store.metric_ws_dashboard_hello_latency_seconds
   in
   let hello_latency_count_before =
-    Prometheus.metric_total
-      (Prometheus.metric_ws_dashboard_hello_latency_seconds ^ "_count")
+    Otel_metric_store.metric_total
+      (Otel_metric_store.metric_ws_dashboard_hello_latency_seconds ^ "_count")
   in
   TM.observe_ws_dashboard_hello_latency ~success:true 0.125;
-  Masc_mcp.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
+  Masc.Sse.broadcast (`Assoc [ ("type", `String "transport-test") ]);
   let json = TM.transport_health_json ~config in
   let sse_json = json |> U.member "sse" in
   let streamable_json = json |> U.member "streamable_http" in
@@ -361,8 +346,8 @@ let test_transport_health_json () =
   let agent_health_json = json |> U.member "agent_health" in
   check int "observer sessions" 1
     (sse_json |> U.member "sessions_observer" |> U.to_int);
-  check int "coordinator sessions" 1
-    (sse_json |> U.member "sessions_coordinator" |> U.to_int);
+  check int "agent_stream sessions" 1
+    (sse_json |> U.member "sessions_agent_stream" |> U.to_int);
   check int "presence sessions" 1
     (sse_json |> U.member "sessions_presence" |> U.to_int);
   check bool "queue depth reflects queued event" true
@@ -437,8 +422,8 @@ let test_transport_health_json () =
     (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
   check bool "webrtc signaling_mode field exists" true
     (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
-  check string "room id" "default"
-    (cluster_json |> U.member "room_id" |> U.to_string);
+  check string "workspace id" "default"
+    (cluster_json |> U.member "workspace_id" |> U.to_string);
   check bool "summary primary path exists" true
     (String.length (summary_json |> U.member "primary_path" |> U.to_string) > 0);
   check string "summary queue pressure reflects relay drops" "high"
@@ -449,7 +434,7 @@ let test_transport_health_json () =
      |> U.to_int);
   (* The [delivery] sub-object surfaces WS cache/ack/throttle counters
      inline so the dashboard can render operational state without
-     scraping /metrics directly.  Producing metrics may not be registered
+     querying external telemetry directly.  Producing metrics may not be registered
      yet in this standalone PR, so presence (not value) is the contract
      this test enforces. *)
   let delivery_json = ws_json |> U.member "delivery" in
@@ -482,7 +467,7 @@ let test_transport_health_json () =
       | `Int i -> float_of_int i
       | _ -> 0.0)
      >= hello_latency_sum_before +. 0.125);
-  ignore (Masc_mcp.Sse.close_all_clients ());
+  ignore (Masc.Sse.close_all_clients ());
   cleanup_dir base_dir
 
 (* ============================================================

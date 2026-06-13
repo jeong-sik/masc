@@ -1,6 +1,6 @@
 # Keeper Sandbox Boundary Policy
 
-Last updated: 2026-05-25
+Last updated: 2026-06-01
 
 ## Goal
 
@@ -16,13 +16,13 @@ failure just because a keeper uses the Docker backend.
 | --- | --- | --- |
 | `Keeper_sandbox_config` | Structured keeper TOML parsing, canonical sandbox profile validation, backend storage-root projection, sandbox-visible path projection | Tool execution, shell command dispatch, Docker process lifecycle |
 | `Keeper_sandbox` | Keeper-facing sandbox contract used by tools and status surfaces | Manual TOML parsing, Docker launch policy |
-| `Coord_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
+| `Workspace_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
 | `Retired_file_tool` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
 | `Keeper_workspace_op` | Structured `tool_search_files` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
 | `Agent_tool_execute_timeout` | Execute timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
 | `Agent_tool_execute_runtime_paths` | Runtime path rewrites between container-visible and host-visible paths | Cwd/path validation, command execution, Docker lifecycle |
 | `Agent_tool_execute_readonly_policy` | Readonly Execute rejection categories, Good/Bad hints, and structured recovery diagnoses | Shell IR dispatch, cwd/path resolution, Docker runtime ownership |
-| `Agent_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
+| `Keeper_tool_execute_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for Execute/SearchFiles surfaces | Tool request parsing, remote workflow semantics |
 | `Agent_tool_execute_path` | `tool_search_files` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
 | `Agent_tool_execute_command_parse` | Raw shell command parsing into Shell IR | Command-shape policy, Docker process execution |
 | `Agent_tool_execute_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
@@ -59,6 +59,29 @@ failure just because a keeper uses the Docker backend.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
   `Keeper_sandbox_docker` directly. They pass host/backend command
   projections to `Keeper_sandbox_runner`.
+- Status, list, operator, and sandbox-status surfaces must read effective
+  keeper meta via `Keeper_meta_store.read_effective_meta*`, not raw persisted
+  JSON, before displaying `sandbox_profile`, `network_mode`, `tool_access`, or
+  sandbox live state. Persisted runtime JSON intentionally omits TOML-owned
+  fields; raw reads can otherwise report `local` while receipts and tool
+  execution correctly use `docker`.
+- Runtime/provider attribution for status surfaces must come from explicit
+  runtime observations and execution receipts. `Runtime_agent.run` must attach
+  terminal runtime observation to completed or partial-completed turns, receipts
+  must serialize `runtime.selected_model`, and runtime-trust status may fall
+  back from decision telemetry to the latest receipt model. Public dashboards
+  may keep provider/model lanes redacted, but keeper operator surfaces must show
+  either observed attribution or a typed runtime/provider blocker. The
+  `model_observability` status block must reuse the same runtime-trust /
+  receipt fallback; it must not report `selected_model=null` when
+  `runtime_trust.selected_model` or
+  `runtime_trust.execution.provider_selected_model` is present.
+- Telemetry coverage gaps are historical evidence, not permanent health
+  latches. Dashboard source health may report `coverage_gap` only for active
+  gaps: a gap is active until the same source has a durable row with a timestamp
+  equal to or newer than the gap timestamp. Summary payloads must keep
+  historical `coverage_gap_count` visible and expose
+  `active_coverage_gap_count` for current health decisions.
 - Command semantics may only interpret commands accepted by the typed
   bash subset parser. Unsupported shell constructs fail closed and must
   not be reinterpreted with space splitting or fallback token scans.
@@ -68,6 +91,11 @@ failure just because a keeper uses the Docker backend.
 Focused behavioral tests verify path and command behavior:
 
 - `test_keeper_path_ssot`
+- `test_keeper_effective_meta_overlay`
+- `test_keeper_runtime_trust_snapshot`
+- `test_runtime_provider_auth_headers`
+- `test_telemetry_unified` recovered coverage-gap summary test
+- `test_keeper_tool_call_log` recovered tool-call coverage-gap aggregate test
 - `test_keeper_sandbox_docker_route`
 
 Source-level boundary tests prevent regressions in layer ownership:
@@ -78,12 +106,13 @@ Source-level boundary tests prevent regressions in layer ownership:
 The boundary test intentionally fails if:
 
 - tool code reintroduces Docker path literals or profile detection;
-- coord worktree helpers reintroduce Docker container-root construction
+- status/sandbox-status surfaces bypass TOML-overlaid effective keeper meta;
+- workspace repo-path helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;
 - typed Execute or SearchFiles ops construct Shell IR outside
-  `Agent_tool_execute_shell_ir`;
+  `Keeper_tool_execute_shell_ir`;
 - `shared shell compatibility facade` source files return;
 - SearchFiles ops or GitHub `Execute` routes cwd/path resolution outside
   `Agent_tool_execute_path`;
@@ -103,3 +132,8 @@ The boundary test intentionally fails if:
 - keeper TOML parsing stops using the structured parser;
 - command semantics reintroduces word extraction or string-split fallback
   parsing.
+- completed or partial-completed runtime turns stop producing terminal runtime
+  observation for receipts, or runtime-trust status stops surfacing receipt
+  `runtime.selected_model` when decision telemetry is absent.
+- recovered historical telemetry coverage gaps force source health to remain
+  `coverage_gap` after a newer durable row exists for that source.

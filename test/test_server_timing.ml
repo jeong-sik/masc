@@ -1,4 +1,4 @@
-open Masc_mcp
+open Masc
 
 let test_empty_header () =
   let t = Server_timing.create () in

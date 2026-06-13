@@ -13,11 +13,11 @@ open Alcotest
 
 let renamed_identifiers =
   [ ( "lib/tool_schemas/tool_schemas_inline.ml"
-    , "_inline_coord_codegen_names"
-    , "inline_coord_codegen_names" )
+    , "_inline_workspace_codegen_names"
+    , "inline_workspace_codegen_names" )
   ; ( "lib/tool_schemas/tool_schemas_inline.ml"
-    , "_inline_coord_from_codegen"
-    , "inline_coord_from_codegen" )
+    , "_inline_workspace_from_codegen"
+    , "inline_workspace_from_codegen" )
   ; ( "lib/tool_schemas/tool_schemas_inline_infra.ml"
     , "_codegen_inline_infra_names"
     , "codegen_inline_infra_names" )

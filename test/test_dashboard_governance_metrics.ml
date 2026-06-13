@@ -1,7 +1,7 @@
 (** Tests for Dashboard_governance_metrics — tool rejection ring + approval queue. *)
 
-module GM = Masc_mcp.Dashboard_governance_metrics
-module P = Masc_mcp.Prometheus
+module GM = Dashboard_governance_metrics
+module P = Masc.Otel_metric_store
 
 open Alcotest
 
@@ -71,7 +71,7 @@ let test_record_failure_is_metric_visible () =
   in
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
+      Keeper_metrics.(to_string LifecycleCallbackFailures)
       ~labels
       ()
   in
@@ -82,7 +82,7 @@ let test_record_failure_is_metric_visible () =
     ~reason_code:"policy";
   let after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
+      Keeper_metrics.(to_string LifecycleCallbackFailures)
       ~labels
       ()
   in

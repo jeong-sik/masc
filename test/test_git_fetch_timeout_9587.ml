@@ -1,13 +1,13 @@
 (* test/test_git_fetch_timeout_9587.ml
 
    #9587: lock the git_fetch_timeout_sec contract.  The previous
-   hardcoded 30s budget at Coord_worktree.run_argv_exit timed out
+   hardcoded 30s budget at Workspace_worktree.run_argv_exit timed out
    legitimately slow [git fetch origin] inside the Docker keeper
    sandbox; the fix introduces a configurable timeout via
    [MASC_GIT_FETCH_TIMEOUT_SEC] with a 120s default and a 10s
    floor (so a [0] override does not silently disable the cap). *)
 
-open Masc_mcp
+open Masc
 
 let with_env key value f =
   let prev = Sys.getenv_opt key in

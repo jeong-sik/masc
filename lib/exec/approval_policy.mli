@@ -23,7 +23,7 @@ val decide :
   caps:Capability.t list ->
   simple:Shell_ir.simple ->
   Verdict.t
-(** Pure policy decision.  The rule cascade (checked top to bottom):
+(** Pure policy decision.  The rule runtime (checked top to bottom):
 
     - [Destructive] git op anywhere in the cap list:
       [Enforced] → [Deny Destructive_git].

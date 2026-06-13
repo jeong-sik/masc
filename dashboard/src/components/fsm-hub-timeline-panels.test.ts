@@ -45,7 +45,7 @@ describe('swimlaneSegmentColor', () => {
 describe('isTransitionInSegment', () => {
   const baseSegment = {
     field: 'KCL',
-    laneKey: 'cascade' as const,
+    laneKey: 'runtime' as const,
     value: 'trying',
     from: 1000,
     to: 2000,

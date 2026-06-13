@@ -32,8 +32,7 @@ fallback when no turn has run yet. Three concrete defects:
    over-runs.
 3. **No model awareness.** The predictor treats all agents as one
    distribution. A 9B-class agent and a 35B-A3B agent have visibly
-   different token-output distributions (per `heuristic_metrics`
-   sweeps); collapsing them inflates variance and weakens the
+   different token-output distributions; collapsing them inflates variance and weakens the
    prediction in both directions.
 
 The audit (`deep_audit_dashboard_heuristic.md` §8.1, 2026-05-05)
@@ -111,10 +110,10 @@ val unknown_agent_fallback = 1024
 
 `unknown_agent_fallback = 1024` rationale: the value is a conservative
 upper bound for a single LLM turn's output tokens against the
-current cascade defaults (`model-d-mini`/`qwen3-9B`/`qwen3-35B-A3B`).
+current runtime defaults (`model-d-mini`/`qwen3-9B`/`qwen3-35B-A3B`).
 **No formal measurement evidence is currently recorded** — once
-`heuristic_metrics` distributions land in a follow-up, this fallback
-should be revisited and either confirmed or replaced. This is an
+distribution evidence lands in a follow-up, this fallback should be
+revisited and either confirmed or replaced. This is an
 intentional honest gap, surfaced as a code comment, not a hidden
 assumption.
 

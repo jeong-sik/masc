@@ -4,7 +4,7 @@
 This script is read-only.  It aggregates persisted keeper runtime manifests and
 checks the concrete evidence chain that a production promotion needs:
 terminal turn, receipt, checkpoint, provider closure, event-bus correlation,
-memory injection, optional tool-call log, and timestamp ordering.
+optional tool-call log, and timestamp ordering.
 """
 
 from __future__ import annotations
@@ -44,7 +44,6 @@ class Thresholds:
     min_checkpoint_coverage_pct: float = 100.0
     min_provider_closure_pct: float = 100.0
     min_event_bus_coverage_pct: float = 100.0
-    min_memory_coverage_pct: float = 100.0
     min_tool_log_coverage_pct: float = 100.0
     min_timestamp_coverage_pct: float = 100.0
     max_missing_artifacts: int = 0
@@ -65,7 +64,6 @@ class ReadinessMetrics:
     checkpoint_ok_turns: int = 0
     provider_closed_turns: int = 0
     event_bus_ok_turns: int = 0
-    memory_ok_turns: int = 0
     tool_used_turns: int = 0
     tool_log_ok_turns: int = 0
     timestamp_rows: int = 0
@@ -294,7 +292,6 @@ def check_timestamp_order(rows: list[dict[str, Any]]) -> tuple[int, float]:
                 "checkpoint_saved",
                 "receipt_appended",
                 "event_bus_correlated",
-                "memory_injected",
             ):
                 for row in event_rows(rows, event):
                     ts = parse_ts(row.get("ts"))
@@ -468,8 +465,6 @@ def evaluate(
 
         if provider and success and event_rows(rows, "event_bus_correlated"):
             metrics.event_bus_ok_turns += 1
-        if provider and success and event_rows(rows, "memory_injected"):
-            metrics.memory_ok_turns += 1
 
         tools_used = receipt_tools_used(base_path, rows)
         if tools_used > 0:
@@ -496,9 +491,6 @@ def evaluate(
         ),
         "event_bus_coverage_pct": pct(
             metrics.event_bus_ok_turns, metrics.success_provider_turns
-        ),
-        "memory_coverage_pct": pct(
-            metrics.memory_ok_turns, metrics.success_provider_turns
         ),
         "tool_log_coverage_pct": pct(
             metrics.tool_log_ok_turns, metrics.tool_used_turns
@@ -567,10 +559,6 @@ def evaluate(
     if derived["event_bus_coverage_pct"] < thresholds.min_event_bus_coverage_pct:
         failures.append(
             f"event_bus_coverage_pct {derived['event_bus_coverage_pct']} < {thresholds.min_event_bus_coverage_pct}"
-        )
-    if derived["memory_coverage_pct"] < thresholds.min_memory_coverage_pct:
-        failures.append(
-            f"memory_coverage_pct {derived['memory_coverage_pct']} < {thresholds.min_memory_coverage_pct}"
         )
     if derived["tool_log_coverage_pct"] < thresholds.min_tool_log_coverage_pct:
         failures.append(
@@ -692,7 +680,7 @@ def write_fixture_turn(
         "generation": 1,
         "keeper_turn_id": turn,
         "oas_turn_count": turn,
-        "cascade_name": "fixture",
+        "runtime_id": "fixture",
         "status": "ok",
         "decision": {},
         "links": {
@@ -711,7 +699,6 @@ def write_fixture_turn(
     events.extend(
         [
             "event_bus_correlated",
-            "memory_injected",
             "checkpoint_saved",
             "receipt_appended",
             "turn_finished",
@@ -827,7 +814,6 @@ def thresholds_from_args(args: argparse.Namespace) -> Thresholds:
         min_checkpoint_coverage_pct=args.min_checkpoint_coverage_pct,
         min_provider_closure_pct=args.min_provider_closure_pct,
         min_event_bus_coverage_pct=args.min_event_bus_coverage_pct,
-        min_memory_coverage_pct=args.min_memory_coverage_pct,
         min_tool_log_coverage_pct=args.min_tool_log_coverage_pct,
         min_timestamp_coverage_pct=args.min_timestamp_coverage_pct,
         max_missing_artifacts=args.max_missing_artifacts,
@@ -873,7 +859,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-checkpoint-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-provider-closure-pct", type=float, default=100.0)
     parser.add_argument("--min-event-bus-coverage-pct", type=float, default=100.0)
-    parser.add_argument("--min-memory-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-tool-log-coverage-pct", type=float, default=100.0)
     parser.add_argument("--min-timestamp-coverage-pct", type=float, default=100.0)
     parser.add_argument("--max-missing-artifacts", type=int, default=0)

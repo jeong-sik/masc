@@ -4,6 +4,19 @@
 open Server_utils
 open Server_dashboard_http_core
 
+type cached_surface = Server_dashboard_http_cache.cached_surface
+
+
+let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
+let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
+let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
+
+(* Transport health probe timeout — env-overridable with sane bounds.
+   SSOT: env_config_snapshot.ml also registers the same env var. *)
+let transport_health_timeout_default_s = 8.0
+let transport_health_timeout_min_s = 3.0
+let transport_health_timeout_max_s = 30.0
+
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
    wrapper at [server_runtime_bootstrap.ml] uses the matching
@@ -18,20 +31,20 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        let t0 = Time_compat.now () in
        let cache_shell_payload ~light =
          let cache_key =
-           dashboard_shell_cache_key ~light state.Mcp_server.room_config
+           dashboard_shell_cache_key ~light state.Mcp_server.workspace_config
          in
          let compute () =
-           dashboard_shell_payload_json ~light state.Mcp_server.room_config
+           dashboard_shell_payload_json ~light state.Mcp_server.workspace_config
          in
          match state.Mcp_server.clock with
          | Some clock ->
            Dashboard_cache.get_or_compute_with_timeout
              cache_key
-             ~ttl:15.0
+             ~ttl:shell_surface_cache_ttl_s
              ~clock
              ~timeout_sec:shell_prewarm_timeout_s
              compute
-         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+         | None -> Dashboard_cache.get_or_compute cache_key ~ttl:shell_surface_cache_ttl_s compute
        in
        (try
           let light_result = cache_shell_payload ~light:true in
@@ -121,8 +134,8 @@ let () =
   operator_digest_broadcast_ref := broadcast_cached_surface ~event_type:"operator_digest"
 ;;
 
-let execution_cache =
-  create_cached_surface
+let execution_cache : cached_surface =
+  Server_dashboard_http_cache.create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
         ; "generated_at", `String (Masc_domain.now_iso ())
@@ -132,13 +145,13 @@ let execution_cache =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Called via [Coord_hooks.on_task_mutation_fn] after task add,
+    Called via [Workspace_hooks.on_task_mutation_fn] after task add,
     batch_add, and all transitions (claim, start, done, cancel,
     release) routed through [observe_task_transition].
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let record_invalidation_failure ~callback ~message exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ "callback", callback ]
     ();
@@ -168,7 +181,7 @@ let invalidate_execution_cache_with_hooks_for_testing
 
 let invalidate_execution_cache () =
   invalidate_execution_cache_with_hooks_for_testing
-    ~invalidate_execution_surface:(fun () -> invalidate_cached_surface execution_cache)
+    ~invalidate_execution_surface:(fun () -> Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
     ~invalidate_light_cache:(fun () ->
       Dashboard_cache.invalidate "execution:default:light")
     ()
@@ -178,13 +191,13 @@ let invalidate_execution_cache () =
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
-  mark_cached_surface_success
+  Server_dashboard_http_cache.mark_cached_surface_success
     execution_cache
     (`Assoc [ "status", `String "seeded_for_test" ])
 ;;
 
 let transport_health_cache =
-  create_cached_surface
+  Server_dashboard_http_cache.create_cached_surface
     (`Assoc
         [ "status", `String "initializing"
         ; "generated_at", `String (Masc_domain.now_iso ())
@@ -253,7 +266,7 @@ let cached_surface_cache_json
 ;;
 
 let with_cached_dashboard_surface_metadata
-      ~(config : Coord_utils.config)
+      ~(config : Workspace_utils.config)
       ?cache_key
       ~dashboard_surface
       ~source
@@ -284,7 +297,7 @@ let with_cached_dashboard_surface_metadata
       ; ( "retention"
         , `Assoc
             [ "scope", `String scope
-            ; "coordination_root", `String config.base_path
+            ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "producer", `String producer
             ; "store_kind", `String store_kind
@@ -334,7 +347,7 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~scope:"dashboard_execution"
     ~producer:"Dashboard_execution.json"
     ~store_kind:"process_cache"
-    ~ttl_s:120.0
+    ~ttl_s:deep_surface_cache_ttl_s
     ~timeout_s:Env_config_runtime.Dashboard.execution_timeout_sec
     ~background_refresh_interval_s:60.0
     ~query
@@ -353,17 +366,17 @@ let with_transport_health_metadata ~config ~timeout_s json =
     ~scope:"dashboard_transport_health"
     ~producer:"Transport_metrics.transport_health_json"
     ~store_kind:"process_cache"
-    ~ttl_s:30.0
+    ~ttl_s:config_cache_ttl_s
     ~timeout_s
     ~background_refresh_interval_s:30.0
     ~query:(transport_health_query_json ())
     json
 ;;
 
-let dashboard_execution_snapshot_json () = cached_surface_json execution_cache
+let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
 
 let dashboard_transport_health_snapshot_json () =
-  cached_surface_json transport_health_cache
+  Server_dashboard_http_cache.cached_surface_json transport_health_cache
 ;;
 
 (* Issue #8396: cache patchers used to recognise only 7 lifecycle event
@@ -427,15 +440,14 @@ let paused_of_lifecycle_event = function
 ;;
 
 let keeper_agent_status_opt row =
-  let open Yojson.Safe.Util in
-  match member "agent" row with
-  | `Assoc _ as agent ->
-    (match member "status" agent with
-     | `String status -> Some status
+  match Json_util.assoc_member_opt "agent" row with
+  | Some (`Assoc _ as agent) ->
+    (match Json_util.assoc_member_opt "status" agent with
+     | Some (`String status) -> Some status
      | _ -> None)
-  | _ ->
-    (match member "status" row with
-     | `String status -> Some status
+  | None | Some _ ->
+    (match Json_util.assoc_member_opt "status" row with
+     | Some (`String status) -> Some status
      | _ -> None)
 ;;
 
@@ -451,8 +463,8 @@ let patched_keeper_status row ~keepalive_running =
 
 let patch_keeper_row ~keeper_name ~event ~keepalive_running = function
   | `Assoc fields as row ->
-    (match Yojson.Safe.Util.member "name" row with
-     | `String name when String.equal name keeper_name ->
+    (match Json_util.assoc_member_opt "name" row with
+     | Some (`String name) when String.equal name keeper_name ->
        let row_fields : (string * Yojson.Safe.t) list = fields in
        let row_fields =
          row_fields
@@ -483,16 +495,16 @@ let patch_keeper_rows ~keeper_name ~event ~keepalive_running rows =
   List.map (patch_keeper_row ~keeper_name ~event ~keepalive_running) rows
 ;;
 
-let running_keeper_names (config : Coord.config) =
-  Keeper_types.keeper_names config
+let running_keeper_names (config : Workspace.config) =
+  Keeper_meta_store.keeper_names config
   |> List.filter_map (fun name ->
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some meta) when Keeper_status_bridge.runtime_keepalive_running config meta ->
       Some name
     | _ -> None)
 ;;
 
-let patch_surface_json_for_running_keepers (config : Coord.config) = function
+let patch_surface_json_for_running_keepers (config : Workspace.config) = function
   | `Assoc fields as json ->
     let running = running_keeper_names config in
     if running = []
@@ -580,7 +592,7 @@ let broadcast_namespace_truth_ref : (Mcp_server.server_state -> unit) ref =
     available, each refresh runs in a pool domain with a domain-local Caqti
     pool. Falls back to in-domain compute. *)
 let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
-  let room_config = state.Mcp_server.room_config in
+  let workspace_config = state.Mcp_server.workspace_config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   (* Default keeps timeout < interval (60s) so Proactive_refresh's clamp
      at start does not fire every boot. Env var override can still push
@@ -593,7 +605,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~max_v:300.0
   in
   let compute () =
-    mark_cached_surface_attempt execution_cache;
+    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
     let started_at = Unix.gettimeofday () in
     try
       run_dashboard_compute
@@ -602,7 +614,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
         ~clock
         ~net
         ~mono_clock
-        ~config:room_config
+        ~config:workspace_config
         (fun ~config ~sw ->
            Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
            |> patch_surface_json_for_running_keepers config
@@ -611,12 +623,12 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
                 ~started_at
                 ~extra:
                   [ ( "readonly_pool"
-                    , Coord_utils.domain_local_pg_backend_diagnostics_json () )
+                    , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
                   ])
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error execution_cache exn;
+      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
       raise exn
   in
   Proactive_refresh.start
@@ -625,17 +637,17 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error = Some (mark_cached_surface_error execution_cache)
+      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error execution_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success execution_cache json;
+      Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
       broadcast_cached_surface
         ~event_type:"execution_snapshot"
-        (cached_surface_json execution_cache
+        (Server_dashboard_http_cache.cached_surface_json execution_cache
          |> with_execution_metadata
-              ~config:room_config
+              ~config:workspace_config
               ~query:
                 (execution_query_json
                    ~actor:None
@@ -650,16 +662,16 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
   let compute () =
-    mark_cached_surface_attempt transport_health_cache;
-    try Transport_metrics.transport_health_json ~config:state.Mcp_server.room_config with
+    Server_dashboard_http_cache.mark_cached_surface_attempt transport_health_cache;
+    try Transport_metrics.transport_health_json ~config:state.Mcp_server.workspace_config with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error transport_health_cache exn;
+      Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache exn;
       raise exn
   in
   let interval_s = 30.0 in
@@ -669,22 +681,22 @@ let start_transport_health_refresh_loop ~state ~sw ~clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"transport_health" ~interval_s) with
         timeout_s
-      ; on_error = Some (mark_cached_surface_error transport_health_cache)
+      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error transport_health_cache)
       ; warm_delay_s = 0.0
       }
     ~compute
     ~on_result:(fun json ->
-      mark_cached_surface_success transport_health_cache json;
+      Server_dashboard_http_cache.mark_cached_surface_success transport_health_cache json;
       broadcast_cached_surface
         ~event_type:"transport_health_snapshot"
-        (cached_surface_json transport_health_cache
+        (Server_dashboard_http_cache.cached_surface_json transport_health_cache
          |> with_transport_health_metadata
-              ~config:state.Mcp_server.room_config
+              ~config:state.Mcp_server.workspace_config
               ~timeout_s))
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let net = state.Mcp_server.net in
   let mono_clock = state.Mcp_server.mono_clock in
   let fixture = query_param request "fixture" in
@@ -725,7 +737,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
               ~surface:"execution"
               ~started_at
               ~extra:
-                [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ()
+                [ "readonly_pool", Workspace_utils.domain_local_pg_backend_diagnostics_json ()
                 ])
   in
   match fixture, actor, full_mode with
@@ -733,10 +745,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
-    cached_surface_or_first_success_json
+    Server_dashboard_http_cache.cached_surface_or_first_success_json
       execution_cache
       ~cache_key:"execution:default:light"
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ~light:true)
@@ -756,7 +768,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
     in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
-      ~ttl:120.0
+      ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
       (compute ?actor ?fixture ~light)
@@ -769,7 +781,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~surface:"/api/v1/dashboard/execution-trust"
       ~source:"execution_receipt"
       ~cache_key:"execution-trust:default"
-      ~ttl_s:15.0
+      ~ttl_s:shell_surface_cache_ttl_s
       json
   in
   let compute () =
@@ -780,7 +792,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ?mono_clock:state.Mcp_server.mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.room_config
+      ~config:state.Mcp_server.workspace_config
       (fun ~config ~sw:_ ->
          Dashboard_http_keeper.execution_trust_dashboard_json config
          |> with_projection_diagnostics ~surface:"execution_trust" ~started_at ~extra:[])
@@ -789,16 +801,16 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   | Some clock ->
     Dashboard_cache.get_or_compute_with_timeout
       "execution-trust:default"
-      ~ttl:15.0
+      ~ttl:shell_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
-  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:15.0 compute)
+  | None -> Dashboard_cache.get_or_compute "execution-trust:default" ~ttl:shell_surface_cache_ttl_s compute)
   |> attach_surface_envelope
 ;;
 
 let transport_health_cache_diagnostics () =
-  match cached_surface_json transport_health_cache with
+  match Server_dashboard_http_cache.cached_surface_json transport_health_cache with
   | `Assoc fields ->
     (match List.assoc_opt "projection_diagnostics" fields with
      | Some (`Assoc diagnostics) -> diagnostics
@@ -810,15 +822,15 @@ let dashboard_transport_health_http_json ~state =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
-      ~default:8.0
-      ~min_v:3.0
-      ~max_v:30.0
+      ~default:transport_health_timeout_default_s
+      ~min_v:transport_health_timeout_min_s
+      ~max_v:transport_health_timeout_max_s
   in
-  let json = cached_surface_json transport_health_cache in
+  let json = Server_dashboard_http_cache.cached_surface_json transport_health_cache in
   extend_projection_diagnostics
     json
     (("source", `String "cached_surface") :: transport_health_cache_diagnostics ())
   |> with_transport_health_metadata
-       ~config:state.Mcp_server.room_config
+       ~config:state.Mcp_server.workspace_config
        ~timeout_s
 ;;

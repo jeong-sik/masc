@@ -5,7 +5,7 @@ let normalize p =
 
 (** Build the absolute, normalized playground bundle root for [meta]
     under [config.base_path]. *)
-let playground_root_abs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
+let playground_root_abs ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize
 
 let target_is_inside_playground ~playground ~target =
@@ -13,11 +13,11 @@ let target_is_inside_playground ~playground ~target =
   target = playground || String.starts_with ~prefix:(playground ^ "/") target
 
 let is_hardened_profile = function
-  | Keeper_types.Docker -> true
-  | Keeper_types.Local -> false
+  | Keeper_types_profile_sandbox.Docker -> true
+  | Keeper_types_profile_sandbox.Local -> false
 
 let check_target ~operation ~config ~meta ~target =
-  if not (is_hardened_profile meta.Keeper_types.sandbox_profile) then
+  if not (is_hardened_profile meta.Keeper_meta_contract.sandbox_profile) then
     Ok ()
   else
     let playground = playground_root_abs ~config ~meta in

@@ -41,7 +41,7 @@ pub fn update_actor_lifecycle_dom(
                 format!(" ({})", html_escape(&p.class))
             };
             div.set_inner_html(&format!(
-                "<span class=\"actor-icon\">+</span> <strong>{}</strong>{} joined the adventure",
+                "<span class=\"actor-icon\">+</span> <strong>{}</strong>{} bound the adventure",
                 html_escape(name),
                 class_info,
             ));

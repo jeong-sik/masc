@@ -5,7 +5,6 @@ import { currentDashboardActor, sendBroadcast } from '../../api'
 import {
   dispatchOperatorAction,
   operatorActionBusy,
-  operatorSnapshot,
 } from '../../operator-store'
 import { showToast } from '../common/toast'
 import { ActionButton } from '../common/button'
@@ -16,20 +15,16 @@ import {
   stateBlockKeys,
   STATE_BLOCK_TEMPLATE,
 } from '../ops/ops-state'
-import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 import {
   keeperNameFromTarget,
-  mentionQueryFromMessage,
-  trailingMentionNameFromMessage,
-  onlineKeeperNameForMention,
-  mentionCandidates,
   replaceTrailingMentionDraft,
 } from '../../lib/mention-utils'
+import { useOperatorMentionContext } from '../common/use-operator-mention-context'
 
 export type ComposerV2Mode = 'broadcast' | 'dm' | 'state-block'
 
 interface ComposerV2Target {
-  room_id?: string
+  workspace_id?: string
   keeper_id?: string
 }
 
@@ -49,15 +44,15 @@ export interface ComposerV2Request {
 }
 
 const MODE_OPTIONS: Array<{ value: ComposerV2Mode; label: string; description: string }> = [
-  { value: 'broadcast', label: 'Broadcast', description: 'Room broadcast' },
+  { value: 'broadcast', label: 'Broadcast', description: 'Workspace broadcast' },
   { value: 'dm', label: 'DM', description: 'Keeper DM' },
   { value: 'state-block', label: 'State', description: 'State block' },
 ]
 
 const MENTION_LISTBOX_ID = 'composer-v2-mention-listbox'
 
-function normalizeRoomId(roomId: string | null | undefined): string {
-  const normalized = roomId?.trim().replace(/^#+/, '')
+function normalizeWorkspaceId(workspaceId: string | null | undefined): string {
+  const normalized = workspaceId?.trim().replace(/^#+/, '')
   return normalized || 'default'
 }
 
@@ -79,7 +74,7 @@ function composeBodyText(body: ComposerV2Request['compose']['body']): string {
 
 export function buildComposerV2Request(input: {
   mode: ComposerV2Mode
-  roomId: string
+  workspaceId: string
   body: string
   keeperId?: string | null
 }): ComposerV2Request {
@@ -88,7 +83,7 @@ export function buildComposerV2Request(input: {
   if (input.mode === 'dm') {
     if (input.keeperId) target.keeper_id = input.keeperId
   } else {
-    target.room_id = normalizeRoomId(input.roomId)
+    target.workspace_id = normalizeWorkspaceId(input.workspaceId)
   }
   const composeBody = input.mode === 'state-block'
     ? { kind: 'state-block' as const, raw: body, keys: stateBlockKeys(body) }
@@ -103,47 +98,42 @@ export function buildComposerV2Request(input: {
   }
 }
 
-export function ComposerV2({ roomId }: { roomId?: string | null }) {
+export function ComposerV2({ workspaceId }: { workspaceId?: string | null }) {
   const [mode, setMode] = useState<ComposerV2Mode>('broadcast')
   const [draft, setDraft] = useState('')
   const [keeperTarget, setKeeperTarget] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [activeMentionIndex, setActiveMentionIndex] = useState(0)
-  const [dismissedMentionQuery, setDismissedMentionQuery] = useState<string | null>(null)
-  const room = normalizeRoomId(roomId)
-  const snapshot = operatorSnapshot.value
+  const workspace = normalizeWorkspaceId(workspaceId)
   const busy = submitting || operatorActionBusy.value
-  // Paused keepers stay targetable so operators can DM/probe/resume them,
-  // even when another lifecycle axis still carries an offline-ish token.
-  const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(isKeeperOperatorTargetable)
-    .map(keeper => ({ name: keeper.name, status: keeper.status }))
-  const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
-  const selectedKeeper = keeperNameFromTarget(keeperTarget)
-  const selectedKeeperOnline = !!selectedKeeper && onlineKeepers.some(k => k.name === selectedKeeper)
-  const mentionQuery = mode === 'dm' ? mentionQueryFromMessage(draft) : null
-  const trailingMention = mode === 'dm' ? trailingMentionNameFromMessage(draft) : null
-  const trailingMentionTarget = mode === 'dm' ? onlineKeeperNameForMention(onlineKeepers, trailingMention) : null
-  const unresolvedTrailingMention = mode === 'dm' && !!trailingMention && !trailingMentionTarget
-  const effectiveKeeper = trailingMentionTarget ?? selectedKeeper
-  const effectiveKeeperOnline = !!trailingMentionTarget || selectedKeeperOnline
-  const mentionMatches = mode === 'dm' ? mentionCandidates(onlineKeepers, mentionQuery, effectiveKeeper) : []
-  const mentionListOpen = mentionQuery !== null && dismissedMentionQuery !== mentionQuery
-  const activeMention = mentionListOpen ? mentionMatches[activeMentionIndex] ?? mentionMatches[0] : null
-  const activeMentionOptionId = activeMention
-    ? `${MENTION_LISTBOX_ID}-option-${Math.max(mentionMatches.indexOf(activeMention), 0)}`
-    : undefined
+  const mention = useOperatorMentionContext({
+    message: draft,
+    target: keeperTarget,
+    dmActive: mode === 'dm',
+    listboxId: MENTION_LISTBOX_ID,
+  })
+  const {
+    onlineKeepers,
+    onlineKeeperNames,
+    selectedKeeperOnline,
+    mentionQuery,
+    trailingMentionTarget,
+    unresolvedTrailingMention,
+    effectiveKeeper,
+    effectiveKeeperOnline,
+    mentionMatches,
+    mentionListOpen,
+    activeMentionOptionId,
+    activeMentionIndex,
+    setActiveMentionIndex,
+    dismissedMentionQuery,
+    setDismissedMentionQuery,
+  } = mention
   const stateKeys = mode === 'state-block' ? stateBlockKeys(draft) : []
   const sendDisabled = busy
     || draft.trim() === ''
     || (mode === 'dm' && (!effectiveKeeperOnline || unresolvedTrailingMention))
     || (mode === 'state-block' && stateKeys.length === 0)
-
-  useEffect(() => {
-    setActiveMentionIndex(0)
-    setDismissedMentionQuery(null)
-  }, [mentionQuery, onlineKeeperNames])
 
   useEffect(() => {
     if (mode !== 'dm') return
@@ -173,7 +163,7 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
       : null
     const request = buildComposerV2Request({
       mode,
-      roomId: room,
+      workspaceId: workspace,
       body: message,
       keeperId,
     })
@@ -228,8 +218,8 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
             `
           })}
         </div>
-        <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-muted)]" aria-label=${`Target room: ${room}`}>
-          #${room}
+        <span class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-1 text-2xs font-medium text-[var(--color-fg-muted)]" aria-label=${`Target workspace: ${workspace}`}>
+          #${workspace}
         </span>
         <span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]" aria-live="polite">
           ${draft.length} chars · ${onlineKeepers.length} keeper targets

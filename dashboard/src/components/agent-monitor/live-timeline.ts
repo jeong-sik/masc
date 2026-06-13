@@ -44,7 +44,7 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'error':
       return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'agent_joined' || et === 'agent_left' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'oas_context' || et === 'oas_event' || et === 'oas_task'
+      return et === 'agent_bound' || et === 'agent_unbound' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'oas_context' || et === 'oas_event' || et === 'oas_task'
     default:
       return true
   }
@@ -66,8 +66,8 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
     case 'oas_event':
     case 'oas_task':
       return 'info'
-    case 'agent_joined':
-    case 'agent_left':
+    case 'agent_bound':
+    case 'agent_unbound':
       return 'info'
     case 'keeper_handoff':
       return 'info'
@@ -96,8 +96,8 @@ function eventKindLabel(eventType: JournalEventType | undefined): string {
     case 'oas_context': return 'CTX'
     case 'oas_event': return 'OAS'
     case 'oas_task': return 'TASK'
-    case 'agent_joined': return 'JOIN'
-    case 'agent_left': return 'LEFT'
+    case 'agent_bound': return 'JOIN'
+    case 'agent_unbound': return 'LEFT'
     case 'keeper_handoff': return 'HAND'
     case 'keeper_compaction': return 'COMP'
     case 'keeper_guardrail': return 'GUARD'

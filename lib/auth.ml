@@ -3,9 +3,10 @@
 open Masc_domain
 
 (* Crypto utilities, file I/O, config, credential CRUD, token
-   verification — extracted to [Auth_credential] (godfile decomp). *)
+   verification — formerly re-exported via Auth_credential shim. *)
 
-include Auth_credential
+include Auth_credential_base
+include Auth_credential_token
 
 (* ============================================ *)
 (* Bare alias & archive                         *)
@@ -39,6 +40,7 @@ let archive_credential_file config ~agent_name ~reason =
   then ()
   else (
     try
+      (* NDT-OK: wall-clock epoch names operator archive folders only. *)
       let stamp = string_of_int (int_of_float (Unix.gettimeofday ())) in
       let dest_dir =
         Filename.concat (auth_dir config) (Filename.concat ".archive" stamp)
@@ -49,9 +51,9 @@ let archive_credential_file config ~agent_name ~reason =
       Log.Auth.warn "archived credential %s -> %s (reason: %s)" src dest reason;
       if String.equal reason "bare-form keeper credential is dead after PR-3b1 starvation"
       then
-        Prometheus.inc_counter
-          Prometheus.metric_config_credential_archived_starvation
-          ~labels:[ "keeper_name", agent_name ]
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_config_credential_archived_starvation
+          ~labels:[ "keeper", agent_name ]
           ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -69,12 +71,12 @@ let archive_credential_file config ~agent_name ~reason =
      PR-3a (#11146)   archive bare when token differs from canonical
                       (dual-identity guard).
      PR-3b1 (#11152)  starve runtime callers via canonicalize_if_keeper
-                      in tool_coord.
+                      in tool_workspace.
      PR-3b2 (#11155)  archive bare unconditionally, on the assumption
                       that starvation killed every short-form caller.
      PR-#10440        ensure_credential_alias re-creates a bare-form
                       redirect stub on every boot so short-form
-                      load_credential callers (auth_doctor, etc.)
+                      load_credential callers (auth diagnostics, etc.)
                       resolve directly.
 
    PR-3b2 and PR-#10440 contradict: the alias writer puts a stub back
@@ -106,6 +108,7 @@ let prune_archive ~base_path ~retention_days ~min_keep : int * int =
   if not (Sys.file_exists archive_dir && Sys.is_directory archive_dir)
   then 0, 0
   else (
+    (* NDT-OK: retention cutoff is runtime housekeeping, not protocol state. *)
     let now = Unix.gettimeofday () in
     let cutoff = now -. (float_of_int retention_days *. Masc_time_constants.day) in
     let entries =
@@ -179,8 +182,8 @@ let classify_bare_for_canonical config ~canonical_name =
 ;;
 
 let inc_bare_alias_outcome ~outcome =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_bare_alias_outcome_total
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_bare_alias_outcome_total
     ~labels:[ "outcome", outcome ]
     ~delta:1.0
     ()
@@ -227,18 +230,18 @@ let bare_alias_audit ~base_path ~canonical_names =
       canonical_names
   in
   (* Observability sink: gauges idempotently mirror the current
-     classifier state so every Prometheus scrape (post-call) reports
+     classifier state so every Otel_metric_store export (post-call) reports
      the same value, not just the boot-time INFO line. *)
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "alive" ]
     (float_of_int result.alive_aliases);
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "dead" ]
     (float_of_int result.dead_bares);
-  Prometheus.set_gauge
-    Prometheus.metric_auth_bare_alias
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_auth_bare_alias
     ~labels:[ "state", "no_bare" ]
     (float_of_int result.no_bares);
   result
@@ -247,7 +250,7 @@ let bare_alias_audit ~base_path ~canonical_names =
 let ensure_keeper_credential config ~agent_name
   : (string * agent_credential, masc_error) result
   =
-  ignore (ensure_internal_keeper_token config);
+  let _internal_token = ensure_internal_keeper_token config in
   let existing = load_credential config agent_name in
   let create_fresh_keeper_token () =
     let raw_token = generate_token () in
@@ -322,7 +325,10 @@ let refresh_token config ~agent_name ~old_token
     (* Allow refresh even if expired *)
     (match load_credential config agent_name with
      | None ->
-       Error (Auth (Auth_error.Unauthorized ("No credential found for " ^ agent_name)))
+       Error (Auth (Auth_error.Unauthorized
+         { reason = Missing_token
+         ; message = "No credential found for " ^ agent_name
+         }))
      | Some old_cred -> create_token config ~agent_name ~role:old_cred.role)
   | Error e -> Error e
   | Ok old_cred -> create_token config ~agent_name ~role:old_cred.role
@@ -393,10 +399,9 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
             (Auth
                (Auth_error.Forbidden
                   { agent = agent_name; action = permission_to_string permission }))
-      else Error (Auth (Auth_error.Unauthorized "Token required")))
+      else Error (Auth (Auth_error.Unauthorized
+        { reason = Missing_token; message = "Token required" })))
 ;;
-
-let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
 
 (** Tool auth is always strict: unknown internal tools require at least
     worker-level permission, and unknown external tools are denied. *)
@@ -416,9 +421,9 @@ let has_internal_tool_prefix tool_name =
     internal_tool_prefixes
 ;;
 
-let is_unmapped_internal_tool_name tool_name =
+let is_known_or_internal_tool_name tool_name =
   has_internal_tool_prefix tool_name
-  || Tool_catalog.is_on_surface Tool_catalog.Keeper_internal tool_name
+  || Option.is_some (Tool_catalog.registered_metadata tool_name)
 ;;
 
 let unknown_tool_class tool_name =
@@ -426,27 +431,22 @@ let unknown_tool_class tool_name =
 ;;
 
 let record_strict_unknown_tool_denial ~agent_name ~tool_name =
-  Prometheus.inc_counter
-    Prometheus.metric_auth_strict_unknown_tool_denials
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_auth_strict_unknown_tool_denials
     ~labels:[ "agent_name", agent_name; "tool_class", unknown_tool_class tool_name ]
     ()
 ;;
 
 (** Check permission for a tool call *)
 let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) result =
-  match permission_for_tool tool_name with
-  | None ->
-    if is_unmapped_internal_tool_name tool_name
-    then
-      (* Conservative default for unmapped internal tools. *)
-      check_permission config ~agent_name ~token ~permission:CanBroadcast
-    else (
-      let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
-      Error
-        (Auth
-           (Auth_error.Forbidden
-              { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
-  | Some perm -> check_permission config ~agent_name ~token ~permission:perm
+  if is_known_or_internal_tool_name tool_name
+  then check_permission config ~agent_name ~token ~permission:CanBroadcast
+  else (
+    let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
+    Error
+      (Auth
+         (Auth_error.Forbidden
+            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
 (* ============================================ *)
@@ -476,7 +476,8 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
     | Ok (Some cred) -> Ok cred.role
     | Ok None ->
       if auth_cfg.require_token
-      then Error (Auth (Auth_error.Unauthorized "Token required"))
+      then Error (Auth (Auth_error.Unauthorized
+        { reason = Missing_token; message = "Token required" }))
       else Ok Worker)
 ;;
 
@@ -486,34 +487,25 @@ let resolve_role config ~agent_name ~token : (agent_role, masc_error) result =
 ;;
 
 let authorize_tool_for_role ~agent_name ~role ~tool_name : (unit, masc_error) result =
-  match permission_for_tool tool_name with
-  | Some perm ->
-      if has_permission role perm
-      then Ok ()
-      else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-  | None ->
-      if is_unmapped_internal_tool_name tool_name
-      then
-        (* Unmapped internal tool: require at least Worker *)
-        if has_permission role CanBroadcast
-        then Ok ()
-        else
-          Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
-      else (
-        let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
-        Error
-          (Auth
-             (Auth_error.Forbidden
-                { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
+  if is_known_or_internal_tool_name tool_name
+  then
+    if has_permission role CanBroadcast
+    then Ok ()
+    else Error (Auth (Auth_error.Forbidden { agent = agent_name; action = tool_name }))
+  else (
+    let () = record_strict_unknown_tool_denial ~agent_name ~tool_name in
+    Error
+      (Auth
+         (Auth_error.Forbidden
+            { agent = agent_name; action = "use unknown non-masc tool: " ^ tool_name })))
 ;;
 
 (** Role-based tool authorization.
-    Resolves the caller role and enforces the tool's required permission.
+    Resolves the caller role and enforces generic internal-tool access.
     Invalid/expired tokens are rejected (not silently downgraded).
 
-    Tools not mapped by permission_for_tool are subject to additional
-    checks — unmapped internal tools require at least Worker, and
-    unmapped external tools are forbidden. *)
+    Known or [masc_*] tools require at least Worker; unknown external tools are
+    forbidden. *)
 let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) result =
   match resolve_role config ~agent_name ~token with
   | Error e -> Error e
@@ -521,25 +513,25 @@ let authorize_tool_v2 config ~agent_name ~token ~tool_name : (unit, masc_error) 
 ;;
 
 (* ============================================ *)
-(* Coord secret (for room-level auth)            *)
+(* Workspace secret                                  *)
 (* ============================================ *)
 
-(** Initialize room secret *)
-let init_room_secret config : string =
+(** Initialize workspace secret *)
+let init_workspace_secret config : string =
   ensure_auth_dirs config;
   let secret = generate_token () in
   let hash = sha256_hash secret in
-  save_private_text_file (room_secret_file config) hash;
+  save_private_text_file (workspace_secret_file config) hash;
   (* Update auth config with hash *)
   let cfg = load_auth_config config in
-  save_auth_config config { cfg with room_secret_hash = Some hash };
+  save_auth_config config { cfg with workspace_secret_hash = Some hash };
   secret (* Return raw secret to show user once *)
 ;;
 
-(** Verify room secret *)
-let verify_room_secret config secret : bool =
+(** Verify workspace secret *)
+let verify_workspace_secret config secret : bool =
   let hash = sha256_hash secret in
-  let file = room_secret_file config in
+  let file = workspace_secret_file config in
   if Sys.file_exists file
   then (
     let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
@@ -551,11 +543,11 @@ let verify_room_secret config secret : bool =
 (* High-level auth operations                   *)
 (* ============================================ *)
 
-(** Enable authentication for a room.
+(** Enable authentication for a workspace.
     Creates a bootstrap admin token for the enabling agent to prevent
     circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =
-  let secret = init_room_secret config in
+  let secret = init_workspace_secret config in
   let cfg = load_auth_config config in
   save_auth_config config { cfg with enabled = true; require_token };
   let bootstrap_token =
@@ -626,8 +618,8 @@ let start_bare_alias_audit_fiber ~sw ~clock ~base_path
            bare_alias_audit ~base_path
              ~canonical_names:(canonical_names_fn ())
          in
-         Prometheus.inc_counter
-           Prometheus.metric_auth_bare_alias_audit_ticks_total
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_auth_bare_alias_audit_ticks_total
            ~delta:1.0
            ()
        with

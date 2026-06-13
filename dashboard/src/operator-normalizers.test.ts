@@ -81,7 +81,7 @@ describe('normalizeOperatorDigest', () => {
   it('extracts active_recommended_actions', () => {
     const result = normalizeOperatorDigest({
       active_recommended_actions: [
-        { action_type: 'broadcast', target_type: 'room', reason: 'Alert' },
+        { action_type: 'broadcast', target_type: 'workspace', reason: 'Alert' },
       ],
     })
     expect(result.active_recommended_actions).toHaveLength(1)
@@ -90,13 +90,13 @@ describe('normalizeOperatorDigest', () => {
   it('extracts root namespace', () => {
     const result = normalizeOperatorDigest({
       root: {
-        project: 'masc-mcp',
+        project: 'masc',
         cluster: 'local',
         paused: true,
         pause_reason: 'maintenance',
       },
     })
-    expect(result.root!.project).toBe('masc-mcp')
+    expect(result.root!.project).toBe('masc')
     expect(result.root!.cluster).toBe('local')
     expect(result.root!.paused).toBe(true)
     expect(result.root!.pause_reason).toBe('maintenance')
@@ -190,9 +190,9 @@ describe('normalizeOperatorSnapshot', () => {
 
   it('extracts root namespace', () => {
     const result = normalizeOperatorSnapshot({
-      root: { project: 'masc-mcp', paused: false },
+      root: { project: 'masc', paused: false },
     })
-    expect(result.root.project).toBe('masc-mcp')
+    expect(result.root.project).toBe('masc')
     expect(result.root.paused).toBe(false)
   })
 
@@ -262,8 +262,6 @@ describe('normalizeOperatorSnapshot', () => {
             needs_attention: true,
             operator_disposition: 'pause_human',
             execution: {
-              tool_contract_result: 'violated',
-              missing_required_tools: ['masc_board_post'],
               provider_selected_model: 'provider:runtime-lane',
             },
             latest_terminal_reason: {
@@ -281,8 +279,6 @@ describe('normalizeOperatorSnapshot', () => {
       needs_attention: true,
       operator_disposition: 'pause_human',
       execution_summary: {
-        tool_contract_result: 'violated',
-        missing_required_tools: ['masc_board_post'],
         provider_selected_model: 'provider:runtime-lane',
       },
       latest_terminal_reason: {
@@ -455,7 +451,7 @@ describe('normalizeOperatorSnapshot', () => {
     const result = normalizeOperatorSnapshot({
       admission_queue: {
         mode: 'passthrough',
-        throttle_owner: 'oas_cascade',
+        throttle_owner: 'oas_runtime',
         max_concurrent: 3,
         active: 1,
         available: 2,
@@ -464,7 +460,7 @@ describe('normalizeOperatorSnapshot', () => {
     })
     expect(result.admission_queue).toEqual({
       mode: 'passthrough',
-      throttle_owner: 'oas_cascade',
+      throttle_owner: 'oas_runtime',
       max_concurrent: 3,
       active: 1,
       available: 2,
@@ -515,14 +511,14 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'paused',
           needs_attention: true,
-          attention_reason: 'tool_required_unsatisfied',
+          attention_reason: 'tool_route_recoverable_failure',
           next_human_action: 'inspect_provider_tool_contract',
         },
       ],
     })
     const k = result.keepers[0]
     expect(k?.needs_attention).toBe(true)
-    expect(k?.attention_reason).toBe('tool_required_unsatisfied')
+    expect(k?.attention_reason).toBe('tool_route_recoverable_failure')
     expect(k?.next_human_action).toBe('inspect_provider_tool_contract')
   })
 

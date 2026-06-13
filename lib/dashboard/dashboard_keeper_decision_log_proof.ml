@@ -89,14 +89,8 @@ let scheduled_evidence_json stat =
   `Assoc [
     ("decision_count", `Int stat.decision_count);
     ("failure_count", `Int stat.failure_count);
-    ( "latest_ts_unix",
-      match stat.latest_ts_unix with
-      | Some ts -> `Float ts
-      | None -> `Null );
-    ( "latest_ts",
-      match stat.latest_ts with
-      | Some ts -> `String ts
-      | None -> `Null );
+    ( "latest_ts_unix", Json_util.float_opt_to_json stat.latest_ts_unix );
+    ( "latest_ts", Json_util.string_opt_to_json stat.latest_ts );
   ]
 
 let is_turn_exchange_channel = function

@@ -11,7 +11,7 @@
     Env override: [MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD]
     (default 0.8, valid range \[0.5, 0.99\]; out-of-range falls back
     to default with warn). Read once at module init; restart required
-    to change. Effective value is exported as Prometheus gauge
+    to change. Effective value is exported as Otel_metric_store gauge
     {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}. *)
 val emergency_compact_ratio_threshold : float
 
@@ -40,8 +40,6 @@ val decide_compaction
   -> message_gate:int
   -> token_gate:int
   -> cooldown_sec:int
-  -> tool_heavy_msg_threshold:int
-  -> tool_heavy_ratio_floor:float
   -> last_continuity_update_ts:float
   -> last_proactive_ts:float
   -> now_ts:float
@@ -49,7 +47,7 @@ val decide_compaction
 
 (** Project [meta] to its [(ratio_gate, message_gate, token_gate)]
     tuple. *)
-val compaction_policy_of_keeper : Keeper_types.keeper_meta -> float * int * int
+val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS
@@ -60,7 +58,7 @@ val compaction_policy_of_keeper : Keeper_types.keeper_meta -> float * int * int
     - [Some trigger] when compaction was applied, [None] otherwise;
     - a typed decision tag describing the gate outcome. *)
 val compact_if_needed_typed
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context
@@ -72,7 +70,42 @@ val compact_if_needed_typed
     in the second position is the human-readable rendering of the
     {!Compaction_trigger.t} (via {!Compaction_trigger.to_human}). *)
 val compact_if_needed
-  :  meta:Keeper_types.keeper_meta
+  :  meta:Keeper_meta_contract.keeper_meta
   -> now_ts:float
   -> Keeper_context_core.working_context
   -> Keeper_context_core.working_context * string option * string
+
+type pre_compact_event = {
+  timestamp : float;
+  keeper_name : string;
+  context_ratio : float;
+  message_count : int;
+  token_count : int;
+  strategies : string list;
+  context_window : int;
+  is_local_model : bool;
+  trigger : Compaction_trigger.t;
+}
+
+val record_pre_compact_callback :
+  (keeper_name:string ->
+   context_ratio:float ->
+   message_count:int ->
+   token_count:int ->
+   strategies:string list ->
+   context_window:int ->
+   is_local_model:bool ->
+   trigger:Compaction_trigger.t ->
+   pre_compact_event option) ref
+
+val register_record_pre_compact :
+  (keeper_name:string ->
+   context_ratio:float ->
+   message_count:int ->
+   token_count:int ->
+   strategies:string list ->
+   context_window:int ->
+   is_local_model:bool ->
+   trigger:Compaction_trigger.t ->
+   pre_compact_event option) ->
+  unit

@@ -16,13 +16,49 @@ let suggest_alternatives ~(allowed_tools : string list)
   allowed_tools
   |> List.filter (fun t ->
        not (SS.mem t repeated_set)
-       && t <> Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent)
+       && t <> "keeper_stay_silent")
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
      else List.filteri (fun i _ -> i < max_suggestions) candidates
 
-(** Pure decision logic for the on_idle hook.  Testable without Coord.config.
+let includes_tool name tools = List.exists (String.equal name) tools
+
+let recovery_hint ~allowed_tools ~tool_names =
+  if includes_tool "keeper_tools_list" tool_names then
+    Some
+      (if includes_tool "keeper_surface_read" allowed_tools then
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; for current lane context use keeper_surface_read with a \
+          surface label from Connected Surfaces or chat history. If the user asks \
+          for a connector-wide channel registry outside those connected lanes, \
+          state that it is unavailable."
+       else
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; do not repeat it to answer user content questions.")
+  else if
+    includes_tool "keeper_board_get" tool_names
+    || includes_tool "keeper_board_post_get" tool_names
+  then
+    let discovery_tools =
+      [ "keeper_board_list"; "keeper_board_search" ]
+      |> List.filter (fun name -> includes_tool name allowed_tools)
+    in
+    let discovery =
+      match discovery_tools with
+      | [] -> "a visible board activity post_id"
+      | [ one ] -> one
+      | many -> String.concat " or " many
+    in
+    Some
+      (Printf.sprintf
+         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_get with {}."
+         discovery)
+  else
+    None
+
+(** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
     Graduated response to repeated tool calls uses the configured
     [Env_config_keeper.KeeperKeepalive.idle_skip_threshold]:
@@ -48,27 +84,45 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | names -> String.concat ", " names
   in
   let alternatives =
-    suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
-      ~max_suggestions:5
+    let base =
+      suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
+        ~max_suggestions:5
+    in
+    if includes_tool "keeper_tools_list" tool_names
+       && includes_tool "keeper_surface_read" allowed_tools
+    then
+      Keeper_types_profile_toml_normalizers.dedupe_keep_order
+        ("keeper_surface_read" :: base)
+      |> List.filteri (fun i _ -> i < 5)
+    else
+      base
   in
   let alt_str = match alternatives with
-    | [] -> "keeper_tool_search, keeper_board_post, or stay_silent"
+    | [] -> "keeper_tool_search or keeper_stay_silent"
     | alts -> String.concat ", " alts
+  in
+  let hint = recovery_hint ~allowed_tools ~tool_names in
+  let append_hint msg =
+    match hint with
+    | None -> msg
+    | Some hint -> msg ^ " " ^ hint
   in
   if consecutive_idle_turns >= skip_at then
     Agent_sdk.Hooks.Skip
   else if consecutive_idle_turns = skip_at - 1 then
     Agent_sdk.Hooks.Nudge
-      (Printf.sprintf
-         "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
-          Use one of these instead: %s — or call keeper_stay_silent to do nothing."
-         tools_str consecutive_idle_turns alt_str)
+      (append_hint
+         (Printf.sprintf
+            "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
+             Use one of these instead: %s — or call keeper_stay_silent to do nothing."
+            tools_str consecutive_idle_turns alt_str))
   else
     Agent_sdk.Hooks.Nudge
-      (Printf.sprintf
-         "You are repeating %s without progress. \
-          Available alternatives: %s."
-         tools_str alt_str)
+      (append_hint
+         (Printf.sprintf
+            "You are repeating %s without progress. \
+             Available alternatives: %s."
+            tools_str alt_str))
 
 (** Wrapper around {!on_idle_decision_with_threshold} that supplies the
     [idle_skip_threshold] constant from [Env_config_keeper.KeeperKeepalive].
@@ -80,7 +134,15 @@ let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
 
-let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
+let keeper_idle_decision
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
+    ~consecutive_idle_turns
+    ~tool_names =
+  let keeper_name = (!meta_ref).name in
+  Otel_metric_store.set_gauge
+    Keeper_metrics.(to_string ConsecutiveIdle)
+    ~labels:[ label_keeper, keeper_name ]
+    (Float.of_int (max 0 consecutive_idle_turns));
   let allowed_tools =
     Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
   let decision =
@@ -90,11 +152,11 @@ let keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names =
     | [] -> "<none>" | names -> String.concat ", " names in
   (match decision with
    | Agent_sdk.Hooks.Skip ->
-     Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.warn ~keeper_name "idle_turns=%d repeated_tools=[%s] — requesting stop"
+       consecutive_idle_turns tools_str
    | Agent_sdk.Hooks.Nudge _ ->
-     Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
-       (!meta_ref).name consecutive_idle_turns tools_str
+     Log.Keeper.info ~keeper_name "idle_turns=%d tools=[%s] — nudging LLM via Nudge"
+       consecutive_idle_turns tools_str
    | _ -> ());
   decision
 
@@ -112,4 +174,3 @@ let recent_tool_streak_count ?(within_sec = 900.0) ~(tool_name : string)
        | _ -> count)
   in
   loop 0 (List.rev entries)
-

@@ -112,13 +112,19 @@ end
 
 val supported_protocol_versions : string list
 (** Versions accepted by this server (delegates to
-    {!Mcp_protocol.Version.supported_versions}). *)
+    {!Mcp_protocol.Version.supported_versions}, with the 2026-07-28
+    stateless revision overlaid while the vendored SDK catches up). *)
 
 val default_protocol_version : string
 (** Latest version (delegates to {!Mcp_protocol.Version.latest}). *)
 
 val is_supported_protocol_version : string -> bool
 (** Membership test against {!supported_protocol_versions}. *)
+
+val is_stateless_protocol_version : string -> bool
+(** [true] for protocol revisions that do not use the initialize
+    handshake or [Mcp-Session-Id] as protocol state. Accepts both
+    the release-candidate date label and the current draft alias. *)
 
 val validate_protocol_version : string -> (string, string) result
 (** [Ok v] if supported, otherwise [Error msg] listing the supported set. *)
@@ -129,6 +135,24 @@ val normalize_protocol_version : string -> string
 val protocol_version_from_params : Yojson.Safe.t option -> string
 (** Extract [protocolVersion] from a JSON-RPC [params] object,
     falling back to {!default_protocol_version}. *)
+
+val protocol_version_meta_key : string
+(** Fully qualified per-request [_meta] key used by the 2026-07-28
+    stateless protocol: ["io.modelcontextprotocol/protocolVersion"]. *)
+
+val protocol_version_from_request_meta_json : Yojson.Safe.t -> string option
+(** Extract the per-request protocol version from
+    [params._meta.io.modelcontextprotocol/protocolVersion]. Returns
+    [None] for legacy initialize-only messages or malformed shapes. *)
+
+val protocol_version_from_request_meta_body : string -> string option
+(** Parses a JSON-RPC body and delegates to
+    {!protocol_version_from_request_meta_json}. Returns [None] on
+    malformed JSON. *)
+
+val body_uses_stateless_protocol : string -> bool
+(** [true] iff the JSON-RPC body declares a stateless protocol version
+    in per-request [_meta]. *)
 
 val protocol_version_from_initialize_request_json :
   Yojson.Safe.t -> string option

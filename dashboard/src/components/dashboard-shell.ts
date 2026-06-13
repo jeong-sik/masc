@@ -4,17 +4,20 @@ import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
 import type { RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardRuntimeProbePayload } from '../api/dashboard'
+import { fetchDashboardRuntimeProbe } from '../api/dashboard'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
-import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
+import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
 import {
   configuredCountSourceLabel,
   formatKeeperCountBreakdown,
+  keeperRowLooksRunning,
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
 } from '../runtime-counts'
@@ -47,6 +50,8 @@ import {
 } from './widget-solo'
 
 const buildIdentityOpen = signal(false)
+const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
+const shellRuntimeProviderProbeError = signal<string | null>(null)
 
 function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
   return html`
@@ -165,7 +170,7 @@ interface DashboardHealthChip {
   tone: DashboardHealthChipTone
   // Optional drill-down route. When set, DashboardHealthStrip renders this
   // chip as a RouteLink so operators can jump from "Source mismatch" /
-  // "Paused keepers N" / "Reaction ledger pending N" straight to the page
+  // "일시정지 keeper N" / "Reaction ledger pending N" straight to the page
   // that explains the signal. Chips without a route render as static spans
   // (e.g. transport-offline — no view helps).
   route?: DashboardHealthChipRoute
@@ -189,8 +194,11 @@ interface DashboardHealthInput {
   namespaceTruthConfiguredKeepers?: number
   keepers: Keeper[]
   runtimeResolution: DashboardRuntimeResolution | null
+  runtimeProviderProbe?: DashboardRuntimeProbePayload | null
+  runtimeProviderProbeError?: string | null
   executionError: string | null
   loading: boolean
+  pendingVerificationCount?: number
 }
 
 // RFC-0135 PR-3: the local `keeperLooksPaused` was one of four
@@ -407,8 +415,12 @@ function cdalHealthChip(cdal: DashboardCdalHealth | null | undefined): Dashboard
 function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
   switch (key) {
     case 'source-mismatch':
+    case 'server-workspace-split':
     case 'runtime-warning':
       return { tab: 'monitoring', params: { section: 'runtime' } }
+    case 'runtime-provider-health':
+    case 'runtime-probe-unavailable':
+      return { tab: 'monitoring', params: { section: 'runtime', view: 'providers' } }
     case 'paused-keepers':
     case 'fleet-liveness-risk':
     case 'no-keeper-rows':
@@ -417,6 +429,58 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
       return { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } }
     default:
       return undefined
+  }
+}
+
+function runtimeProviderFailureChip(probe: DashboardRuntimeProbePayload | null | undefined): DashboardHealthChip | null {
+  if (!probe) return null
+  const summary = probe.summary ?? null
+  const providers = probe.providers ?? []
+  const failedProviders = providers.filter(provider => provider.reachable === false)
+  const failed = summary?.failed ?? failedProviders.length
+  if (failed <= 0) return null
+
+  const missingAuth = failedProviders.filter(provider => provider.status === 'missing_auth').length
+  const reachable = summary?.reachable ?? providers.filter(provider => provider.reachable === true).length
+  const probed = summary?.probed ?? providers.filter(provider => provider.reachable !== null && provider.reachable !== undefined).length
+  const skipped = summary?.skipped ?? providers.filter(provider => provider.status === 'skipped_cli').length
+  const label = missingAuth > 0
+    ? `Runtime auth missing ${missingAuth}`
+    : reachable > 0
+      ? `Runtime providers degraded ${reachable}/${Math.max(probed, reachable + failed)}`
+      : `Runtime providers unreachable ${failed}`
+  const failedDetails = failedProviders.slice(0, 3).map(provider => {
+    const runtimeId = provider.runtime_id ?? provider.provider_id ?? '(unknown runtime)'
+    return `${runtimeId}: ${provider.status ?? 'failed'}`
+  })
+  const hiddenFailed = Math.max(0, failedProviders.length - failedDetails.length)
+  if (hiddenFailed > 0) {
+    failedDetails.push(`+${hiddenFailed} more`)
+  }
+  const detailParts = [
+    `default=${summary?.default_runtime_id ?? '-'}`,
+    `reachable=${reachable}`,
+    `failed=${failed}`,
+    `skipped=${skipped}`,
+  ]
+  if (failedDetails.length > 0) {
+    detailParts.push(`providers=${failedDetails.join('; ')}`)
+  }
+  return {
+    key: 'runtime-provider-health',
+    label,
+    detail: detailParts.join(', '),
+    tone: reachable > 0 ? 'warn' : 'bad',
+  }
+}
+
+function runtimeProbeErrorChip(error: string | null | undefined): DashboardHealthChip | null {
+  if (!error) return null
+  return {
+    key: 'runtime-probe-unavailable',
+    label: 'Runtime probe unavailable',
+    detail: error,
+    tone: 'warn',
   }
 }
 
@@ -432,12 +496,19 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   }
 
   const runtime = input.runtimeResolution
-  if (runtime?.source_mismatch || runtime?.server_workspace_mismatch) {
+  if (runtime?.source_mismatch) {
     chips.push({
       key: 'source-mismatch',
       label: 'Source mismatch',
       detail: 'Server, workspace, or resolved base path source differs.',
       tone: 'warn',
+    })
+  } else if (runtime?.server_workspace_mismatch) {
+    chips.push({
+      key: 'server-workspace-split',
+      label: 'Server/base split',
+      detail: 'Server binary repo differs from the dashboard base path; data still resolves from the base path.',
+      tone: 'muted',
     })
   } else if (runtime?.status && runtime.status !== 'ready') {
     chips.push({
@@ -449,12 +520,15 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   }
 
   const pausedKeepers = input.keepers.filter(isKeeperPaused).length
-  const fallbackRunningKeepers = Math.max(0, input.keepers.length - pausedKeepers)
+  const fallbackRunningKeepers = input.keepers.filter(keeperRowLooksRunning).length
+  const fallbackOfflineKeepers = Math.max(0, input.keepers.length - fallbackRunningKeepers - pausedKeepers)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: input.counts !== null || input.keepers.length > 0,
     agentsCount: input.counts?.agents ?? 0,
     keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
     pausedKeepersCount: pausedKeepers,
+    offlineKeepersCount: input.counts !== null ? 0 : fallbackOfflineKeepers,
+    keeperRowsCount: input.keepers.length,
     namespaceTruthCounts: input.namespaceTruthCounts,
     namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
     shellCounts: input.counts,
@@ -462,20 +536,21 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   })
   const configured = runtimeCounts.configured.keepers
   const liveKeepers = runtimeCounts.live.keepers
-  const activeCountSource = input.counts !== null
+  const runningCountSource = input.counts !== null
     ? 'shell'
     : input.keepers.length > 0
       ? '상세 행'
       : runtimeCountSourceLabel(runtimeCounts.source)
-  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0)) {
+  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0 || runtimeCounts.live.offlineKeepers > 0)) {
     chips.push({
       key: 'keeper-count-basis',
       label: formatKeeperCountBreakdown({
         liveKeepers,
         pausedKeepers,
+        offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `활성=${activeCountSource} runtime, paused=상세 행 lifecycle, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
+      detail: `런타임 가동=${runningCountSource}; 일시정지=재개 대기 lifecycle row; 오프라인=프로세스/하트비트 없음으로 기동 필요 row; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -483,8 +558,8 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',
-      label: `Paused keepers ${pausedKeepers}`,
-      detail: 'One or more keeper rows are paused; board/tool activity may look quiet.',
+      label: `일시정지 keeper ${pausedKeepers}`,
+      detail: '재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.',
       tone: 'warn',
     })
   }
@@ -497,6 +572,16 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   const reactionLedgerChip = reactionLedgerHealthChip(runtime?.fleet_safety?.keeper_reaction_ledger)
   if (reactionLedgerChip) {
     chips.push(reactionLedgerChip)
+  }
+
+  const providerHealthChip = runtimeProviderFailureChip(input.runtimeProviderProbe)
+  if (providerHealthChip) {
+    chips.push(providerHealthChip)
+  } else {
+    const probeErrorChip = runtimeProbeErrorChip(input.runtimeProviderProbeError)
+    if (probeErrorChip) {
+      chips.push(probeErrorChip)
+    }
   }
 
   const cdalChip = cdalHealthChip(runtime?.cdal)
@@ -519,6 +604,19 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
       label: 'Execution refresh failed',
       detail: input.executionError,
       tone: 'bad',
+    })
+  }
+
+  const vrfCount = input.pendingVerificationCount ?? 0
+  if (vrfCount > 0) {
+    chips.push({
+      key: 'verification-backlog',
+      label: `Verification ${vrfCount}`,
+      detail:
+        vrfCount >= 5
+          ? `${vrfCount} tasks are awaiting verification. This is a high backlog that may delay task completion.`
+          : `${vrfCount} task${vrfCount === 1 ? '' : 's'} awaiting verification.`,
+      tone: vrfCount >= 5 ? 'bad' : 'warn',
     })
   }
 
@@ -552,6 +650,41 @@ function healthChipClass(tone: DashboardHealthChipTone): string {
 }
 
 export function DashboardHealthStrip() {
+  useEffect(() => {
+    let disposed = false
+    let inFlight = false
+    let activeController: AbortController | null = null
+    const refresh = async () => {
+      if (inFlight) return
+      inFlight = true
+      activeController = new AbortController()
+      try {
+        const response = await fetchDashboardRuntimeProbe(false, { signal: activeController.signal })
+        if (!disposed) {
+          shellRuntimeProviderProbe.value = response.probe ?? null
+          shellRuntimeProviderProbeError.value = null
+        }
+      } catch (error) {
+        const name = typeof error === 'object' && error !== null && 'name' in error
+          ? String((error as { name?: unknown }).name)
+          : ''
+        if (!disposed && name !== 'AbortError') {
+          shellRuntimeProviderProbe.value = null
+          shellRuntimeProviderProbeError.value = error instanceof Error ? error.message : String(error)
+        }
+      } finally {
+        inFlight = false
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => void refresh(), 30_000)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+      activeController?.abort()
+    }
+  }, [])
+
   const wsOnly = dashboardWsOnlyEnabled()
   const live = wsOnly
     ? dashboardWsConnected.value || dashboardWsSseFallbackActive.value
@@ -563,8 +696,11 @@ export function DashboardHealthStrip() {
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     keepers: keepers.value,
     runtimeResolution: shellRuntimeResolution.value,
+    runtimeProviderProbe: shellRuntimeProviderProbe.value,
+    runtimeProviderProbeError: shellRuntimeProviderProbeError.value,
     executionError: executionError.value,
     loading: dashboardLoading.value || namespaceTruthInitializing.value,
+    pendingVerificationCount: tasksByStatus.value.awaitingVerification.length,
   })
 
   return html`
@@ -638,7 +774,7 @@ function shortCommit(commit: string | null | undefined): string {
     clickable GitHub permalink. Hard-coded because this is the only
     origin the dashboard is ever built from — a future fork would
     override this via a build-time constant, not a runtime flag. */
-const UPSTREAM_REPO = 'jeong-sik/masc-mcp'
+const UPSTREAM_REPO = 'jeong-sik/masc'
 
 /** Pure: turn a raw commit hash into a GitHub commit URL. Returns
     null for empty / non-hex-looking input so the dropdown renders
@@ -1147,6 +1283,13 @@ function useSurfaceDocumentTitle(): void {
   }, [currentView?.label, currentSection?.label])
 }
 
+export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
+  return routeState.tab === 'monitoring'
+    && routeState.params.section === 'agents'
+    && typeof routeState.params.keeper === 'string'
+    && routeState.params.keeper.trim() !== ''
+}
+
 function SurfaceLead() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
@@ -1212,6 +1355,7 @@ export function DashboardMain() {
   const routeLabel = dashboardRouteBoundaryKey(route.value)
   const soloMode = isWidgetSoloRoute(route.value)
   const immersiveSurface = route.value.tab === 'code'
+  const keeperDetailRoute = isKeeperDetailDashboardRoute(route.value)
   const warmingBanner = namespaceTruthInitializing.value ? html`
     <div class=${immersiveSurface
       ? 'shrink-0 border-b border-solid border-[var(--warn-20)] bg-[var(--warn-10)] px-4 py-1.5 text-center text-xs text-[var(--color-status-warn)]'
@@ -1256,8 +1400,8 @@ export function DashboardMain() {
 
   return html`
     ${warmingBanner}
-    <${SurfaceLead} />
-    <${ObservatoryFilterBar} />
+    ${keeperDetailRoute ? null : html`<${SurfaceLead} />`}
+    ${keeperDetailRoute ? null : html`<${ObservatoryFilterBar} />`}
     <${ErrorBoundary} key=${routeLabel} label=${routeLabel || 'dashboard'}>
       <div class="animate-in fade-in slide-in-from-bottom-2 duration-[var(--t-slow)] fill-mode-both">
         <${TabContent} />

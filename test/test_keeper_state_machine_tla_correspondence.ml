@@ -19,12 +19,12 @@
      [Next]-action conjunct includes [NotTerminal], so any event from
      [Dead]/[Stopped]/[Zombie] is *not* in the relation.  The OCaml
      [apply_event] mirror is the explicit [Terminal_state] reject at the
-     top of [lib/keeper/keeper_state_machine.ml §apply_event].
+     top of [lib/keeper_state/keeper_state_machine.ml §apply_event].
    - Hand-curated mapping: see [tla_phase_names] below.  Line refs into
      the .tla file are pinned to the §TypeOK enumeration. *)
 
 open Alcotest
-module SM = Masc_mcp.Keeper_state_machine
+module SM = Keeper_state_machine
 
 (* ── Hand-curated phase mapping (TLA+ → OCaml) ────────────────
    Source: specs/keeper-state-machine/KeeperStateMachine.tla §TypeOK

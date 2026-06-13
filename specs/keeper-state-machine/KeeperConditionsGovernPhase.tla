@@ -35,16 +35,16 @@
 \*
 \*   spec variable                | OCaml location                                    | semantic
 \*   -----------------------------+---------------------------------------------------+---------
-\*   phase \in {"Running", "HandingOff"} | lib/keeper/keeper_state_machine.ml:phase    | type phase = ... | Running | ... | HandingOff | ...
+\*   phase \in {"Running", "HandingOff"} | lib/keeper_registry/keeper_state_machine.ml:phase    | type phase = ... | Running | ... | HandingOff | ...
 \*                                | (full 13-phase variant; this spec projects to 2)  |
-\*   handoff_needed (boolean)     | lib/keeper/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
-\*                                | lib/keeper/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
+\*   handoff_needed (boolean)     | lib/keeper_registry/keeper_state_machine.ml:context_handoff_needed | conditions.context_handoff_needed : bool
+\*                                | lib/keeper_registry/keeper_state_machine.ml:update_conditions | set from auto_rules.handoff at update_conditions
 \*
 \* Producer side (where conditions are stamped).  Cited by function name,
 \* not line number — iter 64 N-2.a convention; the previous "line 351"
 \* anchor had drifted +172 and pointed into the valid_transition matrix
 \* instead.  See docs/tla-audit/kcgp-r5-conditions-govern-phase-lineref-drift-2026-05-12.md
-\*   lib/keeper/keeper_state_machine.ml — derive_phase has the
+\*   lib/keeper_registry/keeper_state_machine.ml — derive_phase has the
 \*     `else if c.handoff_active then HandingOff` branch (in its
 \*     buffer-states block) that routes into HandingOff when handoff_active
 \*     is set, satisfying the spec liveness obligation that handoff_needed
@@ -53,7 +53,7 @@
 \* Wire path to the dashboard banner consumer (also symbol-anchored — the
 \* previous "line 634" / "line 620" anchors had both drifted; symbol
 \* anchors don't rot):
-\*   lib/keeper/keeper_state_machine.ml — update_conditions stamps
+\*   lib/keeper_registry/keeper_state_machine.ml — update_conditions stamps
 \*     `context_handoff_needed = auto_rules.handoff`, and the conditions
 \*     json export carries the
 \*     `"context_handoff_needed", \`Bool c.context_handoff_needed` field,

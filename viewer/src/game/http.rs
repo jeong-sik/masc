@@ -10,12 +10,14 @@ use wasm_bindgen_futures::JsFuture;
 use crate::config;
 use crate::game::components::{Actor, Condition, Equipment, Skill, Stats};
 use crate::game::events::*;
-use crate::game::state::{ConnectionStatus, MapState, RoomState, TurnPhase, TurnProgressState};
+use crate::game::state::{
+    ConnectionStatus, MapState, TurnPhase, TurnProgressState, WorkspaceState,
+};
 
 // ─── Expected API Response Types ─────────────
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct RoomResponse {
+pub struct WorkspaceResponse {
     pub id: String,
     #[serde(default)]
     pub status: String,
@@ -126,7 +128,7 @@ fn default_area() -> String {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GameStateResponse {
     #[serde(default)]
-    pub room: Option<RoomResponse>,
+    pub workspace: Option<WorkspaceResponse>,
     #[serde(default)]
     pub characters: Vec<CharacterData>,
     #[serde(default)]
@@ -149,51 +151,53 @@ pub struct InitialStateBuffer {
     consumed: bool,
 }
 
-/// Tracks the currently active TRPG room for runtime room switching.
+/// Tracks the currently active TRPG workspace for runtime workspace switching.
 #[derive(Resource, Default)]
-pub struct ActiveTrpgRoom {
-    pub room_id: String,
-    pub room_rev: u32,
+pub struct ActiveTrpgWorkspace {
+    pub workspace_id: String,
+    pub workspace_rev: u32,
 }
 
-fn normalize_room_status(raw: &str) -> String {
+fn normalize_workspace_status(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
-fn room_requires_new_game(raw_status: &str) -> bool {
+fn workspace_requires_new_game(raw_status: &str) -> bool {
     matches!(
-        normalize_room_status(raw_status).as_str(),
-        "" | "idle" | "lobby" | "ended" | "completed" | "done" | "retired" | "closed"
-            | "unavailable"
+        normalize_workspace_status(raw_status).as_str(),
+        "" | "idle" | "ended" | "completed" | "done" | "retired" | "closed" | "unavailable"
     )
 }
 
-fn initial_progress_event_type(room_status: &str, state_unavailable: bool) -> Option<&'static str> {
+fn initial_progress_event_type(
+    workspace_status: &str,
+    state_unavailable: bool,
+) -> Option<&'static str> {
     if state_unavailable {
         return None;
     }
-    let status = normalize_room_status(room_status);
+    let status = normalize_workspace_status(workspace_status);
     if matches!(
         status.as_str(),
         "ended" | "completed" | "done" | "retired" | "closed"
     ) {
-        Some("room.ended")
-    } else if room_requires_new_game(status.as_str()) {
+        Some("workspace.ended")
+    } else if workspace_requires_new_game(status.as_str()) {
         None
     } else {
-        Some("room.started")
+        Some("workspace.started")
     }
 }
 
 fn should_emit_initial_turn_advanced(
-    room_turn: u32,
-    room_status: &str,
+    workspace_turn: u32,
+    workspace_status: &str,
     state_unavailable: bool,
 ) -> bool {
-    room_turn > 0
+    workspace_turn > 0
         && matches!(
-            initial_progress_event_type(room_status, state_unavailable),
-            Some("room.started")
+            initial_progress_event_type(workspace_status, state_unavailable),
+            Some("workspace.started")
         )
 }
 
@@ -213,7 +217,7 @@ fn queue_initial_state_fetch(commands: &mut Commands) {
             Err(e) => {
                 log::warn!("Engine not available, using unavailable state: {:?}", e);
                 if let Ok(mut buf) = shared.lock() {
-                    *buf = Some(unavailable_game_state(&config::current_room_id()));
+                    *buf = Some(unavailable_game_state(&config::current_workspace_id()));
                 }
             }
         }
@@ -230,61 +234,63 @@ fn queue_initial_state_fetch(commands: &mut Commands) {
 /// Startup system: fires async HTTP fetch for initial game state.
 pub fn fetch_initial_state(
     mut commands: Commands,
-    mut active_room: ResMut<ActiveTrpgRoom>,
+    mut active_workspace: ResMut<ActiveTrpgWorkspace>,
     mut connection: ResMut<ConnectionStatus>,
 ) {
-    active_room.room_id = config::current_room_id();
-    active_room.room_rev = config::current_room_revision();
+    active_workspace.workspace_id = config::current_workspace_id();
+    active_workspace.workspace_rev = config::current_workspace_revision();
     *connection = ConnectionStatus::Connecting;
     queue_initial_state_fetch(&mut commands);
 }
 
-/// Detects TRPG room changes at runtime and reloads state for the new room.
-pub fn refresh_state_on_room_change(
+/// Detects TRPG workspace changes at runtime and reloads state for the new workspace.
+pub fn refresh_state_on_workspace_change(
     mut commands: Commands,
-    mut active_room: ResMut<ActiveTrpgRoom>,
+    mut active_workspace: ResMut<ActiveTrpgWorkspace>,
     actors: Query<Entity, With<Actor>>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
     mut connection: ResMut<ConnectionStatus>,
 ) {
-    let current_room = config::current_room_id();
-    let current_room_rev = config::current_room_revision();
-    if active_room.room_id == current_room && active_room.room_rev == current_room_rev {
+    let current_workspace = config::current_workspace_id();
+    let current_workspace_rev = config::current_workspace_revision();
+    if active_workspace.workspace_id == current_workspace
+        && active_workspace.workspace_rev == current_workspace_rev
+    {
         return;
     }
 
-    active_room.room_id = current_room.clone();
-    active_room.room_rev = current_room_rev;
+    active_workspace.workspace_id = current_workspace.clone();
+    active_workspace.workspace_rev = current_workspace_rev;
 
     for entity in &actors {
         commands.entity(entity).despawn();
     }
 
-    *room_state = RoomState::default();
-    room_state.id = current_room.clone();
+    *workspace_state = WorkspaceState::default();
+    workspace_state.id = current_workspace.clone();
     *map_state = MapState::default();
     *turn_progress = TurnProgressState::default();
-    turn_progress.room_status = "loading".to_string();
+    turn_progress.workspace_status = "loading".to_string();
     *connection = ConnectionStatus::Connecting;
 
     queue_initial_state_fetch(&mut commands);
     log::info!(
-        "TRPG room changed — reloading state for room {} (rev {})",
-        current_room,
-        current_room_rev
+        "TRPG workspace changed — reloading state for workspace {} (rev {})",
+        current_workspace,
+        current_workspace_rev
     );
 }
 
 /// Update system: polls the buffer each frame. Once data arrives,
-/// populates RoomState, MapState, and spawns Actor entities.
+/// populates WorkspaceState, MapState, and spawns Actor entities.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_initial_state(
     mut commands: Commands,
     mut buffer: ResMut<InitialStateBuffer>,
     actors: Query<Entity, With<Actor>>,
-    mut room_state: ResMut<RoomState>,
+    mut workspace_state: ResMut<WorkspaceState>,
     mut map_state: ResMut<MapState>,
     mut turn_progress: ResMut<TurnProgressState>,
     mut connection: ResMut<ConnectionStatus>,
@@ -307,37 +313,43 @@ pub fn apply_initial_state(
         return;
     };
     let state_unavailable = state
-        .room
+        .workspace
         .as_ref()
-        .map(|room| room.status.trim() == "unavailable")
+        .map(|workspace| workspace.status.trim() == "unavailable")
         .unwrap_or(false);
 
     let actor_ids: Vec<String> = state.characters.iter().map(|ch| ch.id.clone()).collect();
-    if let Some(room) = &state.room {
-        if let Some(room_event) = initial_progress_event_type(&room.status, state_unavailable) {
+    if let Some(workspace) = &state.workspace {
+        if let Some(workspace_event) =
+            initial_progress_event_type(&workspace.status, state_unavailable)
+        {
             let selected_players = actor_ids
                 .iter()
                 .filter(|id| id.as_str() != "dm")
                 .cloned()
                 .collect::<Vec<_>>();
             progress_writer.write(TurnProgressUpdated(TurnProgressPayload {
-                event_type: room_event.to_string(),
-                turn: room.turn,
-                phase: room.phase.clone(),
-                room_id: room.id.clone(),
+                event_type: workspace_event.to_string(),
+                turn: workspace.turn,
+                phase: workspace.phase.clone(),
+                workspace_id: workspace.id.clone(),
                 actor_id: "".to_string(),
                 keeper: "".to_string(),
                 role: "".to_string(),
                 reason: "".to_string(),
-                room_status: room.status.clone(),
+                workspace_status: workspace.status.clone(),
                 dm_keeper: "".to_string(),
                 selected_player_ids: selected_players,
             }));
-            if should_emit_initial_turn_advanced(room.turn, &room.status, state_unavailable) {
+            if should_emit_initial_turn_advanced(
+                workspace.turn,
+                &workspace.status,
+                state_unavailable,
+            ) {
                 turn_writer.write(TurnAdvanced(TurnAdvancePayload {
-                    turn: room.turn,
-                    phase: room.phase.clone(),
-                    room_id: room.id.clone(),
+                    turn: workspace.turn,
+                    phase: workspace.phase.clone(),
+                    workspace_id: workspace.id.clone(),
                 }));
             }
             for roll in &state.dice_log {
@@ -350,14 +362,14 @@ pub fn apply_initial_state(
         commands.entity(entity).despawn();
     }
 
-    // Apply room state
-    if let Some(room) = &state.room {
-        room_state.id = room.id.clone();
-        room_state.status = room.status.clone();
-        room_state.turn = room.turn;
-        room_state.phase = TurnPhase::from_str(&room.phase);
-        room_state.current_scenario = room.current_scenario.clone();
-        room_state.current_node = room.current_node.clone();
+    // Apply workspace state
+    if let Some(workspace) = &state.workspace {
+        workspace_state.id = workspace.id.clone();
+        workspace_state.status = workspace.status.clone();
+        workspace_state.turn = workspace.turn;
+        workspace_state.phase = TurnPhase::from_str(&workspace.phase);
+        workspace_state.current_scenario = workspace.current_scenario.clone();
+        workspace_state.current_node = workspace.current_node.clone();
     }
 
     if state_unavailable {
@@ -366,12 +378,12 @@ pub fn apply_initial_state(
         *connection = ConnectionStatus::Connected;
     }
 
-    // Rooms in terminal/empty states should open the new-game flow instead of
-    // replaying stale entities. Paused/running rooms are resumable and keep state.
-    if room_requires_new_game(&room_state.status) {
-        turn_progress.room_status = room_state.status.clone();
-        turn_progress.turn = room_state.turn;
-        turn_progress.phase = room_state.phase.as_str().to_string();
+    // Workspaces in terminal/empty states should open the new-game flow instead of
+    // replaying stale entities. Paused/running workspaces are resumable and keep state.
+    if workspace_requires_new_game(&workspace_state.status) {
+        turn_progress.workspace_status = workspace_state.status.clone();
+        turn_progress.turn = workspace_state.turn;
+        turn_progress.phase = workspace_state.phase.as_str().to_string();
         turn_progress.player_order.clear();
         turn_progress.actor_order.clear();
         turn_progress.actor_states.clear();
@@ -383,18 +395,18 @@ pub fn apply_initial_state(
         *map_state = MapState::default();
         buffer.consumed = true;
 
-        prompt_new_game_for_inactive_room(room_state.status.trim());
+        prompt_new_game_for_inactive_workspace(workspace_state.status.trim());
         log::info!(
-            "Room '{}' is not resumable (status: '{}') — skipping actor spawn, showing new-game guidance",
-            room_state.id,
-            room_state.status,
+            "Workspace '{}' is not resumable (status: '{}') — skipping actor spawn, showing new-game guidance",
+            workspace_state.id,
+            workspace_state.status,
         );
         return;
     }
 
-    turn_progress.room_status = room_state.status.clone();
-    turn_progress.turn = room_state.turn;
-    turn_progress.phase = room_state.phase.as_str().to_string();
+    turn_progress.workspace_status = workspace_state.status.clone();
+    turn_progress.turn = workspace_state.turn;
+    turn_progress.phase = workspace_state.phase.as_str().to_string();
     if !state.dm_keeper.trim().is_empty() {
         turn_progress.dm_keeper = state.dm_keeper.trim().to_string();
     }
@@ -535,7 +547,7 @@ async fn fetch_game_state() -> Result<GameStateResponse, JsValue> {
 }
 
 fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
-    if root.get("room").is_some() {
+    if root.get("workspace").is_some() {
         let mut parsed: GameStateResponse =
             serde_json::from_value(root.clone()).map_err(|e| e.to_string())?;
         if root.get("state").is_some() {
@@ -557,30 +569,34 @@ fn normalize_state_response(root: Value) -> Result<GameStateResponse, String> {
 }
 
 fn merge_state_fallback(primary: &mut GameStateResponse, fallback: &GameStateResponse) {
-    match (&mut primary.room, fallback.room.as_ref()) {
-        (None, Some(room)) => primary.room = Some(room.clone()),
-        (Some(primary_room), Some(fallback_room)) => {
-            if primary_room.id.trim().is_empty() && !fallback_room.id.trim().is_empty() {
-                primary_room.id = fallback_room.id.clone();
+    match (&mut primary.workspace, fallback.workspace.as_ref()) {
+        (None, Some(workspace)) => primary.workspace = Some(workspace.clone()),
+        (Some(primary_workspace), Some(fallback_workspace)) => {
+            if primary_workspace.id.trim().is_empty() && !fallback_workspace.id.trim().is_empty() {
+                primary_workspace.id = fallback_workspace.id.clone();
             }
-            if primary_room.status.trim().is_empty()
-                || primary_room.status.eq_ignore_ascii_case("unknown")
+            if primary_workspace.status.trim().is_empty()
+                || primary_workspace.status.eq_ignore_ascii_case("unknown")
             {
-                primary_room.status = fallback_room.status.clone();
+                primary_workspace.status = fallback_workspace.status.clone();
             }
-            if primary_room.turn == 0 && fallback_room.turn > 0 {
-                primary_room.turn = fallback_room.turn;
+            if primary_workspace.turn == 0 && fallback_workspace.turn > 0 {
+                primary_workspace.turn = fallback_workspace.turn;
             }
-            if primary_room.phase.trim().is_empty() && !fallback_room.phase.trim().is_empty() {
-                primary_room.phase = fallback_room.phase.clone();
-            }
-            if primary_room.current_scenario.trim().is_empty()
-                && !fallback_room.current_scenario.trim().is_empty()
+            if primary_workspace.phase.trim().is_empty()
+                && !fallback_workspace.phase.trim().is_empty()
             {
-                primary_room.current_scenario = fallback_room.current_scenario.clone();
+                primary_workspace.phase = fallback_workspace.phase.clone();
             }
-            if primary_room.current_node.trim().is_empty() && !fallback_room.current_node.trim().is_empty() {
-                primary_room.current_node = fallback_room.current_node.clone();
+            if primary_workspace.current_scenario.trim().is_empty()
+                && !fallback_workspace.current_scenario.trim().is_empty()
+            {
+                primary_workspace.current_scenario = fallback_workspace.current_scenario.clone();
+            }
+            if primary_workspace.current_node.trim().is_empty()
+                && !fallback_workspace.current_node.trim().is_empty()
+            {
+                primary_workspace.current_node = fallback_workspace.current_node.clone();
             }
         }
         _ => {}
@@ -607,11 +623,11 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
     let state = root.get("state").unwrap_or(root);
     let actor_control = parse_actor_control_map(state);
 
-    let room_id = root
-        .get("room_id")
-        .or_else(|| state.get("room_id"))
+    let workspace_id = root
+        .get("workspace_id")
+        .or_else(|| state.get("workspace_id"))
         .and_then(Value::as_str)
-        .unwrap_or(config::DEFAULT_ROOM_ID)
+        .unwrap_or(config::DEFAULT_WORKSPACE_ID)
         .to_string();
 
     let turn = state.get("turn").and_then(Value::as_u64).unwrap_or(0) as u32;
@@ -660,8 +676,8 @@ fn parse_masc_state_response(root: &Value) -> GameStateResponse {
         parse_dice_log(root).unwrap_or_else(|| parse_dice_log(state).unwrap_or_default());
 
     GameStateResponse {
-        room: Some(RoomResponse {
-            id: room_id,
+        workspace: Some(WorkspaceResponse {
+            id: workspace_id,
             status: state
                 .get("status")
                 .or_else(|| root.get("status"))
@@ -856,8 +872,8 @@ fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
         .get("phase")
         .and_then(Value::as_str)
         .unwrap_or("dm_narration");
-    let fallback_room_id = root
-        .get("room_id")
+    let fallback_workspace_id = root
+        .get("workspace_id")
         .or_else(|| root.get("id"))
         .and_then(Value::as_str)
         .unwrap_or("")
@@ -867,7 +883,7 @@ fn parse_dice_log(root: &Value) -> Option<Vec<DiceRollPayload>> {
     let mut output = Vec::new();
     for entry in entries {
         if let Some(row) =
-            parse_dice_log_entry(entry, fallback_turn, fallback_phase, &fallback_room_id)
+            parse_dice_log_entry(entry, fallback_turn, fallback_phase, &fallback_workspace_id)
         {
             output.push(row);
         }
@@ -879,7 +895,7 @@ fn parse_dice_log_entry(
     entry: &Value,
     fallback_turn: u32,
     _fallback_phase: &str,
-    fallback_room_id: &str,
+    fallback_workspace_id: &str,
 ) -> Option<DiceRollPayload> {
     if !entry.is_object() {
         return None;
@@ -947,10 +963,10 @@ fn parse_dice_log_entry(
 
     Some(DiceRollPayload {
         turn,
-        room_id: entry
-            .get("room_id")
+        workspace_id: entry
+            .get("workspace_id")
             .and_then(Value::as_str)
-            .unwrap_or(fallback_room_id)
+            .unwrap_or(fallback_workspace_id)
             .trim()
             .to_string(),
         character,
@@ -1191,11 +1207,11 @@ fn parse_party_characters(
         .collect()
 }
 
-/// When the fetched room is not resumable, surface guidance for starting a new
+/// When the fetched workspace is not resumable, surface guidance for starting a new
 /// session. The new-game panel itself should remain user-triggered.
-fn prompt_new_game_for_inactive_room(room_status: &str) {
+fn prompt_new_game_for_inactive_workspace(workspace_status: &str) {
     #[cfg(not(target_arch = "wasm32"))]
-    let _ = room_status;
+    let _ = workspace_status;
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -1224,9 +1240,9 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             }
         }
 
-        // Pre-populate room ID input with a fresh generated ID
+        // Pre-populate workspace ID input with a fresh generated ID
         if let Some(input) = document
-            .get_element_by_id("new-game-room-id")
+            .get_element_by_id("new-game-workspace-id")
             .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
         {
             if input.value().trim().is_empty() {
@@ -1236,9 +1252,9 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             }
         }
 
-        // Set a status message appropriate to the room state
+        // Set a status message appropriate to the workspace state
         if let Some(el) = document.get_element_by_id("new-game-status") {
-            let msg = match normalize_room_status(room_status).as_str() {
+            let msg = match normalize_workspace_status(workspace_status).as_str() {
                 "ended" => "이 게임은 종료되었습니다. 새 게임을 시작하세요.",
                 "unavailable" => {
                     "엔진에 연결할 수 없습니다. 새 게임을 시작하면 재연결을 시도합니다."
@@ -1248,7 +1264,7 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
             el.set_inner_html(msg);
         }
 
-        // Trigger bootstrap once when auto-opening the panel for an inactive room.
+        // Trigger bootstrap once when auto-opening the panel for an inactive workspace.
         if should_bootstrap {
             if let Some(btn) = document.get_element_by_id("new-game-toggle") {
                 if let Some(html_btn) = btn.dyn_ref::<web_sys::HtmlElement>() {
@@ -1259,10 +1275,10 @@ fn prompt_new_game_for_inactive_room(room_status: &str) {
     }
 }
 
-fn unavailable_game_state(room_id: &str) -> GameStateResponse {
+fn unavailable_game_state(workspace_id: &str) -> GameStateResponse {
     GameStateResponse {
-        room: Some(RoomResponse {
-            id: room_id.to_string(),
+        workspace: Some(WorkspaceResponse {
+            id: workspace_id.to_string(),
             status: "unavailable".to_string(),
             turn: 0,
             phase: "dm_narration".to_string(),
@@ -1285,7 +1301,7 @@ mod tests {
     #[test]
     fn normalize_legacy_shape() {
         let root = json!({
-            "room": {
+            "workspace": {
                 "id": "default",
                 "status": "active",
                 "turn": 2,
@@ -1299,18 +1315,18 @@ mod tests {
         });
 
         let parsed = normalize_state_response(root).expect("legacy parse should succeed");
-        assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(2));
+        assert_eq!(parsed.workspace.as_ref().map(|r| r.turn), Some(2));
         assert_eq!(parsed.current_area, "A");
     }
 
     #[test]
-    fn normalize_hybrid_shape_backfills_room_from_state() {
+    fn normalize_hybrid_shape_backfills_workspace_from_state() {
         let root = json!({
-            "room": {
+            "workspace": {
                 "id": "default"
             },
             "state": {
-                "room_id": "default",
+                "workspace_id": "default",
                 "status": "active",
                 "turn": 40,
                 "phase": "round",
@@ -1330,10 +1346,10 @@ mod tests {
         });
 
         let parsed = normalize_state_response(root).expect("hybrid parse should succeed");
-        let room = parsed.room.as_ref().expect("room should exist");
-        assert_eq!(room.status, "active");
-        assert_eq!(room.turn, 40);
-        assert_eq!(room.phase, "round");
+        let workspace = parsed.workspace.as_ref().expect("workspace should exist");
+        assert_eq!(workspace.status, "active");
+        assert_eq!(workspace.turn, 40);
+        assert_eq!(workspace.phase, "round");
         assert_eq!(parsed.current_area, "A");
         assert_eq!(parsed.area_label, "Forest Entrance");
         assert_eq!(parsed.characters.len(), 1);
@@ -1343,7 +1359,7 @@ mod tests {
     fn normalize_masc_shape_uses_defaults_without_fallback_party() {
         let root = json!({
             "ok": true,
-            "room_id": "default",
+            "workspace_id": "default",
             "state": {
                 "turn": 5,
                 "phase": "dm_narration",
@@ -1352,7 +1368,7 @@ mod tests {
         });
 
         let parsed = normalize_state_response(root).expect("masc parse should succeed");
-        assert_eq!(parsed.room.as_ref().map(|r| r.turn), Some(5));
+        assert_eq!(parsed.workspace.as_ref().map(|r| r.turn), Some(5));
         assert_eq!(parsed.current_area, "C");
         assert!(
             parsed.characters.is_empty(),
@@ -1364,7 +1380,7 @@ mod tests {
     fn normalize_masc_shape_reads_party_as_characters() {
         let root = json!({
             "ok": true,
-            "room_id": "default",
+            "workspace_id": "default",
             "state": {
                 "turn": 3,
                 "phase": "round",
@@ -1393,7 +1409,7 @@ mod tests {
     fn normalize_masc_shape_maps_actor_control_and_dm_keeper() {
         let root = json!({
             "ok": true,
-            "room_id": "default",
+            "workspace_id": "default",
             "state": {
                 "turn": 4,
                 "phase": "round",
@@ -1444,7 +1460,7 @@ mod tests {
     fn normalize_masc_shape_infers_dm_keeper_from_narration_log() {
         let root = json!({
             "ok": true,
-            "room_id": "default",
+            "workspace_id": "default",
             "state": {
                 "turn": 2,
                 "phase": "dm_narration",
@@ -1476,7 +1492,7 @@ mod tests {
     fn normalize_masc_shape_ignores_stale_narration_keeper_mapping() {
         let root = json!({
             "ok": true,
-            "room_id": "default",
+            "workspace_id": "default",
             "state": {
                 "turn": 2,
                 "phase": "round",
@@ -1507,9 +1523,9 @@ mod tests {
     }
 
     #[test]
-    fn ended_room_is_not_active() {
+    fn ended_workspace_is_not_active() {
         let root = json!({
-            "room": {
+            "workspace": {
                 "id": "adventure-123",
                 "status": "ended",
                 "turn": 8,
@@ -1524,28 +1540,28 @@ mod tests {
             "area_label": "왕좌의 간"
         });
 
-        let parsed = normalize_state_response(root).expect("ended room parse should succeed");
+        let parsed = normalize_state_response(root).expect("ended workspace parse should succeed");
         let status = parsed
-            .room
+            .workspace
             .as_ref()
             .map(|r| r.status.as_str())
             .unwrap_or("");
         assert_ne!(
             status, "active",
-            "ended room should not be treated as active"
+            "ended workspace should not be treated as active"
         );
         assert_eq!(status, "ended");
         assert_eq!(
             parsed.characters.len(),
             1,
-            "characters still parsed even for ended rooms"
+            "characters still parsed even for ended workspaces"
         );
     }
 
     #[test]
-    fn idle_room_is_not_active() {
+    fn idle_workspace_is_not_active() {
         let root = json!({
-            "room": {
+            "workspace": {
                 "id": "default",
                 "status": "idle",
                 "turn": 0,
@@ -1556,9 +1572,9 @@ mod tests {
             "area_label": ""
         });
 
-        let parsed = normalize_state_response(root).expect("idle room parse should succeed");
+        let parsed = normalize_state_response(root).expect("idle workspace parse should succeed");
         let status = parsed
-            .room
+            .workspace
             .as_ref()
             .map(|r| r.status.as_str())
             .unwrap_or("");
@@ -1568,47 +1584,52 @@ mod tests {
 
     #[test]
     fn unavailable_game_state_has_correct_shape() {
-        let state = unavailable_game_state("test-room");
-        let room = state.room.as_ref().expect("room should be present");
-        assert_eq!(room.id, "test-room");
-        assert_eq!(room.status, "unavailable");
+        let state = unavailable_game_state("test-workspace");
+        let workspace = state
+            .workspace
+            .as_ref()
+            .expect("workspace should be present");
+        assert_eq!(workspace.id, "test-workspace");
+        assert_eq!(workspace.status, "unavailable");
         assert!(state.characters.is_empty());
     }
 
     #[test]
-    fn paused_room_is_resumable() {
-        assert!(!room_requires_new_game("paused"));
+    fn paused_workspace_is_resumable() {
+        assert!(!workspace_requires_new_game("paused"));
     }
 
     #[test]
-    fn ended_room_requires_new_game() {
-        assert!(room_requires_new_game("ended"));
-        assert!(room_requires_new_game("completed"));
-        assert!(room_requires_new_game("done"));
-        assert!(room_requires_new_game("closed"));
+    fn ended_workspace_requires_new_game() {
+        assert!(workspace_requires_new_game("ended"));
+        assert!(workspace_requires_new_game("completed"));
+        assert!(workspace_requires_new_game("done"));
+        assert!(workspace_requires_new_game("closed"));
     }
 
     #[test]
-    fn initial_progress_event_is_hidden_for_idle_and_lobby() {
-        assert_eq!(initial_progress_event_type("lobby", false), None);
+    fn initial_progress_event_is_hidden_for_idle() {
         assert_eq!(initial_progress_event_type("idle", false), None);
     }
 
     #[test]
-    fn initial_progress_event_marks_ended_room_as_ended_event() {
-        assert_eq!(initial_progress_event_type("ended", false), Some("room.ended"));
-    }
-
-    #[test]
-    fn initial_progress_event_marks_completed_room_as_ended_event() {
+    fn initial_progress_event_marks_ended_workspace_as_ended_event() {
         assert_eq!(
-            initial_progress_event_type("completed", false),
-            Some("room.ended")
+            initial_progress_event_type("ended", false),
+            Some("workspace.ended")
         );
     }
 
     #[test]
-    fn initial_progress_event_is_suppressed_when_room_state_unavailable() {
+    fn initial_progress_event_marks_completed_workspace_as_ended_event() {
+        assert_eq!(
+            initial_progress_event_type("completed", false),
+            Some("workspace.ended")
+        );
+    }
+
+    #[test]
+    fn initial_progress_event_is_suppressed_when_workspace_state_unavailable() {
         assert_eq!(initial_progress_event_type("running", true), None);
     }
 
@@ -1621,7 +1642,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_room_status_is_case_insensitive() {
-        assert_eq!(normalize_room_status("  AcTiVe "), "active");
+    fn normalize_workspace_status_is_case_insensitive() {
+        assert_eq!(normalize_workspace_status("  AcTiVe "), "active");
     }
 }

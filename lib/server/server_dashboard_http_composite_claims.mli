@@ -1,12 +1,10 @@
-val compact_preview : max_chars:int -> string -> string * bool
 val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 val json_string : string -> Yojson.Safe.t -> string option
 val json_int : string -> Yojson.Safe.t -> int option
 val json_float : string -> Yojson.Safe.t -> float option
 val json_bool : string -> Yojson.Safe.t -> bool option
 val compact_receipt_error_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_cascade_json : Yojson.Safe.t -> Yojson.Safe.t
-val compact_receipt_tool_surface_json : Yojson.Safe.t -> Yojson.Safe.t
+val compact_receipt_runtime_json : Yojson.Safe.t -> Yojson.Safe.t
 val json_number : string -> Yojson.Safe.t -> float option
 val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val string_has_prefix : prefix:string -> string -> bool
@@ -23,10 +21,10 @@ val composite_claim_scope_json :
 val find_override_field_source :
   string -> Yojson.Safe.t -> Yojson.Safe.t option
 val composite_config_drift_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val composite_execution_receipt_json :
-  config:Coord.config ->
+  config:Workspace.config ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val lower_string_opt : string option -> string option
 val string_opt_is_any : string option -> string list -> bool
@@ -35,13 +33,14 @@ val json_string_eq : string -> Yojson.Safe.t -> String.t -> bool
 val composite_latest_activity_epoch :
   Yojson.Safe.t -> Yojson.Safe.t -> float option
 val composite_snapshot_is_idle : Yojson.Safe.t -> bool
-val composite_execution_tool_required : Yojson.Safe.t -> bool
 val composite_execution_config_blocked : Yojson.Safe.t -> bool
 val composite_execution_saturated : Yojson.Safe.t -> bool
 val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool
 val composite_execution_config_drift : Yojson.Safe.t -> bool
 val keeper_activation_readiness_json :
-  Keeper_types.keeper_meta -> Yojson.Safe.t
+  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+val composite_execution_contract_blocker_reason : Yojson.Safe.t -> string option
+val composite_execution_contract_blocked : Yojson.Safe.t -> bool
 val composite_execution_blocked : Yojson.Safe.t -> bool
 val composite_execution_receipt_present : Yojson.Safe.t -> bool
 val composite_execution_receipt_epoch : Yojson.Safe.t -> float option

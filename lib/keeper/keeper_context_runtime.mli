@@ -1,5 +1,5 @@
 (** Keeper_context_runtime — shared keeper context utilities: working context,
-    checkpoint management, compaction, room presence, system prompts,
+    checkpoint management, compaction, system prompts,
     text processing, proactive prompt helpers, and proactive generation.
 
     Working context types live in {!Keeper_types}.
@@ -7,6 +7,8 @@
     are provided directly by this module. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 
@@ -69,13 +71,10 @@ val context_of_oas_checkpoint
   -> primary_model_max_tokens:int
   -> working_context
 
-val checkpoint_model_of_meta : keeper_meta -> string
-
 val save_oas_checkpoint
   :  max_checkpoint_messages:int
   -> session:session_context
   -> agent_name:string
-  -> model:string
   -> ctx:working_context
   -> generation:int
   -> (Agent_sdk.Checkpoint.t, string) result
@@ -96,6 +95,7 @@ type handoff_rollover =
 type compaction_event =
   { attempted : bool
   ; applied : bool
+  ; started_dispatched : bool
   ; failure_reason : string option
   ; trigger : Compaction_trigger.t option
   ; decision : Keeper_compact_policy.compaction_decision
@@ -121,7 +121,7 @@ type post_turn_lifecycle =
 type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
-  ; cascade_budget : int
+  ; runtime_budget : int
   ; turn_budget : int
   ; effective_budget : int
   }
@@ -209,7 +209,7 @@ val apply_post_turn_lifecycle_with_resilience_handles
   -> post_turn_lifecycle
 
 val dispatch_keeper_phase_event
-  :  config:Coord.config
+  :  config:Workspace.config
   -> ?origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> Keeper_state_machine.event
@@ -242,11 +242,11 @@ val record_compaction_outcome
     [context_overflow] set in this case, so operators need the signal
     to escalate profile / alert.
 
-    Two emit paths exist ([tool_keeper] manual compact recovery and
+    Two emit paths exist ([keeper_tool_surface] manual compact recovery and
     [dispatch_post_turn_lifecycle_events] automatic compact); both
     funnel through this helper to keep observability coherent. *)
 val dispatch_compaction_completed
-  :  config:Coord.config
+  :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
   -> before_tokens:int
@@ -254,7 +254,7 @@ val dispatch_compaction_completed
   -> unit
 
 val dispatch_post_turn_lifecycle_events
-  :  config:Coord.config
+  :  config:Workspace.config
   -> keeper_name:string
   -> post_turn_lifecycle
   -> unit
@@ -273,7 +273,7 @@ val keeper_board_write_tool_names : string list
 val keeper_write_done : string list -> bool
 val keeper_action_kind_of_tool_names : string list -> string
 
-(** {1 Model and Coord Utilities} *)
+(** {1 Model and Workspace Utilities} *)
 
 val effective_model_labels_for_turn : keeper_meta -> string list
 
@@ -283,11 +283,7 @@ val resolve_max_context_resolution
   -> max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
-val room_cursor_for : keeper_meta -> string -> int
-val set_room_cursor : keeper_meta -> string -> int -> keeper_meta
-val room_ids_for_meta : Coord.config -> keeper_meta -> string list
-val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
-
+(** {1 Mention Detection} *)
 (** {1 Mention Detection} *)
 
 val exact_direct_mention_present : targets:string list -> string -> bool
@@ -307,6 +303,7 @@ val build_keeper_system_prompt
   -> instructions:string
   -> ?persona_extended:string
   -> ?keeper_name:string
+  -> ?home_ground:string
   -> ?active_goals:(string * string * string) list
   -> unit
   -> string

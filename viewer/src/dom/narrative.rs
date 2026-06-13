@@ -3,7 +3,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::game::events::NarrativeReceived;
-use crate::game::state::{RoomState, TurnProgressState};
+use crate::game::state::{WorkspaceState, TurnProgressState};
 
 use super::dm_voice;
 use super::escape::{sanitize_text, scroll_to_bottom, trim_log};
@@ -233,7 +233,7 @@ fn is_duplicate_narrative_entry(log_el: &web_sys::Element, dedup_key: &str) -> b
 /// Appends narrative entries to the #narrative-log DOM element.
 pub fn update_narrative_dom(
     mut events: MessageReader<NarrativeReceived>,
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     progress: Res<TurnProgressState>,
 ) {
     let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -396,9 +396,9 @@ pub fn update_narrative_dom(
             let Some(dashboard) = document.get_element_by_id("dashboard") else {
                 return;
             };
-            if let Some(room_id) = clickable_entry.get_attribute("data-room-id") {
-                if !room_id.trim().is_empty() {
-                    let _ = dashboard.set_attribute("data-focus-room", room_id.trim());
+            if let Some(workspace_id) = clickable_entry.get_attribute("data-workspace-id") {
+                if !workspace_id.trim().is_empty() {
+                    let _ = dashboard.set_attribute("data-focus-workspace", workspace_id.trim());
                 }
             }
             if let Some(turn) = clickable_entry.get_attribute("data-turn") {
@@ -418,7 +418,7 @@ pub fn update_narrative_dom(
         scroll_to_bottom(&log_el);
         trim_log(&log_el, 200);
         if !is_debug_entry {
-            dm_voice::maybe_play_dm_voice(payload, &clean_text, &room_state, &progress);
+            dm_voice::maybe_play_dm_voice(payload, &clean_text, &workspace_state, &progress);
         }
     }
 }

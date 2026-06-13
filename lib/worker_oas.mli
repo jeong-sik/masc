@@ -20,19 +20,9 @@ val build_agent :
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
-  ?disclosure_strategy:Keeper_disclosure_strategy.t ->
   unit ->
   (Agent_sdk.Agent.t, string) result
-(** [build_agent] constructs an OAS agent for the given worker meta.
-
-    The optional [disclosure_strategy] parameter (RFC-0084
-    host-config-cleanup-G) activates [Agent_sdk.Builder.with_disclosure_level]
-    and, when the strategy's [demote_on_error] flag is set,
-    [Agent_sdk.Builder.with_disclosure_resolver].  When omitted the
-    SDK's [Full_schema] default applies — preserving today's
-    behaviour for every caller that has not yet adopted the typed
-    surface.  Wiring of TOML-driven strategy values is scoped to
-    follow-up [host-config-cleanup-H] (keeper_meta TOML round-trip). *)
+(** [build_agent] constructs an OAS agent for the given worker meta. *)
 
 (** {1 Tool Tracking} *)
 
@@ -61,7 +51,6 @@ val run_worker_via_oas :
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
   ?gate_config:Eval_gate.gate_config ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?worker_run_id:string ->
   unit ->
   (Worker_container_types.run_result, string) result
@@ -76,7 +65,6 @@ val resume_worker_via_oas :
   prompt:string ->
   tools:Agent_sdk.Tool.t list ->
   raw_trace:Agent_sdk.Raw_trace.t ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?worker_run_id:string ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   unit ->
@@ -88,3 +76,13 @@ val resume_model_id_of_checkpoint :
   Worker_container_types.worker_container_meta ->
   Agent_sdk.Checkpoint.t ->
   string
+
+module For_testing : sig
+  val begin_worker_mcp_client_session :
+    Worker_container_types.worker_container_meta ->
+    Worker_container_types.worker_container_meta
+
+  val finish_worker_mcp_client_session :
+    Worker_container_types.worker_container_meta ->
+    Worker_container_types.worker_container_meta
+end

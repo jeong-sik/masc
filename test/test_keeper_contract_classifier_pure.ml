@@ -1,11 +1,10 @@
 (** Pure-function unit tests for [Keeper_contract_classifier].
 
     Covers ADT label mappers, the [is_actionable] boolean projection,
-    [classify_actionable_signal] precedence (unclaimed_tasks >
-    board_activity), and the tool-aware variant that
-    skips a signal when no matching tool is in the allowed surface. *)
+    and [classify_actionable_signal] precedence (unclaimed_tasks >
+    board_activity). *)
 
-open Masc_mcp
+open Masc
 module KCC = Keeper_contract_classifier
 
 let check_string label expected actual =
@@ -45,10 +44,10 @@ let test_signal_label_none () =
 
 (* ── contract_status_label ───────────────────────────────────────────── *)
 
-let test_status_label_tool_surface_mismatch () =
+let test_status_label_surface_mismatch () =
   let rendered =
     Format.asprintf "%a" KCC.pp_contract_status
-      (KCC.Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
+      (KCC.Surface_mismatch { missing = [ "keeper_task_claim"; "masc_broadcast" ] })
   in
   (* The stable label is intentionally low-cardinality; the pretty printer
      carries missing tool names for grep/debug output. *)
@@ -103,53 +102,6 @@ let test_classify_none () =
   check_signal "no signal" KCC.No_actionable_signal
     (KCC.classify_actionable_signal o)
 
-(* ── classify_actionable_signal_for_tools: tool-aware precedence ──────── *)
-
-let test_classify_for_tools_drops_unclaimed_no_claim_tool () =
-  let o = make_obs ~tasks:5 ~board:1 in
-  let allowed = [ "keeper_board_post" ] in
-  check_signal
-    "tasks present but no claim tool → falls through to board"
-    KCC.Has_board_activity
-    (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
-
-let test_classify_for_tools_keeps_unclaimed_with_claim_tool () =
-  let o = make_obs ~tasks:5 ~board:1 in
-  let allowed = [ "keeper_task_claim" ] in
-  check_signal
-    "tasks + claim tool → unclaimed wins"
-    KCC.Has_unclaimed_tasks
-    (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
-
-let test_classify_for_tools_no_actionable_when_no_tools () =
-  let o = make_obs ~tasks:5 ~board:5 in
-  let allowed = [ "completely_unrelated_tool" ] in
-  check_signal
-    "no matching tool surface → no actionable signal"
-    KCC.No_actionable_signal
-    (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
-
-let test_classify_for_tools_accepts_public_aliases () =
-  let claimable = make_obs ~tasks:1 ~board:0 in
-  check_signal
-    "prefixed public MCP claim tool supports task claim"
-    KCC.Has_unclaimed_tasks
-    (KCC.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "mcp__masc__masc_claim_next" ]
-       claimable)
-
-let test_requires_tool_support_for_allowed_tools_true () =
-  let o = make_obs ~tasks:1 ~board:0 in
-  check_bool "claimable task + claim tool requires tool-capable provider" true
-    (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "keeper_task_claim" ] o)
-
-let test_requires_tool_support_for_allowed_tools_false_without_matching_tool () =
-  let o = make_obs ~tasks:1 ~board:0 in
-  check_bool "claimable task without claim tool does not require tool support" false
-    (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "keeper_board_post" ] o)
-
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
 let () =
@@ -163,8 +115,8 @@ let () =
         ] );
       ( "contract_status_label",
         [
-          Alcotest.test_case "Tool_surface_mismatch carries missing names"
-            `Quick test_status_label_tool_surface_mismatch;
+          Alcotest.test_case "Surface_mismatch carries missing names"
+            `Quick test_status_label_surface_mismatch;
           Alcotest.test_case "Satisfied_completion stable token" `Quick
             test_status_label_satisfied_completion;
           Alcotest.test_case "Satisfied_execution stable token" `Quick
@@ -184,21 +136,5 @@ let () =
             test_classify_unclaimed_wins_over_board;
           Alcotest.test_case "board signal" `Quick test_classify_board_signal;
           Alcotest.test_case "no signal" `Quick test_classify_none;
-        ] );
-      ( "classify_actionable_signal_for_tools",
-        [
-          Alcotest.test_case "no claim tool → drops unclaimed, falls to board" `Quick
-            test_classify_for_tools_drops_unclaimed_no_claim_tool;
-          Alcotest.test_case "with claim tool → unclaimed wins" `Quick
-            test_classify_for_tools_keeps_unclaimed_with_claim_tool;
-          Alcotest.test_case "no matching tool → none" `Quick
-            test_classify_for_tools_no_actionable_when_no_tools;
-          Alcotest.test_case "public aliases are normalized" `Quick
-            test_classify_for_tools_accepts_public_aliases;
-          Alcotest.test_case "matching actionable signal requires tool support"
-            `Quick test_requires_tool_support_for_allowed_tools_true;
-          Alcotest.test_case
-            "unmatched actionable signal does not require tool support" `Quick
-            test_requires_tool_support_for_allowed_tools_false_without_matching_tool;
         ] );
     ]

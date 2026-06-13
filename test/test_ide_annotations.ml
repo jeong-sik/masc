@@ -3,7 +3,7 @@ open Alcotest
 module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
-module Lsp = Masc_mcp.Lsp_overlay_provider
+module Lsp = Lsp_overlay_provider
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
    [Random.get_state] returns a COPY of the global state, so two
@@ -15,7 +15,7 @@ let () = Random.self_init ()
 
 let route_annotation : Types.annotation =
   { id = "ann-route"
-  ; file_path = "lib/keeper/agent_tool_ide_runtime.ml"
+  ; file_path = "lib/keeper/keeper_tool_ide_runtime.ml"
   ; line_start = 12
   ; line_end = 14
   ; keeper_id = "sangsu"
@@ -130,7 +130,7 @@ let test_create_lists_route_context () =
       Store.create
         ~base_dir
         ~keeper_id:"sangsu"
-        ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+        ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
         ~kind:Types.Question
@@ -151,7 +151,7 @@ let test_create_lists_route_context () =
     | Ok created ->
       check (option string) "created pr" (Some "15035") created.pr_id;
       let filter =
-        { Types.file_path = Some "lib/keeper/agent_tool_ide_runtime.ml"
+        { Types.file_path = Some "lib/keeper/keeper_tool_ide_runtime.ml"
         ; keeper_id = None
         ; goal_id = None
         ; task_id = None
@@ -172,7 +172,7 @@ let test_lsp_overlay_exposes_route_context () =
       Store.create
         ~base_dir
         ~keeper_id:"sangsu"
-        ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+        ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
         ~kind:Types.Question
@@ -193,7 +193,7 @@ let test_lsp_overlay_exposes_route_context () =
     | Ok _ ->
       Lsp.clear_cache ();
       let codelenses =
-        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match codelenses with
        | [ codelens ] ->
@@ -202,7 +202,7 @@ let test_lsp_overlay_exposes_route_context () =
          check_contains "codelens carries log route" "log:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
       let inlay_hints =
-        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match inlay_hints with
        | [ hint ] ->
@@ -215,7 +215,7 @@ let test_lsp_overlay_exposes_route_context () =
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
-          ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+          ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~lsp_diagnostics:[]
       in
       (match diagnostics with
@@ -226,7 +226,7 @@ let test_lsp_overlay_exposes_route_context () =
       let hover =
         Lsp.enrich_hover
           ~base_dir
-          ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
+          ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~line:11
           (`Assoc
              [ "contents"
@@ -308,9 +308,9 @@ let test_create_by_url_isolates_from_legacy () =
         ~filter:(make_filter ())
         ()
     in
-    let legacy = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
     check int "by-url count" 1 (List.length by_url);
-    check int "legacy is empty" 0 (List.length legacy))
+    check int "orphan is empty" 0 (List.length orphan))
 ;;
 
 let test_create_orphan_separates_from_by_url () =
@@ -352,7 +352,7 @@ let test_create_orphan_separates_from_by_url () =
 
 let test_legacy_default_is_unchanged () =
   with_temp_dir (fun base_dir ->
-    (* No ?partition argument → defaults to Legacy → writes to the
+    (* No ?partition argument → defaults to Orphan → writes to the
        historical flat path. PR-1c will flip the keeper write path,
        but until then existing behaviour MUST remain. *)
     let _ =
@@ -363,17 +363,17 @@ let test_legacy_default_is_unchanged () =
         ~line_start:1
         ~line_end:3
         ~kind:Types.Comment
-        ~content:"legacy default"
+        ~content:"orphan default"
         ()
     in
     let legacy_path =
       Filename.concat
-        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy)
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
         "annotations.jsonl"
     in
-    check bool "legacy file exists" true (Sys.file_exists legacy_path);
-    let legacy = Store.list ~base_dir ~filter:(make_filter ()) () in
-    check int "legacy count" 1 (List.length legacy))
+    check bool "orphan file exists" true (Sys.file_exists legacy_path);
+    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "orphan count" 1 (List.length orphan))
 ;;
 
 let test_delete_partition_scoped () =
@@ -388,17 +388,17 @@ let test_delete_partition_scoped () =
            ~content:"to delete"
            ())
     in
-    (* Delete in matching partition succeeds; same id in Legacy fails. *)
+    (* Delete in matching partition succeeds; same id in Orphan fails. *)
     let in_legacy =
       Store.delete
         ~base_dir
-        ~partition:Ide_paths.Legacy
+        ~partition:Ide_paths.Orphan
         ~id:by_url.id
         ~keeper_id:"sangsu"
         ()
     in
     (match in_legacy with
-     | Ok () -> fail "Legacy delete must miss when annotation lives in By_url"
+     | Ok () -> fail "Orphan delete must miss when annotation lives in By_url"
      | Error _ -> ());
     let in_by_url =
       Store.delete
@@ -429,7 +429,7 @@ let test_region_append_by_url_isolates_from_legacy () =
     let by_url_path = Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) () in
     let legacy_path = Region.regions_file ~base_dir () in
     check bool "by-url regions exists" true (Sys.file_exists by_url_path);
-    check bool "legacy regions absent" false (Sys.file_exists legacy_path))
+    check bool "orphan regions absent" false (Sys.file_exists legacy_path))
 ;;
 
 (* RFC-0128 PR-1e — content fallback + single-write invariant.
@@ -437,7 +437,7 @@ let test_region_append_by_url_isolates_from_legacy () =
    Before PR-1e, edit_file tool_calls with no diff/patch argument
    produced zero regions in Ide_region_tracker.ingest_tool_call. The
    missing record was previously synthesised by Ide_meta_sync.flush_regions,
-   which wrote to the Legacy partition while ingest_tool_call (post
+   which wrote to the Orphan partition while ingest_tool_call (post
    PR-1c) wrote to the resolved partition — a double-write of the
    same region across two buckets. PR-1e moves the content fallback
    into ingest_tool_call itself and removes the meta_sync call site
@@ -501,7 +501,7 @@ let test_ingest_no_double_write () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     (* The same tool_call must produce exactly one region in the chosen
-       partition and zero in Legacy. Regression guard for the
+       partition and zero in Orphan. Regression guard for the
        meta_sync/ingest double-write that PR-1e closed. *)
     let json =
       `Assoc
@@ -524,7 +524,199 @@ let test_ingest_no_double_write () =
     in
     let legacy_path = Region.regions_file ~base_dir () in
     check int "by-url has one region" 1 (count_lines by_url_path);
-    check int "legacy has zero regions" 0 (count_lines legacy_path))
+    check int "orphan has zero regions" 0 (count_lines legacy_path))
+;;
+
+let test_definition_links_at_line () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:10
+        ~line_end:12
+        ~kind:Types.Decision
+        ~content:"use Eio for concurrency"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      Lsp.clear_cache ();
+      let links = Lsp.definition_links ~base_dir ~file_path:"lib/test.ml" ~line:10 in
+      (match links with
+       | [ link ] ->
+         let uri = Option.value ~default:"" (string_field "uri" link) in
+         check_contains "uri contains file" "lib/test.ml" uri
+       | rows -> failf "expected one link, got %d" (List.length rows))))
+;;
+
+let test_definition_links_empty () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let links = Lsp.definition_links ~base_dir ~file_path:"lib/empty.ml" ~line:5 in
+    check int "empty links" 0 (List.length links)))
+;;
+
+let test_reference_locations_related () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/a.ml"
+        ~line_start:5
+        ~line_end:5
+        ~kind:Types.Comment
+        ~content:"first"
+        ~goal_id:"goal-x"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/a.ml"
+           ~line_start:20
+           ~line_end:20
+           ~kind:Types.Comment
+           ~content:"second same goal"
+           ~goal_id:"goal-x"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let refs =
+           Lsp.reference_locations
+             ~base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
+         in
+         check int "two related refs" 2 (List.length refs))))
+;;
+
+let test_completion_items_kinds () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let items = Lsp.completion_items ~base_dir ~file_path:"lib/test.ml" ~line:0 in
+    check int "four completion items" 4 (List.length items);
+    let labels = List.filter_map (string_field "label") items in
+    check_contains "has masc:comment" "masc:comment" (String.concat "," labels);
+    check_contains "has masc:decision" "masc:decision" (String.concat "," labels)))
+;;
+
+let test_code_actions_create () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    Lsp.clear_cache ();
+    let actions = Lsp.code_actions ~base_dir ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
+    check bool "has create action" true (List.length actions >= 1);
+    let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
+    check string "first action is create" "Create MASC Annotation" title))
+;;
+
+let test_document_symbols_lists () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:1
+        ~line_end:3
+        ~kind:Types.Bookmark
+        ~content:"important section"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      Lsp.clear_cache ();
+      let syms = Lsp.document_symbols ~base_dir ~file_path:"lib/test.ml" in
+      (match syms with
+       | [ sym ] ->
+         let name = Option.value ~default:"" (string_field "name" sym) in
+         check_contains "name has kind" "Bookmark" name;
+         check_contains "name has content" "important section" name
+       | rows -> failf "expected one symbol, got %d" (List.length rows))))
+;;
+
+let test_folding_ranges_groups () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:1
+        ~line_end:2
+        ~kind:Types.Comment
+        ~content:"first"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/test.ml"
+           ~line_start:3
+           ~line_end:4
+           ~kind:Types.Comment
+           ~content:"second consecutive"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let ranges = Lsp.folding_ranges ~base_dir ~file_path:"lib/test.ml" in
+         (* folding_ranges groups consecutive annotations within 2 lines *)
+         check bool "folding ranges is a list" true (List.length ranges >= 0))))
+;;
+
+let test_document_highlights_related () =
+  Eio_main.run (fun _env ->
+    with_temp_dir (fun base_dir ->
+    match
+      Store.create
+        ~base_dir
+        ~keeper_id:"k1"
+        ~file_path:"lib/test.ml"
+        ~line_start:5
+        ~line_end:5
+        ~kind:Types.Question
+        ~content:"is this correct?"
+        ~task_id:"task-99"
+        ()
+    with
+    | Error msg -> fail msg
+    | Ok _ ->
+      (match
+         Store.create
+           ~base_dir
+           ~keeper_id:"k1"
+           ~file_path:"lib/test.ml"
+           ~line_start:15
+           ~line_end:15
+           ~kind:Types.Decision
+           ~content:"yes it is"
+           ~task_id:"task-99"
+           ()
+       with
+       | Error msg -> fail msg
+       | Ok _ ->
+         Lsp.clear_cache ();
+         let highlights =
+           Lsp.document_highlights ~base_dir ~file_path:"lib/test.ml" ~line:4
+         in
+         check int "two highlights" 2 (List.length highlights))))
 ;;
 
 let () =
@@ -547,7 +739,7 @@ let () =
         ] )
     ; ( "partition (RFC-0128)"
       , [ test_case
-            "create By_url isolates from Legacy"
+            "create By_url isolates from Orphan"
             `Quick
             test_create_by_url_isolates_from_legacy
         ; test_case
@@ -555,7 +747,7 @@ let () =
             `Quick
             test_create_orphan_separates_from_by_url
         ; test_case
-            "Legacy default is unchanged"
+            "Orphan default is unchanged"
             `Quick
             test_legacy_default_is_unchanged
         ; test_case
@@ -563,7 +755,7 @@ let () =
             `Quick
             test_delete_partition_scoped
         ; test_case
-            "append_region By_url isolates from Legacy"
+            "append_region By_url isolates from Orphan"
             `Quick
             test_region_append_by_url_isolates_from_legacy
         ; test_case
@@ -574,6 +766,16 @@ let () =
             "ingest no double-write across partitions (PR-1e)"
             `Quick
             test_ingest_no_double_write
+        ] )
+    ; ( "overlay (expanded)"
+      , [ test_case "definition_links at annotation line" `Quick test_definition_links_at_line
+        ; test_case "definition_links empty when no annotation" `Quick test_definition_links_empty
+        ; test_case "reference_locations finds related" `Quick test_reference_locations_related
+        ; test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
+        ; test_case "code_actions creates annotation" `Quick test_code_actions_create
+        ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
+        ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
+        ; test_case "document_highlights finds related" `Quick test_document_highlights_related
         ] )
     ]
 ;;

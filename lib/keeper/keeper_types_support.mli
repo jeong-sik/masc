@@ -8,37 +8,41 @@ include module type of Keeper_config
 
 (** Resolve the keeper base directory ([.masc/keepers]) for [config],
     creating it if missing. *)
-val keeper_dir_ : Coord.config -> string
+val keeper_dir_ : Workspace.config -> string
 
 (** Resolve the trace base directory ([.masc/traces]) for [config],
     creating it if missing. *)
-val session_base_dir_ : Coord.config -> string
+val session_base_dir_ : Workspace.config -> string
 
 (** Check API key availability for the given model labels via
-    [Cascade_runtime]. *)
+    [Runtime_runtime]. *)
 val ensure_api_keys_for_labels : string list -> (unit, string) result
 
 (** Single-file metrics path kept for fallback reads. *)
-val keeper_metrics_path : Coord.config -> string -> string
+val keeper_metrics_path : Workspace.config -> string -> string
 
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
-val keeper_metrics_store : Coord.config -> string -> Dated_jsonl.t
+val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t
 
 (** Date-split execution-receipt store:
     [.masc/keepers/<name>/execution-receipts/YYYY-MM/DD.jsonl]. *)
-val keeper_execution_receipt_store : Coord.config -> string -> Dated_jsonl.t
+val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t
 
-val keeper_memory_bank_path : Coord.config -> string -> string
-val keeper_progress_path : Coord.config -> string -> string
-val keeper_generation_index_path : Coord.config -> string -> string
+(** Date-split TurnRecord store (RFC-0233 §2.2):
+    [.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl]. *)
+val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
+
+val keeper_memory_bank_path : Workspace.config -> string -> string
+val keeper_progress_path : Workspace.config -> string -> string
+val keeper_generation_index_path : Workspace.config -> string -> string
 
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)
-val keeper_session_dir : Coord.config -> string -> string
+val keeper_session_dir : Workspace.config -> string -> string
 
-val keeper_generation_manifest_path : Coord.config -> string -> string
-val keeper_history_path : Coord.config -> string -> string
-val keeper_internal_history_path : Coord.config -> string -> string
+val keeper_generation_manifest_path : Workspace.config -> string -> string
+val keeper_history_path : Workspace.config -> string -> string
+val keeper_internal_history_path : Workspace.config -> string -> string
 
 (** Trim + lowercase a history-source label. *)
 val normalize_history_source : string -> string
@@ -50,13 +54,13 @@ val is_prompt_history_source : string -> bool
     channel. *)
 val is_internal_history_source : string -> bool
 
-val keeper_policy_log_path : Coord.config -> string -> string
-val keeper_decision_log_path : Coord.config -> string -> string
-val keeper_feedback_log_path : Coord.config -> string -> string
-val keeper_dataset_export_path : Coord.config -> string -> string
-val keeper_alerts_path : Coord.config -> string
-val keeper_alert_retry_path : Coord.config -> string
-val keeper_alert_deadletter_path : Coord.config -> string
+val keeper_policy_log_path : Workspace.config -> string -> string
+val keeper_decision_log_path : Workspace.config -> string -> string
+val keeper_feedback_log_path : Workspace.config -> string -> string
+val keeper_dataset_export_path : Workspace.config -> string -> string
+val keeper_alerts_path : Workspace.config -> string
+val keeper_alert_retry_path : Workspace.config -> string
+val keeper_alert_deadletter_path : Workspace.config -> string
 
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered

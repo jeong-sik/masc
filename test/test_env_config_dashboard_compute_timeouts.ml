@@ -2,7 +2,7 @@
     for mission/shell/render. Four values were extracted from inline
     literals:
 
-    - [server_dashboard_http_core.ml:78]   25.0  → mission_timeout_sec
+    - [server_dashboard_http_core.ml:78]   25.0  → briefing_timeout_sec
     - [server_dashboard_http_core.ml:790]  16.0  → shell_timeout_sec
     - [server_dashboard_http_core.ml:791]   8.0  → shell_light_timeout_sec
     - [dashboard_execution.ml:204]         60.0  → render_timeout_sec
@@ -19,7 +19,7 @@
        on full's work.
     3. Render budget comfortably exceeds inner compute budgets. The
        outer render guard at [dashboard_execution.ml:376] must give the
-       inner [Dashboard_cache.get_or_compute_with_timeout] sites room
+       inner [Dashboard_cache.get_or_compute_with_timeout] sites workspace
        to report their own "compute timeout" rather than being killed
        by the outer wrapper.
     4. Floor clamps prevent operators from configuring degenerate values. *)
@@ -34,8 +34,8 @@ let approx = float 0.001
 
 let test_default_mission () =
   check approx
-    "mission_timeout_sec default (was inline 25.0)"
-    25.0 D.mission_timeout_sec
+    "briefing_timeout_sec default (was inline 25.0)"
+    25.0 D.briefing_timeout_sec
 
 let test_default_shell () =
   check approx
@@ -65,10 +65,10 @@ let test_shell_light_strictly_less_than_full () =
 
 let test_render_exceeds_mission () =
   check bool
-    "render_timeout_sec MUST exceed mission_timeout_sec (else outer \
+    "render_timeout_sec MUST exceed briefing_timeout_sec (else outer \
      guard kills mission compute before its inner report)"
     true
-    (D.render_timeout_sec > D.mission_timeout_sec)
+    (D.render_timeout_sec > D.briefing_timeout_sec)
 
 let test_render_exceeds_shell () =
   check bool
@@ -79,7 +79,7 @@ let test_render_exceeds_shell () =
 (* --- 4. API surface compile guard ----------------------------- *)
 
 let test_smoke_call_sites_compile () =
-  let _ = D.mission_timeout_sec in
+  let _ = D.briefing_timeout_sec in
   let _ = D.shell_timeout_sec in
   let _ = D.shell_light_timeout_sec in
   let _ = D.render_timeout_sec in

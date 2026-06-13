@@ -1,42 +1,23 @@
-let json_member = Server_dashboard_http_json_utils.json_member
-
-let json_int_opt_member key json =
-  match json_member key json with
-  | `Int n -> Some n
-  | `Intlit raw -> int_of_string_opt raw
-  | _ -> None
-
-let json_float_opt_member key json =
-  match json_member key json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit raw -> float_of_string_opt raw
-  | _ -> None
-
-let json_string_opt_member key json =
-  match json_member key json with
-  | `String value when String.trim value <> "" -> Some value
-  | _ -> None
+let json_member key json =
+  match Json_util.assoc_member_opt key json with
+  | Some v -> v
+  | None -> `Null
+let json_int_opt_member key json = Json_util.get_int json key
+let json_float_opt_member key json = Json_util.get_float json key
+let json_string_opt_member key json = Json_util.get_string_nonempty json key
 
 let json_string_opt_value = function
   | `String value when String.trim value <> "" -> Some value
   | _ -> None
 
-let json_bool_opt_member key json =
-  match json_member key json with
-  | `Bool value -> Some value
-  | _ -> None
+let json_bool_opt_member key json = Json_util.get_bool json key
 
 let json_list_member key json =
   match json_member key json with
   | `List items -> items
   | _ -> []
 
-let json_string_list_member key json =
-  json_list_member key json
-  |> List.filter_map (function
-       | `String value when String.trim value <> "" -> Some value
-       | _ -> None)
+let json_string_list_member = Json_util.json_string_list_member
 
 let assoc_bool_default key ~default fields =
   match List.assoc_opt key fields with
@@ -53,11 +34,8 @@ let assoc_json_opt key fields =
   | Some `Null | None -> None
   | Some value -> Some value
 
-let iso_of_unix_seconds ts =
-  Masc_domain.iso8601_of_unix_seconds ts
 
-let take limit values =
-  values |> List.filteri (fun idx _ -> idx < limit)
+let take = List.take
 
 let goal_ids_of_json json =
   match json_string_list_member "goal_ids" json with
@@ -82,9 +60,9 @@ let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
   `Assoc
     [
       ("kind", `String kind);
-      ("ts", `String (iso_of_unix_seconds ts_unix));
+      ("ts", `String (Masc_domain.iso8601_of_unix_seconds ts_unix));
       ("ts_unix", `Float ts_unix);
-      ("observed_at", `String (iso_of_unix_seconds observed_at_unix));
+      ("observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix));
       ("observed_at_unix", `Float observed_at_unix);
       ("observation_only", `Bool observation_only);
       ("trace_id", Json_util.string_opt_to_json trace_id);
@@ -369,12 +347,12 @@ let receipt_timeline_event receipt =
           json_string_opt_member "outcome" receipt
           |> Option.value ~default:"unknown"
         in
-        let tool_contract_result =
-          json_string_opt_member "tool_contract_result" receipt
+        let completion_contract_result =
+          json_string_opt_member "completion_contract_result" receipt
           |> Option.value ~default:"unknown"
         in
-        let cascade_outcome =
-          receipt |> json_member "cascade"
+        let runtime_outcome =
+          receipt |> json_member "runtime"
           |> json_string_opt_member "outcome"
           |> Option.value ~default:"not_observed"
         in
@@ -387,10 +365,13 @@ let receipt_timeline_event receipt =
           match error_kind with
           | Some _ -> "bad"
           | None ->
-              if String.equal tool_contract_result "violated" then "bad"
+              if
+                String.equal completion_contract_result "violated"
+                || String.equal runtime_outcome "failed"
+              then "bad"
               else if
-                String.equal cascade_outcome "passed_to_next_model"
-                || (receipt |> json_member "cascade"
+                String.equal runtime_outcome "passed_to_next_model"
+                || (receipt |> json_member "runtime"
                     |> json_bool_opt_member "fallback_applied"
                     |> Option.value ~default:false)
               then "warn"
@@ -405,8 +386,8 @@ let receipt_timeline_event receipt =
              ~ts_unix ~kind:"execution_receipt"
              ~title:"Execution Receipt"
              ~summary:
-               (Printf.sprintf "%s · tool_contract=%s · cascade=%s"
-                  outcome tool_contract_result cascade_outcome)
+               (Printf.sprintf "%s · completion_contract=%s · runtime=%s"
+                  outcome completion_contract_result runtime_outcome)
              ~severity ())
 
 let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
@@ -428,7 +409,7 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
            ~summary
            ~severity:
              (match blocker_class with
-              | "cascade_exhausted" | "completion_contract_violation" -> "bad"
+              | "runtime_exhausted" | "completion_contract_violation" -> "bad"
               | _ -> "warn")
            ())
   | None, Some summary

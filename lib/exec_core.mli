@@ -105,18 +105,11 @@ type exec_env_snapshot = {
   project_name : string option;
 }
 
-val string_of_project_kind : project_kind -> string
-val detect_project_kind : string -> project_kind
 val snapshot_env : cwd:string -> exec_env_snapshot
-val env_snapshot_to_json : exec_env_snapshot -> Yojson.Safe.t
 
 val classify_command_of_ir : Masc_exec.Shell_ir.t -> classification
 (** IR-based classification. Direct consumers of parsed Shell IR
     should use this. *)
-
-val default_classification : classification
-(** Constant classification used when no IR is available:
-    [{ family = Unknown; reversibility = Read_only; risk = Low; write_intent = false }]. *)
 
 val classification_to_json : classification -> Yojson.Safe.t
 
@@ -127,8 +120,6 @@ val semantic_status_of_process :
   Unix.process_status ->
   semantic_status
 
-val string_of_retryability : retryability -> string
-
 val build_process_outcome :
   classification:classification ->
   artifact_policy:artifact_policy ->
@@ -138,24 +129,6 @@ val build_process_outcome :
   status:Unix.process_status ->
   output:string ->
   outcome
-
-val build_blocked_outcome :
-  ?classification:classification ->
-  cmd:string ->
-  error:string ->
-  reason:string ->
-  ?hint:string ->
-  ?alternatives:string list ->
-  ?retryability:retryability ->
-  ?diag:diagnosis option ->
-  unit ->
-  outcome
-
-val outcome_to_json :
-  ?extra:(string * Yojson.Safe.t) list ->
-  ?env_snapshot:exec_env_snapshot option ->
-  outcome ->
-  Yojson.Safe.t
 
 val process_result_json :
   ?artifact_policy:artifact_policy ->

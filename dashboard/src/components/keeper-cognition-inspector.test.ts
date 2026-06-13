@@ -47,7 +47,7 @@ describe('KeeperCognitionInspector', () => {
 
   it('formats live tool access rows from keeper runtime fields', () => {
     const rows = toolAccessRowsForKeeper(keeper({
-      cascade_name: 'primary',
+      runtime_id: 'primary',
       sandbox_profile: 'docker',
       proactive_enabled: false,
       proactive_idle_sec: 120,
@@ -57,8 +57,8 @@ describe('KeeperCognitionInspector', () => {
       configured_social_model: 'reactive',
     }))
 
-    expect(rows.map(row => row.label)).toContain('cascade')
-    expect(rows.find(row => row.label === 'cascade')?.value).toBe('primary')
+    expect(rows.map(row => row.label)).toContain('runtime')
+    expect(rows.find(row => row.label === 'runtime')?.value).toBe('primary')
     expect(rows.find(row => row.label === 'sandbox')?.value).toBe('docker')
     expect(rows.find(row => row.label === 'proactive idle')?.value).toContain('off')
     expect(rows.find(row => row.label === 'observed tools')?.value).toContain('Execute')
@@ -71,7 +71,7 @@ describe('KeeperCognitionInspector', () => {
       keeper({
         name: 'beta',
         status: 'active',
-        cascade_name: 'primary',
+        runtime_id: 'primary',
         latest_tool_names: ['keeper_task_done'],
       }),
     ]

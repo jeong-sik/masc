@@ -127,25 +127,25 @@ check_http "dashboard execution 200" "$BASE/api/v1/dashboard/execution" "200"
 check_json "dashboard execution exposes provenance" "$BASE/api/v1/dashboard/execution" "'status' in d and 'agents' in d and 'execution_queue' in d and d.get('dashboard_surface') == '/api/v1/dashboard/execution' and d.get('source') == 'dashboard_execution_read_model' and d.get('retention', {}).get('scope') == 'dashboard_execution' and d.get('query', {}).get('default_light_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "dashboard execution trust 200" "$BASE/api/v1/dashboard/execution-trust" "200"
 check_json "dashboard execution trust exposes provenance" "$BASE/api/v1/dashboard/execution-trust" "'dashboard_surface' in d and 'keepers' in d and 'coverage_gaps' in d" '^True$'
-check_http "dashboard mission 200" "$BASE/api/v1/dashboard/mission" "200"
-check_json "dashboard mission exposes summary and keepers" "$BASE/api/v1/dashboard/mission" "'summary' in d and 'keeper_briefs' in d" '^True$'
-check_http "dashboard mission briefing 200" "$BASE/api/v1/dashboard/mission/briefing" "200"
-check_json "dashboard mission briefing exposes provenance" "$BASE/api/v1/dashboard/mission/briefing" "'provenance' in d and 'criteria' in d" '^True$'
+check_http "dashboard briefing 200" "$BASE/api/v1/dashboard/briefing" "200"
+check_json "dashboard briefing exposes summary and keepers" "$BASE/api/v1/dashboard/briefing" "'summary' in d and 'keeper_briefs' in d" '^True$'
+check_http "dashboard briefing sections 200" "$BASE/api/v1/dashboard/briefing/sections" "200"
+check_json "dashboard briefing sections exposes provenance" "$BASE/api/v1/dashboard/briefing/sections" "'provenance' in d and 'criteria' in d" '^True$'
 check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
 check_json \
   "surface-readiness has canonical surface count" \
   "$BASE/api/v1/dashboard/surface-readiness" \
   "len(d.get('surfaces', []))" \
-  '^24$'
+  '^22$'
 check_json \
   "surface-readiness matches canonical surface ids" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.cascade-config', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.doctor', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
+  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
   '^True$'
 check_json \
   "surface-readiness dropped retired surfaces" \
   "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'workspace.collab-mvp'])" \
+  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.runtime-config', 'workspace.collab-mvp'])" \
   '^True$'
 
 echo "[3/7] Monitoring"
@@ -160,7 +160,7 @@ check_json_eventually \
 check_json \
   "namespace-truth exposes provenance" \
   "$BASE/api/v1/dashboard/namespace-truth" \
-  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/room-truth' not in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
+  "d.get('dashboard_surface') == '/api/v1/dashboard/namespace-truth' and d.get('source') == 'namespace_truth_read_model' and '/api/v1/dashboard/workspace-truth' not in d.get('dashboard_aliases', []) and d.get('retention', {}).get('scope') == 'dashboard_namespace_truth'" \
   '^True$'
 check_http "goal-loop status 200" "$BASE/api/v1/dashboard/goal-loop/status" "200"
 check_json "goal-loop status exposes phases" "$BASE/api/v1/dashboard/goal-loop/status" "'overall_status' in d and 'phases' in d" '^True$'
@@ -182,26 +182,8 @@ check_http "oas telemetry recent 200" "$BASE/api/v1/dashboard/oas/telemetry/rece
 check_json "oas telemetry recent exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/recent?limit=5" "'samples' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
 check_http "oas telemetry summary 200" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "200"
 check_json "oas telemetry summary exposes provenance" "$BASE/api/v1/dashboard/oas/telemetry/summary?limit=5" "'summary' in d and 'dashboard_surface' in d and 'retention' in d" '^True$'
-check_http "cascade health 200" "$BASE/api/v1/cascade/health" "200"
-check_json "cascade health exposes providers" "$BASE/api/v1/cascade/health" "'providers' in d" '^True$'
-check_http "cascade strategy trace 200" "$BASE/api/v1/cascade/strategy_trace?limit=1" "200"
-check_json "cascade strategy trace exposes provenance" "$BASE/api/v1/cascade/strategy_trace?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/cascade/strategy_trace' and d.get('source') == 'cascade_strategy_trace_ring' and d.get('retention', {}).get('scope') == 'cascade_strategy_trace' and d.get('query', {}).get('limit') == 1" '^True$'
-check_http "cascade audit runs 200" "$BASE/api/v1/cascade/audit_runs?limit=1" "200"
-check_json "cascade audit runs exposes provenance" "$BASE/api/v1/cascade/audit_runs?limit=1" "'audit_runs' in d and 'total_runs' in d and d.get('dashboard_surface') == '/api/v1/cascade/audit_runs' and d.get('source') == 'cascade_audit_jsonl' and d.get('retention', {}).get('scope') == 'cascade_audit_runs' and d.get('query', {}).get('limit') == 1" '^True$'
-check_http "keeper cascades 200" "$BASE/api/v1/keeper/cascades" "200"
-check_json "keeper cascades exposes profiles" "$BASE/api/v1/keeper/cascades" "'profiles' in d and 'invalid_profiles' in d" '^True$'
 check_http "runtime providers 200" "$BASE/api/v1/providers" "200"
 check_json "runtime providers exposes inventory" "$BASE/api/v1/providers" "'summary' in d and 'providers' in d" '^True$'
-check_http "cascade config 200" "$BASE/api/v1/cascade/config" "200"
-check_json "cascade config exposes profiles" "$BASE/api/v1/cascade/config" "'validation_status' in d and 'profiles' in d" '^True$'
-check_http "cascade raw config 200" "$BASE/api/v1/cascade/config/raw" "200"
-check_json "cascade raw config exposes source" "$BASE/api/v1/cascade/config/raw" "'source_text' in d and 'source_editable' in d" '^True$'
-check_http "cascade client capacity 200" "$BASE/api/v1/cascade/client_capacity" "200"
-check_json "cascade client capacity exposes provenance" "$BASE/api/v1/cascade/client_capacity" "'entries' in d and d.get('dashboard_surface') == '/api/v1/cascade/client_capacity' and d.get('source') == 'cascade_client_capacity_registry' and d.get('retention', {}).get('scope') == 'cascade_client_capacity'" '^True$'
-check_http "cascade capacity history 200" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "200"
-check_json "cascade capacity history exposes provenance" "$BASE/api/v1/cascade/client_capacity/history?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/cascade/client_capacity/history' and d.get('source') == 'cascade_client_capacity_history_ring' and d.get('retention', {}).get('scope') == 'cascade_client_capacity_history' and d.get('query', {}).get('limit') == 1" '^True$'
-check_http "cascade slo 200" "$BASE/api/v1/cascade/slo" "200"
-check_json "cascade slo exposes status" "$BASE/api/v1/cascade/slo" "'status' in d and 'current' in d" '^True$'
 check_http "model metrics 200" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "200"
 check_json "model metrics exposes model list" "$BASE/api/v1/models/metrics?window=30&bucket_min=5" "'models' in d" '^True$'
 check_http "keeper costs 200" "$BASE/api/v1/dashboard/keeper-costs?window=60" "200"
@@ -228,16 +210,10 @@ check_http "cost latency 200" "$BASE/api/v1/dashboard/cost-latency?window=60" "2
 check_json "cost latency exposes cost and latency" "$BASE/api/v1/dashboard/cost-latency?window=60" "'total_cost_usd' in d and 'latencyBuckets' in d" '^True$'
 check_http "keeper decisions 200" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "200"
 check_json "keeper decisions exposes provenance" "$BASE/api/v1/dashboard/keeper-decisions?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/keeper-decisions' and d.get('source') == 'keeper_decision_log' and 'retention' in d" '^True$'
-check_http "dashboard heuristics 200" "$BASE/api/v1/dashboard/heuristics?limit=1" "200"
-check_json "dashboard heuristics exposes provenance" "$BASE/api/v1/dashboard/heuristics?limit=1" "'events' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
-check_http "heuristic coverage 200" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "200"
-check_json "heuristic coverage exposes provenance" "$BASE/api/v1/dashboard/heuristics/coverage?limit=1" "'sites' in d and d.get('dashboard_surface') == '/api/v1/dashboard/heuristics/coverage' and d.get('source') == 'heuristic_metrics' and 'retention' in d" '^True$'
-check_http "dashboard stress 200" "$BASE/api/v1/dashboard/stress?limit=1" "200"
-check_json "dashboard stress exposes provenance" "$BASE/api/v1/dashboard/stress?limit=1" "'agent_stress' in d and d.get('dashboard_surface') == '/api/v1/dashboard/stress' and d.get('source') == 'agent_stress' and 'retention' in d" '^True$'
 
 echo "[4/7] Operations + Workspace"
 check_http "operator digest 200" "$BASE/api/v1/operator/digest" "200"
-check_json "operator digest exposes provenance" "$BASE/api/v1/operator/digest" "'health' in d and d.get('dashboard_surface') == '/api/v1/operator/digest' and d.get('source') == 'operator_digest_read_model' and d.get('retention', {}).get('scope') == 'operator_digest' and d.get('query', {}).get('effective_target_type') == 'root' and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
+check_json "operator digest exposes provenance" "$BASE/api/v1/operator/digest" "'health' in d and d.get('dashboard_surface') == '/api/v1/operator/digest' and d.get('source') == 'operator_digest_read_model' and d.get('retention', {}).get('scope') == 'operator_digest' and d.get('query', {}).get('effective_target_type') == 'workspace' and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "operator snapshot 200" "$BASE/api/v1/operator" "200"
 check_json "operator snapshot exposes provenance" "$BASE/api/v1/operator" "'available_actions' in d and 'keepers' in d and d.get('dashboard_surface') == '/api/v1/operator' and d.get('source') == 'operator_snapshot_read_model' and d.get('retention', {}).get('scope') == 'operator_snapshot' and d.get('query', {}).get('default_summary_request') is True and d.get('cache', {}).get('cache_state') in ('fresh', 'stale', 'initializing', 'request_swr_or_inline_compute')" '^True$'
 check_http "board 200" "$BASE/api/v1/dashboard/board" "200"
@@ -256,8 +232,6 @@ check_http "planning 200" "$BASE/api/v1/dashboard/planning" "200"
 check_json "planning exposes rollup" "$BASE/api/v1/dashboard/planning" "'rollup' in d" '^True$'
 check_http "goals tree 200" "$BASE/api/v1/dashboard/goals" "200"
 check_json "goals tree exposes summary" "$BASE/api/v1/dashboard/goals" "'summary' in d and 'tree' in d" '^True$'
-check_http "git graph 200" "$BASE/api/v1/git/graph?n=20" "200"
-check_json "git graph exposes stats and nodes" "$BASE/api/v1/git/graph?n=20" "'stats' in d and 'nodes' in d" '^True$'
 check_http "git diff 200" "$BASE/api/v1/git/diff?path=README.md" "200"
 check_json "git diff exposes unified diff state" "$BASE/api/v1/git/diff?path=README.md" "'has_changes' in d and 'unified' in d" '^True$'
 check_http "repositories 200" "$BASE/api/v1/repositories" "200"
@@ -300,8 +274,6 @@ check_json "harness health exposes overview" "$BASE/api/v1/dashboard/harness-hea
 echo "[6/7] Code + Logs"
 check_http "audit ledger 200" "$BASE/api/v1/audit?limit=1" "200"
 check_json "audit ledger exposes entries" "$BASE/api/v1/audit?limit=1" "'entries' in d and 'count' in d" '^True$'
-check_http "dashboard doctor 200" "$BASE/api/v1/dashboard/doctor" "200"
-check_json "dashboard doctor exposes doctor summary" "$BASE/api/v1/dashboard/doctor" "'summary' in d and 'doctors' in d" '^True$'
 check_http "IDE presence 200" "$BASE/api/v1/ide/presence" "200"
 check_json "IDE presence exposes connected state" "$BASE/api/v1/ide/presence" "d.get('data', {}).get('connected')" '^True$'
 check_http "IDE annotations 200" "$BASE/api/v1/ide/annotations" "200"

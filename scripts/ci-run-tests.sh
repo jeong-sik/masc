@@ -446,7 +446,7 @@ fi
 # specific retry handlers above (RPC lock, interface mismatch), retry
 # once with an isolated build dir. This covers CI-only resource
 # exhaustion (fd/tmpdir) that cannot be reproduced locally.
-# See: https://github.com/jeong-sik/masc-mcp/issues/2957
+# See: https://github.com/jeong-sik/masc/issues/2957
 if [[ "${status}" -ne 0 ]] \
   && [[ "${CI_TEST_ALLOW_FLAKY_RETRY}" = "1" ]] \
   && [[ "${CI_TEST_FLAKY_RETRY_DONE}" -eq 0 ]] \

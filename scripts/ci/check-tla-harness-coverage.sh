@@ -10,11 +10,10 @@ known_unchecked_specs() {
   cat <<'EOF'
 # RFC-0065 cfg-backed specs are design/projection coverage and are not wired
 # into scripts/tla-check.sh yet.
-specs/keeper-state-machine/KeeperCascadeAttemptFSM.tla
-specs/keeper-state-machine/KeeperCascadeRouting.tla
+specs/keeper-state-machine/KeeperRuntimeAttemptFSM.tla
+specs/keeper-state-machine/KeeperRuntimeRouting.tla
 specs/keeper-state-machine/KeeperPostTurnOrchestration.tla
 specs/keeper-state-machine/KeeperRolloverDecision.tla
-specs/keeper-state-machine/KeeperToolSurface.tla
 EOF
 }
 

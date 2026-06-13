@@ -18,7 +18,7 @@ message Agent {
   string status = 2;  // "active", "idle", "zombie"
   repeated string capabilities = 3;
   string last_heartbeat = 4;
-  string joined_at = 5;
+  string session_bound_at = 5;
 }
 
 message Task {
@@ -68,26 +68,8 @@ message StatusResponse {
   repeated Agent agents = 1;
   repeated Task tasks = 2;
   int32 message_count = 3;
-  string room_path = 4;
+  string workspace_path = 4;
   string project_name = 5;
-}
-
-// Agent Operations
-message JoinRequest {
-  string agent_name = 1;
-  repeated string capabilities = 2;
-}
-message JoinResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-message LeaveRequest {
-  string agent_name = 1;
-}
-message LeaveResponse {
-  bool success = 1;
-  string message = 2;
 }
 
 // Task Operations
@@ -221,10 +203,6 @@ message StreamMessagesRequest {
 service MASCService {
   // Status
   rpc GetStatus(StatusRequest) returns (StatusResponse);
-
-  // Agent lifecycle
-  rpc Join(JoinRequest) returns (JoinResponse);
-  rpc Leave(LeaveRequest) returns (LeaveResponse);
 
   // Task management
   rpc AddTask(AddTaskRequest) returns (AddTaskResponse);

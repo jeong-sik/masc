@@ -17,6 +17,7 @@ import { StatGrid } from './common/stat-tile'
 import { DashboardFeedSourceStrip } from './common/dashboard-feed-source-strip'
 import { formatTokens } from '../lib/format-number'
 import { findKeeper } from '../lib/keeper-utils'
+import { isSubmitEnter } from '../lib/keyboard'
 import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
@@ -26,7 +27,7 @@ import {
   tasks,
 } from '../store'
 import {
-  fetchRoomMessages,
+  fetchWorkspaceMessages,
   fetchTaskHistory,
   sendBroadcast,
   fetchAgentTimeline,
@@ -50,12 +51,12 @@ import type {
 } from '../types'
 import { AgentRuntimeStrip } from './agent-monitor/runtime-strip'
 import { AgentLiveTimeline } from './agent-monitor/live-timeline'
-import { KeeperChatPanel } from './keeper-chat-panel'
+import { KeeperConversationPanel } from './keeper-shared'
 
 type TaskHistoryRow = { taskId: string; text: string }
 
 interface ProfileData {
-  roomActivity: string[]
+  workspaceActivity: string[]
   taskHistories: TaskHistoryRow[]
   agentTimeline: AgentTimelineResponse | null
   agentRelations: AgentRelationsResponse | null
@@ -68,9 +69,9 @@ const sendingMention = signal(false)
 const activityQuery = signal('')
 
 /**
- * Pure filter for the "프로젝트 활동" (roomActivity) string list.
+ * Pure filter for the "프로젝트 활동" (workspaceActivity) string list.
  *
- * Case-insensitive substring match on the full line. `fetchRoomMessages`
+ * Case-insensitive substring match on the full line. `fetchWorkspaceMessages`
  * returns rendered lines that already embed actor/target/text, so a
  * substring pass is enough to isolate all lines mentioning a particular
  * actor, task id, or keyword.
@@ -81,7 +82,7 @@ const activityQuery = signal('')
  *
  * Input is never mutated; caller may pass a readonly array.
  */
-function filterRoomActivity(
+function filterWorkspaceActivity(
   lines: readonly string[],
   query: string,
 ): readonly string[] {
@@ -128,7 +129,7 @@ function loadProfile(name: string): Promise<void> {
   }
   return profileResource.load(async () => {
     const [lines, timeline, relations] = await Promise.all([
-      fetchRoomMessages(80),
+      fetchWorkspaceMessages(80),
       fetchAgentTimeline(name, 4, 20).catch(() => null),
       fetchAgentRelations(name).catch(() => null),
     ])
@@ -154,7 +155,7 @@ function loadProfile(name: string): Promise<void> {
     }
 
     return {
-      roomActivity: activity,
+      workspaceActivity: activity,
       taskHistories: histories,
       agentTimeline: timeline,
       agentRelations: relations,
@@ -341,7 +342,7 @@ export function AgentProfile({ name }: { name: string }) {
   const profileLoading = ps.status === 'loading'
 
   const owned = assignedTasks(name)
-  const lines = profileData?.roomActivity ?? []
+  const lines = profileData?.workspaceActivity ?? []
   const timeline = profileData?.agentTimeline ?? null
   const keeper = findKeeper(name)
   const keeperChatName = keeperChatTargetName(name, keeper)
@@ -445,7 +446,7 @@ export function AgentProfile({ name }: { name: string }) {
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : (() => {
-                const visible = filterRoomActivity(lines, activityQuery.value)
+                const visible = filterWorkspaceActivity(lines, activityQuery.value)
                 const isFiltering = activityQuery.value.trim() !== ''
                 return html`
                   <div class="flex flex-col gap-1.5">
@@ -479,7 +480,7 @@ export function AgentProfile({ name }: { name: string }) {
       </div>
 
       ${isKeeper ? html`
-        <${KeeperChatPanel} name=${keeperChatName} />
+        <${KeeperConversationPanel} keeperName=${keeperChatName} placeholder="메시지 입력..." />
       ` : html`
         <div class="flex gap-2 items-center px-3.5 py-2.5 bg-[var(--color-bg-elevated)] border border-[var(--ff-gold-15)] rounded-[var(--r-1)]">
           <span class="text-sm font-semibold text-[var(--ff-gold)] whitespace-nowrap">@${name}</span>
@@ -487,7 +488,7 @@ export function AgentProfile({ name }: { name: string }) {
             placeholder="메시지 입력..."
             value=${mentionText.value}
             onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitMention(name) }}
+            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention(name) }}
             disabled=${sendingMention.value}
           />
           <${ActionButton}

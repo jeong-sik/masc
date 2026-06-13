@@ -9,7 +9,7 @@
     completes the .mli surface for the cluster.
 
     Only the 2 JSON-builder entries leak through the
-    [include Meta_cognition_snapshot] cascade in
+    [include Meta_cognition_snapshot] runtime in
     [meta_cognition.ml] to satisfy {!Meta_cognition.snapshot_json}
     / {!Meta_cognition.summary_json}.  Everything else is
     internal data-loading + signal-extraction machinery.
@@ -34,7 +34,7 @@
 val snapshot_json :
   ?hearth:string ->
   limit:int ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** [snapshot_json ?hearth ~limit config] returns the full
     meta-cognition JSON snapshot for [config].  Aggregates:
@@ -50,7 +50,7 @@ val snapshot_json :
     set).  [~limit] caps the per-signal result list length to
     keep the snapshot bounded for dashboard polling. *)
 
-val summary_json : ?hearth:string -> Coord.config -> Yojson.Safe.t
+val summary_json : ?hearth:string -> Workspace.config -> Yojson.Safe.t
 (** [summary_json ?hearth config] returns a compact summary
     projection of {!snapshot_json} suitable for the
     [Meta_cognition.summary_input] decoder.  Fewer fields per

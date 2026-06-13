@@ -4,8 +4,8 @@
     Sse.subscribe_external, and cleanup logic.
     HTTP upgrade integration is tested separately (E2E). *)
 
-module Ws = Masc_mcp.Server_mcp_transport_ws
-module Sse = Masc_mcp.Sse
+module Ws = Server_mcp_transport_ws
+module Sse = Masc.Sse
 
 (* ====== Session Registry ====== *)
 
@@ -193,11 +193,11 @@ let test_parse_sse_dashboard_event_finds_data_line () =
    must register as a hit, distinct strings must register as misses.
    Read counter deltas because the global state is shared across tests. *)
 let read_counter name =
-  Masc_mcp.Prometheus.metric_value_or_zero name ()
+  Masc.Otel_metric_store.metric_value_or_zero name ()
 
 let test_parse_cache_counters () =
-  let hits_name = Masc_mcp.Prometheus.metric_ws_parse_cache_hits in
-  let misses_name = Masc_mcp.Prometheus.metric_ws_parse_cache_misses in
+  let hits_name = Masc.Otel_metric_store.metric_ws_parse_cache_hits in
+  let misses_name = Masc.Otel_metric_store.metric_ws_parse_cache_misses in
   let hits0 = read_counter hits_name in
   let misses0 = read_counter misses_name in
   let e =
@@ -284,15 +284,15 @@ let test_bytes_of_shared_text_invalidates_on_new_ref () =
   Alcotest.(check string) "content still correct for B"
     b (Bytes.to_string bb)
 
-(* Observability: the Prometheus counters must account exactly for the
+(* Observability: the Otel_metric_store counters must account exactly for the
    traffic the cache absorbs — hits for reuse, misses for fresh
    allocations.  Delta-check against shared module-level state so other
    tests running before us do not poison the expected values. *)
-let read_counter name = Masc_mcp.Prometheus.metric_value_or_zero name ()
+let read_counter name = Masc.Otel_metric_store.metric_value_or_zero name ()
 
 let test_bytes_cache_counters () =
-  let hits_name = Masc_mcp.Prometheus.metric_ws_bytes_cache_hits in
-  let misses_name = Masc_mcp.Prometheus.metric_ws_bytes_cache_misses in
+  let hits_name = Masc.Otel_metric_store.metric_ws_bytes_cache_hits in
+  let misses_name = Masc.Otel_metric_store.metric_ws_bytes_cache_misses in
   let hits0 = read_counter hits_name in
   let misses0 = read_counter misses_name in
   let text = String.make 16 'z' in
@@ -319,15 +319,15 @@ let test_bytes_cache_counters () =
    every ack; these tests cover the server-side observability helper that
    the dispatcher calls with the extracted value. *)
 
-module Metrics = Masc_mcp.Transport_metrics
-module Prom = Masc_mcp.Prometheus
+module Metrics = Masc.Transport_metrics
+module MetricStore = Masc.Otel_metric_store
 
-let read_counter name = Prom.metric_value_or_zero name ()
+let read_counter name = MetricStore.metric_value_or_zero name ()
 
 let test_observe_ws_client_buffered_bytes_accumulates () =
-  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let sum_name = MetricStore.metric_ws_client_buffered_bytes in
   let count_name = sum_name ^ "_count" in
-  let ack_name = Prom.metric_ws_client_acks in
+  let ack_name = MetricStore.metric_ws_client_acks in
   let sum0 = read_counter sum_name in
   let cnt0 = read_counter count_name in
   let ack0 = read_counter ack_name in
@@ -341,7 +341,7 @@ let test_observe_ws_client_buffered_bytes_accumulates () =
     2.0 (read_counter ack_name -. ack0)
 
 let test_observe_ws_client_buffered_bytes_clamps_negative () =
-  let sum_name = Prom.metric_ws_client_buffered_bytes in
+  let sum_name = MetricStore.metric_ws_client_buffered_bytes in
   let sum0 = read_counter sum_name in
   (* A misbehaving client cannot drive the gauge below zero.  The helper
      should floor to 0 rather than leak negative observations into
@@ -400,7 +400,7 @@ let test_backpressure_gate_default_is_one_mib () =
     1048576 limit
 
 let test_backpressure_gate_throttle_counter_increments () =
-  let name = Prom.metric_ws_throttled_deliveries in
+  let name = MetricStore.metric_ws_throttled_deliveries in
   let before = read_counter name in
   Metrics.inc_ws_throttled_delivery ();
   Metrics.inc_ws_throttled_delivery ();
@@ -587,8 +587,8 @@ let test_slice_index_add_is_idempotent () =
    events (no slice mapping) still raw-forward to every session. *)
 
 let read_skip_counter () =
-  Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Prometheus.metric_ws_slice_fanout_skipped ()
+  Masc.Otel_metric_store.metric_value_or_zero
+    Masc.Otel_metric_store.metric_ws_slice_fanout_skipped ()
 
 let with_env_var key value f =
   let prev = Sys.getenv_opt key in
@@ -625,6 +625,30 @@ let test_slice_fanout_flag_reads_env () =
     with_env_var "MASC_WS_SLICE_INDEX_ENABLED" "false" (fun () ->
         Alcotest.(check bool) "env=false → disabled"
           false (Ws.slice_index_enabled ())))
+
+(* ====== Dashboard auth state (RFC-0204 §8.4, Phase 1) ====== *)
+
+let test_dashboard_auth_unauthenticated () =
+  Alcotest.(check bool) "Unauthenticated is not authenticated"
+    false (Ws.dashboard_auth_is_authenticated Ws.Unauthenticated);
+  Alcotest.(check (option string)) "Unauthenticated carries no agent"
+    None (Ws.dashboard_auth_agent Ws.Unauthenticated)
+
+let test_dashboard_auth_authenticated_with_agent () =
+  let st = Ws.Authenticated { agent = Some "garnet" } in
+  Alcotest.(check bool) "Authenticated counts as authenticated"
+    true (Ws.dashboard_auth_is_authenticated st);
+  Alcotest.(check (option string)) "agent name is carried through"
+    (Some "garnet") (Ws.dashboard_auth_agent st)
+
+let test_dashboard_auth_authenticated_tokenless () =
+  (* An auth config that permits tokenless dashboard reads resolves to an
+     authenticated state with no agent name. *)
+  let st = Ws.Authenticated { agent = None } in
+  Alcotest.(check bool) "tokenless still counts as authenticated"
+    true (Ws.dashboard_auth_is_authenticated st);
+  Alcotest.(check (option string)) "tokenless carries no agent"
+    None (Ws.dashboard_auth_agent st)
 
 let () =
   Alcotest.run "WebSocket Transport" [
@@ -722,5 +746,13 @@ let () =
         test_slice_fanout_flag_default_is_on;
       Alcotest.test_case "flag reads env var" `Quick
         test_slice_fanout_flag_reads_env;
+    ]);
+    ("dashboard_auth_state", [
+      Alcotest.test_case "Unauthenticated has no auth and no agent" `Quick
+        test_dashboard_auth_unauthenticated;
+      Alcotest.test_case "Authenticated carries the agent name" `Quick
+        test_dashboard_auth_authenticated_with_agent;
+      Alcotest.test_case "tokenless Authenticated has no agent" `Quick
+        test_dashboard_auth_authenticated_tokenless;
     ]);
   ]

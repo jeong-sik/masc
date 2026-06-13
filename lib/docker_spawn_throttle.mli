@@ -3,11 +3,11 @@
     Each [docker run/exec/...] call on the macOS host consumes
     host-side pipes/sockets and docker daemon FDs. Without an
     orchestrator-level cap on concurrent spawns, N keepers hitting
-    a cascade-exhaustion storm can saturate the system FD ceiling
+    a runtime-exhaustion storm can saturate the system FD ceiling
     (kern.maxfiles, default 491_520).
 
     Reference incident: 2026-05-16 18:08-18:15 ENFILE storm —
-    12+ keepers concurrently retried cascade tiers, each retry
+    12+ keepers concurrently retried runtime tiers, each retry
     spawned a fresh [docker run --rm], no backpressure existed at
     the host layer.
 
@@ -20,7 +20,7 @@
     {- Layer B — FD-aware serialization. When [Keeper_fd_pressure.active ()]
        indicates the breaker is tripped, an additional global mutex
        funnels all in-flight spawns through a single thread, giving
-       the cooldown room to drain. Engaged automatically.}}
+       the cooldown workspace to drain. Engaged automatically.}}
 
     Callers wrap their spawn invocation with [with_slot]; the helper
     blocks until a slot is available. *)

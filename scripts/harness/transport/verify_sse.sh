@@ -36,10 +36,16 @@ fi
 # Test 3: JSON-RPC initialize via Streamable HTTP (/mcp)
 MCP_ACCEPT="Accept: application/json, text/event-stream"
 init_req='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"e2e-harness","version":"1.0"}}}'
+auth_args=()
+auth_token="$(transport_auth_token)"
+if [[ -n "$auth_token" ]]; then
+  auth_args=(-H "Authorization: Bearer ${auth_token}")
+fi
 init_deadline=$(( $(date +%s) + 15 ))
 init_resp=""
 while [[ "$(date +%s)" -lt "$init_deadline" ]]; do
   init_resp=$(curl -sf -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+    "${auth_args[@]}" \
     -H "Content-Type: application/json" \
     -H "${MCP_ACCEPT}" \
     -d "$init_req" 2>&1 || true)
@@ -63,6 +69,7 @@ SESSION_ID=""
 while [[ "$(date +%s)" -lt "$session_deadline" ]]; do
   SESSION_ID="$(
     curl -sf -i -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+      "${auth_args[@]}" \
       -H "Content-Type: application/json" \
       -H "${MCP_ACCEPT}" \
       -d "$init_req" 2>&1 \
@@ -75,6 +82,7 @@ while [[ "$(date +%s)" -lt "$session_deadline" ]]; do
 done
 tools_req='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 tools_resp=$(curl -sf -X POST "${MASC_HTTP_BASE_URL}/mcp" \
+  "${auth_args[@]}" \
   -H "Content-Type: application/json" \
   -H "${MCP_ACCEPT}" \
   -H "Mcp-Session-Id: ${SESSION_ID}" \

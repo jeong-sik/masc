@@ -107,8 +107,10 @@ let new_counters () =
 (* [idle] is a per-host queue of reusable clients, newest-first (push
    at head on release, pop from head on acquire — LIFO favors warmest
    socket).  Protected by [mu] for race-free reads/writes from
-   multiple fibers.  [mu] is [Eio.Mutex] (poison-on-exception),
-   non-reentrant; we never call user callbacks while holding it. *)
+   multiple fibers.  [mu] is [Eio.Mutex] with [~protect:true] so the
+   mutex recovers cleanly when a fiber is cancelled mid-critical-section
+   (e.g. Eio.Cancel from timeout racing) instead of staying permanently
+   poisoned.  We never call user callbacks while holding it. *)
 type t = {
   sw       : Eio.Switch.t;
   env      : Eio_unix.Stdenv.base;
@@ -124,7 +126,7 @@ type t = {
    We must NOT hold [mu] while calling piaf (network IO, may sleep).
    Pattern: pick idle entry under lock → release lock → use entry. *)
 let with_mu t f =
-  Eio.Mutex.use_rw ~protect:false t.mu f
+  Eio.Mutex.use_rw ~protect:true t.mu f
 
 (* ── Idle eviction fiber ───────────────────────────────────────── *)
 
@@ -172,9 +174,9 @@ let start_eviction_fiber t =
          | exn ->
              t.counters.evict_failure_count_total
                <- t.counters.evict_failure_count_total + 1;
-             Printf.eprintf
+             Log.Http.error
                "[masc_http_client.pool] eviction fiber caught \
-                exception (count=%d): %s\n%!"
+                exception (count=%d): %s"
                t.counters.evict_failure_count_total
                (Printexc.to_string exn));
         loop ()

@@ -7,7 +7,7 @@
     column dashboards already index by. *)
 
 open Alcotest
-module C = Masc_mcp.Coord
+module C = Masc.Workspace
 module T = Masc_domain
 
 let check_label expected status =
@@ -24,7 +24,7 @@ let awaiting =
     assignee = "k1";
     submitted_at = now_iso;
     verification_id = "req-1";
-    deadline = None;
+    phase = Awaiting_verifier;
   }
 let done_ = T.Done {
   assignee = "k1";

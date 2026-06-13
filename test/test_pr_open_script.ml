@@ -139,7 +139,6 @@ let make_fake_gh dir =
 set -eu
 log_file="${FAKE_GH_LOG:?}"
 labels_file="${FAKE_GH_LABELS:?}"
-statuses_file="${FAKE_GH_STATUSES:-$labels_file.statuses}"
 draft_file="${FAKE_GH_DRAFT_STATE_FILE:-$labels_file.draft}"
 edit_body_file="${FAKE_GH_EDIT_BODY:-$labels_file.body}"
 cmd1="${1:-}"
@@ -194,21 +193,7 @@ JSON
     printf 'true\n' >"$draft_file"
     ;;
   api:*)
-    case "${2:-}" in
-      */statuses/*)
-        cat >>"$statuses_file"
-        printf '\n' >>"$statuses_file"
-        ;;
-      *)
-        cat >"$labels_file"
-        ;;
-    esac
-    ;;
-  label:list)
-    printf '[]\n'
-    ;;
-  label:create)
-    exit 0
+    cat >"$labels_file"
     ;;
   pr:checks)
     if [ "${FAKE_GH_ALLOW_CHECKS:-}" = "1" ]; then
@@ -298,13 +283,10 @@ let test_script_runs_under_system_bash_without_watch () =
         (contains_substring stderr "mapfile: command not found");
       let log = read_file gh_log in
       check bool "creates draft PR" true (contains_substring log "pr create");
-      check bool "arms immediate draft guard status" true
+      check bool "does not create legacy failing status" false
         (contains_substring log "api repos/example/test/statuses/abc123");
       check bool "skips watched checks with --no-watch" false
         (contains_substring log "pr checks");
-      check bool "sets draft guard status failure" true
-        (contains_substring (read_file (gh_labels ^ ".statuses"))
-           "Draft Auto-Merge Guard");
       check bool "syncs commit lineage" true
         (contains_substring log "pr edit");
       let synced_body = read_file (gh_labels ^ ".body") in
@@ -315,12 +297,8 @@ let test_script_runs_under_system_bash_without_watch () =
       let labels = read_file gh_labels in
       check bool "adds enhancement label for code changes" true
         (contains_substring labels "\"enhancement\"");
-      check bool "adds agent-pr label for draft guard classification" true
-        (contains_substring labels "\"agent-pr\"");
       check bool "does not add docs label for code-only change" false
-        (contains_substring labels "\"docs\"");
-      check bool "ensures agent-pr label exists" true
-        (contains_substring log "label create"))
+        (contains_substring labels "\"docs\""))
 
 let test_script_restores_draft_when_create_returns_ready () =
   with_temp_dir "pr-open-script-draft-restore" (fun dir ->
@@ -362,10 +340,7 @@ let test_script_restores_draft_when_create_returns_ready () =
       check bool "reports restoration" true
         (contains_substring stderr "restoring draft state");
       check bool "prints PR url" true
-        (contains_substring stdout "PR: https://github.com/example/test/pull/42");
-      let labels = read_file gh_labels in
-      check bool "still adds agent-pr label" true
-        (contains_substring labels "\"agent-pr\""))
+        (contains_substring stdout "PR: https://github.com/example/test/pull/42"))
 
 let test_script_prints_final_status_after_watch () =
   with_temp_dir "pr-open-script-watch-status" (fun dir ->

@@ -1,6 +1,6 @@
-(** Keeper_turn_driver — MASC named-cascade and model-label execution entry points.
+(** Keeper_turn_driver — MASC named-runtime and model-label execution entry points.
 
-    Public API for running OAS agents through MASC-managed named cascade
+    Public API for running OAS agents through MASC-managed named runtime
     profiles ([run_named]) or explicit model label ([run_model_by_label]),
     with optional MASC tool bridging variants.
 
@@ -12,31 +12,29 @@
 
 (** {1 MASC/OAS structured errors}
 
-    Re-exported from {!Cascade_error_classify} (which itself includes
-    {!Cascade_internal_error}). Using [include module type of] instead of a
-    manual type copy so the interface stays structurally identical to the
-    implementation's [include Cascade_error_classify]. *)
+    Re-exported from {!Keeper_internal_error}. The manifest aliases keep the
+    facade's public types identical to the internal-error SSOT instead of
+    copying fresh nominal types into this interface. *)
 
-include module type of Cascade_error_classify
+include
+  module type of Keeper_internal_error
+    with type provider_rejection = Keeper_internal_error.provider_rejection
+     and type capacity_backpressure_source =
+      Keeper_internal_error.capacity_backpressure_source
+     and type capacity_retry_after = Keeper_internal_error.capacity_retry_after
+     and type runtime_exhaustion_reason =
+      Keeper_internal_error.runtime_exhaustion_reason
+     and type accept_rejection_kind =
+      Keeper_internal_error.accept_rejection_kind
+     and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
-(** {1 Cascade error helpers} *)
-
-val sdk_error_to_cascade_outcome :
-  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
+(** {1 Provider error helpers} *)
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
 val message_looks_like_capacity_backpressure : string -> bool
 
-val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
-(** [true] only for typed [Resumable_cli_session] envelopes. *)
-
 val sdk_error_is_terminal_provider_runtime_failure :
-  Agent_sdk.Error.sdk_error -> bool
-
-val sdk_error_is_model_access_denied : Agent_sdk.Error.sdk_error -> bool
-
-val sdk_error_is_required_tool_contract_violation :
   Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
@@ -44,9 +42,8 @@ val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 val sdk_error_soft_rate_limited :
   Agent_sdk.Error.sdk_error -> float option option
 
-val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
-val sdk_error_cascade_fallback_class :
+val sdk_error_runtime_fallback_class :
   Agent_sdk.Error.sdk_error -> string option
 
 (** [apply_stream_idle_timeout_default opt] returns [opt] when the caller
@@ -64,7 +61,7 @@ type provider_attempt_provenance =
   ; resolved_model_source : string
   ; capability_source : string
   ; fallback_authority : string
-  ; provider_source_cascade : string option
+  ; provider_source_runtime : string option
   }
 
 type provider_attempt_started_record =
@@ -73,8 +70,6 @@ type provider_attempt_started_record =
   ; started_per_provider_timeout_s : float option
   ; started_attempt_timeout_source : string
   ; started_attempt_watchdog_source : string
-  ; started_liveness_mode : string
-  ; started_liveness_budget_source : string option
   }
 
 type provider_attempt_finished_record =
@@ -92,24 +87,22 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
-(** {1 Named cascade execution} *)
+(** {1 Named runtime execution} *)
 
 val run_named :
-  cascade_name:string ->
+  runtime_id:string ->
   ?base_path:string ->
   ?keeper_name:string ->
   goal:string ->
   ?provider_filter:string list ->
-  ?require_tool_choice_support:bool ->
-  ?require_tool_support:bool ->
   ?priority:Llm_provider.Request_priority.t ->
   ?session_id:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
   ?initial_messages:Agent_sdk.Types.message list ->
-  ?max_turns:int ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
+  ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
   ?max_input_tokens:int ->
@@ -119,18 +112,12 @@ val run_named :
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?context_reducer:Agent_sdk.Context_reducer.t ->
-  ?memory:Agent_sdk.Memory.t ->
-  ?tool_retry_policy:Agent_sdk.Tool_retry_policy.t ->
-  ?required_tool_satisfaction:Agent_sdk.Completion_contract.required_tool_satisfaction ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
-  ?proof_ref:Masc_mcp_cdal_runtime.Cdal_proof.t option ref ->
-  ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
-  ?cli_transport_overrides:Cascade_runner.cli_transport_overrides ->
   ?allowed_paths:string list ->
   ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
@@ -140,26 +127,26 @@ val run_named :
   ?checkpoint_dir:string ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
   ?context:Agent_sdk.Context.t ->
-  ?slot_id:int ->
   ?enable_thinking:bool ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?exit_condition:(int -> bool) ->
-  ?exit_condition_result:(int -> Cascade_runner.stop_reason * string option) ->
+  ?exit_condition_result:(int -> Runtime_agent.stop_reason * string option) ->
   ?summarizer:(Agent_sdk.Types.message list -> string) ->
   ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?trace_link:string * string ->
   ?event_bus:Agent_sdk.Event_bus.t ->
+  ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
-  ?runtime_manifest_required_tool_names:string list ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
   unit ->
-  (Cascade_runner.run_result, Agent_sdk.Error.sdk_error) result
-(** Run a single [Agent.run] call with MASC-driven cascade model fallback.
-    MASC drives the cascade FSM directly: resolves cascade providers,
-    tries each with OAS, and uses [Cascade_fsm.decide] on failure.
-    The cascade loop runs inside an admission queue permit. *)
+  (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+(** Run a single [Agent.run] call with MASC-driven runtime model fallback.
+    MASC drives the runtime FSM directly: resolves runtime providers,
+    tries each with OAS, and uses [Runtime_fsm.decide] on failure.
+    The runtime loop runs inside a capacity-managed queue permit. *)
 
 module For_testing : sig
   val checkpoint_after_attempt :
@@ -167,22 +154,11 @@ module For_testing : sig
     Agent_sdk.Agent.t option ->
     Agent_sdk.Checkpoint.t option
 
-  val missing_required_tool_names_after_lane_by_name :
-    required_tool_names:string list ->
-    materialized_tool_names:string list ->
-    string list
+  val success_selected_model_raw : Runtime_candidate.t -> string option
 
-  val success_selected_model_raw : Cascade_runtime_candidate.t -> string option
-
-  val cascade_tier_admission_policy_of_priority :
-    Llm_provider.Request_priority.t ->
-    Cascade_tier_admission.admission_policy
-
-  val with_cascade_tier_admission_for_testing :
-    admission:Cascade_tier_admission.t ->
-    enabled:bool ->
-    tier_id:string ->
-    admission_policy:Cascade_tier_admission.admission_policy ->
-    (unit -> 'a) ->
-    ('a, Cascade_saturation_signal.t) result
+  val apply_accept :
+    runtime_id:string ->
+    accept:(Agent_sdk_response.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
 end

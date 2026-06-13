@@ -1,4 +1,4 @@
-# masc-mcp Makefile
+# masc Makefile
 # Compose development targets from feature-specific fragments.
 
 # Isolate build directory per worktree to prevent dune lock contention

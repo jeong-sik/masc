@@ -14,7 +14,7 @@ open Alcotest
     test verifies the wrapper invariants hold: the with_span call
     produces a 4-tuple emission shape identical to the keeper-turn path.
 
-    Tests are constants-only (no Masc_mcp lib dependency) because the
+    Tests are constants-only (no Masc lib dependency) because the
     real wrap behaviour is unit-tested in test_guarded_dispatch_telemetry
     (PR-3) — this PR's wrapping pattern is *identical* (same
     Tool_telemetry.with_span entry, same outcome label vocabulary).

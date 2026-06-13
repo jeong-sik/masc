@@ -14,7 +14,7 @@ Two adjacent silent-failure surfaces shared a root cause — strings used where 
 
 ### 1.1 Agent SDK error → keeper `blocker_class` stamp gap
 
-`keeper_status_bridge.ml :: blocker_class_of_sdk_error` had a `_ -> None` catch-all that silently dropped 9 `Agent_sdk.Error.Agent` constructors (`MaxTurnsExceeded`, `TokenBudgetExceeded`, `CostBudgetExceeded`, `UnrecognizedStopReason`, `IdleDetected`, `ToolRetryExhausted`, `GuardrailViolation`, `TripwireViolation`, `ExitConditionMet`). Result: structured blocker class state stayed null while the surface text *was* stamped — dashboards and Prometheus showed zero counts for these classes even though they were occurring.
+`keeper_status_bridge.ml :: blocker_class_of_sdk_error` had a `_ -> None` catch-all that silently dropped 9 `Agent_sdk.Error.Agent` constructors (`MaxTurnsExceeded`, `TokenBudgetExceeded`, `CostBudgetExceeded`, `UnrecognizedStopReason`, `IdleDetected`, `ToolRetryExhausted`, `GuardrailViolation`, `TripwireViolation`, `ExitConditionMet`). Result: structured blocker class state stayed null while the surface text *was* stamped — dashboards and legacy metrics backend showed zero counts for these classes even though they were occurring.
 
 ### 1.2 Tool dispatch return: `(bool * string)` with substring classifier
 
@@ -90,7 +90,7 @@ The gRPC bridge still emits `(ok, message)` to outside clients. The projection l
 Under `~/me/AGENT-LLM-A.md` §"워크어라운드 거부 기준" (operator-local; not tracked in this repo) the temptation here would be:
 
 - ❌ "Add more substrings to `is_retryable_message`" — workaround signature #2 (string classifier reinforcement).
-- ❌ "Count unmapped SDK errors with a Prometheus counter" — workaround signature #1 (telemetry-as-fix).
+- ❌ "Count unmapped SDK errors with a legacy metrics backend counter" — workaround signature #1 (telemetry-as-fix).
 - ❌ "Add `_ -> Some Unknown_blocker` so dashboards see *something*" — workaround signature: permissive default.
 
 This RFC chooses the structural fix: **closed sum types + exhaustive match**. New SDK error variants and new failure classes now require a compile-time edit in a single SSOT module, and the compiler enumerates every caller that must adapt.
@@ -104,8 +104,8 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 | **2** | 50+ `Tool_*.dispatch` signatures → `Tool_result.t option` (Big Bang) | #14482 | Merged |
 | **3** | `execute_tool_eio` / `dispatch_by_tag` return `Tool_result.t` directly; remove `tuple_of_tool_result` reverse adapter | #14486 | Merged |
 | **4c-1** | 9 core tool handlers (`tool_args`, `retired_file_tool`, `retired_file_write_tool`, `tool_control`, `tool_library`, `tool_plan`, `tool_run`, `tool_task`, retired repo-isolation handler) + keeper dispatch handlers migrated | #14528 | Merged |
-| **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `tool_inline_dispatch` | superseded by RFC-0189 PR-2 | Removed |
-| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, `tool_deep_review`, `tool_bridge`); delete remaining Tool_result compatibility adapters and `Coord_types.tool_result` | superseded by RFC-0189 PR-2 | Removed |
+| **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `mcp_tool_runtime` | superseded by RFC-0189 PR-2 | Removed |
+| **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, former adversarial review, `tool_bridge`); delete remaining Tool_result compatibility adapters and `Workspace_types.tool_result` | superseded by RFC-0189 PR-2 | Removed |
 
 ## 6. Test Strategy
 
@@ -116,7 +116,7 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 
 ## 7. Observability
 
-Dashboards and Prometheus exporters that already consumed keeper blocker-class state automatically gained visibility into the 9 previously-dropped SDK variants once Phase 0 landed. The current dashboard/health surface reads that state from structured `last_blocker.klass`; the old class/detail sidecar fields are no longer a runtime contract. No new counter or label was introduced — the structural fix made existing telemetry correct (the inverse of workaround signature #1, which would have added new counters without fixing the underlying drop).
+Dashboards and legacy metrics backend exporters that already consumed keeper blocker-class state automatically gained visibility into the 9 previously-dropped SDK variants once Phase 0 landed. The current dashboard/health surface reads that state from structured `last_blocker.klass`; the old class/detail sidecar fields are no longer a runtime contract. No new counter or label was introduced — the structural fix made existing telemetry correct (the inverse of workaround signature #1, which would have added new counters without fixing the underlying drop).
 
 ## 8. Risks
 
@@ -128,7 +128,7 @@ Dashboards and Prometheus exporters that already consumed keeper blocker-class s
 
 1. Should `tool_failure_class` gain a 5th variant for **infrastructure failure** (e.g., `Tool_result` produced from a Cloud Run cold start, dispatcher unavailable)? Today this maps to `Runtime_failure`. Phase 4 may surface enough cases to justify a split.
 2. The old legacy-named field was retired after internal callers moved to the canonical `message` field; external wire projections still emit `(ok, message)`.
-3. Phase 4d removal list contains `Coord_types.tool_result` — that type may have external structural-typing depending. Confirm via cross-repo grep before deletion.
+3. Phase 4d removal list contains `Workspace_types.tool_result` — that type may have external structural-typing depending. Confirm via cross-repo grep before deletion.
 
 ## 10. Documentation Backfill
 

@@ -17,7 +17,7 @@
 
 ## Summary
 
-`masc-mcp` should describe keeper continuity as a bounded advanced feature.
+`masc` should describe keeper continuity as a bounded advanced feature.
 
 The product promise is:
 
@@ -79,7 +79,7 @@ Current implementation already emits the continuity fields above on keeper statu
 ### Promise level
 
 - Keep keeper continuity in the advanced layer of the product
-- Do not promote it to the front-door repo-coordination promise in README or release framing
+- Do not promote it to the front-door repo-workspace collaboration promise in README or release framing
 
 ### Language rules
 

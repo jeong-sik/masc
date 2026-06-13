@@ -1,7 +1,7 @@
 (** test_adversarial_eval.ml — Tests for fresh-context adversarial evaluator.
     Includes red-line enforcement tests per RFC #3475. *)
 
-open Masc_mcp
+open Masc
 
 (* --- Red line enforcement tests --- *)
 
@@ -39,9 +39,9 @@ let test_classify_history () =
     (Option.is_some (Adversarial_eval.classify_path "session_log.jsonl"));
   Alcotest.(check bool) "retrospective.json is banned" true
     (Option.is_some (Adversarial_eval.classify_path "retrospective.json"));
-  Alcotest.(check bool) "room-task-history path is banned" true
+  Alcotest.(check bool) "task-state-history path is banned" true
     (Option.is_some
-       (Adversarial_eval.classify_path "memory/room-task-history.jsonl"))
+       (Adversarial_eval.classify_path "memory/task-state-history.jsonl"))
 
 let test_classify_allowed () =
   Alcotest.(check bool) "module.ml is allowed" true
@@ -54,8 +54,8 @@ let test_classify_allowed () =
     (Option.is_none (Adversarial_eval.classify_path "lib/spec_decoder.ml"));
   Alcotest.(check bool) "governance source file is allowed" true
     (Option.is_none (Adversarial_eval.classify_path "lib/governance_pipeline.ml"));
-  Alcotest.(check bool) "room history source file is allowed" true
-    (Option.is_none (Adversarial_eval.classify_path "lib/room_history_parser.ml"))
+  Alcotest.(check bool) "state history source file is allowed" true
+    (Option.is_none (Adversarial_eval.classify_path "lib/state_history_parser.ml"))
 
 let test_validate_clean_inputs () =
   let inputs =
@@ -96,17 +96,17 @@ let test_validate_rejects_design_doc () =
   | Error (_, _) -> Alcotest.fail "wrong rejection kind"
   | Ok _ -> Alcotest.fail "should reject design doc"
 
-let test_validate_rejects_room_history_path () =
+let test_validate_rejects_state_history_path () =
   let inputs =
     Adversarial_eval.[
       Changed_file
-        { path = "memory/room-task-history.jsonl"; content = "{}\n" };
+        { path = "memory/task-state-history.jsonl"; content = "{}\n" };
     ]
   in
   match Adversarial_eval.validate_inputs inputs with
-  | Error (_, Adversarial_eval.Coord_history) -> ()
+  | Error (_, Adversarial_eval.State_history) -> ()
   | Error (_, _) -> Alcotest.fail "wrong rejection kind"
-  | Ok _ -> Alcotest.fail "should reject room history"
+  | Ok _ -> Alcotest.fail "should reject state history"
 
 (* --- Structural check tests --- *)
 
@@ -222,8 +222,8 @@ let () =
           Alcotest.test_case "validate clean" `Quick test_validate_clean_inputs;
           Alcotest.test_case "reject readme" `Quick test_validate_rejects_readme;
           Alcotest.test_case "reject design doc" `Quick test_validate_rejects_design_doc;
-          Alcotest.test_case "reject room history path" `Quick
-            test_validate_rejects_room_history_path;
+          Alcotest.test_case "reject state history path" `Quick
+            test_validate_rejects_state_history_path;
         ] );
       ( "structural_checks",
         [

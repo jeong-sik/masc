@@ -143,19 +143,19 @@
 
     <h2>Waterfall <span class="tag">dependency chain</span></h2>
     <div class="seg">
-      <div class="meta"><span class="n">waterfall</span>Spans start offset + wait for dependency. Color changes per stage of the cascade. Useful for debugging a single goal's critical path.
+      <div class="meta"><span class="n">waterfall</span>Spans start offset + wait for dependency. Color changes per stage of the runtime. Useful for debugging a single goal's critical path.
         <span class="code">data-mode="waterfall"</span>
       </div>
       <div class="sw wf">
-        <div class="sw-head"><span>CASCADE · goal-merge-blockers</span><div class="sw-ruler"><span>t+0s</span><span>t+0.4s</span><span>t+0.8s</span><span>t+1.2s</span></div></div>
+        <div class="sw-head"><span>RUNTIME · goal-merge-blockers</span><div class="sw-ruler"><span>t+0s</span><span>t+0.4s</span><span>t+0.8s</span><span>t+1.2s</span></div></div>
         <div class="sw-body">
           <div class="lane"><span class="lane-name" style="color:var(--color-accent-fg)"><span class="dot"></span>router</span><div class="lane-track"><span class="span run d1"></span></div></div>
-          <div class="lane"><span class="lane-name" style="color:var(--info)"><span class="dot"></span>provider-b</span><div class="lane-track"><span class="span run d2"></span></div></div>
+          <div class="lane"><span class="lane-name" style="color:var(--info)"><span class="dot"></span>runtime-slot-b</span><div class="lane-track"><span class="span run d2"></span></div></div>
           <div class="lane"><span class="lane-name" style="color:var(--ok)"><span class="dot"></span>guard</span><div class="lane-track"><span class="span run d3"></span></div></div>
           <div class="lane"><span class="lane-name" style="color:var(--brass-2)"><span class="dot"></span>commit</span><div class="lane-track"><span class="span run d4"></span></div></div>
           <div class="now" style="left: 96%"></div>
         </div>
-        <div style="padding: 4px 10px; font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-fg-disabled); background:var(--color-bg-surface); border-top:1px solid var(--color-border-default);">total 1.24s · critical path: provider-b (320ms) → guard (210ms)</div>
+        <div style="padding: 4px 10px; font-family:var(--font-mono); font-size:var(--fs-10); color:var(--color-fg-disabled); background:var(--color-bg-surface); border-top:1px solid var(--color-border-default);">total 1.24s · critical path: runtime-slot-b (320ms) → guard (210ms)</div>
       </div>
     </div>
 
@@ -277,7 +277,7 @@
     </div>
 
     <div class="seg">
-      <div class="meta"><span class="n">comfy</span>38px lanes. For the cockpit hero view. Room for two rows of glyphs per lane (activity + state).
+      <div class="meta"><span class="n">comfy</span>38px lanes. For the cockpit hero view. Workspace for two rows of glyphs per lane (activity + state).
         <span class="code">[data-density="comfy"]</span>
       </div>
       <div class="sw comfy">

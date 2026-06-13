@@ -2,7 +2,7 @@
 use crate::dom::escape::html_escape;
 use crate::game::events::{
     CombatAttack, CombatDefense, InterventionApplied, InterventionSubmitted, KeeperUnavailable,
-    PartySelected, PhaseChanged, RoomCreated, RoomStarted, SessionOutcome, SessionStarted,
+    PartySelected, PhaseChanged, WorkspaceCreated, WorkspaceStarted, SessionOutcome, SessionStarted,
     TurnActionResolved, TurnStarted,
 };
 use bevy::prelude::*;
@@ -10,8 +10,8 @@ use bevy::prelude::*;
 #[allow(clippy::too_many_arguments)]
 pub fn update_session_events_dom(
     mut party: MessageReader<PartySelected>,
-    mut room_created: MessageReader<RoomCreated>,
-    mut room_started: MessageReader<RoomStarted>,
+    mut workspace_created: MessageReader<WorkspaceCreated>,
+    mut workspace_started: MessageReader<WorkspaceStarted>,
     mut session_started: MessageReader<SessionStarted>,
     mut phase_changed: MessageReader<PhaseChanged>,
     mut turn_started: MessageReader<TurnStarted>,
@@ -55,7 +55,7 @@ pub fn update_session_events_dom(
             );
         }
 
-        for RoomCreated(p) in room_created.read() {
+        for WorkspaceCreated(p) in workspace_created.read() {
             let preset = if p.preset.is_empty() {
                 "default"
             } else {
@@ -66,13 +66,13 @@ pub fn update_session_events_dom(
                 &log,
                 "session-event",
                 &format!(
-                    "<span class=\"session-icon\">○</span> Room created ({})",
+                    "<span class=\"session-icon\">○</span> Workspace created ({})",
                     html_escape(preset)
                 ),
             );
         }
 
-        for RoomStarted(p) in room_started.read() {
+        for WorkspaceStarted(p) in workspace_started.read() {
             let status = if p.status.is_empty() {
                 "started"
             } else {
@@ -85,7 +85,7 @@ pub fn update_session_events_dom(
                 &format!(
                     "<span class=\"session-icon\">▶</span> Adventure {} — {}",
                     html_escape(status),
-                    html_escape(&p.room_id)
+                    html_escape(&p.workspace_id)
                 ),
             );
         }
@@ -277,8 +277,8 @@ pub fn update_session_events_dom(
     // Suppress unused-variable warnings on non-wasm targets
     let _ = (
         &mut party,
-        &mut room_created,
-        &mut room_started,
+        &mut workspace_created,
+        &mut workspace_started,
         &mut session_started,
         &mut phase_changed,
         &mut turn_started,

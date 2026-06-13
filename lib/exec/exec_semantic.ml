@@ -4,6 +4,7 @@ type t =
   | `Timeout of float
   | `Signaled of int
   | `Git_not_a_repo
+  | `Git_unknown_revision
   | `Oom_killed
   | `Policy_denied of string
   | `Tool_missing of string
@@ -13,6 +14,21 @@ let is_git_argv = function
   | "git" :: _ -> true
   | bin :: _ when Filename.basename bin = "git" -> true
   | _ -> false
+
+(* git exits 128 for many distinct fatals. We disambiguate the
+   unknown-revision / ambiguous-argument case from the not-a-repo case
+   because they require opposite self-correction: not-a-repo -> change
+   cwd or clone; unknown-revision -> the cwd IS a valid repo but the
+   ref/path is wrong. Conflating them gives an LLM "clone the
+   repository" advice while it sits inside a valid checkout, which
+   prolongs its flail loop. The only signal that separates the two is
+   the diagnostic git writes to stderr (same exit code 128), so we
+   match git's own wording. Lowercase once then case-sensitive
+   contains, mirroring [stderr_hints_oom]. *)
+let stderr_hints_unknown_revision stderr =
+  let lower = String.lowercase_ascii stderr in
+  String_util.contains_substring lower "unknown revision"
+  || String_util.contains_substring lower "ambiguous argument"
 
 let stderr_hints_oom stderr =
   let lower = String.lowercase_ascii stderr in
@@ -50,7 +66,9 @@ let interpret ~argv ~status ~stdout:_ ~stderr =
         | [] -> ""
       in
       `Permission_denied path
-  | Unix.WEXITED 128 when is_git_argv argv -> `Git_not_a_repo
+  | Unix.WEXITED 128 when is_git_argv argv ->
+      if stderr_hints_unknown_revision stderr then `Git_unknown_revision
+      else `Git_not_a_repo
   | Unix.WEXITED code -> `Fail code
   | Unix.WSIGNALED n when n = Sys.sigkill && stderr_hints_oom stderr ->
       `Oom_killed
@@ -69,6 +87,10 @@ let to_hint = function
   | `Signaled n -> Some (Printf.sprintf "process terminated by signal %d" n)
   | `Git_not_a_repo ->
       Some "git exit 128 — cwd is not inside a git repository"
+  | `Git_unknown_revision ->
+      Some
+        "git exit 128 — the cwd is a valid repository but the requested \
+         revision or path is unknown/ambiguous"
   | `Oom_killed ->
       Some "process was OOM-killed — try a smaller input or higher mem limit"
   | `Policy_denied rule ->
@@ -93,6 +115,14 @@ let to_alternatives = function
   | `Git_not_a_repo ->
       [ "Run `pwd` to check current directory."
       ; "Clone the repository first: `git clone <url> <dir>` then cd into it."
+      ]
+  | `Git_unknown_revision ->
+      [ "Verify the ref exists: `git rev-parse --verify <ref>` (try \
+         `origin/<ref>` for a remote-tracking branch)."
+      ; "List candidates: `git branch -a` and `git tag` to find the \
+         intended ref."
+      ; "Separate revisions from paths with `--`: `git <cmd> <ref> -- \
+         <path>`."
       ]
   | `Oom_killed ->
       [ "Reduce input size: process fewer files or rows at once."
@@ -119,6 +149,7 @@ let to_kind = function
   | `Timeout _ -> "timeout"
   | `Signaled _ -> "signaled"
   | `Git_not_a_repo -> "git_not_a_repo"
+  | `Git_unknown_revision -> "git_unknown_revision"
   | `Oom_killed -> "oom_killed"
   | `Policy_denied _ -> "policy_denied"
   | `Tool_missing _ -> "tool_missing"
@@ -130,6 +161,7 @@ let to_payload : t -> (string * payload_value) list = function
   | `Timeout s -> [ "seconds", `Float s ]
   | `Signaled n -> [ "signal", `Int n ]
   | `Git_not_a_repo -> []
+  | `Git_unknown_revision -> []
   | `Oom_killed -> []
   | `Policy_denied rule -> [ "rule", `String rule ]
   | `Tool_missing tool -> [ "tool", `String tool ]

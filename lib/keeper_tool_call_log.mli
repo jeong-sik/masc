@@ -26,8 +26,16 @@ val consume_truncation_info :
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. OAS-internal tool call that bypassed the wrapper). *)
 
+type turn_ctx_cell = Keeper_tool_call_log_context.cell
+(** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
+    [run_turn] invocation and threaded to every context reader of the
+    same run, so concurrent runs of one keeper cannot overwrite each
+    other's attribution. *)
+
+val create_turn_ctx_cell : unit -> turn_ctx_cell
+
 val set_turn_context :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   ?agent_name:string ->
   ?lane:string ->
   ?tool_choice:string ->
@@ -46,35 +54,31 @@ val set_turn_context :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   unit ->
   unit
-(** [set_turn_context ...] stores the current effective turn policy for
-    subsequent tool-call logs emitted by the keeper during this turn. *)
+(** [set_turn_context ~cell ...] stores the current effective turn policy
+    for subsequent tool-call logs emitted during this run. *)
 
 val get_turn_context :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
     sandbox_profile, network_mode, approval_mode)] for
-    the keeper, or [None] values when no turn context has
+    the run, or [None] values when no turn context has
     been recorded. *)
 
-val runtime_contract_json_for_call :
+val runtime_observability_contract_json_for_call :
   keeper_name:string ->
+  cell:turn_ctx_cell ->
   unit ->
   Yojson.Safe.t
-(** [runtime_contract_json_for_call ~keeper_name ()] returns the
-    canonical keeper runtime contract from the current turn context. *)
+(** [runtime_observability_contract_json_for_call ~keeper_name ~cell ()]
+    returns the observability projection from the run's turn context. *)
 
 val action_radius_json_for_call :
-  keeper_name:string ->
+  cell:turn_ctx_cell ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   success:bool ->
@@ -93,9 +97,10 @@ val route_evidence_json_of_tool_io :
 (** [route_evidence_json_of_tool_io] extracts first-class route proof from a
     keeper tool call. Descriptor-backed calls always include descriptor route
     fields such as [descriptor_id], [public_name], [canonical_name], [executor],
-    [backend], [sandbox], and policy labels. Runtime route/status fields such
-    as [via], [sandbox_profile], [git_creds_enabled], [network_mode], [status],
-    and redacted command/cwd/path are added when present. *)
+    [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
+    Runtime route/status fields such as [via], [sandbox_profile],
+    [network_mode], [status], and redacted command/cwd/path are added when
+    present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
@@ -139,6 +144,8 @@ val log_call :
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
+  ?execution_id:Ids.Execution_id.t ->
+  ?tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -151,19 +158,19 @@ val log_call :
   ?allowed_paths:string list ->
   ?network_mode:string ->
   ?approval_mode:string ->
-  ?tool_surface_class:string ->
-  ?visible_tool_count:int ->
-  ?required_tools:string list ->
-  ?required_tool_candidates:string list ->
-  ?missing_required_tools:string list ->
-  ?cascade_profile:string ->
+  ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
+    [execution_id] is the RFC-0233 canonical join key minted once at the
+    dispatch boundary; the trajectory row for the same execution carries
+    the identical value. [tool_use_id] is the provider call id for the
+    same execution (when the dispatch lane has one) — the key that the
+    oas:tool_called/oas:tool_completed event rows also carry.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
-    non-empty values are redacted to the neutral runtime lane. [cascade_profile]
+    non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before

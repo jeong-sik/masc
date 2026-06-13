@@ -60,7 +60,7 @@ dance:
    now a needle in a reformat haystack.
 4. A `style:` follow-up PR or commit to carry the reformat separately.
 
-Observed instances (2026-05-12): PR #14931 (`style(cascade_model_resolve):
+Observed instances (2026-05-12): PR #14931 (`style(runtime_model_resolve):
 align to janestreet`), and the `style(test_oas_worker_named_liveness_integration)`
 commit on PR #14905. With ~85% of the tree non-compliant, this recurs on
 every PR that edits an old file — a self-perpetuating whack-a-mole.

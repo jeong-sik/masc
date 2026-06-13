@@ -19,7 +19,7 @@ echo ""
 echo "[1/5] Checking MASC health..."
 if ! curl -sf "${BASE_URL}/health" > /dev/null; then
   echo "❌ MASC is not running at ${BASE_URL}"
-  echo "Start with: ./start-masc-mcp.sh --http"
+  echo "Start with: ./start-masc.sh --http"
   exit 1
 fi
 echo "✓ MASC is running"
@@ -102,9 +102,9 @@ if [ "$KEEPERS_WITH_TOOLS" -eq 0 ]; then
   echo "❌ CRITICAL: No keepers have made successful tool calls"
   echo ""
   echo "Recommended actions:"
-  echo "1. Verify cascade configuration prioritizes GLM over local models"
+  echo "1. Verify runtime configuration prioritizes GLM over local models"
   echo "2. Check GLM API key: echo \$MASC_GLM_API_KEY"
-  echo "3. Restart MASC: ./start-masc-mcp.sh --http"
+  echo "3. Restart MASC: ./start-masc.sh --http"
   echo "4. Monitor for 24 hours and re-run this script"
   exit 1
 elif [ "$KEEPERS_WITH_TOOLS" -lt $((TOTAL_KEEPERS * 60 / 100)) ]; then

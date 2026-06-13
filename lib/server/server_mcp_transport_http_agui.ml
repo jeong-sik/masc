@@ -49,7 +49,7 @@ let handle_ag_ui_events ~deps request reqd =
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
   let protocol_version = get_protocol_version_for_session ~session_id request in
-  (* room query param ignored — namespace retired *)
+  (* workspace query param ignored — namespace retired *)
   let last_event_id =
     match Httpun.Headers.get (request : Httpun.Request.t).headers "last-event-id" with
     | Some id -> (int_of_string_opt (id))

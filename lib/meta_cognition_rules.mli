@@ -28,9 +28,9 @@ val belief_rules : Meta_cognition_types.belief_rule list
     - [belief:masc_tools_blocked] — keeper-class agents
       believe [masc_*] introspection/admin tools are
       blocked
-    - [belief:idle_backlog_empty] — room believes backlog is
+    - [belief:idle_backlog_empty] — workspace believes backlog is
       empty and agents are idle
-    - [belief:operator_needed] — room believes operator
+    - [belief:operator_needed] — workspace believes operator
       intervention or new privileged surface is needed *)
 
 val tension_rules : Meta_cognition_types.tension_rule list
@@ -47,13 +47,13 @@ val desire_rules : Meta_cognition_types.desire_rule list
       (actionability: [operator_or_platform])
     - [desire:operator_guidance] (actionability: [operator])
     - [desire:synthetic_exercise]
-      (actionability: [room_or_operator])
+      (actionability: [workspace_or_operator])
 
     The actionability literals match
     {!Meta_cognition_interpret.operator_actionability}'s
     permitted set (cycle 89) so the snapshot pipeline can
     route these into the dashboard's
-    [Operator_desire] cascade. *)
+    [Operator_desire] runtime. *)
 
 (** {1 Source predicates}
 
@@ -82,7 +82,7 @@ val operator_need_support :
     matches one of the operator-need keywords (English +
     Korean).  Used by {!Meta_cognition_snapshot} to pre-filter
     operator-need-tagged sources before running the desire
-    cascade. *)
+    runtime. *)
 
 val classify_interaction_text : string -> string option
 (** [classify_interaction_text text] returns the canonical

@@ -15,7 +15,7 @@ open Alcotest
 let jsonrpc_notification method_name =
   `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
 
-module Sse = Masc_mcp.Sse
+module Sse = Masc.Sse
 
 let run_domains_together count fn =
   let ready = Atomic.make 0 in
@@ -137,7 +137,7 @@ let test_register_uses_successful_commit_time_after_retry () =
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc_mcp.Lockfree_atomic.update_with_commit Sse.clients (fun state ->
+               (Lockfree_atomic.update_with_commit Sse.clients (fun state ->
                     {
                       next_state = { state with count = state.count };
                       result = ();
@@ -194,31 +194,31 @@ let test_client_count_exact_unregister_decrement () =
 
 let test_client_count_by_kind_tracks_session_roles () =
   let before_observer = Sse.client_count_by_kind Sse.Observer in
-  let before_coordinator = Sse.client_count_by_kind Sse.Coordinator in
+  let before_agent_stream = Sse.client_count_by_kind Sse.Agent_stream in
   let observer = "test_kind_observer_" ^ string_of_int (Random.bits ()) in
-  let coordinator = "test_kind_coord_" ^ string_of_int (Random.bits ()) in
+  let agent_stream = "test_kind_workspace_" ^ string_of_int (Random.bits ()) in
   Fun.protect
     ~finally:(fun () ->
       Sse.unregister observer;
-      Sse.unregister coordinator)
+      Sse.unregister agent_stream)
     (fun () ->
       let (_id1, _, _) = Sse.register ~kind:Sse.Observer observer ~last_event_id:0 in
       let (_id2, _, _) =
-        Sse.register ~kind:Sse.Coordinator coordinator ~last_event_id:0
+        Sse.register ~kind:Sse.Agent_stream agent_stream ~last_event_id:0
       in
       check int "observer count increments"
         (before_observer + 1)
         (Sse.client_count_by_kind Sse.Observer);
-      check int "coordinator count increments"
-        (before_coordinator + 1)
-        (Sse.client_count_by_kind Sse.Coordinator);
+      check int "agent_stream count increments"
+        (before_agent_stream + 1)
+        (Sse.client_count_by_kind Sse.Agent_stream);
       Sse.unregister observer;
       check int "observer count decrements"
         before_observer
         (Sse.client_count_by_kind Sse.Observer);
-      check int "coordinator still present"
-        (before_coordinator + 1)
-        (Sse.client_count_by_kind Sse.Coordinator))
+      check int "agent_stream still present"
+        (before_agent_stream + 1)
+        (Sse.client_count_by_kind Sse.Agent_stream))
 
 let test_unregister_if_current_replacement_count () =
   let before = Sse.client_count () in
@@ -263,12 +263,12 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
       Atomic.set Sse.buffer_commit_test_hook original_hook;
       Atomic.set Sse.event_buffer original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [ (777_000, "sentinel", Unix.gettimeofday ()) ];
+      Atomic.set Sse.event_buffer [ (777_000, "marker", Unix.gettimeofday ()) ];
       Atomic.set Sse.buffer_commit_test_hook
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
              ignore
-               (Masc_mcp.Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
+               (Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
                     {
                       next_state = List.map (fun item -> item) buffer;
                       result = ();
@@ -434,6 +434,41 @@ let test_send_to_nonexistent () =
    Test Runners
    ============================================================ *)
 
+(* ============================================================
+   Snapshot Throttle Tests
+   ============================================================ *)
+
+let test_sync_transport_snapshot_throttle_idempotent () =
+  (* Calling sync_transport_snapshot multiple times rapidly must not
+     crash or corrupt state.  The CAS throttle ensures only the first
+     call in each [snapshot_min_interval_sec] window computes; the
+     rest return () immediately. *)
+  let session_id = "test_throttle_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      for _ = 1 to 20 do
+        Sse.sync_transport_snapshot ()
+      done;
+      check int "client count preserved after rapid snapshots"
+        1 (Sse.client_count ()))
+
+let test_broadcast_throttled_snapshot_stability () =
+  (* broadcast_impl calls sync_transport_snapshot internally.
+     Verify rapid broadcasts do not corrupt client state. *)
+  let session_id = "test_bcast_throttle_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let payload = `Assoc [ "test", `String "throttle" ] in
+      for _ = 1 to 20 do
+        Sse.broadcast payload
+      done;
+      check int "client count preserved after rapid broadcasts"
+        1 (Sse.client_count ()))
+
 let () =
   run "Sse Coverage" [
     "format_event", [
@@ -493,6 +528,12 @@ let () =
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;
       test_case "empty clients" `Quick test_broadcast_empty_clients;
+    ];
+    "snapshot_throttle", [
+      test_case "rapid sync_transport_snapshot idempotent" `Quick
+        test_sync_transport_snapshot_throttle_idempotent;
+      test_case "rapid broadcast snapshot stable" `Quick
+        test_broadcast_throttled_snapshot_stability;
     ];
     "send_to", [
       test_case "existing" `Quick test_send_to_existing;

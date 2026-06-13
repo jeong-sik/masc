@@ -59,9 +59,10 @@ val runtime_ollama_probe_json :
 (** Re-export of {!Tool_local_runtime_probe.runtime_ollama_probe_json}.
     All parameters are optional with defaults: [probe_runs = 2],
     [max_tokens = 16], [think_mode = Think_auto],
-    [timeout_sec = default_probe_timeout_sec],
-    [ps_timeout_sec = default_ps_timeout_sec],
-    [generate_when_unloaded = true], [run_generate = true]. *)
+    [timeout_sec = 6], [ps_timeout_sec = 2],
+    [generate_when_unloaded = true], [run_generate = true].  Per
+    PR #20479 spirit: the tool itself (ollama [OLLAMA_LOAD_TIMEOUT])
+    owns hang protection; callers do not observe these timeouts. *)
 
 val run_bench :
   ?model_id:string ->
@@ -136,9 +137,3 @@ val schemas : Masc_domain.tool_schema list
     [expected_model], [expected_slots], [expected_ctx]) and
     [masc_runtime_ollama_probe] (9 optional properties).  Adding a
     new tool requires extending both this list and {!dispatch}. *)
-
-val tool_required_permission : string -> Masc_domain.permission option
-(** [tool_required_permission name] returns
-    [Some Masc_domain.CanReadState] for both [masc_runtime_verify] and
-    [masc_runtime_ollama_probe], else [None].  Consumed during
-    {!Tool_spec.register} setup at module init. *)

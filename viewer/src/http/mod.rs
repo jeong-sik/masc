@@ -1,7 +1,7 @@
 //! Shared JSON-RPC HTTP client for MCP server communication.
 //!
 //! Extracts the common fetch → parse → error-classify pattern used by
-//! `action_panel`, `actor_join`, and `turn_controls`.
+//! `action_panel`, `actor_bind`, and `turn_controls`.
 
 /// Classified result of a JSON-RPC call.
 #[derive(Debug, Clone)]

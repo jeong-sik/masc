@@ -20,6 +20,21 @@ module Float = Stdlib.Float
 include Tool_local_runtime_http
 module Oas_types = Agent_sdk.Types
 
+
+let http_error_message (err : Llm_provider.Http_client.http_error) =
+  match err with
+  | Llm_provider.Http_client.NetworkError { message; _ } -> message
+  | Llm_provider.Http_client.TimeoutError { message; phase } ->
+      Printf.sprintf "provider timeout: %s: %s"
+        (Llm_provider.Http_client.timeout_phase_to_label phase) message
+  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
+  | Llm_provider.Http_client.ProviderTerminal { kind; message } ->
+      Printf.sprintf "provider terminal: %s" message
+  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+      Llm_provider.Http_client.provider_failure_to_string ~kind ~message
+  | Llm_provider.Http_client.HttpError { code; body } ->
+      Printf.sprintf "HTTP %d: %s" code
+        (if String.length body > 200 then String.sub body 0 200 ^ "..." else body)
 let pctl percentile values =
   match values with
   | [] -> None
@@ -33,14 +48,14 @@ let pctl percentile values =
       in
       List.nth_opt sorted index
 
-let error_message_of_http_error = Oas_compat.Http_client.error_message
+let error_message_of_http_error = http_error_message
 
 let per_runtime_breakdown_to_yojson counts =
   counts
   |> Hashtbl.to_seq_values
   |> List.of_seq
   |> List.sort (fun a b ->
-         String.compare (Yojson.Safe.Util.member "runtime_id" a |> Yojson.Safe.Util.to_string) (Yojson.Safe.Util.member "runtime_id" b |> Yojson.Safe.Util.to_string))
+         String.compare (Json_util.get_string a "runtime_id" |> Option.value ~default:"") (Json_util.get_string b "runtime_id" |> Option.value ~default:""))
 
 let update_runtime_breakdown counts ~runtime_id ~(sample : bench_sample) =
   let prev =
@@ -102,9 +117,8 @@ let finalize_runtime_breakdown json =
         ]
   | _ -> json
 
-let default_local_model_id () =
-  let _label, model_id = Cascade_runtime.default_local_model_label_and_id () in
-  model_id
+(* RFC-0206 single-binding: bench the default runtime's model directly. *)
+let default_local_model_id () = Runtime.default_model_api_name ()
 
 let is_oas_managed_runtime_pool = function
   | None -> true
@@ -142,7 +156,7 @@ let model_label_for_pool ~model_id runtime_pool =
   | Some pool ->
       let trimmed = String.trim pool in
       if is_oas_managed_runtime_pool (Some trimmed) then
-        Cascade_runtime.local_model_label model_id
+        model_id
       else
         let base_url =
           if
@@ -154,7 +168,7 @@ let model_label_for_pool ~model_id runtime_pool =
             runtime_base_url_for_pool runtime_pool
         in
         Printf.sprintf "custom:%s@%s" model_id base_url
-  | None -> Cascade_runtime.local_model_label model_id
+  | None -> model_id
 
 let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
   let base_url = runtime_base_url_for_pool runtime_pool |> String.trim in
@@ -188,7 +202,7 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
       let started = Time_compat.now () in
       let model_label = model_label_for_pool ~model_id runtime_pool in
       match
-        Cascade_config.parse_model_string ~max_tokens model_label
+        Runtime_model_string.parse_model_string ~max_tokens model_label
       with
       | None ->
           ( { success = false; latency_ms = 0; error = Some ("invalid model label: " ^ model_label) },

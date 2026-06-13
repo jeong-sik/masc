@@ -106,13 +106,7 @@ let collapse_preview text =
   |> String.trim
 
 let truncate_text ?(max_len = 160) text =
-  if String.length text <= max_len then
-    text
-  else
-    String.sub text 0 max_len ^ "...[truncated]"
-
-let default_probe_timeout_sec = 6
-let default_ps_timeout_sec = 2
+  String_util.to_string (String_util.utf8_safe ~max_bytes:max_len ~suffix:"...[truncated]" text)
 
 let ollama_probe_think_mode_to_string = function
   | Think_auto -> "auto"
@@ -189,12 +183,11 @@ let ollama_probe_run_to_yojson (run : ollama_probe_run) =
     ]
 
 let ollama_loaded_models_of_ps_json json =
-  let open Yojson.Safe.Util in
   let items =
     match json with
     | `Assoc _ -> (
-        match member "models" json with
-        | `List models -> models
+        match Json_util.assoc_member_opt "models" json with
+        | Some (`List models) -> models
         | _ -> [])
     | `List models -> models
     | _ -> []
@@ -217,25 +210,23 @@ let ollama_loaded_models_of_ps_json json =
   |> List.map ollama_loaded_model_to_yojson
 
 let prompt_eval_duration_ms_of_run_json json =
-  let open Yojson.Safe.Util in
-  match member "prompt_eval_duration_ms" json with
-  | `Float value -> Some value
-  | `Int value -> Some (Stdlib.Float.of_int value)
-  | `Intlit value -> Option.map Stdlib.Float.of_int (parse_int_opt value)
+  match Json_util.assoc_member_opt "prompt_eval_duration_ms" json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (Stdlib.Float.of_int value)
+  | Some (`Intlit value) -> Option.map Stdlib.Float.of_int (parse_int_opt value)
   | _ -> None
 
 let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms json =
-  let open Yojson.Safe.Util in
   let duration_ms key = int_member json key |> ns_to_ms in
   let response =
-    match member "response" json |> to_string_option with
+    match Json_util.get_string json "response" with
     | Some value ->
         let preview = value |> collapse_preview |> truncate_text in
         Some preview
     | None -> None
   in
   let response_chars =
-    match member "response" json |> to_string_option with
+    match Json_util.get_string json "response" with
     | Some value -> Some (String.length value)
     | None -> None
   in
@@ -257,15 +248,16 @@ let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms jso
     eval_duration_ms;
     generation_tokens_per_second =
       tok_per_second ~count:eval_count ~duration_ms:eval_duration_ms;
-    done_flag = member "done" json |> to_bool_option;
+    done_flag = Json_util.get_bool json "done" ;
     done_reason = string_member json "done_reason";
     thinking_present =
-      (match member "thinking" json with
-      | `Null -> false
-      | `String value -> not (String.equal (String.trim value) "")
-      | `List [] -> false
-      | `Assoc [] -> false
-      | _ -> true);
+      (match Json_util.assoc_member_opt "thinking" json with
+      | Some `Null -> false
+      | Some (`String value) -> not (String.equal (String.trim value) "")
+      | Some (`List []) -> false
+      | Some (`Assoc []) -> false
+      | Some _ -> true
+      | None -> false);
     response_preview = response;
     response_chars;
     error = None;
@@ -299,9 +291,9 @@ let kv_cache_assessment_json run_jsons =
            match prompt_eval_duration_ms_of_run_json json with
            | Some duration_ms ->
                let run_index =
-                 match Yojson.Safe.Util.member "run_index" json with
-                 | `Int value -> Some value
-                 | `Intlit value -> parse_int_opt value
+                 match Json_util.assoc_member_opt "run_index" json with
+                 | Some (`Int value) -> Some value
+                 | Some (`Intlit value) -> parse_int_opt value
                  | _ -> None
                in
                Some (run_index, duration_ms)
@@ -398,14 +390,13 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
           |> List.filter_map (fun item ->
                  match item with
                  | `Assoc _ -> (
-                     let open Yojson.Safe.Util in
                      Some
                        {
-                         name = item |> member "name" |> to_string_option;
-                         model = item |> member "model" |> to_string_option;
+                         name = Json_util.get_string item "name";
+                         model = Json_util.get_string item "model";
                          size_vram_bytes = int_member item "size_vram_bytes";
                          context_length = int_member item "context_length";
-                         expires_at = item |> member "expires_at" |> to_string_option;
+                         expires_at = Json_util.get_string item "expires_at";
                        })
                  | _ -> None)
         in
@@ -505,9 +496,7 @@ let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
 
 let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
-    ?(timeout_sec = default_probe_timeout_sec)
-    ?(ps_timeout_sec = default_ps_timeout_sec)
-    ?(generate_when_unloaded = true)
+    ?(timeout_sec = 6) ?(ps_timeout_sec = 2) ?(generate_when_unloaded = true)
     ?(run_generate = true) () =
   let server_url =
     Option.bind server_url String_util.trim_to_option
@@ -572,12 +561,6 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     | Skip_generate_probe Model_unloaded -> true
     | _ -> false
   in
-  (match generate_skip_reason with
-   | Some reason ->
-       Prometheus.inc_counter
-         Prometheus.metric_runtime_ollama_probe_generate_skips
-         ~labels:[("reason", reason)] ()
-   | None -> ());
   let after_status, loaded_after, after_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
   in
@@ -592,7 +575,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     []
     |> (fun items ->
          if effective_model_loaded_before then
-           "Effective model was already resident before the probe according to /api/ps."
+           "Effective model was already loaded before the probe according to /api/ps."
            :: items
          else items)
     |> (fun items ->
@@ -602,7 +585,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          else items)
     |> (fun items ->
          if generate_skipped_unloaded_model then
-           "Skipped /api/generate because the effective model was not resident; dashboard probes avoid cold-loading Ollama models."
+           "Skipped /api/generate because the effective model was not loaded; dashboard probes avoid cold-loading Ollama models."
            :: items
          else items)
     |> (fun items ->
@@ -620,14 +603,14 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
              :: items
          | _ -> items)
     |> (fun items ->
-         match Yojson.Safe.Util.member "signal" kv_cache_assessment with
-         | `String "likely_reused" ->
+         match Json_util.assoc_member_opt "signal" kv_cache_assessment with
+         | Some (`String "likely_reused") ->
              "Repeated prompt_eval_duration_ms dropped enough to suggest repeated-prefix reuse."
              :: items
-         | `String "possible_reuse" ->
+         | Some (`String "possible_reuse") ->
              "Repeated prompt_eval_duration_ms improved, but the signal is moderate rather than decisive."
              :: items
-         | `String "no_visible_reuse" ->
+         | Some (`String "no_visible_reuse") ->
              "Repeated prompt_eval_duration_ms did not show a strong reuse improvement."
              :: items
          | _ -> items)

@@ -112,6 +112,49 @@ harness_mktemp_file() {
   printf '%s\n' "$path"
 }
 
+harness_seed_server_config() {
+  local repo_root="$1"
+  local base_path="$2"
+  local config_dir="${base_path%/}/.masc/config"
+
+  mkdir -p \
+    "$config_dir" \
+    "$config_dir/keepers" \
+    "$config_dir/personas" \
+    "$config_dir/prompts"
+
+  if [[ ! -f "$config_dir/tool_policy.toml" ]]; then
+    if [[ -f "$repo_root/config/tool_policy.toml" ]]; then
+      cp "$repo_root/config/tool_policy.toml" "$config_dir/tool_policy.toml"
+    else
+      echo "tool_policy.toml fixture not found under repo root: $repo_root" >&2
+      return 1
+    fi
+  fi
+
+  if [[ ! -f "$config_dir/runtime.toml" ]]; then
+    cat >"$config_dir/runtime.toml" <<'EOF'
+[runtime]
+default = "transport_harness.smoke"
+
+[providers.transport_harness]
+display-name = "Transport Harness Smoke"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:9/v1"
+
+[models.smoke]
+api-name = "smoke"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[transport_harness.smoke]
+is-default = true
+max-concurrent = 1
+EOF
+  fi
+}
+
 harness_wait_for_health() {
   local port="$1"
   local timeout_sec="${2:-20}"
@@ -130,10 +173,17 @@ harness_start_server() {
   local port="$2"
   local base_path="$3"
   local log_file="$4"
+  local repo_root="${MASC_HARNESS_REPO_ROOT:-${ROOT_DIR:-${REPO_ROOT:-}}}"
+
+  if [[ -z "$repo_root" ]]; then
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  fi
 
   mkdir -p "$base_path"
+  harness_seed_server_config "$repo_root" "$base_path"
   (
     export MASC_BASE_PATH="$base_path"
+    export MASC_BASE_PATH_INPUT="$base_path"
     export MASC_STORAGE_TYPE="filesystem"
     export MASC_AUTONOMY_ENABLED="0"
     export MASC_ORCHESTRATOR_ENABLED="0"

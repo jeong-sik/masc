@@ -1,7 +1,7 @@
 ---
 status: design
 last_verified: 2026-05-18
-issue: https://github.com/jeong-sik/masc-mcp/issues/16083
+issue: https://github.com/jeong-sik/masc/issues/16083
 masc_goal: goal-refactor-lsp-atlas-20260518
 masc_task: task-386
 code_refs:
@@ -120,7 +120,7 @@ docs/generated/reverse-engineering/symbol-graph.v1.json
 
 `docs/reverse-engineering-design.html` should link to the artifact and render only the curated summary. The exporter must not rewrite the HTML automatically; HTML updates stay in normal PR review.
 
-The first snapshot in this PR is a schema-compatible static seed. It records WBS lanes, source owners, guard tests, and curated flow edges, and it explicitly records `live_lsp_not_invoked_in_this_pr` in `omissions[]`. Its `display_range` rows are bound to the JSON `base_commit`, so they are evidence for that commit only and must not be treated as current-main coordinates after main advances. A later implementation PR should replace static ranges with live `documentSymbol` and `references` responses.
+The first snapshot in this PR is a schema-compatible static seed. It records WBS lanes, source owners, guard tests, and curated flow edges, and it explicitly records `live_lsp_not_invoked_in_this_pr` in `omissions[]`. Its `display_range` rows are bound to the JSON `base_commit`, so they are evidence for that commit only and must not be treated as current-main orchestrates after main advances. A later implementation PR should replace static ranges with live `documentSymbol` and `references` responses.
 
 ## Seed Export Command
 
@@ -136,7 +136,7 @@ guard test existence, and `display_range` bounds for the artifact's current
 worktree when the artifact `base_commit` matches `HEAD`. If `base_commit` is
 older than the current checkout, the command switches to `base_commit_bound`
 range mode: it still checks range shape and all file/test paths, but does not
-pretend stale static line numbers are current-main coordinates. It does not
+pretend stale static line numbers are current-main orchestrates. It does not
 call `/api/v1/ide/lsp`, does not add a runtime route, and does not mutate task,
 keeper, git, dashboard, or cache state.
 
@@ -146,10 +146,10 @@ The static seed check is intentionally not a live exporter proof. To verify
 whether the local runner can attempt a future live export, run:
 
 ```bash
-scripts/ide/export-symbol-graph --doctor-live-lsp
+scripts/ide/export-symbol-graph
 ```
 
-The doctor prints JSON for the languages present in the artifact and checks
+The exporter prints JSON for the languages present in the artifact and checks
 only executable availability, currently `ocaml-lsp-server` for OCaml files and
 `typescript-language-server` for TypeScript files. It does not call
 `/api/v1/ide/lsp`, open a WebSocket, spawn LSP servers, update
@@ -175,7 +175,7 @@ The first artifact uses `masc.symbol_graph.v1`:
 ```json
 {
   "schema_version": "masc.symbol_graph.v1",
-  "repo": "masc-mcp",
+  "repo": "masc",
   "base_commit": "7dda94cd4f",
   "generated_at": "2026-05-18T00:00:00Z",
   "source": {

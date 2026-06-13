@@ -4,7 +4,7 @@
 // log row inline spinner, Linear sync dot, Stripe in-flight inline):
 // a small border-circle-with-transparent-top-border is the canonical
 // \"something is happening right here\" indicator. Distinct from
-// LoadingState (a large centered Loader2 with breathing room) and
+// LoadingState (a large centered Loader2 with breathing workspace) and
 // LivePulseDot (an animate-pulse state marker). This primitive is the
 // spin-in-the-middle-of-a-sentence variant.
 //

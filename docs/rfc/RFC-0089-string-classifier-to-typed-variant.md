@@ -129,7 +129,7 @@ skill routing) 은 후속 PR 대상으로 남았다.
   외삽치는 본 RFC §4 우선순위 결정에만 사용, 본문 acceptance에 포함하지 않음.
 - 가장 큰 단일 도메인 caller blast: Board_core_classify 7 caller (lib 5 + test 2)
 - 2026-05-17 top hotspots (file:occurrence):
-  `worker_dev_tools.ml:19`, `exec/output_parse.ml:15`,
+  `retired_worker_shell_facade:19`, `exec/output_parse.ml:15`,
   `server/server_routes_http_routes_workspace.ml:11`,
   `server/server_dashboard_http_link_preview.ml:9`,
   sandbox Execute runner, `keeper/agent_tool_execute_command_parse.ml:9`.

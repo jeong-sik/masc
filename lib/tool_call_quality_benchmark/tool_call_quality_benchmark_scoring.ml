@@ -94,22 +94,6 @@ let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
   in
   present_ok && equals_ok && contains_ok && min_int_ok
 
-let tool_used tool_name (run : evidence_run) =
-  List.exists (fun call -> String.equal call.tool_name tool_name) run.tool_calls
-
-(* Build a name-keyed set over [run.tool_calls] in one pass.  Used by
-   [required_tool_score] and [forbidden_tool_used] to replace
-   O(R × C) repeated linear scans with O(C + R) build + lookup. *)
-let tool_call_name_set (run : evidence_run) =
-  let tbl = Hashtbl.create (List.length run.tool_calls) in
-  List.iter (fun call -> Hashtbl.replace tbl call.tool_name ()) run.tool_calls;
-  tbl
-
-let name_set_of_list names =
-  let tbl = Hashtbl.create (List.length names) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) names;
-  tbl
-
 let arg_check_passes (run : evidence_run) (check : arg_check) =
   let predicate call =
     String.equal call.tool_name check.tool_name
@@ -126,31 +110,19 @@ let arg_check_passes (run : evidence_run) (check : arg_check) =
 let tool_sequence (run : evidence_run) =
   run.tool_calls |> List.map (fun call -> call.tool_name)
 
-let required_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
-  match benchmark_case.category with
-  | Tool_forbidden ->
-      if Stdlib.List.length run.tool_calls = 0 then 1.0 else 0.0
-  | _ ->
-      (match benchmark_case.required_tools with
-       | [] -> 1.0
-       | required_tools ->
-           (* Build the run's tool-name set once; replaces R × O(C) scans
-              with O(C) build + R × O(1) lookups. *)
-           let used = tool_call_name_set run in
-           required_tools
-           |> List.map (fun tool_name ->
-                  if Hashtbl.mem used tool_name then 1.0 else 0.0)
-           |> avg_float)
+let selector_call_view (call : tool_call) : Eval_tool_selector.call =
+  { tool_name = call.tool_name; route_evidence = call.route_evidence }
+
+let forbidden_call_used_by_case (benchmark_case : benchmark_case) (call : tool_call) =
+  List.exists (String.equal call.tool_name) benchmark_case.forbidden_tools
+  || List.exists
+       (fun selector -> Eval_tool_selector.matches selector (selector_call_view call))
+       benchmark_case.forbidden_selectors
 
 let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
-  | _ ->
-      (* Same shape as [required_tool_score]: one O(C) build, F lookups. *)
-      let used = tool_call_name_set run in
-      List.exists
-        (fun tool_name -> Hashtbl.mem used tool_name)
-        benchmark_case.forbidden_tools
+  | _ -> List.exists (forbidden_call_used_by_case benchmark_case) run.tool_calls
 
 let task_pass_score (benchmark_case : benchmark_case) (run : evidence_run) =
   let reported = Option.value ~default:false run.task_success in
@@ -202,14 +174,9 @@ let unnecessary_tool_rate (benchmark_case : benchmark_case) (run : evidence_run)
     match benchmark_case.category with
     | Tool_forbidden -> 1.0
     | _ ->
-        (* Iteration is reversed here vs [forbidden_tool_used]: we scan
-           run.tool_calls and check each name against forbidden_tools,
-           so build the set from forbidden_tools (F entries) and let
-           the scan be C × O(1). *)
-        let forbidden_set = name_set_of_list benchmark_case.forbidden_tools in
         let forbidden_count =
           run.tool_calls
-          |> List.filter (fun call -> Hashtbl.mem forbidden_set call.tool_name)
+          |> List.filter (forbidden_call_used_by_case benchmark_case)
           |> List.length
         in
         let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in
@@ -244,9 +211,8 @@ let score_run ~cases (run : evidence_run) =
         if not (List.mem run.keeper_profile benchmark_case.keeper_profiles) then None
         else
           let task_pass = task_pass_score benchmark_case run in
-          let required_score = required_tool_score benchmark_case run in
           let tool_selection =
-            if forbidden_tool_used benchmark_case run then 0.0 else required_score
+            if forbidden_tool_used benchmark_case run then 0.0 else 1.0
           in
           let arg_validity = arg_validity_score benchmark_case run in
           let recovery = recovery_score benchmark_case run task_pass in
@@ -288,6 +254,3 @@ let score_run ~cases (run : evidence_run) =
               prompt_fingerprint = run.prompt_fingerprint;
               tool_sequence = tool_sequence run;
             }
-
-let to_reward_advice ~agent_name ?task_id score =
-  Reward_advice_artifact.of_benchmark_case_score ~agent_name ?task_id score

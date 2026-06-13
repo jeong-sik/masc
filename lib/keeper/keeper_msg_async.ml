@@ -9,6 +9,8 @@
     complete or are recovered from disk as lost after a process restart. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 
 type request_status =
   | Queued
@@ -30,6 +32,8 @@ type entry =
 
 let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
+let active_switches : (string, Eio.Switch.t) Hashtbl.t = Hashtbl.create 16
+exception CancelledByOperator
 let counter = Atomic.make 0
 let max_age_sec = Masc_time_constants.hour
 
@@ -42,6 +46,8 @@ let max_request_id_len = 128
 let is_safe_request_id request_id =
   let len = String.length request_id in
   if len = 0
+  then false
+  else if request_id = "." || request_id = ".."
   then false
   else if len > max_request_id_len
   then false
@@ -95,21 +101,21 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
 ;;
 
 let string_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `String value -> Some value
+  match Json_util.assoc_member_opt name json with
+  | Some (`String value) -> Some value
   | _ -> None
 ;;
 
 let float_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
+  match Json_util.assoc_member_opt name json with
+  | Some (`Float value) -> Some value
+  | Some (`Int value) -> Some (float_of_int value)
   | _ -> None
 ;;
 
 let bool_member name json =
-  match Yojson.Safe.Util.member name json with
-  | `Bool value -> Some value
+  match Json_util.assoc_member_opt name json with
+  | Some (`Bool value) -> Some value
   | _ -> None
 ;;
 
@@ -270,7 +276,7 @@ let mark_lost_after_recovery (entry : entry) =
 let generate_request_id ~keeper_name =
   let n = Atomic.fetch_and_add counter 1 in
   let safe_keeper_name =
-    Coord_utils_backend_setup.sanitize_namespace_segment keeper_name
+    Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name
   in
   Printf.sprintf
     "kmsg_%s_%d_%d"
@@ -347,8 +353,6 @@ type worker_result =
   | Worker_done of tool_result
   | Worker_timeout of { timeout_sec : float }
 
-(** Submit a keeper_msg turn for async execution.
-    Forks a background fiber on [sw], returns the request_id immediately. *)
 let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     ~keeper_name () : string =
   gc_stale ();
@@ -370,22 +374,28 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     set_status_protected ~preserve_terminal:true request_id Running;
     let result =
       try
-        let worker_result =
-          match clock, timeout_sec with
-          | Some clock, Some timeout_sec ->
-            (try Worker_done (Eio.Time.with_timeout_exn clock timeout_sec f) with
-             | Eio.Time.Timeout -> Worker_timeout { timeout_sec })
-          | None, _ | _, None -> Worker_done (f ())
-        in
-        (match worker_result with
-         | Worker_done result ->
-           Done
-             { ok = tool_result_success result
-             ; body = tool_result_body result
-             }
-         | Worker_timeout { timeout_sec } ->
-           timeout_done_status ~request_id ~keeper_name ~timeout_sec)
+        Eio.Switch.run (fun req_sw ->
+          with_lock (fun () -> Hashtbl.replace active_switches request_id req_sw);
+          Fun.protect
+            ~finally:(fun () -> with_lock (fun () -> Hashtbl.remove active_switches request_id))
+            (fun () ->
+               let worker_result =
+                 match clock, timeout_sec with
+                 | Some clock, Some timeout_sec ->
+                   (try Worker_done (Eio.Time.with_timeout_exn clock timeout_sec f) with
+                    | Eio.Time.Timeout -> Worker_timeout { timeout_sec })
+                 | None, _ | _, None -> Worker_done (f ())
+               in
+               match worker_result with
+               | Worker_done result ->
+                 Done
+                   { ok = tool_result_success result
+                   ; body = tool_result_body result
+                   }
+               | Worker_timeout { timeout_sec } ->
+                 timeout_done_status ~request_id ~keeper_name ~timeout_sec))
       with
+      | CancelledByOperator as e -> cancelled_lost_status e
       | Eio.Cancel.Cancelled _ as e -> cancelled_lost_status e
       | exn ->
         Done
@@ -414,11 +424,14 @@ let poll ?base_path request_id : entry option =
         | Some entry -> Some entry))
 ;;
 
-(** List all pending/running requests for a keeper. *)
-let list_for_keeper ~keeper_name : entry list =
+(** List all pending/running requests for a keeper (or all keepers if omitted). *)
+let list_for_keeper ?keeper_name () : entry list =
   Eio.Mutex.use_ro mu (fun () ->
     Hashtbl.fold
-      (fun _id entry acc -> if entry.keeper_name = keeper_name then entry :: acc else acc)
+      (fun _id entry acc ->
+         match keeper_name with
+         | Some name when not (String.equal entry.keeper_name name) -> acc
+         | _ -> entry :: acc)
       pending
       [])
   |> List.sort (fun a b -> compare b.submitted_at a.submitted_at)
@@ -459,7 +472,31 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
   `Assoc fields
 ;;
 
+let cancel ?base_path request_id : bool =
+  let sw_opt = with_lock (fun () -> Hashtbl.find_opt active_switches request_id) in
+  match sw_opt with
+  | Some sw ->
+    Eio.Switch.fail sw CancelledByOperator;
+    with_lock (fun () -> Hashtbl.remove active_switches request_id);
+    true
+  | None ->
+    match base_path with
+    | None -> false
+    | Some base_path ->
+      match load_record ~base_path ~request_id with
+      | Some ({ status = Queued | Running; _ } as entry) ->
+        let reason = "keeper_msg request was cancelled by operator" in
+        let cancelled_entry =
+          (* NDT-OK: gettimeofday is acceptable for timestamping operator cancelled lost state *)
+          { entry with status = Lost { reason }; completed_at = Some (Unix.gettimeofday ()) }
+        in
+        persist_entry cancelled_entry;
+        true
+      | _ -> false
+;;
+
 module For_testing = struct
+  let is_safe_request_id = is_safe_request_id
   let forget request_id = with_lock (fun () -> Hashtbl.remove pending request_id)
   let clear () = with_lock (fun () -> Hashtbl.clear pending)
   let record_path = record_path

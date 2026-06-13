@@ -5,17 +5,20 @@
 # transit-only envelope to single-source decision substrate.
 # Plan SSOT: ~/me/memory/shell-ir-first-class-promotion-todo-2026-05-23.html
 #
-# G1-G7 KPIs measured:
+# G1-G8 KPIs measured:
 #   G1  Bash.parse_string caller count (lib/, non-test)
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
-#   G3  gh command gate_typed routing (heuristic — counts gate_typed
-#       callers in keeper handlers)
+#   G3  Shell IR centralized dispatcher adoption (counts keeper files
+#       consuming Keeper_tool_execute_shell_ir.dispatch*)
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
-#   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
+#   G5  Shell IR path-validation coverage through validate_shell_ir_paths or
+#       the Keeper_tool_execute_shell_ir dispatch facade
 #   G6  specs/shell-ir-first-class/ShellIRFirstClass.tla existence
 #   G7  shell_word_values + Bash_words.stages parallel-parser callers
+#   G8  Typed coverage guard: GADT constructors vs risk_of_typed arms
+#       (constructors must have 1:1 risk classification, Generic ≤ 1)
 #
 # Output modes:
 #   default      Human-readable metric table.
@@ -23,7 +26,7 @@
 #   --baseline F Diff current metrics against baseline F; exit 1 if any
 #                G* regresses (used by CI ratchet, S7).
 #
-# Run from masc-mcp repo root.
+# Run from masc repo root.
 
 set -eu
 # Intentionally no pipefail: `rg -c` exits 1 when zero matches, and we
@@ -65,7 +68,7 @@ fi
 # docstring/comment mentions of legacy identifiers (e.g. `[shell_word_values]`
 # inside `(** ... *)`) inflate raw grep counts even after every real call
 # site has been migrated. Non-nested form is sufficient — OCaml allows
-# nested comments but masc-mcp does not use them in docstrings.
+# nested comments but masc does not use them in docstrings.
 strip_ocaml_comments() {
   perl -0777 -pe 's{\(\*.*?\*\)}{}gs' "$1"
 }
@@ -115,7 +118,7 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 # ---- G1 allowed exceptions (named; any new file must be added here) ----
 # After comment-aware grep (S4 audit accuracy fix), only files with *real*
 # code-side `Bash.parse_string` references count. Files whose former
-# matches were docstring-only (`agent_tool_execute_command_semantics.mli`,
+# matches were docstring-only (`keeper_tool_execute_command_semantics.mli`,
 # the two `.mli` interfaces) have
 # been removed — re-add only if a future code-side call resurfaces.
 #
@@ -128,9 +131,8 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 #      it must parse directly to avoid a cycle.
 g1_allowed_files=(
   "lib/exec/command_gate/shell_command_gate.ml"
-  "lib/exec_policy.ml"
-  "lib/exec_policy_command_syntax.ml"
-  "lib/exec_policy_log_sanitize.ml"
+  "lib/exec_policy/exec_policy.ml"
+  "lib/exec_policy/exec_policy_command_syntax.ml"
 )
 g1_current_files=$(list_code_files "$g1_pattern" \
   | rg -v '/dune$|\.dune$' \
@@ -146,12 +148,18 @@ done <<< "$g1_current_files"
 
 # ---- G2: classifier signature ----
 # Heuristic: scan let signatures of is_write_operation / is_destructive_bash_operation
-g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
-g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
+g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
+g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 
-# ---- G3: gate_typed routing in keeper handlers ----
-g3_gate_typed=$(rg -c 'Shell_(command_)?gate\.gate_typed|gate_typed ~' lib/keeper/ 2>/dev/null \
-  | awk -F: '{s+=$2} END{print s+0}')
+# ---- G3: Shell IR centralized dispatcher adoption ----
+# Architecture: typed Execute/SearchFiles Shell IR consumers route through the
+# Keeper_tool_execute_shell_ir facade, which calls gate_typed and dispatches
+# decided IR. Count keeper consumer files rather than direct gate_typed refs so
+# the metric survives facade extraction and module renames.
+g3_min_facade_consumers=2
+g3_gate_typed=$(list_code_files 'Keeper_tool_execute_shell_ir\.(dispatch|dispatch_classified)' \
+  | rg '^lib/keeper/' \
+  | wc -l | tr -d ' ')
 
 # ---- G4: risk stamp existence ----
 # Primary: phantom envelope module shell_ir_risk.ml/mli (RFC-0160 S3)
@@ -164,10 +172,14 @@ g4_dispatch_decided=$(rg -l 'dispatch_decided' lib/ 2>/dev/null \
   | rg -v '/test/' \
   | wc -l | tr -d ' ')
 
-# ---- G5: validate_shell_ir_paths callers ----
-g5_callers=$(rg -l 'validate_shell_ir_paths' lib/ 2>/dev/null \
-  | rg -v '/test/' \
-  | rg -v 'exec_policy\.ml$|exec_policy\.mli$' \
+# ---- G5: Shell IR path-validation coverage ----
+# Direct validate_shell_ir_paths call count became a stale proxy once the
+# Keeper_tool_execute_shell_ir facade centralized path validation inside
+# dispatch_classified. Count direct validation plus facade dispatch/validation
+# consumers; every facade dispatch reaches validate_paths before Exec_dispatch.
+g5_min_path_validation_surfaces=4
+g5_callers=$(list_code_files 'Exec_policy\.validate_shell_ir_paths|Keeper_tool_execute_shell_ir\.(dispatch|dispatch_classified|validate_paths)' \
+  | rg -v 'exec_policy/exec_policy\.ml$|exec_policy/exec_policy\.mli$' \
   | wc -l | tr -d ' ')
 
 # ---- G6: TLA+ spec ----
@@ -188,6 +200,22 @@ g7_shell_word_values=$(count_code_refs 'shell_word_values')
 g7_bash_words_stages=$(count_code_refs 'Bash_words\.stages')
 g7_total=$(( g7_shell_word_values + g7_bash_words_stages ))
 
+# ---- G8: typed coverage guard ----
+# GADT constructors in shell_ir_typed_types.mli must have 1:1 corresponding
+# risk_of_typed arms in shell_ir_risk.ml. Generic is the intentional escape
+# hatch (untyped commands); new constructors must NOT route through Generic.
+#
+# Guard: if gadt_constructors > risk_arms, a constructor was added without
+# risk classification (compiler catches this too, but CI catches it earlier).
+# If generic_arms > 1, someone expanded the escape hatch instead of typing.
+g8_gadt_constructors=$(rg -c '^\s*\| [A-Z]\w+' lib/exec/shell_ir_typed_types.mli 2>/dev/null || echo 0)
+# Count | W (...) arms only within risk_of_typed function (between its
+# definition and the ;; terminator).
+g8_risk_arms=$(sed -n '/^let risk_of_typed/,/^;;/p' lib/exec/shell_ir_risk.ml 2>/dev/null \
+  | grep -c '| W ' || echo 0)
+g8_generic_arms=$(sed -n '/^let risk_of_typed/,/^;;/p' lib/exec/shell_ir_risk.ml 2>/dev/null \
+  | grep -c 'Generic _' || echo 0)
+
 # ---- IR constructor count (Simple / Pipeline) — non-G but informative ----
 ir_constructors=$(rg -c 'Shell_ir\.Simple|Shell_ir\.Pipeline' lib/ 2>/dev/null \
   | rg -v '/test/' \
@@ -207,7 +235,7 @@ emit_json() {
   "g1_parse_string_total_refs_nontest": ${g1_total_refs},
   "g2_classifier_string_sig": ${g2_string_sig},
   "g2_classifier_ir_sig": ${g2_ir_sig},
-  "g3_gate_typed_refs_in_keeper": ${g3_gate_typed},
+  "g3_dispatcher_adopting_keeper_files": ${g3_gate_typed},
   "g4_risk_in_simple": ${g4_risk_in_simple},
   "g4_phantom_envelope": ${g4_phantom},
   "g4_dispatch_decided_consumers": ${g4_dispatch_decided},
@@ -216,6 +244,9 @@ emit_json() {
   "g7_shell_word_values_refs": ${g7_shell_word_values},
   "g7_bash_words_stages_refs": ${g7_bash_words_stages},
   "g7_parallel_parser_total": ${g7_total},
+  "g8_gadt_constructors": ${g8_gadt_constructors},
+  "g8_risk_of_typed_arms": ${g8_risk_arms},
+  "g8_generic_arms": ${g8_generic_arms},
   "info_ir_constructors_nontest": ${ir_constructors},
   "allowed_exceptions": {
     "g1_parse_string": [${allowed_json}]
@@ -236,16 +267,16 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
         string sig: ${g2_string_sig}, IR sig: ${g2_ir_sig}
                                                        (target: string=0, IR≥2)
 
-  G3  Shell_command_gate.gate_typed refs in lib/keeper/
-        ${g3_gate_typed} refs                          (target: ≥ 4 keeper ops covered)
+  G3  Keeper_tool_execute_shell_ir dispatcher adoption
+        ${g3_gate_typed} keeper files                    (target: ≥ ${g3_min_facade_consumers} facade consumers)
 
   G4  Risk-stamped IR (phantom envelope in shell_ir_risk.ml/mli)
         risk in simple: ${g4_risk_in_simple}, phantom: ${g4_phantom}
         dispatch_decided consumers: ${g4_dispatch_decided} files
                                                        (target: phantom≥10, consumers≥3)
 
-  G5  validate_shell_ir_paths caller files (non-test, non-defining)
-        ${g5_callers} files                            (target: ≥ 4)
+  G5  path-validation covered files (direct or facade, non-test)
+        ${g5_callers} files                            (target: ≥ ${g5_min_path_validation_surfaces})
 
   G6  TLA+ spec specs/shell-ir-first-class/ShellIRFirstClass.tla
         exists: ${g6_spec}                             (target: 1)
@@ -253,6 +284,11 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
   G7  Parallel parser refs (shell_word_values + Bash_words.stages, non-test)
         shell_word_values: ${g7_shell_word_values}, Bash_words.stages: ${g7_bash_words_stages}
         total: ${g7_total}                             (target: 0)
+
+  G8  Typed coverage guard (GADT constructors vs risk_of_typed arms)
+        constructors: ${g8_gadt_constructors}, risk arms: ${g8_risk_arms}
+        generic (escape hatch): ${g8_generic_arms}
+                                                       (target: arms ≥ constructors, generic ≤ 1)
 
   info  Shell_ir.(Simple|Pipeline) constructor refs (non-test)
         ${ir_constructors}
@@ -295,6 +331,33 @@ diff_against_baseline() {
     echo "REGRESS G4 (phantom envelope): ${b_g4} → ${c_g4}"
     regressions=$((regressions + 1))
   fi
+  # G3/G5 use current architecture floors instead of historical baseline
+  # comparison because facade extraction intentionally changes raw file counts.
+  if [[ "$g3_gate_typed" -lt "$g3_min_facade_consumers" ]]; then
+    echo "REGRESS G3 (dispatcher facade consumers): ${g3_gate_typed} < ${g3_min_facade_consumers}"
+    regressions=$((regressions + 1))
+  fi
+  if [[ "$g5_callers" -lt "$g5_min_path_validation_surfaces" ]]; then
+    echo "REGRESS G5 (path-validation covered files): ${g5_callers} < ${g5_min_path_validation_surfaces}"
+    regressions=$((regressions + 1))
+  fi
+  # G8: risk_of_typed arms must keep pace with GADT constructors
+  local b_g8a c_g8a b_g8g c_g8g
+  b_g8a=$(jq -r '.g8_risk_of_typed_arms // 0' "$baseline_file")
+  c_g8a=$(echo "$current_json" | jq -r '.g8_risk_of_typed_arms')
+  local b_g8c c_g8c
+  b_g8c=$(jq -r '.g8_gadt_constructors // 0' "$baseline_file")
+  c_g8c=$(echo "$current_json" | jq -r '.g8_gadt_constructors')
+  if [[ "$c_g8c" -gt "$b_g8c" && "$c_g8a" -le "$b_g8a" ]]; then
+    echo "REGRESS G8 (constructors ${b_g8c}→${c_g8c} but risk arms ${b_g8a}→${c_g8a}): new constructor without risk classification"
+    regressions=$((regressions + 1))
+  fi
+  b_g8g=$(jq -r '.g8_generic_arms // 0' "$baseline_file")
+  c_g8g=$(echo "$current_json" | jq -r '.g8_generic_arms')
+  if [[ "$c_g8g" -gt "$b_g8g" ]]; then
+    echo "REGRESS G8 (generic arms ${b_g8g}→${c_g8g}): escape hatch expanded instead of typing"
+    regressions=$((regressions + 1))
+  fi
   # Unclassified G1 sites — any file not in allowed_exceptions
   if [[ ${#g1_unclassified[@]} -gt 0 ]]; then
     echo "UNCLASSIFIED G1 (new parse_string caller files):"
@@ -307,7 +370,7 @@ diff_against_baseline() {
     echo "RFC-0160 baseline regressed in ${regressions} metric(s)" >&2
     exit 1
   fi
-  echo "OK (RFC-0160 ratchet: no G1/G7 regression, no unclassified sites)"
+  echo "OK (RFC-0160 ratchet: no G1/G3/G5/G7/G8 regression, no unclassified sites)"
 }
 
 case "$mode" in

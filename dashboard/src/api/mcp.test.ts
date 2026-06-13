@@ -321,7 +321,7 @@ describe('callMcpTool', () => {
     setupMcpSessionMocks('sess-explicit-internal')
 
     const { callMcpTool } = await import('./mcp')
-    await callMcpTool('masc_join', { _agent_name: 'agent-code-tool-matrix' })
+    await callMcpTool('masc_bind', { _agent_name: 'agent-code-tool-matrix' })
 
     const toolCall = findCallByMethod('tools/call')
     expect(toolCall).toBeDefined()
@@ -404,9 +404,70 @@ describe('callMcpTool', () => {
 
     const { callMcpTool } = await import('./mcp')
 
-    await expect(callMcpTool('masc_join', { _agent_name: 'dashboard' })).rejects.toThrow(
+    await expect(callMcpTool('masc_bind', { _agent_name: 'dashboard' })).rejects.toThrow(
       'No credential found for dashboard',
     )
+  })
+
+  it('reinitializes and retries once when the server rejects a stale MCP session', async () => {
+    fetchWithTimeout
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-stale' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: {
+              code: -32600,
+              message: 'Unknown Mcp-Session-Id. Re-initialize to obtain a fresh session.',
+            },
+            id: null,
+          }),
+          {
+            status: 404,
+            statusText: 'Not Found',
+            headers: { 'Mcp-Session-Id': 'sess-uninitialized' },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response('{}', {
+          status: 200,
+          headers: { 'Mcp-Session-Id': 'sess-fresh' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response('data: {"result":{"content":[{"type":"text","text":"ok"}]}}\n', { status: 200 }),
+      )
+
+    const { callMcpTool } = await import('./mcp')
+    await expect(callMcpTool('masc_status', {})).resolves.toBe('ok')
+
+    const calls = fetchWithTimeout.mock.calls as Array<[string, RequestInit, number]>
+    const callsByMethod = (method: string) =>
+      calls.filter(([, init]) => {
+        const body = init.body
+        if (typeof body !== 'string') return false
+        try { return JSON.parse(body).method === method }
+        catch { return false }
+      })
+    const initCalls = callsByMethod('initialize')
+    const toolCalls = callsByMethod('tools/call')
+
+    expect(initCalls).toHaveLength(2)
+    expect(toolCalls).toHaveLength(2)
+    expect((toolCalls[0]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-stale')
+    expect((initCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBeUndefined()
+    expect((toolCalls[1]![1].headers as Record<string, string>)['Mcp-Session-Id'])
+      .toBe('sess-fresh')
   })
 
   it('blocks subsequent calls after tools/call returns 403', async () => {

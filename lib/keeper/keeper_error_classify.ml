@@ -9,34 +9,11 @@
     @since 0.122.0 *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_context_runtime
 
-(* Duplicated from keeper_unified_turn.ml to avoid circular dependency.
-   keeper_unified_turn.ml also keeps its own copy for the error-classification
-   helpers that remain there (is_server_rejected_parse_error pattern matching). *)
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  if start_idx < 0 || start_idx + needle_len > String.length haystack
-  then false
-  else
-    let rec check i =
-      if i >= needle_len then true
-      else if String.unsafe_get needle i <> String.unsafe_get haystack (start_idx + i)
-      then false
-      else check (i + 1)
-    in
-    check 0
-
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  if needle = "" then true
-  else
-    let max_start = String.length haystack - String.length needle in
-    let rec try_from i =
-      if i > max_start then false
-      else if substring_matches_at ~needle haystack i then true
-      else try_from (i + 1)
-    in
-    try_from 0
+let string_contains_substring = String_util.string_contains_substring
 
 (** {1 Retry & Side-Effect Safety}
 
@@ -45,7 +22,7 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
       cross-provider retry (2 attempts after all OAS per-provider retries
       exhaust), error reclassification for ambiguous outcomes.
     - OAS owns: per-provider retry (3 attempts), HTTP backoff, timeout
-      handling, provider failover within a single cascade call.
+      handling, provider failover within a single runtime call.
     - Neither may: retry silently after a mutating tool succeeded (integrity
       over availability); duplicate OAS per-provider retry counts. *)
 
@@ -55,8 +32,34 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
 let is_structural_oas_timeout_message message =
   Keeper_oas_timeout_message.is_structural message
 
+let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some (Keeper_turn_driver.Internal_unhandled_exception { site; exn_repr })
+    when String.equal site "runtime_runner.execute" ->
+    let lower = String.lowercase_ascii exn_repr in
+    string_contains_substring ~needle:"tls alert" lower
+    || string_contains_substring ~needle:"handshake failure" lower
+    || string_contains_substring ~needle:"tls_error" lower
+  | Some
+      ( Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Accept_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None -> false
+
 let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
+  if is_transient_internal_runner_error err
+  then true
+  else match err with
   | Agent_sdk.Error.Api (NetworkError _) -> true
   | Agent_sdk.Error.Api (Timeout { message }) ->
       not (is_structural_oas_timeout_message message)
@@ -70,15 +73,12 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (Overloaded _) -> true
   | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   (* Cloudflare 52x timeout family — origin server unreachable or
-     slow to respond.
-     522 = Connection timed out (TCP handshake failed).
-     524 = A timeout occurred after the origin accepted the request; keep it
-     out of the same-cascade transient retry path so it can short-circuit into
-     the degraded cascade rotation server_error path instead. *)
+     slow to respond. Both are transient: a different provider may succeed
+     where one origin timed out, so the runtime should advance. *)
   | Agent_sdk.Error.Api (ServerError { status = 522; _ }) -> true
-  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> false
+  | Agent_sdk.Error.Api (ServerError { status = 524; _ }) -> true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { code = 524; _ }) ->
-      false
+      true
   | Agent_sdk.Error.Provider (Llm_provider.Error.ServerError { transient; _ }) ->
       transient
   (* Non-transient API errors. *)
@@ -96,7 +96,6 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
@@ -108,74 +107,62 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
     eligible for same-turn retry.  They ARE eligible for auto-recovery
     when all committed tools are reconcile-safe (idempotent/board-like):
     the keeper's next heartbeat cycle will build a fresh prompt. *)
-let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+let server_parse_rejection_message_matches message =
+  let lower = String.lowercase_ascii message in
+  (* Compound patterns to avoid false positives on generic messages
+     like "Service closing" or "Can't find the specified tool".
+     Each pattern targets a specific JSON parser error family. *)
+  (string_contains_substring ~needle:"can't find closing" lower
+   || string_contains_substring ~needle:"find end of" lower)
+  || string_contains_substring ~needle:"unexpected character in json" lower
+  || string_contains_substring ~needle:"unterminated" lower
+  || string_contains_substring ~needle:"parse error" lower
+
+let is_provider_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Provider (Llm_provider.Error.ParseError _) -> true
-  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
-      let lower = String.lowercase_ascii message in
-      (* Compound patterns to avoid false positives on generic messages
-         like "Service closing" or "Can't find the specified tool".
-         Each pattern targets a specific JSON parser error family. *)
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.InvalidRequest { reason; _ }) ->
-      let lower = String.lowercase_ascii reason in
-      (string_contains_substring ~needle:"can't find closing" lower
-       || string_contains_substring ~needle:"find end of" lower)
-      || string_contains_substring ~needle:"unexpected character in json" lower
-      || string_contains_substring ~needle:"unterminated" lower
-      || string_contains_substring ~needle:"parse error" lower
-  (* All other API error variants do not represent server-side parse failures. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (ContextOverflow _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  (* Non-API error families. *)
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
+      server_parse_rejection_message_matches reason
+  (* Not a provider-level parse rejection. *)
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError _ | Llm_provider.Error.Timeout _
+      | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
+      | Llm_provider.Error.AuthError _ | Llm_provider.Error.MissingApiKey _
+      | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
+      | Llm_provider.Error.HardQuota _
+      | Llm_provider.Error.ProviderUnavailable _
+      | Llm_provider.Error.ProviderTerminal _
+      | Llm_provider.Error.InvalidConfig _
+      | Llm_provider.Error.UnknownVariant _) -> false
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
   | Agent_sdk.Error.Internal _ -> false
 
-let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
+let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Agent_sdk.Completion_contract_id.Require_tool_use
-  (* Other agent-level errors are not require-tool-use contract violations. *)
-  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetExceeded _)
-  | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-Agent error families. *)
-  | Agent_sdk.Error.Api _
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
+  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
+      server_parse_rejection_message_matches message
+  (* Not a model-level parse rejection. *)
+  | Agent_sdk.Error.Api (NetworkError _ | Timeout _ | Overloaded _
+    | ServerError _ | RateLimited _ | AuthError _ | NotFound _
+    | ContextOverflow _) -> false
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
   | Agent_sdk.Error.Internal _ -> false
+
+let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
+  is_provider_rejected_parse_error err || is_model_rejected_parse_error err
 
 (** Receipt I/O failure: the turn body succeeded but the authoritative
     receipt could not be persisted.  See
@@ -184,14 +171,18 @@ let is_receipt_lost_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Internal msg ->
       string_contains_substring ~needle:"execution_receipt_append_failed" msg
-  | _ -> false
+  (* Not a receipt I/O failure. *)
+  | Agent_sdk.Error.Api _ -> false
+  | Agent_sdk.Error.Provider _ -> false
+  | Agent_sdk.Error.Agent _ -> false
+  | Agent_sdk.Error.Mcp _ -> false
+  | Agent_sdk.Error.Config _ -> false
+  | Agent_sdk.Error.Serialization _ -> false
+  | Agent_sdk.Error.Io _ -> false
+  | Agent_sdk.Error.Orchestration _ -> false
 
-(** Provider-level timeout (not structural OAS wall-clock budget). *)
 let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Api (Timeout _) -> true
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-  | _ -> false
+  Keeper_provider_runtime_boundary.is_provider_timeout_error err
 
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
    orchestration level this means the current provider lane is saturated or
@@ -199,21 +190,20 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
    than lumping it into a generic server_error bucket. *)
 let is_gateway_backpressure_status status = status = 524
 
-let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some
-      (Keeper_turn_driver.Cascade_exhausted
-         { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
+      (Keeper_turn_driver.Runtime_exhausted
+         { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
       true
   | Some
-      (Keeper_turn_driver.Cascade_exhausted
-         { reason = Keeper_types.Max_turns_exceeded; _ }) ->
+      (Keeper_turn_driver.Runtime_exhausted
+         { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
-  | Some (Keeper_turn_driver.Cascade_exhausted _) ->
+  | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -222,9 +212,6 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: pre-dispatch admission denial — budget too low to attempt.
-     Not auto-recoverable because rotation does not increase the turn budget. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -235,9 +222,8 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
 let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Capacity_backpressure _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
@@ -245,8 +231,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial is not a CLI session error. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
@@ -254,28 +238,49 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | None ->
       false
 
-let is_auto_recoverable_cascade_fail_open_error
+let is_auto_recoverable_runtime_fail_open_error
     (err : Agent_sdk.Error.sdk_error) : bool =
   Keeper_turn_driver.sdk_error_is_hard_quota err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
-  || is_auto_recoverable_cascade_exhausted_error err
+  || is_auto_recoverable_runtime_exhausted_error err
+
+let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some
+      (Keeper_turn_driver.Accept_rejected
+         { reason_kind = Some Keeper_turn_driver.Accept_no_usable_progress; _ }) ->
+    true
+  | Some (Keeper_turn_driver.Accept_rejected _) ->
+    false
+  | Some
+      ( Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None ->
+    false
 
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
-   and [recoverable_cascade_failure_reason] (broader set including raw
+   and [recoverable_runtime_failure_reason] (broader set including raw
    provider API failures).  Wire form is the lowercase string via
    [degraded_retry_reason_to_string]. *)
 type degraded_retry_reason =
   | Hard_quota
-  | Max_turns
   | Resumable_cli_session
   | Admission_queue_timeout
   | Provider_timeout
   | Turn_timeout
-  | Cascade_candidates_filtered
-  | Required_tool_contract_violation
-  | Cascade_exhausted
+  | Runtime_candidates_filtered
+  | Runtime_exhausted
   | Capacity_backpressure
   | Rate_limit
   | Server_error
@@ -283,76 +288,70 @@ type degraded_retry_reason =
 
 let degraded_retry_reason_to_string = function
   | Hard_quota -> "hard_quota"
-  | Max_turns -> "max_turns"
   | Resumable_cli_session -> "resumable_cli_session"
   | Admission_queue_timeout -> "admission_queue_timeout"
   | Provider_timeout -> "provider_timeout"
   | Turn_timeout -> "turn_timeout"
-  | Cascade_candidates_filtered -> "cascade_candidates_filtered"
-  | Required_tool_contract_violation -> "required_tool_contract_violation"
-  | Cascade_exhausted -> "cascade_exhausted"
+  | Runtime_candidates_filtered -> "runtime_candidates_filtered"
+  | Runtime_exhausted -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
 
 type degraded_retry =
-  { next_cascade : string
+  { next_runtime : string
   ; fallback_reason : degraded_retry_reason
   }
 
 let is_declared_phase_alias raw phase_name =
   String.equal (String.trim raw) phase_name
 
-let fallback_cascade_for_unavailable_profile
-    ~(base_cascade : string)
-    ~(effective_cascade : string) : string option =
+let fallback_runtime_for_unavailable_profile
+    ~(base_runtime : string)
+    ~(effective_runtime : string) : string option =
   let normalized_base =
-    Keeper_cascade_profile.normalize_declared_name base_cascade
+    String.trim base_runtime
   in
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    String.trim effective_runtime
   in
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
   else if
-    String.equal normalized_effective Keeper_config.phase_buffer_cascade_name
-    || String.equal normalized_effective (Keeper_config.default_cascade_name ())
+    String.equal normalized_effective (Keeper_config.default_runtime_id ())
+    || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
-  else Some (Keeper_config.default_cascade_name ())
+  else Some (Keeper_config.default_runtime_id ())
 
 let degraded_retry_after_recoverable_error
-    ~(effective_cascade : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
+    ~(effective_runtime : string)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
-    Keeper_cascade_profile.normalize_declared_name effective_cascade
+    String.trim effective_runtime
   in
   let effective_is_declared_phase_buffer =
-    is_declared_phase_alias effective_cascade Keeper_config.phase_buffer_cascade_name
+    is_declared_phase_alias effective_runtime (Keeper_config.default_runtime_id ())
   in
   let effective_is_declared_phase_recovery =
     is_declared_phase_alias
-      effective_cascade
-      Keeper_config.phase_recovery_cascade_name
+      effective_runtime
+      (Keeper_config.default_runtime_id ())
   in
   let phase_recovery_retry fallback_reason =
     Some
       {
-        next_cascade = Keeper_config.phase_recovery_cascade_name;
+        next_runtime = (Keeper_config.default_runtime_id ());
         fallback_reason;
       }
   in
-  if tool_requirement = Required
-     || effective_is_declared_phase_buffer
+  if effective_is_declared_phase_buffer
      || effective_is_declared_phase_recovery
-     || String.equal normalized_effective Keeper_config.phase_buffer_cascade_name
-     || String.equal normalized_effective Keeper_config.phase_recovery_cascade_name
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
+     || String.equal normalized_effective (Keeper_config.default_runtime_id ())
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
     phase_recovery_retry Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    phase_recovery_retry Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -366,22 +365,19 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         phase_recovery_retry Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-        phase_recovery_retry Cascade_candidates_filtered
+        (Keeper_turn_driver.Runtime_exhausted
+           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
+        phase_recovery_retry Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Max_turns_exceeded; _ }) ->
-        phase_recovery_retry Max_turns
-    | Some (Keeper_turn_driver.Cascade_exhausted _)
-    | Some (Keeper_turn_driver.No_tool_capable_provider _)
+        (Keeper_turn_driver.Runtime_exhausted
+           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
+        phase_recovery_retry Runtime_candidates_filtered
+    | Some
+        (Keeper_turn_driver.Runtime_exhausted _)
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-    (* RFC-0158: admission denial has no local-recovery retry — budget
-       exhaustion is not resolved by cascade rotation. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
     (* RFC-0159 Phase A: opaque internal failures have no
        local-recovery retry mapping. *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
@@ -390,13 +386,9 @@ let degraded_retry_after_recoverable_error
     | None ->
         None
 
-let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
-  if is_required_tool_contract_violation err then
-    Some Required_tool_contract_violation
-  else if Keeper_turn_driver.sdk_error_is_hard_quota err then
+let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
+  if Keeper_turn_driver.sdk_error_is_hard_quota err then
     Some Hard_quota
-  else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    Some Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
@@ -410,49 +402,47 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
         Some Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-        Some Cascade_candidates_filtered
+        (Keeper_turn_driver.Runtime_exhausted
+           { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
+        Some Capacity_backpressure
     | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Max_turns_exceeded; _ }) ->
-        Some Max_turns
-    | Some (Keeper_turn_driver.Cascade_exhausted _) ->
-        (* Generic cascade exhaustion: all candidates failed without a more
+        (Keeper_turn_driver.Runtime_exhausted
+           { reason = Keeper_turn_driver.Candidates_filtered_after_cycles; _ }) ->
+        Some Runtime_candidates_filtered
+    | Some
+        (Keeper_turn_driver.Runtime_exhausted _) ->
+        (* Generic runtime exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative
-           [fallback_cascade] hints declared in cascade.toml actually
+           [fallback_runtime] hints declared in runtime.toml actually
            escalate. Receipt-derived data on 2026-04-25 showed 31/39
            silent turns ended with [(null)] fallback_reason because this
            arm previously returned [None]. Other arms below remain
            non-recoverable to keep the surface conservative. *)
-        Some Cascade_exhausted
-    | Some (Keeper_turn_driver.No_tool_capable_provider _)
+        Some Runtime_exhausted
     | Some (Keeper_turn_driver.Accept_rejected _)
     | Some (Keeper_turn_driver.Admission_queue_rejected _)
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-    (* RFC-0158: admission denial is not a cascade-rotation reason. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
-    (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
+    (* RFC-0159 Phase A: typed [Internal_*] variants are not runtime-rotation
        reasons; they expose previously-opaque raw exception payloads.  *)
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
         None
     | None ->
-        (* Status-code-aware cascade rotation: raw provider API errors that are
-           not wrapped in a MASC internal error (e.g. single-provider cascades
+        (* Status-code-aware runtime rotation: raw provider API errors that are
+           not wrapped in a MASC internal error (e.g. single-provider runtimes
            where OAS surfaces the error directly) should still trigger rotation
-           when a different cascade may succeed.
+           when a different runtime may succeed.
 
            429 rate-limit (non-hard-quota): the current provider is throttled;
-           a different cascade/provider may have capacity.
+           a different runtime/provider may have capacity.
 
            5xx server errors: the provider is unhealthy or overloaded; a
-           different cascade may be healthy.
+           different runtime may be healthy.
 
-           401/403 auth errors: the credential for this cascade is invalid; a
-           different cascade with different credentials may succeed.
+           401/403 auth errors: the credential for this runtime is invalid; a
+           different runtime with different credentials may succeed.
 
            Hard-quota 429s are already handled above by sdk_error_is_hard_quota,
            so only soft (non-hard-quota) rate limits reach this arm. *)
@@ -499,7 +489,7 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
              | Llm_provider.Error.ProviderTerminal _) ->
              None
          (* Sub-500 server errors (4xx already handled above for AuthError /
-            RateLimited) are not classified as recoverable cascade failures. *)
+            RateLimited) are not classified as recoverable runtime failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
@@ -515,151 +505,55 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Serialization _
          | Agent_sdk.Error.Io _
          | Agent_sdk.Error.Orchestration _
-         | Agent_sdk.Error.A2a _
          | Agent_sdk.Error.Internal _ -> None)
 
-let requalify_bare_catalog_name bare =
-  let tier_q = "tier." ^ bare in
-  let tg_q = "tier-group." ^ bare in
-  (* Prefer tier. over tier-group. when the catalog only exposes public names;
-     qualified lookup catalogs below still disambiguate concrete members. *)
-  match
-    Cascade_name.of_string tier_q |> Result.is_ok,
-    Cascade_name.of_string tg_q |> Result.is_ok
-  with
-  | true, _ -> tier_q
-  | false, true -> tg_q
-  | false, false -> bare
-
-let normalized_cascade_name ~catalog_names name =
+let normalized_runtime_id ~catalog_names name =
   let trimmed = String.trim name in
-  let canonical_catalog_name =
-    if Cascade_name.is_canonical_prefix trimmed then Some trimmed
-    else
-      let tier_group = "tier-group." ^ trimmed in
-      let tier = "tier." ^ trimmed in
-      if List.mem tier_group catalog_names then Some tier_group
-      else if List.mem tier catalog_names then Some tier
-      else None
-  in
-  let is_live_catalog_profile =
-    List.exists (String.equal trimmed) catalog_names
-  in
-  (* Fallback candidates are concrete catalog profiles, not keeper-declared
-     logical routes.  Preserve live profile names like [local_recovery] so a
-     fallback_cascade does not collapse back to routes.phase_recovery.
-     When the input is a bare catalog name (stripped of tier/tier-group
-     prefix), re-qualify it so downstream [Cascade_name.of_string_exn]
-     does not crash on the missing canonical prefix. *)
-  if is_live_catalog_profile then
-    Option.value canonical_catalog_name
-      ~default:
-        (if Cascade_name.is_canonical_prefix trimmed
-         then trimmed
-         else requalify_bare_catalog_name trimmed)
+  if List.exists (String.equal trimmed) catalog_names then trimmed
   else if
-    String.equal trimmed Keeper_config.phase_buffer_cascade_name
-    || String.equal trimmed Keeper_config.phase_recovery_cascade_name
-    || String.equal trimmed Keeper_config.tool_required_cascade_name
-  then Option.value canonical_catalog_name ~default:trimmed
-  else Keeper_cascade_profile.normalize_declared_name trimmed
+    String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
+    || String.equal trimmed (Keeper_config.default_runtime_id ())
+  then trimmed
+  else String.trim trimmed
 
-let strip_prefix ~prefix value =
-  if String.starts_with ~prefix value then
-    Some
-      (String.sub value (String.length prefix)
-         (String.length value - String.length prefix))
-  else None
-
-let direct_tier_duplicates_attempted_group
-    ~(attempted : string list)
-    ~(candidate : string)
-  =
-  match strip_prefix ~prefix:"tier." candidate with
-  | None -> false
-  | Some suffix ->
-    List.exists
-      (fun attempted ->
-         match strip_prefix ~prefix:"tier-group." attempted with
-         | Some attempted_suffix -> String.equal suffix attempted_suffix
-         | None -> false)
-      attempted
-
-let required_tool_rotation_candidate
-    ?(allow_phase_recovery = false)
-    ~catalog_names
-    name
-  =
-  let normalized = normalized_cascade_name ~catalog_names name in
-  let routed_phase_buffer_is_distinct =
-    not
-      (String.equal
-         Keeper_config.phase_buffer_cascade_name
-         (Keeper_config.default_cascade_name ()))
-  in
-  (* Required-tool turns may still use the phase-recovery route when the catalog
-     declares it as an explicit fallback profile. Do not take it from generic
-     rotation order; requiring an explicit hint avoids accidentally sending
-     required-tool turns into a control/recovery lane. *)
-  not
-    ((routed_phase_buffer_is_distinct
-      && String.equal normalized Keeper_config.phase_buffer_cascade_name))
-  && (allow_phase_recovery
-      || not
-           (String.equal normalized Keeper_config.phase_recovery_cascade_name))
-  && not (Cascade_capability_profile.is_system_cascade_name normalized)
-
-let tool_required_rotation_cascade_name () =
-  try
-    Keeper_cascade_profile.cascade_name_for_use
-      Keeper_cascade_profile.Tool_required
-  with Failure _ -> Keeper_config.tool_required_cascade_name
+let runtime_catalog_names () =
+  match Runtime.get_runtime_ids () with
+  | [] -> [ Keeper_config.default_runtime_id () ]
+  | names -> names
+;;
 
 let default_degraded_rotation_candidates
     ~catalog_names
-    ~(base_cascade : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
-  let normalized_base = normalized_cascade_name ~catalog_names base_cascade in
-  let default_cascade =
-    normalized_cascade_name ~catalog_names (Keeper_config.default_cascade_name ())
+    ~(base_runtime : string) =
+  let normalized_base = normalized_runtime_id ~catalog_names base_runtime in
+  let default_runtime =
+    normalized_runtime_id ~catalog_names (Keeper_config.default_runtime_id ())
   in
-  let tool_required_cascade =
-    normalized_cascade_name ~catalog_names (tool_required_rotation_cascade_name ())
+  let phase_recovery_runtime =
+    normalized_runtime_id ~catalog_names
+      (Runtime.get_default_runtime_id ())
   in
-  let phase_recovery_cascade =
-    normalized_cascade_name ~catalog_names
-      (Keeper_cascade_profile.cascade_name_for_use
-         Keeper_cascade_profile.Phase_recovery)
-  in
-  match tool_requirement with
-  | Required -> [ normalized_base; tool_required_cascade ]
-  | Optional | No_tools ->
-    [ normalized_base; default_cascade; phase_recovery_cascade ]
+  [ normalized_base; default_runtime; phase_recovery_runtime ]
 
 let normalize_rotation_candidates ~catalog_names candidates =
   candidates
   |> List.filter_map (fun candidate ->
          let trimmed = String.trim candidate in
          if String.equal trimmed "" then None
-         else Some (normalized_cascade_name ~catalog_names trimmed))
+         else Some (normalized_runtime_id ~catalog_names trimmed))
   |> dedupe_keep_order
 
 let degraded_rotation_candidates
     ~catalog_names
-    ~(rotation_cascades : string list option)
     ~(fallback_hint : string option)
-    ~(base_cascade : string)
-    ~(effective_cascade : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
+    ~(base_runtime : string)
+    ~(effective_runtime : string) =
   let normalized_effective =
-    normalized_cascade_name ~catalog_names effective_cascade
+    normalized_runtime_id ~catalog_names effective_runtime
   in
   let raw_candidates =
-    match rotation_cascades with
-    | None ->
-        default_degraded_rotation_candidates ~catalog_names ~base_cascade
-          ~tool_requirement
-    | Some catalog -> normalize_rotation_candidates ~catalog_names catalog
+    default_degraded_rotation_candidates ~catalog_names ~base_runtime
   in
   let fallback_hint_candidate =
     match fallback_hint with
@@ -667,83 +561,92 @@ let degraded_rotation_candidates
     | Some hint ->
         let trimmed = String.trim hint in
         if String.equal trimmed "" then None
-        else Some (normalized_cascade_name ~catalog_names trimmed)
+        else Some (normalized_runtime_id ~catalog_names trimmed)
   in
   let candidates =
     match fallback_hint_candidate with
     | None -> raw_candidates
-    (* Required-tool retries must try the configured tool-required lane before
-       declarative fallback hints; otherwise a broad recovery chain can bypass
-       the runtime-MCP-capable lane and immediately land on a passive provider. *)
-    | Some hint when tool_requirement = Required ->
-        dedupe_keep_order (raw_candidates @ [ hint ])
     | Some hint -> dedupe_keep_order (hint :: raw_candidates)
   in
   candidates
   |> List.filter (fun candidate ->
-         (not (String.equal candidate normalized_effective))
-         && (tool_requirement <> Required
-             || required_tool_rotation_candidate
-                  ~allow_phase_recovery:
-                    (match fallback_hint_candidate with
-                     | Some hint -> String.equal hint candidate
-                     | None -> false)
-                  ~catalog_names
-                  candidate))
+         not (String.equal candidate normalized_effective))
+
+(** [true] when the error is a completion contract violation.
+    Contract violations should cap rotation because retrying the same
+    or different runtime will not satisfy the contract. Non-contract
+    errors (provider timeout, rate limit, server error) are transient
+    and should allow cycling through candidates again. *)
+let is_completion_contract_violation (_ : Agent_sdk.Error.sdk_error) : bool =
+  false
 
 let degraded_rotation_after_recoverable_error
-    ?rotation_cascades
     ?fallback_hint
-    ~(base_cascade : string)
-    ~(effective_cascade : string)
-    ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement)
-    ~(attempted_cascades : string list)
+    ~(base_runtime : string)
+    ~(effective_runtime : string)
+    ~(attempted_runtimes : string list)
     (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
-  match recoverable_cascade_failure_reason err with
+  match recoverable_runtime_failure_reason err with
   | None -> None
   | Some fallback_reason ->
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_cascade_profile.catalog_lookup_names () in
+      let catalog_names = runtime_catalog_names () in
       let attempted =
-        attempted_cascades
-        |> List.map (normalized_cascade_name ~catalog_names)
+        attempted_runtimes
+        |> List.map (normalized_runtime_id ~catalog_names)
         |> dedupe_keep_order
       in
-      degraded_rotation_candidates
-        ~catalog_names
-        ~rotation_cascades
-        ~fallback_hint
-        ~base_cascade ~effective_cascade ~tool_requirement
-      |> List.find_opt (fun candidate ->
-             (not (List.exists (String.equal candidate) attempted))
-             && not (direct_tier_duplicates_attempted_group ~attempted ~candidate))
-      |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
+      let candidates =
+        degraded_rotation_candidates
+          ~catalog_names
+          ~fallback_hint
+          ~base_runtime ~effective_runtime
+      in
+      let untried =
+        List.find_opt
+          (fun candidate ->
+             not (List.exists (String.equal candidate) attempted))
+          candidates
+      in
+      (match untried with
+       | Some next_runtime ->
+         Some { next_runtime; fallback_reason }
+       | None when not (is_completion_contract_violation err) ->
+         (* Non-contract errors (provider timeout, rate limit, server error)
+            are transient. Allow cycling through candidates again because
+            the same runtime may succeed on a subsequent attempt. Only
+            contract violations cap rotation — retrying cannot satisfy the
+            contract. #19930 *)
+         (match candidates with
+          | [] -> None
+          | first_candidate :: _ ->
+            Some { next_runtime = first_candidate; fallback_reason })
+       | None ->
+         (* Contract violation: all candidates exhausted. Cap rotation. *)
+         None)
 
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
-  || Keeper_turn_driver.sdk_error_is_max_turns_exceeded err
-  || is_resumable_cli_session_error err
-  || is_auto_recoverable_cascade_exhausted_error err
+  || is_auto_recoverable_runtime_exhausted_error err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Provider_timeout _) -> true
+  if Keeper_provider_runtime_boundary.is_provider_timeout_error err
+  then true
+  else
+    match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> true
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
+  | Some (Keeper_turn_driver.Runtime_exhausted _)
   | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
   | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
+  | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial should not trigger keeper-cycle-failed WARN;
-     the turn budget was simply insufficient. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   (* RFC-0159 Phase A: opaque internal failures should not trigger the
      keeper-cycle-failed WARN by themselves; the surrounding handler
      already logs the exception detail. *)
@@ -790,12 +693,11 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   (* Other agent error variants. *)
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
+  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
@@ -806,7 +708,6 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
 (** Extract the [InputRequired] payload from an [sdk_error], if any.
@@ -828,13 +729,12 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
   | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
   | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
+  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
   | Agent_sdk.Error.Agent (CostBudgetExceeded _)
   | Agent_sdk.Error.Agent (CostBudgetUnenforceable _)
   | Agent_sdk.Error.Agent (TokenBudgetExceeded _)
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (ToolRetryExhausted _)
-  | Agent_sdk.Error.Agent (CompletionContractViolation _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _)
   | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
@@ -845,47 +745,25 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Serialization _
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
   | Agent_sdk.Error.Internal _ -> false
 
-(** [true] when an error represents terminal cascade exhaustion or a
-    final accept-rejected result from the MASC OAS boundary. *)
-let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
+(** [true] when an error represents terminal runtime exhaustion. Accept
+    rejection is an accept-contract result; no-progress accept rejection is
+    classified separately so it does not masquerade as all-runtimes-exhausted. *)
+let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some (Keeper_turn_driver.Cascade_exhausted _)
-  | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.No_tool_capable_provider _)
-  | Some (Keeper_turn_driver.Accept_rejected _) -> true
+  | Some (Keeper_turn_driver.Runtime_exhausted _)
+  | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)
   | Some (Keeper_turn_driver.Turn_timeout _)
   | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
   | Some (Keeper_turn_driver.Ambiguous_post_commit _)
-  (* RFC-0158: admission denial is not cascade exhaustion. *)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
-  (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
+  (* RFC-0159 Phase A: opaque internal failures are not runtime exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
   | None -> false
-
-(** [true] when the rotation-cap fast-fail should fire for a
-    [required_tool_contract_violation] error.  The cap prevents runaway
-    rotation chains where the LLM calls no keeper tools: we allow at most one
-    rotation (so [attempted_cascades] must have at least 2 entries before the
-    cap fires), unless a fresh fallback cascade is still available
-    ([fallback_not_yet_tried = true]).
-
-    The list is seeded with the initial cascade name before the first turn
-    attempt, so:
-    - length = 1  ⇒ no rotation has been attempted yet → do not cap
-    - length ≥ 2  ⇒ at least one rotation was tried → cap (unless fallback available) *)
-let should_cap_rotation_for_contract_violation
-    ~(attempted_cascades : string list)
-    ~(fallback_not_yet_tried : bool)
-    (err : Agent_sdk.Error.sdk_error) : bool =
-  is_required_tool_contract_violation err
-  && List.length attempted_cascades >= 2
-  && not fallback_not_yet_tried

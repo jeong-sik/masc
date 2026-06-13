@@ -20,7 +20,7 @@ val get_session_manager : unit -> Voice_session_manager.t
 
     + Resolve [config_path] from [Env_config_core.base_path_opt]
       with fallback chain (git root via
-      [Coord_utils_backend_setup.find_git_root], then
+      [Workspace_utils_backend_setup.find_git_root], then
       [Common.masc_dirname]).
     + [Voice_session_manager.create ~config_path].
     + [Voice_session_manager.restore mgr] (rehydrates persisted

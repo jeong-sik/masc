@@ -4,7 +4,7 @@ open Server_routes_http_pages
 
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.room_config.base_path
+let base_path_of_state state = state.Mcp_server.workspace_config.base_path
 
 let sanitize_log_value ?(max_bytes = 240) s =
   let without_controls =
@@ -25,7 +25,7 @@ let observe_workspace_route_failure ?(warn_on_failure = true) ~site ~path exn =
       let site = sanitize_log_value ~max_bytes:64 site in
       let path = sanitize_log_value ~max_bytes:180 path in
       let error = sanitize_log_value (Printexc.to_string exn) in
-      Prometheus.inc_counter Prometheus.metric_workspace_route_failures
+      Otel_metric_store.inc_counter Otel_metric_store.metric_workspace_route_failures
         ~labels:[("site", site)]
         ();
       if warn_on_failure then
@@ -53,7 +53,7 @@ let workspace_or_default ?(warn_on_failure = true) ~site ~path ~default f =
    renders something and never depends on disk state to draw a tree.
 
    This split keeps the side-effecting wiring (state -> config,
-   Keeper_types.read_meta, Sys.file_exists / Sys.is_directory) at the
+   Keeper_meta_store.read_meta, Sys.file_exists / Sys.is_directory) at the
    route boundary while the dispatch logic stays unit-testable. *)
 let classify_keeper_query
     ~project_base
@@ -98,14 +98,14 @@ let classify_workspace_query
 
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let lookup_repository repo_id =
     match Repo_store.find ~base_path:project_base repo_id with
     | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
     | Error _ -> None
   in
   let lookup_playground name =
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
     | _ -> None
   in
@@ -150,6 +150,12 @@ let source_header source =
 
 let json_response_with_source ~status ~source req reqd json =
   Http.Response.json_value ~status ~extra_headers:(source_header source)
+    ~request:req json reqd
+
+let json_response_with_source_and_base ~status ~source ~base_path req reqd json =
+  let headers = ("X-Workspace-Base-Path", sanitize_header_value base_path)
+                :: source_header source in
+  Http.Response.json_value ~status ~extra_headers:headers
     ~request:req json reqd
 
 (* --- Safe path --- *)
@@ -293,12 +299,30 @@ let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
 let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
   if depth > max_depth || remaining <= 0 then (acc, remaining)
   else
-    let entries =
+    let raw_entries =
       workspace_or_default
         ~site:"tree_readdir"
         ~path:dir
         ~default:[]
         (fun () -> Sys.readdir dir |> Array.to_list)
+    in
+    (* Sort alphabetically, then partition directories-first so that
+       the node limit (default 750) is consumed by directory trees
+       (lib/, src/) before leaf files ( *.py, *.md).  Without this,
+       a flat directory like ~/me with hundreds of root-level files
+       exhausts the limit before important subdirectories appear. *)
+    let entries =
+      let sorted = List.sort String.compare raw_entries in
+      let dirs, files = List.partition (fun name ->
+        let full = Filename.concat dir name in
+        workspace_or_default
+          ~warn_on_failure:false
+          ~site:"tree_is_directory_partition"
+          ~path:full
+          ~default:false
+          (fun () -> Sys.is_directory full)
+      ) sorted in
+      dirs @ files
     in
     let rec fold acc remaining = function
       | [] -> (acc, remaining)
@@ -349,7 +373,7 @@ let git_run ~cwd args =
         ~actor:(Masc_exec.Agent_id.of_string "system/workspace_api")
         ~raw_source
         ~summary:"workspace api git command"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Http_routes ())
+
         argv
     in
     match status with
@@ -581,7 +605,8 @@ let add_routes router =
                scan_dir ~diff_by_path ~base ~depth:0 ~max_depth:depth ~max_nodes [] base
            in
            let json = `List (List.rev nodes) in
-           json_response_with_source ~status:`OK ~source request reqd json)
+           json_response_with_source_and_base
+             ~status:`OK ~source ~base_path:base request reqd json)
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->

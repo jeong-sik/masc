@@ -1,4 +1,4 @@
-import type { Agent, BoardPost, StopCause } from './core'
+import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
 import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
 
@@ -65,8 +65,8 @@ export interface DashboardConfigResolution {
   status: 'ready' | 'warn' | 'invalid_env' | 'missing'
   warnings: string[]
   config_root: DashboardConfigResolutionItem
-  cascade_authoring: DashboardConfigResolutionItem
-  cascade: DashboardConfigResolutionItem
+  runtime_authoring: DashboardConfigResolutionItem
+  runtime: DashboardConfigResolutionItem
   prompts: DashboardConfigResolutionItem
   keepers: DashboardConfigResolutionItem
   personas: DashboardConfigResolutionItem
@@ -395,7 +395,7 @@ export interface DashboardAttentionEvent {
 
 export interface DashboardNamespaceTruthRetention {
   scope?: string
-  coordination_root?: string
+  workspace_root?: string
   workspace_path?: string
   shell_input?: string
   execution_input?: string
@@ -552,8 +552,8 @@ export interface DashboardExecutionWorkerSupportBrief {
   focus: string
   last_signal_at?: string | null
   last_signal_age_sec?: number | null
-  signal_truth?: 'live' | 'stale' | 'absent'
-  evidence_source?: 'message' | 'presence' | 'none'
+  signal_truth?: ExecutionSignalTruth
+  evidence_source?: EvidenceSourceCore
   active_task_count?: number
   related_session_id?: string | null
   related_operation_id?: string | null
@@ -588,8 +588,6 @@ export interface DashboardExecutionContinuityBrief {
   recent_input_preview?: string | null
   recent_output_preview?: string | null
   recent_tool_names?: string[]
-  allowed_tool_count?: number | null
-  allowed_tool_preview?: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null
   tool_audit_source?: string | null
@@ -673,46 +671,46 @@ export interface DashboardPlanningResponse {
     done?: number
     cancelled?: number
   }
-  coordination_fsm?: DashboardCoordinationFsmSnapshot | null
+  workspace_fsm?: DashboardWorkspaceFsmSnapshot | null
 }
 
-export interface DashboardCoordinationFsmRefs {
+export interface DashboardWorkspaceFsmRefs {
   goal_id?: string | null
   task_ids?: string[]
   post_ids?: string[]
   agent_name?: string | null
 }
 
-export interface DashboardCoordinationFsmEvidence {
+export interface DashboardWorkspaceFsmEvidence {
   source?: string
   kind?: string
   id?: string | null
   label?: string
   detail?: string
   timestamp?: number | null
-  refs?: DashboardCoordinationFsmRefs
+  refs?: DashboardWorkspaceFsmRefs
 }
 
-export interface DashboardCoordinationFsmViolation {
+export interface DashboardWorkspaceFsmViolation {
   axis?: string
   code?: string
   severity?: 'info' | 'warn' | 'error' | string
   message?: string
-  refs?: DashboardCoordinationFsmRefs
-  evidence?: DashboardCoordinationFsmEvidence[]
+  refs?: DashboardWorkspaceFsmRefs
+  evidence?: DashboardWorkspaceFsmEvidence[]
 }
 
-export interface DashboardCoordinationFsmProduct {
-  refs?: DashboardCoordinationFsmRefs
+export interface DashboardWorkspaceFsmProduct {
+  refs?: DashboardWorkspaceFsmRefs
   goal?: string | null
   task?: string
   board?: string
   reward?: string
-  evidence?: DashboardCoordinationFsmEvidence[]
-  violations?: DashboardCoordinationFsmViolation[]
+  evidence?: DashboardWorkspaceFsmEvidence[]
+  violations?: DashboardWorkspaceFsmViolation[]
 }
 
-export interface DashboardCoordinationFsmSummary {
+export interface DashboardWorkspaceFsmSummary {
   products?: number
   violations?: number
   evidence?: number
@@ -723,13 +721,13 @@ export interface DashboardCoordinationFsmSummary {
   }
 }
 
-export interface DashboardCoordinationFsmSnapshot {
+export interface DashboardWorkspaceFsmSnapshot {
   schema_version?: number
   mode?: string
-  summary?: DashboardCoordinationFsmSummary
-  products?: DashboardCoordinationFsmProduct[]
-  evidence?: DashboardCoordinationFsmEvidence[]
-  violations?: DashboardCoordinationFsmViolation[]
+  summary?: DashboardWorkspaceFsmSummary
+  products?: DashboardWorkspaceFsmProduct[]
+  evidence?: DashboardWorkspaceFsmEvidence[]
+  violations?: DashboardWorkspaceFsmViolation[]
   projection_error?: string | null
 }
 
@@ -784,7 +782,6 @@ export interface GoalCompletionSummary {
 
 export interface GoalVerificationVote {
   principal: {
-    kind: string
     id: string
     display_name?: string | null
   }
@@ -799,13 +796,12 @@ export interface GoalVerificationRequest {
   goal_id: string
   target_phase: string
   requested_by: {
-    kind: string
     id: string
     display_name?: string | null
   }
   policy_snapshot: {
-    principals: Array<{ kind: string; id: string; display_name?: string | null }>
-    eligible_principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    principals: Array<{ id: string; display_name?: string | null }>
+    eligible_principals: Array<{ id: string; display_name?: string | null }>
     required_verdicts: number
   }
   votes: GoalVerificationVote[]
@@ -858,20 +854,10 @@ export interface GoalKeeperTrustApprovalState {
 }
 
 export interface GoalKeeperTrustExecutionSummary {
-  tool_contract_result?: string | null
-  runtime_proof_status?: string | null
-  required_tools?: string[] | null
-  missing_required_tools?: string[] | null
-  requested_tools?: string[] | null
-  tools_used?: string[] | null
-  unexpected_tools?: string[] | null
-  requested_tool_count?: number | null
-  tools_used_count?: number | null
-  unexpected_tool_count?: number | null
   provider_attempt_count?: number | null
   provider_fallback_applied?: boolean | null
   provider_selected_model?: string | null
-  cascade_outcome?: string | null
+  runtime_outcome?: string | null
   sandbox_summary?: string | null
   sandbox_root?: string | null
   mutation_guard_summary?: string | null
@@ -997,9 +983,9 @@ export interface GoalDetailKeeper {
   active_goal_ids: string[]
   sandbox_profile: string
   network_mode: string
-  cascade_name: string
+  runtime_id: string
   approval_profile: string | null
-  cascade_outcome: string | null
+  runtime_outcome: string | null
   latest_execution_outcome: string | null
   latest_execution_at: string | null
   latest_receipt: Record<string, unknown> | null
@@ -1028,7 +1014,7 @@ export interface DashboardGoalDetailResponse {
 
 
 export interface ServerStatus {
-  coordination_root?: string
+  workspace_root?: string
   workspace_path?: string
   workspace_differs?: boolean
   cluster?: string

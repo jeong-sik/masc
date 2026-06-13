@@ -29,11 +29,25 @@ endif
 
 # Specs with known failures (parsing/evaluation errors under CI tla2tools).
 # Remove from this list as specs are fixed. Each entry is a basename (no .cfg).
-# KeeperStateMachine: CompactionClearsOverflow invariant contradicts CompactionFailed
-# action (Failed deliberately preserves context_overflow for retry). Tracked in #8710;
-# proper fix requires discriminating CompactionCompleted vs CompactionFailed in the
-# invariant. Temporary skip unblocks PR queue (30+ PRs inheriting this fail).
-KNOWN_FAILURES ?= KeeperTraceSpec KeeperStateMachine
+#
+# KeeperStateMachine was previously skipped here. The stale note blamed
+# CompactionClearsOverflow / #8710, but that property had already been narrowed
+# to the *WithSavings arm and the clean spec did not contradict CompactionFailed.
+# The real reasons the spec did not pass clean were two logical defects, both now
+# fixed in KeeperStateMachine.tla:
+#   1. SupervisorRestartAttempt omitted terminal_failure_latched from its
+#      UNCHANGED set, leaving the variable null. TLC errored (rc=75) before
+#      evaluating any invariant/property, so neither the clean spec nor the
+#      overflow Bug Model ever ran.
+#   2. StablePhases omitted the Zombie terminal phase (while including the other
+#      two terminal phases Stopped/Dead), so the six resolve-liveness properties
+#      false-violated when TerminalFailureDetected settled a transient phase into
+#      the absorbing Zombie state.
+# With both fixed: clean cfg = rc 0 (119k states, no error); both buggy cfgs
+# (KeeperStateMachine-buggy.cfg, KeeperStateMachine-overflow-buggy.cfg) = rc 13
+# (BuggyCompactionClearsOverflow action property violated). KeeperStateMachine is
+# therefore removed from the skip list and runs in check-clean + check-buggy.
+KNOWN_FAILURES ?= KeeperTraceSpec
 
 # Buggy specs whose current invariant/model is documented as non-violating.
 # Remove from this list once the buggy cfg asserts a stronger property.
@@ -72,19 +86,25 @@ check-clean:
 	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
 	for cfg in $$cfgs; do \
 	  dir=$$(dirname "$$cfg"); \
-	  base=$$(basename "$$cfg" .cfg); \
-	  tla="$$dir/$$base.tla"; \
-	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
+	  cfgtag=$$(basename "$$cfg" .cfg); \
+	  parent="$$cfgtag"; tla="$$dir/$$parent.tla"; \
+	  while [ ! -f "$$tla" ] && [ -n "$$parent" ]; do \
+	    new_parent=$$(printf '%s' "$$parent" | sed -E 's/-[^-]+$$//'); \
+	    [ "$$new_parent" = "$$parent" ] && break; \
+	    parent="$$new_parent"; tla="$$dir/$$parent.tla"; \
+	  done; \
+	  if [ ! -f "$$tla" ]; then printf "ORPHAN %-40s (no parent .tla — cfg verifies nothing)\n" "$$cfg"; fail=1; continue; fi; \
+	  base="$$parent"; \
 	  skip=0; for kf in $(KNOWN_FAILURES); do [ "$$base" = "$$kf" ] && skip=1; done; \
-	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_FAILURES)\n" "$$base"; continue; fi; \
-	  printf "CHECK %-40s ...\n" "$$base"; \
+	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_FAILURES)\n" "$$cfgtag"; continue; fi; \
+	  printf "CHECK %-40s ...\n" "$$cfgtag"; \
 	  start_ts=$$(date +%s); \
-	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$base.log 2>&1; \
+	  $(TLC) -config "$$cfg" "$$tla" > /tmp/tlc-$$cfgtag.log 2>&1; \
 	  rc=$$?; \
 	  end_ts=$$(date +%s); \
 	  duration=$$((end_ts - start_ts)); \
-	  if [ $$rc -eq 0 ]; then printf "OK    %-40s (%3ds)\n" "$$base" "$$duration"; \
-	  else printf "FAIL  %-40s (exit $$rc, %3ds)\n" "$$base" "$$duration"; tail -15 /tmp/tlc-$$base.log; fail=1; fi; \
+	  if [ $$rc -eq 0 ]; then printf "OK    %-40s (%3ds)\n" "$$cfgtag" "$$duration"; \
+	  else printf "FAIL  %-40s (exit $$rc, %3ds)\n" "$$cfgtag" "$$duration"; tail -15 /tmp/tlc-$$cfgtag.log; fail=1; fi; \
 	done; \
 	if [ $$fail -eq 1 ]; then exit 1; fi
 
@@ -95,11 +115,15 @@ check-buggy:
 	if [ -z "$$cfgs" ]; then echo "(none)"; exit 0; fi; \
 	for cfg in $$cfgs; do \
 	  dir=$$(dirname "$$cfg"); \
-	  stripped=$${cfg%%-buggy*}; \
-	  bugbase=$$(basename "$$stripped"); \
 	  cfgtag=$$(basename "$$cfg" .cfg); \
-	  tla="$$dir/$$bugbase.tla"; \
-	  if [ ! -f "$$tla" ]; then echo "SKIP $$cfg (no .tla)"; continue; fi; \
+	  parent="$$cfgtag"; tla="$$dir/$$parent.tla"; \
+	  while [ ! -f "$$tla" ] && [ -n "$$parent" ]; do \
+	    new_parent=$$(printf '%s' "$$parent" | sed -E 's/-[^-]+$$//'); \
+	    [ "$$new_parent" = "$$parent" ] && break; \
+	    parent="$$new_parent"; tla="$$dir/$$parent.tla"; \
+	  done; \
+	  if [ ! -f "$$tla" ]; then printf "ORPHAN %-40s (no parent .tla — buggy cfg verifies nothing)\n" "$$cfg"; fail=1; continue; fi; \
+	  bugbase="$$parent"; \
 	  skip=0; for kb in $(KNOWN_BUGGY_NO_VIOLATION); do [ "$$bugbase" = "$$kb" ] && skip=1; done; \
 	  if [ $$skip -eq 1 ]; then printf "SKIP  %-40s (KNOWN_BUGGY_NO_VIOLATION)\n" "$$bugbase (buggy)"; continue; fi; \
 	  printf "CHECK %-40s ...\n" "$$cfgtag (buggy)"; \
@@ -146,7 +170,7 @@ check-social: CLEAN_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call clean_cfgs_in,$(d)
 check-social: BUGGY_CFGS := $(foreach d,$(SOCIAL_DIRS),$(call buggy_cfgs_in,$(d)/))
 check-social: check-all
 
-OTHER_DIRS := admission-queue auth autonomous boundary bug-models cascade \
+OTHER_DIRS := admission-queue auth autonomous boundary bug-models \
               checkpoint-trim goal-loop keeper-switch-hierarchy keeper-turn-fsm \
               multimodal resilience server-state shared shell-ir-first-class \
               task-lifecycle

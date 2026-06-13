@@ -12,7 +12,7 @@
     This module makes each policy choice explicit and named so the
     bootstrap call sites read as audited contracts and so the
     [masc_oas_bus_capacity] gauge can publish the chosen capacity per
-    bus to [/metrics].
+    bus through OTel.
 
     Adding a new bus MUST extend this module — the surrounding code
     accepts [t] values only, not bare ints. *)
@@ -42,21 +42,26 @@ type t = private {
 }
 
 val oas_runtime : t
-(** Bus shared with the OAS turn pipeline.  [Block] is required so a
-    slow subscriber back-pressures publishers (no event loss during
-    turn replay).  256 buffer matches OAS's own default and is the
-    measured headroom for a single turn's emissions. *)
+(** Bus shared with the OAS turn pipeline.  [Drop_oldest] (not [Block]):
+    every subscriber is observational (telemetry counter, SSE relay,
+    best-effort compaction audit, metrics) and durable turn/event replay
+    reads the JSONL telemetry surface, not this live bus — so no consumer
+    requires completeness.  [Block] here coupled keeper turn progress to
+    subscriber drain speed: a slow subscriber filled the 256 buffer and
+    back-pressure froze every keeper publisher inside [Event_bus.publish]
+    with no timeout (RCA 2026-06-10 fleet freeze).  Dropping the stalest
+    observational event is strictly preferable to freezing the fleet. *)
 
 val masc_domain : t
 (** Bus for MASC-domain events (broadcast, heartbeat, keeper, autonomy,
-    harness, trust).  Same configuration as [oas_runtime] — these are
-    semantic events whose loss would silently break the coordination
-    invariants. *)
+    harness, trust).  [Block] (unlike [oas_runtime]) — these are semantic
+    events whose loss would silently break the workspace invariants, and
+    its publishers are not the keeper turn pipeline. *)
 
 val create_bus : t -> Agent_sdk.Event_bus.t
 (** Materialise the chosen configuration and publish the
     [masc_oas_bus_capacity] gauge sample with [bus] and [policy]
-    labels so the capacity ceiling is visible in [/metrics]. *)
+    labels so the capacity ceiling is visible in telemetry export. *)
 
 val to_policy_label : backpressure_policy -> string
 (** [Block | Drop_oldest | Drop_newest] → kebab-case label. *)

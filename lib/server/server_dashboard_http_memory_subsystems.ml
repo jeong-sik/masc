@@ -26,7 +26,7 @@ let dashboard_memory_subsystems_include_entries request =
   | _ -> false
 ;;
 
-let load_memory_subsystems_entries ~(config : Coord_utils.config) =
+let load_memory_subsystems_entries ~(config : Workspace_utils.config) =
   (* NDT-OK: wall-clock read only gates a dashboard cache TTL. *)
   let now = Unix.gettimeofday () in
   match !memory_subsystems_entry_cache with
@@ -37,7 +37,7 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
   | _ ->
     let rows, errors =
       try
-        Keeper_types.keeper_names config
+        Keeper_meta_store.keeper_names config
         |> List.fold_left
              (fun (rows_acc, errs_acc) keeper ->
                match
@@ -74,7 +74,7 @@ let load_memory_subsystems_entries ~(config : Coord_utils.config) =
 ;;
 
 let dashboard_memory_subsystems_http_json
-      ~(config : Coord_utils.config)
+      ~(config : Workspace_utils.config)
       ?include_memory_entries
       request
   : Yojson.Safe.t

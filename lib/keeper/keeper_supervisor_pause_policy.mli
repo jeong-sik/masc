@@ -7,9 +7,11 @@
 
     The phase-event publisher is injected (via [~publish_phase_lifecycle])
     so this module stays free of [Keeper_lifecycle_events] /
-    [Cascade_events] dependencies. *)
+    [Runtime_events] dependencies. *)
 
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_types_profile
 open Keeper_execution
 
 (** Resume policy: whether the supervisor can auto-resume the keeper
@@ -21,7 +23,7 @@ type crash_pause_resume_policy =
 (** Resolve the persisted [auto_resume_after_sec] value for [resume_policy]
     using the global keeper supervisor back-off knobs. *)
 val auto_resume_after_sec_for_policy
-  :  Keeper_types.keeper_meta
+  :  Keeper_meta_contract.keeper_meta
   -> crash_pause_resume_policy
   -> float option
 
@@ -53,7 +55,7 @@ val handle_crash_auto_pause
 (** [handle_stale_storm_pause ~publish_phase_lifecycle ctx entry ~count]
     pauses [entry] because the same keeper terminated [count] times in
     a 6h sliding window with [stale_termination]. Manual resume
-    required (operator must investigate the cascade/tool/runtime loop
+    required (operator must investigate the runtime/tool/runtime loop
     that caused the storm). *)
 val handle_stale_storm_pause
   :  publish_phase_lifecycle:
@@ -80,8 +82,8 @@ val handle_provider_timeout_pause
       ~resume_policy] is the turn-context SSOT for pausing a keeper.
     See the implementation file for full behavioural contract. *)
 val handle_auto_pause_from_meta
-  :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
   -> reason_tag:string
   -> ?metric_name:string
   -> lifecycle_detail:string
@@ -89,7 +91,7 @@ val handle_auto_pause_from_meta
   -> blocker_class:Keeper_meta_contract.blocker_class option
   -> resume_policy:crash_pause_resume_policy
   -> unit
-  -> (Keeper_types.keeper_meta, string) result
+  -> (Keeper_meta_contract.keeper_meta, string) result
 
 (** [failure_reason_policy_decision reason] maps a persisted
     [Keeper_registry.failure_reason] back to a

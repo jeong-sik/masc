@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Dev instance (port 8935). Prod uses com.jeong-sik.masc-prod (port 8945, see scripts/deploy.sh). -->
+    <key>Label</key>
+    <string>com.jeong-sik.masc</string>
+
+    <!-- NOTE: Paths below are machine-specific. Adjust for your setup:
+         - ProgramArguments: path to start-masc.sh in the repo
+         - StandardOutPath/StandardErrorPath: log directory
+         - MASC_BASE_PATH / WorkingDirectory: your base path -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/dancer/me/workspace/yousleepwhen/masc/start-masc.sh</string>
+        <string>--http</string>
+        <string>--port</string>
+        <string>8935</string>
+        <string>--base-path</string>
+        <string>/Users/dancer/me</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dancer/me/logs/masc-launchd.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/dancer/me/logs/masc-launchd.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <key>MASC_MCP_PORT</key>
+        <string>8935</string>
+        <key>MASC_BASE_PATH</key>
+        <string>/Users/dancer/me</string>
+        <key>MASC_AUTO_RESPOND</key>
+        <string>true</string>
+        <key>MASC_ORCHESTRATOR_ENABLED</key>
+        <string>0</string>
+        <key>MASC_ZOMBIE_THRESHOLD_SEC</key>
+        <string>180</string>
+        <key>MASC_ZOMBIE_CLEANUP_INTERVAL_SEC</key>
+        <string>30</string>
+        <key>SSL_CERT_FILE</key>
+        <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
+        <key>SSL_CERT_DIR</key>
+        <string>/etc/ssl/certs</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/dancer/me</string>
+</dict>
+</plist>

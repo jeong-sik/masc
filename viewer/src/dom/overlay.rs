@@ -3,7 +3,7 @@ use bevy::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
 
-use crate::game::state::{ChoiceState, CombatState, OverlayState, RoomState};
+use crate::game::state::{ChoiceState, CombatState, OverlayState, WorkspaceState};
 
 #[cfg(target_arch = "wasm32")]
 use super::escape::html_escape;
@@ -68,15 +68,15 @@ pub fn update_overlay_dom(
     overlay: Res<OverlayState>,
     choice: Res<ChoiceState>,
     combat: Res<CombatState>,
-    room_state: Res<RoomState>,
+    workspace_state: Res<WorkspaceState>,
     mut cache: ResMut<OverlayCache>,
 ) {
     let weather_changed = overlay.weather != cache.last_weather;
     let mood_changed = overlay.mood != cache.last_mood;
     let choice_changed = choice.active != cache.last_choice_active;
     let combat_changed = combat.active != cache.last_combat_active;
-    let scene_changed = room_state.current_scenario != cache.last_scenario
-        || room_state.current_node != cache.last_node;
+    let scene_changed = workspace_state.current_scenario != cache.last_scenario
+        || workspace_state.current_node != cache.last_node;
 
     if weather_changed || mood_changed || choice_changed || combat_changed || scene_changed {
         #[cfg(target_arch = "wasm32")]
@@ -188,8 +188,8 @@ pub fn update_overlay_dom(
 
             if scene_changed {
                 if let Some(el) = document.get_element_by_id("scene-indicator") {
-                    let scenario = room_state.current_scenario.trim();
-                    let node = room_state.current_node.trim();
+                    let scenario = workspace_state.current_scenario.trim();
+                    let node = workspace_state.current_node.trim();
                     if scenario.is_empty() && node.is_empty() {
                         el.set_text_content(None);
                         if let Some(html_el) = el.dyn_ref::<web_sys::HtmlElement>() {
@@ -207,8 +207,8 @@ pub fn update_overlay_dom(
                         }
                     }
                 }
-                cache.last_scenario = room_state.current_scenario.clone();
-                cache.last_node = room_state.current_node.clone();
+                cache.last_scenario = workspace_state.current_scenario.clone();
+                cache.last_node = workspace_state.current_node.clone();
             }
         }
     }

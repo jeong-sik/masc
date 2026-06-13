@@ -1,22 +1,5 @@
 import { get, post } from './core'
-import { ACTIVITY_TIMEOUT_MS } from '../config/constants'
 import { callMcpTool } from './mcp'
-import {
-  ActionsActivitySchemaDriftError,
-  parseActivityGraphResponse,
-  parseSwimlaneResponse,
-  type ActivityGraphResponse,
-  type SwimlaneResponse,
-} from './schemas/actions-activity'
-
-type ActivityFetchOptions = {
-  signal?: AbortSignal
-}
-
-function isNotInitializedEnvelope(raw: unknown): boolean {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return false
-  return (raw as { error?: unknown }).error === 'not initialized'
-}
 
 // --- Control Dock ---
 
@@ -26,7 +9,7 @@ export async function sendBroadcast(_actorHint: string, message: string): Promis
   })
 }
 
-export async function fetchRoomMessages(limit = 40): Promise<string[]> {
+export async function fetchWorkspaceMessages(limit = 40): Promise<string[]> {
   const text = await callMcpTool('masc_messages', { limit })
   return text
     .split('\n')
@@ -47,54 +30,6 @@ export function fetchTaskEvents(taskId: string, limit = 50): Promise<unknown[]> 
     limit: String(limit),
   })
   return get<unknown[]>(`/api/v1/dashboard/tasks/history?${params.toString()}`)
-}
-
-// --- Activity Graph ---
-
-export async function fetchActivityGraph(
-  since?: string,
-  options: ActivityFetchOptions = {},
-): Promise<ActivityGraphResponse | null> {
-  const params = since ? `?since=${since}` : ''
-  try {
-    const raw = await get<unknown>(`/api/v1/activity/graph${params}`, {
-      timeoutMs: ACTIVITY_TIMEOUT_MS,
-      includeActorHeader: false,
-      signal: options.signal,
-    })
-    if (isNotInitializedEnvelope(raw)) return null
-    return parseActivityGraphResponse(raw)
-  } catch (err) {
-    if (err instanceof ActionsActivitySchemaDriftError) throw err
-    // Mirrors sse-store.ts §256: activity graph fetch failures cause the
-    // dashboard to show empty / stale activity data. Promote to warn so the
-    // operator sees the failure at default DevTools level.
-    console.warn('[activity] graph fetch failed', err instanceof Error ? err.message : err)
-    throw err
-  }
-}
-
-export async function fetchSwimlane(
-  since?: string,
-  options: ActivityFetchOptions = {},
-): Promise<SwimlaneResponse | null> {
-  const params = since ? `?since=${since}` : ''
-  try {
-    const raw = await get<unknown>(`/api/v1/activity/swimlane${params}`, {
-      timeoutMs: ACTIVITY_TIMEOUT_MS,
-      includeActorHeader: false,
-      signal: options.signal,
-    })
-    if (isNotInitializedEnvelope(raw)) return null
-    return parseSwimlaneResponse(raw)
-  } catch (err) {
-    if (err instanceof ActionsActivitySchemaDriftError) throw err
-    // Mirrors sse-store.ts §256: swimlane fetch failures cause the dashboard
-    // to show empty / stale swimlane data. Promote to warn so the operator
-    // sees the failure at default DevTools level.
-    console.warn('[activity] swimlane fetch failed', err instanceof Error ? err.message : err)
-    throw err
-  }
 }
 
 // --- Dashboard delete actions ---

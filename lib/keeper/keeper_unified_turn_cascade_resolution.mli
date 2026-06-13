@@ -1,38 +1,42 @@
-(** Cascade routing resolution stage extracted from
-    [Keeper_unified_turn.run_keeper_cycle] per RFC-0136 PR-2.
+(** Keeper_unified_turn_cascade_resolution — Telemetry-event publishing
+    for cascade (retry/rotation) resolution decisions.
 
-    Owns the [selected_item] override of [meta.cascade_ref], the
-    [Keeper_cascade_routing.select_cascade] call, and the
-    [fail_open_phase_buffer_when_unavailable] hardening of the resolved
-    cascade. Returns both the updated meta and the resolved cascade so
-    the caller can resume with downstream pre-dispatch validation. *)
+    Publishes a [telemetry_event] on the MASC Event_bus each time the
+    keeper retry loop resolves a cascade decision — degraded retry
+    allowed, slot-phase exhausted, no degraded retry, or transient
+    network retry.
 
-type cascade_resolution =
-  { resolved_meta : Keeper_types.keeper_meta
-    (** [meta] with [cascade_ref] potentially overridden by
-        [selected_item] and with cascade name aligned to routing. *)
-  ; resolved_cascade : string
-    (** Final cascade name after probeable-runtime fail-open. *)
-  }
+    [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
+    on the bus and increments
+    [masc_keeper_telemetry_events_consumed_total].
 
-val resolve_cascade
-  :  meta:Keeper_types.keeper_meta
-  -> phase_opt:Keeper_state_machine.phase option
-  -> selected_item:(string * Cascade_ref.cascade_item) option
-  -> append_cascade_routed_manifest:
-       (cascade_name:string -> decision:Yojson.Safe.t -> unit)
-  -> cascade_resolution
-(** Resolve cascade routing.
+    @since task-786 *)
 
-    Side effects:
-    - Increments [Keeper_metrics.(to_string FsmEdgeTransitions)]
-      with the [ksm_to_kcl_routing] edge label.
-    - Emits debug log for the base-to-effective cascade transition.
-    - Emits warn log when [fail_open_phase_buffer_when_unavailable] falls
-      back to the base cascade.
-    - Invokes [append_cascade_routed_manifest] once with the resolved
-      cascade name and the routing decision JSON.
+(** {1 Decision kind} *)
 
-    The function is total: it always returns a [cascade_resolution]
-    value. Failures inside the routing dependencies surface as logs
-    rather than exceptions. *)
+type cascade_decision_kind =
+  | Degraded_retry_allowed
+  | Degraded_retry_slot_phase_exhausted
+  | No_degraded_retry
+  | Transient_network_retry
+(** Kind of cascade resolution decision. *)
+
+(** {1 Publishing} *)
+
+val publish_cascade_resolution :
+  keeper_name:string ->
+  runtime_id:string ->
+  decision:cascade_decision_kind ->
+  reason:string ->
+  next_runtime:string option ->
+  attempt:int ->
+  error_kind:string option ->
+  error_message:string option ->
+  unit
+(** Publishes a [telemetry_event] with payload
+    [{ keeper_name, runtime_id, decision, reason, next_runtime,
+       attempt, error_kind, error_message, timestamp }].
+
+    Call at each cascade resolution point in the retry loop so
+    observability can track provider fallback patterns, slot-phase
+    exhaustion events, and transient retries. *)

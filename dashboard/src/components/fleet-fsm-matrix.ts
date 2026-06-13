@@ -53,18 +53,18 @@ export const FLEET_HISTORY_LEN = 30
 // Axis order is fixed by the TLA+ joint spec
 // (KeeperCompositeLifecycle.tla): KSM → KTC → KDP → KCL → KMC.
 // Keep it identical to TRANSITION_FIELDS so an operator scanning
-// left-to-right sees "lifecycle → turn → decision → cascade →
+// left-to-right sees "lifecycle → turn → decision → runtime →
 // compaction" — the natural causal order of a turn.
 // 6 axes (LT-16-KCB Phase 3 added KCB). Causal order: lifecycle →
-// turn → decision → cascade → compaction → circuit-breaker. KCB sits
+// turn → decision → runtime → compaction → circuit-breaker. KCB sits
 // at the tail because its state is derived from the *outcome* of the
-// cascade's tool calls (failure streak counter), so it is temporally
+// runtime's tool calls (failure streak counter), so it is temporally
 // downstream of the other five for any given turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
   { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
   { key: 'turn',       label: '턴',        acronym: 'KTC' },
   { key: 'decision',   label: '결정',      acronym: 'KDP' },
-  { key: 'cascade',    label: 'Cascade',   acronym: 'KCL' },
+  { key: 'runtime',    label: 'Runtime',   acronym: 'KCL' },
   { key: 'compaction', label: '압축',      acronym: 'KMC' },
   { key: 'breaker',    label: '차단기',    acronym: 'KCB' },
 ]
@@ -142,7 +142,7 @@ export function sparkClassFor(value: string): string {
 /** Per-axis observation ring keyed by keeper name. */
 export type KeeperFleetHistory = Record<string, Record<LaneKey, string[]>>
 
-const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker']
+const AXIS_KEYS: LaneKey[] = ['phase', 'turn', 'decision', 'runtime', 'compaction', 'breaker']
 
 export type FleetRuntimeAttentionLevel = 'ok' | 'stale' | 'idle' | 'blocked'
 
@@ -261,14 +261,13 @@ function formatAge(seconds: number | null): string {
 function isIdleComposite(snapshot: KeeperCompositeSnapshot): boolean {
   return snapshot.turn_phase === 'idle'
     && snapshot.decision.stage === 'undecided'
-    && snapshot.cascade.state === 'idle'
+    && snapshot.runtime.state === 'idle'
     && snapshot.compaction.stage === 'accumulating'
     && (snapshot.circuit_breaker?.state ?? 'clean') === 'clean'
 }
 
 function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   const execution = snapshot.execution
-  const surface = execution?.tool_surface
   const parts: string[] = []
   const previousReceipt = hasPreviousTurnExecutionReceipt(snapshot)
   if (!snapshot.is_live) parts.push('is_live=false')
@@ -281,27 +280,6 @@ function executionEvidence(snapshot: KeeperCompositeSnapshot): string[] {
   }
   if (execution?.terminal_reason_code) {
     parts.push(`${previousReceipt ? 'previous_' : ''}terminal=${execution.terminal_reason_code}`)
-  }
-  if (execution?.tool_contract_result) {
-    parts.push(`${previousReceipt ? 'previous_' : ''}tool=${execution.tool_contract_result}`)
-  }
-  if (surface?.tool_requirement) {
-    parts.push(`tool_requirement=${surface.tool_requirement}`)
-  }
-  if (surface?.turn_lane) {
-    parts.push(`turn_lane=${surface.turn_lane}`)
-  }
-  if (surface?.tool_surface_class) {
-    parts.push(`tool_surface=${surface.tool_surface_class}`)
-  }
-  if (typeof surface?.visible_tool_count === 'number') {
-    parts.push(`visible_tools=${surface.visible_tool_count}`)
-  }
-  if (surface?.tool_surface_fallback_used === true) {
-    parts.push('tool_surface_fallback=true')
-  }
-  if (surface?.tool_gate_enabled === false) {
-    parts.push('tool_gate=false')
   }
   if (execution?.error?.kind) {
     parts.push(`error=${execution.error.kind}`)
@@ -321,8 +299,6 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   if (execution.operator_disposition === 'pause_human') return true
   if (execution.outcome === 'receipt_failed') return true
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') return true
-  if (execution.tool_contract_result === 'missing_required_tool_use') return true
-  if (execution.tool_contract_result === 'unknown' && execution.error != null) return true
   return false
 }
 
@@ -401,21 +377,7 @@ function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean
   // TLA-prefix wire format — see `hasBlockingExecutionEvidence` comment above.
   if (execution.outcome === 'receipt_done' || execution.outcome === 'receipt_skipped') return true
   if (execution.terminal_reason_code === 'completed') return true
-  if (execution.tool_contract_result?.startsWith('satisfied')) return true
   return false
-}
-
-function requiredToolText(snapshot: KeeperCompositeSnapshot): string | null {
-  const surface = snapshot.execution?.tool_surface
-  const missing = surface?.missing_required_tools ?? []
-  const required = surface?.required_tools ?? []
-  const names = missing.length > 0 ? missing : required
-  return names.length > 0 ? names.join(', ') : null
-}
-
-function hasRequireToolUseViolation(snapshot: KeeperCompositeSnapshot): boolean {
-  const code = snapshot.execution?.terminal_reason_code ?? ''
-  return code.includes('require_tool_use')
 }
 
 function blockingCause(snapshot: KeeperCompositeSnapshot): string {
@@ -428,14 +390,6 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
         ? `blocked: ${execution.operator_disposition_reason}`
         : 'blocked by operator disposition',
     )
-  }
-  if (execution.tool_contract_result === 'missing_required_tool_use') {
-    const tools = requiredToolText(snapshot)
-    parts.push(tools ? `tool contract: missing_required_tool_use (${tools})` : 'tool contract: missing_required_tool_use')
-  } else if (hasRequireToolUseViolation(snapshot)) {
-    parts.push('tool contract: actionable signal without keeper tool')
-  } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
-    parts.push('tool contract unknown with execution error')
   }
   if (execution.terminal_reason_code && execution.terminal_reason_code !== 'completed') {
     parts.push(`terminal: ${execution.terminal_reason_code}`)
@@ -452,20 +406,11 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
 function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'latest execution receipt 확인'
-  if (execution.tool_contract_result === 'missing_required_tool_use') {
-    const tools = requiredToolText(snapshot)
-    return tools
-      ? `필수 tool 호출 경로 확인: ${tools}`
-      : '필수 tool contract를 만족시키거나 task/tool 설정 조정'
-  }
-  if (hasRequireToolUseViolation(snapshot)) {
-    return '모델이 keeper tool을 호출하도록 prompt/tool-choice 경로 확인'
-  }
   if (execution.terminal_reason_code === 'api_error_invalid_request') {
-    return 'provider auth/model/config receipt 확인'
+    return 'runtime auth/config receipt 확인'
   }
   if (execution.terminal_reason_code === 'api_error_timeout') {
-    return 'provider timeout budget/cascade lane 확인'
+    return 'runtime timeout budget/lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'blocker gate/approval 상태와 최신 receipt 확인'
@@ -512,15 +457,6 @@ export function buildRuntimeAssistPrompt(
       terminal_reason_code: snapshot.execution.terminal_reason_code,
       operator_disposition: snapshot.execution.operator_disposition,
       operator_disposition_reason: snapshot.execution.operator_disposition_reason,
-      tool_contract_result: snapshot.execution.tool_contract_result,
-      required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
-      missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
-      tool_requirement: snapshot.execution.tool_surface?.tool_requirement ?? null,
-      turn_lane: snapshot.execution.tool_surface?.turn_lane ?? null,
-      tool_surface_class: snapshot.execution.tool_surface?.tool_surface_class ?? null,
-      visible_tool_count: snapshot.execution.tool_surface?.visible_tool_count ?? null,
-      tool_gate_enabled: snapshot.execution.tool_surface?.tool_gate_enabled ?? null,
-      tool_surface_fallback_used: snapshot.execution.tool_surface?.tool_surface_fallback_used ?? null,
       error_kind: snapshot.execution.error?.kind ?? null,
       error_preview: snapshot.execution.error?.message_preview ?? null,
     })
@@ -535,7 +471,7 @@ export function buildRuntimeAssistPrompt(
     `next_hint=${attention.nextStep}`,
     `evidence=${attention.reason}`,
     `is_live=${String(snapshot.is_live)}`,
-    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.cascade.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
+    `KSM=${snapshot.phase} KTC=${snapshot.turn_phase} KDP=${snapshot.decision.stage} KCL=${snapshot.runtime.state} KMC=${snapshot.compaction.stage} KCB=${breaker}`,
     `last_receipt=${receipt}`,
     '',
     '응답 형식:',
@@ -742,7 +678,7 @@ export function pushObservation(
       phase:      prev?.phase      ? prev.phase.slice()      : [],
       turn:       prev?.turn       ? prev.turn.slice()       : [],
       decision:   prev?.decision   ? prev.decision.slice()   : [],
-      cascade:    prev?.cascade    ? prev.cascade.slice()    : [],
+      runtime:    prev?.runtime    ? prev.runtime.slice()    : [],
       compaction: prev?.compaction ? prev.compaction.slice() : [],
       breaker:    prev?.breaker    ? prev.breaker.slice()    : [],
     }
@@ -801,7 +737,7 @@ export function tallyInvariantViolations(
 ): Record<keyof typeof INVARIANT_LABELS, number> {
   const counts = {
     phase_turn_alignment: 0,
-    no_cascade_before_measurement: 0,
+    no_runtime_before_measurement: 0,
     compaction_atomicity: 0,
     event_priority_monotone: 0,
     phase_derivation_agreement: 0,
@@ -971,7 +907,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? tallyInvariantViolations(data.snapshots) : null),
     [data],
   )
-  // Backend emits this Prometheus counter (`metric_fsm_guard_violation`)
+  // Backend emits this OTel counter (`metric_fsm_guard_violation`)
   // as a fleet-wide total duplicated onto every snapshot — see
   // keeper_composite_observer.ml:452. Reading [0] is intentional;
   // summing across snapshots would multiply the count by fleet size.
@@ -1106,7 +1042,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-testid="idle-composite-chip"
                   class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
-                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, cascade=idle, compaction=accumulating, circuit=clean)"
+                  title="모든 sub-FSM이 idle인 keeper 수 (turn=idle, decision=undecided, runtime=idle, compaction=accumulating, circuit=clean)"
                 >
                   Composite idle: ${idleCompositeCount}
                 </span>

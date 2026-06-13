@@ -13,6 +13,7 @@ import {
   connectorAccentStyle,
   sidecarCommands,
   startSidecar,
+  isInProcessConnector,
   CONNECTOR_DISPLAY_NAMES,
   KNOWN_CONNECTOR_IDS,
   type KnownConnectorId,
@@ -86,7 +87,9 @@ export function ConnectorOnboardingGrid() {
       </div>
       <${ConnectorBulkActions} connectors=${[]} />
       <div class="grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
-        ${KNOWN_CONNECTOR_IDS.map(id => html`<${OnboardingCard} connectorId=${id} />`)}
+        ${KNOWN_CONNECTOR_IDS
+          .filter(id => !isInProcessConnector(id))
+          .map(id => html`<${OnboardingCard} connectorId=${id} />`)}
       </div>
     </div>
   `

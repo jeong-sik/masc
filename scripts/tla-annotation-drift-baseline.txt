@@ -19,16 +19,16 @@
 #   - PR #14798 (KCAF D-1 audit, iter 30)
 
 # R-D-1.a pending: KCAF spec §ProviderOutcomes has a 3-way call_err
-# alphabet (call_err_cascadeable / _terminal / _hard_quota) while OCaml
-# `Cascade_fsm.provider_outcome` carries a single `Call_err`
+# alphabet (call_err_runtimeable / _terminal / _hard_quota) while OCaml
+# `Runtime_fsm.provider_outcome` carries a single `Call_err`
 # constructor with runtime classification via
-# `Cascade_health_filter.should_cascade_to_next` plus
+# `Runtime_health_filter.should_runtime_to_next` plus
 # `sdk_error_is_hard_quota` (keeper_turn_driver.ml:657-669).
 #
 # Production correctness preserved through:
-#   - Cascade_health_filter corpus tests
-#   - 3-BugAction model in KeeperCascadeAttemptFSM-buggy.cfg
-#   - Fun.protect finalizer in with_keeper_turn_slot
+#   - Runtime_health_filter corpus tests
+#   - 3-BugAction model in KeeperRuntimeAttemptFSM-buggy.cfg
+#   - holder release finalizer in with_recorded_turn_holder
 #
 # Removal trigger: R-D-1.a (Call_err 3-way split) lands.  See iter 30
 # audit memo §"Three RFC candidates".

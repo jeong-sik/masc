@@ -1,4 +1,4 @@
-(** test_keeper_turn_fsm_emit — Step 4b sentinel.
+(** test_keeper_turn_fsm_emit — Step 4b marker.
 
     Pins the [Keeper_turn_fsm.emit_transition] surface so a future
     refactor that drops [?prev] or renames a cancel/failure
@@ -13,9 +13,9 @@
       [bin/masc-trace] grouping does not silently lose a state
 *)
 
-open Masc_mcp
+open Masc
 module F = Keeper_turn_fsm
-module P = Prometheus
+module P = Otel_metric_store
 
 (* ── Compile-time signature anchor ─────────────────────────── *)
 
@@ -45,7 +45,7 @@ let test_turn_state_labels_cover_every_variant () =
   let pairs : (F.any_state * string) list =
     [ F.Any F.Idle, "idle"
     ; F.Any F.Phase_gating, "phase_gating"
-    ; F.Any F.Cascade_routing, "cascade_routing"
+    ; F.Any F.Runtime_routing, "runtime_routing"
     ; F.Any F.Awaiting_provider, "awaiting_provider"
     ; F.Any F.Streaming, "streaming"
     ; F.Any F.Awaiting_tool_result, "awaiting_tool"
@@ -54,9 +54,9 @@ let test_turn_state_labels_cover_every_variant () =
     ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
     ; ( F.Any
           (F.Failed
-             (F.Failure_no_tool_capable_provider
-                { cascade_name = "tools"; detail = "no candidate supports tools" }))
-      , "failed:no_tool_capable_provider" )
+             (F.Failure_no_capable_provider
+                { runtime_id = "tools"; detail = "no candidate supports tools" }))
+      , "failed:no_capable_provider" )
     ; F.Any (F.Cancelled F.Cancelled_phase_gate_close), "cancelled:phase_gate_close"
     ]
   in
@@ -87,28 +87,28 @@ let check_action ?ctx expected ~from_state ~to_state =
 let test_transition_actions_cover_tla_next () =
   check_action F.StartTurn ~from_state:F.Idle ~to_state:F.Phase_gating;
   check_action F.PhaseGateSkip ~from_state:F.Phase_gating ~to_state:F.Done;
-  check_action F.PhaseGateOk ~from_state:F.Phase_gating ~to_state:F.Cascade_routing;
-  check_action F.CascadeRouted ~from_state:F.Cascade_routing ~to_state:F.Awaiting_provider;
+  check_action F.PhaseGateOk ~from_state:F.Phase_gating ~to_state:F.Runtime_routing;
+  check_action F.RuntimeRouted ~from_state:F.Runtime_routing ~to_state:F.Awaiting_provider;
   check_action
-    F.CascadeUnavailable
-    ~from_state:F.Cascade_routing
+    F.RuntimeUnavailable
+    ~from_state:F.Runtime_routing
     ~to_state:
-      (F.Failed (F.Failure_cascade_unavailable { base = "ollama"; resolved = None }));
+      (F.Failed (F.Failure_runtime_unavailable { base = "ollama"; resolved = None }));
   check_action
     F.LivelockBlocked
-    ~from_state:F.Cascade_routing
+    ~from_state:F.Runtime_routing
     ~to_state:
       (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
   check_action
     F.NoToolCapableProvider
-    ~from_state:F.Cascade_routing
+    ~from_state:F.Runtime_routing
     ~to_state:
       (F.Failed
-         (F.Failure_no_tool_capable_provider
-            { cascade_name = "tools"; detail = "no provider supports required tools" }));
+         (F.Failure_no_capable_provider
+            { runtime_id = "tools"; detail = "no provider supports requested tool surface" }));
   check_action
     F.ProviderError
-    ~from_state:F.Cascade_routing
+    ~from_state:F.Runtime_routing
     ~to_state:
       (F.Failed (F.Failure_provider_error { kind = "provider_d"; detail = "rate_limit" }));
   check_action F.ProviderResponded ~from_state:F.Awaiting_provider ~to_state:F.Streaming;
@@ -123,7 +123,7 @@ let test_transition_actions_cover_tla_next () =
     F.ContractViolation
     ~from_state:F.Streaming
     ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "require_tool_use" }));
+      (F.Failed (F.Failure_completion_contract_violation { reason_code = "completion_contract" }));
   check_action
     F.ReceiptLost
     ~from_state:F.Streaming
@@ -143,7 +143,7 @@ let test_transition_actions_cover_tla_next () =
     F.ContractViolation
     ~from_state:F.Completing
     ~to_state:
-      (F.Failed (F.Failure_tool_contract_violation { reason_code = "passive_only" }));
+      (F.Failed (F.Failure_completion_contract_violation { reason_code = "passive_only" }));
   check_action
     F.ReceiptLost
     ~from_state:F.Completing
@@ -225,7 +225,7 @@ let test_stop_signaled_blocks_forward_transitions () =
        (F.transition_action_label action));
   (* PhaseGateOk must be rejected when stop_signaled is active *)
   (match F.classify_transition ~ctx:stop_active_ctx
-            ~from_state:F.Phase_gating ~to_state:F.Cascade_routing () with
+            ~from_state:F.Phase_gating ~to_state:F.Runtime_routing () with
    | None -> ()
    | Some action ->
      Alcotest.failf
@@ -353,13 +353,13 @@ let test_cancel_reason_labels_documented () =
 
 let test_failure_reason_labels_documented () =
   let pairs : (F.failure_reason * string) list =
-    [ ( F.Failure_cascade_unavailable { base = "ollama:7b"; resolved = None }
-      , "cascade_unavailable" )
-    ; ( F.Failure_no_tool_capable_provider
-          { cascade_name = "tools"; detail = "no candidate supports tools" }
-      , "no_tool_capable_provider" )
+    [ ( F.Failure_runtime_unavailable { base = "ollama:7b"; resolved = None }
+      , "runtime_unavailable" )
+    ; ( F.Failure_no_capable_provider
+          { runtime_id = "tools"; detail = "no candidate supports tools" }
+      , "no_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
-    ; F.Failure_tool_contract_violation { reason_code = "rc" }, "tool_contract_violation"
+    ; F.Failure_completion_contract_violation { reason_code = "rc" }, "completion_contract_violation"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"
     ; ( F.Failure_turn_livelock_blocked { reason = "stuck_after_sec" }
       , "turn_livelock_blocked" )

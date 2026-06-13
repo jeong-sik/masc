@@ -28,7 +28,7 @@ let test_protect_finally_runs () =
   check bool "finally called" true !called
 
 let test_protect_finally_error_no_raise () =
-  with_env "MASC_MCP_STRICT_FINALIZERS" (Some "0") (fun () ->
+  with_env "MASC_STRICT_FINALIZERS" (Some "0") (fun () ->
     let called = ref false in
     let value =
       Common.protect
@@ -41,7 +41,7 @@ let test_protect_finally_error_no_raise () =
     check bool "finally called" true !called)
 
 let test_protect_finally_error_raise () =
-  with_env "MASC_MCP_STRICT_FINALIZERS" (Some "1") (fun () ->
+  with_env "MASC_STRICT_FINALIZERS" (Some "1") (fun () ->
     let raised =
       try
         let _ =

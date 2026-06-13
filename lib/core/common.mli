@@ -8,7 +8,7 @@
     all return [true]; absent, empty, or anything else returns [false]. *)
 val env_true : string -> bool
 
-(** [true] when [MASC_MCP_STRICT_FINALIZERS] env is truthy. Callers can
+(** [true] when [MASC_STRICT_FINALIZERS] env is truthy. Callers can
     opt into raising finally-block exceptions instead of swallowing
     them. *)
 val strict_finalizers : unit -> bool
@@ -44,6 +44,15 @@ val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
+
+val keepers_runtime_dirname : string
+(** OUTPUT root segment for server-written keeper runtime state. Single literal
+    behind both keeper-dir SSOT functions; the input/output relocation flips it. *)
+
+val keepers_runtime_dir_of_base : base_path:string -> string
+(** [<base_path>/.masc/keepers] for callers holding only a [base_path]
+    (default cluster). Low-level SSOT that avoids the Workspace dependency cycle
+    the cluster-aware [Workspace.keepers_runtime_dir] would impose. *)
 
 val auth_dir_from_base_path : base_path:string -> string
 (** [<base_path>/.masc/auth]. SSOT path so {!Auth} and

@@ -38,9 +38,19 @@ let test_r0_read_commands () =
   check "rg pattern lib/" Shell_ir_risk.R0_Read;
   check "git status" Shell_ir_risk.R0_Read;
   check "git log --oneline -5" Shell_ir_risk.R0_Read;
+  check "git branch -a --list '*20083*'" Shell_ir_risk.R0_Read;
+  check "git branch --show-current" Shell_ir_risk.R0_Read;
+  check "git -C /repo status" Shell_ir_risk.R0_Read;
+  check "git -c color.ui=false branch --show-current" Shell_ir_risk.R0_Read;
+  check "git rev-parse HEAD" Shell_ir_risk.R0_Read;
+  check "git remote -v" Shell_ir_risk.R0_Read;
+  check "git config --get remote.origin.url" Shell_ir_risk.R0_Read;
+  check "git config --global --get user.email" Shell_ir_risk.R0_Read;
+  check "git tag -l" Shell_ir_risk.R0_Read;
+  check "env FOO=bar git status" Shell_ir_risk.R0_Read;
   check "gh pr view 123" Shell_ir_risk.R0_Read;
+  check "gh --repo owner/repo pr view 123" Shell_ir_risk.R0_Read;
   check "dune build" Shell_ir_risk.R0_Read;
-  check "make test" Shell_ir_risk.R0_Read;
   check "npm run build" Shell_ir_risk.R0_Read
 ;;
 
@@ -54,13 +64,35 @@ let test_r1_reversible_commands () =
   check "chgrp group file" Shell_ir_risk.R1_Reversible_mutation;
   check "git push origin main" Shell_ir_risk.R1_Reversible_mutation;
   check "git commit -m msg" Shell_ir_risk.R1_Reversible_mutation;
+  check "git add file.txt" Shell_ir_risk.R1_Reversible_mutation;
+  check "git apply patch.diff" Shell_ir_risk.R1_Reversible_mutation;
+  check "git -C /repo push origin branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git -c user.name=x commit -m msg" Shell_ir_risk.R1_Reversible_mutation;
+  check "git switch feature" Shell_ir_risk.R1_Reversible_mutation;
+  check "git restore file.txt" Shell_ir_risk.R1_Reversible_mutation;
+  check "git pull --ff-only" Shell_ir_risk.R1_Reversible_mutation;
+  check "git fetch origin main" Shell_ir_risk.R1_Reversible_mutation;
+  check "git config --global user.email x@example.com" Shell_ir_risk.R1_Reversible_mutation;
+  check "git remote set-head origin -a" Shell_ir_risk.R1_Reversible_mutation;
+  check "env FOO=bar git push origin branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "cat patch.diff | git apply" Shell_ir_risk.R1_Reversible_mutation;
   check "git checkout branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch new-branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch -d old-branch" Shell_ir_risk.R1_Reversible_mutation;
+  check "git branch -m old new" Shell_ir_risk.R1_Reversible_mutation;
   check "dune clean" Shell_ir_risk.R1_Reversible_mutation;
+  check "make test" Shell_ir_risk.R1_Reversible_mutation;
   check "make install" Shell_ir_risk.R1_Reversible_mutation;
   check "npm install pkg" Shell_ir_risk.R1_Reversible_mutation;
   check "truncate -s 0 file" Shell_ir_risk.R1_Reversible_mutation;
   check "mktemp" Shell_ir_risk.R1_Reversible_mutation;
-  check "tee file.txt" Shell_ir_risk.R1_Reversible_mutation
+  check "tee file.txt" Shell_ir_risk.R1_Reversible_mutation;
+  check "curl https://example.com" Shell_ir_risk.R1_Reversible_mutation;
+  check "wget https://example.com/file" Shell_ir_risk.R1_Reversible_mutation;
+  check "ssh host uptime" Shell_ir_risk.R1_Reversible_mutation;
+  check "scp file host:/tmp/file" Shell_ir_risk.R1_Reversible_mutation;
+  check "rsync -av src/ host:/tmp/src/" Shell_ir_risk.R1_Reversible_mutation;
+  check "env FOO=bar curl https://example.com" Shell_ir_risk.R1_Reversible_mutation
 ;;
 
 let test_r2_irreversible_commands () =
@@ -71,7 +103,11 @@ let test_r2_irreversible_commands () =
   check "install file dest" Shell_ir_risk.R2_Irreversible;
   check "dd if=/dev/zero of=disk" Shell_ir_risk.R2_Irreversible;
   check "git reset --hard HEAD" Shell_ir_risk.R2_Irreversible;
+  check "git -C /repo reset --hard HEAD" Shell_ir_risk.R2_Irreversible;
+  check "git clean -fd" Shell_ir_risk.R2_Irreversible;
+  check "env git reset --hard HEAD" Shell_ir_risk.R2_Irreversible;
   check "gh pr merge 123" Shell_ir_risk.R2_Irreversible;
+  check "gh --repo owner/repo pr merge 123" Shell_ir_risk.R2_Irreversible;
   check "gh repo delete owner/repo" Shell_ir_risk.R2_Irreversible;
   check "shred -u file.txt" Shell_ir_risk.R2_Irreversible
 ;;
@@ -79,7 +115,100 @@ let test_r2_irreversible_commands () =
 let test_destructive_commands () =
   check "rm -rf /" Shell_ir_risk.Destructive_protected;
   check "git push --force origin main" Shell_ir_risk.Destructive_protected;
-  check "git push -f origin main" Shell_ir_risk.Destructive_protected
+  check "git push -f origin main" Shell_ir_risk.Destructive_protected;
+  check "git -C /repo push --force origin main" Shell_ir_risk.Destructive_protected;
+  check "env git push --force origin main" Shell_ir_risk.Destructive_protected;
+  check "cat ref | git push --force origin main" Shell_ir_risk.Destructive_protected;
+  check "bash -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected;
+  check "sh -c 'echo x > /tmp/x'" Shell_ir_risk.Destructive_protected;
+  check "python -c 'open(\"x\", \"w\").write(\"1\")'" Shell_ir_risk.Destructive_protected;
+  check "python3 -c 'open(\"x\", \"w\").write(\"1\")'" Shell_ir_risk.Destructive_protected;
+  check "node -e 'require(\"fs\").writeFileSync(\"x\", \"1\")'"
+    Shell_ir_risk.Destructive_protected;
+  check "pip install pkg" Shell_ir_risk.Destructive_protected;
+  check "npx some-tool" Shell_ir_risk.Destructive_protected;
+  check "env -S \"sh -c 'touch x'\"" Shell_ir_risk.Destructive_protected;
+  check "env --split-string=\"sh -c 'touch x'\"" Shell_ir_risk.Destructive_protected;
+  check "opam exec -- sh -c 'touch x'" Shell_ir_risk.Destructive_protected
+;;
+
+let test_typed_execute_shell_capable_executable_is_destructive () =
+  let input =
+    `Assoc
+      [ "executable", `String "python3"
+      ; "argv", `List [ `String "-c"; `String "open('x', 'w').write('1')" ]
+      ]
+  in
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute python3 is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
+;;
+
+let test_typed_execute_env_split_shell_wrapper_is_destructive () =
+  let input =
+    `Assoc
+      [ "executable", `String "env"
+      ; "argv", `List [ `String "-S"; `String "sh -c 'touch x'" ]
+      ]
+  in
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute env -S shell wrapper is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
+;;
+
+let test_typed_execute_opam_exec_shell_wrapper_is_destructive () =
+  let input =
+    `Assoc
+      [ "executable", `String "opam"
+      ; "argv"
+        , `List
+            [ `String "exec"
+            ; `String "--"
+            ; `String "sh"
+            ; `String "-c"
+            ; `String "touch x"
+            ]
+      ]
+  in
+  match Masc.Keeper_tool_execute_typed_input.of_json input with
+  | Error msg -> Alcotest.failf "typed Execute parse failed: %s" msg
+  | Ok typed_input ->
+    (match Masc.Keeper_tool_execute_typed_input.to_shell_ir typed_input with
+     | Error err ->
+       Alcotest.failf
+         "typed Execute validation failed: %a"
+         Masc.Keeper_tool_execute_typed_input.pp_validation_error
+         err
+     | Ok ir ->
+       let envelope = Shell_ir_risk.classify (Shell_ir_risk.undecided ir) in
+       Alcotest.(check bool)
+         "typed Execute opam exec shell wrapper is blocked before dispatch"
+         true
+         (Shell_ir_risk.is_destructive envelope))
 ;;
 
 let test_gh_r0_read () =
@@ -94,6 +223,8 @@ let test_gh_r0_read () =
 let test_gh_r1_reversible () =
   check "gh pr create" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr close 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh --repo owner/repo pr close 123" Shell_ir_risk.R1_Reversible_mutation;
+  check "gh pr checkout 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh pr reopen 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh issue create" Shell_ir_risk.R1_Reversible_mutation;
   check "gh issue edit 123" Shell_ir_risk.R1_Reversible_mutation;
@@ -113,6 +244,8 @@ let test_gh_r1_reversible () =
   check "gh api repos/owner/repo/issues --method POST" Shell_ir_risk.R1_Reversible_mutation;
   check "gh api repos/owner/repo/issues -X PUT" Shell_ir_risk.R1_Reversible_mutation;
   check "gh api repos/owner/repo/issues -X PATCH" Shell_ir_risk.R1_Reversible_mutation;
+  check "printf data | gh api -X PATCH repos/owner/repo" Shell_ir_risk.R1_Reversible_mutation;
+  check "env GH_TOKEN=x gh pr close 123" Shell_ir_risk.R1_Reversible_mutation;
   check "gh api graphql" Shell_ir_risk.R1_Reversible_mutation;
   check "gh api repos/owner/repo --field name=value" Shell_ir_risk.R1_Reversible_mutation;
   check "gh api repos/owner/repo --raw-field name=value" Shell_ir_risk.R1_Reversible_mutation
@@ -147,7 +280,20 @@ let () =
     ; ( "R2 irreversible"
       , [ Alcotest.test_case "bare commands" `Quick test_r2_irreversible_commands ] )
     ; ( "Destructive protected"
-      , [ Alcotest.test_case "destructive commands" `Quick test_destructive_commands ] )
+      , [ Alcotest.test_case "destructive commands" `Quick test_destructive_commands
+        ; Alcotest.test_case
+            "typed Execute shell-capable executable"
+            `Quick
+            test_typed_execute_shell_capable_executable_is_destructive
+        ; Alcotest.test_case
+            "typed Execute env -S shell wrapper"
+            `Quick
+            test_typed_execute_env_split_shell_wrapper_is_destructive
+        ; Alcotest.test_case
+            "typed Execute opam exec shell wrapper"
+            `Quick
+            test_typed_execute_opam_exec_shell_wrapper_is_destructive
+        ] )
     ; ( "gh R0 read"
       , [ Alcotest.test_case "gh read commands" `Quick test_gh_r0_read ] )
     ; ( "gh R1 reversible"

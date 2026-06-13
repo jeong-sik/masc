@@ -4,8 +4,8 @@
     - Chaos: random events from all 23 variants. Tests rejection correctness.
     - Guided: phase-aware events only. Tests state transition coverage. *)
 
-module SM = Masc_mcp.Keeper_state_machine
-module IC = Masc_mcp.Keeper_invariant_check
+module SM = Keeper_state_machine
+module IC = Masc.Keeper_invariant_check
 
 (* ── Chaos Generator: all 23 event variants ────────────── *)
 

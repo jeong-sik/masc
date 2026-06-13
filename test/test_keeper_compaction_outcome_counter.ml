@@ -11,11 +11,11 @@
                     [context_overflow] set so operators can
                     escalate). *)
 
-module EC = Masc_mcp.Keeper_context_runtime
-module Prom = Masc_mcp.Prometheus
+module EC = Masc.Keeper_context_runtime
+module Metrics = Masc.Otel_metric_store
 
 let counter_for ~keeper ~outcome =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     EC.compaction_outcome_metric
     ~labels:[ ("keeper", keeper); ("outcome", outcome) ]
     ()

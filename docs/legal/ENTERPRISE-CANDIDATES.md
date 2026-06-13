@@ -23,7 +23,7 @@ Open Core 분리 시 EE(Enterprise Edition) tier로 이동 가능한 모듈을 *
 | 모듈 | EE 적합성 근거 |
 |---|---|
 | `lib/auth.ml` + `.mli` | 인증 핵심. EE는 *확장*만 (SAML2/SCIM/SSO) |
-| `lib/auth_doctor.ml` + `.mli` | auth 진단 도구. compliance 시나리오에서 EE 차별화 가능 |
+| `lib/auth_diagnostic.ml` + `.mli` | auth 진단 도구. compliance 시나리오에서 EE 차별화 가능 |
 | `lib/auth_login.ml` + `.mli` | login 흐름 |
 | `lib/auth_resolve.ml` + `.mli` | identity 해소 |
 | `lib/auth_strict_mode.ml` + `.mli` | strict mode (compliance) — Enterprise compliance 요구에 부합 |
@@ -47,15 +47,14 @@ Open Core 분리 시 EE(Enterprise Edition) tier로 이동 가능한 모듈을 *
 - ❌ 현재 구현이 *Tier 1 부분 구현* (ch1 S6: "sandbox path leak 잔존, gVisor/Firecracker rg 0 hits")
 - → EE 분리 *prerequisite 미충족*. sandbox 완성 후 결정.
 
-### 2.3 Credential Provider
+### 2.3 Repo Auth Provider
 
 | 모듈 | 근거 |
 |---|---|
-| `lib/credential_provider/*` (RFC 0008 기반) | 자격 증명 수명주기. 외부 IdP 연동 (Okta, Auth0) EE 후보 |
+| retired | repo-local auth brokering was removed from the product surface |
 
 **평가**:
-- ⚠️ RFC 0008 진행 중 — spec 안정화 prerequisite
-- 분리 결정은 RFC 0008 머지 + production usage 확보 후
+- ❌ 현재 EE 후보 아님. repo-local auth brokering is not a supported split surface.
 
 ### 2.4 향후 후보 (현재 미구현)
 

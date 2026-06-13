@@ -47,9 +47,9 @@ WORKDIR /app
 # Binary path configurable via build arg for local dev vs CI.
 # Local:  dune build --release bin/main_eio.exe && \
 #         docker build --build-arg BINARY_PATH=_build/default/bin/main_eio.exe .
-ARG BINARY_PATH=masc-mcp-linux-x64
-COPY ${BINARY_PATH} /app/masc-mcp
-RUN chmod +x /app/masc-mcp
+ARG BINARY_PATH=masc-linux-x64
+COPY ${BINARY_PATH} /app/masc
+RUN chmod +x /app/masc
 
 # Create non-root user for runtime
 RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
@@ -88,11 +88,11 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 USER appuser
 
-# tini is PID 1, masc-mcp runs as PID 2. tini forwards SIGTERM to its
+# tini is PID 1, masc runs as PID 2. tini forwards SIGTERM to its
 # child (preserving STOPSIGNAL contract) and reaps zombies. Compose's
 # `init: true` would do the same via docker-init, but baking tini in
 # guarantees zombie reaping for plain `docker run` without --init too.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # --base-path is already set via MASC_BASE_PATH; avoid duplication.
-CMD ["/app/masc-mcp", "--port", "8080"]
+CMD ["/app/masc", "--port", "8080"]

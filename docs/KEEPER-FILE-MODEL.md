@@ -87,14 +87,13 @@ These are the identity fields that should live in persona by default.
 | `short_goal` | Optional | Short-horizon goal | Defaults to `goal` in create paths. |
 | `mid_goal` | Optional | Mid-horizon goal | Defaults to `goal` in create paths. |
 | `long_goal` | Optional | Long-horizon goal | Defaults to `goal` in create paths. |
-| `will` | Optional | Keeper self-model: will | Identity field. |
-| `needs` | Optional | Keeper self-model: needs | Identity field. |
-| `desires` | Optional | Keeper self-model: desires | Identity field. |
-| `instructions` | Optional | Persona-specific instructions | Identity field. |
+| `will` | Optional | Keeper drive / self-model | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `needs` | Optional | Resources or context the keeper believes it needs | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `desires` | Optional | Desired end state / motivational bias | Used as prompt default unless a keeper TOML overlay overrides it. |
+| `instructions` | Optional | Persona-specific behavior and voice instructions | Used as prompt default unless a keeper TOML overlay overrides it. |
 | `mention_targets` | Optional | Default mention aliases | If omitted, create-from-persona falls back to `[persona_name]`. |
-| `tool_preset` | Optional | Default tool policy preset | Canonical place for default tool intent. |
-| `tool_also_allow` | Optional | Additional tools layered onto preset | Use sparingly. |
-| `tool_denylist` | Optional | Tools to remove from the resolved preset | Optional policy refinement. |
+| `tool_access` | Optional | Default tool candidate profile list | String array of tool names used as profile input; omitted means `[]`. It is not the complete execution gate. |
+| `tool_denylist` | Optional | Tools to remove after candidate profile resolution | Optional policy refinement. |
 | `policy_voice_enabled` | Optional | Whether voice tools should be surfaced | Policy default, not runtime state. |
 | `shards` | Optional | Default tool shards | Optional specialization hook. |
 
@@ -105,7 +104,8 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | Field | Status | Preferred owner |
 | --- | --- | --- |
 | `allowed_paths` | Ignored by design | nowhere in persona |
-| `cascade_name` | Compatibility-only | `keeper.toml` |
+| `runtime_id`, `model`, `runtime_ref` | Removed | `runtime.toml [[runtime.assignments]]` |
+| `persona_ref` | Removed | `keeper.persona_name` |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
 
@@ -136,13 +136,10 @@ persona_name = "analyst"
 | --- | --- | --- | --- |
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode git/gh dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
-| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
-| `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
-| `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
-| `repo_cli_identity` | Optional | Bound repo CLI identity bundle | Resolves to `.masc/repo-cli-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |
-| `git_identity_mode` | Optional | Commit identity policy | `keeper_alias` keeps git author separate from GitHub auth; `repo_cli_identity` is reserved for future explicit coupling. |
-| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` claims only tasks linked to these goals. If the scoped pool has no task claimable with the keeper's current capabilities, the claim stops; only auto-repaired keeper-purpose goals may fall back to all claimable tasks. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container. Hard mode requires `docker`. |
+| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none`; `local` defaults to `inherit`. Hard mode requires `none`. |
+| `tool_access` | Optional | Deployment-specific tool candidate profile override | Only when intentionally overriding persona default. |
+| `active_goal_ids` | Optional | Goal-scoped claim filter | When set, `keeper_task_claim` only claims tasks linked to these goals and reports scope health in audit/status surfaces. |
 
 ### Additional supported overlay fields
 
@@ -156,10 +153,10 @@ These are still accepted by the loader, but for consistency they should be used 
 | `policy_voice_enabled` | bool | Override persona voice policy |
 | `proactive_enabled` | bool | Override default proactive scheduling |
 | `proactive_idle_sec`, `proactive_cooldown_sec` | int | Proactive scheduling intervals |
-| `room_signal_prompt_enabled` | bool | Override room-signal prompt behavior |
+| `workspace_signal_prompt_enabled` | bool | Override workspace-signal prompt behavior |
 | `allowed_paths` | string array | Exceptional path override only; prefer empty and rely on the single sandbox root |
-| `tool_also_allow` | string array | Extra tool names added to the preset surface |
-| `tool_denylist` | string array | Tool names blocked regardless of preset |
+| `tool_access` | string array | Explicit tool candidate profile names |
+| `tool_denylist` | string array | Tool names blocked after candidate profile resolution |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
@@ -174,10 +171,9 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | --- | --- |
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
-| `git_identity_mode` | `keeper_alias`, `repo_cli_identity` |
-| `tool_preset` | `minimal`, `social`, `messaging`, `research`, `delivery`, `full` |
+| `tool_access` | string array of registered tool names used as the candidate profile list |
 | `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
-| `cascade_name` | keeper-assignable declarative cascade profiles exposed by the active catalog: route targets, tier names, or tier-group names that are not marked `keeper-assignable = false` |
+| `runtime_id` | keeper-assignable declarative runtime profiles exposed by the active catalog: route targets, tier names, or runtime names that are not marked `keeper-assignable = false` |
 
 ### Sandbox Example
 
@@ -193,9 +189,7 @@ Operational intent:
 - private writable lane: the keeper sandbox. The current local/docker storage path is `.masc/playground/<keeper>/...`, but keeper tools should use sandbox-relative paths such as `repos/<repo>` and `mind/<file>`.
 - no arbitrary shared writable shell directory
 - `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
-- `repo_cli_identity`가 설정된 keeper는 `.masc/repo-cli-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. operator 개인 `gh` config, ambient `GH_TOKEN`/`GITHUB_TOKEN`, SSH agent로는 fallback 하지 않는다.
-- `repo_cli_identity`가 없는 keeper는 `.masc/repo-cli-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다.
-- `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 Docker container의 ambient operator credential 사용이 꺼지고, GitHub access는 selected identity bundle의 `GH_CONFIG_DIR`로 검증된 `tool_execute` 경로만 사용한다.
+- `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 Docker container의 ambient operator credential 사용이 꺼지고, keeper TOML 필드로 credential을 선택하지 않는다.
 
 ### Removed / forbidden fields (hard-rejected)
 
@@ -203,9 +197,9 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 
 | Field | Replacement / rationale |
 | --- | --- |
-| `also_allow` | Renamed to `tool_also_allow` in `keeper.toml`. Use `tool_access.also_allow` only inside the JSON `tool_access` object. |
-| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `cascade_name` → `cascade.toml`. Do not pin per-keeper. |
-| `allowed_providers` | Provider/model ownership lives in `cascade.toml` and OAS runtime receipts. Do not pin providers per keeper. |
+| Retired tool-policy aliases | Tool policy uses the canonical `tool_access` string-array candidate profile list plus `tool_denylist`; runtime execution is still constrained by descriptor/registry availability, per-turn OAS allowlists, and eval gates. |
+| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `runtime.toml`. Do not pin per-keeper. |
+| `allowed_providers` | Provider/model ownership lives in `runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |
 | `initiative_scope`, `initiative_enabled`, `initiative_idle_sec`, `initiative_cooldown_sec` | Renamed to `proactive_*` (see above). |

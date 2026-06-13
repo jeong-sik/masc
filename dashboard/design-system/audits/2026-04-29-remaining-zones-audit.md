@@ -26,11 +26,11 @@ For each zone:
 | **K3 Institution Episodes** | zero-surface | **full coverage** | `memory-subsystems.ts:EpisodeCard` + `MemorySubsystemsEpisode` data already match all spec fields |
 | **C2 Messages** | zero-surface | **partial coverage** | `keeper-chat-panel.ts` covers chat surface; mention inbox + state-block message variants are not separate UI but data exists |
 | **K2 Decisions/Memory** | zero-surface | backend-blocked | no `decisions.jsonl` / `memory.jsonl` cross-keeper API; only per-keeper `Keeper.last_speech_act` |
-| **O2 Audit Ledger** | zero-surface | backend-blocked | `/api/v1/audit` endpoint absent; closest is `cascade/strategy_trace` which is a different schema |
+| **O2 Audit Ledger** | zero-surface | backend-blocked | `/api/v1/audit` endpoint absent; closest is `runtime/strategy_trace` which is a different schema |
 | **O3 Trend variant** | partial (Phase F-C) | backend-blocked | `SafeAutonomyData.history[]` field absent (verified in `safe-autonomy.ts:80`) |
 | **O5 Heuristic + Stress** | zero-surface | backend-blocked | no `heuristics.jsonl` / `agent_stress.jsonl` API in `dashboard/src/api/` |
 | **G1-C Snapshot diff** | partial | backend-blocked | `goal_snapshots` API absent; product decision required |
-| **O1 Cascade Inspector** | partial | Large + backend-partial | `StrategyTraceTable` rows exist but spec's per-run hop card model needs new endpoint shape |
+| **O1 Runtime Inspector** | partial | Large + backend-partial | `StrategyTraceTable` rows exist but spec's per-run hop card model needs new endpoint shape |
 | **C3 Composer v2** | zero-surface | use-site-missing | composer requires C2 chat surface to be a zone; current chat lives inside per-keeper detail |
 | **G3 Error boundary** | zero-surface | full coverage | reconciled in #11543 (severity prop + reload) |
 | **G4 Pagination / G5 Breadcrumb** | not in original audit | partial coverage | `dashboard-shell.ts` already renders breadcrumb trail; pagination is per-feature inline (board, etc.) |
@@ -58,23 +58,23 @@ Every spec field has a production equivalent (`ts → timestamp`). Production ex
 
 ## Detail — C2 Messages
 
-**Spec** (`cb-group-e.jsx:157-313`): three variants — Room timeline, Mention inbox, State-block message focus.
+**Spec** (`cb-group-e.jsx:157-313`): three variants — Workspace timeline, Mention inbox, State-block message focus.
 
-**Production**: `dashboard/src/components/keeper-chat-panel.ts` is a per-keeper chat surface (not a room timeline). `dashboard/src/components/chat/primitives.ts` provides chat primitives. `MASC_broadcast` exists via `callMcpTool('masc_broadcast', ...)` in `actions.ts:24`.
+**Production**: `dashboard/src/components/keeper-chat-panel.ts` is a per-keeper chat surface (not a workspace timeline). `dashboard/src/components/chat/primitives.ts` provides chat primitives. `MASC_broadcast` exists via `callMcpTool('masc_broadcast', ...)` in `actions.ts:24`.
 
 **Gap** — partial:
-- C2-A Room timeline: missing as a zone (chat is per-keeper, not per-room)
+- C2-A Workspace timeline: missing as a zone (chat is per-keeper, not per-workspace)
 - C2-B Mention inbox: missing entirely
 - C2-C State-block message: missing as a structured-message form
 
-The data plumbing is partly there (broadcast tool call works), but a "rooms" abstraction that would group messages cross-keeper is not surfaced. **Backend partial-blocked**: `masc_broadcast` exists for sending but no `/api/v1/rooms` for fan-out reading. Reconciliation requires either a room API or a synthesized stream-by-broadcast view.
+The data plumbing is partly there (broadcast tool call works), but a "workspaces" abstraction that would group messages cross-keeper is not surfaced. **Backend partial-blocked**: `masc_broadcast` exists for sending but no `/api/v1/workspaces` for fan-out reading. Reconciliation requires either a workspace API or a synthesized stream-by-broadcast view.
 
 ## Detail — Backend-blocked zones (K2 / O2 / O3 / O5 / G1-C)
 
 For each, the path was: search for the data type, the API endpoint, the SSE event type. None found:
 
 - **K2** `decisions.jsonl` / `memory.jsonl` — no decision/memory stream API. `Keeper.last_speech_act` is the only per-keeper field, not a cross-keeper log.
-- **O2** `audit.jsonl` — no `/api/v1/audit`. `cascade/strategy_trace` is a different (cascade-internal) audit, not the global event ledger the spec describes.
+- **O2** `audit.jsonl` — no `/api/v1/audit`. `runtime/strategy_trace` is a different (runtime-internal) audit, not the global event ledger the spec describes.
 - **O3** `SafeAutonomyData.history[]` — verified absent in `safe-autonomy.ts:80`.
 - **O5** `heuristics.jsonl` / `agent_stress.jsonl` — no matching API surface.
 - **G1-C** `goal_snapshots` — no snapshot API.
@@ -85,7 +85,7 @@ Each requires backend work outside Phase F scope.
 
 **Spec** (`cb-group-e.jsx:317-440`): Composer with broadcast / dm / state-block modes.
 
-The composer would have to live inside a chat surface. Today's production chat surface is per-keeper (`keeper-chat-panel.ts`), not a multi-room board. Building the composer in isolation produces dead code; the room/board chat surface needs to exist first (= C2 unblocked).
+The composer would have to live inside a chat surface. Today's production chat surface is per-keeper (`keeper-chat-panel.ts`), not a multi-workspace board. Building the composer in isolation produces dead code; the workspace/board chat surface needs to exist first (= C2 unblocked).
 
 ## Detail — G4 Pagination / G5 Breadcrumb (partial primitives)
 
@@ -101,9 +101,9 @@ Phase F (Reconciliation) backlog as it actually stands after this audit:
 | Bucket | Zones |
 |--------|-------|
 | ✅ Already covered (close as no-op) | C1, K3, G3 |
-| 🟡 Partial — frontend extension possible | C2 (reconciliation requires backend room API), G4/G5 (optional primitives) |
+| 🟡 Partial — frontend extension possible | C2 (reconciliation requires backend workspace API), G4/G5 (optional primitives) |
 | 🔴 Backend-blocked | K2, O2, O3, O5, G1-C |
-| 🔴 Large (multi-PR) | O1 Cascade Inspector |
+| 🔴 Large (multi-PR) | O1 Runtime Inspector |
 | 🟡 Use-site missing | C3 (depends on C2) |
 | ⏸ User-deferred | E1-E5, Phase B (I0 IDE Backbone) |
 

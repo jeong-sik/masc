@@ -12,7 +12,7 @@
     generation possibly synced to the checkpoint).
     [handoff_json] carries the legacy MASC handoff envelope. *)
 type handoff_rollover =
-  { updated_meta : Keeper_types.keeper_meta
+  { updated_meta : Keeper_meta_contract.keeper_meta
   ; handoff_json : Yojson.Safe.t option
   ; attempted : bool
   ; failure_reason : string option
@@ -25,9 +25,9 @@ type handoff_rollover =
 (** Returns [true] when [klass] is the typed equivalent of a provider
     context-overflow signal.  The keeper layer never substring-matches
     error phrasing — the SDK boundary classifies once into
-    [Keeper_types.blocker_class], and downstream code reasons only over
+    [Keeper_meta_contract.blocker_class], and downstream code reasons only over
     the typed enum.  Pure — exposed for unit testing. *)
-val blocker_class_indicates_overflow : Keeper_types.blocker_class -> bool
+val blocker_class_indicates_overflow : Keeper_meta_contract.blocker_class -> bool
 
 (** Verdict from [classify_rollover_gate]; [Skip] carries a stable
     skip reason, [Go] carries the trigger reason that will appear
@@ -39,9 +39,9 @@ type rollover_gate_decision =
 (** Append lineage telemetry artifacts; logs and swallows non-cancel
     exceptions (rollover succeeds even if lineage append fails). *)
 val append_lineage_artifacts_best_effort :
-  config:Coord.config ->
-  parent:Keeper_types.keeper_meta ->
-  child:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  parent:Keeper_meta_contract.keeper_meta ->
+  child:Keeper_meta_contract.keeper_meta ->
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
@@ -56,9 +56,9 @@ val classify_rollover_gate :
   cooldown_elapsed:bool ->
   ratio:float ->
   handoff_threshold:float ->
-  last_outcome:Keeper_types.proactive_cycle_outcome ->
-  last_blocker_info:Keeper_types.blocker_info option ->
-  ?current_turn_blocker_info:Keeper_types.blocker_info option ->
+  last_outcome:Keeper_meta_contract.proactive_cycle_outcome ->
+  last_blocker_info:Keeper_meta_contract.blocker_info option ->
+  ?current_turn_blocker_info:Keeper_meta_contract.blocker_info option ->
   unit ->
   rollover_gate_decision
 
@@ -69,9 +69,9 @@ val classify_rollover_gate :
 val maybe_rollover_oas_handoff :
   on_started:(unit -> unit) ->
   base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
+  meta:Keeper_meta_contract.keeper_meta ->
   model:string ->
   primary_model_max_tokens:int ->
-  current_turn_blocker_info:Keeper_types.blocker_info option ->
+  current_turn_blocker_info:Keeper_meta_contract.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   handoff_rollover

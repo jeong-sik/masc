@@ -1,7 +1,7 @@
 (** See .mli for contract.
 
-    Extracted from [Agent_tool_command_runtime] (RFC-0006 Phase B-3b) so both
-    [Agent_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
+    Extracted from [Keeper_tool_command_runtime] (RFC-0006 Phase B-3b) so both
+    [Keeper_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
     sandbox) can preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)
@@ -48,15 +48,10 @@ type stop_result =
    tab-separated fields into 3 and breaking the exact-match parser
    below. Strip only the line-terminator [\r] so trailing-empty
    tab-separated fields survive. *)
-let strip_cr line =
-  let n = String.length line in
-  if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line
-;;
-
 let nonempty_lines out =
   out
   |> String.split_on_char '\n'
-  |> List.map strip_cr
+  |> List.map String_util.strip_trailing_cr
   |> List.filter (fun line -> line <> "")
 ;;
 
@@ -630,15 +625,13 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
     [ "backend", `String "docker"
     ; "status", `String (if preflight.ok then "ok" else "error")
     ; "ok", `Bool preflight.ok
-    ; "credential_fallbacks_disabled", `Bool preflight.credential_fallbacks_disabled
-    ; "git_egress", `String preflight.git_egress
     ; "image", `String preflight.image
     ; "docker_runtime_ok", `Bool preflight.docker_runtime_ok
-    ; option_field "docker_runtime_error" preflight.docker_runtime_error
+    ; Json_util.string_opt_field "docker_runtime_error" preflight.docker_runtime_error
     ; "hardening_ok", `Bool preflight.hardening_ok
-    ; option_field "hardening_error" preflight.hardening_error
+    ; Json_util.string_opt_field "hardening_error" preflight.hardening_error
     ; "image_present", `Bool preflight.image_present
-    ; option_field "image_error" preflight.image_error
+    ; Json_util.string_opt_field "image_error" preflight.image_error
     ; ( "failure_classes"
       , `List
           (List.map
@@ -777,7 +770,7 @@ let docker_preflight ~timeout_sec () =
          then
            Some
              "Fix the keeper sandbox hardening configuration \
-              (seccomp/rootless/userns) and rerun doctor."
+              (seccomp/rootless/userns) and rerun sandbox diagnostics."
          else None)
       ]
       |> List.filter_map (fun action -> action)
@@ -809,11 +802,6 @@ let docker_preflight ~timeout_sec () =
           && image_present
           && command_error = None
           && missing_commands = []
-      ; credential_fallbacks_disabled = false
-      ; git_egress =
-          (if Env_config_sandbox.Runtime.git_dispatch ()
-           then "repo_cli_identity_dispatch"
-           else "container_network_policy")
       ; image
       ; docker_runtime_ok
       ; docker_runtime_error
@@ -853,8 +841,8 @@ let preflight_cache_lookup ~now =
 
 let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
   match sandbox_profile with
-  | Keeper_types.Local -> Ok ()
-  | Keeper_types.Docker ->
+  | Keeper_types_profile_sandbox.Local -> Ok ()
+  | Keeper_types_profile_sandbox.Docker ->
     if not (Env_config_sandbox.Preflight.enabled ())
     then Ok ()
     else (

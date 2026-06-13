@@ -8,7 +8,7 @@
     type identities and value bindings flow through unchanged.
 
     Wire schema: every operator action (keeper spawn, restart, pause,
-    cascade switch, etc.) is appended as one JSONL line to
+    runtime switch, etc.) is appended as one JSONL line to
     `<operator_dir>/action_log.jsonl`. The schema covers identity
     (trace_id, actor, remote session/client), target (type/id), the
     delegated tool, confirmation state (preview/immediate/expired/
@@ -67,11 +67,11 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
   `Assoc
     [ "trace_id", `String entry.trace_id
     ; "actor", `String entry.actor
-    ; "remote_session_id", Operator_pending_confirm.string_option_to_json entry.remote_session_id
+    ; "remote_session_id", Json_util.string_opt_to_json entry.remote_session_id
     ; "remote_client_type", `String entry.remote_client_type
     ; "action_type", `String entry.action_type
     ; "target_type", `String entry.target_type
-    ; "target_id", Operator_pending_confirm.string_option_to_json entry.target_id
+    ; "target_id", Json_util.string_opt_to_json entry.target_id
     ; "delegated_tool", `String entry.delegated_tool
     ; ( "confirmation_state"
       , `String (confirmation_state_to_string entry.confirmation_state) )
@@ -82,7 +82,7 @@ let action_log_entry_to_yojson (entry : action_log_entry) =
 ;;
 
 let append_action_log config (entry : action_log_entry) =
-  Coord_utils.mkdir_p (Operator_pending_confirm.operator_dir config);
+  Workspace_utils.mkdir_p (Operator_pending_confirm.operator_dir config);
   Fs_compat.append_jsonl (action_log_path config) (action_log_entry_to_yojson entry)
 ;;
 

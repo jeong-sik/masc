@@ -3,7 +3,7 @@
     and tone/severity utilities for the execution
     dashboard pipeline.
 
-    {b Cascade chain}: 3 sister modules
+    {b Runtime chain}: 3 sister modules
     ({!Dashboard_execution_fixture},
     {!Dashboard_execution_sessions},
     {!Dashboard_execution}) do
@@ -12,7 +12,7 @@
     every dashboard execution consumer.  Plus dotted
     callers ({!get_agent_profile} from
     [server_dashboard_http_core] +
-    [server_routes_http_routes_room]).
+    [server_routes_http_routes_workspace]).
 
     External surface (38 entries — 8 records + 30
     helpers).
@@ -31,8 +31,7 @@
     [is_keeper_offline] / [is_health_at_risk] /
     [is_session_terminal] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
-    [cap_string_list] / [tool_preview_fields] /
-    [execution_tool_preview_limit] / [tool_audit_snapshot]
+    [cap_string_list] / [execution_tool_preview_limit] / [tool_audit_snapshot]
     / [skill_route_summary_of_keeper] /
     [string_list_of_field]). *)
 
@@ -43,8 +42,8 @@ type tone = Dashboard_utils.tone =
   | Tone_warn
   | Tone_bad
 (** Severity tone re-export from {!Dashboard_utils.tone}.
-    Type-equality preserves so every cascade consumer
-    (Dashboard_mission_assembly, etc.) can use the same
+    Type-equality preserves so every runtime consumer
+    (Dashboard_briefing_assembly, etc.) can use the same
     constructors regardless of which alias they reach
     them through. *)
 
@@ -61,7 +60,7 @@ type session_seed = {
   session_id : string;
   goal : string;
   namespace : string option;
-  status : string;
+  status : string option;
   health : string;
   member_names : string list;
   last_activity_at : string option;
@@ -112,7 +111,6 @@ type continuity_context = {
 }
 
 type tool_audit_snapshot = {
-  allowed_tool_names : string list;
   latest_tool_names : string list;
   latest_tool_call_count : int option;
   latest_action_source : string option;
@@ -138,11 +136,8 @@ val get_agent_profile : string -> agent_profile
 
 (** {1 JSON envelope helpers} *)
 
-val json_string_option : string option -> Yojson.Safe.t
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
-val string_field_opt : string -> Yojson.Safe.t -> string option
-val int_field : ?default:int -> string -> Yojson.Safe.t -> int
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 val string_list_of_field : string -> Yojson.Safe.t -> string list
 
@@ -153,12 +148,18 @@ val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
+val session_payload_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_meta_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_summary_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_team_health_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_communication_json : Yojson.Safe.t -> Yojson.Safe.t
+val session_status_opt : Yojson.Safe.t -> string option
+val session_recent_events : Yojson.Safe.t -> Yojson.Safe.t list
+val event_detail_json : Yojson.Safe.t -> Yojson.Safe.t
 val severity_rank : string -> int
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_tool_preview_limit : int
 val cap_string_list : ?limit:int -> string list -> string list
-val tool_preview_fields :
-  ?limit:int -> string -> string list -> (string * Yojson.Safe.t) list
 
 (** {1 Health predicates} *)
 

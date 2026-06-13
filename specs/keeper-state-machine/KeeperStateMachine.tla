@@ -12,7 +12,7 @@
 \*   - Budget monotonicity (restart_budget_remaining never revives)
 \*   - Overflowed transitions bounded (auto-compact or Paused, never loops)
 \*
-\* Mirrors: lib/keeper/keeper_state_machine.ml
+\* Mirrors: lib/keeper_registry/keeper_state_machine.ml
 
 EXTENDS Naturals, FiniteSets
 
@@ -174,7 +174,7 @@ CompactionStarted ==
 \* Clears the overflow flags together with the retry latch; the keeper
 \* returns to a fresh post-compact state.  Mirrors the OCaml
 \* [Compaction_completed] arm when [before_tokens > after_tokens]
-\* (lib/keeper/keeper_state_machine.ml §saved_tokens > 0).
+\* (lib/keeper_registry/keeper_state_machine.ml §saved_tokens > 0).
 CompactionCompletedWithSavings ==
     /\ NotTerminal /\ compaction_active
     /\ compaction_active' = FALSE
@@ -361,12 +361,18 @@ SupervisorRestartAttempt ==
     /\ restart_count < MaxRestarts
     /\ backoff_elapsed' = TRUE
     /\ restart_count' = restart_count + 1
+    \* terminal_failure_latched is UNCHANGED here: a supervisor restart
+    \* attempt does not touch the terminal-failure latch.  It must still be
+    \* listed so TLC constrains all 18 variables; omitting it leaves the
+    \* variable unassigned (null) and TLC errors (rc=75) before any
+    \* invariant/property is evaluated, silently disabling the Bug Model.
     /\ UNCHANGED <<launch_pending, fiber_alive, heartbeat_healthy, turn_healthy,
                    context_within_budget, context_handoff_needed,
                    compaction_active, handoff_active, operator_paused,
                    stop_requested, restart_budget_remaining,
                    guardrail_triggered, drain_complete,
-                   context_overflow, compact_retry_exhausted>>
+                   context_overflow, compact_retry_exhausted,
+                   terminal_failure_latched>>
 
 RestartBudgetExhausted ==
     /\ NotTerminal /\ restart_budget_remaining
@@ -606,7 +612,16 @@ CompactionClearsOverflow ==
 
 \* Stable phases = non-buffer phases that represent a settled state.
 \* Buffer phases are transient; liveness means they eventually exit.
-StablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline"}
+\* All three terminal phases (Stopped, Dead, Zombie) are settled: each is
+\* absorbing (every Next-action requires NotTerminal) and mirrors the OCaml
+\* apply_event terminal-state reject arm. Zombie was previously omitted while
+\* Stopped/Dead were present — an incomplete enumeration. A keeper that
+\* latches a terminal failure (TerminalFailureDetected, fireable from any
+\* transient phase) settles into Zombie exactly as it settles into Dead, so
+\* the resolve liveness properties below must accept Zombie as a settled
+\* target. A genuine transient-phase loop still never reaches any settled
+\* phase and still violates the resolve property.
+StablePhases == {"Running", "Paused", "Crashed", "Stopped", "Dead", "Offline", "Zombie"}
 
 \* L1: Failing eventually reaches a stable phase
 FailingResolves == (Phase = "Failing") ~> (Phase \in StablePhases)

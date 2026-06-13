@@ -38,12 +38,15 @@ describe('runtimeBandMeta', () => {
     const meta = runtimeBandMeta('paused')
     expect(meta.key).toBe('paused')
     expect(meta.label).toContain('일시정지')
+    expect(meta.description).toContain('재개')
+    expect(meta.description).not.toContain('운영자')
   })
 
   it('returns offline meta', () => {
     const meta = runtimeBandMeta('offline')
     expect(meta.key).toBe('offline')
     expect(meta.label).toContain('오프라인')
+    expect(meta.description).toContain('기동')
   })
 })
 
@@ -111,6 +114,20 @@ describe('summarizeMonitoringEvidence', () => {
 })
 
 describe('summarizeKeeperMonitoring', () => {
+  it('describes paused keepers as resume-waiting instead of operator-only', () => {
+    const summary = summarizeKeeperMonitoring({
+      name: 'keeper-paused',
+      status: 'paused',
+      phase: 'Paused',
+      pipeline_stage: 'paused',
+      paused: true,
+    } as Keeper)
+
+    expect(summary.band.key).toBe('paused')
+    expect(summary.hint).toContain('재개 대기')
+    expect(summary.hint).not.toContain('운영자')
+  })
+
   it('ignores stale last_blocker text when no live runtime blocker is present', () => {
     const summary = summarizeKeeperMonitoring({
       name: 'keeper-a',
@@ -211,35 +228,4 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  it('routes current tool-contract attention through the runtime projection', () => {
-    const compositeToolAttention = {
-      keeper: 'keeper-tool',
-      phase: 'running',
-      turn_phase: 'idle',
-      decision: { stage: 'idle' },
-      cascade: { state: 'idle' },
-      compaction: { stage: 'idle' },
-      circuit_breaker: { state: 'closed' },
-      is_live: false,
-      execution: {
-        tool_contract_result: 'missing_required_tool_use',
-      },
-      runtime_attention: {
-        blocked: false,
-        needs_attention: false,
-        execution_current: true,
-        stale_execution_receipt: false,
-      },
-    } as unknown as Parameters<typeof summarizeKeeperMonitoring>[1] extends infer C ? C : never
-    const summary = summarizeKeeperMonitoring({
-      name: 'keeper-tool',
-      status: 'idle',
-      phase: 'Running',
-      last_heartbeat: new Date().toISOString(),
-      keepalive_running: true,
-    } as Keeper, compositeToolAttention)
-
-    expect(summary.band.key).toBe('attention')
-    expect(summary.hint).toBe('도구 계약 결과가 missing_required_tool_use입니다.')
-  })
 })

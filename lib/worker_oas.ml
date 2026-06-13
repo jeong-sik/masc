@@ -2,7 +2,7 @@
 
     Converts MASC worker metadata into OAS Agent configuration, using the
     OAS Builder pattern for agent construction. Wraps Agent.run with MASC
-    worker lifecycle hooks (heartbeat, join/leave, board posting).
+    worker lifecycle hooks (heartbeat, board posting).
 
     Key mappings:
     - worker_container_meta fields -> OAS agent_config + Builder options
@@ -28,7 +28,6 @@ let oas_model_of_effective_model (model_id : string) : string = model_id
 (* worker_container_meta -> OAS Masc_domain.agent_config                   *)
 (* ================================================================ *)
 
-let proof_result_status_to_string = Cascade_runner.proof_result_status_to_string
 let worker_max_turns_cap = 20
 
 (** Derive max_turns from worker meta timeout budget.
@@ -56,9 +55,9 @@ let agent_config_of_worker_meta
   ; system_prompt = Some system_prompt
   ; max_tokens = Some max_tokens
   ; max_turns = effective_max_turns meta
-  ; temperature = Some Llm_provider.Constants.Inference_profile.worker_default.temperature
-  ; top_p = Some Cascade_worker_defaults.top_p
-  ; top_k = Some Cascade_worker_defaults.top_k
+  ; temperature = Some Runtime_provider_defaults.worker_default_temperature
+  ; top_p = Some 0.95
+  ; top_k = Some 40
   ; (* min_p intentionally omitted: the constant is 0.0 (no-op) and some
        cloud providers (Groq, GLM) reject the field itself with
        "Invalid request: property 'min_p' is unsupported". OAS capability
@@ -116,9 +115,12 @@ let local_model_gate =
   }
 ;;
 
-(* Boundary: MASC selects the internal retry policy, but OAS owns
-   retry classification, feedback synthesis, and loop control. *)
-let default_internal_tool_retry_policy = Agent_sdk.Tool_retry_policy.default_internal
+(* Boundary: MASC does not impose a tool-retry budget on workers. Retrying a
+   malformed tool call is the keeper's own competence — the SDK delivers the
+   validation error back to the model (pipeline [None] branch) and the agent
+   loop decides whether to re-emit. OAS owns retry classification, feedback
+   synthesis, and loop control; runaway is bounded by token budget + idle
+   turns, not a code-level retry count. *)
 let default_gate_config () = { local_model_gate with denied_tools = [] }
 
 (* ================================================================ *)
@@ -147,7 +149,6 @@ let build_agent
       ?context
       ?(approval : Agent_sdk.Hooks.approval_callback =
         Approval_callbacks.reject_by_default)
-      ?(disclosure_strategy : Keeper_disclosure_strategy.t option)
       ()
   : (Agent_sdk.Agent.t, string) result
   =
@@ -159,7 +160,7 @@ let build_agent
     | None ->
       { Agent_sdk.Guardrails.tool_filter = AllowList tool_names
       ; max_tool_calls_per_turn =
-          Some Cascade_worker_defaults.max_tool_calls_per_turn
+          Some 30
       }
   in
   let builder =
@@ -171,9 +172,9 @@ let build_agent
     | Some n -> Agent_sdk.Builder.with_max_tokens n b
     | None -> b)
     |> Agent_sdk.Builder.with_max_turns config.max_turns
-    |> Agent_sdk.Builder.with_temperature Llm_provider.Constants.Inference_profile.worker_default.temperature
-    |> Agent_sdk.Builder.with_top_p Cascade_worker_defaults.top_p
-    |> Agent_sdk.Builder.with_top_k Cascade_worker_defaults.top_k
+    |> Agent_sdk.Builder.with_temperature Runtime_provider_defaults.worker_default_temperature
+    |> Agent_sdk.Builder.with_top_p 0.95
+    |> Agent_sdk.Builder.with_top_k 40
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. min_p of 0.0 is a no-op and cloud providers
        (Groq, GLM) reject the field itself. *)
@@ -184,7 +185,6 @@ let build_agent
     |> Agent_sdk.Builder.with_tools tools
     |> Agent_sdk.Builder.with_hooks hooks
     |> Agent_sdk.Builder.with_guardrails guardrails
-    |> Agent_sdk.Builder.with_tool_retry_policy default_internal_tool_retry_policy
     |> Agent_sdk.Builder.with_raw_trace raw_trace
     |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
     |> Agent_sdk.Builder.with_description (description_of_meta meta)
@@ -200,27 +200,6 @@ let build_agent
     match context with
     | Some ctx -> Agent_sdk.Builder.with_context ctx builder
     | None -> builder
-  in
-  (* RFC-0084 host-config-cleanup-G — activate the typed
-     Keeper_disclosure_strategy surface introduced by PR-13 by wiring
-     it into Agent_sdk.Builder.with_disclosure_level (+ optional
-     with_disclosure_resolver for the demote_on_error case).  When
-     [disclosure_strategy] is [None] the SDK default [Full_schema]
-     applies and no builder call is made — preserving today's
-     behaviour for every caller that has not yet adopted the typed
-     surface. *)
-  let builder =
-    match disclosure_strategy with
-    | None -> builder
-    | Some strategy ->
-      let builder =
-        match Keeper_disclosure_strategy.to_oas_disclosure_level strategy with
-        | None -> builder
-        | Some level -> Agent_sdk.Builder.with_disclosure_level level builder
-      in
-      (match Keeper_disclosure_strategy.to_oas_resolver strategy with
-       | None -> builder
-       | Some resolver -> Agent_sdk.Builder.with_disclosure_resolver resolver builder)
   in
   Agent_sdk.Builder.build_safe builder |> Result.map_error Agent_sdk.Error.to_string
 ;;
@@ -275,16 +254,13 @@ let string_of_screening_value (value : Yojson.Safe.t) : string =
     Reads "command", "cmd", "content", "action"/"args", or "path" keys.
     Shared pattern with keeper_hooks_oas.ml extract_command_from_input. *)
 let extract_command_from_input (input : Yojson.Safe.t) : string =
-  let open Yojson.Safe.Util in
   let string_member key =
-    match input |> member key with
-    | `String s -> s
-    | _ -> ""
+    Json_util.get_string input key |> Option.value ~default:""
   in
   let member_to_string key =
-    match input |> member key with
-    | `Null -> ""
-    | value -> string_of_screening_value value
+    match Json_util.assoc_member_opt key input with
+    | None | Some `Null -> ""
+    | Some value -> string_of_screening_value value
   in
   try
     let command = string_member "command" in
@@ -324,11 +300,12 @@ let render_worker_skip_reason ~tool_name ~reason_code ~reason_text =
 
 (** Build pre_tool_use hook with optional safety gates.
 
-    When [gate_config] is provided, adds 3-gate defense-in-depth
+    When [gate_config] is provided, adds safety defense-in-depth
     (same pattern as keeper_hooks_oas.ml):
     - Gate 0: Deny list — reject tools in [gate_config.denied_tools]
-    - Gate 1: Cost budget — reject when [accumulated_cost_usd >= max_cost_usd]
-    - Gate 2: Destructive pattern detection — reject dangerous shell commands
+    - Gate 1: Destructive pattern detection — reject dangerous shell commands
+
+    [gate_config.max_cost_usd] is advisory telemetry only and must not reject.
 
     When [gate_config] is None, only name tracking is performed (backward compat).
 
@@ -341,7 +318,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
         Some
           (fun event ->
             match event with
-            | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+            | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
               (* Always track tool names *)
               tool_names_ref := tool_name :: !tool_names_ref;
               (* Safety gates (when gate_config is provided) *)
@@ -349,11 +326,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                | None -> Agent_sdk.Hooks.Continue
                | Some (gate : Eval_gate.gate_config) ->
                  (* Gate 0: Deny list *)
-                 if
-                   Tool_access_policy.selector_matches_name
-                     (Tool_access_policy.Names gate.denied_tools)
-                     tool_name
-                 then (
+                 if List.mem tool_name gate.denied_tools then (
                    Log.LocalWorker.warn "worker deny list: blocked %s" tool_name;
                    Agent_sdk.Hooks.Override
                      (render_worker_skip_reason
@@ -361,27 +334,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                         ~reason_code:"worker_deny"
                         ~reason_text:"tool is on the worker deny list"))
                  else if
-                   (* Gate 1: Cost budget *)
-                   accumulated_cost_usd >= gate.max_cost_usd
-                 then (
-                   let reason_text =
-                     Printf.sprintf
-                       "accumulated_cost_usd=%.4f exceeded limit=%.4f"
-                       accumulated_cost_usd
-                       gate.max_cost_usd
-                   in
-                   Log.LocalWorker.warn
-                     "worker cost gate: $%.4f >= $%.4f limit, skipping %s"
-                     accumulated_cost_usd
-                     gate.max_cost_usd
-                     tool_name;
-                   Agent_sdk.Hooks.Override
-                     (render_worker_skip_reason
-                        ~tool_name
-                        ~reason_code:"cost_gate"
-                        ~reason_text))
-                 else if
-                   (* Gate 2: Destructive pattern detection *)
+                   (* Gate 1: Destructive pattern detection *)
                    gate.destructive_check_enabled
                    && Tool_capability.has Tool_capability.Destructive tool_name
                  then (
@@ -501,6 +454,46 @@ let resume_model_id_of_checkpoint
   if checkpoint.model <> "" then checkpoint.model else meta.effective_model
 ;;
 
+let record_worker_mcp_client_session_duration
+      ~(auth_token : string option)
+      ~(meta : Worker_container_types.worker_container_meta)
+      ?error_type
+      ()
+  =
+  match meta.mcp_client_session_started_at with
+  | None -> ()
+  | Some started_at ->
+    Worker_container_types.record_mcp_client_session_duration
+      ~url:(Worker_container_types.mcp_endpoint_url ~auth_token)
+      ~started_at
+      ?error_type
+      ()
+;;
+
+let begin_worker_mcp_client_session
+      (meta : Worker_container_types.worker_container_meta)
+  =
+  match meta.mcp_client_session_started_at with
+  | Some _ -> meta
+  | None ->
+    (* NDT-OK: this stamps a client-session telemetry interval, not control flow. *)
+    { meta with mcp_client_session_started_at = Some (Unix.gettimeofday ()) }
+;;
+
+let finish_worker_mcp_client_session
+      (meta : Worker_container_types.worker_container_meta)
+  =
+  { meta with
+    mcp_client_session_started_at = None
+  ; last_run_at = Some (Time_compat.now ())
+  }
+;;
+
+module For_testing = struct
+  let begin_worker_mcp_client_session = begin_worker_mcp_client_session
+  let finish_worker_mcp_client_session = finish_worker_mcp_client_session
+end
+
 (* ================================================================ *)
 (* Run Worker via OAS                                                *)
 (* ================================================================ *)
@@ -525,7 +518,6 @@ let rec run_worker_via_oas
           ~(tools : Agent_sdk.Tool.t list)
           ~(raw_trace : Agent_sdk.Raw_trace.t)
           ?(gate_config : Eval_gate.gate_config option)
-          ?contract
           ?worker_run_id
           ()
   : (Worker_container_types.run_result, string) result
@@ -555,36 +547,24 @@ let rec run_worker_via_oas
       ?gate_config
       ~context_injector
       ~context:shared_context
-      ?disclosure_strategy:meta.disclosure_strategy
       ()
   in
+  let meta = begin_worker_mcp_client_session meta in
   let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
-  Eio_guard.protect
-    ~finally:(fun () ->
-      ignore
-        (Worker_container_types.leave_worker ~sw ~auth_token ~session_id ~worker_name))
-    (fun () ->
-       match
-         Worker_container_types.join_worker ~sw ~auth_token ~session_id ~worker_name
-       with
-       | Error e -> Error ("worker join failed: " ^ e)
-       | Ok _ ->
-         let workspace_path =
-           if String.trim meta.workspace_path <> ""
-           then meta.workspace_path
-           else base_path
-         in
-         run_existing_worker_agent
-           ~sw
-           ~base_path
-           ~meta
-           ~prompt
-           ~workspace_path
-           ~raw_trace
-           ?worker_run_id
-           ?contract
-           ~tool_names_ref
-           agent)
+  let workspace_path =
+    if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
+  in
+  run_existing_worker_agent
+    ~sw
+    ~base_path
+    ~auth_token
+    ~meta
+    ~prompt
+    ~workspace_path
+    ~raw_trace
+    ?worker_run_id
+    ~tool_names_ref
+    agent
 
 and resume_worker_via_oas
       ~(sw : Eio.Switch.t)
@@ -596,7 +576,6 @@ and resume_worker_via_oas
       ~(prompt : string)
       ~(tools : Agent_sdk.Tool.t list)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
-      ?contract
       ?worker_run_id
       ?(approval : Agent_sdk.Hooks.approval_callback =
         Approval_callbacks.reject_by_default)
@@ -618,7 +597,7 @@ and resume_worker_via_oas
   in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
   let* resume_provider =
-    oas_provider_of_label (Cascade_runtime.local_model_label resume_model_id)
+    oas_provider_of_label (resume_model_id)
     |> Result.map_error (fun e ->
       Printf.sprintf "checkpoint resume (model %S): %s" resume_model_id e)
   in
@@ -646,7 +625,6 @@ and resume_worker_via_oas
       ~raw_trace
       ~periodic_callbacks:heartbeat_cbs
       ~guardrails
-      ~tool_retry_policy:default_internal_tool_retry_policy
       ()
   in
   let options =
@@ -656,52 +634,42 @@ and resume_worker_via_oas
       approval = Some approval
     }
   in
-  Eio_guard.protect
-    ~finally:(fun () ->
-      ignore
-        (Worker_container_types.leave_worker ~sw ~auth_token ~session_id ~worker_name))
-    (fun () ->
-       match
-         Worker_container_types.join_worker ~sw ~auth_token ~session_id ~worker_name
-       with
-       | Error e -> Error ("worker join failed: " ^ e)
-       | Ok _ ->
-         let agent =
-           Agent_sdk.Agent.resume
-             ~net
-             ~checkpoint
-             ~tools
-             ~options
-             ~config
-             ~context:shared_context
-             ()
-         in
-         let workspace_path =
-           if String.trim meta.workspace_path <> ""
-           then meta.workspace_path
-           else base_path
-         in
-         run_existing_worker_agent
-           ~sw
-           ~base_path
-           ~meta
-           ~prompt
-           ~workspace_path
-           ~raw_trace
-           ?worker_run_id
-           ?contract
-           ~tool_names_ref
-           agent)
+  let agent =
+    Agent_sdk.Agent.resume
+      ~net
+      ~checkpoint
+      ~tools
+      ~options
+      ~config
+      ~context:shared_context
+      ()
+  in
+  let meta = begin_worker_mcp_client_session meta in
+  let* () = Worker_container.save_worker_meta ~base_path ~worker_name meta in
+  let workspace_path =
+    if String.trim meta.workspace_path <> "" then meta.workspace_path else base_path
+  in
+  run_existing_worker_agent
+    ~sw
+    ~base_path
+    ~auth_token
+    ~meta
+    ~prompt
+    ~workspace_path
+    ~raw_trace
+    ?worker_run_id
+    ~tool_names_ref
+    agent
 
 and run_existing_worker_agent
       ~(sw : Eio.Switch.t)
       ~(base_path : string)
+      ~(auth_token : string option)
       ~(meta : Worker_container_types.worker_container_meta)
       ~(prompt : string)
       ~(workspace_path : string)
       ~(raw_trace : Agent_sdk.Raw_trace.t)
       ?worker_run_id
-      ?contract
       ~(tool_names_ref : string list ref)
       (agent : Agent_sdk.Agent.t)
   : (Worker_container_types.run_result, string) result
@@ -718,14 +686,20 @@ and run_existing_worker_agent
           worker_name
           (Printexc.to_string exn))
     (fun () ->
-       let result, proof =
-         match contract with
-         | Some c ->
-           let cr =
-             Masc_mcp_cdal_runtime.Contract_runner.run ~sw ~contract:c agent prompt
-           in
-           cr.response, Some cr.proof
-         | None -> Agent_sdk.Agent.run ~sw agent prompt, None
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some c -> Some c
+         | None ->
+           (match Process_eio.get_clock () with
+            | Ok c -> Some c
+            | Error _ -> None)
+       in
+       let result =
+         Agent_sdk.Agent.run
+           ~sw
+           ?clock
+           agent
+           prompt
        in
        let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
        let evidence_session_id =
@@ -734,24 +708,35 @@ and run_existing_worker_agent
               (fun (run_ref : Agent_sdk.Raw_trace.run_ref) -> run_ref.worker_run_id)
               raw_trace_run)
        in
-       let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
-       let tool_names =
-         List.rev !tool_names_ref |> Json_util.dedupe_keep_order
-       in
-       let* () =
-         Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
-       in
-       let* () =
-         Worker_container.save_worker_meta
-           ~base_path
-           ~worker_name
-           { meta with last_run_at = Some (Time_compat.now ()) }
-       in
+      let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
+      let tool_names =
+        List.rev !tool_names_ref |> Json_util.dedupe_keep_order
+      in
+      let session_error_type =
+        match result with
+        | Ok _ -> None
+        | Error _ -> Some "agent_error"
+      in
+      let* () =
+        Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint
+      in
+      let completed_meta = finish_worker_mcp_client_session meta in
+      let* () =
+        Worker_container.save_worker_meta
+          ~base_path
+          ~worker_name
+          completed_meta
+      in
+      record_worker_mcp_client_session_duration
+        ~auth_token
+        ~meta
+        ?error_type:session_error_type
+        ();
        Worker_container.materialize_direct_evidence
          ~base_path
          ~worker_name
          ~worker_run_id
-         ~meta
+         ~meta:completed_meta
          ~prompt
          ~workspace_path
          ~agent
@@ -781,14 +766,6 @@ and run_existing_worker_agent
              ~output
              ?raw_trace_run
              ?evidence_session_id
-             ?proof_run_id:
-               (Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
-             ?proof_result_status:
-               (Option.map
-                  (fun p ->
-                     proof_result_status_to_string
-                       p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
-                  proof)
              ()
          in
          Ok
@@ -805,20 +782,10 @@ and run_existing_worker_agent
            ; session_id
            ; raw_trace_run
            ; api_response = Some response
-           ; proof
            }
        | Error err ->
          let detail = Agent_sdk.Error.to_string err in
-         (match proof with
-          | Some p ->
-            Log.LocalWorker.warn
-              "worker %s errored with CDAL proof: run_id=%s status=%s error=%s"
-              worker_name
-              p.run_id
-              (proof_result_status_to_string p.result_status)
-              detail
-          | None ->
-            Log.LocalWorker.warn "worker %s errored (no proof): %s" worker_name detail);
+         Log.LocalWorker.warn "worker %s errored: %s" worker_name detail;
          let* () =
            Worker_container.append_worker_completion_log
              ~base_path
@@ -830,14 +797,6 @@ and run_existing_worker_agent
              ~error:detail
              ?raw_trace_run
              ?evidence_session_id
-             ?proof_run_id:
-               (Option.map (fun p -> p.Masc_mcp_cdal_runtime.Cdal_proof.run_id) proof)
-             ?proof_result_status:
-               (Option.map
-                  (fun p ->
-                     proof_result_status_to_string
-                       p.Masc_mcp_cdal_runtime.Cdal_proof.result_status)
-                  proof)
              ()
          in
          Error detail)

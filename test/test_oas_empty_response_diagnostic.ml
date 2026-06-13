@@ -1,7 +1,7 @@
 (** OAS Empty Response Diagnostic Harness *)
 
 open Alcotest
-module Graphql_client = Masc_mcp.Graphql_client
+module Graphql_client = Masc.Graphql_client
 
 let test_ensure_json_response_empty () =
   let actual = Graphql_client.ensure_json_response "" in

@@ -3,7 +3,7 @@
 
     The keeper sandbox boundary historically followed the tool name:
     Execute for [sandbox_profile=Docker] keepers ran in a
-    container, but [ReadFile] / [EditFile/WriteFile] / structured search
+    container, but [Read] / [Edit/Write] / structured search
     could touch the host directly. The result was a cross-tool leak:
     different tools enforced different boundaries for the same keeper.
 
@@ -27,8 +27,8 @@
 
     A no-op (always [Ok ()]) for local keepers. *)
 val check_read_target :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   target:string ->
   (unit, string) result
 
@@ -36,7 +36,7 @@ val check_read_target :
     [check_read_target]. A no-op for local keepers; for Docker keepers,
     host writes are limited to the keeper playground bundle. *)
 val check_write_target :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
   target:string ->
   (unit, string) result

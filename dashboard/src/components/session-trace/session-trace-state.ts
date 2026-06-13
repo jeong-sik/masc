@@ -66,6 +66,10 @@ export interface UnifiedTraceEvent {
   round?: number
   cost_usd?: number
   error?: string | null
+  // RFC-0233: canonical execution identity — same id across trajectory,
+  // tool_call log, and oas-event rows for one physical execution.
+  // Absent on rows written before PR-1 and on timeline rows.
+  executionId?: string
   // thinking fields
   thinkingContent?: string
   thinkingRedacted?: boolean
@@ -392,6 +396,7 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   if (entry.task_id) detail.task_id = entry.task_id
   if (entry.lane) detail.lane = entry.lane
   if (entry.model) detail.model = entry.model
+  if (entry.execution_id) detail.execution_id = entry.execution_id
   return detail
 }
 
@@ -419,6 +424,14 @@ function toolCallEntryMatchesTraceEvent(
 ): boolean {
   if (event.kind !== 'tool_call' || !event.toolName) return false
   if (event.gate?.status === 'reject') return false
+
+  // RFC-0233: when both sides carry the canonical execution_id, identity
+  // equality is the whole answer — the heuristic below only exists for
+  // rows written before the id was minted (no backfill by design).
+  if (entry.execution_id && event.executionId) {
+    return entry.execution_id === event.executionId
+  }
+
   if (entry.tool !== event.toolName) return false
 
   const eventTraceId = toolEventTraceId(event)
@@ -446,6 +459,7 @@ function toolCallEntryMatchesTraceEvent(
 
 function toolCallEntryMatchScore(entry: ToolCallEntry, event: UnifiedTraceEvent): number {
   let score = Math.abs(event.ts - (entry.ts * 1000))
+  if (entry.execution_id && event.executionId && entry.execution_id === event.executionId) score -= 1_000_000
   if (toolEventTraceId(event) && entry.trace_id && toolEventTraceId(event) === entry.trace_id) score -= 500
   if (toolEventSessionId(event) && entry.session_id && toolEventSessionId(event) === entry.session_id) score -= 200
   if (toolEventTurn(event) != null && (entry.turn ?? entry.keeper_turn_id) === toolEventTurn(event)) score -= 100
@@ -488,7 +502,11 @@ function enrichToolCallTrace(
     toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
     toolResult: entry.success ? outputText : null,
     duration_ms: entry.duration_ms,
-    turn: entry.turn ?? entry.keeper_turn_id ?? event.turn,
+    // Trajectory turn is trace-relative and pairs with `round`; the log's
+    // session-absolute turn stays readable as detail.turn. Mixing the two
+    // vocabularies in one T#R# badge would mislabel the row.
+    turn: event.turn ?? entry.turn ?? entry.keeper_turn_id,
+    executionId: entry.execution_id ?? event.executionId,
     error,
   }
 }
@@ -497,7 +515,11 @@ function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): Uni
   const ts = entry.ts * 1000
   const outputText = formatToolCallOutput(entry)
   return {
-    id: `tc-${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`,
+    // execution_id is unique per physical execution — a stable row id that
+    // survives refetch; the composite form remains for pre-PR-1 rows.
+    id: entry.execution_id
+      ? `tc-${entry.execution_id}`
+      : `tc-${entry.trace_id ?? 'no-trace'}-${entry.session_id ?? 'no-session'}-${entry.tool}-${Math.round(ts)}-${entry.turn ?? entry.keeper_turn_id ?? index}`,
     ts,
     ts_iso: new Date(ts).toISOString(),
     kind: 'tool_call',
@@ -511,6 +533,7 @@ function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): Uni
     toolResult: entry.success ? outputText : null,
     duration_ms: entry.duration_ms,
     turn: entry.turn ?? entry.keeper_turn_id,
+    executionId: entry.execution_id,
     error: entry.success ? null : outputText || 'tool call failed',
   }
 }
@@ -520,6 +543,12 @@ function richerToolCallMatchesFallback(
   fallback: UnifiedTraceEvent,
 ): boolean {
   if (richer.kind !== 'tool_call' || fallback.kind !== 'tool_call') return false
+
+  // RFC-0233: canonical identity decides when both rows carry it.
+  if (richer.executionId && fallback.executionId) {
+    return richer.executionId === fallback.executionId
+  }
+
   if (!richer.toolName || !fallback.toolName) return false
   if (richer.toolName !== fallback.toolName) return false
 
@@ -677,7 +706,8 @@ function trajectoryEntryToTrace(
 ): UnifiedTraceEvent {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
-  const detail = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
+  const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
+  if (entry.execution_id) detail.execution_id = entry.execution_id
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
@@ -711,6 +741,7 @@ function trajectoryEntryToTrace(
     turn: entry.turn,
     round: entry.round,
     cost_usd: entry.cost_usd,
+    executionId: entry.execution_id,
     error: entry.error,
   }
 }
@@ -772,6 +803,9 @@ const TIMELINE_HOURS = 24
 const TIMELINE_LIMIT = 200
 const TRAJECTORY_LIMIT = 100
 const TOOL_CALL_LIMIT = 100
+const SESSION_TRACE_RELOAD_DEBOUNCE_MS = 1_000
+
+const sessionTraceReloadTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export async function loadSessionTrace(agentName: string, isKeeper: boolean): Promise<void> {
   // Bump fetch token for this agent — any prior in-flight fetch becomes stale.
@@ -815,7 +849,30 @@ export async function loadSessionTrace(agentName: string, isKeeper: boolean): Pr
   }
 }
 
+export function scheduleSessionTraceReload(
+  agentName: string,
+  isKeeper: boolean,
+  delayMs = SESSION_TRACE_RELOAD_DEBOUNCE_MS,
+): void {
+  if (traceSlots.value[agentName] == null) return
+
+  const existing = sessionTraceReloadTimers.get(agentName)
+  if (existing != null) clearTimeout(existing)
+
+  const timer = setTimeout(() => {
+    sessionTraceReloadTimers.delete(agentName)
+    if (traceSlots.value[agentName] == null) return
+    void loadSessionTrace(agentName, isKeeper)
+  }, delayMs)
+  sessionTraceReloadTimers.set(agentName, timer)
+}
+
 export function closeSessionTrace(agentName: string): void {
+  const timer = sessionTraceReloadTimers.get(agentName)
+  if (timer != null) {
+    clearTimeout(timer)
+    sessionTraceReloadTimers.delete(agentName)
+  }
   const next = { ...traceSlots.value }
   delete next[agentName]
   traceSlots.value = next

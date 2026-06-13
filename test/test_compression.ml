@@ -1,6 +1,6 @@
 (** Test suite for Compact Protocol v4 Compression
 
-    Tests compression functionality across MASC-MCP modules:
+    Tests compression functionality across MASC modules:
     - Backend.Compression (storage layer)
     - Http_server_eio.Compression (HTTP layer - tested separately)
 

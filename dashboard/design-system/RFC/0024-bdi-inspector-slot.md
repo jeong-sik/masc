@@ -1,7 +1,7 @@
 # RFC 0024 — BDI Inspector Slot (extends RFC 0019)
 
 - **Status**: Draft
-- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
+- **Author**: Vincent + Agent Runtime A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Extends**: RFC 0019 (Keeper Line Ownership)
 - **Depends on**: RFC 0008 (AgentPresence), RFC 0019

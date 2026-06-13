@@ -52,3 +52,13 @@ val unbind :
   (Yojson.Safe.t, string) result
 (** Remove a channel→keeper binding, append an audit event, and
     return the removed binding row as JSON. *)
+
+(** {1 Presence (RFC-0223 P2)} *)
+
+val bound_channels : keeper_name:string -> string list
+(** Channel ids bound to [keeper_name], freshly read from the binding
+    store on each call. *)
+
+val connected : unit -> bool
+(** Whether the sidecar's status file reports a live, non-stale
+    connection. *)

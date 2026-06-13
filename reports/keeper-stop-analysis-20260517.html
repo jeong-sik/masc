@@ -264,7 +264,7 @@
   <a href="#main" class="skip-link">본문으로 건너뛰기</a>
   <header>
     <h1>MASC/OAS Keeper Stop &amp; Silent Failure Analysis</h1>
-    <p>대상: <code>/Users/dancer/me/workspace/yousleepwhen/masc-mcp</code> 와 인접 <code>oas</code> 런타임. 코드 레벨 정적 분석으로 Keeper가 멈추거나 멈춘 것처럼 보이는 경로, 그리고 silent/low-visibility failure를 순서도 단위로 정리했다.</p>
+    <p>대상: <code>/Users/dancer/me/workspace/yousleepwhen/masc</code> 와 인접 <code>oas</code> 런타임. 코드 레벨 정적 분석으로 Keeper가 멈추거나 멈춘 것처럼 보이는 경로, 그리고 silent/low-visibility failure를 순서도 단위로 정리했다.</p>
     <div class="meta">
       <span class="pill">작성일: 2026-05-17 Asia/Seoul</span>
       <span class="pill">As-of commit: <code style="background:rgba(255,255,255,0.12);color:#e5edf7;border:none">6c4a9598a1</code> (fix(tool_keeper): observe env-var parse fallback #15954)</span>
@@ -296,7 +296,7 @@
         </div>
       </div>
       <p class="note">가장 중요한 결론: “keeper가 멈춤”은 단일 상태가 아니다. 코드상으로는 <code>Stopped</code>, <code>Paused</code>, <code>Dead</code>, <code>Zombie</code>, <code>Crashed/Restarting</code>, 그리고 <code>Running</code>이지만 <code>should_run=false</code> 또는 admission/visibility gate로 turn이 스케줄되지 않는 상태가 모두 같은 증상으로 보인다.</p>
-      <p class="warn">가장 위험한 silent 계열은 “정지로 승격되지 않고 turn만 스킵되는 경로”다. FD/disk pressure admission, visibility idle gate, cascade backpressure, semaphore wait timeout, board/event 수집 실패, recurring task auto-disable, OAS callback swallow가 여기에 들어간다.</p>
+      <p class="warn">가장 위험한 silent 계열은 “정지로 승격되지 않고 turn만 스킵되는 경로”다. FD/disk pressure admission, visibility idle gate, runtime backpressure, semaphore wait timeout, board/event 수집 실패, recurring task auto-disable, OAS callback swallow가 여기에 들어간다.</p>
       <div class="added-note">
         <strong>가장 위험도 높은 단일 항목</strong>: OAS <code>ApprovalRequired</code> + callback 없음 = 도구 실행됨 (silent safety bypass).
         <code>oas/lib/agent/agent_tools.ml:562-584</code>에서 <code>None -&gt; Log.debug "...executing"</code> 분기 확인됨.
@@ -365,13 +365,13 @@ prepare_fiber_launch -> Fiber_started -> run_heartbeat_loop
   |-- run_keepalive_unified_turn
         |
         |-- warmup/cooldown/should_run=false -----------> skip, still alive
-        |-- FD/disk/cascade backpressure ---------------> skip, still alive
+        |-- FD/disk/runtime backpressure ---------------> skip, still alive
         |-- turn slot wait timeout ---------------------> skip, still alive
         |-- Keeper_unified_turn.run_keeper_cycle
               |
               |-- success ------------------------------> reset failures, write meta
               |-- auto-recoverable error ---------------> no crash count
-              |-- cascade/tool contract streak ---------> auto-pause
+              |-- runtime/tool contract streak ---------> auto-pause
               |-- persistent failures >= threshold -----> Keeper_fiber_crash
               |-- ambiguous partial commit -------------> pause + continue gate
               |-- OAS timeout budget strikes >= 3 ------> Keeper_fiber_crash
@@ -454,7 +454,7 @@ Pipeline.run_turn
         |-- HTTP/stream/body/CLI stdout timeout -----> Retryable timeout, then error
         |-- hard quota/auth/invalid/context ---------> non-retryable error
         |-- provider terminal max_turns -------------> MaxTurnsExceeded
-        |-- cascade all failed/circuit open ---------> cascade error to MASC
+        |-- runtime all failed/circuit open ---------> runtime error to MASC
   |-- completion contract ---------------------------> CompletionContractViolation
   |-- tool execution
         |-- no tool visible for required tool --------> contract violation
@@ -491,9 +491,9 @@ Agent_trace.finalize
           <tr><td>2</td><td><span class="tag pause">Paused</span></td><td>operator pause 또는 meta.paused=true</td><td><code>keeper_state_machine.ml:525-527</code>, <code>keeper_supervisor.ml:803-865</code></td><td>fiber relaunch가 skip되어 죽은 것처럼 보임.</td></tr>
           <tr><td>3</td><td><span class="tag dead">Dead</span></td><td>credential archived 또는 zombie timeout</td><td><code>keeper_state_machine.ml:484-488</code>, <code>keeper_registry.ml:461-500</code></td><td>keeper가 terminal로 분류되고 turn 실행 불가.</td></tr>
           <tr><td>4</td><td><span class="tag dead">Dead</span></td><td>fiber not alive + restart budget exhausted</td><td><code>keeper_state_machine.ml:496-507</code>, <code>keeper_supervisor.ml:1647-1702</code></td><td>restart loop 종료. liveness recovery 대상이 되거나 tombstone으로 정리.</td></tr>
-          <tr><td>5</td><td><span class="tag error">Crash</span></td><td>heartbeat consecutive failures threshold 초과</td><td><code>keeper_heartbeat_loop.ml:1734-1743</code>, <code>keeper_registry_types.ml:64-96</code></td><td><span class="rfc-tag merged">RFC-0106</span> presence/room 접근 실패가 누적되면 supervisor crash path 진입. Cancel_safe 적용으로 Cancelled-vs-actual 구분.</td></tr>
+          <tr><td>5</td><td><span class="tag error">Crash</span></td><td>heartbeat consecutive failures threshold 초과</td><td><code>keeper_heartbeat_loop.ml:1734-1743</code>, <code>keeper_registry_types.ml:64-96</code></td><td><span class="rfc-tag merged">RFC-0106</span> presence/workspace 접근 실패가 누적되면 supervisor crash path 진입. Cancel_safe 적용으로 Cancelled-vs-actual 구분.</td></tr>
           <tr><td>6</td><td><span class="tag error">Crash</span></td><td>persistent turn failures threshold 초과</td><td><code>keeper_unified_turn.ml:2045-2214</code></td><td>자동복구 불가 오류가 누적되면 keeper fiber crash.</td></tr>
-          <tr><td>7</td><td><span class="tag pause">Auto-Pause</span></td><td>cascade_exhausted 반복</td><td><code>keeper_unified_turn.ml:2103-2162</code></td><td>provider/cascade가 고장난 상태에서 restart loop 대신 pause.</td></tr>
+          <tr><td>7</td><td><span class="tag pause">Auto-Pause</span></td><td>runtime_exhausted 반복</td><td><code>keeper_unified_turn.ml:2103-2162</code></td><td>provider/runtime가 고장난 상태에서 restart loop 대신 pause.</td></tr>
           <tr><td>8</td><td><span class="tag pause">Auto-Pause</span></td><td>required tool contract violation 반복</td><td><code>keeper_unified_turn.ml:2123-2173</code></td><td>모델이 필수 도구 호출을 계속 누락하면 pause 및 task release.</td></tr>
           <tr><td>9</td><td><span class="tag pause">Auto-Pause</span></td><td>OAS timeout budget loop</td><td><code>keeper_heartbeat_loop.ml:560-676</code>, <code>keeper_turn_slot.ml:867-929</code>, <code>keeper_supervisor.ml:1360-1380</code></td><td>3 strikes 후 crash, sweep에서 timeout-budget auto-pause.</td></tr>
           <tr><td>10</td><td><span class="tag error">Watchdog</span></td><td>idle turn stale</td><td><code>keeper_stale_watchdog.ml:7-24</code>, <code>keeper_stale_watchdog.ml:428-881</code></td><td>Running인데 turn timestamp가 갱신되지 않으면 kill/restart/pause 경로.</td></tr>
@@ -507,7 +507,7 @@ Agent_trace.finalize
           <tr><td>18</td><td><span class="tag skip">Not Scheduled</span></td><td>disk pressure</td><td><code>keeper_disk_pressure.ml:235-267</code>, <code>keeper_registry.ml:1200-1210</code></td><td>low free space면 admission block. <strong>probe error는 Admit라서 감지가 약함</strong> — root fix 후보(<a href="#rfc-index">RFC candidate</a>).</td></tr>
           <tr><td>19</td><td><span class="tag skip">Skipped</span></td><td>turn slot/semaphore wait timeout</td><td><code>keeper_turn_slot.ml:538-560</code>, <code>keeper_turn_slot.ml:955-1079</code>, <code>keeper_heartbeat_loop.ml:1197-1200</code></td><td>turn은 실패가 아니라 skip. 장시간이면 멈춤처럼 보임.</td></tr>
           <tr><td>20</td><td><span class="tag skip">Skipped</span></td><td>smart heartbeat visibility gate</td><td><code>keeper_heartbeat_loop.ml:1304-1512</code></td><td>visible consumer가 없고 pending signal도 없으면 idle turn이 장시간 지연.</td></tr>
-          <tr><td>21</td><td><span class="tag skip">Skipped</span></td><td>cascade backpressure/resilience blocker</td><td><code>keeper_heartbeat_loop.ml:437-455</code>, <code>keeper_heartbeat_loop.ml:995-1078</code></td><td>cascade unhealthy면 turn 자체가 스케줄되지 않음.</td></tr>
+          <tr><td>21</td><td><span class="tag skip">Skipped</span></td><td>runtime backpressure/resilience blocker</td><td><code>keeper_heartbeat_loop.ml:437-455</code>, <code>keeper_heartbeat_loop.ml:995-1078</code></td><td>runtime unhealthy면 turn 자체가 스케줄되지 않음.</td></tr>
           <tr><td>22</td><td><span class="tag skip">Skipped</span></td><td>warmup/cooldown/should_run=false</td><td><code>keeper_heartbeat_loop.ml:789-1218</code></td><td>정책상 조용히 대기. stop은 아니지만 외부에서는 무응답.</td></tr>
           <tr><td>23</td><td><span class="tag silent">Silent-ish</span></td><td>board event collection failure/unsupported stimulus</td><td><code>keeper_heartbeat_loop.ml:220-247</code>, <code>keeper_heartbeat_loop.ml:789-1218</code></td><td>WARN/metric 후 empty event 또는 no signal. reactive turn이 빠질 수 있음.</td></tr>
           <tr><td>24</td><td><span class="tag silent">Silent-ish</span></td><td>recurring task auto-disabled</td><td><code>keeper_heartbeat_loop.ml:1255-1302</code></td><td>recurring heartbeat broadcast가 없어져도 keeper 자체는 살아 있음.</td></tr>
@@ -545,8 +545,8 @@ Agent_trace.finalize
           <tr><td>7</td><td><span class="tag error">Config</span></td><td>CLI transport required but missing</td><td><code>oas/lib/pipeline/pipeline_stage_route.ml:13-21</code>, <code>oas/lib/llm_provider/complete.ml:1110-1114</code></td><td>non-retryable InvalidRequest</td></tr>
           <tr><td>8</td><td><span class="tag error">Provider</span></td><td>HTTP auth/invalid/not found/context overflow</td><td><code>oas/lib/llm_provider/retry.ml:167-188</code></td><td>non-retryable provider error; MASC turn failure</td></tr>
           <tr><td>9</td><td><span class="tag error">Retry</span></td><td>rate limit/server/network timeout after retries</td><td><code>oas/lib/llm_provider/complete.ml:1132-1190</code></td><td>turn failure; transient may not count toward MASC crash</td></tr>
-          <tr><td>10</td><td><span class="tag error">Cascade</span></td><td>all cascade steps failed or circuits open</td><td><code>oas/lib/llm_provider/complete_cascade.ml:542-658</code></td><td>cascade_exhausted; MASC can auto-pause after streak</td></tr>
-          <tr><td>11</td><td><span class="tag error">Quota</span></td><td>hard quota</td><td><code>oas/lib/llm_provider/retry.ml:114-165</code>, <code>oas/lib/llm_provider/complete_cascade.ml:649-650</code></td><td>hard failure, not useful to retry same key</td></tr>
+          <tr><td>10</td><td><span class="tag error">Runtime</span></td><td>all runtime steps failed or circuits open</td><td><code>oas/lib/llm_provider/complete_runtime.ml:542-658</code></td><td>runtime_exhausted; MASC can auto-pause after streak</td></tr>
+          <tr><td>11</td><td><span class="tag error">Quota</span></td><td>hard quota</td><td><code>oas/lib/llm_provider/retry.ml:114-165</code>, <code>oas/lib/llm_provider/complete_runtime.ml:649-650</code></td><td>hard failure, not useful to retry same key</td></tr>
           <tr><td>12</td><td><span class="tag error">Timeout</span></td><td>body_timeout_s / stream idle timeout</td><td><code>oas/lib/llm_provider/complete.ml:1537-1658</code>, <code>oas/lib/llm_provider/http_client.ml:584-629</code></td><td>structured NetworkError Timeout</td></tr>
           <tr><td>13</td><td><span class="tag error">CLI</span></td><td>CLI stdout idle timeout, nonzero exit, parse issue</td><td><code>oas/lib/llm_provider/cli_common_subprocess.ml:63-304</code></td><td>NetworkError; stdout recovery can convert nonzero exit to success</td></tr>
           <tr><td>14</td><td><span class="tag error">Contract</span></td><td>tool_choice visibility impossible</td><td><code>oas/lib/pipeline/pipeline.ml:201-230</code></td><td><code>CompletionContractViolation</code></td></tr>
@@ -607,13 +607,13 @@ Agent_trace.finalize
 
     <section class="section">
       <h2>Top Failure Trees</h2>
-      <h3>1. Provider/Cascade Failure Tree</h3>
+      <h3>1. Provider/Runtime Failure Tree</h3>
       <pre class="flow">provider auth/quota/network/config/capability issue
-  -> OAS retry/cascade
+  -> OAS retry/runtime
     -> retry exhausted or all providers failed
       -> MASC run_keeper_cycle error
         -> transient? no crash count
-        -> cascade_exhausted? failure_reason stamped early
+        -> runtime_exhausted? failure_reason stamped early
           -> streak threshold reached
             -> auto-pause, not restart loop
         -> persistent threshold reached without auto-pause
@@ -692,13 +692,13 @@ tool requires approval
       <h2>Implementation Addendum (2026-05-17 21:37 KST)</h2>
       <p>
         본 분석서 기준 P0 일부를 코드로 착수했다. 변경은 root checkout이 아니라 worktree-first 원칙대로
-        <code>masc-mcp/.worktrees/fix-keeper-admission-observability</code>와
+        <code>masc/.worktrees/fix-keeper-admission-observability</code>와
         <code>oas/.worktrees/fix-approval-required-fail-closed</code>에 분리되어 있다.
       </p>
       <h3>MASC P0: launch/admission silent failure 제거</h3>
       <ul>
         <li><code>Keeper_registry.spawn_slots_decision</code>을 bool gate에서 typed denial reason으로 확장.</li>
-        <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Prometheus counter + WARN log로 전환.</li>
+        <li><code>keeper_supervisor</code>와 <code>keeper_keepalive</code>의 no-op skip을 <code>admission_denied</code> lifecycle event + Otel_metric_store counter + WARN log로 전환.</li>
         <li><code>masc_keeper_spawn_slot_denied_total</code> metric 추가. labels: <code>keeper</code>, <code>surface</code>, <code>reason</code>.</li>
         <li>dashboard lifecycle patcher가 <code>admission_denied</code>를 Offline 상태로 반영하도록 확장.</li>
         <li>설계 SSOT: <code>docs/rfc/RFC-0124-keeper-admission-denial-boundary.md</code>.</li>
@@ -719,7 +719,7 @@ tool requires approval
         <li>설계 SSOT: <code>docs/rfc/RFC-OAS-021-approval-required-missing-callback-policy.md</code>.</li>
       </ul>
       <h3>현재 검증</h3>
-      <pre class="flow"># masc-mcp worktree
+      <pre class="flow"># masc worktree
 scripts/dune-local.sh build test/test_keeper_registry.exe test/test_types.exe
 ./_build/default/test/test_keeper_registry.exe   # 106 tests passed
 ./_build/default/test/test_types.exe             # 115 tests passed
@@ -738,7 +738,7 @@ git diff --check</pre>
       <p>본 보고서의 모든 라인 인용은 <code>as-of commit 6c4a9598a1</code> 기준. 라인 drift 시 다음 단계로 재확인.</p>
       <h3>라인 인용 재확인 (예시)</h3>
       <pre class="flow"># 1. As-of commit 기준 정합 확인 (보고서 commit ↔ 현재 main 비교)
-cd ~/me/workspace/yousleepwhen/masc-mcp
+cd ~/me/workspace/yousleepwhen/masc
 git log --oneline 6c4a9598a1..origin/main -- lib/keeper/ | head
 
 # 2. 함수 단위 재탐색 (라인 번호가 흔들리면 심볼로 찾기)
@@ -771,34 +771,34 @@ gh pr list --search 'RFC-0106 in:title' --state merged</pre>
     <section class="section">
       <h2>Evidence References</h2>
       <ul class="refs">
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:6-19</code> phase set</li>
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:321-405</code> transitions and executable phases</li>
-        <li><code>masc-mcp/lib/keeper/keeper_state_machine.ml:473-541</code> phase derivation priority</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry_types.ml:64-96</code> failure_reason ADT</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:65-89</code>, <code>135-179</code> orphan update handling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_registry.ml:1200-1210</code> spawn/admission slots</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:117-218</code> presence heartbeat failures</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:437-455</code> cascade backpressure</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:560-676</code> OAS budget strike/crash path</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:789-1218</code> unified keepalive turn scheduling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1304-1512</code> smart heartbeat gate</li>
-        <li><code>masc-mcp/lib/keeper/keeper_heartbeat_loop.ml:1734-1743</code> heartbeat threshold crash</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:244-400</code> normal exit vs crash handling</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:604-665</code> supervise_keepalive launch gate</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1216-1380</code> auto-pause handlers</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:1382-1963</code> sweep/recover/restart/dead</li>
-        <li><code>masc-mcp/lib/keeper/keeper_supervisor.ml:2027-2380</code> liveness and alive-but-stuck recovery</li>
-        <li><code>masc-mcp/lib/keeper/keeper_stale_watchdog.ml:7-24</code>, <code>428-881</code> stale classes and kill path</li>
-        <li><code>masc-mcp/lib/keeper/keeper_turn_slot.ml:538-560</code>, <code>955-1079</code> semaphore wait timeout</li>
-        <li><code>masc-mcp/lib/keeper_fd_pressure.ml:199-215</code>, <code>421-460</code> FD probe/admission</li>
-        <li><code>masc-mcp/lib/keeper_disk_pressure.ml:235-267</code> disk admission</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:6-19</code> phase set</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:321-405</code> transitions and executable phases</li>
+        <li><code>masc/lib/keeper/keeper_state_machine.ml:473-541</code> phase derivation priority</li>
+        <li><code>masc/lib/keeper/keeper_registry_types.ml:64-96</code> failure_reason ADT</li>
+        <li><code>masc/lib/keeper/keeper_registry.ml:65-89</code>, <code>135-179</code> orphan update handling</li>
+        <li><code>masc/lib/keeper/keeper_registry.ml:1200-1210</code> spawn/admission slots</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:117-218</code> presence heartbeat failures</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:437-455</code> runtime backpressure</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:560-676</code> OAS budget strike/crash path</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:789-1218</code> unified keepalive turn scheduling</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:1304-1512</code> smart heartbeat gate</li>
+        <li><code>masc/lib/keeper/keeper_heartbeat_loop.ml:1734-1743</code> heartbeat threshold crash</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:244-400</code> normal exit vs crash handling</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:604-665</code> supervise_keepalive launch gate</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:1216-1380</code> auto-pause handlers</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:1382-1963</code> sweep/recover/restart/dead</li>
+        <li><code>masc/lib/keeper/keeper_supervisor.ml:2027-2380</code> liveness and alive-but-stuck recovery</li>
+        <li><code>masc/lib/keeper/keeper_stale_watchdog.ml:7-24</code>, <code>428-881</code> stale classes and kill path</li>
+        <li><code>masc/lib/keeper/keeper_turn_slot.ml:538-560</code>, <code>955-1079</code> semaphore wait timeout</li>
+        <li><code>masc/lib/keeper_fd_pressure.ml:199-215</code>, <code>421-460</code> FD probe/admission</li>
+        <li><code>masc/lib/keeper_disk_pressure.ml:235-267</code> disk admission</li>
         <li><code>oas/lib/agent/agent.ml:64-85</code> loop guard</li>
         <li><code>oas/lib/agent/agent.ml:228-279</code> callbacks and max execution timeout</li>
         <li><code>oas/lib/agent/agent_trace.ml:119-211</code> trace/finalization behavior</li>
         <li><code>oas/lib/pipeline/pipeline.ml:201-230</code>, <code>442-505</code>, <code>1118-1221</code> contract, route, output handling</li>
         <li><code>oas/lib/agent/agent_tools.ml:562-584</code> approval-required fallback</li>
         <li><code>oas/lib/llm_provider/complete.ml:1132-1190</code>, <code>1537-1658</code> retry and body/stream timeout</li>
-        <li><code>oas/lib/llm_provider/complete_cascade.ml:542-658</code> cascade fallback/circuit logic</li>
+        <li><code>oas/lib/llm_provider/complete_runtime.ml:542-658</code> runtime fallback/circuit logic</li>
         <li><code>oas/lib/llm_provider/cli_common_subprocess.ml:63-304</code> CLI subprocess timeout/recovery</li>
         <li><code>oas/lib/context_offload.ml:36-67</code> fail-open context offload</li>
       </ul>

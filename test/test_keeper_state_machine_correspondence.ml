@@ -54,8 +54,8 @@
     the comparison without touching this test. *)
 
 open Alcotest
-module SM = Masc_mcp.Keeper_state_machine
-module SM_json = Masc_mcp.Keeper_state_machine_json
+module SM = Keeper_state_machine
+module SM_json = Keeper_state_machine_json
 
 (* ── OCaml-side change-set computation ─────────────────────── *)
 

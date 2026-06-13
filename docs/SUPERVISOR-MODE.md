@@ -2,7 +2,6 @@
 status: runbook
 last_verified: 2026-04-23
 code_refs:
-  - lib/supervisor.ml
   - lib/tool_operator.ml
   - lib/operator/operator_control.ml
 ---
@@ -49,12 +48,11 @@ Supervisor Mode is not for:
 ## Golden Loop
 
 1. Call `masc_operator_snapshot(view="summary")`.
-2. Call `masc_operator_digest(target_type="root")`.
+2. Call `masc_operator_digest()`.
 3. Decide whether the next step is:
    - `broadcast`
    - `namespace_pause`
    - `namespace_resume`
-   - `social_sweep`
    - `keeper_message`
    - `keeper_probe`
    - `keeper_recover`
@@ -70,7 +68,6 @@ Supervisor Mode is not for:
 | `broadcast` | Namespace-wide guidance is needed | Immediate |
 | `namespace_pause` | Automation should stop before more work lands | Preview + confirm |
 | `namespace_resume` | Recovery after an operator pause | Immediate |
-| `social_sweep` | Keepers need an immediate public-square sweep | Immediate |
 | `keeper_message` | One keeper needs direct corrective input | Immediate |
 | `keeper_probe` | A keeper needs a fresh diagnostic snapshot | Immediate |
 | `keeper_recover` | A stale or degraded keeper needs a controlled restart | Preview + confirm |
@@ -78,6 +75,6 @@ Supervisor Mode is not for:
 ## Notes
 
 - Treat dashboard surfaces as read models, not canonical write paths.
-- For implementation work, start from repo coordination and keeper/runtime tools.
+- For implementation work, start from repo workspace collaboration and keeper/runtime tools.
 - For benchmark work, use [BENCHMARK-RUNBOOK.md](./BENCHMARK-RUNBOOK.md) or
   [INTEGRATED-BENCHMARK-RUNBOOK.md](./INTEGRATED-BENCHMARK-RUNBOOK.md).

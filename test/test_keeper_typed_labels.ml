@@ -3,7 +3,7 @@
 
     Step 15 (partial): catches the silent regression where two
     constructors of the same ADT collapse to the same string label. A
-    label collision would cause Prometheus dimensions to merge across
+    label collision would cause Otel_metric_store dimensions to merge across
     distinct semantic states, hiding the very signal these ADTs were
     introduced to make legible.
 
@@ -17,7 +17,7 @@
     - [Keeper_contract_classifier.pp_contract_status] surfaces missing list
 *)
 
-open Masc_mcp
+open Masc
 
 (* ── Helpers ─────────────────────────────────────────────────── *)
 
@@ -59,10 +59,10 @@ let test_cancel_reason_labels_unique () =
 
 let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
   [
-    Failure_cascade_unavailable { base = "x"; resolved = None };
-    Failure_no_tool_capable_provider { cascade_name = "x"; detail = "d" };
+    Failure_runtime_unavailable { base = "x"; resolved = None };
+    Failure_no_capable_provider { runtime_id = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
-    Failure_tool_contract_violation { reason_code = "rc" };
+    Failure_completion_contract_violation { reason_code = "rc" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };
     Failure_runtime_error "msg";
     Failure_unexpected_exception { exn = "exn"; backtrace = None };
@@ -78,7 +78,7 @@ let test_failure_reason_labels_unique () =
 let test_pp_failure_reason_includes_payload () =
   let s =
     format_to_string Keeper_turn_fsm.pp_failure_reason
-      (Failure_cascade_unavailable
+      (Failure_runtime_unavailable
          { base = "claude_api"; resolved = Some "cli_tool_d" })
   in
   Alcotest.(check bool)
@@ -102,7 +102,7 @@ let all_turn_states : Keeper_turn_fsm.any_state list =
   [
     Keeper_turn_fsm.Any Idle;
     Keeper_turn_fsm.Any Phase_gating;
-    Keeper_turn_fsm.Any Cascade_routing;
+    Keeper_turn_fsm.Any Runtime_routing;
     Keeper_turn_fsm.Any Awaiting_provider;
     Keeper_turn_fsm.Any Streaming;
     Keeper_turn_fsm.Any Awaiting_tool_result;
@@ -120,11 +120,11 @@ let test_turn_state_labels_unique () =
 let test_failed_label_carries_reason () =
   let s =
     Keeper_turn_fsm.any_state_label
-      (Keeper_turn_fsm.Any (Failed (Failure_cascade_unavailable { base = "b"; resolved = None })))
+      (Keeper_turn_fsm.Any (Failed (Failure_runtime_unavailable { base = "b"; resolved = None })))
   in
   Alcotest.(check string)
     "Failed label uses 'failed:' prefix + reason"
-    "failed:cascade_unavailable" s
+    "failed:runtime_unavailable" s
 
 let test_cancelled_label_carries_reason () =
   let s =
@@ -208,8 +208,7 @@ let test_is_actionable_matches_variants () =
 let all_contract_statuses
     : Keeper_contract_classifier.contract_status list =
   [
-    Tool_surface_mismatch { missing = [ "x" ] };
-    Missing_required_tool_use;
+    Surface_mismatch { missing = [ "x" ] };
     Claim_only_after_owned_task;
     Needs_execution_progress;
     Passive_only;
@@ -228,20 +227,13 @@ let test_contract_status_labels_unique () =
 let test_pp_contract_status_surfaces_missing_list () =
   let s =
     format_to_string Keeper_contract_classifier.pp_contract_status
-      (Tool_surface_mismatch { missing = [ "keeper_task_claim"; "masc_claim_next" ] })
+      (Surface_mismatch { missing = [ "keeper_task_claim" ] })
   in
   Alcotest.(check bool)
     "pp_contract_status surfaces first missing tool"
     true
     (try
        ignore (Str.search_forward (Str.regexp_string "keeper_task_claim") s 0);
-       true
-     with Not_found -> false);
-  Alcotest.(check bool)
-    "pp_contract_status surfaces second missing tool"
-    true
-    (try
-       ignore (Str.search_forward (Str.regexp_string "masc_claim_next") s 0);
        true
      with Not_found -> false)
 

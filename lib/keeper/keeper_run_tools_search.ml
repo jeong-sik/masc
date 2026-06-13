@@ -7,12 +7,12 @@ type tool_search_hit_partition =
 let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_results =
   (* PR #14574 review #1/#7: only expose a public alias (e.g. "Execute") when
      its routed internal handler is actually in the
-     incoming [allowed] set for this preset. Adding all [public_names ()]
+     incoming active surface. Adding all [public_names ()]
      unconditionally let [keeper_tool_search] return aliases even when
      their backing tool was not permitted for the turn, which would invite
      the model to attempt unregistered tool calls. *)
   let aliases_with_allowed_route =
-    Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names allowed
+    Keeper_tool_descriptor_resolution.public_names_for_allowed_internal_names allowed
   in
   let allowed = allowed @ aliases_with_allowed_route in
   let allowed_set =
@@ -37,24 +37,4 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
   ; discoverable_hits
   ; filtered_by_policy = List.length retrieved - List.length allowed_retrieved
   }
-;;
-
-let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
-  if List.length all_allowed <= max_tools
-  then all_allowed
-  else (
-    let essential_names = Keeper_types.dedupe_keep_order essential_names in
-    let essential =
-      all_allowed
-      |> List.filter (fun name -> List.mem name essential_names)
-      |> Keeper_types.dedupe_keep_order
-    in
-    let non_essential =
-      List.filter (fun name -> not (List.mem name essential_names)) all_allowed
-    in
-    let budget = max 0 (max_tools - List.length essential) in
-    essential
-    @ (non_essential
-       |> List.filteri (fun i _ -> i < budget)
-       |> Keeper_types.dedupe_keep_order))
 ;;

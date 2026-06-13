@@ -8,19 +8,16 @@
 (** Which source admitted a tool name during resolution. *)
 type tried_source =
   | Dispatch_table              (** Tool_dispatch.is_registered *)
-  | Tool_name_variant           (** Tool_name.of_string *)
-  | Public_descriptor           (** Agent_tool_descriptor.find_public *)
+  | Public_descriptor           (** Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
-  | Alias_masc_to_internal      (** Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** effective_core_tools *)
-  | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
-  | Surface of Tool_catalog_surfaces.surface
+  | Tool_schema                 (** Tool_shard.all_keeper_tool_schemas + inline schemas *)
+  | Descriptor_registry         (** Keeper_tool_descriptor.all_descriptors public_name (flat SSOT) *)
 
 (** Resolution outcome for a tool name. *)
 type resolution =
-  | Resolved of { canonical : string; via : tried_source;
-                  surface : Tool_catalog_surfaces.surface option }
+  | Resolved of { canonical : string; via : tried_source }
   | Alias_to of { from_ : string; canonical : string; via : tried_source }
   | Unknown of { name : string; tried : tried_source list }
 
@@ -41,10 +38,6 @@ val all_admitting_sources : string -> tried_source list
 (** RFC-0084 §1.4 — Single-SSOT entry for runtime tool-name routing. *)
 
 type runtime_decision_outcome =
-  | Mcp_mapped of
-      { stripped : string
-      ; internal : string
-      }
   | Route_hit of { internal : string }
   | Already_internal of { canonical : string }
   | Miss
@@ -54,8 +47,6 @@ type runtime_decision_outcome =
     low-dependency SSOT for runtime tool-name routing.
 
     Result variants:
-    - [Mcp_mapped { stripped; internal }] — name was an MCP-prefixed
-      public alias resolved to an internal canonical name.
     - [Route_hit { internal }] — alias-table hit; internal name returned.
     - [Already_internal { canonical }] — name is already in internal form.
     - [Miss] — name does not resolve through any runtime route. *)
@@ -63,7 +54,7 @@ val runtime_decision : string -> runtime_decision_outcome
 
 (** Pure canonicalisation — no telemetry side-effect.
 
-    Used by set-logic call sites (required-tool canonicalisation, surface
+    Used by set-logic call sites (tool canonicalisation, surface
     composition, satisfaction checks) where every invocation should NOT
     count as an observation event. *)
 val canonical_tool_name : string -> string
@@ -76,7 +67,7 @@ val canonical_tool_name : string -> string
     [canonical_tool_name] to avoid double-counting. *)
 val canonical_tool_name_observed : string -> string
 
-(** Return a model-facing correction when a tool call uses a keeper-internal
+(** Return a schema-allowed correction when a tool call uses a keeper-internal
     implementation name whose public alias is the supported LLM surface. *)
 val public_alias_guidance_for_internal_call
-  :  visible_tool_names:string list -> string -> string option
+  :  allowed_tool_names:string list -> string -> string option

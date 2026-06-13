@@ -3,7 +3,7 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/
-  - lib/tool_dispatch.ml
+  - lib/tool/tool_dispatch.ml
   - lib/server/
 ---
 
@@ -11,7 +11,7 @@ code_refs:
 
 **Status**: Draft
 **Date**: 2026-03-29
-**Scope**: MASC-MCP full product surface
+**Scope**: MASC full product surface
 **Version at analysis**: v2.161.0 (dune-project), 305+ MCP tools, 289K LOC
 **One sentence**: 문서가 약속하는 기능과 실제 작동하는 기능의 차이를 정량 검증하여, 17개 갭을 4-Wave 해결 계획으로 정리한다.
 
@@ -40,7 +40,7 @@ code_refs:
 
 ## 1. Problem Statement
 
-masc-mcp는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이 수치는 "코드가 존재하는가"를 측정한다.
+masc는 95.2% 구현율(spec/C-implementation-status.md)을 보고하지만, 이 수치는 "코드가 존재하는가"를 측정한다.
 "코드가 production 경로에 연결되어 작동하는가"는 별개 질문이다.
 
 분석 결과:
@@ -207,7 +207,7 @@ ls .masc/keepers/ | wc -l
 
 ```bash
 # tool_dispatch.ml에서 config 도구 검색 (2026-03-29)
-grep -n "masc_config" lib/tool_dispatch.ml
+grep -n "masc_config" lib/tool/tool_dispatch.ml
 # 결과: 0건
 
 # 직렬화 레이어는 존재
@@ -238,7 +238,7 @@ grep -n "to_json" lib/config/env_config.ml | head -3
 
 ```bash
 # dispatch 등록 확인 (2026-03-29)
-grep "masc_tempo\|masc_encryption\|masc_notification\|masc_generate_key" lib/tool_dispatch.ml
+grep "masc_tempo\|masc_encryption\|masc_notification\|masc_generate_key" lib/tool/tool_dispatch.ml
 # 결과: 0건
 
 # historical snapshot (2026-03-29): 당시 handler 파일은 잔존
@@ -314,7 +314,7 @@ let handle_voice_transcript (_ctx : 'a context) _args : result =
 | 파일 | 버전 |
 |------|------|
 | `dune-project` | 2.161.0 |
-| `masc_mcp.opam` | 2.161.0 |
+| `masc.opam` | 2.161.0 |
 | `CHANGELOG.md` 최신 | 2.160.0 |
 | `ROADMAP.md` | 2.159.0 |
 | `PRODUCT-OPERATING-PLAN.md` | 2.153.0 |
@@ -363,8 +363,8 @@ deny list에 등록되었으나 구현이 없는 도구:
 ```
 masc_config_set          → C2 관련, 구현 없음
 masc_config_reset        → C2 관련, 구현 없음
-masc_room_delete         → 구현 없음
-masc_room_destroy        → 구현 없음
+masc_workspace_delete         → 구현 없음
+masc_workspace_destroy        → 구현 없음
 masc_admin_reset         → 구현 없음
 masc_admin_cleanup       → 구현 없음
 masc_spawn               → tool_tag_init에 이름만 등록, handler 없음
@@ -385,7 +385,7 @@ masc_pg_query            → 구현 없음
 
 - 586 모듈, 1961 의존 엣지
 - 최대 SCC: 115개 모듈 (전체의 20%)
-- Hub: Room (139 dependents), Tool_args (59), Keeper_types (44)
+- Hub: Workspace (139 dependents), Tool_args (59), Keeper_types (44)
 - Tool↔Keeper 순환이 핵심 원인
 - worktree `refactor/3593-scc-quick-fixes` 존재, Phase 0만 완료
 
@@ -531,7 +531,7 @@ Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + co
 | 순서 | 갭 | 노력 | 산출물 |
 |------|-----|------|--------|
 | 8 | H5: Feature Flags | 3-5일 | flag 레지스트리 + 평가 API |
-| 9 | M5: GC 디커플링 | 3-5일 | per-room GC 또는 Pulse 분리 |
+| 9 | M5: GC 디커플링 | 3-5일 | per-workspace GC 또는 Pulse 분리 |
 | 10 | H3: Auth/API | 5-8일 | auth 설계 문서 + 기본 구현 |
 | 11 | M4: OAS 경계 | 3-5일 | bridge audit + 도메인 용어 제거 |
 
@@ -570,7 +570,7 @@ Wave 2 완료 조건: `find .masc/keepers -name "memory.jsonl" | wc -l` > 0 + co
 | `lib/tool_tempo.ml` | H1 | dead handler (PR #4750에서 제거) |
 | `lib/tool_encryption.ml` | H1 | dead handler (PR #4750에서 제거) |
 | `lib/tool_notifications.ml` | H1 | dead handler (삭제 대상) |
-| `lib/tool_dispatch.ml` | H1, C2 | 도구 등록 중앙 |
+| `lib/tool/tool_dispatch.ml` | H1, C2 | 도구 등록 중앙 |
 | `dune-project` | H4 | 버전 SSOT |
 | `ROADMAP.md` | H4 | 버전 drift |
 | `PRODUCT-OPERATING-PLAN.md` | H4 | 버전 drift |
@@ -593,10 +593,10 @@ done
 find .masc/keepers -name "memory.jsonl" -o -name "memory_bank.jsonl" | wc -l
 
 # C2: config 도구 등록 확인
-grep -c "masc_config" lib/tool_dispatch.ml
+grep -c "masc_config" lib/tool/tool_dispatch.ml
 
 # M1: phantom tool 정리 확인
-grep "masc_config_set\|masc_room_delete\|masc_admin_reset\|masc_spawn\|masc_execute\b\|masc_neo4j_query\|masc_pg_query" \
+grep "masc_config_set\|masc_workspace_delete\|masc_admin_reset\|masc_spawn\|masc_execute\b\|masc_neo4j_query\|masc_pg_query" \
   lib/keeper/keeper_hooks_oas.ml | grep -v "(\*" | wc -l
 # 주석 처리되지 않은 phantom 항목 수 (목표: 0 또는 forward-looking 주석 포함)
 ```

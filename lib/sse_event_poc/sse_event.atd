@@ -2,7 +2,7 @@
 
    Scope: agent_started payload field only.  Envelope wrap is out of scope
    here (envelope has nullable-with-empty-string-coerced-to-null semantics
-   via cascade_event_bridge.json_string_opt that atdgen cannot express
+   via runtime_event_bridge.json_string_opt that atdgen cannot express
    without a custom JSON adapter).
 
    Goal: determine whether atdgen's default record write matches

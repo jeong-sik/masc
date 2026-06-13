@@ -15,7 +15,6 @@ type repository = {
   local_path : string;
   aliases : string list [@default []];
   default_branch : string;
-  credential_id : string;
   keepers : string list;
   status : repository_status;
   auto_sync : bool;
@@ -25,34 +24,9 @@ type repository = {
 }
 [@@deriving yojson, show, eq]
 
-type credential_type =
-  | Github
-  | Gitlab
-  | Local
-[@@deriving yojson, show, eq]
-
-type credential_state =
-  | Unmaterialized
-  | Materialized of { last_verified_at : int64 }
-  | Stale of { reason : string }
-[@@deriving yojson, show, eq]
-
-type credential = {
-  id : string;
-  cred_type : credential_type;
-  username : string;
-  gh_config_dir : string option [@default None];
-  ssh_key_path : string option [@default None];
-  gpg_key_id : string option [@default None];
-  state : credential_state [@default Unmaterialized];
-  token_sha256_prefix : string option [@default None];
-}
-[@@deriving yojson, show, eq]
-
 type keeper_repo_mapping = {
   keeper_id : string;
   repository_ids : string list;
-  mapped_credential_id : string option [@default None];
 }
 [@@deriving yojson, show, eq]
 

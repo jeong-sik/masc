@@ -36,8 +36,8 @@ let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
   let open Safe_ops in
   reset_persistence_utf8_repair_stats_for_tests ();
   let metric_before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Prometheus.metric_persistence_utf8_repair
+    Masc.Otel_metric_store.metric_value_or_zero
+      Masc.Otel_metric_store.metric_persistence_utf8_repair
       ()
   in
   let replacement = "\xEF\xBF\xBD" in
@@ -51,8 +51,8 @@ let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
     check int "one repaired read" 1 stats.repaired_reads;
     check int "one invalid byte" 1 stats.repaired_bytes;
     let metric_after =
-      Masc_mcp.Prometheus.metric_value_or_zero
-        Masc_mcp.Prometheus.metric_persistence_utf8_repair
+      Masc.Otel_metric_store.metric_value_or_zero
+        Masc.Otel_metric_store.metric_persistence_utf8_repair
         ()
     in
     check (float 0.0001) "UTF-8 repair counter +1"

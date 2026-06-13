@@ -1,4 +1,4 @@
-module Lib = Masc_mcp
+module Lib = Masc
 
 open Alcotest
 
@@ -68,7 +68,7 @@ let with_env key value f =
 
 let test_dashboard_perf_reads_root_benchmarks () =
   with_temp_base @@ fun base_path ->
-  let config = Lib.Coord.default_config base_path in
+  let config = Lib.Workspace.default_config base_path in
   let results_dir = Filename.concat base_path "benchmarks/results" in
   let baseline_file = Filename.concat results_dir "results_20260331_130000.csv" in
   let latest_file = Filename.concat results_dir "results_20260331_140000.csv" in
@@ -99,7 +99,7 @@ let test_dashboard_perf_reads_root_benchmarks () =
       ]);
   set_mtime baseline_file 1_000.0;
   set_mtime latest_file 2_000.0;
-  let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "result file" "benchmarks/results/results_20260331_140000.csv"
@@ -123,7 +123,7 @@ let test_dashboard_perf_reads_root_benchmarks () =
 
 let test_dashboard_perf_reads_worktree_benchmarks () =
   with_temp_base @@ fun base_path ->
-  let config = Lib.Coord.default_config base_path in
+  let config = Lib.Workspace.default_config base_path in
   let workspace_root = Filename.concat base_path ".worktrees/feat-perf" in
   let worktree_results_dir = Filename.concat workspace_root "benchmarks/results" in
   let latest_file = Filename.concat worktree_results_dir "results_20260331_150000.csv" in
@@ -136,7 +136,7 @@ let test_dashboard_perf_reads_worktree_benchmarks () =
     ];
   set_mtime latest_file 3_000.0;
   with_env "MASC_BENCHMARK_RESULTS_DIR" worktree_results_dir @@ fun () ->
-  let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "worktree dir selected" ".worktrees/feat-perf/benchmarks/results"
@@ -149,7 +149,7 @@ let test_dashboard_perf_reads_worktree_benchmarks () =
 
 let test_dashboard_perf_prefers_latest_scoped_artifact () =
   with_temp_base @@ fun base_path ->
-  let config = Lib.Coord.default_config base_path in
+  let config = Lib.Workspace.default_config base_path in
   let root_results_dir = Filename.concat base_path "benchmarks/results" in
   let root_file = Filename.concat root_results_dir "results_20260331_160000.csv" in
   let workspace_root = Filename.concat base_path ".worktrees/feat-perf" in
@@ -170,7 +170,7 @@ let test_dashboard_perf_prefers_latest_scoped_artifact () =
   set_mtime worktree_file 2_000.0;
   set_mtime root_file 3_000.0;
   with_cwd workspace_root @@ fun () ->
-  let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "latest scoped file wins" "benchmarks/results/results_20260331_160000.csv"
@@ -178,8 +178,8 @@ let test_dashboard_perf_prefers_latest_scoped_artifact () =
 
 let test_dashboard_perf_empty_shape () =
   with_temp_base @@ fun base_path ->
-  let config = Lib.Coord.default_config base_path in
-  let json = Lib.Server_dashboard_http.dashboard_perf_http_json config in
+  let config = Lib.Workspace.default_config base_path in
+  let json = Server_dashboard_http.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "empty" (json |> member "status" |> to_string);
   check int "benchmarks empty" 0

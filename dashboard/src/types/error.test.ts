@@ -19,7 +19,7 @@ describe('classifyErrorCode', () => {
     ['Missing parameter: task_id', 'validation_error'],
     ['Invalid input format', 'validation_error'],
     ['Not implemented yet', 'not_implemented'],
-    ['Room not joined', 'precondition_failed'],
+    ['Workspace not joined', 'precondition_failed'],
     ['Internal server error', 'internal_error'],
     ['Unexpected failure', 'internal_error'],
   ] satisfies Array<[string, ErrorCode]>)(

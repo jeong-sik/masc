@@ -126,7 +126,7 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
 describe('filterGoalRelations', () => {
   const store: Record<string, Goal> = {
     'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', status: 'active', metric: 'error_rate' }),
-    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift cascade coverage', status: 'paused', metric: 'coverage_pct' }),
+    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift runtime coverage', status: 'paused', metric: 'coverage_pct' }),
     'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', status: 'completed', metric: null }),
   }
   const ids: string[] = ['g-alpha', 'g-beta', 'g-gamma', 'g-orphan']
@@ -145,7 +145,7 @@ describe('filterGoalRelations', () => {
   })
 
   it('matches resolved goal title (case-insensitive)', () => {
-    const out = filterGoalRelations(ids, 'CASCADE', resolve)
+    const out = filterGoalRelations(ids, 'RUNTIME', resolve)
     expect(out).toEqual(['g-beta'])
   })
 

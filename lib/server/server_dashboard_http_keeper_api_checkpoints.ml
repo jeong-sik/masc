@@ -32,24 +32,18 @@ let oas_checkpoint_summary_json
     ; ( "system_prompt_present"
       , `Bool
           (match checkpoint.system_prompt with
-           | Some prompt -> String.trim prompt <> ""
+           | Some prompt -> Option.is_some (String_util.trim_to_option prompt)
            | None -> false) )
-    ; ( "latest_preview"
-      , match latest_preview_of_messages messages with
-        | Some preview -> `String preview
-        | None -> `Null )
-    ; ( "continuity_summary"
-      , match continuity_summary with
-        | Some summary -> `String summary
-        | None -> `Null )
+    ; ( "latest_preview", Json_util.string_opt_to_json (latest_preview_of_messages messages) )
+    ; ( "continuity_summary", Json_util.string_opt_to_json continuity_summary )
     ; "file_stat", stat_json_of_path path
     ]
 ;;
 
-let inventory_json (config : Coord.config) (name : string)
+let inventory_json (config : Workspace.config) (name : string)
   : [ `OK | `Not_found ] * Yojson.Safe.t
   =
-  match Keeper_types.read_meta_resolved config name with
+  match Keeper_meta_store.read_meta_resolved config name with
   | Error msg -> `Not_found, `Assoc [ "error", `String msg ]
   | Ok None ->
     ( `Not_found

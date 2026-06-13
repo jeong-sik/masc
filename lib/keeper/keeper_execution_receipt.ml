@@ -3,48 +3,17 @@
 include Keeper_execution_receipt_types
 
 
-let last_nonempty values =
-  List.fold_left
-    (fun acc value -> if String.trim value = "" then acc else Some value)
-    None
-    values
-;;
-
-let last_tool_name receipt =
-  let rec choose = function
-    | [] -> None
-    | values :: rest ->
-      (match last_nonempty values with
-       | Some _ as value -> value
-       | None -> choose rest)
-  in
-  choose
-    [ receipt.observed_tools
-    ; receipt.canonical_tools
-    ; receipt.tools_used
-    ; receipt.reported_tools
-    ; receipt.requested_tools
-    ]
-;;
-
-let cascade_rotation_attempt_to_json attempt =
+let runtime_rotation_attempt_to_json attempt =
   `Assoc
-    [ "from_cascade", `String (Cascade_name.to_string attempt.from_cascade)
-    ; "to_cascade", `String (Cascade_name.to_string attempt.to_cascade)
+    [ "from_runtime", `String (attempt.from_runtime)
+    ; "to_runtime", `String (attempt.to_runtime)
     ; ( "reason"
       , `String (Keeper_error_classify.degraded_retry_reason_to_string attempt.reason) )
-    ; "outcome", `String (cascade_rotation_outcome_to_string attempt.outcome)
-    ; ( "slot_release_at_phase"
-      , string_opt_json
-          (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
+    ; "outcome", `String (runtime_rotation_outcome_to_string attempt.outcome)
     ; ( "productive_phase_elapsed_ms"
-      , match attempt.productive_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms )
     ; ( "retry_phase_elapsed_ms"
-      , match attempt.retry_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms )
     ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
     ; "error_message", string_opt_json attempt.error_message
     ; "recorded_at", `String attempt.recorded_at
@@ -60,113 +29,11 @@ let receipt_duration_ms receipt =
   | _ -> 0.0
 ;;
 
-let string_contains_ci haystack needle =
-  let haystack = String.lowercase_ascii haystack in
-  let needle = String.lowercase_ascii needle in
-  let haystack_len = String.length haystack in
-  let needle_len = String.length needle in
-  let rec loop i =
-    if needle_len = 0
-    then true
-    else if i + needle_len > haystack_len
-    then false
-    else if String.sub haystack i needle_len = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
-let bump_count name counts =
-  let rec loop prefix = function
-    | [] -> List.rev ((name, 1) :: prefix)
-    | (existing, count) :: rest when String.equal existing name ->
-      List.rev_append prefix ((existing, count + 1) :: rest)
-    | item :: rest -> loop (item :: prefix) rest
-  in
-  loop [] counts
-;;
-
-let count_json values =
-  values
-  |> List.map (fun (name, count) ->
-    `Assoc [ "name", `String name; "count", `Int count ])
-  |> fun values -> `List values
-;;
-
-let count_descriptors ~f descriptors =
-  descriptors
-  |> List.fold_left
-       (fun counts descriptor -> bump_count (f descriptor) counts)
-       []
-  |> count_json
-;;
-
-let descriptor_receipt_labels_json descriptors =
-  descriptors
-  |> List.map (fun (descriptor : Agent_tool_descriptor.t) ->
-    `Assoc
-      [ "descriptor_id", `String descriptor.id
-      ; "labels", Agent_tool_descriptor.receipt_labels_json descriptor
-      ])
-  |> fun values -> `List values
-;;
-
-let policy_decision_failed receipt =
-  let candidates =
-    [ receipt.terminal_reason_code
-    ; Option.value
-        (Option.map error_kind_to_string receipt.error_kind)
-        ~default:""
-    ; Option.value receipt.error_message ~default:""
-    ]
-  in
-  List.exists
-    (fun value ->
-       string_contains_ci value "policy_denied"
-       || string_contains_ci value "denied_by_policy"
-       || string_contains_ci value "approval_required"
-       || string_contains_ci value "governance_approval")
-    candidates
-;;
-
-let tool_descriptor_summary_json receipt =
-  let descriptors =
-    receipt.observed_tools
-    @ receipt.canonical_tools
-    @ receipt.tools_used
-    @ receipt.reported_tools
-    |> Agent_tool_descriptor_resolution.descriptors_for_tool_names
-  in
-  `Assoc
-    [ "source", `String "receipt_tool_sets"
-    ; ( "observed_descriptor_ids"
-      , list_json (List.map (fun (d : Agent_tool_descriptor.t) -> d.id) descriptors) )
-    ; "descriptor_count", `Int (List.length descriptors)
-    ; "receipt_labels_by_descriptor", descriptor_receipt_labels_json descriptors
-    ; ( "executor_counts"
-      , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.executor_to_string d.executor)
-          descriptors )
-    ; ( "backend_counts"
-      , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.backend_to_string d.backend)
-          descriptors )
-    ; ( "sandbox_counts"
-      , count_descriptors
-          ~f:(fun (d : Agent_tool_descriptor.t) ->
-            Agent_tool_descriptor.sandbox_to_string d.sandbox)
-          descriptors )
-    ; ( "failed_policy_decision_count"
-      , `Int (if policy_decision_failed receipt then 1 else 0) )
-    ]
-;;
+let string_contains_ci = String_util.contains_substring_ci
 
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
-   [(Disp_unknown, Reason_unmapped_cascade_state)].
+   [(Disp_unknown, Reason_unmapped_runtime_state)].
 
    PR #11651 fixed the historical "blocked" -> "unknown" silent path
    (livelock turns emitted [outcome="blocked"] which was not in
@@ -180,15 +47,15 @@ let tool_descriptor_summary_json receipt =
    to the existing PR #11651 narrative documented at the fall-through
    case below ([match outcome_kind_of_string ...] catch-all). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ReceiptUnmappedDisposition)
     ~help:
-      "Total receipts whose (outcome, cascade_outcome) tuple did not match any branch of \
+      "Total receipts whose (outcome, runtime_outcome) tuple did not match any branch of \
        operator_disposition and fell through to the typed catch-all \
-       (Disp_unknown, Reason_unmapped_cascade_state).  PR #11651 fixed the historical \
+       (Disp_unknown, Reason_unmapped_runtime_state).  PR #11651 fixed the historical \
        'blocked' -> 'unknown' silent path; this counter alerts operators if a future \
        refactor reintroduces such a path. A non-zero rate is a regression signal — \
-       investigate which receipt.outcome / cascade_outcome / terminal_reason_code \
+       investigate which receipt.outcome / runtime_outcome / terminal_reason_code \
        combination is unclassified.  Labels are intentionally omitted: receipt fields \
        are high-cardinality free-form strings; structured detail goes to the WARN log \
        line at the firing site."
@@ -199,7 +66,7 @@ type operator_disposition_kind =
   | Disp_pass
   | Disp_pause_human
   | Disp_alert_exhausted
-  | Disp_fail_open_next_cascade
+  | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped
@@ -209,7 +76,7 @@ let operator_disposition_kind_to_string = function
   | Disp_pass -> "pass"
   | Disp_pause_human -> "pause_human"
   | Disp_alert_exhausted -> "alert_exhausted"
-  | Disp_fail_open_next_cascade -> "fail_open_next_cascade"
+  | Disp_fail_open_next_runtime -> "fail_open_next_runtime"
   | Disp_pass_next_model -> "pass_next_model"
   | Disp_user_cancelled -> "user_cancelled"
   | Disp_skipped -> "skipped"
@@ -218,211 +85,222 @@ let operator_disposition_kind_to_string = function
 
 type operator_disposition_reason =
   | Reason_healthy
-  | Reason_cascade_exhausted
+  | Reason_runtime_exhausted
   | Reason_preflight_config_error
   | Reason_degraded_retry
-  | Reason_cascade_fallback
+  | Reason_runtime_fallback
+  | Reason_transient_runtime_retry
   | Reason_provider_runtime_error
   | Reason_internal_error
-  | Reason_tool_required_unsatisfied
   | Reason_tool_route_recoverable_failure
+  | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
   | Reason_phase_skipped
-  | Reason_unmapped_cascade_state
+  | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
   | Reason_healthy -> "healthy"
-  | Reason_cascade_exhausted -> "cascade_exhausted"
+  | Reason_runtime_exhausted -> "runtime_exhausted"
   | Reason_preflight_config_error -> "preflight_config_error"
   | Reason_degraded_retry -> "degraded_retry"
-  | Reason_cascade_fallback -> "cascade_fallback"
+  | Reason_runtime_fallback -> "runtime_fallback"
+  | Reason_transient_runtime_retry -> "transient_runtime_retry"
   | Reason_provider_runtime_error -> "provider_runtime_error"
   | Reason_internal_error -> "internal_error"
-  | Reason_tool_required_unsatisfied -> "tool_required_unsatisfied"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
+  | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
-  | Reason_unmapped_cascade_state -> "unmapped_cascade_state"
+  | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
+;;
+
+(* Terminal-reason prefixes for OAS agent-execution errors that exhaust a
+   turn/time budget before the turn completes. The SSOT now lives in
+   [Keeper_terminal_reason] (RFC-0042 PR-4) so the typed classifier owns
+   the constants the [Auto_recoverable_budget] bucket matches; these
+   re-exports keep [Keeper_agent_error] and the public [.mli] byte-stable.
+   A turn cut off by the per-call turn cap ([MaxTurnsExceeded]), the
+   wall-clock ceiling ([AgentExecutionTimeout]), or the progress-aware idle
+   watchdog ([AgentExecutionIdleTimeout]) did NOT violate the tool
+   contract — it never reached a verdict. The keeper checkpoints and the
+   supervisor auto-resumes. Scope is deliberately narrow: token/cost
+   budget, guardrail, and tripwire terminals stay out, since those are
+   genuine ceilings an operator should see, not transient turn cut-offs. *)
+let terminal_prefix_max_turns_exceeded =
+  Keeper_terminal_reason.terminal_prefix_max_turns_exceeded
+;;
+
+let terminal_prefix_execution_timeout =
+  Keeper_terminal_reason.terminal_prefix_execution_timeout
+;;
+
+let terminal_prefix_idle_timeout = Keeper_terminal_reason.terminal_prefix_idle_timeout
+
+let is_auto_recoverable_turn_budget_terminal =
+  Keeper_terminal_reason.is_auto_recoverable_turn_budget_terminal
 ;;
 
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
-  let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+  (* Parse the wire string ONCE into the typed classification
+     ([Keeper_terminal_reason], RFC-0042 PR-4). The earlier
+     [String.starts_with] / [string_contains] chain is now a single
+     [of_wire] call; each former string predicate is a variant test,
+     preserving the original [if/else] priority order. The error_kind
+     sub-predicates stay here (they read the receipt record, not the wire
+     string) and remain OR'd with the variant test at the same branch. *)
+  let terminal_reason = Keeper_terminal_reason.of_wire receipt.terminal_reason_code in
   let error_kind =
     Option.map
       (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
       receipt.error_kind
   in
   let provider_runtime_failure =
-    String.starts_with ~prefix:"api_error_" terminal_reason
-    || String.equal terminal_reason "provider_error"
+    (match terminal_reason with
+     | Keeper_terminal_reason.Provider_runtime_failure _ -> true
+     | _ -> false)
     ||
     match error_kind with
     | Some ("api" | "mcp" | "io" | "orchestration" | "serialization") -> true
     | Some _ | None -> false
   in
   let preflight_config_failure =
+    (match terminal_reason with
+     | Keeper_terminal_reason.Config_or_auth _ -> true
+     | _ -> false)
+    ||
     match error_kind with
-    | Some kind ->
-      string_contains_ci kind "config"
-      || string_contains_ci kind "auth"
-      || string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
-    | None ->
-      string_contains_ci terminal_reason "config"
-      || string_contains_ci terminal_reason "auth"
+    | Some kind -> string_contains_ci kind "config" || string_contains_ci kind "auth"
+    | None -> false
   in
-  (* Pre-typing, this branch also matched cascade_outcome="cascade_exhausted"
-     and "exhausted" — neither is in the producer's closed [cascade_outcome]
-     set ([Cascade_passed_to_next_model] / [_completed] / [_not_observed] /
-     [_not_dispatched]).  Those branches were unreachable workarounds; the
-     typed migration drops them.  Cascade exhaustion still reaches this
-     branch via [terminal_reason="cascade_exhausted"]. *)
-  if String.equal terminal_reason "cascade_exhausted"
-  then Disp_alert_exhausted, Reason_cascade_exhausted
-  else if preflight_config_failure
-  then Disp_pause_human, Reason_preflight_config_error
-  else if
-    provider_runtime_failure
-    && (receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade)
-  then Disp_fail_open_next_cascade, Reason_degraded_retry
-  else if
-    provider_runtime_failure
-    && (receipt.cascade_fallback_applied
-        || receipt.cascade_outcome = Cascade_passed_to_next_model)
-  then Disp_pass_next_model, Reason_cascade_fallback
-  else if provider_runtime_failure
-  then Disp_pause_human, Reason_provider_runtime_error
-  else if String.starts_with ~prefix:"completion_contract_violation:" terminal_reason
-  then
-    (* The downstream completion-contract layer has already decided the turn
-       violated [require_tool_use] (or another contract sub-clause) and emits
-       [terminal_reason="completion_contract_violation:<sub_clause>"]. The
-       earlier-layer [tool_contract_result] can show [satisfied_completion]
-       from a separate classifier that judged the same turn locally OK; the
-       two-layer disagreement was the unmapped fall-through that #11651
-       regression counter is meant to flag. Treat terminal_reason as
-       authoritative — the disposition is the same as the explicit
-       [tool_required_unsatisfied] branch below. *)
-    Disp_pause_human, Reason_tool_required_unsatisfied
-  else if
-    String.starts_with ~prefix:"turn_livelock:" terminal_reason
-    ||
-    match error_kind with
-    | Some "turn_livelock_blocked" -> true
-    | Some _ | None -> false
-  then Disp_pause_human, Reason_turn_livelock_blocked
-  else if
-    String.equal terminal_reason "internal_error"
-    ||
-    match error_kind with
-    | Some "internal" -> true
-    | Some _ | None -> false
-  then Disp_pause_human, Reason_internal_error
-  else
-    let canonical_names names =
-      names
-      |> List.map Keeper_tool_resolution.canonical_tool_name
-      |> Keeper_types.dedupe_keep_order
-    in
-    let used_tool_names =
-      canonical_names
-        (receipt.canonical_tools @ receipt.observed_tools @ receipt.tools_used)
-    in
-    let required_tool_names = canonical_names receipt.tool_surface.required_tools in
-    let required_tools_satisfied =
-      required_tool_names <> []
-      && receipt.tool_surface.missing_required_tools = []
-      && List.for_all
-           (fun required -> List.mem required used_tool_names)
-           required_tool_names
-    in
-    let generic_claim_context_progress =
-      (* Generic require_tool_use has no named required-tool set. A successful
-         claim-only turn still made scheduling progress; the next turn must
-         execute, but this receipt should not be reclassified as a human pause. *)
-      required_tool_names = []
-      && receipt.tool_surface.missing_required_tools = []
-      && List.exists Keeper_tool_progress.is_claim_context_tool_name used_tool_names
-    in
-    let ok_followup_progress =
-      receipt.outcome = `Ok
-      && receipt.cascade_outcome = Cascade_completed
-      && receipt.tool_contract_result = Contract_needs_execution_progress
-      && (required_tools_satisfied || generic_claim_context_progress)
-    in
-    let required_tool_contract_unsatisfied =
-      receipt.tool_surface.tool_requirement = Required
-      && (List.mem
-            receipt.tool_contract_result
-            [ Contract_violated
-            ; Contract_unknown
-            ; Contract_needs_execution_progress
-            ; Contract_missing_required_tool_use
-            ; Contract_passive_only
-            ; Contract_claim_only_after_owned_task
-            ; Contract_tool_surface_mismatch
-            ; Contract_no_tool_capable_provider
-            ]
-          || receipt.tools_used = [])
-      && not ok_followup_progress
-    in
-    let required_tool_route_failure =
+  (* Pre-typing, this branch also matched runtime_outcome="runtime_exhausted"
+     and "exhausted" — neither is in the producer's closed [runtime_outcome]
+     set ([Runtime_passed_to_next_model] / [_completed] / [_failed] /
+     [_not_observed] / [_not_dispatched]).  Those branches were unreachable workarounds; the
+     typed migration drops them.  Runtime exhaustion still reaches this
+     branch via [terminal_reason="runtime_exhausted"]. *)
+  match terminal_reason with
+  | Keeper_terminal_reason.Runtime_exhausted _ ->
+    Disp_alert_exhausted, Reason_runtime_exhausted
+  | _ when preflight_config_failure ->
+    Disp_pause_human, Reason_preflight_config_error
+  | _
+    when provider_runtime_failure
+         && (receipt.degraded_retry_applied
+             || Option.is_some receipt.degraded_retry_runtime) ->
+    Disp_fail_open_next_runtime, Reason_degraded_retry
+  | _
+    when provider_runtime_failure
+         && (receipt.runtime_fallback_applied
+             || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
+    Disp_pass_next_model, Reason_runtime_fallback
+  | _
+    when provider_runtime_failure
+         && Keeper_terminal_reason.is_transient_provider_runtime_failure
+              terminal_reason ->
+    (* Retry-recoverable transient (idle-chunk liveness kill wrapped as
+       [Api.Timeout], or a transient [Api.NetworkError]) that the keeper's
+       in-turn retry self-heals. Before this arm it fell through to the
+       [Disp_pause_human] branch below and broadcast an operator page
+       ([needs_operator_broadcast Disp_pause_human = true]) for a transient
+       that already recovered — fleet log [reason=provider_runtime_error] +
+       liveness guard [retry=1/2] then success (deepseek 17/19). Routing to
+       [Disp_fail_open_next_runtime] advances the FSM (RFC-0022 attempt
+       liveness intent) and, since [needs_operator_broadcast] is [false] for
+       that disposition, emits NO page. The structural OAS budget timeout
+       carries a distinct wire code and is NOT transient, so it still pauses
+       via the fall-through below.
+
+       The reason is [Reason_transient_runtime_retry], NOT
+       [Reason_runtime_fallback]: this arm is reached only AFTER the
+       runtime-fallback arm above excluded [runtime_fallback_applied] /
+       [Runtime_passed_to_next_model], so by construction no cross-runtime
+       fallback happened — the turn recovered via the SAME runtime's in-turn
+       retry. [operator_disposition_reason] is serialised into receipt JSON
+       unconditionally (dashboard-visible), so collapsing this onto the
+       fallback label would mislabel every transient-recovery turn as a
+       genuine fallback. *)
+    Disp_fail_open_next_runtime, Reason_transient_runtime_retry
+  | _ when provider_runtime_failure ->
+    Disp_pause_human, Reason_provider_runtime_error
+  | Keeper_terminal_reason.Completion_contract_violation _ ->
+    Disp_pause_human, Reason_unmapped_runtime_state
+  | Keeper_terminal_reason.Turn_livelock _ ->
+    Disp_pause_human, Reason_turn_livelock_blocked
+  | _
+    when (match error_kind with
+          | Some "turn_livelock_blocked" -> true
+          | Some _ | None -> false) ->
+    Disp_pause_human, Reason_turn_livelock_blocked
+  | Keeper_terminal_reason.Internal_error _ ->
+    Disp_pause_human, Reason_internal_error
+  | _
+    when (match error_kind with
+          | Some "internal" -> true
+          | Some _ | None -> false) ->
+    Disp_pause_human, Reason_internal_error
+  | Keeper_terminal_reason.Auto_recoverable_budget _ ->
+    Disp_pass, Reason_turn_budget_exhausted
+  | Config_or_auth _
+  | Provider_runtime_failure _
+  | Pre_dispatch_success _
+  | Other _ ->
+    (* Generic fall-through. [Config_or_auth] and
+       [Provider_runtime_failure] are caught by the guarded branches above
+       (their constructors force [preflight_config_failure] /
+       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
+       [Other] reach here in practice; the first two are listed to keep the
+       match exhaustive without a wildcard. *)
+    let tool_route_failure =
       List.mem
-        receipt.tool_contract_result
-        [ Contract_tool_surface_mismatch; Contract_no_tool_capable_provider ]
+        receipt.completion_contract_result
+        [ Contract_surface_mismatch; Contract_no_capable_provider ]
     in
-    if required_tool_contract_unsatisfied && required_tool_route_failure
+    if tool_route_failure
     then
-      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-      then Disp_fail_open_next_cascade, Reason_tool_route_recoverable_failure
+      if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+      then Disp_fail_open_next_runtime, Reason_tool_route_recoverable_failure
       else if
-        receipt.cascade_fallback_applied
-        || receipt.cascade_outcome = Cascade_passed_to_next_model
+        receipt.runtime_fallback_applied
+        || receipt.runtime_outcome = Runtime_passed_to_next_model
       then Disp_pass_next_model, Reason_tool_route_recoverable_failure
       else Disp_pause_human, Reason_tool_route_recoverable_failure
-    else if required_tool_contract_unsatisfied
-    then (
-      if receipt.tool_contract_result = Contract_missing_required_tool_use
-      then
-        Prometheus.inc_counter
-          Keeper_metrics.(to_string ContractViolations)
-          ~labels:
-            [ "keeper_name", receipt.keeper_name
-            ; "kind", "missing_required_tool_use"
-            ; "signal"
-            , (if receipt.tools_used = []
-               then "no_tools_used"
-               else "partial_tools_used")
-            ]
-          ();
-      Disp_pause_human, Reason_tool_required_unsatisfied)
     else if
-      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
-    then Disp_fail_open_next_cascade, Reason_degraded_retry
+      receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_runtime
+    then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if
-      receipt.cascade_fallback_applied
-      || receipt.cascade_outcome = Cascade_passed_to_next_model
-    then Disp_pass_next_model, Reason_cascade_fallback
+      receipt.runtime_fallback_applied
+      || receipt.runtime_outcome = Runtime_passed_to_next_model
+    then Disp_pass_next_model, Reason_runtime_fallback
     else if
       receipt.outcome = `Ok
-      && receipt.cascade_outcome = Cascade_not_dispatched
-      && receipt.tool_contract_result = Contract_not_dispatched
-      && String.equal terminal_reason "pre_dispatch_success"
+      && receipt.runtime_outcome = Runtime_not_dispatched
+      && receipt.completion_contract_result = Contract_not_dispatched
+      &&
+      (match terminal_reason with
+       | Keeper_terminal_reason.Pre_dispatch_success _ -> true
+       | Runtime_exhausted _
+       | Config_or_auth _
+       | Provider_runtime_failure _
+       | Completion_contract_violation _
+       | Turn_livelock _
+       | Internal_error _
+       | Auto_recoverable_budget _
+       | Other _ -> false)
     then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
-       error AND cascade reached the configured terminal. Any other fallthrough
-       is an unmapped state — surface it as "unknown" so a new cascade_outcome
+       error AND runtime reached the configured terminal. Any other fallthrough
+       is an unmapped state — surface it as "unknown" so a new runtime_outcome
        or terminal_reason_code does not silently display as "healthy" on the
        dashboard. See #9900 and CLAUDE.md anti-pattern #2.
 
        Cancelled is split out from the legacy binary outcome so dashboards
        and replay decoders can distinguish a user-initiated cancellation
        from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
-       action: a turn that intentionally never dispatched, so cascade
+       action: a turn that intentionally never dispatched, so runtime
        never engaged. It is a successful no-op rather than a failure or
        an unmapped state. Spec parity with [ReceiptOutcomeSet] in
        [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
@@ -430,32 +308,32 @@ let operator_disposition (receipt : t)
       match receipt.outcome with
       | `Cancelled -> Disp_user_cancelled, Reason_cancelled
       | `Skipped -> Disp_skipped, Reason_phase_skipped
-      | `Ok when receipt.cascade_outcome = Cascade_completed -> Disp_pass, Reason_healthy
-      | `Ok when receipt.cascade_outcome = Cascade_not_dispatched ->
+      | `Ok when receipt.runtime_outcome = Runtime_completed -> Disp_pass, Reason_healthy
+      | `Ok when receipt.runtime_outcome = Runtime_not_dispatched ->
         (* Pre-dispatch shortcut: the turn completed successfully without
            dispatching to the LLM (cached response, immediate tool result,
            or pre-dispatch check resolved the turn).  Treated as healthy
-           because the outcome is success — the cascade was simply not
+           because the outcome is success — the runtime was simply not
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
       | _ ->
-        Prometheus.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ExecutionReceiptFailures)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
           ();
         Log.Keeper.warn
-          "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
-           terminal_reason=%s tool_contract_result=%s error_kind=%s) — investigate \
+          "operator_disposition: unmapped (outcome=%s runtime_outcome=%s \
+           terminal_reason=%s completion_contract_result=%s error_kind=%s) — investigate \
            regression of #11651 silent-path fix"
           (outcome_kind_to_string receipt.outcome)
-          (cascade_outcome_to_string receipt.cascade_outcome)
-          terminal_reason
-          (tool_contract_result_to_string receipt.tool_contract_result)
+          (runtime_outcome_to_string receipt.runtime_outcome)
+          receipt.terminal_reason_code
+          (completion_contract_result_to_string receipt.completion_contract_result)
           (Option.value
              (Option.map error_kind_to_string receipt.error_kind)
              ~default:"<none>");
-        Disp_unknown, Reason_unmapped_cascade_state)
+        Disp_unknown, Reason_unmapped_runtime_state)
 ;;
 
 let to_json (receipt : t) =
@@ -471,17 +349,12 @@ let to_json (receipt : t) =
     | error_kind, error_message ->
       `Assoc
         [ ( "kind"
-          , match error_kind with
-            | Some value -> `String (error_kind_to_string value)
-            | None -> `Null )
-        ; ( "message"
-          , match error_message with
-            | Some value -> `String value
-            | None -> `Null )
+          , string_opt_json (Option.map error_kind_to_string error_kind) )
+        ; ( "message", string_opt_json error_message )
         ]
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
       ~keeper_name:receipt.keeper_name
       ~agent_name:receipt.agent_name
       ~trace_id:receipt.trace_id
@@ -490,18 +363,11 @@ let to_json (receipt : t) =
       ?keeper_turn_id:receipt.turn_count
       ?task_id:receipt.current_task_id
       ~goal_ids:receipt.goal_ids
-      ~sandbox_profile:(Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
+      ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
-      ~network_mode:(Keeper_types.network_mode_to_string receipt.network_mode)
+      ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
       ?approval_mode:receipt.approval_profile
-      ~tool_surface_class:
-        (Keeper_agent_tool_surface.tool_surface_class_to_string
-           receipt.tool_surface.tool_surface_class)
-      ~visible_tool_count:receipt.tool_surface.visible_tool_count
-      ~required_tools:receipt.tool_surface.required_tools
-      ~required_tool_candidates:receipt.tool_surface.required_tool_candidates
-      ~missing_required_tools:receipt.tool_surface.missing_required_tools
-      ~cascade_profile:(Cascade_name.to_string receipt.cascade_name)
+      ~runtime_profile:(receipt.runtime_id)
       ()
   in
   let action_radius =
@@ -516,7 +382,7 @@ let to_json (receipt : t) =
       ~success:(outcome_kind_is_terminal_success receipt.outcome)
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
-      ~sandbox_target:(Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
+      ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ()
   in
   `Assoc
@@ -526,24 +392,12 @@ let to_json (receipt : t) =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "oas_turn_count"
-      , match receipt.oas_turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "oas_dispatch_mode"
-      , match receipt.oas_dispatch_mode with
-        | Some value -> `String value
-        | None -> `Null )
-    ; ( "oas_internal_cascade_disabled"
-      , `Bool receipt.oas_internal_cascade_disabled )
-    ; ( "current_task_id"
-      , match receipt.current_task_id with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
+    ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count )
+    ; ( "oas_dispatch_mode", string_opt_json receipt.oas_dispatch_mode )
+    ; ( "oas_internal_runtime_disabled"
+      , `Bool receipt.oas_internal_runtime_disabled )
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
@@ -553,68 +407,38 @@ let to_json (receipt : t) =
     ; "action_radius", action_radius
     ; "response_text_present", `Bool receipt.response_text_present
     ; "model_used", `Null
-    ; "requested_tools", list_json receipt.requested_tools
-    ; "reported_tools", list_json receipt.reported_tools
-    ; "observed_tools", list_json receipt.observed_tools
-    ; "canonical_tools", list_json receipt.canonical_tools
-    ; "unexpected_tools", list_json receipt.unexpected_tools
-    ; "tools_used", list_json receipt.tools_used
-    ; "tool_descriptor_summary", tool_descriptor_summary_json receipt
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "tool_surface"
       , `Assoc
           [ ( "turn_lane"
             , Keeper_agent_tool_surface.turn_lane_to_yojson receipt.tool_surface.turn_lane
             )
-          ; ( "tool_surface_class"
-            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                receipt.tool_surface.tool_surface_class )
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
-          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
-          ; ( "tool_surface_fallback_used"
-            , `Bool receipt.tool_surface.tool_surface_fallback_used )
-          ; "required_tools", list_json receipt.tool_surface.required_tools
-          ; ( "required_tool_candidates"
-            , list_json receipt.tool_surface.required_tool_candidates )
-          ; ( "missing_required_tools"
-            , list_json receipt.tool_surface.missing_required_tools )
-          ; ( "materialized_tools"
-            , list_json receipt.tool_surface.materialized_tools )
           ] )
     ; ( "sandbox"
       , `Assoc
-          [ "kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
-          ; ( "sandbox_root"
-            , match receipt.sandbox_root with
-              | Some value -> `String value
-              | None -> `Null )
+          [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+          ; ( "sandbox_root", string_opt_json receipt.sandbox_root )
           ; ( "network_mode"
-            , `String (Keeper_types.network_mode_to_string receipt.network_mode) )
+            , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
           ] )
     ; ( "approval"
       , `Assoc
-          [ ( "profile"
-            , match receipt.approval_profile with
-              | Some value -> `String value
-              | None -> `Null )
+          [ ( "profile", string_opt_json receipt.approval_profile )
           ; "derived", `Bool receipt.approval_profile_derived
           ] )
-    ; ( "cascade"
+    ; ( "runtime"
       , `Assoc
-          [ "name", `String (Cascade_name.to_string receipt.cascade_name)
-          ; "selected_model", `Null
-          ; "attempt_count", `Int receipt.cascade_attempt_count
-          ; "fallback_applied", `Bool receipt.cascade_fallback_applied
-          ; "outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
-          ; "oas_internal_cascade_allowed", `Bool receipt.oas_internal_cascade_allowed
+          [ "name", `String (receipt.runtime_id)
+          ; "selected_model", string_opt_json receipt.runtime_selected_model
+          ; "attempt_count", `Int receipt.runtime_attempt_count
+          ; "fallback_applied", `Bool receipt.runtime_fallback_applied
+          ; "outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
+          ; "oas_internal_runtime_allowed", `Bool receipt.oas_internal_runtime_allowed
           ; "degraded_retry_applied", `Bool receipt.degraded_retry_applied
-          ; ( "degraded_retry_cascade"
-            , match receipt.degraded_retry_cascade with
-              | Some value -> `String (Cascade_name.to_string value)
+          ; ( "degraded_retry_runtime"
+            , match receipt.degraded_retry_runtime with
+              | Some value -> `String (value)
               | None -> `Null )
           ; ( "fallback_reason"
             , match receipt.fallback_reason with
@@ -624,8 +448,8 @@ let to_json (receipt : t) =
           ; ( "rotation_attempts"
             , `List
                 (List.map
-                   cascade_rotation_attempt_to_json
-                   receipt.cascade_rotation_attempts) )
+                   runtime_rotation_attempt_to_json
+                   receipt.runtime_rotation_attempts) )
           ] )
     ; ( "stop_reason"
       , match receipt.stop_reason with
@@ -635,30 +459,18 @@ let to_json (receipt : t) =
     ; "started_at", `String receipt.started_at
     ; "ended_at", `String receipt.ended_at
     ; ( "extra_system_context_digest"
-      , match receipt.extra_system_context_digest with
-        | Some value -> `String value
-        | None -> `Null )
+      , string_opt_json receipt.extra_system_context_digest )
     ; ( "extra_system_context_injected_size"
-      , match receipt.extra_system_context_injected_size with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.extra_system_context_injected_size )
     ; ( "extra_system_context_computed_size"
-      , match receipt.extra_system_context_computed_size with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.extra_system_context_computed_size )
     ; ( "pre_dispatch_compacted", `Bool receipt.pre_dispatch_compacted )
     ; ( "pre_dispatch_compaction_trigger"
-      , match receipt.pre_dispatch_compaction_trigger with
-        | Some value -> `String value
-        | None -> `Null )
+      , string_opt_json receipt.pre_dispatch_compaction_trigger )
     ; ( "pre_dispatch_compaction_before_tokens"
-      , match receipt.pre_dispatch_compaction_before_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_before_tokens )
     ; ( "pre_dispatch_compaction_after_tokens"
-      , match receipt.pre_dispatch_compaction_after_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
+      , Json_util.int_opt_to_json receipt.pre_dispatch_compaction_after_tokens )
     ]
 ;;
 
@@ -701,7 +513,7 @@ let to_json (receipt : t) =
                                   [needs_operator_broadcast] is true and
                                   the receipt is not a duplicate livelock
                                   notification, inside a [try] so a single
-                                  failure does not cascade — the spec's
+                                  failure does not runtime — the spec's
                                   clean model.
 
    Bug model (would be violated if a future refactor dropped the first
@@ -714,7 +526,7 @@ let to_json (receipt : t) =
 let needs_operator_broadcast = function
   | Disp_pause_human | Disp_alert_exhausted | Disp_unknown -> true
   | Disp_pass
-  | Disp_fail_open_next_cascade
+  | Disp_fail_open_next_runtime
   | Disp_pass_next_model
   | Disp_user_cancelled
   | Disp_skipped -> false
@@ -772,29 +584,18 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count )
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)
     ; "terminal_reason_code", `String terminal_reason_code
-    ; ( "current_task_id"
-      , match receipt.current_task_id with
-        | Some value -> `String value
-        | None -> `Null )
+    ; ( "current_task_id", string_opt_json receipt.current_task_id )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "cascade_name", `String (Cascade_name.to_string receipt.cascade_name)
-    ; "cascade_outcome", `String (cascade_outcome_to_string receipt.cascade_outcome)
-    ; ( "tool_contract_result"
-      , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-    ; ( "last_tool_name"
-      , match last_tool_name receipt with
-        | Some value -> `String value
-        | None -> `Null )
-    ; "tools_used", list_json receipt.tools_used
+    ; "runtime_id", `String (receipt.runtime_id)
+    ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
+    ; ( "completion_contract_result"
+      , `String (completion_contract_result_to_string receipt.completion_contract_result) )
     ; ( "contract_violation_detail"
       , match decode_contract_violation_reason terminal_reason_code with
         | None -> `Null
@@ -804,37 +605,12 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
             ; "called_tools", list_json called
             ; "satisfying_tools", list_json satisfying
             ] )
-    ; ( "tool_contract"
-      , `Assoc
-          [ ( "result"
-            , `String (tool_contract_result_to_string receipt.tool_contract_result) )
-          ; "required_tools", list_json receipt.tool_surface.required_tools
-          ; ( "required_tool_candidates"
-            , list_json receipt.tool_surface.required_tool_candidates )
-          ; ( "missing_required_tools"
-            , list_json receipt.tool_surface.missing_required_tools )
-          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
-          ; ( "tool_requirement"
-            , Keeper_agent_tool_surface.tool_requirement_to_yojson
-                receipt.tool_surface.tool_requirement )
-          ; ( "turn_lane"
-            , Keeper_agent_tool_surface.turn_lane_to_yojson
-                receipt.tool_surface.turn_lane )
-          ; ( "tool_surface_class"
-            , Keeper_agent_tool_surface.tool_surface_class_to_yojson
-                receipt.tool_surface.tool_surface_class )
-          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
-          ; ( "tool_surface_fallback_used"
-            , `Bool receipt.tool_surface.tool_surface_fallback_used )
-          ; ( "materialized_tools"
-            , list_json receipt.tool_surface.materialized_tools )
-          ] )
     ; ( "sandbox"
       , `Assoc
-          [ "kind", `String (Keeper_types.sandbox_profile_to_string receipt.sandbox_kind)
+          [ "kind", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
           ; "sandbox_root", string_opt_json receipt.sandbox_root
           ; ( "network_mode"
-            , `String (Keeper_types.network_mode_to_string receipt.network_mode) )
+            , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
           ] )
     ; "model_used", `Null
     ; ( "stop_reason"
@@ -845,10 +621,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
       , match receipt.error_kind with
         | Some v -> `String (error_kind_to_string v)
         | None -> `Null )
-    ; ( "error_message"
-      , match receipt.error_message with
-        | Some v -> `String v
-        | None -> `Null )
+    ; ( "error_message", string_opt_json receipt.error_message )
     ; "ended_at", `String receipt.ended_at
     ]
 ;;
@@ -871,7 +644,7 @@ let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
     event.seq
 ;;
 
-let append (config : Coord.config) (receipt : t) =
+let append (config : Workspace.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config receipt.keeper_name
   in
@@ -910,7 +683,7 @@ let append (config : Coord.config) (receipt : t) =
         (* fail-closed: log loud, do not silently swallow. The append itself
            has already persisted the receipt; the broadcast failure is its
            own diagnostic that watchdogs/log alerts will pick up. *)
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ExecutionReceiptFailures)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
           ();
@@ -921,7 +694,7 @@ let append (config : Coord.config) (receipt : t) =
           reason_s
           (Printexc.to_string exn))
     else (
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string OperatorBroadcastSuppressed)
         ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
         ();
@@ -987,21 +760,21 @@ let stale_turn_bucket stale_seconds =
 let stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let runtime_id_string = runtime_id in
   let failure_reason_text = stale_broadcast_failure_reason_text failure_reason in
   let failure_reason_cohort = stale_broadcast_failure_cohort failure_reason in
   `Assoc
     [ "schema", `String "keeper.operator_broadcast_required.v1"
     ; "keeper_name", `String keeper_name
     ; "agent_name", `String agent_name
-    ; "cascade_name", `String cascade_name_string
+    ; "runtime_id", `String runtime_id_string
     ; "trace_id", `String trace_id
     ; "generation", `Int generation
     ; "disposition", `String "stalled"
@@ -1024,19 +797,19 @@ let emit_stale_keeper_broadcast
       config
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~failure_reason
       ~stale_seconds
       ~last_turn_ts
   =
-  let cascade_name_string = Cascade_name.to_string cascade_name in
+  let runtime_id_string = runtime_id in
   let payload =
     stale_broadcast_payload
       ~keeper_name
       ~agent_name
-      ~cascade_name
+      ~runtime_id
       ~trace_id
       ~generation
       ~stale_seconds
@@ -1051,26 +824,26 @@ let emit_stale_keeper_broadcast
       ~payload
       ()
   in
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ExecutionReceiptFailures)
     ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
   Log.Keeper.warn
-    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"
+    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago runtime=%s seq=%d"
     keeper_name
     stale_seconds
-    cascade_name_string
+    runtime_id_string
     event.seq
 ;;
 
-let latest_json (config : Coord.config) keeper_name =
+let latest_json (config : Workspace.config) keeper_name =
   let store = Keeper_types_support.keeper_execution_receipt_store config keeper_name in
   match Dated_jsonl.read_recent store 1 with
   | [ json ] -> Some json
   | _ -> None
 ;;
 
-let latest_json_by_keeper (config : Coord.config) keeper_names =
+let latest_json_by_keeper (config : Workspace.config) keeper_names =
   keeper_names
   |> List.filter_map (fun keeper_name ->
     match latest_json config keeper_name with

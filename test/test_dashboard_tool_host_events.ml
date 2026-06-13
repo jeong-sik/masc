@@ -1,5 +1,5 @@
 open Alcotest
-open Masc_mcp
+open Masc
 
 let temp_dir () =
   let dir = Filename.temp_file "test_dashboard_tool_host_events_" "" in
@@ -62,7 +62,7 @@ let test_record_writes_audit_ring_and_telemetry () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       let report =
         {
           Dashboard_tool_host_events.agent_name = "agent_code";

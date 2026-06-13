@@ -24,12 +24,12 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
     phase: 'Stable',
     turn_phase: 'idle',
     decision: { stage: 'undecided' },
-    cascade: { state: 'idle' },
+    runtime: { state: 'idle' },
     compaction: { stage: 'accumulating' },
     measurement: { captured: false },
     invariants: {
       phase_turn_alignment: true,
-      no_cascade_before_measurement: true,
+      no_runtime_before_measurement: true,
       compaction_atomicity: true,
       event_priority_monotone: true,
       phase_derivation_agreement: true,
@@ -58,8 +58,8 @@ describe('extractLaneValue', () => {
     expect(extractLaneValue(snapshot({ decision: { stage: 'guard_ok' } }), 'decision')).toBe('guard_ok')
   })
 
-  it('extracts cascade', () => {
-    expect(extractLaneValue(snapshot({ cascade: { state: 'trying' } }), 'cascade')).toBe('trying')
+  it('extracts runtime', () => {
+    expect(extractLaneValue(snapshot({ runtime: { state: 'trying' } }), 'runtime')).toBe('trying')
   })
 
   it('extracts compaction', () => {
@@ -144,7 +144,7 @@ describe('constants', () => {
 
   it('LANE_LABELS has all 6 lanes', () => {
     const keys = Object.keys(LANE_LABELS)
-    expect(keys).toEqual(['phase', 'turn', 'decision', 'cascade', 'compaction', 'breaker'])
+    expect(keys).toEqual(['phase', 'turn', 'decision', 'runtime', 'compaction', 'breaker'])
   })
 
   it('INVARIANT_LABELS has all 5 invariants', () => {
@@ -169,7 +169,7 @@ describe('failureReasonLabel', () => {
 
   it('preserves parametric detail after the base', () => {
     expect(failureReasonLabel('heartbeat_consecutive_failures(3)')).toBe('하트비트 연속 실패(3)')
-    expect(failureReasonLabel('tool_required_unsatisfied(code:detail)')).toBe('필수 도구 미충족(code:detail)')
+    expect(failureReasonLabel('tool_route_recoverable_failure(code:detail)')).toBe('도구 라우팅 복구 가능 실패(code:detail)')
   })
 
   it('falls back to raw string for unknown bases', () => {

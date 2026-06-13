@@ -6,21 +6,22 @@
 
 open Server_auth
 open Server_utils
+open Masc_domain
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.room_config.base_path
+let base_path_of_state state = state.Mcp_server.workspace_config.base_path
 let extract_path_param = Server_utils.extract_path_param
 
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
-  let config = state.Mcp_server.room_config in
+  let config = state.Mcp_server.workspace_config in
   let lookup_repository repo_id =
     match Repo_store.find ~base_path:project_base repo_id with
     | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
     | Error _ -> None
   in
   let lookup_playground name =
-    match Keeper_types.read_meta config name with
+    match Keeper_meta_store.read_meta config name with
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
     | _ -> None
   in
@@ -38,13 +39,13 @@ let resolve_workspace_base ~state ~uri =
 
    Priority:
      1. [?canonical_url=...] explicit override (still re-normalised so a
-        misspelt query falls back to Legacy rather than silently
+        misspelt query falls back to Orphan rather than silently
         creating a new bucket).
      2. [?repo_id=...] → lookup repo.url in [Repo_store] → normalise.
-     3. Default → [Legacy] so traffic that has not been updated to use
-        either parameter keeps reading the historical flat store.
+     3. Default → [Orphan] so traffic that has not been updated to use
+        either parameter is preserved in the unresolved partition.
 
-   PR-1d removes the [Legacy] fallback once the data migration runs. *)
+   PR-1d removed the old [Legacy] constructor in favor of [Orphan]. *)
 let resolve_partition_for_query ~state ~uri =
   let project_base = base_path_of_state state in
   let from_canonical =
@@ -65,13 +66,58 @@ let resolve_partition_for_query ~state ~uri =
   | None ->
     (match from_repo_id () with
      | Some slug -> Ide_paths.By_url slug
-     | None -> Ide_paths.Legacy)
+     | None -> Ide_paths.Orphan)
 ;;
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
-let build_presence_snapshot state =
+let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
+  match Uri.get_query_param uri name with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n > 0 -> min n max_value
+     | _ -> default)
+  | None -> default
+;;
+
+let parse_non_negative_int_query ?(default = 0) uri name =
+  match Uri.get_query_param uri name with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n > 0 -> n
+     | _ -> default)
+  | None -> default
+;;
+
+let event_kind_param uri =
+  match Uri.get_query_param uri "kind" with
+  | None -> Ok None
+  | Some raw ->
+    (match String.trim raw with
+     | "" | "all" -> Ok None
+     | kind ->
+       (match Ide_bridge.event_kind_of_string kind with
+        | Some parsed -> Ok (Some parsed)
+        | None -> Error "kind must be one of tool, turn, pr, all"))
+;;
+
+let keeper_id_param uri =
+  match Uri.get_query_param uri "keeper_id" with
+  | Some k when String.trim k <> "" -> Some (String.trim k)
+  | _ ->
+    (match Uri.get_query_param uri "keeper" with
+     | Some k when String.trim k <> "" -> Some (String.trim k)
+     | _ -> None)
+;;
+
+let file_path_param uri =
+  match Uri.get_query_param uri "file_path" with
+  | Some p when String.trim p <> "" -> Some (String.trim p)
+  | _ -> None
+;;
+
+let runtime_id_and_branch state =
   let base = base_path_of_state state in
   let runtime_id =
     let base_name = Filename.basename base in
@@ -99,18 +145,24 @@ let build_presence_snapshot state =
         else ref_line)
     else "main"
   in
+  runtime_id, branch
+;;
+
+let build_presence_snapshot state =
+  let base = base_path_of_state state in
+  let runtime_id, branch = runtime_id_and_branch state in
   let entries =
-    let agents = Agent_registry_eio.list_active ~within_seconds:300.0 () in
+    let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
     List.map
-      (fun (a : Agent_identity.t) ->
+      (fun (a : Client_identity.t) ->
          `Assoc
-           [ "keeper_id", `String a.Agent_identity.agent_name
+           [ "keeper_id", `String a.Client_identity.agent_name
            ; "workspace_label", `String (Filename.basename base)
            ; "branch", `String branch
            ; "role", `String "keeper"
            ; "status", `String "active"
            ; ( "last_seen_ms"
-             , `Intlit (Printf.sprintf "%.0f" (a.Agent_identity.registered_at *. 1000.0))
+             , `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
              )
            ])
       agents
@@ -124,8 +176,79 @@ let build_presence_snapshot state =
     ]
 ;;
 
+let build_cursor_snapshot state uri =
+  let base = base_path_of_state state in
+  let runtime_id, branch = runtime_id_and_branch state in
+  let partition = resolve_partition_for_query ~state ~uri in
+  let keeper_id = keeper_id_param uri in
+  let file_path = file_path_param uri in
+  let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
+  let offset = parse_non_negative_int_query ~default:0 uri "offset" in
+  let cursors =
+    Ide_bridge.list_cursors
+      ~base_path:base
+      ~partition
+      ?keeper_id
+      ?file_path
+      ~limit
+      ~offset
+      ()
+  in
+  `Assoc
+    [ "runtime_id", `String runtime_id
+    ; "branch", `String branch
+    ; "connected", `Bool true
+    ; "cursors", `List cursors
+    ; "count", `Int (List.length cursors)
+    ; "limit", `Int limit
+    ; "offset", `Int offset
+    ]
+;;
+
 let add_routes router =
+  Ide_bridge.install_agent_observation_sinks ();
   router
+  |> Http.Router.get "/api/v1/agents" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+         let entries =
+           List.map
+             (fun (a : Client_identity.t) ->
+                `Assoc
+                  [ "name", `String a.Client_identity.agent_name
+                  ; "status", `String "active"
+                  ; "current_task", `Null
+                  ; "model", `Null
+                  ])
+             agents
+         in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok (`Assoc [ "agents", `List entries ]))
+           reqd)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/status" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let config = state.Mcp_server.workspace_config in
+         let workspace_state = Workspace.read_state config in
+         let tempo = Tempo.get_tempo config in
+         let json = `Assoc [
+           "cluster", `String (Env_config_core.cluster_name ());
+           "project", `String workspace_state.project;
+           "tempo_interval_s", `Float tempo.current_interval_s;
+           "paused", `Bool workspace_state.paused;
+         ] in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok json)
+           reqd)
+      request
+      reqd)
   |> Http.Router.get "/api/v1/ide/annotations" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
@@ -357,6 +480,54 @@ let add_routes router =
            reqd)
       request
       reqd)
+  |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let uri = Uri.of_string request.target in
+         match event_kind_param uri with
+         | Error msg ->
+           Http.Response.json_value
+             ~status:`Bad_request
+             ~request
+             (json_error msg)
+             reqd
+         | Ok kind ->
+           let base = base_path_of_state state in
+           let partition = resolve_partition_for_query ~state ~uri in
+           let keeper_id = keeper_id_param uri in
+           let limit = parse_positive_int_query ~default:50 ~max_value:200 uri "limit" in
+           let offset = parse_non_negative_int_query ~default:0 uri "offset" in
+           let events =
+             Ide_bridge.list_events
+               ~base_path:base
+               ~partition
+               ?kind
+               ?keeper_id
+               ~limit
+               ~offset
+               ()
+           in
+           let kind_json =
+             match kind with
+             | Some k -> `String (Ide_bridge.event_kind_to_string k)
+             | None -> `String "all"
+           in
+           let result =
+             `Assoc
+               [ "events", `List events
+               ; "count", `Int (List.length events)
+               ; "kind", kind_json
+               ; "limit", `Int limit
+               ; "offset", `Int offset
+               ]
+           in
+           Http.Response.json_value
+             ~compress:true
+             ~request
+             (json_ok result)
+             reqd)
+      request
+      reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
      main's helper call instead of our inline construction. *)
   |> Http.Router.get "/api/v1/ide/presence" (fun request reqd ->
@@ -368,6 +539,74 @@ let add_routes router =
            ~request
            (json_ok snapshot)
            reqd)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/cursors" (fun request reqd ->
+    with_public_read
+      (fun state _req reqd ->
+         let uri = Uri.of_string request.target in
+         let snapshot = build_cursor_snapshot state uri in
+         Http.Response.json_value
+           ~compress:true
+           ~request
+           (json_ok snapshot)
+           reqd)
+      request
+      reqd)
+  |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
+    with_public_read
+      (fun state req reqd ->
+         let base = base_path_of_state state in
+         Http.Request.read_body_async reqd (fun body_str ->
+           let json =
+             try Yojson.Safe.from_string body_str with
+             | _ -> `Assoc []
+           in
+           let find_string key =
+             match json with
+             | `Assoc fields ->
+               (match List.assoc_opt key fields with
+                | Some (`String s) when s <> "" -> Some s
+                | _ -> None)
+             | _ -> None
+           in
+           let find_int key =
+             match json with
+             | `Assoc fields ->
+               (match List.assoc_opt key fields with
+                | Some (`Int i) -> Some i
+                | Some (`Intlit s) -> int_of_string_opt s
+                | _ -> None)
+             | _ -> None
+           in
+           match
+             ( find_string "file_path"
+             , find_int "line"
+             , find_string "keeper_id" )
+           with
+           | Some file_path, Some line, Some keeper_id
+             when line >= 1 ->
+             let column = find_int "column" in
+             let source = Option.value (find_string "source") ~default:"editor" in
+             Ide_bridge.ingest_cursor_event
+               ~base_path:base
+               ~keeper_id
+               ~file_path
+               ~line
+               ?column
+               ~source
+               ();
+             Http.Response.json_value
+               ~status:`Created
+               ~request
+               (json_ok (`Assoc [ "ok", `Bool true ]))
+               reqd
+           | _ ->
+             Http.Response.json_value
+               ~status:`Bad_request
+               ~request
+               (json_error "Missing required fields: file_path, line (>=1), keeper_id")
+               reqd))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->
@@ -415,6 +654,109 @@ let add_routes router =
                  (Printexc.to_string exn);
                Httpun.Body.Writer.close writer)
          | _ -> Httpun.Body.Writer.close writer)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/cursors/stream" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let uri = Uri.of_string request.target in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             ([ "content-type", "text/event-stream"
+              ; "cache-control", "no-cache"
+              ; "connection", "keep-alive"
+              ; "x-accel-buffering", "no"
+              ]
+              @ cors_headers origin)
+         in
+         let response = Httpun.Response.create ~headers `OK in
+         let writer = Httpun.Reqd.respond_with_streaming inner_reqd response in
+         let write_snapshot () =
+           let snapshot_json =
+             Yojson.Safe.to_string (build_cursor_snapshot state uri)
+           in
+           let event = Printf.sprintf "data: %s\n\n" snapshot_json in
+           Httpun.Body.Writer.write_string writer event
+         in
+         write_snapshot ();
+         match state.Mcp_server.sw, state.Mcp_server.clock with
+         | Some sw, Some clock ->
+           Eio.Fiber.fork ~sw (fun () ->
+             let rec loop () =
+               (try
+                  Eio.Time.sleep clock 30.0;
+                  write_snapshot ();
+                  loop ()
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Server.debug
+                    "IDE cursor SSE ping loop error: %s"
+                    (Printexc.to_string exn));
+               Httpun.Body.Writer.close writer
+             in
+             try loop () with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.error
+                 "IDE cursor SSE loop exited: %s"
+                 (Printexc.to_string exn);
+               Httpun.Body.Writer.close writer)
+         | _ -> Httpun.Body.Writer.close writer)
+      request
+      reqd)
+  |> Http.Router.get "/api/v1/ide/memory" (fun request reqd ->
+    with_public_read
+      (fun state _req inner_reqd ->
+         let uri = Uri.of_string request.target in
+         let base = base_path_of_state state in
+         let keeper_id =
+           match Uri.get_query_param uri "keeper_id" with
+           | Some k when k <> "" -> Some k
+           | _ -> None
+         in
+         let limit =
+           match Uri.get_query_param uri "limit" with
+           | Some s -> (try int_of_string s with _ -> 50)
+           | None -> 50
+         in
+         (* Memory tiers: retrospective, episode, semantic.
+            Currently returns annotation-based memory entries.
+            Future: integrate with Neo4j/pgvector for semantic search. *)
+         let filter : Ide_annotation_types.annotation_filter =
+           { file_path = None; keeper_id; goal_id = None; task_id = None }
+         in
+         let annotations = Ide_annotations.list ~base_dir:base ~filter () in
+         let entries =
+           List.map (fun (a : Ide_annotation_types.annotation) ->
+             `Assoc [
+               ("id", `String a.id);
+               ("kind", `String (Ide_annotation_types.annotation_kind_to_string a.kind));
+               ("content", `String a.content);
+               ("file_path", `String a.file_path);
+               ("line_start", `Int a.line_start);
+               ("line_end", `Int a.line_end);
+               ("keeper_id", `String a.keeper_id);
+               ("created_at_ms", `Intlit (Int64.to_string a.created_at_ms));
+               ("goal_id", (match a.goal_id with Some g -> `String g | None -> `Null));
+               ("task_id", (match a.task_id with Some t -> `String t | None -> `Null));
+             ])
+           (List.filteri (fun i _ -> i < limit) annotations)
+         in
+         let result = `Assoc [
+           ("entries", `List entries);
+           ("total", `Int (List.length annotations));
+           ("limit", `Int limit);
+         ] in
+         let origin = get_origin request in
+         let headers =
+           Httpun.Headers.of_list
+             (("content-type", "application/json") :: cors_headers origin)
+         in
+         let body = Yojson.Safe.to_string result in
+         let response = Httpun.Response.create ~headers `OK in
+         Httpun.Reqd.respond_with_string inner_reqd response body)
       request
       reqd)
 ;;

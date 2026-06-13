@@ -6,18 +6,18 @@ created: 2026-05-20
 implementation_prs: []
 ---
 
-# RFC-0149 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · cascade_resolve_live_warn)
+# RFC-0149 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · runtime_resolve_live_warn)
 
 - **Status**: Implemented (frontmatter SSOT) — §3.3 + §3.2 + §3.1 sunsets all merged; legacy silent paths deleted; counters demoted to informational per the per-section sunset criteria.  See §4 *Removal targets* for the per-section PR trail.
 - **Created**: 2026-05-20
-- **Owner**: keeper observability + memory + cascade
-- **Predecessors**: masc-mcp #16771, #16778, #16787 (all MERGED to main 2026-05-19)
-- **Evidence base**: `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 CASCADE
+- **Owner**: keeper observability + memory + runtime
+- **Predecessors**: masc #16771, #16778, #16787 (all MERGED to main 2026-05-19)
+- **Evidence base**: `~/me/memory/masc-code-flowchart-audit-2026-05-20.html` §3 MEMORY, §4 COMPACT, §6 RUNTIME
 - **Related**: RFC-0144 (workaround sunset taxonomy), RFC-0145 (permissive silent fallback elimination)
 
 ## 1. Motivation
 
-A 2026-05-20 six-subsystem audit (Turn / Life / Memory / Compact / Tool / Cascade) identified 3 silent-failure pathways that an immediate follow-up sprint *fixed* by adding Prometheus counters / WARN-once logs while explicitly preserving the silent behavior. All three PR bodies state "Behavior is unchanged".
+A 2026-05-20 six-subsystem audit (Turn / Life / Memory / Compact / Tool / Runtime) identified 3 silent-failure pathways that an immediate follow-up sprint *fixed* by adding legacy metrics backend counters / WARN-once logs while explicitly preserving the silent behavior. All three PR bodies state "Behavior is unchanged".
 
 This pattern is the exact match for `~/me/instructions/software-development.md` §워크어라운드 거부 기준 §1 (텔레메트리-as-fix):
 
@@ -35,15 +35,15 @@ In scope (3 deprecated-path workarounds, all already merged):
 |---|---|---|
 | #16771 (`5ab5b97f1e`) | `lib/keeper/keeper_memory_recall.ml:73-75` `read_file_tail_lines` | `try ... -> []` + counter + WARN. Read failure still returns `[]`. |
 | #16778 (`cac8880268`) | `lib/keeper/keeper_compact_policy.ml:312-326` `saved_tokens` / `saved_messages` | `max 0 (pre - post)` + counter. Negative-delta still silently floored. |
-| #16787 (`3bf5f555df`) | `lib/keeper/keeper_cascade_profile.ml:518-538` `resolve_live_with_catalog` | Silent fallback to `Keeper_turn` + counter + WARN-once. Typo / stale ref still routes to default. |
+| #16787 (`3bf5f555df`) | `lib/keeper/keeper_runtime_profile.ml:518-538` `resolve_live_with_catalog` | Silent fallback to `Keeper_turn` + counter + WARN-once. Typo / stale ref still routes to default. |
 
 Out of scope (separate RFC candidates from the same audit):
 
 - B1 LIFE: Dead phase entry-action ordering race (`keeper_state_machine.ml:773-778`).
 - B2 MEMORY: RFC-0107 `Jsonl_atomic` adoption for memory bank compaction.
-- B3 CASCADE: cascade.toml unknown field strict validation.
-- B4 CASCADE: `cascade_inference.ml:59-82` inference param fail-OPEN.
-- B6 TURN: `keeper_turn_cascade_budget_routing.ml:11,17` string prefix dispatch → tagged variant.
+- B3 RUNTIME: runtime.toml unknown field strict validation.
+- B4 RUNTIME: `runtime_inference.ml:59-82` inference param fail-OPEN.
+- B6 TURN: `keeper_turn_runtime_budget_routing.ml:11,17` string prefix dispatch → tagged variant.
 
 ## 3. Root-fix (typed boundary) per workaround
 
@@ -101,7 +101,7 @@ end
 
 **Sunset criterion**: When `Token_count.t` phantom types are introduced and `keeper_compact_policy.ml:312` consumes them via `match`, the `CompactionNegativeSavings` counter is removed. The `kind` label vocabulary (`tokens` | `messages`) is folded into `Divergent`-variant payload.
 
-### 3.3 `resolve_live_with_catalog` — typed `Cascade_name.t` parse (replaces #16787)
+### 3.3 `resolve_live_with_catalog` — typed `Runtime_name.t` parse (replaces #16787)
 
 Current code accepts `string` and silently falls back to `Keeper_turn` default for unresolved names:
 
@@ -115,15 +115,15 @@ Replacement applies "Parse, don't validate":
 ```ocaml
 val resolve_live_with_catalog :
   catalog:string list -> string
-  -> (Cascade_name.t, [ `Unresolved of string ]) result
+  -> (Runtime_name.t, [ `Unresolved of string ]) result
 ```
 
 Caller sites:
 
-- `Keeper_cascade_profile.cascade_name_for_use` and downstream — branch on `Ok name` (use) vs. `Error (`Unresolved raw)` (boot-time error or operator-visible alert; never default-route).
-- Tests assert that *no path* returns `Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog` for unresolved input.
+- `Keeper_runtime_profile.runtime_id_for_use` and downstream — branch on `Ok name` (use) vs. `Error (`Unresolved raw)` (boot-time error or operator-visible alert; never default-route).
+- Tests assert that *no path* returns `Runtime_routes.fallback_name_for_catalog Keeper_turn ~catalog` for unresolved input.
 
-**Sunset criterion**: When `Cascade_name.t` becomes the resolution boundary and `resolve_live` returns `result`, the `on_resolve_live_fallback` metric is removed and `logged_unresolved_raw` Hashtbl is removed. Operators see typed `Error` at config load time, not at turn time.
+**Sunset criterion**: When `Runtime_name.t` becomes the resolution boundary and `resolve_live` returns `result`, the `on_resolve_live_fallback` metric is removed and `logged_unresolved_raw` Hashtbl is removed. Operators see typed `Error` at config load time, not at turn time.
 
 ## 4. Removal targets
 
@@ -131,13 +131,13 @@ Caller sites:
 |---|---|---|---|
 | #16771 (memory recall counter+WARN) | RFC-0149 §3.1 implementation merged | TBD | This RFC |
 | #16778 (compact negative_savings counter) | RFC-0149 §3.2 implementation merged | TBD | This RFC |
-| #16787 (cascade resolve_live WARN-once) | RFC-0149 §3.3 implementation merged | TBD | This RFC |
+| #16787 (runtime resolve_live WARN-once) | RFC-0149 §3.3 implementation merged | TBD | This RFC |
 
 No date pressure — the merged workarounds are observability-only and do not block production. They become *informational* (not load-bearing) once typed boundaries replace the silent paths.
 
 ## 5. Implementation order
 
-1. **PR-1** — §3.3 first. `Cascade_name.t` typed parse. Smallest call-graph reach (cascade profile lookups only). Lowest risk.
+1. **PR-1** — §3.3 first. `Runtime_name.t` typed parse. Smallest call-graph reach (runtime profile lookups only). Lowest risk.
 2. **PR-2** — §3.1. `read_file_tail_lines` → `result`. Caller fan-out: 4 sites in `keeper_memory_recall.ml` + 1 in `keeper_memory_bank.ml`. Each caller adds an explicit `Error` arm.
 3. **PR-3** — §3.2. Phantom-typed `Token_count.t`. Touches `Context.t` count source resolution. Wait for §3.1/3.2 to land first so the compaction pipeline review can include the boundary changes together.
 
@@ -160,7 +160,7 @@ This RFC is the retroactive sunset; the feedback memory is the pre-PR check that
 ## 8. References
 
 - `~/me/instructions/software-development.md` §AI 코드 생성 안티패턴 + §워크어라운드 거부 기준 §1 (텔레메트리-as-fix)
-- `~/me/memory/masc-mcp-code-flowchart-audit-2026-05-20.html` (parent audit)
+- `~/me/memory/masc-code-flowchart-audit-2026-05-20.html` (parent audit)
 - `~/me/memory/feedback_telemetry_as_fix_self_recurrence.md` (lesson memory)
 - RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers (same meta-pattern, different cluster)
 - RFC-0145 — Permissive Silent Fallback Elimination (same family of anti-patterns)

@@ -3,10 +3,10 @@
     masc-improver evidence from 2026-04-24: a single keeper spent
     13.3 hours of LLM time and burned 4.19M tokens across 40+
     consecutive [stay_silent] turns, because the scheduler kept
-    firing ticks on a keeper whose preset could not satisfy any
-    backlog task.
+    firing ticks on a keeper whose effective tool surface could not satisfy
+    any backlog task.
 
-    The scheduler-side fix (O(1) preset gate, quarantine, backlog
+    The scheduler-side fix (O(1) effective-surface gate, quarantine, backlog
     routing) is large and belongs in a follow-up. This module
     closes the **observability** half so runtime can detect the
     loop instead of letting it burn silently in the background.
@@ -36,7 +36,7 @@ type record_outcome =
 
 (** Update streak for [keeper_name] based on [speech_act] from the
     latest turn. [speech_act] is the string form already emitted by
-    {!Masc_mcp.Keeper_social_model_types.speech_act_to_string} —
+    {!Keeper_social_model_types.speech_act_to_string} —
     we match on the literal ["stay_silent"] rather than the variant
     so this module does not couple to the social-model type. *)
 val record_turn : keeper_name:string -> speech_act:string -> record_outcome

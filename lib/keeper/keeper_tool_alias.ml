@@ -5,10 +5,10 @@
     name maps to one route record containing the internal handler name, an
     input translator, and an optional public schema.
 
-    Two surfaces:
-    - LLM native tools: Execute, SearchFiles, ReadFile, EditFile, WriteFile,
-      SearchWeb, FetchWeb
-    - MCP tools: masc_* (handled separately via Tool_catalog_surfaces)
+    Two descriptor-backed surfaces:
+    - LLM native-style tools: Execute, Grep/Search, Read, Edit, Write,
+      WebSearch, WebFetch
+    - MCP tools: names with the masc_ prefix
 
     Internal [keeper_*] names are implementation details of the routing layer,
     not a public surface. A tool call for a name we don't handle is a routing
@@ -22,22 +22,25 @@ type route =
   { internal_name : string
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; public_schema : Yojson.Safe.t option
-  ; descriptor : Agent_tool_descriptor.t
+  ; descriptor : Keeper_tool_descriptor.t
   }
 
 let routing_table : (string, route) Hashtbl.t =
   let t = Hashtbl.create 8 in
   List.iter
-    (fun (d : Agent_tool_descriptor.t) ->
-       Hashtbl.replace
-         t
-         d.public_name
-         { internal_name = d.internal_name
-         ; translate = d.translate
-         ; public_schema = Some d.input_schema
-         ; descriptor = d
-         })
-    Agent_tool_descriptor.public_descriptors;
+    (fun (d : Keeper_tool_descriptor.t) ->
+       List.iter
+         (fun public_name ->
+            Hashtbl.replace
+              t
+              public_name
+              { internal_name = d.internal_name
+              ; translate = d.translate
+              ; public_schema = Some d.input_schema
+              ; descriptor = d
+              })
+         (Keeper_tool_descriptor.public_names_of_descriptor d))
+    Keeper_tool_descriptor.public_descriptors;
   t
 ;;
 
@@ -46,58 +49,106 @@ let routing_table : (string, route) Hashtbl.t =
 (** [is_known_public name] is [true] when [name] has a routing entry. *)
 let is_known_public name = Hashtbl.mem routing_table name
 
-(** Known internal handler names — the [internal_name] values that
-    [routing_table] entries map onto, plus the [masc_*] surface that
-    [public_masc_to_internal] resolves. Used to bound the [routed_to]
-    Prometheus label so that unrecognised strings never become a new
-    time series. *)
+let is_masc_mcp_descriptor (d : Keeper_tool_descriptor.t) =
+  match d.runtime_handler with
+  | Tool_masc_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_workspace_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_surface_audit -> true
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_time_now
+  | Tool_stay_silent
+  | Tool_tools_list
+  | Tool_tool_search
+  | Tool_context_status
+  | Tool_memory_search
+  | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
+  | Tool_surface_read
+  | Tool_surface_post
+  | Tool_person_note_set
+  | Tool_ide_annotate
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Board_tool_dispatch -> false
+;;
+
+let add_internal_names t (d : Keeper_tool_descriptor.t) =
+  List.iter
+    (fun internal_name -> Hashtbl.replace t internal_name ())
+    (Keeper_tool_descriptor.internal_names d)
+;;
+
+(** Known internal handler names for LLM-native public descriptors. *)
 let known_internal_names_tbl : (string, unit) Hashtbl.t =
   let t = Hashtbl.create 128 in
-  Hashtbl.iter
-    (fun _ r ->
-       List.iter
-         (fun internal_name -> Hashtbl.replace t internal_name ())
-         (Agent_tool_descriptor.internal_names r.descriptor))
-    routing_table;
+  List.iter (add_internal_names t) Keeper_tool_descriptor.public_descriptors;
+  t
+;;
+
+(** Descriptor-backed runtime names used for telemetry labels and runtime
+    canonicalisation. Kept separate from [is_known_internal] so policy
+    resolution provenance still reaches [Descriptor_registry] for workspace
+    descriptors. *)
+let known_runtime_names_tbl : (string, unit) Hashtbl.t =
+  let t = Hashtbl.create 128 in
+  List.iter (add_internal_names t) Keeper_tool_descriptor.public_descriptors;
   List.iter
-    (fun internal ->
-       Hashtbl.replace t internal ();
-       (* Also admit the public MCP counterpart (e.g. [masc_board_post])
-          so successful MCP routes do not collapse to [tool="unknown"]
-          (PR #14585 review). *)
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public ()
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
+    (fun d -> if is_masc_mcp_descriptor d then add_internal_names t d)
+    (Keeper_tool_descriptor.all_descriptors ());
   List.iter
     (fun public_mcp -> Hashtbl.replace t public_mcp ())
-    Tool_catalog_surfaces.public_mcp_surface_tools;
+    Keeper_tool_name.public_mcp_non_descriptor_names;
   t
 ;;
 
 let is_known_internal name = Hashtbl.mem known_internal_names_tbl name
 
+let is_known_runtime_name name = Hashtbl.mem known_runtime_names_tbl name
+
 (** Bound a label value to a closed set so hallucinated / unbounded
-    names never inflate Prometheus cardinality. *)
+    names never inflate Otel_metric_store cardinality. *)
 let safe_tool_label name =
   if is_known_public name
   then name
-  else if is_known_internal name
+  else if is_known_runtime_name name
   then name
   else "unknown"
 ;;
 
 let safe_routed_to_label name =
-  if name = "none" then name else if is_known_internal name then name else "unknown"
+  if name = "none" then name else if is_known_runtime_name name then name else "unknown"
 ;;
 
 let record_route_outcome ~tool ~routed_to ~result =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ToolCallTotal)
     ~labels:
       [ "tool", safe_tool_label tool
       ; "routed_to", safe_routed_to_label routed_to
       ; "result", result
+      ]
+    ();
+  (* Instruction monitoring: track per-tool invocation completeness.
+     result="ok" means parameters were accepted by the runtime surface;
+     other results (miss/error) indicate the call did not complete normally. *)
+  Otel_metric_store.inc_counter
+    (Keeper_metrics.to_string ToolCallParamCompleteness)
+    ~labels:
+      [ ("tool", safe_tool_label tool)
+      ; ("status", if String.equal result "ok" then "complete" else "incomplete")
       ]
     ()
 ;;
@@ -113,24 +164,11 @@ let route name =
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names
     to allowlists — they should now add these names directly. *)
-let public_names = Agent_tool_descriptor.public_names
+let public_names = Keeper_tool_descriptor.public_names
 
-let public_name_for_internal = Agent_tool_descriptor.public_name_for_internal
+let public_name_for_internal = Keeper_tool_descriptor.public_name_for_internal
 
-(* ── MCP surface routing (separate concern) ──────────────────────── *)
-
-let public_masc_to_internal_tbl =
-  let t = Hashtbl.create 16 in
-  List.iter
-    (fun internal ->
-       match Tool_catalog_surfaces.keeper_internal_replacement internal with
-       | Some public -> Hashtbl.replace t public internal
-       | None -> ())
-    Tool_catalog_surfaces.keeper_internal_tools;
-  t
-;;
-
-let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
+(* ── MCP prefix normalisation ────────────────────────────────────── *)
 
 let strip_mcp_masc_prefix name =
   if String.starts_with ~prefix:"mcp__masc__" name
@@ -139,28 +177,21 @@ let strip_mcp_masc_prefix name =
 ;;
 
 type canonical_resolution =
-  | Public_mcp of
-      { stripped : string
-      ; internal : string
-      }
   | Public_alias of { internal : string }
   | Internal of { canonical : string }
   | Unknown
 
 let canonical_resolution name =
   let stripped = strip_mcp_masc_prefix name in
-  match public_masc_to_internal stripped with
-  | Some internal -> Public_mcp { stripped; internal }
+  match route stripped with
+  | Some r -> Public_alias { internal = r.internal_name }
   | None ->
-    (match route stripped with
-     | Some r -> Public_alias { internal = r.internal_name }
-     | None ->
-       if is_known_internal stripped then Internal { canonical = stripped } else Unknown)
+    if is_known_runtime_name stripped then Internal { canonical = stripped } else Unknown
 ;;
 
 let canonical_internal_name name =
   match canonical_resolution name with
-  | Public_mcp { internal; _ } | Public_alias { internal } -> Some internal
+  | Public_alias { internal } -> Some internal
   | Internal { canonical } -> Some canonical
   | Unknown -> None
 ;;
@@ -168,7 +199,7 @@ let canonical_internal_name name =
 (** [public_input_schema public_name] returns the LLM-facing JSON schema
     for a known public tool name. [None] means no tailored schema exists. *)
 let public_input_schema = function
-  | public -> Agent_tool_descriptor.public_input_schema public
+  | public -> Keeper_tool_descriptor.public_input_schema public
 ;;
 
 (** [translate_input ~public input] reshapes an LLM call payload from
@@ -177,5 +208,5 @@ let public_input_schema = function
 
     For unknown public names this is the identity. *)
 let translate_input ~public input =
-  Agent_tool_descriptor.translate_input ~public input
+  Keeper_tool_descriptor.translate_input ~public input
 ;;

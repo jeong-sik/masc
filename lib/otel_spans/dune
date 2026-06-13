@@ -1,0 +1,30 @@
+(include_subdirs no)
+
+(library
+ (name masc_otel_spans)
+ (public_name masc.otel_spans)
+ (wrapped false)
+ (modules otel_config otel_spans opentelemetry_client_cohttp_eio)
+ (libraries
+  opentelemetry
+  opentelemetry.client
+  ambient-context
+  ambient-context-eio
+  eio
+  eio.unix
+  unix
+  cohttp
+  cohttp-eio
+  uri
+  ca-certs
+  tls
+  tls-eio
+  domain-name
+  pbrt
+  mtime
+  mtime.clock.os
+  mirage-crypto-rng.unix
+  masc.http_client
+  masc.masc_log
+  masc.masc_core
+  masc.config))

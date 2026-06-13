@@ -6,7 +6,7 @@
 \*   - KeeperCompositeLifecycle.tla
 \*   - KeeperTurnCycle.tla
 \*   - KeeperDecisionPipeline.tla
-\*   - KeeperCascadeLifecycle.tla
+\*   - KeeperRuntimeLifecycle.tla
 \*   - KeeperCompactionLifecycle.tla
 \*   - boundary/KeeperContinueGate.tla
 \*
@@ -20,9 +20,9 @@
 \* Verifies that manual_reconcile_required is not a one-way trap:
 \* once set, the system can always eventually clear it.
 \*
-\* Background (masc-mcp#6841+):
+\* Background (masc#6841+):
 \*   manual_reconcile_required was set to TRUE by OAS bridge failures
-\*   (committed external side effects during cascade errors), but the
+\*   (committed external side effects during runtime errors), but the
 \*   heartbeat recovery path only dispatched Turn_succeeded without
 \*   dispatching Manual_reconcile_cleared.  Since Turn_succeeded does
 \*   NOT clear manual_reconcile_required in the OCaml FSM (only
@@ -34,7 +34,7 @@
 \* mechanism has been REMOVED ENTIRELY from both the canonical spec
 \* and the OCaml impl (verified: zero occurrences in
 \* specs/keeper-state-machine/KeeperStateMachine.tla and
-\* lib/keeper/keeper_state_machine.ml as of 2026-04-20).  The audit
+\* lib/keeper_registry/keeper_state_machine.ml as of 2026-04-20).  The audit
 \* model is retained as a forensic record of the design lesson:
 \* recovery actions must clear ALL latches that block their target
 \* state, not just the most obvious one.  The named TurnSucceeded /
@@ -55,7 +55,7 @@
 \* Bug model: recovery only dispatches Turn_succeeded (old code).
 \* The liveness property MUST be violated in the buggy variant.
 \*
-\* Mirrors: lib/keeper/keeper_state_machine.ml (update_conditions)
+\* Mirrors: lib/keeper_registry/keeper_state_machine.ml (update_conditions)
 \*          lib/keeper/keeper_heartbeat_snapshot.ml:write_heartbeat_snapshot (heartbeat recovery)
 
 EXTENDS Naturals
@@ -103,7 +103,7 @@ DerivePhase ==
 Phase == DerivePhase
 
 \* Issue #8642/#8701 family: explicit OCaml ↔ TLA+ mapping. SSOT for
-\* OCaml side is lib/keeper/keeper_state_machine.ml (13 phases;
+\* OCaml side is lib/keeper_registry/keeper_state_machine.ml (13 phases;
 \* Zombie added iter 4 #14707).  This spec uses the same CamelCase
 \* constructor names as the OCaml type
 \* but only models the 6 phases relevant to reconcile liveness — the

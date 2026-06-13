@@ -17,16 +17,16 @@
       window stays valid).
 
     The cache is keyed by [agents_dir config] (per base_path), so each
-    test sets up its own temp room and cleans up to avoid cross-test
+    test sets up its own temp workspace and cleans up to avoid cross-test
     interference. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
-module Auth = Masc_mcp.Auth
-module Auth_base = Masc_mcp.Auth_credential_base
+module Auth = Masc.Auth
+module Auth_base = Masc.Auth_credential_base
 
-let setup_test_room () =
+let setup_test_workspace () =
   let unique_id =
     Printf.sprintf "masc-auth-cache-test-%d-%d" (Unix.getpid ())
       (int_of_float (Unix.gettimeofday () *. 1000.))
@@ -37,7 +37,7 @@ let setup_test_room () =
   Unix.mkdir masc_dir 0o755;
   tmp
 
-let cleanup_test_room dir =
+let cleanup_test_workspace dir =
   let rec rm_rf path =
     if Sys.is_directory path then begin
       Array.iter (fun f -> rm_rf (Filename.concat path f)) (Sys.readdir path);
@@ -69,9 +69,9 @@ let create_token_for dir ~agent_name ~role =
 (* ------------------------------------------------------------------ *)
 
 let test_lookup_stays_correct_across_repeated_calls () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
         let raw = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in
@@ -82,9 +82,9 @@ let test_lookup_stays_correct_across_repeated_calls () =
         done))
 
 let test_save_credential_invalidates_cache () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
         let raw_a = create_token_for dir ~agent_name:"agent_a" ~role:Masc_domain.Worker in
@@ -100,9 +100,9 @@ let test_save_credential_invalidates_cache () =
         | Error e -> fail ("agent_a re-lookup: " ^ Masc_domain.masc_error_to_string e)))
 
 let test_delete_credential_invalidates_cache () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
         let raw = create_token_for dir ~agent_name:"ephemeral" ~role:Masc_domain.Worker in
@@ -119,9 +119,9 @@ let test_delete_credential_invalidates_cache () =
         | Error _ -> ()))
 
 let test_explicit_invalidate_clears_entry () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
         let raw = create_token_for dir ~agent_name:"gamma" ~role:Masc_domain.Worker in
@@ -135,9 +135,9 @@ let test_explicit_invalidate_clears_entry () =
         | Error e -> fail (Masc_domain.masc_error_to_string e)))
 
 let test_unknown_token_is_mismatch () =
-  let dir = setup_test_room () in
+  let dir = setup_test_workspace () in
   Fun.protect
-    ~finally:(fun () -> cleanup_test_room dir)
+    ~finally:(fun () -> cleanup_test_workspace dir)
     (fun () ->
       with_eio_runtime (fun () ->
         let _ = create_token_for dir ~agent_name:"alpha" ~role:Masc_domain.Worker in

@@ -1,4 +1,4 @@
-(* Cartesian sentinel matrix for [assert_receipt_authoritative].
+(* Cartesian marker matrix for [assert_receipt_authoritative].
 
    The single-concern helper enforces the OCaml-runtime image of the
    TLA+ [ReceiptIsAuthoritative] invariant
@@ -27,13 +27,13 @@
    Production callers in [keeper_unified_turn] and [keeper_agent_run]
    currently derive [outcome] and the implied [turn_state] from the
    same [turn_result] expression, so wiring the helper into the
-   runtime is trivially [Ok ()] today. The drift sentinel here is the
+   runtime is trivially [Ok ()] today. The drift marker here is the
    value-bearing piece of Phase 1-3: it locks the helper's behaviour
    so that when callers do diverge (a concern that surfaces in
    [ReceiptMatchesState] coverage work) the helper is already pinned. *)
 
-module R = Masc_mcp.Keeper_execution_receipt
-module F = Masc_mcp.Keeper_turn_fsm
+module R = Masc.Keeper_execution_receipt
+module F = Masc.Keeper_turn_fsm
 
 let all_outcomes : R.outcome_kind list =
   [ `Ok; `Skipped; `Error; `Cancelled ]

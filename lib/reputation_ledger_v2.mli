@@ -56,7 +56,7 @@ type ledger_event =
 (** {1 Emitters} *)
 
 val emit_tool_outcome :
-  Coord.config ->
+  Workspace.config ->
   agent_id:string ->
   tool_name:string ->
   success:bool ->
@@ -68,7 +68,7 @@ val emit_tool_outcome :
     empty; safe to call from any fiber (serialised via the Dated_jsonl mutex). *)
 
 val emit_goal_completion :
-  Coord.config ->
+  Workspace.config ->
   agent_id:string ->
   task_id:string ->
   task_title:string ->
@@ -80,7 +80,7 @@ val emit_goal_completion :
 (** Append a [Goal_completion] event. *)
 
 val emit_safety_violation :
-  Coord.config ->
+  Workspace.config ->
   agent_id:string ->
   violation_kind:string ->
   ?tool_name:string ->
@@ -92,7 +92,7 @@ val emit_safety_violation :
 (** {1 Readers} *)
 
 val read_events_for_agent :
-  Coord.config ->
+  Workspace.config ->
   agent_id:string ->
   window_days:int ->
   ledger_event list
@@ -121,7 +121,7 @@ val default_ledger_metrics : agent_ledger_metrics
     [safety_compliance = 1.0] — the baseline for an agent with no history. *)
 
 val compute_ledger_metrics :
-  Coord.config ->
+  Workspace.config ->
   agent_id:string ->
   window_days:int ->
   agent_ledger_metrics

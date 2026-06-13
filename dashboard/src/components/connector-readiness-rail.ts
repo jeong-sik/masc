@@ -208,7 +208,7 @@ export function deriveRail(
   on: RailHandlers,
   inflight: Partial<Record<RailKey, boolean>> = {},
 ): RailPill[] {
-  // Token: heuristic — if the sidecar is running, the operator has set
+  // Token: inferred — if the sidecar is running, the operator has set
   // a valid token (the bridge would have crashed at startup otherwise).
   // If it's down we can't know, so we suggest setting one.
   const tokenState: RailState = input.sidecarUp ? 'ok' : 'bad'

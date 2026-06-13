@@ -1,6 +1,6 @@
 ---
 rfc: "0129"
-title: "Cascade attempt idle-cap: kill the reserve_fraction band-aid"
+title: "Runtime attempt idle-cap: kill the reserve_fraction band-aid"
 status: Implemented
 created: 2026-05-18
 updated: 2026-05-21
@@ -47,7 +47,7 @@ audit-sweep RFC to land directly at Implemented (after RFC-0132
 
 ---
 
-# RFC-0129: Cascade attempt idle-cap — kill the reserve_fraction band-aid
+# RFC-0129: Runtime attempt idle-cap — kill the reserve_fraction band-aid
 
 ## §0 Diagnosis reversal (2026-05-18)
 
@@ -59,10 +59,10 @@ collected during PR-1 implementation contradicted that premise:
 |---|---|---|
 | `oas/lib/llm_provider/http_client.ml` `post_sync` body read | unbounded `take_all` | wrapped in `Eio.Time.with_timeout_exn` via `body_timeout_s` since OAS 0.195.0 (`complete.ml:656-686`) |
 | `oas/lib/llm_provider/http_client.ml` SSE / NDJSON | unbounded line read | per-line `idle_timeout` via `Eio.Time.with_timeout_exn` (`http_client.mli:204-243`) |
-| masc-mcp ↔ OAS per-attempt cap | not wired | wired end-to-end: `effective_timeout_sec` → `per_provider_timeout_s` → `Cascade_agent_context.max_execution_time_s` → `Agent_sdk.Builder.with_max_execution_time` (`cascade_agent_context.ml:178-180`) |
-| masc-mcp ↔ OAS per-line idle cap | not wired | wired: `Agent_sdk.Builder.with_stream_idle_timeout` (`cascade_agent_context.ml:174`), default `stream_idle_timeout_sec = 120s` (`keeper_runtime_config.mli:75`) |
+| masc ↔ OAS cumulative per-attempt cap | not wired | no longer forwarded for active streaming: `per_provider_timeout_s` does not populate `Runtime_agent_context.max_execution_time_s`; streaming liveness is progress-based |
+| masc ↔ OAS per-line idle cap | not wired | wired: `Agent_sdk.Builder.with_stream_idle_timeout` (`runtime_agent_context.ml:174`), default `stream_idle_timeout_sec = 120s` (`keeper_runtime_config.mli:75`) |
 
-The premise `keeper_turn_cascade_budget.ml:173-174` was written
+The premise `keeper_turn_runtime_budget.ml:173-174` was written
 against is no longer true. Both caps the band-aid was protecting
 against have been enforced by the lower layers for a release cycle.
 `degraded_retry_budget_reserve_fraction = 0.5` is now killing
@@ -76,7 +76,7 @@ events in 24h, `productive_phase_elapsed_ms` clustered at
 **307,500 ± 200ms across every event**. Deterministic — not provider
 latency jitter, it is a code cap.
 
-Decomposition matches `lib/keeper/keeper_turn_cascade_budget.ml`:
+Decomposition matches `lib/keeper/keeper_turn_runtime_budget.ml`:
 
 ```
 remaining_turn_budget_s            = 600.0
@@ -87,18 +87,18 @@ retry_reserved_cap                 = 585 × 0.5           = 292.5s
 effective_timeout_sec              = min(adaptive, retry_reserved_cap)
                                                           ≈ 292.5s
 + oas_timeout_guard_sec                                  + 15.0s
-≈ cascade_attempt_watchdog wall                          ≈ 307.5s
+≈ runtime_attempt_watchdog wall                          ≈ 307.5s
 ```
 
 The receipt rotation distribution today is
 **strict_tool_candidates → provider-k-spark : 9** versus
-**provider-k-spark → strict_tool_candidates : 5**. Both tier-groups hit the
+**provider-k-spark → strict_tool_candidates : 5**. Both runtimes hit the
 same cap because they share members (Provider-K-5-1, agent-code-spark, ollama)
 and route through the same cap chain.
 
 ## §2 Why the band-aid is stale
 
-`keeper_turn_cascade_budget.ml:162-181` carries two
+`keeper_turn_runtime_budget.ml:162-181` carries two
 self-incriminating comments:
 
 ```
@@ -118,13 +118,11 @@ Both comments **predate**:
 2. **OAS streaming `?idle_timeout`** — `read_sse`/`read_ndjson`
    raise `Eio.Time.Timeout` if no line arrives within
    `idle_timeout` seconds. The deadline resets on each line.
-3. **masc-mcp wiring**:
-   `Cascade_agent_context.max_execution_time_s` →
-   `Agent_sdk.Builder.with_max_execution_time` (per-attempt cap
-   already plumbed; populated by
-   `keeper_turn_driver_try_provider.max_execution_time_for_attempt`).
-   `stream_idle_timeout_s` similarly wired to
-   `Agent_sdk.Builder.with_stream_idle_timeout`.
+3. **masc wiring**:
+   `stream_idle_timeout_s` is wired to
+   `Agent_sdk.Builder.with_stream_idle_timeout`. Active streaming
+   attempts no longer derive `Runtime_agent_context.max_execution_time_s`
+   from `per_provider_timeout_s`.
 
 Given these three pieces have all landed, the reserve_fraction is
 no longer protecting against "OAS can hang the body read". It is
@@ -135,7 +133,7 @@ Receipt-side scenarios in light of the corrected diagnosis:
 
 | scenario | what the system sees today | what is true |
 |---|---|---|
-| **A.** provider streaming for 280s, would have finished at 320s | timeout at 307.5s | output exists but is discarded; cascade rotates and pays double cost |
+| **A.** provider streaming for 280s, would have finished at 320s | timeout at 307.5s | output exists but is discarded; runtime rotates and pays double cost |
 | **B.** provider produces zero bytes after 280s (real hang) | also timeout at 307.5s | OAS `stream_idle_timeout_s=120s` would have caught this at 120s already, but `with_max_execution_time` fires first because reserve_fraction halved it down to 292.5s |
 | **C.** provider finishes at 290s | success | the only path the band-aid does not corrupt |
 
@@ -147,13 +145,12 @@ A single, narrow change scope:
 
 1. **Remove** `degraded_retry_budget_reserve_fraction` and the
    `reserve_degraded_retry_budget` parameter from
-   `Keeper_turn_cascade_budget.resolve_bounded_oas_timeout_budget_with_turn_budget`.
+   `Keeper_turn_runtime_budget.resolve_bounded_oas_timeout_budget_with_turn_budget`.
 2. **Update** the stale comment block to reflect the cap chain that
    now exists end-to-end.
-3. **Keep** the existing wiring: `with_max_execution_time` continues
-   to bound the per-attempt outer wall clock at full usable budget;
-   `with_stream_idle_timeout` continues to bound inter-line silence;
-   OAS `body_timeout_s` continues to bound non-streaming bodies.
+3. **Keep** the streaming-progress wiring: `with_stream_idle_timeout`
+   continues to bound inter-line silence; OAS `body_timeout_s` is
+   sync-only and remains opt-in for explicit non-streaming body ceilings.
 
 Two related-but-non-gating tracks are explicitly separated below
 (§4.2, §4.3) so they cannot stall the fleet fix.
@@ -165,14 +162,14 @@ Two related-but-non-gating tracks are explicitly separated below
 Pure removal. Same-diff legacy deletion per
 `AGENT-LLM-A.md` workaround-rejection bar:
 
-- `lib/keeper/keeper_turn_cascade_budget.ml`: delete the constant,
+- `lib/keeper/keeper_turn_runtime_budget.ml`: delete the constant,
   delete the parameter, delete the branch, collapse the source
   labels. First-attempt branch returns
   `Float.min adaptive_timeout_sec usable_budget`.
-- `lib/keeper/keeper_turn_cascade_budget.mli`,
+- `lib/keeper/keeper_turn_runtime_budget.mli`,
   `lib/keeper/keeper_unified_turn.{ml,mli}`: signature update +
   caller cleanup (drops the unused
-  `Keeper_cascade_profile.fallback_cascade_for` lookup at this
+  `Keeper_runtime_profile.fallback_runtime_for` lookup at this
   call-site — function itself stays alive for other callers).
 - `test/test_keeper_unified.ml`: 9 `~reserve_degraded_retry_budget:*`
   argument removals; 2 tests rewritten because they encoded the
@@ -183,14 +180,14 @@ No new flag, no new counter, no cooldown, no transitional baseline.
 ### §4.2 Pool layer reference — PR-1 (#16084), **not gating**
 
 Independent infrastructure work in `lib/masc_http_client/pool.ml`
-(piaf-based) to give the masc-mcp Pool the same idle-timeout +
+(piaf-based) to give the masc Pool the same idle-timeout +
 body-progress shape that OAS already has at its HTTP layer.
 
 Scope and rationale:
 
 - Pool callers today: `lib/server/server_dashboard_http_link_preview.ml`
   and `lib/local/worker_container_types.ml`. Neither is an OAS LLM
-  call. Pool fixes do **not** affect cascade attempt timeouts.
+  call. Pool fixes do **not** affect runtime attempt timeouts.
 - Value of the PR: correct generic API at the Pool layer that
   mirrors OAS's existing idle-timeout pattern, with unit tests for
   steady stream / silent-from-start / mid-stream silence.
@@ -199,12 +196,12 @@ Scope and rationale:
 ### §4.3 Body-progress observability — deferred
 
 Surfacing `{ first_byte_at, last_chunk_at, bytes_received }` into
-`cascade.rotation_attempts[i].body_progress` was in the first draft
+`runtime.rotation_attempts[i].body_progress` was in the first draft
 as part of the same RFC. It is now out of scope because:
 
 - The fleet 307.5s cluster does not require body-progress to fix —
   it requires the reserve to go away.
-- Sourcing body-progress from the OAS layer to masc-mcp receipt
+- Sourcing body-progress from the OAS layer to masc receipt
   schema requires an agent_sdk surface extension, which deserves
   its own RFC (provider HTTP boundary cross-cut).
 - Deferring is consistent with the workaround-rejection bar's
@@ -230,7 +227,7 @@ After PR-2 merges, run on a 24h window:
 
 ```
 rg 'oas_timeout_budget' "$MASC_BASE_PATH"/.masc/keepers/*/execution-receipts/2026-05/*.jsonl \
-  | python3 .tmp/from_cascade.py
+  | python3 .tmp/from_runtime.py
 ```
 
 Expected:
@@ -260,16 +257,18 @@ Expected:
 ## §8 Evidence
 
 - Fleet measurement, 2026-05-18:
-  `.tmp/from_cascade.py` output reproduced in the session that
+  `.tmp/from_runtime.py` output reproduced in the session that
   spawned this RFC (9 keeper × 14 hit distribution + 307,500ms
   deterministic clustering).
 - Self-admitting comment at
-  `lib/keeper/keeper_turn_cascade_budget.ml:173-174` (replaced by
+  `lib/keeper/keeper_turn_runtime_budget.ml:173-174` (replaced by
   PR-2).
-- OAS `body_timeout_s` since 0.195.0, `complete.ml:656-686`.
-- OAS streaming `idle_timeout` at `http_client.mli:204-243`.
-- masc-mcp `with_max_execution_time` wiring at
-  `cascade_agent_context.ml:178-180`.
+- OAS `body_timeout_s` on the non-streaming `Complete.complete` path since
+  0.195.0, `complete.ml:656-686`.
+- OAS streaming `idle_timeout` at `http_client.mli:204-243`; streaming has
+  no total body-duration cap.
+- masc `stream_idle_timeout_s` wiring at
+  `runtime_agent_context.ml:174-180`.
 
 ## §9 Open questions
 
@@ -277,7 +276,7 @@ Expected:
    With reserve_fraction gone, the outer cap is generous enough
    that a 120s idle window is the dominant signal for real hangs.
    Empirical question — re-measure once §6 #1 is satisfied.
-2. The first cascade can now consume up to ~585s of a 600s turn,
+2. The first runtime can now consume up to ~585s of a 600s turn,
    leaving little for the fallback if it truly takes that long.
    Current evidence (14 events, all scenario A) suggests this never
    happens; if §6 surfaces post-PR-2 fallback-starvation cases,

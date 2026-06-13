@@ -20,7 +20,7 @@ module Float = Stdlib.Float
 open Tool_args
 
 type context = {
-  config: Coord.config;
+  config: Workspace.config;
   agent_name: string;
 }
 
@@ -36,7 +36,7 @@ type context = {
                   call sites (Not_found in get_metrics,
                   Validation_error in agent_card) are caller-input
                   rejections.
-   [result_to_response] : [Coord.update_agent_r] Ok/Error
+   [result_to_response] : [Workspace.update_agent_r] Ok/Error
                   projection.  Error is classified
                   [Workflow_rejection] until [Masc_domain] grows
                   a typed failure_class per error variant — at
@@ -104,31 +104,10 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-(** Handle masc_agents *)
-let handle_agents ?(tool_name = "masc_agents") ?(start_time = 0.0) ctx args
-  : Tool_result.result
-  =
-  let limit = get_int args "limit" 20 |> max 1 |> min 50 in
-  let json = Coord.get_agents_status ctx.config in
-  let json = match json with
-    | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
-    | other -> other
-  in
-  json_ok ~tool_name ~start_time json
-
-(** Handle masc_agent_update *)
-let handle_agent_update ?(tool_name = "masc_agent_update") ?(start_time = 0.0) ctx args
-  : Tool_result.result
-  =
-  let status = get_string_opt args "status" in
-  let capabilities =
-    match Yojson.Safe.Util.member "capabilities" args with
-    | `Null -> None
-    | `List _ -> Some (get_string_list args "capabilities")
-    | _ -> None
-  in
-  result_to_response ~tool_name ~start_time
-    (Coord.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
+(* masc_agents / masc_agent_update handlers removed (2026-06-09): both read/
+   wrote the disk-backed .masc/agents/ registry whose producer
+   (Workspace_eio.register_agent) had zero call sites. Live agent status is
+   served by the `who` resource (Session.get_agent_statuses). *)
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
@@ -186,12 +165,6 @@ let min_avg_time metrics_list =
   |> List.filter (fun t -> Stdlib.Float.compare t 0.0 > 0)
   |> List.fold_left (fun acc t -> if Stdlib.Float.compare acc 0.0 = 0 || Stdlib.Float.compare t acc < 0 then t else acc) 0.0
 
-(** Calculate max collaborators from metrics list *)
-let max_collabs metrics_list =
-  metrics_list
-  |> List.map (fun (_, m) -> List.length m.Metrics_store_eio.unique_collaborators)
-  |> List.fold_left max 0
-
 (** Fitness scoring weights.
 
     Rationale for default values:
@@ -217,8 +190,10 @@ let max_collabs metrics_list =
     to prioritize "finishes correctly" over "finishes fast" based on observed MASC
     usage patterns where incomplete tasks cause more rework than slow tasks.
 
-    TODO: Validate empirically — track selection outcomes vs task success rate
-    to determine if the current weighting produces better team compositions. *)
+    TODO: Validate empirically — correlate ranking snapshots with later task
+    success rate to determine if the current weighting produces better team
+    compositions.  This read path must not update Thompson alpha/beta directly; real
+    task outcome feedback flows through [Workspace_hooks.record_thompson_result_fn]. *)
 type fitness_weights = {
   w_completion : float;
   w_reliability : float;
@@ -282,22 +257,22 @@ let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0)
     match agent_opt with
     | Some a -> [a]
     | None ->
-      (* Merge agents from metrics store AND room state.
+      (* Merge agents from metrics store AND workspace state.
          Without this, agents active on the board but without task metrics
          are invisible to fitness queries (Issue #1861). *)
       let metrics_agents = Metrics_store_eio.get_all_agents ctx.config in
-      let room_agents =
+      let workspace_agents =
         try
-          Coord.get_agents_raw ctx.config
+          Workspace.get_agents_raw ctx.config
           |> List.map (fun (a : Masc_domain.agent) -> a.name)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-          Log.Misc.warn "room agents fallback (metrics_store still used): %s"
+          Log.Misc.warn "workspace agents fallback (metrics_store still used): %s"
             (Stdlib.Printexc.to_string exn);
           []
       in
-      List.sort_uniq String.compare (metrics_agents @ room_agents)
+      List.sort_uniq String.compare (metrics_agents @ workspace_agents)
   in
   if Stdlib.List.length agents = 0 then
     json_ok ~tool_name ~start_time
@@ -349,7 +324,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
         (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
            (String.concat ", " valid_agent_card_action_strings))
   | Some action ->
-      let agents = Coord.get_agents_raw ctx.config in
+      let agents = Workspace.get_agents_raw ctx.config in
       let target = get_string_opt args "agent_name" in
       let target_agent =
         Option.bind target (fun name ->
@@ -360,8 +335,8 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
       let json =
         `Assoc [
           ("schema", `String "masc.agent_card.v1");
-          ("name", `String "MASC-MCP");
-          ("description", `String "MASC multi-agent coordination MCP server");
+          ("name", `String "MASC");
+          ("description", `String "MASC multi-agent workspace MCP server");
           ("action", `String (agent_card_action_to_string action));
           ("requested_by", `String ctx.agent_name);
           ("base_path", `String ctx.config.base_path);
@@ -373,7 +348,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
             | None -> `Null );
           ( "capabilities",
             `Assoc [
-              ("coordination", `Bool true);
+              ("workspace", `Bool true);
               ("task_backlog", `Bool true);
               ("keeper_runtime", `Bool true);
               ("dashboard", `Bool true);
@@ -384,9 +359,7 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
                  (fun name -> `String name)
                  [
                    "masc_status";
-                   "masc_agents";
                    "masc_tasks";
-                   "masc_claim_next";
                    "masc_transition";
                    "masc_dashboard";
                    "masc_tool_help";
@@ -399,9 +372,6 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
-  | "masc_agents" -> Some (handle_agents ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_update" ->
-      Some (handle_agent_update ~tool_name:name ~start_time:start ctx args)
   | "masc_get_metrics" ->
       Some (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
   | "masc_agent_fitness" ->
@@ -417,15 +387,7 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let tool_spec_read_only =
-  [ "masc_agents"; "masc_agent_card" ]
-let tool_spec_requires_join = []
-
-let tool_required_permission = function
-  | "masc_agents" | "masc_agent_fitness" | "masc_agent_card"
-  | "masc_get_metrics" ->
-      Some Masc_domain.CanReadState
-  | "masc_agent_update" -> Some Masc_domain.CanBroadcast
-  | _ -> None
+  [ "masc_agent_card" ]
 
 let () =
   List.iter
@@ -439,7 +401,5 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ~requires_join:(List.mem s.name tool_spec_requires_join)
-           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

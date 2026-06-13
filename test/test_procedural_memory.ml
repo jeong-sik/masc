@@ -1,7 +1,7 @@
 (** Regression tests for procedural-memory crystallization thresholds. *)
 
 open Alcotest
-module P = Masc_mcp.Procedural_memory
+module P = Masc.Procedural_memory
 
 let procedure ?(evidence = []) ?(success_count = 0) ?(failure_count = 0)
     ?(confidence = 0.0) () : P.procedure =

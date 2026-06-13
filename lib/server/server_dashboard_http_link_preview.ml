@@ -1,5 +1,3 @@
-open Yojson.Safe.Util
-
 type preview_extract = {
   title : string option;
   description : string option;
@@ -40,13 +38,8 @@ let cache_store ~ttl key preview =
       Hashtbl.replace preview_cache key
         { preview; expires_at = Time_compat.now () +. ttl })
 
-let json_string_opt_field fields key =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> String_util.trim_to_option value
-  | _ -> None
-
 let error_reason_of_json = function
-  | `Assoc fields -> json_string_opt_field fields "error"
+  | `Assoc _ as json -> Json_util.assoc_string_opt "error" json
   | _ -> None
 
 let assoc_upsert fields key value =
@@ -347,7 +340,7 @@ let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
   | Ok response when is_redirect_status response.status && remaining_redirects > 0
     ->
       (match list_header_ci response.headers "location" with
-       | Some location when String.trim location <> "" ->
+       | Some location when Option.is_some (String_util.trim_to_option location) ->
            let next_url = resolve_relative_url ~base_url:url location in
            fetch_response_following_redirects ~net ~url:next_url
              ~remaining_redirects:(remaining_redirects - 1)
@@ -453,8 +446,8 @@ let fetch_preview ~clock ~net url =
                | exn -> Error (Printexc.to_string exn))
 
 let urls_of_request args =
-  match args |> member "urls" with
-  | `List items ->
+  match Json_util.assoc_member_opt "urls" args with
+  | Some (`List items) ->
       let urls =
         items
         |> List.filter_map (function

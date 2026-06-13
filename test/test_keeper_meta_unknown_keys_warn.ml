@@ -8,16 +8,16 @@
     (empty tail = String.concat ", " []) at every dashboard tick across
     14 keepers — observed live 2026-05-05 ~01:50 KST.
 
-    The Prometheus counter [metric_keeper_meta_json_failures] with
+    The Otel_metric_store counter [metric_keeper_meta_json_failures] with
     label site=unknown_keys is the only durable side-effect we can
     assert from outside the logger; the structural fix protects both
     the counter and the warn line, so a green counter assertion is
     sufficient evidence that the warn line is also gated. *)
 
-open Masc_mcp
+open Masc
 
 let counter_total () =
-  Prometheus.metric_total Masc_mcp.Keeper_metrics.(to_string MetaJsonFailures)
+  Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures)
 
 let canonical_only_meta_json () =
   (* Build an `Assoc whose every key is in [canonical_keeper_meta_key_names].
@@ -69,20 +69,20 @@ let cleanup_tmpdir path =
 let test_progress_updated_line_failure_is_observable () =
   let dir = fresh_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
-    let config = Coord.default_config dir in
+    let config = Workspace.default_config dir in
     let keeper_name = "progress-refresh-failure" in
     let progress_path =
       Keeper_types_support.keeper_progress_path config keeper_name
     in
     let (_ : string) = Keeper_fs.ensure_dir progress_path in
     let before =
-      Prometheus.metric_total
-        Masc_mcp.Keeper_metrics.(to_string ProgressUpdatedLineFailures)
+      Otel_metric_store.metric_total
+        Keeper_metrics.(to_string ProgressUpdatedLineFailures)
     in
     Keeper_meta_store.refresh_progress_updated_line config keeper_name;
     let after =
-      Prometheus.metric_total
-        Masc_mcp.Keeper_metrics.(to_string ProgressUpdatedLineFailures)
+      Otel_metric_store.metric_total
+        Keeper_metrics.(to_string ProgressUpdatedLineFailures)
     in
     Alcotest.(check bool)
       "progress Updated-line refresh failure increments counter"

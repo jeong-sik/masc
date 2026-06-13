@@ -21,17 +21,17 @@
       `surface="shell"` with `cache_state="initializing"` and
       `bootstrap_source="shell_prewarm"`. *)
 
-let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
+let dashboard_shell_paths_json (config : Workspace.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
     ?input_base_path:((Host_config.from_env ()).base_path_raw)
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
     ~effective_base_path:config.base_path
-    ~effective_masc_root:(Coord.masc_root_dir config)
+    ~effective_masc_root:(Workspace.masc_root_dir config)
     ()
   |> Server_base_path_diagnostics.to_yojson
 ;;
 
-let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
+let dashboard_shell_bootstrap_json (config : Workspace.config) : Yojson.Safe.t =
   let generated_at = Masc_domain.now_iso () in
   let started_at = Unix.gettimeofday () in
   `Assoc

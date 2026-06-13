@@ -1,0 +1,111 @@
+# workspace_* / inline_* 21 도구 정량 audit
+
+**날짜**: 2026-05-11
+**대상**: `lib/tool_schemas/tool_schemas_{workspace,workspace_core,workspace_extra,inline,inline_workspace,inline_episodes,inline_infra}.ml`에 정의된 21개 도구
+**근거**: 사용자가 plan (`~/me/planning/claude-plans/polished-juggling-galaxy.md`) §1.8 검토 중 "이거 지워도되는거아님??" 의문 제기. Explore agent의 "모두 UNIQUE" verdict가 정량 검증 없이 마무리됐기에 본 audit이 정량 결과를 산출한다.
+**관련 PR**: PR-N5 (본 audit) → PR-N5b (DEAD/REDUNDANT 삭제) → PR-N2 (UNIQUE 도구 keeper-internal scope 이동)
+
+## 2026-05-21 supersession
+
+`masc_goal_review`의 "phase-dependent 로직이 있으므로 SAFE DELETE 아님" 기준은 너무 보수적인 레거시 보존 기준으로 폐기한다. 해당 wrapper와 `Goal_store.review_goal` path는 `masc_goal_transition` / `masc_goal_verify` 정식 FSM 표면으로 대체되어 제거됐다.
+
+## 2026-06-04 approval surface supersession
+
+Approval queue state remains keeper-owned, but approval queue access is no
+longer exposed as MASC tools. Do not use the 2026-05-11 `inline_infra` rows
+below as current dispatch or surface ownership.
+
+## 측정 방법
+
+각 도구 이름에 대해:
+```bash
+rg -c "\"<tool_name>\"" lib/ -t ocaml | awk -F: '{s+=$2} END {print s}'   # lib_only
+rg -c "\"<tool_name>\"" lib/ test/ -t ocaml | ...                            # lib + test
+```
+
+lib_only 값은 schema 정의 1건 + dispatch routing + telemetry/test fixture 등을 포함. caller count의 lower bound 근사.
+
+판정 기준 (Copilot 리뷰 정정 반영):
+- **DEAD**: `lib_only <= 1` (스키마 정의 1건만 존재, 다른 caller 0). 진짜 DEAD 도구도 schema 정의는 보유하므로 `= 0`은 불가능.
+- **REDUNDANT**: 다른 도구로 완전 대체 가능 (description 자체에 "deprecated" / "compatibility wrapper" 명시 또는 동일 책임 다른 도구 존재)
+- **PARTIAL_DEPRECATION**: historical label only. Do not use this to keep live wrappers; migrate the useful behavior into canonical tools, then remove the wrapper.
+- **THIN_WRAPPER**: 다른 도구를 1단 호출하고 끝
+- **UNIQUE**: 고유 책임, 유지
+
+## 측정 결과
+
+| 도구 | 파일 | lib | lib+test | verdict | 비고 |
+|------|------|-----|----------|---------|------|
+| `masc_check` | workspace_core | 8 | 14 | UNIQUE | workspace health/sanity check |
+| `masc_heartbeat` | workspace_core | 33 | 58 | UNIQUE | task lifecycle 필수 |
+| `masc_reset` | workspace_core | 10 | 16 | UNIQUE | destructive workspace reset |
+| `masc_status` | workspace_core | 48 | 317 | UNIQUE | dashboard SSOT, 가장 높은 caller count |
+| `masc_workflow_guide` | workspace_core | 13 | 16 | UNIQUE | bootstrap onboarding |
+| `masc_goal_list` | workspace_extra | 11 | 23 | UNIQUE | Goal FSM list |
+| `masc_goal_review` | workspace_extra | 10 | 13 | **REMOVED** | 2026-05-21 기준 제거 완료. prior `PARTIAL_DEPRECATION` / "SAFE DELETE 아님" 판단은 레거시 보존 기준으로 supersede |
+| `masc_goal_transition` | workspace_extra | 12 | 32 | UNIQUE | Goal FSM transition |
+| `masc_goal_upsert` | workspace_extra | 11 | 25 | UNIQUE | Goal FSM create/update |
+| `masc_goal_verify` | workspace_extra | 12 | 22 | UNIQUE | quorum verification |
+| `masc_broadcast` | inline_workspace | 34 | 79 | UNIQUE | inter-agent messaging 핵심 |
+| `masc_bind` | inline_workspace | 24 | 79 | UNIQUE | workspace lifecycle |
+| `masc_unbind` | inline_workspace | 16 | 29 | UNIQUE | workspace lifecycle |
+| `masc_messages` | inline_workspace | 17 | 29 | UNIQUE | thread read |
+| `masc_start` | inline_workspace | 12 | 24 | UNIQUE | session init |
+| `masc_agents` | inline_workspace | 14 | 29 | UNIQUE | workspace roster |
+| `masc_session` | inline_infra | 5 | 6 | UNIQUE | session metadata |
+| `masc_spawn` | inline_infra | 9 | 13 | UNIQUE | agent lifecycle |
+
+## 집계
+
+| Verdict | 갯수 | 비율 |
+|---------|------|------|
+| DEAD | 0 | 0% |
+| REDUNDANT (SAFE DELETE) | 0 | 0% |
+| **REMOVED** | **1** | **5%** |
+| **PARTIAL_DEPRECATION** | **0** | **0%** |
+| THIN_WRAPPER | 0 | 0% |
+| UNIQUE | 20 | 95% |
+
+## 사용자 직감 verdict
+
+사용자: "workspace_* / inline_* 협조 도구 ~30개 — 이거 지워도되는거아님??"
+
+**검증 결과: PARTIAL 판단 superseded**
+- 21개 중 0개 DEAD — 모두 active caller 존재 (lib_only ≥ 5).
+- 21개 중 1개 (`masc_goal_review`)는 제거됨. 자기 description에 "Use masc_goal_transition / masc_goal_verify"를 명시하면서 별도 handler를 유지하던 기준은 폐기.
+- 나머지 18개 모두 UNIQUE — 책임 분리 명확 (status / heartbeat / workspace lifecycle / Goal FSM / messaging / session).
+
+사용자 직감의 본질은 "이 카테고리 자체가 너무 비대하다"가 아니라 "naming/structure가 모호하다" — 본 audit이 21개 모두 active임을 확인했으나, `masc_goal_review` 보존 판단은 supersede됐다.
+
+## 권장 액션
+
+### PR-N5b — superseded by removal
+
+`masc_goal_review`의 phase-dependent handler를 별도 RFC로 보존하자는 결론은 폐기한다. Completion 요청은 `masc_goal_transition action=request_complete`, 검증은 `masc_goal_verify`, 일반 phase 변경은 `masc_goal_transition`으로 통일한다.
+
+### PR-N2 (Stage 2 surface trim) — 21개 분류 (Copilot 카운트 정정 반영)
+
+| 분류 | 갯수 | 도구 |
+|------|------|------|
+| **REMOVED** | 1 | `masc_goal_review` |
+| **Surface 유지** (사용자 확정 surface 정의: goal/board/task/broadcast/lifecycle admin) | 13 | `masc_status`, `masc_heartbeat`, `masc_bind`, `masc_unbind`, `masc_start`, `masc_agents`, `masc_broadcast`, `masc_messages`, `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_spawn` |
+| **Keeper-internal 이동** (admin observability / internal) | 5 | `masc_check`, `masc_reset`, `masc_workflow_guide`, `masc_session` |
+| **합계** | **21** | — |
+
+PR-N2가 `Tool_scope.keeper_internal_list`에 추가할 5개 — `Config.surface_tool_schemas ()` 카운트 -5. (admin observability 또는 internal)
+
+### naming / structure 별도 정리
+- `inline_*` prefix의 의미가 schema 디렉토리 구조에만 존재 (도구 이름엔 `masc_*`). 별도 refactor 필요 없음 — 단 `tool_schemas_inline_*.ml` 파일 분리 자체는 책임 묶음으로 정당화됨.
+- `workspace_*` / `inline_*` 파일 분리는 dispatch 모듈 (`tool_workspace.ml`, `mcp_tool_runtime.ml`)과 1:1 매핑되어 있어 유지.
+
+## 다음 단계
+
+1. 본 audit를 PR-N5 (docs-only PR)로 머지.
+2. PR-N5b: `masc_goal_review` 삭제 + dispatch routing 정리 완료.
+3. PR-N2: 7개 도구 (`masc_check`, `masc_reset`, `masc_workflow_guide`, `masc_session`)를 scope=Keeper_internal로 이동. 14 도구는 surface 유지.
+
+## Plan 정정사항
+
+- `~/me/planning/claude-plans/polished-juggling-galaxy.md` §1.3 schema 파일 경로 정정: `lib/tool_schemas_*.ml` → `lib/tool_schemas/tool_schemas_*.ml` (디렉토리)
+- §1.3 파일 개수 정정: 10 → 14 (`tool_schemas_workspace.ml`, `tool_schemas_inline.ml`, `tool_schemas_inline_episodes.ml` 추가 발견)
+- §1.8 keeper-internal 이동 대상 정정: workspace_*/inline_* 21개 통째로가 아니라 7개만. 나머지 14개는 사용자 surface 정의에 부합하여 surface 유지.

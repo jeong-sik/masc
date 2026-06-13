@@ -4,7 +4,7 @@
 all: build-all
 
 # Build OCaml + dashboard (dashboard rebuilds only when sources changed)
-build: doctor-oas-pin
+build: diagnostics-oas-pin
 	scripts/dune-local.sh build
 	@scripts/build-dashboard-if-needed.sh
 
@@ -17,7 +17,7 @@ dev-dashboard:
 	cd dashboard && pnpm dev
 
 # Build dashboard Bonsai island (js_of_ocaml, OxCaml switch `bonsai-dashboard`).
-# See planning/claude-plans/masc-mcp-eventual-parrot.md.
+# See planning/claude-plans/masc-eventual-parrot.md.
 # --root . pins dune to dashboard_bonsai/dune-project — otherwise dune walks
 # up the directory tree (out of the worktree, into the real repo root) and
 # misresolves the project. Must pair with OPAMSWITCH= so the env loads.
@@ -35,7 +35,7 @@ bonsai-dashboard:
 	cp dashboard_bonsai/static/colors_and_type.generated.css assets/dashboard_bonsai/colors_and_type.generated.css
 
 # Build Bonsai only if the OxCaml switch exists. Used by `build-all` so a
-# single `make` run builds both main masc-mcp and the Bonsai island when
+# single `make` run builds both main masc and the Bonsai island when
 # the dev setup includes the extra switch, but does not block CI / first-
 # time contributors who have not bootstrapped it.
 bonsai-dashboard-if-available:
@@ -62,7 +62,7 @@ bonsai-dashboard-tokens:
 	mkdir -p assets/dashboard_bonsai
 	cp dashboard_bonsai/static/colors_and_type.generated.css assets/dashboard_bonsai/colors_and_type.generated.css
 
-# Build everything: main masc-mcp + Preact dashboard + Bonsai (if available).
+# Build everything: main masc + Preact dashboard + Bonsai (if available).
 # Note: `dune build` at the repo root only compiles the main OCaml — the
 # Bonsai island lives on a separate OxCaml switch and cannot be driven
 # from the same dune invocation. Use `make` for the full build.
@@ -90,4 +90,4 @@ dev-setup: pin-external-deps install-deps
 
 # Start the MCP server (local development)
 run:
-	dune exec --root . masc-mcp -- --port 8933
+	dune exec --root . masc -- --port 8933

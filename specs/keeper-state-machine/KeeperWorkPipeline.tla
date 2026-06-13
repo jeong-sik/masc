@@ -22,7 +22,7 @@
 \*     model now verifies after adding weak fairness to the intra-pipeline
 \*     progress actions below; the runtime-not-wired situation is still
 \*     separate and should remain visible in this banner.
-\* The actual keeper tool runtime surface is descriptor-routed agent_tool_*_runtime
+\* The actual keeper tool runtime surface is descriptor-routed keeper_tool_*_runtime
 \* modules with a different state shape.
 \* See issue #9044 for the retire / re-target / banner trichotomy.
 \* This banner takes the "banner" option to make the aspirational nature

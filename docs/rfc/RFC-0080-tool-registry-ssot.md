@@ -1,9 +1,9 @@
 ---
 rfc: "0080"
-title: "Tool registry SSOT — collapse multi-source membership into typed Tool_name boundary"
+title: "Tool registry SSOT — collapse multi-source membership into typed Keeper resolution"
 status: Implemented
 created: 2026-05-14
-updated: 2026-05-22
+updated: 2026-06-05
 author: vincent
 supersedes: []
 superseded_by: null
@@ -25,7 +25,7 @@ The mismatch is structural, not a typo. `is_known_policy_tool_name` (lib/keeper/
 let is_known_policy_tool_name name =
   let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
   Tool_dispatch.is_registered normalized                              (* 1  *)
-  || Option.is_some (Tool_name.of_string normalized)                  (* 2  *)
+  || legacy_enum_admits normalized                                    (* 2  *)
   || Option.is_some (Keeper_tool_alias.route normalized)              (* 3  *)
   || Keeper_tool_alias.is_known_internal normalized                   (* 4  *)
   || Option.is_some (Keeper_tool_alias.public_masc_to_internal n)     (* 5  *)
@@ -94,7 +94,11 @@ The two paths share some sources (`Keeper_tool_alias.*`) but diverge elsewhere. 
 
 There is no single point of truth for *"this tool name resolves to that handler"*. Each source admits a name on its own terms; the union covers reality only because each adds *something*. Removing any one source today would fail unknown for a chunk of policy entries.
 
-`Tool_name.t` (397 closed variant cases) is the closest thing to a typed registry — but it is treated as *one input* to the OR, not as *the* admission gate.
+Historical note: `Tool_name.t` used to be the closest thing to a typed registry,
+but it was still only one input to the OR. The implemented boundary deliberately
+does **not** promote `Tool_name.t` into the Keeper policy SSOT. Policy admission
+now goes through `Keeper_tool_resolution.resolve`; product/domain schema names
+come from descriptors, registries, and the policy tool-schema inventory.
 
 ## 3. Proposed solution
 
@@ -103,21 +107,18 @@ There is no single point of truth for *"this tool name resolves to that handler"
 Collapse the multi-source OR into **typed conversion at the policy load boundary**:
 
 ```ocaml
-(* lib/keeper/tool_resolution.ml — new *)
+(* lib/keeper/keeper_tool_resolution.ml *)
 type tried_source =
-  | Dispatch_table                           (* S1 *)
-  | Tool_name_variant                        (* S2 *)
-  | Alias_route                              (* S3 *)
-  | Alias_internal                           (* S4 *)
-  | Alias_masc_to_internal                   (* S5 *)
-  | Registry_internal_candidate              (* S6 *)
-  | Registry_core_tools                      (* S7 *)
-  | Shard_schema                             (* S8 *)
-  | Surface of Tool_catalog_surfaces.surface (* S9-12 *)
+  | Dispatch_table
+  | Public_descriptor
+  | Alias_internal
+  | Registry_internal_candidate
+  | Registry_core_tools
+  | Tool_schema
+  | Descriptor_registry
 
 type resolution =
-  | Resolved of { canonical : string ; via : tried_source ;
-                  surface : Tool_catalog_surfaces.surface option }
+  | Resolved of { canonical : string ; via : tried_source }
   | Alias_to of { from : string ; canonical : string ; via : tried_source }
   | Unknown of { name : string ; tried : tried_source list }
 
@@ -146,7 +147,7 @@ List.iter (fun raw ->
 
 ### 3.3 Non-goals
 
-- Renumber/rename existing `Tool_name.t` cases. Keep canonical names stable.
+- Promote `Tool_name.t` back into policy admission. It is not the Keeper SSOT.
 - Restructure `tool_policy.toml` schema. Policy format unchanged.
 - Touch runtime dispatch hot-path latency. `resolve` runs only at boot and at MCP ingress.
 - Block existing dual-emit pattern (RFC-0072 typed sub-FSM transitions). Orthogonal to this RFC.
@@ -168,7 +169,7 @@ AGENT-LLM-A.md §워크어라운드 거부 기준:
 | 시그니처 | 회피 방법 |
 |---|---|
 | Counter-as-fix (warn dump alone, no resolution) | Phase 1 shim **changes warn structure** from list-of-strings to typed `Unknown { tried = … }`. Reader sees *why* unknown, not just *that* unknown. Counter is bait. |
-| String/substring 분류기 보강 | `Tool_name.of_string` already exhaustive over 397 cases. No new substring matcher added. Aliases stay in `Keeper_tool_alias` but are addressed through `Alias_to` typed outcome, not free-form string. |
+| String/substring 분류기 보강 | Legacy enum parsing was exhaustive over hundreds of cases, but it is no longer an admission source. Aliases stay in `Keeper_tool_alias` but are addressed through typed outcomes, not free-form string. |
 | N-of-M 패치 (admits abstraction failure) | Phase 2 plan is *explicitly migration*, not "fix this one site." Each phase-2 PR body must declare ratio (e.g., *3/7 policy-loader sites migrated; remaining 4 in PR #N+1*). |
 | Cap / cooldown / log dedup | None proposed. |
 | Repair / sanitize at read | None. Resolution is at ingress, not at use. |
@@ -191,7 +192,7 @@ To be filled at closeout. Each phase PR appends to this section.
 
 ### 7.1 Production log evidence (2026-05-13)
 
-Source: `<base-path>/.masc/logs/masc-mcp-8935.log`. 2 boot sessions, 540 `is not registered` lines, 88 distinct tool names.
+Source: `<base-path>/.masc/logs/masc-8935.log`. 2 boot sessions, 540 `is not registered` lines, 88 distinct tool names.
 
 Sample (full list in PR body of Phase 1):
 
@@ -205,19 +206,19 @@ keeper_fs_{edit,read}
 keeper_library_{read,search}
 keeper_memory_search
 tool_search_files
-keeper_task_{claim,create,done,force_release,submit_for_verification}
+keeper_task_{claim,create,done,force_release}
 keeper_tasks_{audit,list}
 keeper_time_now
 keeper_tool_search
 keeper_tools_list
 keeper_voice_{agent,listen,session_end,session_start,sessions,speak}
-masc_add_task / masc_agent_card / masc_agents / masc_approval_pending /
+masc_add_task / masc_agent_card / masc_agents /
 masc_batch_add_tasks / masc_broadcast / masc_claim_next /
 masc_goal_{list,review,transition,upsert,verify} /
-masc_heartbeat / masc_join / masc_keeper_{list,msg,msg_result,status} /
-masc_leave / masc_messages / masc_plan_get / masc_plan_get_task /
+masc_heartbeat / masc_bind / masc_keeper_{list,msg,msg_result,status} /
+masc_unbind / masc_messages / masc_plan_get / masc_plan_get_task /
 masc_status / masc_task_history / masc_tasks / masc_tool_help /
-masc_transition / masc_web_search / masc_who /
+masc_transition / masc_web_search / masc_agents /
 tool_{edit_file,execute,read_file,search_files,write_file}
 ```
 

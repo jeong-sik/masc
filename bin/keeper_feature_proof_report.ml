@@ -1,13 +1,13 @@
-open Masc_mcp
+open Masc
 
 let usage =
   {|Usage: masc-keeper-feature-proof [OPTIONS]
 
 Options:
   --base-path PATH        Runtime workspace root (default: MASC_BASE_PATH)
-  --n N                  Tool-quality recent sample size (default: 5000)
-  --window-hours HOURS   Use a time-window sample instead of recent N
-  --threshold PCT        Required tool success threshold (default: 80.0)
+  --n N                  Accepted for compatibility; ignored
+  --window-hours HOURS   Optional scheduled-autonomy evidence window
+  --threshold PCT        Accepted for compatibility; ignored
   --strict               Exit 2 when any feature is warn/fail
   -h, --help             Print this help
 |}
@@ -91,13 +91,11 @@ let main () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Keeper_tool_call_log.init ~base_path ();
-  let coord_config = Coord.default_config base_path in
+  let workspace_config = Workspace.default_config base_path in
   let json =
     Dashboard_keeper_feature_proof.json
-      ~config:coord_config
-      ~n:cfg.n
+      ~config:workspace_config
       ?window_hours:cfg.window_hours
-      ~success_threshold_pct:cfg.threshold
       ()
   in
   print_endline (Yojson.Safe.pretty_to_string json);

@@ -20,8 +20,8 @@
     invariant so future changes that re-introduce the asymmetry fail
     early. *)
 
-module KTP = Masc_mcp.Keeper_types_profile
-module KC = Masc_mcp.Keeper_config
+module KTP = Masc.Keeper_types_profile
+module KC = Masc.Keeper_config
 
 (* nick0cave's actual desires field from .masc/config/keepers/nick0cave.toml
    on the day the residual 4-byte drift was diagnosed.  322 raw bytes,
@@ -73,7 +73,7 @@ let test_profile_toml_normalizes_desires () =
     ^ "\"\n"
   in
   let doc =
-    match Masc_mcp.Keeper_toml_loader.parse_toml toml_text with
+    match Keeper_toml_loader.parse_toml toml_text with
     | Ok d -> d
     | Error e -> Alcotest.failf "TOML parse failed: %s" e
   in
@@ -114,7 +114,7 @@ let test_pre_fix_compare_normalized_vs_raw () =
   Alcotest.(check int) "raw is 322 bytes"
     322 (String.length nick0cave_desires_322);
   let result =
-    Masc_mcp.Keeper_runtime.personality_text_equal
+    Masc.Keeper_runtime.personality_text_equal
       normalized nick0cave_desires_322
   in
   let hex s =
@@ -163,7 +163,7 @@ let test_apply_default_yields_no_drift () =
   Alcotest.(check bool)
     "post-fix: identical normalized values compare equal — no drift"
     true
-    (Masc_mcp.Keeper_runtime.personality_text_equal
+    (Masc.Keeper_runtime.personality_text_equal
        meta_desires target_desires)
 
 let () =

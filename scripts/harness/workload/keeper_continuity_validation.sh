@@ -21,8 +21,8 @@ PORT="${PORT:-}"
 BASE_PATH="${BASE_PATH:-}"
 SERVER_EXE="${SERVER_EXE:-}"
 MCP_URL="${MCP_URL:-}"
-MCP_TOKEN="${MASC_MCP_TOKEN:-}"
-KEEPER_CASCADE_NAME="${KEEPER_CASCADE_NAME:-}"
+MCP_TOKEN="${MASC_TOKEN:-}"
+KEEPER_RUNTIME_NAME="${KEEPER_RUNTIME_NAME:-}"
 KEEPER_NAME="${KEEPER_NAME:-continuity-${RUN_ID}}"
 TARGET_PHASES="${TARGET_PHASES:-bootstrap,liveness,continuity,compaction,handoff,recovery}"
 MAX_TURNS="${MAX_TURNS:-4}"
@@ -283,9 +283,9 @@ refresh_latest_evidence_from_status() {
   LATEST_HEALTH="$(printf '%s' "$status_json" | jq -r '.diagnostic.health_state // ""')"
   if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running // false')" == "true" ]] \
     && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists // false')" == "true" ]]; then
-    LATEST_HEARTBEAT="room-keepalive-active"
+    LATEST_HEARTBEAT="workspace-keepalive-active"
   else
-    LATEST_HEARTBEAT="room-keepalive-missing"
+    LATEST_HEARTBEAT="workspace-keepalive-missing"
   fi
 }
 
@@ -343,7 +343,7 @@ heartbeat_text() {
   fi
 }
 
-room_status_text() {
+workspace_status_text() {
   if call_mcp_tool 1003 "masc_status" '{}' 20; then
     tool_text
   else
@@ -355,17 +355,17 @@ capture_snapshot() {
   local phase="$1"
   local snapshot_file="$SNAP_DIR/${phase}-keeper-status.json"
   local heartbeat_file="$SNAP_DIR/${phase}-heartbeat.txt"
-  local room_file="$SNAP_DIR/${phase}-room-status.txt"
-  local status_json heartbeat_output room_output
+  local workspace_file="$SNAP_DIR/${phase}-workspace-status.txt"
+  local status_json heartbeat_output workspace_output
 
   status_json="$(keeper_status_json)"
   write_json_pretty "$snapshot_file" "$status_json"
   heartbeat_output="$(heartbeat_text)"
   write_text "$heartbeat_file" "$heartbeat_output"
-  room_output="$(room_status_text)"
-  write_text "$room_file" "$room_output"
+  workspace_output="$(workspace_status_text)"
+  write_text "$workspace_file" "$workspace_output"
 
-  printf '%s\n%s\n%s\n' "$snapshot_file" "$heartbeat_file" "$room_file"
+  printf '%s\n%s\n%s\n' "$snapshot_file" "$heartbeat_file" "$workspace_file"
 }
 
 runtime_terminal_summary() {
@@ -484,7 +484,7 @@ create_keeper() {
     --arg name "$KEEPER_NAME" \
     --arg goal "Validate real keeper continuity under isolated load." \
     --arg instructions "모든 응답은 한국어로 작성하세요. 짧고 구조적으로 답하세요." \
-    --arg cascade_name "$KEEPER_CASCADE_NAME" \
+    --arg runtime_id "$KEEPER_RUNTIME_NAME" \
     --argjson compaction_ratio_gate "$KEEPER_COMPACTION_RATIO_GATE" \
     --argjson compaction_message_gate "$KEEPER_COMPACTION_MESSAGE_GATE" \
     --argjson continuity_compaction_cooldown_sec "$KEEPER_CONTINUITY_COOLDOWN_SEC" \
@@ -503,7 +503,7 @@ create_keeper() {
       handoff_threshold:$handoff_threshold,
       handoff_cooldown_sec:30,
       drift_enabled:false
-    } + (if ($cascade_name | length) > 0 then {cascade_name:$cascade_name} else {} end)')"
+    } + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')"
   call_mcp_tool 1100 "masc_keeper_up" "$args" 60
 }
 
@@ -633,7 +633,7 @@ finalize_report() {
     --arg server_log "$SERVER_LOG" \
     --arg base_path "${BASE_PATH:-$TEMP_BASE_PATH}" \
     --arg keeper_name "$KEEPER_NAME" \
-    --arg cascade_name "$KEEPER_CASCADE_NAME" \
+    --arg runtime_id "$KEEPER_RUNTIME_NAME" \
     --arg latest_input_preview "$LATEST_INPUT_PREVIEW" \
     --arg latest_output_preview "$LATEST_OUTPUT_PREVIEW" \
     --arg latest_trace_id "$LATEST_TRACE_ID" \
@@ -666,7 +666,7 @@ finalize_report() {
         base_path:$base_path,
         server_log:$server_log,
         keeper_name:$keeper_name,
-        cascade_name:$cascade_name,
+        runtime_id:$runtime_id,
         target_phases:$target_phases
       },
       evidence:{
@@ -698,7 +698,7 @@ finalize_report() {
 - Classification: **$classification**
 - Dry run: $( [[ "$(normalize_bool "$DRY_RUN")" == "1" ]] && echo "yes" || echo "no" )
 - Keeper: \`$KEEPER_NAME\`
-- Cascade: \`$KEEPER_CASCADE_NAME\`
+- Runtime: \`$KEEPER_RUNTIME_NAME\`
 - MCP URL: \`${MCP_URL:-n/a}\`
 
 ## Result
@@ -774,7 +774,7 @@ EOF
 }
 
 real_run() {
-  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file room_file
+  local status_json heartbeat_output snapshot_info snapshot_file heartbeat_file workspace_file
   local baseline_continuity_ts baseline_compactions baseline_generation baseline_handoffs baseline_trace
   local turn status_after heartbeat_after agent_name compaction_done handoff_done
 
@@ -830,9 +830,9 @@ real_run() {
     if [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.agent.exists')" == "true" ]]; then
       BOOTSTRAP_PASS=1
-      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and room presence" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "pass" "isolated keeper started with active keepalive and workspace presence" "$snapshot_file" "$heartbeat_file"
     else
-      append_phase "bootstrap" "fail" "keeper started but room presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
+      append_phase "bootstrap" "fail" "keeper started but workspace presence/keepalive were not observed" "$snapshot_file" "$heartbeat_file"
       return 1
     fi
   fi
@@ -873,7 +873,7 @@ real_run() {
       && [[ "$(printf '%s' "$status_json" | jq -r '.last_turn_ago_s < 120')" == "true" ]] \
       && [[ "$(printf '%s' "$status_json" | jq -r '.keepalive_running')" == "true" ]]; then
       LIVENESS_PASS=1
-      append_phase "liveness" "pass" "live keeper turn observed with room presence and recent output" "$snapshot_file" "$heartbeat_file"
+      append_phase "liveness" "pass" "live keeper turn observed with workspace presence and recent output" "$snapshot_file" "$heartbeat_file"
     else
       append_phase "liveness" "fail" "keeper metadata exists but no fresh live turn was proven" "$snapshot_file" "$heartbeat_file"
       return 1
@@ -996,7 +996,7 @@ real_run() {
       append_phase "recovery" "fail" "keeper_down failed: $LAST_TOOL_ERROR" "$snapshot_file" "$heartbeat_file"
     else
       sleep 1
-      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" --arg cascade_name "$KEEPER_CASCADE_NAME" '{name:$name} + (if ($cascade_name | length) > 0 then {cascade_name:$cascade_name} else {} end)')" 30; then
+      if ! call_mcp_tool 1500 "masc_keeper_up" "$(jq -cn --arg name "$KEEPER_NAME" --arg runtime_id "$KEEPER_RUNTIME_NAME" '{name:$name} + (if ($runtime_id | length) > 0 then {runtime_id:$runtime_id} else {} end)')" 30; then
         snapshot_info="$(capture_snapshot recovery-up)"
         snapshot_file="$(printf '%s' "$snapshot_info" | sed -n '1p')"
         heartbeat_file="$(printf '%s' "$snapshot_info" | sed -n '2p')"

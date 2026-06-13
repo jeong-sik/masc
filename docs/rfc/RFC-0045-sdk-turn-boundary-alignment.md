@@ -18,24 +18,24 @@ Production keeper crashed with an `Assert_failure` from
 [2026-05-08 20:58:22] [ERROR] [Misc] oas_worker oas-primary: execution exception:
 File "lib/keeper/keeper_registry.ml", line 775, characters 7-13: Assertion failed
 Backtrace:
-  Masc_mcp__Keeper_registry.validate_turn_phase_transition
-  Masc_mcp__Keeper_fsm_guard_runtime.wrap_unit
-  Masc_mcp__Keeper_registry.set_turn_cascade_state
-  Masc_mcp__Keeper_registry.update_current_turn
-  Masc_mcp__Keeper_registry.update_entry.loop
-  Masc_mcp__Keeper_registry.set_turn_cascade_state
-  Masc_mcp__Keeper_run_tools.prepare_agent_setup.(fun)
-  Masc_mcp__Memory_hooks.compose_before_turn_params.(fun)
+  Masc__Keeper_registry.validate_turn_phase_transition
+  Masc__Keeper_fsm_guard_runtime.wrap_unit
+  Masc__Keeper_registry.set_turn_runtime_state
+  Masc__Keeper_registry.update_current_turn
+  Masc__Keeper_registry.update_entry.loop
+  Masc__Keeper_registry.set_turn_runtime_state
+  Masc__Keeper_run_tools.prepare_agent_setup.(fun)
+  Masc__Memory_hooks.compose_before_turn_params.(fun)
   Agent_sdk_base__Hooks.invoke_validated
   ...
   Agent_sdk__Pipeline.run_turn
   Agent_sdk__Agent.run_turn_core
   Agent_sdk__Agent.run_loop.(fun).loop          ← multi-turn boundary
   ...
-  Masc_mcp__Oas_worker_exec.run
+  Masc__Oas_worker_exec.run
 
 [2026-05-08 20:58:52] [INFO] [Keeper] executor: auto-resume blocked;
-    cascade retired_tool_profile is unhealthy
+    runtime retired_tool_profile is unhealthy
 ```
 
 The keeper went down and `auto-resume blocked` followed.
@@ -58,7 +58,7 @@ The mismatch:
 | MASC keeper | `mark_turn_started` (`keeper_unified_turn.ml:785`) — runs **once** before `Agent_sdk.run_loop` |
 | MASC keeper | `mark_turn_finished` (`keeper_unified_turn.ml:867`) — runs **once** after `Agent_sdk.run_loop` returns |
 | Agent SDK | `Agent.run_loop.(fun).loop` (`agent.ml:175`) — iterates **N SDK turns** until exit condition |
-| Agent SDK | `before_turn_params` hook fires **per SDK turn**, calling MASC's `compose_before_turn_params` → `prepare_agent_setup` → `set_turn_cascade_state(Cascade_selecting)` → `Turn_prompting` |
+| Agent SDK | `before_turn_params` hook fires **per SDK turn**, calling MASC's `compose_before_turn_params` → `prepare_agent_setup` → `set_turn_runtime_state(Runtime_selecting)` → `Turn_prompting` |
 
 So **1 MASC keeper-turn ≠ 1 SDK turn**. MASC's FSM was modeled as if the two
 boundaries coincide; in reality the SDK runs N turns inside a single
@@ -66,7 +66,7 @@ boundaries coincide; in reality the SDK runs N turns inside a single
 turn lands cleanly because `obs.turn_phase` is `Turn_prompting` (set by
 `mark_turn_started`). On any subsequent SDK turn, `obs.turn_phase` is the
 terminal state of the previous SDK turn (typically `Turn_finalizing` after
-`Cascade_done` or `Cascade_exhausted`), and the validator rejects the
+`Runtime_done` or `Runtime_exhausted`), and the validator rejects the
 `Turn_finalizing → Turn_prompting` transition.
 
 The crash log's `context overflow guard: 24 tools > max 15, truncating` is a
@@ -82,7 +82,7 @@ the **next** turn after the first one terminated.
 2. `current_turn_observation` is read by:
    - dashboard composite observer (live `Executing` / `Selecting` surface)
    - `validate_*_transition` family (FSM correctness gates)
-   - `set_turn_cascade_state` / `set_turn_phase` / `set_turn_decision_stage`
+   - `set_turn_runtime_state` / `set_turn_phase` / `set_turn_decision_stage`
      (in-turn writers)
 3. PR #14194 invariant: every transition flows through a validator. Direct
    `obs` overwrites without validation are a regression.
@@ -98,12 +98,12 @@ Introduce a per-SDK-turn reset, distinct from `mark_turn_started`:
 
 - New: `Keeper_registry.mark_sdk_turn_started ~base_path name` —
   resets `current_turn_observation` to a fresh in-turn shape
-  (`turn_phase = Turn_prompting`, `cascade_state = Cascade_idle`,
+  (`turn_phase = Turn_prompting`, `runtime_state = Runtime_idle`,
   `decision_stage = Decision_undecided`), **does not** increment
   `total_turns`.
 - New: `Keeper_registry.mark_sdk_turn_finished ~base_path name` —
   optional, captures the terminal phase of the previous SDK turn for
-  diagnostics (e.g. distinguishing `Cascade_done` vs `Cascade_exhausted`
+  diagnostics (e.g. distinguishing `Runtime_done` vs `Runtime_exhausted`
   endings) before the reset.
 - Wire `compose_before_turn_params` (`memory_hooks.ml:73`) to call
   `mark_sdk_turn_started` at the start of each hook invocation. This is the
@@ -154,15 +154,15 @@ Trade-offs:
   boundary that fires once per SDK turn). They are not the same event.
 - Hidden side effect on a function whose name does not signal state mutation.
 
-### Option D — `set_turn_cascade_state` self-heals on `Turn_finalizing → Turn_prompting`
+### Option D — `set_turn_runtime_state` self-heals on `Turn_finalizing → Turn_prompting`
 
-Detect the boundary inside `set_turn_cascade_state` and reset `obs` instead
+Detect the boundary inside `set_turn_runtime_state` and reset `obs` instead
 of calling the validator.
 
 Trade-offs:
 - Localizes the special case to the writer, not the validator.
 - Multiplies the boundary-handling logic across every writer that might be
-  the first in-turn write (today `set_turn_cascade_state`; tomorrow possibly
+  the first in-turn write (today `set_turn_runtime_state`; tomorrow possibly
   `set_turn_decision_stage` or `set_turn_phase`). The same special case
   would need to be repeated in each writer, or factored out — at which
   point Option A (a named boundary helper) is cleaner.
@@ -194,7 +194,7 @@ RFC link + removal target):
     (* WORKAROUND (RFC-0045): SDK run_loop runs N SDK turns inside one
        MASC keeper-turn; mark_turn_started fires once per keeper-turn,
        so the next SDK turn's prepare_agent_setup transitions back from
-       a Cascade_done/Cascade_exhausted-derived Turn_finalizing to
+       a Runtime_done/Runtime_exhausted-derived Turn_finalizing to
        Turn_prompting. Remove this entry once mark_sdk_turn_started is
        wired in compose_before_turn_params (RFC-0045 §5). *)
   ```
@@ -226,9 +226,9 @@ Steps 1 and 2 can land in parallel. Step 3 should not land before Step 2
   test would crash; with `mark_sdk_turn_started` it passes.
 - Property: starting from any terminal `turn_phase` (`Turn_finalizing`,
   `Turn_idle`), `mark_sdk_turn_started` lands the observation in
-  `Turn_prompting × Cascade_idle × Decision_undecided` without invoking
+  `Turn_prompting × Runtime_idle × Decision_undecided` without invoking
   the validator.
-- Integration: a fixture keeper that triggers `Cascade_done` followed by
+- Integration: a fixture keeper that triggers `Runtime_done` followed by
   another SDK turn (via small `max_turns` and a model that returns
   text-then-tool-then-text). Verify metric `keeper_sdk_turn_count`
   (proposed companion gauge) increments per SDK turn while
@@ -240,10 +240,10 @@ Steps 1 and 2 can land in parallel. Step 3 should not land before Step 2
    `measurement`, or carry them forward across SDK turns inside one
    keeper-turn? The current bug only affects `turn_phase`, but consistency
    matters for the dashboard composite observer.
-2. Should there be a `keeper_sdk_turn_count` Prometheus gauge to give
+2. Should there be a `keeper_sdk_turn_count` legacy metrics backend gauge to give
    operators visibility into how often this happens? (Adds noise; defer to
    an audit pass that observes the count in production for a week.)
-3. Are there other writers (besides `set_turn_cascade_state` via
+3. Are there other writers (besides `set_turn_runtime_state` via
    `prepare_agent_setup`) that fire on per-SDK-turn boundary today and
    would also benefit from boundary reset? Audit candidates:
    `set_turn_decision_stage`, `set_turn_phase`,

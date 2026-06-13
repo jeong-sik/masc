@@ -1,4 +1,4 @@
-(** Team_context — shared context for coordinated workers.
+(** Team_context — shared context for coupled workers.
 
     Provides a compact summary of the team's state that can be injected
     into worker prompts so they have awareness of:
@@ -49,5 +49,5 @@ val add_finding :
 val load_findings :
   base_path:string -> string list
 
-(** Empty context for when no active coordination. *)
+(** Empty context for when no active workspace. *)
 val empty : team_context

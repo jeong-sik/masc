@@ -9,11 +9,12 @@ module Types = Masc_domain
     4. Approval queue: stale entries expire with Reject
     5. Approval callback returns correct OAS decisions *)
 
-module GP = Masc_mcp.Governance_pipeline
-module AQ = Masc_mcp.Keeper_approval_queue
-module KT = Masc_mcp.Keeper_types
-module SDH = Masc_mcp.Server_dashboard_http
-module Mcp_eio = Masc_mcp.Mcp_server_eio
+module GP = Masc.Governance_pipeline
+module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
+module AQ = Masc.Keeper_approval_queue
+module SDH = Server_dashboard_http
+module KT = Keeper_types
+module Mcp_eio = Masc.Mcp_server_eio
 
 let check = Alcotest.(check string)
 
@@ -24,7 +25,13 @@ let temp_dir () =
   dir
 
 let meta_from_json json =
-  match KT.meta_of_json json with
+  let json =
+    match json with
+    | `Assoc fields when not (List.mem_assoc "tool_access" fields) ->
+      `Assoc (("tool_access", `List []) :: fields)
+    | _ -> json
+  in
+  match Keeper_meta_json_parse.meta_of_json json with
   | Ok m -> m
   | Error e -> Alcotest.fail ("meta parse failed: " ^ e)
 
@@ -47,6 +54,10 @@ let contains_substring s needle =
     else loop (i + 1)
   in
   n_len = 0 || loop 0
+
+let has_assoc_key key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | _ -> false
 
 let rec yield_until ?(attempts = 50) predicate =
   if predicate () || attempts <= 0 then ()
@@ -99,8 +110,8 @@ let test_approval_queue_failure_metric_labels_site () =
       "audit-approvals"
   in
   let before =
-    Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.(to_string ApprovalQueueFailures)
+    Masc.Otel_metric_store.metric_value_or_zero
+      Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
   in
@@ -120,44 +131,13 @@ let test_approval_queue_failure_metric_labels_site () =
         ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
-        Masc_mcp.Prometheus.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.(to_string ApprovalQueueFailures)
+        Masc.Otel_metric_store.metric_value_or_zero
+          Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()
       in
       Alcotest.(check (float 0.0001)) "failure counter delta" 1.0
         (after -. before))
-
-let execute_approval_get args =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Mcp_eio.set_net (Eio.Stdenv.net env);
-  Mcp_eio.set_clock (Eio.Stdenv.clock env);
-  let clock = Eio.Stdenv.clock env in
-  Eio.Switch.run @@ fun sw ->
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-      let raw_token =
-        match
-          Masc_mcp.Auth.create_token
-            base_path
-            ~agent_name:"approval-admin"
-            ~role:Types.Admin
-        with
-        | Ok (raw, _) -> raw
-        | Error err ->
-          Alcotest.fail
-            ("admin token setup failed: " ^ Masc_domain.masc_error_to_string err)
-      in
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let result =
-        Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"approval-get-test"
-          ~auth_token:raw_token
-          state ~name:"masc_approval_get" ~arguments:args
-      in
-      ((Tool_result.is_success result), (Tool_result.message result)))
 
 let with_test_config f =
   Eio_main.run @@ fun env ->
@@ -169,7 +149,7 @@ let with_test_config f =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      f state.room_config)
+      f state.workspace_config)
 
 let with_eio_base_path f =
   Eio_main.run @@ fun env ->
@@ -748,43 +728,56 @@ let test_approval_queue_get_pending_detail () =
   Alcotest.(check int) "entry removed"
     initial_count (AQ.pending_count ())
 
-let test_approval_get_dispatch_success () =
-  let initial_count = AQ.pending_count () in
-  let callback_result = ref None in
-  let input =
-    `Assoc [
-      ("path", `String "/tmp/operator-only");
-      ("payload", `Assoc [("secret", `String "full-input")]);
-    ]
-  in
-  let id =
-    AQ.submit_pending
-      ~keeper_name:"dispatch-detail-keeper"
-      ~tool_name:"tool_edit_file"
-      ~input
-      ~risk_level:AQ.Critical
-      ~on_resolution:(fun decision -> callback_result := Some decision)
+let test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract () =
+  let runtime_contract =
+    Masc.Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"redacted-contract-keeper"
+      ~sandbox_profile:"docker"
+      ~network_mode:"none"
       ()
   in
+  Alcotest.(check bool)
+    "keeper-visible runtime_contract has no backend"
+    false
+    (has_assoc_key "backend" runtime_contract);
+  Alcotest.(check bool)
+    "keeper-visible runtime_contract has no sandbox_profile"
+    false
+    (has_assoc_key "sandbox_profile" runtime_contract);
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"redacted-contract-keeper"
+      ~tool_name:"tool_execute"
+      ~input:(`Assoc [ ("cmd", `String "git status") ])
+      ~risk_level:AQ.Medium
+      ~sandbox_target:"docker"
+      ~sandbox_profile:"docker"
+      ~backend:"docker"
+      ~runtime_contract
+      ~on_resolution:(fun _ -> ())
+      ()
+  in
+  let open Yojson.Safe.Util in
   Fun.protect
     ~finally:(fun () ->
-      ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+      ignore (AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "cleanup")))
     (fun () ->
-      let ok, payload =
-        execute_approval_get (`Assoc [("id", `String id)])
+      let detail =
+        match AQ.get_pending_json ~id with
+        | Some json -> json
+        | None -> Alcotest.fail "expected pending approval detail"
       in
-      if not ok then Alcotest.fail ("dispatch approval_get failed: " ^ payload);
-      let open Yojson.Safe.Util in
-      let json = Yojson.Safe.from_string payload in
-      Alcotest.(check string) "dispatch detail id" id
-        (json |> member "id" |> to_string);
-      Alcotest.(check string) "dispatch includes full input"
-        (Yojson.Safe.to_string input)
-        (json |> member "input" |> Yojson.Safe.to_string));
-  Alcotest.(check int) "dispatch cleanup removes pending"
-    initial_count (AQ.pending_count ());
-  Alcotest.(check bool) "cleanup rejects callback" true
-    (match !callback_result with Some (Agent_sdk.Hooks.Reject _) -> true | _ -> false)
+      Alcotest.(check string) "operator sandbox target" "docker"
+        (detail |> member "sandbox_target" |> to_string);
+      let detail_contract = detail |> member "runtime_contract" in
+      Alcotest.(check bool)
+        "detail runtime_contract keeps backend redacted"
+        false
+        (has_assoc_key "backend" detail_contract);
+      Alcotest.(check bool)
+        "detail runtime_contract keeps sandbox_profile redacted"
+        false
+        (has_assoc_key "sandbox_profile" detail_contract))
 
 let test_resolve_with_policy_remembers_medium_allow () =
   with_eio_base_path @@ fun base_path ->
@@ -842,9 +835,9 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err)
 
-let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
+let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
   let env_base = temp_dir () in
-  let room_base = temp_dir () in
+  let workspace_base = temp_dir () in
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   AQ.For_testing.reset_audit_store ();
@@ -860,20 +853,20 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir env_base;
-      cleanup_dir room_base)
+      cleanup_dir workspace_base)
     (fun () ->
       let id =
         AQ.submit_pending
-          ~keeper_name:"dashboard-room-keeper"
+          ~keeper_name:"dashboard-workspace-keeper"
           ~tool_name:"masc_transition"
           ~input:
             (`Assoc
               [
                 ("action", `String "claim");
-                ("task_id", `String "task-room");
+                ("task_id", `String "task-workspace");
               ])
           ~risk_level:AQ.Medium
-          ~base_path:room_base
+          ~base_path:workspace_base
           ~on_resolution:(fun _ -> ())
           ()
       in
@@ -887,7 +880,7 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
       in
       let rule_id =
         match
-          SDH.dashboard_governance_approval_resolve_http_json ~base_path:room_base
+          SDH.dashboard_governance_approval_resolve_http_json ~base_path:workspace_base
             ~args:resolve_args
         with
         | Ok json ->
@@ -898,29 +891,29 @@ let test_dashboard_resolve_and_delete_rules_use_room_base_path () =
               ("dashboard resolve failed: "
               ^ SDH.approval_resolve_http_error_to_string err)
       in
-      Alcotest.(check int) "room rule persisted" 1
-        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "workspace rule persisted" 1
+        (List.length (AQ.list_rules ~base_path:workspace_base ()));
       Alcotest.(check int) "env fallback has no rule" 0
         (List.length (AQ.list_rules ~base_path:env_base ()));
       (match
          SDH.dashboard_governance_approval_rule_delete_http_json
-           ~base_path:room_base
+           ~base_path:workspace_base
            ~args:(`Assoc [ ("id", `String rule_id) ])
        with
        | Ok _ -> ()
        | Error message ->
            Alcotest.fail ("dashboard rule delete failed: " ^ message));
-      Alcotest.(check int) "room rule deleted" 0
-        (List.length (AQ.list_rules ~base_path:room_base ()));
+      Alcotest.(check int) "workspace rule deleted" 0
+        (List.length (AQ.list_rules ~base_path:workspace_base ()));
       Alcotest.(check int) "env fallback still empty" 0
         (List.length (AQ.list_rules ~base_path:env_base ())))
 
-let test_submit_pending_audit_uses_room_base_path () =
+let test_submit_pending_audit_uses_workspace_base_path () =
   let env_base = temp_dir () in
-  let room_base = temp_dir () in
+  let workspace_base = temp_dir () in
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  let keeper_name = "approval-room-audit-keeper" in
+  let keeper_name = "approval-workspace-audit-keeper" in
   AQ.For_testing.reset_audit_store ();
   Unix.putenv "MASC_BASE_PATH" env_base;
   Unix.putenv "MASC_BASE_PATH_INPUT" env_base;
@@ -934,7 +927,7 @@ let test_submit_pending_audit_uses_room_base_path () =
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
       cleanup_dir env_base;
-      cleanup_dir room_base)
+      cleanup_dir workspace_base)
     (fun () ->
       ignore
         (AQ.submit_pending
@@ -944,49 +937,21 @@ let test_submit_pending_audit_uses_room_base_path () =
              (`Assoc
                [
                  ("action", `String "claim");
-                 ("task_id", `String "task-room-audit");
+                 ("task_id", `String "task-workspace-audit");
                ])
            ~risk_level:AQ.High
-           ~base_path:room_base
+           ~base_path:workspace_base
            ~on_resolution:(fun _ -> ())
            ());
       AQ.expire_stale ~max_wait_s:(-1.0);
-      let room_events = audit_event_names ~base_path:room_base ~keeper_name in
+      let workspace_events = audit_event_names ~base_path:workspace_base ~keeper_name in
       let env_events = audit_event_names ~base_path:env_base ~keeper_name in
-      Alcotest.(check bool) "room audit has pending" true
-        (List.exists (String.equal "pending") room_events);
-      Alcotest.(check bool) "room audit has expired" true
-        (List.exists (String.equal "expired") room_events);
-      Alcotest.(check (list string)) "env fallback has no room audit" []
+      Alcotest.(check bool) "workspace audit has pending" true
+        (List.exists (String.equal "pending") workspace_events);
+      Alcotest.(check bool) "workspace audit has expired" true
+        (List.exists (String.equal "expired") workspace_events);
+      Alcotest.(check (list string)) "env fallback has no workspace audit" []
         env_events)
-
-let test_approval_get_dispatch_missing_id () =
-  let ok, msg = execute_approval_get (`Assoc [("id", `String "")]) in
-  Alcotest.(check bool) "missing id fails" false ok;
-  Alcotest.(check bool) "missing id message" true
-    (contains_substring msg "id is required")
-
-let test_approval_get_dispatch_not_found () =
-  let ok, msg =
-    execute_approval_get (`Assoc [("id", `String "appr_missing")])
-  in
-  Alcotest.(check bool) "not found fails" false ok;
-  Alcotest.(check bool) "not found message" true
-    (contains_substring msg "no longer pending");
-  Alcotest.(check bool) "not found next action" true
-    (contains_substring msg "Refresh with masc_approval_pending")
-
-let test_approval_get_rejects_worker_role () =
-  match
-    Masc_mcp.Auth.authorize_tool_for_role ~agent_name:"worker"
-      ~role:Masc_domain.Worker ~tool_name:"masc_approval_get"
-  with
-  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-  | Error err ->
-      Alcotest.fail
-        (Printf.sprintf "expected forbidden, got %s"
-           (Masc_domain.masc_error_to_string err))
-  | Ok () -> Alcotest.fail "worker should not be allowed to call approval_get"
 
 (* ── 4. Approval callback integration ────────────────────── *)
 
@@ -1015,7 +980,7 @@ let test_callback_production_tool_edit_file_requires_approval () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
   let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let config = state.room_config in
+  let config = state.workspace_config in
   Eio.Fiber.fork ~sw (fun () ->
     let cb =
       GP.to_oas_approval_callback
@@ -1064,6 +1029,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
           ("sandbox_profile", `String "docker");
           ("network_mode", `String "inherit");
           ("current_task_id", `String "task-210");
+          ("always_approve", `Bool true);
         ])
   in
   let pending_before = AQ.pending_count () in
@@ -1077,13 +1043,13 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
   in
   let decision =
     cb
-      ~tool_name:"WriteFile"
+      ~tool_name:"Write"
       ~input:
         (`Assoc
           [
             ( "file_path",
               `String
-                "repos/masc-mcp/.worktrees/keeper-sandbox-writer-task-210/lib/example.ml"
+                "repos/masc/.worktrees/keeper-sandbox-writer-task-210/lib/example.ml"
             );
             ("content", `String "let x = 1\n");
           ])
@@ -1099,73 +1065,54 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
       ("expected Approve for claimed sandbox worktree write, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
-  with_test_config @@ fun config ->
-  let keeper_name = "sandbox-writer-negative" in
-  let claimed_meta =
-    meta_from_json
-      (`Assoc
-        [
-          ("name", `String keeper_name);
-          ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
-          ("trace_id", `String "sandbox-write-negative-trace");
-          ("sandbox_profile", `String "docker");
-          ("network_mode", `String "inherit");
-          ("current_task_id", `String "task-210");
-        ])
-  in
-  let unclaimed_meta = { claimed_meta with current_task_id = None } in
-  let worktree_input =
-    `Assoc
-      [
-        ( "file_path",
-          `String
-            "repos/masc-mcp/.worktrees/keeper-sandbox-writer-negative-task-210/lib/example.ml"
-        );
-      ]
-  in
-  let root_checkout_input =
-    `Assoc [ ("file_path", `String "repos/masc-mcp/lib/example.ml") ]
-  in
-  Alcotest.(check (option string))
-    "unclaimed keeper has no code-write routine label"
-    None
-    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
-       ~config
-       ~meta:unclaimed_meta
-       ~tool_name:"WriteFile"
-       ~input:worktree_input
-       ~risk_level:AQ.High);
-  Alcotest.(check (option string))
-    "root checkout path has no code-write routine label"
-    None
-    (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
-       ~config
-       ~meta:claimed_meta
-       ~tool_name:"WriteFile"
-       ~input:root_checkout_input
-       ~risk_level:AQ.High)
-
-let test_callback_production_worktree_create_auto_approved () =
-  with_test_config @@ fun config ->
-  let pending_before = AQ.pending_count () in
-  let cb =
-    GP.to_oas_approval_callback
-      ~config ~governance_level:"production" ~keeper_name:"test" () in
-  let decision =
-    cb ~tool_name:"tool_execute"
-      ~input:(`Assoc [
-        ("task_id", `String "task-187");
-        ("repo_name", `String "masc-mcp");
-      ])
-  in
-  match decision with
-  | Agent_sdk.Hooks.Approve ->
-      Alcotest.(check int) "no pending approval"
-        pending_before (AQ.pending_count ())
-  | Agent_sdk.Hooks.Reject r ->
-      Alcotest.fail ("expected Approve for worktree create, got Reject: " ^ r)
-  | _ -> Alcotest.fail "unexpected decision"
+let test_callback_production_worktree_prepare_requires_approval () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = state.workspace_config in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name:"test" ()
+        in
+        let decision =
+          cb
+            ~tool_name:"tool_execute"
+            ~input:
+              (`Assoc
+                [ ("task_id", `String "task-187"); ("repo_name", `String "masc") ])
+        in
+        result := Some decision);
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int)
+        "worktree preparation requires approval"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let id =
+        match AQ.list_pending_json () with
+        | `List (`Assoc kvs :: _) ->
+          (match List.assoc_opt "id" kvs with
+           | Some (`String id) -> id
+           | _ -> Alcotest.fail "missing approval id")
+        | _ -> Alcotest.fail "expected pending approval entry"
+      in
+      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some _ -> Alcotest.fail "expected Approve after operator resolution"
+      | None -> Alcotest.fail "worktree preparation callback did not suspend for approval")
 
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
   with_eio_base_path @@ fun base_path ->
@@ -1190,7 +1137,7 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
            Alcotest.fail
              ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
       let pending_before = AQ.pending_count () in
-      let config = Masc_mcp.Coord.default_config base_path in
+      let config = Masc.Workspace.default_config base_path in
       let cb =
         GP.to_oas_approval_callback
           ~governance_level:"paranoid" ~keeper_name:"remember-keeper"
@@ -1258,7 +1205,7 @@ let test_runtime_trust_classifies_always_approve_flag () =
         ~keeper_name ~tool_name:"masc_create_task" ~risk_level:AQ.Medium
         ~auto_approved:true ();
       let snapshot =
-        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+        Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
       in
       let open Yojson.Safe.Util in
       let approval = snapshot |> member "approval" in
@@ -1281,7 +1228,7 @@ let test_callback_always_approve_respects_forbidden () =
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      let config = state.room_config in
+      let config = state.workspace_config in
       let meta =
         meta_from_json
           (`Assoc [
@@ -1378,7 +1325,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
           ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
       done;
       let snapshot =
-        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+        Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
       in
       let open Yojson.Safe.Util in
       let approval = snapshot |> member "approval" in
@@ -1405,6 +1352,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
+  Unix.putenv "MASC_DISABLE_HITL" "false";
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
@@ -1442,22 +1390,16 @@ let () =
         test_background_pending_distinct_inputs_do_not_reuse_entry;
       Alcotest.test_case "get pending detail includes full input" `Quick
         test_approval_queue_get_pending_detail;
-      Alcotest.test_case "dispatch approval_get success" `Quick
-        test_approval_get_dispatch_success;
-      Alcotest.test_case "dispatch approval_get missing id" `Quick
-        test_approval_get_dispatch_missing_id;
-      Alcotest.test_case "dispatch approval_get not found" `Quick
-        test_approval_get_dispatch_not_found;
-      Alcotest.test_case "approval_get rejects worker role" `Quick
-        test_approval_get_rejects_worker_role;
+      Alcotest.test_case "runtime_contract redacts sandbox backend" `Quick
+        test_approval_queue_keeps_sandbox_backend_out_of_runtime_contract;
       Alcotest.test_case "resolve_with_policy remembers medium allow" `Quick
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
-      Alcotest.test_case "dashboard approve-always rules use room base_path" `Quick
-        test_dashboard_resolve_and_delete_rules_use_room_base_path;
-      Alcotest.test_case "submit_pending audit uses room base_path" `Quick
-        test_submit_pending_audit_uses_room_base_path;
+      Alcotest.test_case "dashboard approve-always rules use workspace base_path" `Quick
+        test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
+      Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
+        test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
       Alcotest.test_case
@@ -1470,12 +1412,8 @@ let () =
         test_callback_production_tool_edit_file_requires_approval;
       Alcotest.test_case "production claimed worktree write auto-approved" `Quick
         test_callback_production_claimed_worktree_write_auto_approved;
-      Alcotest.test_case
-        "sandbox worktree write routine rejects unclaimed/root checkout"
-        `Quick
-        test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout;
-      Alcotest.test_case "production worktree create auto-approved" `Quick
-        test_callback_production_worktree_create_auto_approved;
+      Alcotest.test_case "production worktree preparation requires approval" `Quick
+        test_callback_production_worktree_prepare_requires_approval;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick

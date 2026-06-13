@@ -3,9 +3,9 @@ import { createFileTreeStore, summarizeFileTreeDiffs, type FileTreeNode } from '
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
   { path: 'runtime', label: 'runtime', depth: 0, parent: null, hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/cascade', label: 'cascade', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
-  { path: 'runtime/cascade/router.ts', label: 'router.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: '+14', keeperId: 'nick0cave', hueIndex: 1 },
-  { path: 'runtime/cascade/provider.ts', label: 'provider.ts', depth: 2, parent: 'runtime/cascade', hasChildren: false, diff: '+3', keeperId: 'nick0cave', hueIndex: 1 },
+  { path: 'runtime/runtime', label: 'runtime', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
+  { path: 'runtime/runtime/router.ts', label: 'router.ts', depth: 2, parent: 'runtime/runtime', hasChildren: false, diff: '+14', keeperId: 'nick0cave', hueIndex: 1 },
+  { path: 'runtime/runtime/provider.ts', label: 'provider.ts', depth: 2, parent: 'runtime/runtime', hasChildren: false, diff: '+3', keeperId: 'nick0cave', hueIndex: 1 },
   { path: 'runtime/fsm', label: 'fsm', depth: 1, parent: 'runtime', hasChildren: true, diff: null, keeperId: null, hueIndex: null },
   { path: 'runtime/fsm/lifeline.ts', label: 'lifeline.ts', depth: 2, parent: 'runtime/fsm', hasChildren: false, diff: '+8', keeperId: 'sangsu', hueIndex: 5 },
   { path: 'package.json', label: 'package.json', depth: 0, parent: null, hasChildren: false, diff: null, keeperId: null, hueIndex: null },
@@ -23,13 +23,13 @@ describe('createFileTreeStore', () => {
     s.seed(SAMPLE)
     expect(s.nodeCount()).toBe(7)
     // Default expansion: 'runtime' is depth-0 + hasChildren -> expanded.
-    // 'runtime/cascade' and 'runtime/fsm' are depth-1 -> collapsed.
+    // 'runtime/runtime' and 'runtime/fsm' are depth-1 -> collapsed.
     expect(s.isExpanded('runtime')).toBe(true)
-    expect(s.isExpanded('runtime/cascade')).toBe(false)
+    expect(s.isExpanded('runtime/runtime')).toBe(false)
     const visible = s.visibleNodes().map(n => n.path)
     expect(visible).toEqual([
       'runtime',
-      'runtime/cascade',
+      'runtime/runtime',
       'runtime/fsm',
       'package.json',
     ])
@@ -53,19 +53,19 @@ describe('createFileTreeStore', () => {
   it('expands nested directories on demand', () => {
     const s = createFileTreeStore()
     s.seed(SAMPLE)
-    s.expand('runtime/cascade')
+    s.expand('runtime/runtime')
     const visible = s.visibleNodes().map(n => n.path)
-    expect(visible).toContain('runtime/cascade/router.ts')
-    expect(visible).toContain('runtime/cascade/provider.ts')
+    expect(visible).toContain('runtime/runtime/router.ts')
+    expect(visible).toContain('runtime/runtime/provider.ts')
   })
 
   it('toggle flips expansion state', () => {
     const s = createFileTreeStore()
     s.seed(SAMPLE)
-    s.toggle('runtime/cascade')
-    expect(s.isExpanded('runtime/cascade')).toBe(true)
-    s.toggle('runtime/cascade')
-    expect(s.isExpanded('runtime/cascade')).toBe(false)
+    s.toggle('runtime/runtime')
+    expect(s.isExpanded('runtime/runtime')).toBe(true)
+    s.toggle('runtime/runtime')
+    expect(s.isExpanded('runtime/runtime')).toBe(false)
   })
 
   it('expandAll / collapseAll reach all directories', () => {
@@ -80,7 +80,7 @@ describe('createFileTreeStore', () => {
   it('hides children when an ancestor collapses', () => {
     const s = createFileTreeStore()
     s.seed(SAMPLE)
-    s.expand('runtime/cascade')
+    s.expand('runtime/runtime')
     s.collapse('runtime')
     const visible = s.visibleNodes().map(n => n.path)
     expect(visible).toEqual(['runtime', 'package.json'])
@@ -127,7 +127,7 @@ describe('createFileTreeStore', () => {
     const dispose = s.subscribe(() => {
       count += 1
     })
-    s.expand('runtime/cascade')
+    s.expand('runtime/runtime')
     s.expand('runtime/fsm')
     s.collapse('runtime')
     dispose()

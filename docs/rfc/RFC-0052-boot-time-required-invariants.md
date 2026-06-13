@@ -44,8 +44,8 @@ in
 | 파일 | 라인 | 패턴 |
 |------|------|------|
 | `lib/masc_oas_bridge.ml` | 26 | `get_opt ()` → `None -> None` fallback |
-| `lib/cascade/cascade_catalog_runtime.ml` | 463 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` |
-| `lib/oas_worker_named.ml` | 591 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` cascade fallback |
+| `lib/runtime/runtime_catalog_runtime.ml` | 463 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` |
+| `lib/oas_worker_named.ml` | 591 | `get_opt ()` → `None -> Eio_context.get_clock_opt ()` runtime fallback |
 | `lib/keeper/keeper_llm_bridge.ml` | 14 | **`get ()` (raising)** — `clock_opt` 추출 후 `None -> fn ()` |
 
 → **Dual global Eio context systems**: `Masc_eio_env`와 `Eio_context`가 병존. 같은 bootstrap 시점(`server_runtime_bootstrap.ml:308-314`)에 각각 `init`/`set_*` 되나 서로 다른 atomic store. Drift 가능.
@@ -77,7 +77,7 @@ let start_probe ~sw ~base_path ~interval_sec =
 | `keeper_tag_dispatch.ml` | 20, 155 | `Some -> Ok clock` / `None -> Error "requires Eio clock"` |
 | `agent_tool_voice_runtime.ml` | 26 | switch/net/clock triple destructuring |
 | `keeper_unified_turn.ml` | 402, 730, 886 | `Some -> sleep` / `None -> ()` |
-| `keeper_turn_cascade_budget.ml` | 754 | `Some -> sleep` / `None -> ()` |
+| `keeper_turn_runtime_budget.ml` | 754 | `Some -> sleep` / `None -> ()` |
 | `agent_tool_execute_runtime.ml` | 748 | conditional clock access |
 | `keeper_agent_run.ml` | 478 | optional arg to OAS callback |
 
@@ -154,7 +154,7 @@ type init_error =
 
 ## §5 Alternatives
 
-| 접근법 | 강점 | 약점 | masc-mcp 적합도 |
+| 접근법 | 강점 | 약점 | masc 적합도 |
 |---|---|---|---|
 | OCaml Phantom Types | Zero runtime cost, 익숙한 문법, Jane Street 검증 | Move semantics 없음, signature 추상화 필수 | **높음** — boot phase 2-3 상태에 최적 |
 | Parse Don't Validate (newtype) | 정보 보존, 중복 검증 제거 | OCaml은 typeclass 없어 string-like 사용 불편 | **높음** — `Keeper_identity` canonicalization에 직접 적용 |
@@ -174,7 +174,7 @@ type init_error =
 
 1. `Eio.Switch` 안에서 `Masc_eio_env.initialize` 시점은? (Switch 시작 전 vs 첫 fiber)
 2. `[`Initialized] t`를 모든 caller에 전달하는 cost (signature pollution)
-3. 기존 `Prometheus.metric_*` global state도 같은 패턴 적용? → RFC-0051 영역
+3. 기존 `Otel_metric_store.metric_*` global state도 같은 패턴 적용? → RFC-0051 영역
 4. sub-agent Topic A.4 결과로 phantom 적용 대상 추가
 
 ## §7 References

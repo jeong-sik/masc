@@ -30,6 +30,8 @@ type pending_approval =
   ; action_key : string
   ; input_hash : string
   ; sandbox_target : string
+  ; sandbox_profile : string option
+  ; backend : string option
   ; input : Yojson.Safe.t
   ; risk_level : risk_level
   ; requested_at : float
@@ -113,6 +115,8 @@ val upsert_rule :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
+  ?sandbox_profile:string ->
+  ?backend:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?created_by:string ->
   ?source_approval_id:string ->
@@ -131,6 +135,8 @@ val find_matching_rule :
   tool_name:string ->
   input:Yojson.Safe.t ->
   risk_level:risk_level ->
+  ?sandbox_profile:string ->
+  ?backend:string ->
   ?runtime_contract:Yojson.Safe.t ->
   unit ->
   rule_match option
@@ -148,6 +154,7 @@ val audit_approval_event :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
+  ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
   ?disposition:string ->
@@ -180,7 +187,7 @@ end
 
 val default_noncritical_approval_timeout_s : float
 (** Default operator wait used by [submit_and_await] for non-critical
-    approvals. OAS/cascade bridge deadlines that wrap keeper execution must
+    approvals. OAS/runtime bridge deadlines that wrap keeper execution must
     not be shorter than this, otherwise a valid HITL wait is misclassified as
     provider idleness. *)
 
@@ -197,6 +204,9 @@ val submit_and_await :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
+  ?sandbox_target:string ->
+  ?sandbox_profile:string ->
+  ?backend:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
   ?disposition:string ->
@@ -220,6 +230,9 @@ val submit_pending :
   ?task_id:string ->
   ?goal_id:string ->
   ?goal_ids:string list ->
+  ?sandbox_target:string ->
+  ?sandbox_profile:string ->
+  ?backend:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
   ?disposition:string ->
@@ -244,7 +257,7 @@ val resolve_with_policy :
 
 (** Convenience over [resolve_with_policy] that discards the
     resolution result. Called from the dashboard approval HTTP
-    handler and the MCP inline dispatch. *)
+    handler and the MCP runtime. *)
 val resolve :
   id:string ->
   decision:Agent_sdk.Hooks.approval_decision ->

@@ -5,7 +5,7 @@
     server_bootstrap_http / _loops,
     server_h2_gateway, routes_frontend,
     runtime_bootstrap, transport_metrics) and via the [module Wrtc =
-    Masc_mcp.Server_webrtc_transport] alias from the WS
+    Masc.Server_webrtc_transport] alias from the WS
     + signaling regression tests.
 
     External surface (20 entries + 2 records):

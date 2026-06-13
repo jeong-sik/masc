@@ -5,8 +5,6 @@ open Dashboard_goals_types_accessor
 val clamp_float : float -> float -> float -> float
 val pct_of_float : float -> int
 
-val json_float_opt : float option -> Yojson.Safe.t
-val json_int_opt : int option -> Yojson.Safe.t
 val attainment_unit_to_string : attainment_unit -> string
 
 val contains_ci : string -> string -> bool

@@ -12,7 +12,7 @@ val paused_keeper_count : Yojson.Safe.t -> int
 
 val bool_field : string -> Yojson.Safe.t -> bool
 
-val current_room_base_path_opt : unit -> string option
+val runtime_base_path_opt : unit -> string option
 
 val keeper_fleet_runtime_resolution_base_fields :
   ?meta_scan:Server_routes_http_runtime_fleet_scan.keeper_fleet_meta_scan ->
@@ -34,5 +34,3 @@ val keeper_fleet_runtime_resolution_fields :
 
 val keeper_fleet_runtime_resolution_light_fields :
   unit -> (string * Yojson.Safe.t) list
-
-val cdal_health_json : unit -> Yojson.Safe.t

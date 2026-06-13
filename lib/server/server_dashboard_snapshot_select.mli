@@ -7,7 +7,9 @@
     [Server_dashboard_shell_snapshot] to [Server_dashboard_snapshot_select]
     and retired [Dashboard_cache] from the cold-start fallback in
     [select_telemetry_summary_json] (the path runs at most once per
-    process before the refresh fiber publishes).
+    process before the refresh fiber publishes).  A later pass also
+    retired [Dashboard_cache] from [select_project_snapshot_json],
+    leaving this module free of cache-layer dependencies.
 
     [Server_dashboard_http_core] cannot host these helpers because
     [Dashboard_snapshot] already calls into [Server_dashboard_http_core]
@@ -26,7 +28,7 @@ val select_shell_json :
   ?request:Httpun.Request.t ->
   ?timing:Server_timing.t ->
   ?light:bool ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** Returns [Dashboard_snapshot.current ()].shell when the refresh
     fiber has published (wait-free, [O(1)]).  Falls back to the
@@ -48,7 +50,7 @@ val select_shell_json :
 val select_tools_json :
   ?actor:string ->
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
     selector.  Returns [Dashboard_snapshot.current ()].tools when the
@@ -65,7 +67,7 @@ val select_tools_json :
 
 val select_telemetry_summary_json :
   ?timing:Server_timing.t ->
-  Coord.config ->
+  Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/telemetry/summary read
     path selector.  Returns [Dashboard_snapshot.current ()].telemetry_summary

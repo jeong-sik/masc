@@ -223,7 +223,7 @@ function SwimlanesBars() {
 // ─── DECK variants ─────────────────────────────────────────────────
 const TABS = [
   ['board','Board',0],['tasks','Tasks',7],['goals','Goals',4],
-  ['ver','Verified',12],['prov','Providers',4],['sand','Sandbox',0],['casc','Cascade',3],
+  ['ver','Verified',12],['prov','Providers',4],['sand','Sandbox',0],['casc','Runtime',3],
 ];
 
 function DeckTabs({active, onSelect}) {
@@ -323,12 +323,12 @@ function DeckProviders() {
             <div key={p.id}
                  role="row"
                  aria-rowindex={i + 2}
-                 aria-label={`${p.id} · ${p.model} · TPS ${p.tps} · cascade ${p.cascade} · status ${p.status}`}
+                 aria-label={`${p.id} · ${p.model} · TPS ${p.tps} · runtime ${p.runtime} · status ${p.status}`}
                  className="row">
               <span className="pname" role="cell" aria-hidden="true">{p.id}</span>
               <span className="model" role="cell" aria-hidden="true">{p.model}</span>
               <span className="tps" role="cell" aria-hidden="true">{p.tps}</span>
-              <span className="cas" role="cell" aria-hidden="true">@{p.cascade}</span>
+              <span className="cas" role="cell" aria-hidden="true">@{p.runtime}</span>
               <span role="cell" aria-hidden="true"><Spark color={p.status==='ok'?'ok':p.status==='warn'?'warn':'brass'} bars={18} /></span>
               <span style={{textAlign:'right'}} role="cell" aria-hidden="true">
                 <Chip kind={p.status==='ok'?'ok':p.status==='warn'?'warn':'ghost'}>{p.status.toUpperCase()}</Chip>
@@ -367,15 +367,15 @@ function RailActivity() {
   );
 }
 
-function RailCascade() {
+function RailRuntime() {
   return (
-    <aside className="cb-rail" aria-label="Cascade rail">
+    <aside className="cb-rail" aria-label="Runtime rail">
       <div className="sec">
-        <SectionHeading title="CASCADE" right="cascade-3f19" />
-        <div className="cb-cascade" role="region" aria-label={`Cascade trace cascade-3f19 · hit at step 2 · total ${D2.cascade.total_ms}ms`}>
+        <SectionHeading title="RUNTIME" right="runtime-3f19" />
+        <div className="cb-runtime" role="region" aria-label={`Runtime trace runtime-3f19 · hit at step 2 · total ${D2.runtime.total_ms}ms`}>
           <span className="id" aria-hidden="true">trace · hit @step=2</span>
-          <ol aria-label="Cascade steps" style={{listStyle:'none', margin:0, padding:0}}>
-            {D2.cascade.steps.map((s, i) => (
+          <ol aria-label="Runtime steps" style={{listStyle:'none', margin:0, padding:0}}>
+            {D2.runtime.steps.map((s, i) => (
               <li key={i}
                   className={`step ${s.status==='hit'?'hit':s.status==='miss'?'miss':'skip'}`}
                   aria-label={`Step ${i+1} · ${s.provider} · ${s.status}${s.ms ? ` · ${s.ms}ms` : ''}${s.reason ? ` · ${s.reason}` : ''}`}>
@@ -385,7 +385,7 @@ function RailCascade() {
               </li>
             ))}
           </ol>
-          <div className="total" aria-hidden="true">total <span className="n">{D2.cascade.total_ms}ms</span> · hit@step 2</div>
+          <div className="total" aria-hidden="true">total <span className="n">{D2.runtime.total_ms}ms</span> · hit@step 2</div>
         </div>
       </div>
       <div className="sec">
@@ -414,5 +414,5 @@ Object.assign(window, {
   SidebarFleet, SidebarGrouped, SidebarIcons,
   SwimlanesGlyph, SwimlanesDense, SwimlanesBars,
   DeckTasks, DeckKanban, DeckProviders,
-  RailActivity, RailCascade,
+  RailActivity, RailRuntime,
 });

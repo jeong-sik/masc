@@ -3,8 +3,8 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/types/
-  - lib/tool_dispatch.ml
-  - lib/agent_identity.ml
+  - lib/tool/tool_dispatch.ml
+  - lib/client_identity.ml
 ---
 
 # Types and Invariants
@@ -13,7 +13,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Foundation |
-| Maps to | `lib/types/`, `lib/tool_dispatch.ml`, `lib/agent_identity.ml` |
+| Maps to | `lib/types/`, `lib/tool/tool_dispatch.ml`, `lib/client_identity.ml` |
 | Dependencies | 00-glossary.md |
 
 ---
@@ -46,7 +46,7 @@ end
 
 `Task_id.generate`와 `Thread_id.generate`는 `timestamp-seqhex` 패턴으로 고유 ID를 생성한다. `Turn_id.generate`는 thread_id에 순번을 연결한다.
 
-> 참고: `room_info.id`, `task.id`, `message.from_agent` 등 일부 레코드 필드는 아직 `string`을 직접 사용한다. newtype 전환이 완료되지 않은 부분이며, 점진적으로 마이그레이션 대상이다.
+> 참고: `workspace_info.id`, `task.id`, `message.from_agent` 등 일부 레코드 필드는 아직 `string`을 직접 사용한다. newtype 전환이 완료되지 않은 부분이며, 점진적으로 마이그레이션 대상이다.
 
 ---
 
@@ -101,10 +101,10 @@ type agent = {
 }
 ```
 
-### 2.5 Room Info / Room Registry
+### 2.5 Workspace Info / Workspace Registry
 
 ```ocaml
-type room_info = {
+type workspace_info = {
   id : string;                 (* slugified name *)
   name : string;
   description : string option;
@@ -114,10 +114,10 @@ type room_info = {
   task_count : int;
 }
 
-type room_registry = {
-  rooms : room_info list;
-  default_room : string;       (* default: "default" *)
-  current_room : string option;
+type workspace_registry = {
+  workspaces : workspace_info list;
+  default_workspace : string;       (* default: "default" *)
+  current_workspace : string option;
 }
 ```
 
@@ -173,10 +173,10 @@ type message = {
 }
 ```
 
-### 2.10 Room State
+### 2.10 Workspace State
 
 ```ocaml
-type room_state = {
+type workspace_state = {
   protocol_version : string;
   project : string;
   started_at : string;
@@ -296,7 +296,7 @@ type claim_next_result =
 
 MASC 는 비즈니스 로직 에러를 단일 sum type `masc_error` 로 표현한다.
 
-> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Room / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Room / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
+> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Workspace / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Workspace / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
 ### 3 masc_error (Unified)
 
@@ -307,8 +307,8 @@ type masc_error =
   | NotInitialized
   | AlreadyInitialized
   | AgentNotFound of string
-  | AgentNotJoined of string
-  | AgentAlreadyJoined of string
+  | AgentNotBound of string
+  | AgentAlreadyBound of string
   | TaskNotFound of string
   | TaskAlreadyClaimed of { task_id: string; by: string }
   | TaskNotClaimed of string
@@ -351,7 +351,7 @@ Result alias: `type 'a masc_result = ('a, masc_error) result`
 
 ## 4. Tool Dispatch Types
 
-**소스**: `lib/tool_dispatch.mli`
+**소스**: `lib/tool/tool_dispatch.mli`
 
 ### 4.1 Handler
 
@@ -389,14 +389,14 @@ type module_tag =
   | Mod_a2a
   | Mod_run
   | Mod_compact
-  | Mod_agent | Mod_task | Mod_room
+  | Mod_agent | Mod_task | Mod_workspace
   | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
   | Mod_library | Mod_keeper
   | Mod_inline
   | Mod_shard
 ```
 
-19개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
+19개 variant (SSOT: `lib/tool/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
 
 ### 4.4 Tool_result.result (structured)
 
@@ -426,7 +426,7 @@ type result = (success_payload, failure_payload) Stdlib.Result.t
 
 ## 5. Agent Identity Types
 
-**소스**: `lib/agent_identity.mli`
+**소스**: `lib/client_identity.mli`
 
 ### 5.1 Channel
 
@@ -448,7 +448,7 @@ type t = {
   agent_name : string;
   channel : channel option;
   user_id : string option;
-  room_id : string option;
+  workspace_id : string option;
   capabilities : string list;
   registered_at : float;
   mutable last_seen : float;   (* 유일한 mutable 필드 *)
@@ -467,7 +467,7 @@ module Registry : sig
   val register : registry -> t -> t
   val find_by_session : registry -> string -> t option
   val find_by_name : registry -> string -> t option
-  val touch : registry -> string -> ?room_id:string -> unit -> unit
+  val touch : registry -> string -> ?workspace_id:string -> unit -> unit
   val unregister : registry -> string -> unit
   val list_active : registry -> within_seconds:float -> t list
   val count : registry -> int
@@ -491,7 +491,7 @@ MAGI 3인 체제(Melchior/Balthasar/Casper)에 Athena와 Generalist를 추가한
 
 ## 6. Agent Ecosystem Types (RETIRED)
 
-`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/agent_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/coord/coord_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
+`lib/agent_ecosystem.mli`와 `agent_lifecycle`, `agent_profile`, `lineage`, `extended` 타입은 dead code sweep (#2848)에서 `lib/anti_fake`, `lib/agent_neo4j`와 함께 제거됐다 (-1368 LOC). 현재 agent identity는 `lib/client_identity.ml` 하나로 정리됐고, 생명주기 추적은 `lib/workspace/workspace_lifecycle.ml` + `observe_agent_lifecycle` hook이 담당한다.
 
 ---
 
@@ -527,21 +527,19 @@ type agent_role = Worker | Admin
 
 ```ocaml
 type permission =
-  | CanInit | CanReset | CanJoin | CanLeave
+  | CanInit | CanReset
   | CanReadState | CanAddTask | CanClaimTask | CanCompleteTask
   | CanBroadcast
-  | CanOpenPortal | CanSendPortal
-  | CanCreateWorktree | CanRemoveWorktree
-  | CanVote | CanInterrupt | CanApprove
+  | CanOpenPortal | CanSendPortal | CanVote
   | CanAdmin
 ```
 
-17개 variant. 각 `agent_role`에 허용된 permission 목록:
+11개 variant. 각 `agent_role`에 허용된 permission 목록:
 
 | Role | Permissions |
 |------|------------|
-| Worker | `CanReadState`, `CanJoin`, `CanLeave`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanCreateWorktree`, `CanRemoveWorktree`, `CanVote` |
-| Admin | Worker + `CanInit`, `CanReset`, `CanInterrupt`, `CanApprove`, `CanAdmin` (전체) |
+| Worker | `CanReadState`, `CanAddTask`, `CanClaimTask`, `CanCompleteTask`, `CanBroadcast`, `CanOpenPortal`, `CanSendPortal`, `CanVote` |
+| Admin | Worker + `CanInit`, `CanReset`, `CanAdmin` (전체) |
 
 ### 9.3 Agent Credential
 
@@ -562,7 +560,7 @@ type agent_credential = {
 ```ocaml
 type auth_config = {
   enabled : bool;
-  room_secret_hash : string option;
+  workspace_secret_hash : string option;
   require_token : bool;
   token_expiry_hours : int;     (* 기본값: 24 *)
 }
@@ -597,7 +595,7 @@ type rate_limit_error = {
 
 `lib/message_schema.mli`는 swarm 내부 메시지를 위한 `validation_mode` 3-variant, `structured_message` 5-variant(`TaskUpdate`/`StatusReport`/`Request`/`Response`/`Freeform`), `swarm_envelope` record를 노출하던 모듈이었고, Gen37에서 frontmatter code_refs 정리 시점에 #2848 dead-code sweep과 함께 제거된 것이 확인됐다. `grep -rn "validation_mode\|swarm_envelope" lib/ test/` → 0 hits.
 
-현재 coordination 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
+현재 workspace collaboration 경로는 `board_posts` + keeper FSM으로 통합됐으며 별도 "structured message / envelope" 타입 레이어는 노출되지 않는다. Swarm 문맥에서 message delivery 의미론이 필요하면 `docs/spec/11-board.md`를 참조한다.
 
 ---
 
@@ -609,7 +607,7 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-001 | 에이전트 name은 룸 내에서 유일하다. 동일 이름으로 `masc_join` 시 `AgentAlreadyJoined` 반환. | `masc_join` 중복 호출 테스트 |
+| INV-TYPE-001 | 에이전트 name은 binding scope에서 유일하다. 동일 이름으로 `masc_bind` 시 `AgentAlreadyBound` 반환. | `masc_bind` 중복 호출 테스트 |
 | INV-TYPE-002 | Newtype ID 모듈(`Agent_id`, `Task_id`, `Thread_id`, `Turn_id`)은 모듈 경계에서 타입이 불투명하다. 서로 다른 ID 타입 간 직접 비교/대입은 컴파일 에러다. | 컴파일러가 강제 |
 
 ### State Machine
@@ -647,7 +645,7 @@ type rate_limit_error = {
 | INV-TYPE-013 | `auth_config.enabled = false`이면 모든 도구 호출이 인가된다. 토큰 검증을 수행하지 않는다. | `check_permission` with `enabled = false` 테스트 |
 | INV-TYPE-014 | raw token은 저장하지 않는다. `agent_credential.token` 필드에는 SHA256 해시만 저장된다. | `create_token` 후 credential 파일 내용 검사 |
 | INV-TYPE-015 | initial admin(auth를 활성화한 에이전트)은 bootstrap grace로 모든 permission을 갖는다. | `check_permission` with initial_admin 테스트 |
-| INV-TYPE-016 | `permission_for_tool`에 매핑되지 않은 내부 도구는 최소 `CanBroadcast` 권한을 요구하고, 매핑되지 않은 외부 도구는 거부한다. 이 fail-closed 동작은 환경변수로 완화할 수 없다. | unmapped tool name 테스트 |
+| INV-TYPE-016 | 알려진 내부 도구와 `masc_*` 도구는 최소 `CanBroadcast` 권한을 요구하고, unknown external 도구는 거부한다. 이 fail-closed 동작은 환경변수로 완화할 수 없다. | unmapped tool name 테스트 |
 
 ### Serialization
 

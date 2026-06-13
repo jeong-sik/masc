@@ -7,10 +7,10 @@
 *)
 
 (** Tool handler return type: (success, message). *)
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 (** Start or reconfigure a keeper agent. *)
-val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** Send a message to a running keeper agent.
 
@@ -21,7 +21,7 @@ val handle_keeper_up : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
 
     @since 2.110.0 *)
 val preflight_keeper_msg :
-  _ Keeper_types.context -> Yojson.Safe.t -> (unit, string) result
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> (unit, string) result
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
     accepts the turn for later execution. *)
 
@@ -30,9 +30,20 @@ val keeper_msg_timeout_override : Yojson.Safe.t -> (float option, string) result
     value bounds the OAS turn and, for async dispatch, the request result
     lifecycle exposed via [masc_keeper_msg_result]. *)
 
+module For_testing : sig
+  val direct_owner_conversation_context :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    direct_reply:bool ->
+    channel_session_key:string option ->
+    channel:string ->
+    string
+end
+
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
-  _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
+  _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result
 
 (** Stop a running keeper agent. *)
-val handle_keeper_down : _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+val handle_keeper_down : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_result

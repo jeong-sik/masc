@@ -1,11 +1,11 @@
-(** Auto-Recall Memory - Agent Being Protocol Memory System
+(** Auto-Recall Context - Agent Being Protocol Context System
 
-    Automatic memory injection for MASC agents.
-    Fetches relevant context from multiple sources and injects into prompts.
+    Automatic context recall for MASC agents.
+    Fetches relevant context from multiple sources for prompt rendering.
 
     Sources:
     - Masc_cache: Shared context store (API responses, embeddings, summaries)
-    - Recent_broadcasts: Last N messages in the room
+    - Recent_broadcasts: Last N messages in the workspace
     - File_context: Recently modified files in working directory
 *)
 
@@ -26,7 +26,7 @@ let file_name_match_bonus = 0.3
 (** Source types for context retrieval *)
 type recall_source =
   | Masc_cache        (** Use existing masc_cache_get *)
-  | Recent_broadcasts (** Last N broadcasts in room *)
+  | Recent_broadcasts (** Last N broadcasts in workspace *)
   | File_context      (** Recently modified source files *)
 
 (** Configuration for auto-recall *)
@@ -83,14 +83,14 @@ let estimate_tokens = Inference_utils.estimate_tokens
 (** Fetch from MASC cache *)
 (* Issue #8597 #2: dropped [~query] — cache filtering is by tag
    (config.cache_tags), not by query string. *)
-let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config) =
+let fetch_from_cache (workspace_config : Workspace_utils.config) ~(config : recall_config) =
   let entries =
     match config.cache_tags with
-    | [] -> Cache_eio.list room_config ()
+    | [] -> Cache_eio.list workspace_config ()
     | tags ->
         (* Fetch entries matching any of the specified tags *)
         List.concat_map (fun tag ->
-          Cache_eio.list room_config ~tag ()
+          Cache_eio.list workspace_config ~tag ()
         ) tags
         |> List.sort_uniq (fun a b -> compare a.Cache_eio.key b.Cache_eio.key)
   in
@@ -110,8 +110,8 @@ let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config
 (** Fetch recent broadcasts *)
 (* Issue #8597 #2: dropped [~query] — broadcast fetch is limit-based
    (config.max_broadcasts), not query-ranked. *)
-let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_config) =
-  let messages = Coord.get_messages_raw room_config
+let fetch_from_broadcasts (workspace_config : Workspace_utils.config) ~(config : recall_config) =
+  let messages = Workspace.get_messages_raw workspace_config
     ~since_seq:0
     ~limit:config.max_broadcasts
   in
@@ -136,8 +136,8 @@ let fetch_from_broadcasts (room_config : Coord_utils.config) ~(config : recall_c
    maps to file scanning (max_files=10 / max_preview_bytes=500 are
    hard-coded; cache_tags / max_broadcasts / max_tokens belong to other
    sources). The arg was structurally received, semantically ignored. *)
-let fetch_from_file_context (room_config : Coord_utils.config) ~query =
-  let masc_dir = Coord_utils.masc_dir room_config in
+let fetch_from_file_context (workspace_config : Workspace_utils.config) ~query =
+  let masc_dir = Workspace_utils.masc_dir workspace_config in
   let work_dir = Filename.dirname masc_dir in (* Parent of .masc *)
   
   (* Get recently modified files without shelling out (no find/xargs). *)
@@ -247,23 +247,23 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~query =
     Each leaf consumes only the args it needs (#8597 #2):
     - [Masc_cache] / [Recent_broadcasts] use [config] (tags / limit)
     - [File_context] uses [query] for relevance ranking *)
-let fetch_source room_config ~config ~query = function
-  | Masc_cache -> fetch_from_cache room_config ~config
-  | Recent_broadcasts -> fetch_from_broadcasts room_config ~config
-  | File_context -> fetch_from_file_context room_config ~query
+let fetch_source workspace_config ~config ~query = function
+  | Masc_cache -> fetch_from_cache workspace_config ~config
+  | Recent_broadcasts -> fetch_from_broadcasts workspace_config ~config
+  | File_context -> fetch_from_file_context workspace_config ~query
 
 (** {1 Main API} *)
 
 (** Fetch context from configured sources
 
-    @param room_config MASC room configuration
+    @param workspace_config MASC workspace configuration
     @param config Recall configuration
     @param query Optional query string for relevance ranking
 
     @return Recall result with items sorted by relevance, truncated to token budget
 *)
 let fetch_context
-    (room_config : Coord_utils.config)
+    (workspace_config : Workspace_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
@@ -272,7 +272,7 @@ let fetch_context
     { items = []; total_tokens = 0; truncated = false }
   else
     (* Fetch from all configured sources *)
-    let all_items = List.concat_map (fetch_source room_config ~config ~query) config.sources in
+    let all_items = List.concat_map (fetch_source workspace_config ~config ~query) config.sources in
 
     (* Sort by relevance (highest first) *)
     let sorted = List.sort (fun a b -> compare b.relevance a.relevance) all_items in
@@ -296,7 +296,7 @@ let fetch_context
     @param sw Eio switch
     @param env Eio environment with network access
     @param clock Eio clock
-    @param room_config MASC room configuration
+    @param workspace_config MASC workspace configuration
     @param config Recall configuration
     @param query Query string for relevance
 
@@ -304,12 +304,12 @@ let fetch_context
 *)
 let fetch_context_eio
     ~sw:_ ~env:_ ~clock:_
-    (room_config : Coord_utils.config)
+    (workspace_config : Workspace_utils.config)
     ~(config : recall_config)
     ?(query : string = "")
     ()
     : recall_result =
-  fetch_context room_config ~config ~query ()
+  fetch_context workspace_config ~config ~query ()
 
 (** {1 Formatting} *)
 
@@ -317,15 +317,13 @@ let fetch_context_eio
 let metadata_string_opt (metadata : Yojson.Safe.t) key =
   match metadata with
   | `Assoc _ ->
-      metadata |> Yojson.Safe.Util.member key
-      |> Yojson.Safe.Util.to_string_option
+      Json_util.get_string metadata key
   | _ -> None
 
 let metadata_int_opt (metadata : Yojson.Safe.t) key =
   match metadata with
   | `Assoc _ ->
-      metadata |> Yojson.Safe.Util.member key
-      |> Yojson.Safe.Util.to_int_option
+      Json_util.get_int metadata key
   | _ -> None
 
 let grep_like_line_of_item (item : recall_item) =
@@ -436,4 +434,3 @@ let content_matches_query content query =
       String.length hint >= 3
       && contains_lowered_substring ~haystack_lower:content_lower hint
     ) hints
-

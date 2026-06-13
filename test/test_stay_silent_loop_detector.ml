@@ -8,8 +8,8 @@
    - Threshold is the product constant
    - Per-keeper isolation *)
 
-module D = Masc_mcp.Keeper_stay_silent_loop_detector
-module Prom = Masc_mcp.Prometheus
+module D = Masc.Keeper_stay_silent_loop_detector
+module Metrics = Masc.Otel_metric_store
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber
@@ -17,7 +17,7 @@ module Prom = Masc_mcp.Prometheus
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let detected_count keeper =
-  Prom.metric_value_or_zero
+  Metrics.metric_value_or_zero
     "masc_keeper_stay_silent_loop_detected_total"
     ~labels:[ ("keeper", keeper) ] ()
 

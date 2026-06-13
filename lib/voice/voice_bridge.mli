@@ -52,6 +52,19 @@ val agent_speak :
   ?priority:int ->
   unit ->
   (Yojson.Safe.t, string) result
+(** Synthesize [message] via the configured TTS endpoint chain and play it
+    locally, blocking the calling fiber until playback finishes. Concurrent
+    callers are serialized by the global playback mutex. Returns
+    [status="spoken"] (with [played_seconds] when local playback ran) or
+    [status="dedup_skipped"] when the identical message played within the
+    dedup window; TTS/endpoint failures return [Error] so the caller — and
+    the LLM driving it — sees the failure instead of a fake success.
+
+    This is the only speak path: the former fire-and-forget
+    [enqueue_agent_speak] queue was removed after the 2026-06-10 voice
+    repeat incident (schema promised blocking semantics while the
+    implementation returned [status="queued"] immediately, so keepers
+    re-spoke the same content every sub-turn). *)
 
 val get_agent_voice :
   agent_id:string -> (Yojson.Safe.t, string) result

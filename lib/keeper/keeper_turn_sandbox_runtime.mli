@@ -7,9 +7,9 @@
 type t
 
 val create :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  ?network_mode:Keeper_types.network_mode ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?network_mode:Keeper_types_profile_sandbox.network_mode ->
   turn_id:int ->
   unit ->
   t
@@ -26,26 +26,44 @@ val container_path_of_host :
 val container_cwd_of_host :
   t -> host_cwd:string -> string
 
+val host_cwd_of_container :
+  t -> container_cwd:string -> (string, string) result
+
 val run_command_with_status :
   ?ok_exit_codes:int list ->
+  timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
   max_bytes:int ->
-  timeout_sec:float ->
   unit ->
   (Unix.process_status * string, string) result
 
 val run_exec_with_status :
   ?stdin_content:string ->
-  t ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
+  t ->
   cwd:string ->
   command_argv:string list ->
   (Unix.process_status * string, string) result
 (** Execute [command_argv] inside the turn-scoped container and return the raw
     process status and merged output without applying success-code policy.
-    This is the argv-level entrypoint used by Shell IR dispatch. *)
+    Existing read-backend callers use this for legacy merged-output behavior. *)
+
+val run_exec_with_status_split :
+  ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  timeout_sec:float ->
+  t ->
+  cwd:string ->
+  command_argv:string list ->
+  (Unix.process_status * string * string, string) result
+(** Execute [command_argv] inside the turn-scoped container and return split
+    stdout/stderr without applying success-code policy. This is the argv-level
+    entrypoint used by Shell IR dispatch. *)
 
 type exec_pipeline_stage = {
   command_argv : string list;
@@ -53,8 +71,10 @@ type exec_pipeline_stage = {
 }
 
 val run_exec_pipeline_with_status :
-  t ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
+  t ->
   cwd:string ->
   stages:exec_pipeline_stage list ->
   (Unix.process_status * string * string, string) result
@@ -64,34 +84,34 @@ val run_exec_pipeline_with_status :
 
 val run_command :
   ?ok_exit_codes:int list ->
+  timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
   max_bytes:int ->
-  timeout_sec:float ->
   unit ->
   (string, string) result
 
 val run_bash_with_status :
+  timeout_sec:float ->
   t ->
   cwd:string ->
   cmd:string ->
-  timeout_sec:float ->
   unit ->
   (Unix.process_status * string, string) result
 
 val overwrite_file :
+  timeout_sec:float ->
   t ->
   host_path:string ->
   content:string ->
-  timeout_sec:float ->
   unit ->
   (unit, string) result
 
 val append_file :
+  timeout_sec:float ->
   t ->
   host_path:string ->
   content:string ->
-  timeout_sec:float ->
   unit ->
   (unit, string) result

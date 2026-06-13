@@ -3,13 +3,13 @@ status: reference
 last_verified: 2026-04-17
 code_refs:
   - lib/keeper/keeper_compact_policy.ml
-  - lib/keeper/keeper_state_machine.ml
+  - lib/keeper_registry/keeper_state_machine.ml
   - lib/keeper/keeper_context_core.ml
 ---
 
 # Context Compaction Lifecycle
 
-> Developer reference for how context compaction works end-to-end in masc-mcp.
+> Developer reference for how context compaction works end-to-end in masc.
 > For memory-bank compaction (a separate subsystem), see
 > [`specs/bug-models/MemoryCompaction.tla`](../../specs/bug-models/MemoryCompaction.tla)
 > and [`keeper_memory_bank.ml`](../../lib/keeper/keeper_memory_bank.ml).
@@ -40,9 +40,9 @@ failure reported by provider, not just a soft warning.
 
 ## 2. Phase Transitions
 
-Defined in [`lib/keeper/keeper_state_machine.mli:20-37`](../../lib/keeper/keeper_state_machine.mli)
+Defined in [`lib/keeper_state/keeper_state_machine.mli:20-37`](../../lib/keeper_state/keeper_state_machine.mli)
 (12-state enum). Event handlers in
-[`lib/keeper/keeper_state_machine.ml`](../../lib/keeper/keeper_state_machine.ml):
+[`lib/keeper_state/keeper_state_machine.ml`](../../lib/keeper_state/keeper_state_machine.ml):
 
 ```mermaid
 stateDiagram-v2
@@ -69,7 +69,7 @@ stateDiagram-v2
   operator intervention).
 
 **Post-turn lifecycle contract**
-([`keeper_state_machine.mli:110-138`](../../lib/keeper/keeper_state_machine.mli)):
+([`keeper_state_machine.mli:110-138`](../../lib/keeper_state/keeper_state_machine.mli)):
 `Compaction_started`/`Compaction_completed`/`Compaction_failed` MUST
 be dispatched only from `Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles`.
 Violations reopen the
@@ -110,7 +110,7 @@ separate storage / lifecycle / retention.
 |---------|----------|-----------|-----------|
 | **Paired audit JSONL** | `.masc/data/harness-compact/YYYY-MM/DD.jsonl` | written by `Keeper_compact_audit` subscriber on every ContextCompactStarted + ContextCompacted | rolling, default 14 days (`MASC_COMPACTION_AUDIT_RETENTION_DAYS` override) |
 | Pre-compact dashboard JSONL | `.masc/data/harness-pre-compact/YYYY-MM/DD.jsonl` | written by `Dashboard_harness_health.record_pre_compact` for the dashboard harness summary | dashboard harness retention |
-| Prometheus | `masc_keeper_compactions_total`, `masc_keeper_compaction_ratio_change` | incremented on every compaction attempt / completion | process-lifetime, scrape-based |
+| OTel metrics backend | `masc_keeper_compactions_total`, `masc_keeper_compaction_ratio_change` | incremented on every compaction attempt / completion | process-lifetime, export-based |
 | TLA+ trace (opt-in) | `.masc/keepers/<name>.tla-trace.jsonl` | written when `MASC_TLA_TRACE=1` | until operator deletes; zero overhead when disabled |
 | Checkpoint store | `.masc/keepers/<name>/traces/<trace_id>/<trace_id>.json` | canonical OAS checkpoint write after successful keeper turns | current checkpoint plus OAS history snapshots |
 

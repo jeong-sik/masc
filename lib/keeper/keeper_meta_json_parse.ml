@@ -11,6 +11,7 @@ open Keeper_meta_json_scrub
 type parsed_keeper_identity =
   { pk_name : string
   ; pk_agent_name : string
+  ; pk_persona : string option
   ; pk_trace_id : Keeper_id.Trace_id.t
   ; pk_trace_history : string list
   ; pk_goal : string
@@ -18,8 +19,6 @@ type parsed_keeper_identity =
   ; pk_mid_goal : string
   ; pk_long_goal : string
   ; pk_social_model : string
-  ; pk_cascade_name : string
-  ; pk_cascade_ref : Cascade_ref.cascade_ref option
   ; pk_will : string
   ; pk_needs : string
   ; pk_desires : string
@@ -31,18 +30,14 @@ type parsed_keeper_policy =
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_allowed_paths : string list
-  ; pp_tool_access : tool_access
+  ; pp_tool_access : string list
   ; pp_tool_denylist : string list
   ; pp_mention_targets : string list
-  ; pp_room_signal_prompt_enabled : bool
-  ; pp_joined_room_ids : string list
-  ; pp_last_seen_seq_by_room : (string * int) list
   ; pp_proactive : proactive_policy
   ; pp_compaction : compaction_policy
   ; pp_auto_handoff : bool
   ; pp_handoff_threshold : float
   ; pp_handoff_cooldown_sec : int
-  ; pp_per_provider_timeout_s : float option
   ; pp_always_approve : bool option
   }
 
@@ -75,6 +70,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
   with
   | Error e -> Error ("keeper meta parse error: " ^ e)
   | Ok pk_trace_id ->
+    let pk_persona = Safe_ops.json_string_opt "persona" json in
     let pk_trace_history =
       Safe_ops.json_string_list "trace_history" json |> List.filter validate_name
     in
@@ -119,15 +115,10 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
     let pk_needs = personality.needs in
     let pk_desires = personality.desires in
     let pk_instructions = personality.instructions in
-    let pk_cascade_name =
-      (* Preserve the raw cascade_name as persisted in runtime JSON so the
-       dashboard can distinguish "declared in TOML" from "canonicalized
-       fallback".  Downstream code canonicalizes at point-of-use. *)
-      Safe_ops.json_string ~default:(Keeper_config.default_cascade_name ()) "cascade_name" json
-    in
     Ok
       { pk_name
       ; pk_agent_name
+      ; pk_persona
       ; pk_trace_id
       ; pk_trace_history
       ; pk_goal
@@ -135,14 +126,6 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       ; pk_mid_goal
       ; pk_long_goal
       ; pk_social_model
-      ; pk_cascade_name
-      ; pk_cascade_ref =
-        (match json |> Yojson.Safe.Util.member "cascade_ref" with
-         | `Null | `Assoc [] -> None
-         | ref_json ->
-             (match Cascade_ref.cascade_ref_of_json ref_json with
-              | Some ref -> Some ref
-              | None -> Cascade_ref.cascade_ref_of_string pk_cascade_name))
       ; pk_will
       ; pk_needs
       ; pk_desires
@@ -194,20 +177,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_mention_targets =
       Safe_ops.json_string_list "mention_targets" json |> dedupe_keep_order
     in
-    let pp_room_signal_prompt_enabled =
-      Safe_ops.json_bool
-        ~default:default_room_signal_prompt_enabled
-        "room_signal_prompt_enabled"
-        json
-    in
-    let pp_joined_room_ids =
-      Safe_ops.json_string_list "joined_room_ids" json
-      |> List.filter validate_name
-      |> dedupe_keep_order
-    in
-    let pp_last_seen_seq_by_room =
-      Yojson.Safe.Util.member "last_seen_seq_by_room" json |> room_seq_map_of_json
-    in
     let proactive_enabled =
       Safe_ops.json_bool ~default:default_proactive_enabled "proactive_enabled" json
     in
@@ -256,12 +225,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_handoff_cooldown_sec =
       Safe_ops.json_int ~default:300 "handoff_cooldown_sec" json
     in
-    let pp_per_provider_timeout_s =
-      normalize_per_provider_timeout_json_field
-        ~source:(Printf.sprintf "keeper meta %s" keeper_name)
-        ~field:"per_provider_timeout_s"
-        json
-    in
     let pp_always_approve = Safe_ops.json_bool_opt "always_approve" json in
     Ok
       { pp_sandbox_profile
@@ -271,9 +234,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_tool_access
       ; pp_tool_denylist
       ; pp_mention_targets
-      ; pp_room_signal_prompt_enabled
-      ; pp_joined_room_ids
-      ; pp_last_seen_seq_by_room
       ; pp_proactive =
           { enabled = proactive_enabled
           ; idle_sec = proactive_idle_sec
@@ -294,21 +254,10 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
                    ~default:Keeper_config.default_keep_recent_tool_results
                    "keep_recent_tool_results"
                    json)
-          ; tool_heavy_msg_threshold =
-              Safe_ops.json_int
-                ~default:Keeper_config.default_tool_heavy_msg_threshold
-                "tool_heavy_msg_threshold"
-                json
-          ; tool_heavy_ratio_floor =
-              Safe_ops.json_float
-                ~default:Keeper_config.default_tool_heavy_ratio_floor
-                "tool_heavy_ratio_floor"
-                json
           }
       ; pp_auto_handoff
       ; pp_handoff_threshold
       ; pp_handoff_cooldown_sec
-      ; pp_per_provider_timeout_s
       ; pp_always_approve
       })
 ;;
@@ -320,7 +269,6 @@ let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =
   ; total_tokens = Safe_ops.json_int ~default:0 "total_tokens" json
   ; total_cost_usd = Safe_ops.json_float ~default:0.0 "total_cost_usd" json
   ; last_turn_ts = Safe_ops.json_float ~default:0.0 "last_turn_ts" json
-  ; last_model_used = Safe_ops.json_string ~default:"" "last_model_used" json
   ; last_input_tokens = Safe_ops.json_int ~default:0 "last_input_tokens" json
   ; last_output_tokens = Safe_ops.json_int ~default:0 "last_output_tokens" json
   ; last_total_tokens = Safe_ops.json_int ~default:0 "last_total_tokens" json
@@ -368,7 +316,7 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
    synthesised one.  Closes the silent-recovery gap noted in
    .tmp/memory-compacting-analysis.html (continuity ts recovery). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ContinuityTsRecovered)
     ~help:
       "Total [parse_last_continuity_update_ts] events where the \
@@ -385,7 +333,7 @@ let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojso
   if parsed_ts <= 0.0 && String.trim continuity_summary <> ""
   then begin
     let synthetic = Time_compat.now () in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ContinuityTsRecovered)
       ();
     Log.Keeper.warn
@@ -437,6 +385,7 @@ let parse_keeper_state
     Safe_ops.json_int ~default:0 "mention_reactive_turn_count" json
   in
   let noop_turn_count = Safe_ops.json_int ~default:0 "noop_turn_count" json in
+  let last_seen_message_seq = Safe_ops.json_int ~default:0 "last_seen_message_seq" json in
   let last_speech_act = Safe_ops.json_string ~default:"" "last_speech_act" json in
   let last_social_transition_reason =
     Safe_ops.json_string ~default:"" "last_social_transition_reason" json
@@ -465,10 +414,10 @@ let parse_keeper_state
   (* Canonical format: last_blocker is a structured object
      (blocker_info_to_json output) or `Null. *)
   let last_blocker =
-    let raw_field = Yojson.Safe.Util.member "last_blocker" json in
+    let raw_field = Json_util.assoc_member_opt "last_blocker" json in
     match raw_field with
-    | `Null -> None
-    | `Assoc _ -> blocker_info_of_json raw_field
+    | Some `Null -> None
+    | Some (`Assoc _ as json) -> blocker_info_of_json json
     | _ -> None
 	  in
 	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
@@ -486,11 +435,11 @@ let parse_keeper_state
 	       | _ -> [])
 	    | _ -> []
 	  in
-	  let last_cascade_attempt =
+	  let last_runtime_attempt =
 	    match json with
 	    | `Assoc fields ->
-	      (match List.assoc_opt "last_cascade_attempt" fields with
-	       | Some raw -> cascade_attempt_record_of_json raw
+	      (match List.assoc_opt "last_runtime_attempt" fields with
+	       | Some raw -> runtime_attempt_record_of_json raw
 	       | None -> None)
 	    | _ -> None
 	  in
@@ -532,42 +481,45 @@ let parse_keeper_state
       ; board_reactive_turn_count
       ; mention_reactive_turn_count
       ; noop_turn_count
+      ; last_seen_message_seq
       ; last_speech_act
       ; last_social_transition_reason
       ; last_active_desire
 	      ; last_current_intention
 	      ; last_blocker
-	      ; last_cascade_attempt
+	      ; last_runtime_attempt
 	      ; last_need
 	      ; last_turn_tool_calls
 	      }
   }
 ;;
 
-let reject_legacy_keeper_meta_shapes (json : Yojson.Safe.t) =
+let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    (match List.assoc_opt "last_blocker" fields with
-     | Some (`String _) ->
-       Error
-         "legacy keeper meta field shape is no longer supported: \
-          last_blocker:string. Use structured last_blocker object."
-     | Some _ | None -> Ok ())
+    (match
+       List.find_opt
+         (fun (k, _) -> List.mem k [ "initiative_enabled"; "persona_profile_path" ])
+         fields
+     with
+     | Some (k, _) ->
+       Error ("removed keeper meta field is no longer supported: " ^ k)
+     | None ->
+       (match List.assoc_opt "last_blocker" fields with
+        | Some (`String _) ->
+          Error
+            "removed keeper meta field shape is no longer supported: \
+             last_blocker:string. Use structured last_blocker object."
+        | Some _ | None -> Ok ()))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
 ;;
 
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
-    match reject_removed_keeper_meta_fields json with
+    match reject_removed_keeper_meta_shapes json with
     | Error e -> Error e
     | Ok () ->
-      (match reject_legacy_keeper_meta_fields json with
-       | Error e -> Error e
-       | Ok () ->
-         (match reject_legacy_keeper_meta_shapes json with
-          | Error e -> Error e
-          | Ok () ->
-         (match parse_keeper_identity json with
+      (match parse_keeper_identity json with
           | Error _ as e -> e
           | Ok identity ->
             (match parse_keeper_policy json ~keeper_name:identity.pk_name with
@@ -585,44 +537,19 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                  not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
                then Error "invalid keeper meta (bad trace_id)"
                else
-                 let cascade_ref_result =
-                   match identity.pk_cascade_ref with
-                   | Some _ as ref_ -> Ok ref_
-                   | None ->
-                       let raw_cascade_name =
-                         String.trim identity.pk_cascade_name
-                       in
-                       if String.equal raw_cascade_name ""
-                       then Ok None
-                       else
-                         match Cascade_name.of_string raw_cascade_name with
-                         | Ok cn -> Ok (Some Cascade_ref.{ group = cn; item = None })
-                         | Error `Empty -> Ok None
-                         | Error `Invalid_prefix ->
-                             Error
-                               (Printf.sprintf
-                                  "invalid keeper meta cascade_name %S: expected \
-                                   canonical cascade prefix tier-group., tier., or \
-                                   route."
-                                  identity.pk_cascade_name)
-                 in
-                 (match cascade_ref_result with
-                  | Error _ as e -> e
-                  | Ok cascade_ref ->
-                    Ok
+                 Ok
                    { id = None
                    ; name = identity.pk_name
                    ; agent_name =
                        (if identity.pk_agent_name = ""
                         then Keeper_identity.keeper_agent_name identity.pk_name
                         else identity.pk_agent_name)
+                   ; persona = identity.pk_persona
                    ; goal = identity.pk_goal
                    ; short_goal = identity.pk_short_goal
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
-                   ; cascade_ref
-                   ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
                    ; desires = identity.pk_desires
@@ -632,19 +559,13 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; network_mode = policy.pp_network_mode
                    ; allowed_paths = policy.pp_allowed_paths
                    ; tool_access = policy.pp_tool_access
-                   ; tool_preset_source =
-                       Safe_ops.json_string_opt "tool_preset_source" json
                    ; tool_denylist = policy.pp_tool_denylist
                    ; mention_targets = policy.pp_mention_targets
-                   ; room_signal_prompt_enabled = policy.pp_room_signal_prompt_enabled
-                   ; joined_room_ids = policy.pp_joined_room_ids
-                   ; last_seen_seq_by_room = policy.pp_last_seen_seq_by_room
                    ; proactive = policy.pp_proactive
                    ; compaction = policy.pp_compaction
                    ; auto_handoff = policy.pp_auto_handoff
                    ; handoff_threshold = policy.pp_handoff_threshold
                    ; handoff_cooldown_sec = policy.pp_handoff_cooldown_sec
-                   ; per_provider_timeout_s = policy.pp_per_provider_timeout_s
                    ; always_approve = policy.pp_always_approve
                    ; created_at =
                        (if state.ps_created_at_raw = ""
@@ -667,8 +588,8 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        Safe_ops.json_int_opt "telemetry_feedback_window_hours" json
                    ; runtime = state.ps_runtime
                    ; oas_env =
-                       (match Yojson.Safe.Util.member "oas_env" json with
-                        | `Assoc fields ->
+                       (match Json_util.assoc_member_opt "oas_env" json with
+                        | Some (`Assoc fields) ->
                           List.filter_map
                             (function
                               | k, `String v -> Some (k, v)
@@ -686,7 +607,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   })))))
+                   }))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

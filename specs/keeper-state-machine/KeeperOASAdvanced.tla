@@ -11,7 +11,7 @@
 \*   continue_gate_required, context_polluted, keeper_decision sum type
 \*   incl. NeedsContinueGate) appear anywhere in the codebase.  Three
 \*   OCaml modules touch the OAS surface — lib/oas_compat/, lib/keeper/
-\*   oas_execution_error_phase.ml (7-phase Prometheus label only), and
+\*   oas_execution_error_phase.ml (7-phase metric label only), and
 \*   lib/keeper/keeper_oas_checkpoint.ml — but none model the bridge's
 \*   most operationally important distinction (clean Eio cancellation
 \*   rollback vs cases where an outside-world tool mutation has already
@@ -20,7 +20,7 @@
 \*
 \*   In particular, the bug-model fixture (CancelledAbsorbed action +
 \*   CancelledNeverAbsorbed invariant) is paired and verified — memory
-\*   reference_masc_mcp_integrated_improvement_design_audit records
+\*   reference_masc_integrated_improvement_design_audit records
 \*   "Clean 56 states / no error.  Buggy: invariant violated in 3 steps".
 \*   The runtime owes the spec; the contract is already proven.
 \*
@@ -43,21 +43,21 @@ CONSTANTS MaxTurns
 VARIABLES
     sys_stop_requested,  \* Boolean: Global stop signal from the Supervisor
     fiber_state,         \* {"Active", "Cancelling", "Terminated"}
-    cascade_turn,        \* 0..MaxTurns: Current depth of the proactive cascade
+    runtime_turn,        \* 0..MaxTurns: Current depth of the proactive runtime
     oas_api_state,       \* {"Idle", "Fetching", "Success", "Error"}
     keeper_decision,     \* {"Unknown", "ExecuteSelf", "AutonomyFallback", "Delegate", "NeedsContinueGate"}
     context_polluted,    \* Boolean: Tracks if intermediate OAS context leaked upon failure
     external_side_effect_committed, \* Boolean: A mutating tool already committed outside OAS context
     continue_gate_required \* Boolean: Human/explicit continue gate is required before claiming clean recovery
 
-vars == <<sys_stop_requested, fiber_state, cascade_turn, oas_api_state,
+vars == <<sys_stop_requested, fiber_state, runtime_turn, oas_api_state,
           keeper_decision, context_polluted,
           external_side_effect_committed, continue_gate_required>>
 
 Init ==
     /\ sys_stop_requested = FALSE
     /\ fiber_state = "Active"
-    /\ cascade_turn = 0
+    /\ runtime_turn = 0
     /\ oas_api_state = "Idle"
     /\ keeper_decision = "Unknown"
     /\ context_polluted = FALSE
@@ -72,7 +72,7 @@ GlobalStopPreempts ==
     /\ sys_stop_requested' = TRUE
     \* If the fiber is active, the Eio switch immediately cancels it.
     /\ IF fiber_state = "Active" THEN fiber_state' = "Cancelling" ELSE fiber_state' = fiber_state
-    /\ UNCHANGED <<cascade_turn, oas_api_state, keeper_decision, context_polluted,
+    /\ UNCHANGED <<runtime_turn, oas_api_state, keeper_decision, context_polluted,
                    external_side_effect_committed, continue_gate_required>>
 
 \* 2. Eio Timeout (can only happen if Active and Fetching)
@@ -80,16 +80,16 @@ EioTimeoutTriggered ==
     /\ fiber_state = "Active"
     /\ oas_api_state = "Fetching"
     /\ fiber_state' = "Cancelling"
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, oas_api_state, keeper_decision,
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, oas_api_state, keeper_decision,
                    context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 3. Start fetching from OAS API
 StartFetching ==
     /\ fiber_state = "Active"
     /\ oas_api_state \in {"Idle", "Success"}
-    /\ cascade_turn < MaxTurns
+    /\ runtime_turn < MaxTurns
     /\ oas_api_state' = "Fetching"
-    /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, keeper_decision,
+    /\ UNCHANGED <<sys_stop_requested, fiber_state, runtime_turn, keeper_decision,
                    context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 3b. A mutating tool call commits outside the OAS-local context.
@@ -98,7 +98,7 @@ ToolSideEffectCommitted ==
     /\ oas_api_state = "Fetching"
     /\ external_side_effect_committed = FALSE
     /\ external_side_effect_committed' = TRUE
-    /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, oas_api_state,
+    /\ UNCHANGED <<sys_stop_requested, fiber_state, runtime_turn, oas_api_state,
                    keeper_decision, context_polluted, continue_gate_required>>
 
 \* 4. OAS API Completes successfully
@@ -106,8 +106,8 @@ OASApiCompletes ==
     /\ fiber_state = "Active"
     /\ oas_api_state = "Fetching"
     /\ oas_api_state' = "Success"
-    /\ cascade_turn' = cascade_turn + 1
-    /\ context_polluted' = TRUE \* Context is dirty (polluted) until cascade completes entirely or rolls back
+    /\ runtime_turn' = runtime_turn + 1
+    /\ context_polluted' = TRUE \* Context is dirty (polluted) until runtime completes entirely or rolls back
     /\ UNCHANGED <<sys_stop_requested, fiber_state, keeper_decision,
                    external_side_effect_committed, continue_gate_required>>
 
@@ -116,7 +116,7 @@ OASApiError ==
     /\ fiber_state = "Active"
     /\ oas_api_state = "Fetching"
     /\ oas_api_state' = "Error"
-    /\ UNCHANGED <<sys_stop_requested, fiber_state, cascade_turn, keeper_decision,
+    /\ UNCHANGED <<sys_stop_requested, fiber_state, runtime_turn, keeper_decision,
                    context_polluted, external_side_effect_committed, continue_gate_required>>
 
 \* 6. Bridge Handles OAS Error
@@ -129,7 +129,7 @@ HandleError ==
     /\ keeper_decision' = "AutonomyFallback"
     /\ context_polluted' = FALSE \* Rollback context to clean state
     /\ continue_gate_required' = FALSE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
 \* 6b. Error after a committed external mutation cannot claim clean fallback.
 HandleErrorAfterCommittedSideEffect ==
@@ -141,19 +141,19 @@ HandleErrorAfterCommittedSideEffect ==
     /\ keeper_decision' = "NeedsContinueGate"
     /\ context_polluted' = FALSE
     /\ continue_gate_required' = TRUE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
-\* 7. Cascade Finishes successfully
-FinishCascade ==
+\* 7. Runtime Finishes successfully
+FinishRuntime ==
     /\ fiber_state = "Active"
-    /\ cascade_turn = MaxTurns
+    /\ runtime_turn = MaxTurns
     /\ oas_api_state \in {"Success", "Idle"}
     /\ fiber_state' = "Terminated"
     /\ oas_api_state' = "Idle"
     /\ keeper_decision' = "Delegate"
     /\ context_polluted' = FALSE \* Commit context (no longer polluted)
     /\ continue_gate_required' = FALSE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
 \* 8. Fiber Handles Cancellation (Interrupts Fetching or Idle/Success states safely)
 FiberHandlesCancellation ==
@@ -164,7 +164,7 @@ FiberHandlesCancellation ==
     /\ keeper_decision' = "AutonomyFallback"
     /\ context_polluted' = FALSE \* Rollback OAS-local context via try/with
     /\ continue_gate_required' = FALSE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
 \* 8b. Cancellation after a committed external mutation leaves context clean
 \*     but requires an explicit continue gate because the outside world
@@ -177,7 +177,7 @@ CancellationAfterCommittedSideEffect ==
     /\ keeper_decision' = "NeedsContinueGate"
     /\ context_polluted' = FALSE
     /\ continue_gate_required' = TRUE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
 \* 9. [BUG MODEL] Catch-all absorbs cancellation — fiber returns Error instead
 \*     of propagating Cancelled to the parent switch. This creates a zombie:
@@ -190,7 +190,7 @@ CancelledAbsorbed ==
     /\ keeper_decision' = "ExecuteSelf"
     /\ context_polluted' = TRUE  \* Context NOT rolled back — pollution persists
     /\ continue_gate_required' = FALSE
-    /\ UNCHANGED <<sys_stop_requested, cascade_turn, external_side_effect_committed>>
+    /\ UNCHANGED <<sys_stop_requested, runtime_turn, external_side_effect_committed>>
 
 TerminatedStutter ==
     /\ fiber_state = "Terminated"
@@ -206,7 +206,7 @@ Next ==
     \/ OASApiError
     \/ HandleError
     \/ HandleErrorAfterCommittedSideEffect
-    \/ FinishCascade
+    \/ FinishRuntime
     \/ FiberHandlesCancellation
     \/ CancellationAfterCommittedSideEffect
     \/ TerminatedStutter
@@ -226,7 +226,7 @@ Fairness ==
     /\ WF_vars(OASApiError)
     /\ WF_vars(HandleError)
     /\ WF_vars(HandleErrorAfterCommittedSideEffect)
-    /\ WF_vars(FinishCascade)
+    /\ WF_vars(FinishRuntime)
     /\ WF_vars(FiberHandlesCancellation)
     /\ WF_vars(CancellationAfterCommittedSideEffect)
 
@@ -241,7 +241,7 @@ NoZombieFibers == ((fiber_state = "Terminated") => ~(oas_api_state = "Fetching")
 
 \* 2. A clean fallback means OAS-local context rolled back AND no committed
 \*    external mutation remains unresolved.
-AtomicCascadeFallback ==
+AtomicRuntimeFallback ==
     []((fiber_state = "Terminated" /\ keeper_decision = "AutonomyFallback") =>
         /\ context_polluted = FALSE
         /\ external_side_effect_committed = FALSE

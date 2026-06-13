@@ -5,7 +5,7 @@
 | Status | Draft |
 | Related | RFC-0165 (auth client-agnostic), RFC-0166 (server big-bang sweep), RFC-0167 (agent-code/llama purge), RFC-0168 (provider palette) |
 | Scope | `dashboard/src/components/common/*.ts` JSDoc header comments, `dashboard/src/api/dev-token.ts` inline comment |
-| Repos | masc-mcp |
+| Repos | masc |
 
 ## 1. Problem
 
@@ -30,8 +30,8 @@ None of these surfaces dispatch on the cited names — they are pure attribution
 |---------|-------|--------|
 | `keeper-state-diagram.ts:76` | `AGENT-LLM-A.md` | Project instruction file name. Not a vendor. |
 | `keeper-identity.ts:15` | `'llama'` | Animal name inside the keeper nickname pool, sibling to `cobra`/`gecko`/`lemur`/`manta`. False positive on the substring scanner. |
-| `cascade-config-panel.ts:893` | `case 'ollama': return 'Ollama'` | `ollama` is an LLM serving framework (akin to nginx/postgres), not an MCP-client or upstream-LLM-provider name. Exhaustive closed-sum match — not a string-classifier. |
-| `dashboard-cascade.ts:72` | `'cli' \| 'ollama' \| 'other'` | Capability-bucket label union, mirrored on the OCaml backend (`server_routes_http_routes_cascade.ml:16`). Same rationale as above. |
+| `runtime-config-panel.ts:893` | `case 'ollama': return 'Ollama'` | `ollama` is an LLM serving framework (akin to nginx/postgres), not an MCP-client or upstream-LLM-provider name. Exhaustive closed-sum match — not a string-classifier. |
+| `dashboard-runtime.ts:72` | `'cli' \| 'ollama' \| 'other'` | Capability-bucket label union, mirrored on the OCaml backend (`server_routes_http_routes_runtime.ml:16`). Same rationale as above. |
 | `dashboard.ts:641,644` / `config-resolution-panel.ts:465` | `Ollama` / `ollama warm` | LLM serving framework references in operator-facing labels. |
 | `skeleton.ts:5` | `Lukew / Google Web Vitals` | Web-platform research citation (LCP/FID/CLS metric origin), not an LLM vendor. |
 | `components/common/keeper-identity.ts:15` | `llama` (in animal list) | False positive (animal). |

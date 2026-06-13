@@ -85,7 +85,7 @@ while read -r wt_path; do
   fi
 
   # Nested-worktree guard: never remove a directory that itself contains
-  # other worktrees (memory: feedback_masc-mcp-nested-worktree-containers).
+  # other worktrees (memory: feedback_masc-nested-worktree-containers).
   if [ -d "$wt_path/.worktrees" ]; then
     echo "NESTED  $wt_path — skipped (contains nested .worktrees/)"
     nested=$((nested+1))

@@ -81,7 +81,7 @@ let h2_respond_removed_surface h2_reqd ~surface ~extra_headers =
          ("surface", `String surface);
          ( "message",
            `String
-             "This compatibility surface was removed. Keepers and local clients should use the OAS-backed repo coordination front door."
+             "This compatibility surface was removed. Keepers and local clients should use the OAS-backed repo workspace front door."
          );
        ])
     ~extra_headers

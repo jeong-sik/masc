@@ -26,12 +26,6 @@ DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/slack"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/slack/bindings.json"
 DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/slack/status.json"
 
-# Legacy read-fallback (pre-v0.9.0 layout). See bot.py _load_bindings —
-# loads from here if the new default is absent, then writes to the new
-# default on next save.
-LEGACY_BINDING_STORE_PATH: Final[str] = ".masc/connectors/slack/bindings.json"
-
-
 def _runtime_toml_path() -> Path:
     raw = os.getenv("MASC_BASE_PATH", "").strip()
     root = Path(raw).expanduser() if raw else Path.cwd()
@@ -144,9 +138,6 @@ class BotConfig(BaseSettings):
             "status_path",
         ),
     )
-    # Legacy read-fallback (pre-v0.9.0 layout). Not env-configurable.
-    legacy_binding_store_path: str = Field(default=LEGACY_BINDING_STORE_PATH)
-
     @field_validator("slack_bot_token")
     @classmethod
     def bot_token_not_empty(cls, v: str) -> str:

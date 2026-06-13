@@ -37,7 +37,7 @@ let substitute_web_fetch_timeout s =
 ;;
 
 let observe_guidance_config_drift ~label ~detail =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PromptFailures)
     ~labels:[ "prompt", label ]
     ();
@@ -123,8 +123,8 @@ let fallback_prose key =
   then
     Some
       "Do not call tool names that are absent from the active runtime schema \
-       list. Heartbeat is server-managed; public lifecycle/status tools such \
-       as `masc_join`, `masc_who`, and `masc_heartbeat` are not keeper action \
+       list. Heartbeat is server-managed; public status tools such \
+       as `masc_heartbeat` are not keeper action \
        tools unless they are explicitly shown to you. Copy active schema names \
        exactly; do not substitute public `masc_*` aliases such as \
        `masc_board_list` for keeper-scoped tools."
@@ -164,13 +164,13 @@ let allowed_lookup allowed_tool_names =
 ;;
 
 let model_facing_name name =
-  match Keeper_tool_name_projection.public_alias_for_internal name with
+  match Keeper_tool_visibility_projection.public_alias_for_internal name with
   | Some public -> public
   | None -> name
 ;;
 
 let model_facing_allowed_tool_names allowed_tool_names =
-  allowed_tool_names |> List.map model_facing_name |> Keeper_types.dedupe_keep_order
+  allowed_tool_names |> List.map model_facing_name |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
 ;;
 
 let allowed_hints ~allowed_tool_names =

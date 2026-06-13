@@ -3,12 +3,15 @@
 
 open Tool_args
 open Keeper_types
+open Keeper_meta_contract
+open Keeper_meta_store
+open Keeper_types_profile
 open Keeper_memory
 open Keeper_execution
 open Keeper_status_runtime
 open Keeper_status_metrics
 
-type tool_result = Keeper_types.tool_result
+type tool_result = Keeper_types_profile.tool_result
 
 include Keeper_status_bridge
 
@@ -29,7 +32,7 @@ let handle_keeper_list ctx args : tool_result =
   match Safe_ops.list_dir_safe dir with
   | Error e -> tool_result_error e
   | Ok _files ->
-  let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
+  let keeper_names = Keeper_meta_store.keeper_names ctx.config |> take limit in
   if not detailed then
     let json = `Assoc [
       ("count", `Int (List.length keeper_names));
@@ -40,12 +43,12 @@ let handle_keeper_list ctx args : tool_result =
     let now_ts = Time_compat.now () in
     let keepers =
       List.filter_map (fun name ->
-        match read_meta ctx.config name with
+        match read_effective_meta ctx.config name with
         | Error _ -> None
         | Ok None -> None
         | Ok (Some m) ->
           let created_ts =
-            Coord_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+            Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
           let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in
@@ -160,7 +163,6 @@ let handle_keeper_list ctx args : tool_result =
               ]
           in
           let skill_route_json =
-            let open Yojson.Safe.Util in
             let fallback_selection_mode_string = "agent" in
             let fallback_selection_provenance = "fallback" in
             match last_skill_metrics with
@@ -168,12 +170,12 @@ let handle_keeper_list ctx args : tool_result =
             | Some metrics ->
                 let primary = Safe_ops.json_string_opt "skill_primary" metrics in
                 let secondary =
-                  match metrics |> member "skill_secondary" with
-                  | `List xs ->
+                  match Json_util.assoc_member_opt "skill_secondary" metrics with
+                  | Some (`List xs) ->
                       xs
                       |> List.filter_map (fun v ->
                            match v with `String s when String.trim s <> "" -> Some s | _ -> None)
-                  | _ -> []
+                  | None | Some _ -> []
                 in
                 let reason = Safe_ops.json_string_opt "skill_reason" metrics in
                 `Assoc [

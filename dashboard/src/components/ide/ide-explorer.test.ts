@@ -22,7 +22,6 @@ function repo(id: string, name = id): Repository {
     status: 'active',
     auto_sync: false,
     sync_interval: 0,
-    credential_id: null,
     created_at: null,
     updated_at: null,
   }
@@ -32,11 +31,11 @@ describe('explorerScopeLabel', () => {
   it('labels repository-backed IDE trees with the repository name', () => {
     expect(
       explorerScopeLabel(
-        { kind: 'repository', repoId: 'masc-mcp' },
+        { kind: 'repository', repoId: 'masc' },
         '',
-        [repo('masc-mcp', 'masc-mcp')],
+        [repo('masc', 'masc')],
       ),
-    ).toEqual({ label: 'masc-mcp', tone: 'accent' })
+    ).toEqual({ label: 'masc', tone: 'accent' })
   })
 
   it('keeps repository fallback states visibly distinct from project root', () => {
@@ -126,11 +125,11 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
     store.seed(SAMPLE)
     render(h(IdeExplorer, {
       fileTreeStore: store,
-      workspaceSource: () => ({ kind: 'repository', repoId: 'masc-mcp' } as const),
-      repositories: () => [repo('masc-mcp', 'masc-mcp')],
+      workspaceSource: () => ({ kind: 'repository', repoId: 'masc' } as const),
+      repositories: () => [repo('masc', 'masc')],
     }), container)
 
-    expect(container.textContent).toContain('EXPLORER · masc-mcp')
+    expect(container.textContent).toContain('EXPLORER · masc')
     expect(container.textContent).not.toContain('EXPLORER · project')
   })
 

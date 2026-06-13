@@ -7,7 +7,7 @@ type inbound_message = {
   channel : string;
   channel_user_id : string;
   channel_user_name : string;
-  channel_room_id : string;
+  channel_workspace_id : string;
   keeper_name : string;
   content : string;
   idempotency_key : string;
@@ -26,6 +26,60 @@ type outbound_message = {
   structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
 }
+
+type message_request_status =
+  | Accepted
+  | Queued
+  | Running
+  | Done
+  | Failed
+  | Lost
+  | Cancelled
+
+type message_request = {
+  request_id : string;
+  destination_type : string;
+  destination_id : string;
+  channel : string;
+  actor_id : string option;
+  status : message_request_status;
+  modalities : string list;
+  transport : string option;
+  metadata : (string * string) list;
+}
+
+let message_request_status_to_string = function
+  | Accepted -> "accepted"
+  | Queued -> "queued"
+  | Running -> "running"
+  | Done -> "done"
+  | Failed -> "error"
+  | Lost -> "lost"
+  | Cancelled -> "cancelled"
+
+let string_list_json values =
+  `List (List.map (fun value -> `String value) values)
+
+let string_assoc_json fields =
+  `Assoc (List.map (fun (key, value) -> (key, `String value)) fields)
+
+let message_request_to_json request =
+  let optional_string = function
+    | None -> `Null
+    | Some value -> `String value
+  in
+  `Assoc
+    [
+      ("request_id", `String request.request_id);
+      ("destination_type", `String request.destination_type);
+      ("destination_id", `String request.destination_id);
+      ("channel", `String request.channel);
+      ("actor_id", optional_string request.actor_id);
+      ("status", `String (message_request_status_to_string request.status));
+      ("modalities", string_list_json request.modalities);
+      ("transport", optional_string request.transport);
+      ("metadata", string_assoc_json request.metadata);
+    ]
 
 (* ── Validation ──────────────────────────────────────────────── *)
 
@@ -86,10 +140,9 @@ type dispatch_result =
 (* ── JSON Codecs ─────────────────────────────────────────────── *)
 
 let inbound_of_json json =
-  let open Yojson.Safe.Util in
   try
     let str key =
-      json |> member key |> to_string_option
+      Json_util.get_string json key
       |> Option.value ~default:""
     in
     let channel =
@@ -98,8 +151,8 @@ let inbound_of_json json =
     in
     let keeper_name = str "destination_id" in
     let metadata =
-      match json |> member "metadata" with
-      | `Assoc pairs ->
+      match Json_util.assoc_member_opt "metadata" json with
+      | Some (`Assoc pairs) ->
           List.filter_map (fun (k, v) ->
             match v with `String s -> Some (k, s) | _ -> None
           ) pairs
@@ -109,7 +162,7 @@ let inbound_of_json json =
       channel;
       channel_user_id = str "channel_user_id";
       channel_user_name = str "channel_user_name";
-      channel_room_id = str "channel_room_id";
+      channel_workspace_id = str "channel_workspace_id";
       keeper_name;
       content = str "content";
       idempotency_key = str "idempotency_key";

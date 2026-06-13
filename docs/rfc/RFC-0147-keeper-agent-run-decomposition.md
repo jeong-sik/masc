@@ -14,7 +14,7 @@ renumbered_from: "0144 → 0145 → 0147"
 
 # RFC-0147 — Keeper Agent Run Decomposition
 
-> **Renumbered 2026-05-20 (2nd cascade)**: 본 RFC 는 원래 RFC-0144 (PR
+> **Renumbered 2026-05-20 (2nd runtime)**: 본 RFC 는 원래 RFC-0144 (PR
 > #16773, merged `bf142ff67f`) 로 작성되었으나, 동시 작성된 PR #16769
 > (`RFC-0144 — Workaround Sunset Tracking for Keeper Dedup Carryovers`,
 > merged `99b14ac45f`) 와 번호 충돌 → PR #16779 가 본 RFC 를 RFC-0145 로
@@ -41,7 +41,7 @@ RFC-0136 (`keeper_unified_turn` decomposition) 의 자매 RFC — 동일 *single
 |-------|------|------|
 | L17-22 | 6 re-exports from `Turn_helpers` | sibling re-export |
 | L24 | 1 re-export from `Contract_helpers` | sibling re-export |
-| L25-78 | 5 small helpers (`progress_keeper_tool_names_for_contract`, `tool_contract_result_for_observed_tools` 등) | inline helper |
+| L25-78 | 5 small helpers (`progress_keeper_tool_names_for_contract`, `completion_contract_result_for_progress_evidence` 등) | inline helper |
 | **L80** | **`run_turn`** | **main mega-function L80-L2103 = 2023 LoC (전체 96%)** |
 
 interface (`.mli`, 346 LOC) 의 surface 는 `run_turn` + 7 re-exports.

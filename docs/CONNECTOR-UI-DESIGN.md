@@ -127,7 +127,7 @@ one row each in the accent + emoji tables — no per-surface re-styling.
 
 ## 8. Wire components via DOM IDs, not props
 
-> Cross-card coordination uses well-known anchor IDs +
+> Cross-card workspace collaboration uses well-known anchor IDs +
 > `scrollIntoView`, not React/Preact context.
 
 - Overview-strip tile click → `document.getElementById('connector-card-discord').scrollIntoView()`.

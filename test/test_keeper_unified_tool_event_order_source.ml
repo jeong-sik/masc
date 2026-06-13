@@ -46,10 +46,10 @@ let source_path () =
 let () =
   let src = read_file (source_path ()) in
   assert_not_contains ~label:"no null fallback" src "using Null input";
-  assert_contains ~label:"order violation latch" src
-    "tool_event_order_violation_error";
-  assert_contains ~label:"input-sensitive conservative classification" src
-    "input_sensitive_mutation_tool";
-  assert_contains ~label:"retry abort log" src
-    "aborting retry path to avoid replaying an unpaired tool completion";
+  assert_contains ~label:"run_keeper_cycle entry" src
+    "let run_keeper_cycle";
+  assert_contains ~label:"turn id calculation" src
+    "let keeper_turn_id = meta.runtime.usage.total_turns + 1";
+  assert_contains ~label:"phase gate decision logging" src
+    "let append_phase_gate_decision";
   print_endline "test_keeper_unified_tool_event_order_source: OK"

@@ -9,9 +9,9 @@
 
 open Alcotest
 
-module Telemetry_eio = Masc_mcp.Telemetry_eio
-module Coord = Masc_mcp.Coord
-module Prometheus = Masc_mcp.Prometheus
+module Telemetry_eio = Masc.Telemetry_eio
+module Workspace = Masc.Workspace
+module Otel_metric_store = Masc.Otel_metric_store
 
 let error_kind value = Telemetry_eio.error_kind_of_string value
 let error_kind_to_string = Telemetry_eio.error_kind_to_string
@@ -73,26 +73,26 @@ let write_dated_file dir month day lines =
    event Type Tests
    ============================================================ *)
 
-let test_event_agent_joined () =
-  let e = Telemetry_eio.Agent_joined {
+let test_event_agent_session_bounded () =
+  let e = Telemetry_eio.Agent_session_bound {
     agent_id = "agent_llm_a-001";
     capabilities = ["code"; "review"];
   } in
   match e with
-  | Telemetry_eio.Agent_joined r ->
+  | Telemetry_eio.Agent_session_bound r ->
       check string "agent_id" "agent_llm_a-001" r.agent_id;
       check int "capabilities" 2 (List.length r.capabilities)
-  | _ -> fail "expected Agent_joined"
+  | _ -> fail "expected Agent_session_bound"
 
-let test_event_agent_left () =
-  let e = Telemetry_eio.Agent_left {
+let test_event_agent_unbound () =
+  let e = Telemetry_eio.Agent_unbound {
     agent_id = "agent_llm_a-001";
     reason = "session ended";
   } in
   match e with
-  | Telemetry_eio.Agent_left r ->
+  | Telemetry_eio.Agent_unbound r ->
       check string "reason" "session ended" r.reason
-  | _ -> fail "expected Agent_left"
+  | _ -> fail "expected Agent_unbound"
 
 let test_event_task_started () =
   let e = Telemetry_eio.Task_started {
@@ -176,7 +176,7 @@ let test_event_tool_called () =
 let test_event_record_type () =
   let r : Telemetry_eio.event_record = {
     timestamp = 1704067200.0;
-    event = Telemetry_eio.Agent_joined {
+    event = Telemetry_eio.Agent_session_bound {
       agent_id = "test";
       capabilities = [];
     };
@@ -253,7 +253,7 @@ let test_parse_event_records_tool_called_missing_options () =
   check_one_tool_called_record "missing options" json ~operation_id:None
     ~worker_run_id:None
 
-let check_one_tool_assigned_record label json ~preset =
+let check_one_tool_assigned_record label json =
   match Telemetry_eio.parse_event_records [json] with
   | [ record ] -> (
       match record.event with
@@ -261,7 +261,6 @@ let check_one_tool_assigned_record label json ~preset =
           check string (label ^ " agent_id")
             "keeper-masc-improver-agent" r.agent_id;
           check string (label ^ " profile") "default" r.profile;
-          check (option string) (label ^ " preset") preset r.preset;
           check int (label ^ " tool_count") 32 r.tool_count;
           check string (label ^ " assignment_id") "asg-001" r.assignment_id
       | _ -> fail (label ^ ": expected Tool_assigned"))
@@ -270,7 +269,7 @@ let check_one_tool_assigned_record label json ~preset =
         (Printf.sprintf "%s: expected one parsed record, got %d" label
            (List.length records))
 
-let test_parse_event_records_tool_assigned_null_preset () =
+let test_parse_event_records_tool_assigned_minimal_payload () =
   let json =
     `Assoc
       [
@@ -283,16 +282,15 @@ let test_parse_event_records_tool_assigned_null_preset () =
                 [
                   ("agent_id", `String "keeper-masc-improver-agent");
                   ("profile", `String "default");
-                  ("preset", `Null);
                   ("tool_count", `Int 32);
                   ("assignment_id", `String "asg-001");
                 ];
             ] );
       ]
   in
-  check_one_tool_assigned_record "null preset" json ~preset:None
+  check_one_tool_assigned_record "minimal payload" json
 
-let test_parse_event_records_tool_assigned_missing_preset () =
+let test_parse_event_records_tool_assigned_missing_optional_fields () =
   let json =
     `Assoc
       [
@@ -311,7 +309,7 @@ let test_parse_event_records_tool_assigned_missing_preset () =
             ] );
       ]
   in
-  check_one_tool_assigned_record "missing preset" json ~preset:None
+  check_one_tool_assigned_record "missing optional fields" json
 
 (* ============================================================
    metrics Type Tests
@@ -353,18 +351,60 @@ let test_event_json_roundtrip () =
        | _ -> fail "wrong event type")
   | Error e -> fail ("json decode failed: " ^ e)
 
+(* Legacy variant migration: Agent_joined → Agent_session_bound.
+   Records written before the rename must still deserialize. *)
+let test_legacy_agent_joined_migration () =
+  let legacy_json =
+    `Assoc [
+      ("timestamp", `Float 1000.0);
+      ("event", `List [
+        `String "Agent_joined";
+        `Assoc [("agent_id", `String "keeper-test"); ("capabilities", `List [])]
+      ]);
+    ]
+  in
+  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
+  check int "legacy Agent_joined produces 1 record" 1 (List.length parsed);
+  let record = List.hd parsed in
+  check bool "event is Agent_session_bound" true
+    (match record.event with
+     | Telemetry_eio.Agent_session_bound r ->
+       String.equal r.agent_id "keeper-test" &&
+       List.length r.capabilities = 0
+     | _ -> false)
+
+let test_legacy_agent_left_migration () =
+  let legacy_json =
+    `Assoc [
+      ("timestamp", `Float 1000.0);
+      ("event", `List [
+        `String "Agent_left";
+        `Assoc [("agent_id", `String "keeper-test"); ("reason", `String "leave")]
+      ]);
+    ]
+  in
+  let parsed = Telemetry_eio.parse_event_records [ legacy_json ] in
+  check int "legacy Agent_left produces 1 record" 1 (List.length parsed);
+  let record = List.hd parsed in
+  check bool "event is Agent_unbound" true
+    (match record.event with
+     | Telemetry_eio.Agent_unbound r ->
+       String.equal r.agent_id "keeper-test" &&
+       String.equal r.reason "leave"
+     | _ -> false)
+
 (* Drop observability: malformed payload increments
    masc_persistence_read_drops_total{surface=telemetry_eio,reason=invalid_payload}.
    Pairs with WARN log via Safe_ops.report_persistence_read_drop. *)
 let test_parse_event_records_drop_increments_counter () =
-  let metric = Prometheus.metric_persistence_read_drops in
+  let metric = Otel_metric_store.metric_persistence_read_drops in
   let labels =
     [
       ("surface", "telemetry_eio");
       ("reason", Safe_ops.persistence_read_drop_reason_invalid_payload);
     ]
   in
-  let before = Prometheus.metric_value_or_zero metric ~labels () in
+  let before = Otel_metric_store.metric_value_or_zero metric ~labels () in
   let malformed =
     `Assoc
       [
@@ -375,7 +415,7 @@ let test_parse_event_records_drop_increments_counter () =
   in
   let parsed = Telemetry_eio.parse_event_records [ malformed ] in
   check int "malformed payload produces zero records" 0 (List.length parsed);
-  let after = Prometheus.metric_value_or_zero metric ~labels () in
+  let after = Otel_metric_store.metric_value_or_zero metric ~labels () in
   check (float 0.001) "drop counter incremented by 1" 1.0 (after -. before)
 
 let test_metrics_json_roundtrip () =
@@ -398,8 +438,8 @@ let test_metrics_json_roundtrip () =
    event_to_json Tests
    ============================================================ *)
 
-let test_event_to_json_agent_joined () =
-  let e = Telemetry_eio.Agent_joined {
+let test_event_to_json_agent_session_bounded () =
+  let e = Telemetry_eio.Agent_session_bound {
     agent_id = "test";
     capabilities = ["a"; "b"];
   } in
@@ -427,24 +467,24 @@ let test_count_active_agents_empty () =
   let events : Telemetry_eio.event_record list = [] in
   check int "empty" 0 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_one_joined () =
+let test_count_active_agents_one_bound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
   ] in
-  check int "one joined" 1 (Telemetry_eio.count_active_agents events)
+  check int "one bound" 1 (Telemetry_eio.count_active_agents events)
 
-let test_count_active_agents_joined_then_left () =
+let test_count_active_agents_bound_then_unbound () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_left { agent_id = "a1"; reason = "done" } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_unbound { agent_id = "a1"; reason = "done" } };
   ] in
-  check int "joined then left" 0 (Telemetry_eio.count_active_agents events)
+  check int "bound then unbound" 0 (Telemetry_eio.count_active_agents events)
 
 let test_count_active_agents_multiple () =
   let events : Telemetry_eio.event_record list = [
-    { timestamp = 1.0; event = Agent_joined { agent_id = "a1"; capabilities = [] } };
-    { timestamp = 2.0; event = Agent_joined { agent_id = "a2"; capabilities = [] } };
-    { timestamp = 3.0; event = Agent_left { agent_id = "a1"; reason = "x" } };
+    { timestamp = 1.0; event = Agent_session_bound { agent_id = "a1"; capabilities = [] } };
+    { timestamp = 2.0; event = Agent_session_bound { agent_id = "a2"; capabilities = [] } };
+    { timestamp = 3.0; event = Agent_unbound { agent_id = "a1"; reason = "x" } };
   ] in
   check int "multiple" 1 (Telemetry_eio.count_active_agents events)
 
@@ -570,7 +610,7 @@ let test_summarize_tool_usage_reads_date_split_store_without_fs () =
     (fun () ->
       Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let config = Coord.default_config base_dir in
+      let config = Workspace.default_config base_dir in
       Telemetry_eio.track_tool_called config ~tool_name:"masc_status"
         ~success:true ~duration_ms:42 ~agent_id:"agent_code" ();
       let summary = Telemetry_eio.summarize_tool_usage config in
@@ -589,13 +629,13 @@ let test_track_applies_default_retention_days () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
         in
         write_dated_file telemetry_dir "2020-01" "01" [ {|{"old":true}|} ];
-        Telemetry_eio.track_agent_joined config ~agent_id:"retention-test" ();
+        Telemetry_eio.track_agent_session_bound config ~agent_id:"retention-test" ();
         check bool "old telemetry file pruned by default retention" false
           (Sys.file_exists old_file))))
 
@@ -605,7 +645,7 @@ let test_track_applies_telemetry_max_bytes () =
       with_temp_dir (fun base_dir ->
         Eio_main.run @@ fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let config = Coord.default_config base_dir in
+        let config = Workspace.default_config base_dir in
         let telemetry_dir = telemetry_dir base_dir in
         let old_file_1 =
           Filename.concat (Filename.concat telemetry_dir "2020-01") "01.jsonl"
@@ -617,7 +657,7 @@ let test_track_applies_telemetry_max_bytes () =
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'a') ];
         write_dated_file telemetry_dir "2020-01" "02"
           [ Printf.sprintf {|{"payload":"%s"}|} (String.make 80 'b') ];
-        Telemetry_eio.track_agent_joined config ~agent_id:"max-bytes-test" ();
+        Telemetry_eio.track_agent_session_bound config ~agent_id:"max-bytes-test" ();
         check bool "old telemetry file 1 pruned by max bytes" false
           (Sys.file_exists old_file_1);
         check bool "old telemetry file 2 pruned by max bytes" false
@@ -632,8 +672,8 @@ let test_track_applies_telemetry_max_bytes () =
 let () =
   run "Telemetry Eio Coverage" [
     "event", [
-      test_case "agent_joined" `Quick test_event_agent_joined;
-      test_case "agent_left" `Quick test_event_agent_left;
+      test_case "agent_session_bounded" `Quick test_event_agent_session_bounded;
+      test_case "agent_unbound" `Quick test_event_agent_unbound;
       test_case "task_started" `Quick test_event_task_started;
       test_case "task_completed" `Quick test_event_task_completed;
       test_case "handoff_triggered" `Quick test_event_handoff_triggered;
@@ -646,10 +686,10 @@ let () =
         test_parse_event_records_tool_called_null_options;
       test_case "tool_called missing option fields" `Quick
         test_parse_event_records_tool_called_missing_options;
-      test_case "tool_assigned null preset field" `Quick
-        test_parse_event_records_tool_assigned_null_preset;
-      test_case "tool_assigned missing preset field" `Quick
-        test_parse_event_records_tool_assigned_missing_preset;
+      test_case "tool_assigned minimal payload" `Quick
+        test_parse_event_records_tool_assigned_minimal_payload;
+      test_case "tool_assigned missing optional fields" `Quick
+        test_parse_event_records_tool_assigned_missing_optional_fields;
     ];
     "metrics", [
       test_case "type" `Quick test_metrics_type;
@@ -659,15 +699,19 @@ let () =
       test_case "metrics" `Quick test_metrics_json_roundtrip;
       test_case "drop increments persistence_read_drops counter" `Quick
         test_parse_event_records_drop_increments_counter;
+      test_case "legacy Agent_joined migrates to Agent_session_bound" `Quick
+        test_legacy_agent_joined_migration;
+      test_case "legacy Agent_left migrates to Agent_unbound" `Quick
+        test_legacy_agent_left_migration;
     ];
     "event_to_json", [
-      test_case "agent_joined" `Quick test_event_to_json_agent_joined;
+      test_case "agent_session_bounded" `Quick test_event_to_json_agent_session_bounded;
       test_case "task_completed" `Quick test_event_to_json_task_completed;
     ];
     "count_active_agents", [
       test_case "empty" `Quick test_count_active_agents_empty;
-      test_case "one joined" `Quick test_count_active_agents_one_joined;
-      test_case "joined then left" `Quick test_count_active_agents_joined_then_left;
+      test_case "one bound" `Quick test_count_active_agents_one_bound;
+      test_case "bound then unbound" `Quick test_count_active_agents_bound_then_unbound;
       test_case "multiple" `Quick test_count_active_agents_multiple;
     ];
     "count_tasks_in_progress", [

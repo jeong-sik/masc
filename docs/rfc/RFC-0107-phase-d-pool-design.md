@@ -17,7 +17,7 @@ binding 을 채워 넣는다. Interface 자체는 transport-agnostic 으로
 설계해서 `piaf` 와 `cohttp-eio + manual patch` 사이의 선택이 바뀌어도
 callsite 변경이 없도록 한다.
 
-## 1. Callsite inventory (masc-mcp 내부)
+## 1. Callsite inventory (masc 내부)
 
 `Cohttp_eio.Client.*` 직접 호출 (5 callsites — *3 in masc_http_client 본
 체, 2 in voice_bridge*):
@@ -38,11 +38,11 @@ callsite 변경이 없도록 한다.
 | `lib/local/worker_container_types.ml:184` | `post_sync` |
 | `lib/voice/voice_bridge_core.ml:118` | `make_closing_client` |
 | `lib/auto_responder.ml:226` | `post_sync` |
-| `lib/cascade/cascade_http_probe.ml:154` | `get_sync` |
+| `lib/runtime/runtime_http_probe.ml:154` | `get_sync` |
 | `lib/graphql_client.ml:181` | `post_sync` |
 | `lib/opentelemetry_client_cohttp_eio.ml:147` | `make_closing_client` |
 
-**합계: 13 callsites** in masc-mcp. (OAS 별도 repo 는 본 Phase 범위 외.)
+**합계: 13 callsites** in masc. (OAS 별도 repo 는 본 Phase 범위 외.)
 
 ## 2. Current anti-pattern (per call, 모든 sync 호출자 동일)
 
@@ -172,7 +172,7 @@ type stats = {
 }
 
 val stats : t -> stats
-(** Non-mutating snapshot for Prometheus exporter / dashboard. *)
+(** Non-mutating snapshot for legacy metrics backend exporter / dashboard. *)
 ```
 
 ### 3.2 Migration shim — Masc_http_client unchanged
@@ -234,8 +234,8 @@ Phase D step 2 가 그 결정 위에 구현.
 | **D.1 (이 PR)** | interface design + skeleton mli + design 노트 | Phase C.1 머지 | ~150 (mli + 노트) |
 | **D.2** | piaf wrapper or cohttp patched 구현 + 13 callsite migration (shim 유지) | D.1 + Phase B 결과 | ~400 |
 | **D.3** | stream callsite migration (voice_bridge 2개) | D.2 | ~80 |
-| **D.4** | Prometheus export + dashboard tile | D.2 | ~120 |
-| **D.5** | cascade-storm reproducer (16 keepers × 5 turn) — fd 평탄 검증 | D.2 + D.4 | ~150 |
+| **D.4** | legacy metrics backend export + dashboard tile | D.2 | ~120 |
+| **D.5** | runtime-storm reproducer (16 keepers × 5 turn) — fd 평탄 검증 | D.2 + D.4 | ~150 |
 
 ## 5. Trade-offs & open questions
 
@@ -247,11 +247,11 @@ Phase D step 2 가 그 결정 위에 구현.
 | per-host TLS context cache | piaf 가 이미 함 (Phase B 확인) — cohttp 직접 구현 시 우리가 더해야 함 |
 | HTTP/2 지원 | **out-of-scope** (RFC §2 non-goal). piaf 는 무료로 받지만 callsite 가 h1 가정 |
 | max_idle_per_host = 8 정당화 | RFC-0101 §2 nofile=10240 cap, 256 server slots × 8 idle = 2048, safe |
-| OAS repo 마이그레이션 | **out-of-scope of Phase D**. masc-mcp 13 callsites 만. OAS 는 동등 interface 후속 PR |
+| OAS repo 마이그레이션 | **out-of-scope of Phase D**. masc 13 callsites 만. OAS 는 동등 interface 후속 PR |
 
 ## 6. 검증
 
-- D.2 의 cascade-storm reproducer: 16 keepers × 5 turn, `lsof -p <pid>`
+- D.2 의 runtime-storm reproducer: 16 keepers × 5 turn, `lsof -p <pid>`
   peak measurement. RFC-0101 throttle 비활성화 상태에서 < 256 FD peak
   목표.
 - D.3 voice_bridge stream callsite: 기존 streaming behavior 유지
@@ -323,7 +323,7 @@ B finding §"Eio #244 — exactly-one-owner 원칙" 이 우리 design 에
 직접 인용 가능:
 
 > Talex5 본인이 `Unix.close` 이중 close 패닉을 만나 `accept_fork` API
-> shape 을 바꿔서 해결. 우리 masc-mcp 의 `connection: close` 강제
+> shape 을 바꿔서 해결. 우리 masc 의 `connection: close` 강제
 > 워크어라운드와 cohttp-eio #965 가 같은 버그 class.
 
 D.2 에서 추가할 TLA+ spec `Pool_no_double_close.tla` 의 motivation

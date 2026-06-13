@@ -1,0 +1,21 @@
+(include_subdirs no)
+
+(library
+ (name fd_accountant)
+ (public_name masc.fd_accountant)
+ (wrapped false)
+ (libraries
+  eio
+  eio.unix
+  unix
+  yojson
+  optint
+  masc.lockfree_atomic
+  masc.masc_core
+  masc.masc_types
+  masc.fs_compat
+  masc.dated_jsonl
+  masc.cdal_runtime
+  masc.masc_process)
+ (preprocess
+  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

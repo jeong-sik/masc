@@ -511,7 +511,7 @@ let public_descriptors =
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
-      ~public_aliases:[ "Search" ]
+      ~public_aliases:[ "Search"; "search_files" ]
       ~internal_name:"tool_search_files"
       ~description:
         "Search file contents with ripgrep: provide a regex `pattern` (and \

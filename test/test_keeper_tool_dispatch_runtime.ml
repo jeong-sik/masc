@@ -271,10 +271,43 @@ let test_public_read_rejects_unsupported_range_fields () =
         Yojson.Safe.Util.(member "validation" json |> to_string);
       check string "failure class" "policy_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string);
+      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
+      check string "tutor kind" "invalid_arguments"
+        Yojson.Safe.Util.(member "kind" tutor |> to_string);
+      check bool "tutor explains line offsets" true
+        (contains_substring
+           Yojson.Safe.Util.(member "message" tutor |> to_string)
+           "line offsets");
       check bool "did not reach file runtime" false
         (match Yojson.Safe.Util.member "path_resolution" json with
          | `Assoc _ -> true
          | _ -> false))
+
+let test_public_read_rejects_offset_with_tutor () =
+  with_exec_fixture
+    "keeper_tool_dispatch_runtime_read_rejects_offset"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"Read"
+          ~input:
+            (`Assoc
+               [ "file_path", `String "lib/keeper/keeper_transition_audit.ml"
+               ; "offset", `Int 100
+               ])
+          ()
+      in
+      check string "runtime outcome" "failure" (outcome_label result.outcome);
+      let json = Yojson.Safe.from_string result.raw_output in
+      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
+      check string "tutor requested tool" "Read"
+        Yojson.Safe.Util.(member "requested_tool" tutor |> to_string);
+      check bool "tutor names Grep alternative" true
+        (contains_substring result.raw_output {|"tool":"Grep"|}))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
   Masc.Otel_metric_store.metric_value_or_zero
@@ -552,6 +585,19 @@ let test_public_local_aliases_dispatch_to_runtime_handlers () =
         (contains_substring search_result.raw_output "public-alias.txt");
       check bool "Search match includes content" true
         (contains_substring search_result.raw_output "gamma");
+      let search_files_result =
+        run
+          "search_files"
+          (`Assoc
+             [ "pattern", `String "gamma"; "path", `String visible_file_path ])
+      in
+      let search_files_json =
+        check_success_result "search_files" search_files_result
+      in
+      check string "search_files translates to rg op" "rg"
+        (json_string_field ~default:"" "op" search_files_json);
+      check bool "search_files returns real match" true
+        (contains_substring search_files_result.raw_output "public-alias.txt");
       let execute_result =
         run
           "Execute"
@@ -644,6 +690,35 @@ let test_keeper_task_force_release_noop_is_no_progress () =
         Yojson.Safe.Util.(member "kind" typed |> to_string);
       check string "no-progress reason" "No_work_available"
         Yojson.Safe.Util.(member "reason" typed |> member "kind" |> to_string))
+
+let test_glob_unknown_tool_returns_tutor_guidance () =
+  with_exec_fixture "keeper_tool_dispatch_runtime_glob_tutor"
+    (fun ~config ~meta ~ctx_work ->
+      let result =
+        KET.execute_keeper_tool_call_with_outcome
+          ~config
+          ~meta
+          ~ctx_work
+          ~exec_cache:None
+          ~name:"Glob"
+          ~input:(`Assoc [ "pattern", `String "*.ml" ])
+          ()
+      in
+      check string "runtime outcome" "failure" (outcome_label result.outcome);
+      check string "payload shape" "structured_error"
+        (payload_kind result.payload_shape);
+      let json = Yojson.Safe.from_string result.raw_output in
+      check string "policy rejection" "policy_rejection"
+        Yojson.Safe.Util.(member "failure_class" json |> to_string);
+      let tutor = Yojson.Safe.Util.member "tool_tutor" json in
+      check string "tutor kind" "unknown_tool"
+        Yojson.Safe.Util.(member "kind" tutor |> to_string);
+      check bool "tutor says Glob is not active" true
+        (contains_substring
+           Yojson.Safe.Util.(member "message" tutor |> to_string)
+           "Glob is not an active MASC keeper tool");
+      check bool "tutor names Execute alternative" true
+        (contains_substring result.raw_output {|"tool":"Execute"|}))
 
 let test_public_masc_web_search_alias_dispatches_to_misc_runtime () =
   with_exec_fixture "keeper_tool_dispatch_web_search_alias"
@@ -1094,6 +1169,8 @@ let () =
         test_registered_descriptor_bypasses_tool_access_allowlist;
       test_case "public Read rejects unsupported range fields" `Quick
         test_public_read_rejects_unsupported_range_fields;
+      test_case "public Read rejects offset with tutor guidance" `Quick
+        test_public_read_rejects_offset_with_tutor;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick
@@ -1104,6 +1181,8 @@ let () =
         test_keeper_task_claim_accepts_specific_task_id;
       test_case "keeper_task_force_release todo no-op is no progress" `Quick
         test_keeper_task_force_release_noop_is_no_progress;
+      test_case "Glob returns tutor guidance instead of aliasing to rg" `Quick
+        test_glob_unknown_tool_returns_tutor_guidance;
       test_case "public WebSearch alias reaches misc runtime" `Quick
         test_public_masc_web_search_alias_dispatches_to_misc_runtime;
       test_case "public WebFetch alias reaches misc runtime" `Quick

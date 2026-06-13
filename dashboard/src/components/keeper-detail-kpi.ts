@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { formatPct1, formatTokens } from '../lib/format-number'
+import { formatPct1, formatTokens, formatTokPerSec, isFiniteMetricValue } from '../lib/format-number'
 import { formatDurationCompound } from '../lib/format-time'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
@@ -129,6 +129,11 @@ export function KpiSection({ title, children }: {
 export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const series = keeper.metrics_series ?? []
   const lastPt = series[series.length - 1] as KeeperMetricPoint | undefined
+  const latestWallTokPerSec = latestFiniteMetric(series, point => point.wall_tokens_per_second)
+  const latestHwTokPerSec = latestFiniteMetric(
+    series,
+    point => point.inference_telemetry?.timings?.predicted_per_second,
+  )
   const latestCost =
     lastPt && Number.isFinite(lastPt.cost_usd)
       ? `$${lastPt.cost_usd.toFixed(4)}`
@@ -179,6 +184,20 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
             ${latestCost
               ? html`<${StatTile} label="비용 (USD)" value=${latestCost} />`
               : null}
+            ${latestWallTokPerSec != null
+              ? html`<${StatTile}
+                  label="wall tok/s"
+                  value=${formatTokPerSec(latestWallTokPerSec)}
+                  delta=${{ direction: 'flat' as const, text: 'output/latency' }}
+                />`
+              : null}
+            ${latestHwTokPerSec != null
+              ? html`<${StatTile}
+                  label="hw tok/s"
+                  value=${formatTokPerSec(latestHwTokPerSec)}
+                  delta=${{ direction: 'flat' as const, text: 'decode' }}
+                />`
+              : null}
           </div>
           <${OperationalHealth} keeper=${keeper} />
         </div>
@@ -214,4 +233,15 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
       <//>
     </div>
   `
+}
+
+function latestFiniteMetric(
+  series: KeeperMetricPoint[],
+  select: (point: KeeperMetricPoint) => number | null | undefined,
+): number | null {
+  for (let i = series.length - 1; i >= 0; i -= 1) {
+    const value = select(series[i]!)
+    if (isFiniteMetricValue(value)) return value
+  }
+  return null
 }

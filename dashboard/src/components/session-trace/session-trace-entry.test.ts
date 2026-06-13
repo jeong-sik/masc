@@ -179,6 +179,29 @@ describe('SessionTraceEntry', () => {
     expect(links.map(link => link.label)).toEqual(['Goal', 'Board', 'Comment', 'Keeper'])
   })
 
+  it('shows tok/sec for durable LLM response lifecycle details', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: {
+        id: 'llm-response-1',
+        ts: 4,
+        ts_iso: '2026-04-03T00:03:00Z',
+        kind: 'lifecycle',
+        sourceLane: 'oas',
+        summary: 'LLM response',
+        detail: {
+          durable_kind: 'llm_response',
+          output_tokens: 80,
+          duration_ms: 2000,
+          stop_reason: 'stop',
+        },
+      },
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    expect(container.textContent ?? '').toContain('40.0 tok/s')
+  })
+
   it('does not render Code links for unsafe absolute tool-call file args', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleToolCallEvent({

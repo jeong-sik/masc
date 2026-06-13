@@ -38,8 +38,6 @@ let decide ~accept_on_exhaustion ~is_last = function
   | Call_err err ->
     if (not is_last) && should_try_next err
     then Try_next { last_err = Some err }
-    else if is_last && accept_on_exhaustion
-    then Exhausted { last_err = None }
     else Exhausted { last_err = Some err }
 
 let decide_and_record ~runtime_id:_ ~accept_on_exhaustion ~is_last outcome =

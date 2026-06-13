@@ -142,10 +142,10 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
     informational. *)
 let verdict_to_hook_decision (v : Core.verdict) : Agent_sdk.Hooks.hook_decision =
   match v with
-  | Core.Pass -> Agent_sdk.Hooks.Continue
+  | Core.Pass -> Agent_sdk.Hooks.Skip
   | Core.Warn reason ->
     Log.Verifier.warn "%s" reason;
-    Agent_sdk.Hooks.Continue
+    Agent_sdk.Hooks.Skip
   | Core.Fail reason ->
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Agent_sdk.Hooks.Skip
@@ -153,10 +153,10 @@ let verdict_to_hook_decision (v : Core.verdict) : Agent_sdk.Hooks.hook_decision 
 
 let continue_with_degraded_verifier ~tool_name ~reason =
   Log.Verifier.error
-    "verification degraded for %s; allowing tool to continue: %s"
+    "verification degraded for %s; denying tool to protect safety: %s"
     tool_name
     reason;
-  Agent_sdk.Hooks.Continue
+  Agent_sdk.Hooks.Skip
 ;;
 
 let handle_pre_tool_use
@@ -170,7 +170,7 @@ let handle_pre_tool_use
   =
   let action_description = sprintf "tool:%s" tool_name in
   if Core.should_skip ~action_description
-  then Agent_sdk.Hooks.Continue
+  then Agent_sdk.Hooks.Skip
   else (
     match
       try Ok (Yojson.Safe.to_string input) with
@@ -226,7 +226,7 @@ let make_pre_tool_hook ?(verify_fn = verify) ~(goal : string) ~(context_summary 
   | Agent_sdk.Hooks.OnToolError _
   | Agent_sdk.Hooks.PreCompact _
   | Agent_sdk.Hooks.PostCompact _
-  | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue
+  | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Skip
 ;;
 
 (** Install the verifier hook into an existing OAS hooks record.

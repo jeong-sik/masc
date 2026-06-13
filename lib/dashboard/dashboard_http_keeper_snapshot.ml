@@ -251,11 +251,27 @@ let keeper_config_json (config : Workspace.config) (name : string)
       (* Preview the actual unified prompt the keeper turn uses.
          We build the observation from the current workspace state so the
          system message and the "Current World State" user message both
-         match what a turn would see right now. *)
+         match what a turn would see right now.
+
+         Board events are collected WITHOUT advancing the keeper's board
+         cursor: passing [~pending_board_events:None] would route through
+         [collect_board_events ~advance_cursor:true], so merely opening a
+         keeper's detail page would consume the live cursor and the next
+         real turn would miss those events. Only a turn owns cursor
+         advancement. *)
       let unified_system_prompt_preview, unified_user_message_preview =
         let observation =
-          Keeper_world_observation.observe ~pending_board_events:None ~config
-            ~meta:m
+          let pending_board_events, _new_count, _mention_count =
+            Keeper_world_observation
+            .collect_board_events_without_advancing_cursor
+              ~base_path:config.base_path
+              ~continuity_summary:
+                (Keeper_world_observation.read_continuity_summary ~config
+                   ~meta:m)
+              ~meta:m
+          in
+          Keeper_world_observation.observe
+            ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
         Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
           ~profile_defaults:defaults ~observation ()

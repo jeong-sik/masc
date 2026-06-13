@@ -67,20 +67,20 @@ let target_source () =
   String.concat "\n" (List.map load_source target_files)
 
 let test_metric_registered () =
-  (* The metric literal moved out of [lib/prometheus.ml] and into
+  (* The metric literal moved out of [lib/otel_metric_store.ml] and into
      [lib/keeper_metrics/keeper_metrics.ml] in #14179 (RFC-0043 distribute
      metric ownership). Builtin registration now references
      [Keeper_metrics.(to_string PausedStatePersistErrors)] by
      symbol, so the structural guard checks both files: the literal
      must live somewhere, and the registration site (by symbol) must
-     still be in [lib/prometheus_builtin_metrics_part2.ml]. *)
+     still be in [lib/otel_metric_store_builtin_metrics_part2.ml]. *)
   let metrics = load_source "lib/keeper_metrics/keeper_metrics.ml" in
   check bool "paused-state persist-errors metric declared" true
     (count_occurrences
        ~needle:"masc_keeper_paused_state_persist_errors_total"
        metrics
      >= 1);
-  let prom = load_source "lib/prometheus_builtin_metrics_part2.ml" in
+  let prom = load_source "lib/otel_metric_store_builtin_metrics_part2.ml" in
   check bool "paused-state persist-errors metric registered with HELP"
     true
     (count_occurrences ~needle:metric_name prom >= 1)
@@ -160,7 +160,7 @@ let test_counter_inc_calls () =
      [persist_keeper_paused_state] (Ok None / Error), 2 in
      [resume_booted_keeper_if_needed] (Ok None / Error), 2 in the
      directive endpoint (Ok None / Error) — total 6. *)
-  check bool "Prometheus.inc_counter called for new metric >= 6 times"
+  check bool "Otel_metric_store.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
        ~needle:"Keeper_metrics.(to_string PausedStatePersistErrors)"

@@ -93,6 +93,40 @@ let container_path_of_host (t : t) ~host_path =
          t.host_root)
 ;;
 
+let repos_in_playground host_root =
+  let repos_dir = Filename.concat host_root "repos" in
+  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
+  then []
+  else (
+    try
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        let p = Filename.concat repos_dir name in
+        try Sys.is_directory p && Sys.file_exists (Filename.concat p ".git") with
+        | Sys_error _ -> false)
+      |> List.sort compare
+    with
+    | Sys_error _ -> [])
+
+let rec skip_worktree_prefix = function
+  | ".worktrees" :: _branch :: rest -> rest
+  | "./.worktrees" :: _branch :: rest -> rest
+  | other -> other
+
+let find_repo_segment_and_suffix ~repos ~host_cwd =
+  let segments = String.split_on_char '/' host_cwd in
+  let rec find_suffix = function
+    | [] -> None
+    | head :: tail ->
+      if List.mem head repos then
+        let effective_tail = skip_worktree_prefix tail in
+        Some (head, String.concat "/" effective_tail)
+      else
+        find_suffix tail
+  in
+  find_suffix segments
+
 let container_cwd_of_host (t : t) ~host_cwd =
   match container_path_of_host t ~host_path:host_cwd with
   | Ok container_cwd -> container_cwd
@@ -100,7 +134,37 @@ let container_cwd_of_host (t : t) ~host_cwd =
     match Keeper_cwd_response.profile_independent_cwd
             ~container_root:t.container_root ~host_cwd with
     | Some cwd -> cwd
-    | None -> t.container_root
+    | None ->
+      let repos = repos_in_playground t.host_root in
+      (match find_repo_segment_and_suffix ~repos ~host_cwd with
+       | Some (repo_name, suffix) ->
+         let logical_path =
+           Filename.concat (Filename.concat "repos" repo_name) suffix
+         in
+         Filename.concat t.container_root logical_path
+       | None -> t.container_root)
+;;
+
+let host_cwd_of_container (t : t) ~container_cwd =
+  let container_root_norm = normalize_path t.container_root in
+  let container_cwd_norm = normalize_path container_cwd in
+  if container_cwd_norm = container_root_norm
+  then Ok t.host_root
+  else if String.starts_with ~prefix:(container_root_norm ^ "/") container_cwd_norm
+  then (
+    let suffix =
+      String.sub
+        container_cwd_norm
+        (String.length container_root_norm + 1)
+        (String.length container_cwd_norm - String.length container_root_norm - 1)
+    in
+    Ok (Filename.concat t.host_root suffix))
+  else
+    Error
+      (Printf.sprintf
+         "host_path_of_container: %s is not inside container root %s"
+         container_cwd_norm
+         t.container_root)
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =
@@ -752,7 +816,7 @@ let cleanup (t : t) =
               container_name
               (status_label final_st)
               (Exec_policy.truncate_for_log final_out);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnCleanupFailures)
               ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
               ())

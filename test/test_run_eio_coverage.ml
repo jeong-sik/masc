@@ -257,9 +257,15 @@ let test_get_run () =
 
 let test_get_nonexistent () =
   with_initialized_masc @@ fun config ->
-  match Run_eio.get config ~task_id:"nonexistent" with
-  | Error _ -> ()
-  | Ok _ -> fail "expected error"
+  match Run_eio.get ~agent_name:"keeper-auto" config ~task_id:"nonexistent" with
+  | Error e -> failf "get should auto-create missing run: %s" e
+  | Ok json ->
+      let open Yojson.Safe.Util in
+      let run = json |> member "run" in
+      check string "task_id" "nonexistent" (run |> member "task_id" |> to_string);
+      check string "agent_name" "keeper-auto" (run |> member "agent_name" |> to_string);
+      check bool "run.json created" true
+        (Sys.file_exists (Run_eio.run_json_path config "nonexistent"))
 
 let test_list_empty () =
   with_initialized_masc @@ fun config ->

@@ -1,7 +1,7 @@
 open Alcotest
 
 module Helpers = Masc.Keeper_turn_helpers
-module Prometheus = Masc.Prometheus
+module Otel_metric_store = Masc.Otel_metric_store
 
 let test_side_effect_issue_increments_failure_metric () =
   let keeper_name = "side-effect-metric-keeper-0507" in
@@ -9,7 +9,7 @@ let test_side_effect_issue_increments_failure_metric () =
     [ ("keeper", keeper_name); ("site", "trajectory_finalize") ]
   in
   let before =
-    Prometheus.metric_value_or_zero
+    Otel_metric_store.metric_value_or_zero
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
@@ -25,7 +25,7 @@ let test_side_effect_issue_increments_failure_metric () =
     ~side_effect:"trajectory finalize"
     "test failure";
   let after =
-    Prometheus.metric_value_or_zero
+    Otel_metric_store.metric_value_or_zero
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()

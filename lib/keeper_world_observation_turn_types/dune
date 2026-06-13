@@ -1,6 +1,0 @@
-(include_subdirs no)
-(library
- (name masc_keeper_world_observation_turn_types)
- (public_name masc.keeper_world_observation_turn_types)
- (wrapped false)
- (modules keeper_world_observation_turn_types))

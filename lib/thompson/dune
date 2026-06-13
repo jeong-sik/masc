@@ -7,7 +7,7 @@
 ;;
 ;; PR-AE (#19826) extracted Economy but could NOT take Thompson along:
 ;; Thompson had two load-bearing edges to mega-lib-root modules —
-;; Health.is_healthy and Prometheus.inc_counter. Both have been
+;; Health.is_healthy and Otel_metric_store.inc_counter. Both have been
 ;; inverted via dependency injection: [select_with_feedback] now takes
 ;; [~is_healthy] (required) and [?on_priority_selected] (no-op default).
 ;; The coupling moved to the call site of [select_with_feedback] (today

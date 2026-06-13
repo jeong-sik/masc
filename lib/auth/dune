@@ -6,7 +6,8 @@
  (wrapped false)
  (private_modules
   auth_credential_base
-  auth_credential_token)
+  auth_credential_token
+  auth_metric_store)
  (libraries
   yojson
   unix
@@ -24,7 +25,6 @@
   masc.masc_log
   masc.masc_tool_dispatch
   masc.tool_types
-  time_compat
-  masc.prometheus)
+  time_compat)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

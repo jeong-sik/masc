@@ -354,8 +354,8 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
          summary line carries timestamps the operator can eyeball for
          per-state duration.  No OCaml-side mutable accumulation: the
          emit calls are stateless, and any duration derivation is a
-         pure projection of the already-emitted [ts] timeline.  PromQL
-         and this CLI are the right boundary for time-series math. *)
+         pure projection of the already-emitted [ts] timeline.  External
+         metric queries and this CLI are the right boundary for time-series math. *)
       let state_with_ts =
         List.filter_map
           (fun json ->

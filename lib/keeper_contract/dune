@@ -1,0 +1,12 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_contract)
+ (public_name masc.keeper_contract)
+ (wrapped false)
+ (modules keeper_accountability_claim_types keeper_transition_audit_types keeper_turn_slot_types keeper_workspace_op keeper_world_observation_turn_types)
+ (libraries
+  masc.keeper_state
+  masc.keeper_metrics
+  masc.masc_core
+  yojson))

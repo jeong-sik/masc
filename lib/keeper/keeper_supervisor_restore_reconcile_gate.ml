@@ -72,7 +72,7 @@ let restore_reconcile_continue_gate
             "%s: restored reconcile continue gate rejected; keeper remains paused (%s)"
             meta.name
             reason;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string SupervisorCleanupFailures)
             ~labels:
               [ "keeper", meta.name

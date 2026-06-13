@@ -632,6 +632,24 @@ let test_pipeline_stage_of_phase_exhaustive () =
       expected actual
   ) cases
 
+let test_pipeline_stage_detail_distinguishes_offline_projection () =
+  let cases = [
+    (KSM.Offline, "offline", "launch_pending_no_fiber");
+    (KSM.Stopped, "offline", "clean_stop_terminal");
+    (KSM.Dead, "offline", "restart_budget_exhausted_terminal");
+  ] in
+  List.iter
+    (fun (phase, expected_stage, expected_detail) ->
+       check string
+         (Printf.sprintf "%s stage" (KSM.phase_to_string phase))
+         expected_stage
+         (ES.pipeline_stage_of_phase phase);
+       check string
+         (Printf.sprintf "%s stage detail" (KSM.phase_to_string phase))
+         expected_detail
+         (ES.pipeline_stage_detail_of_phase phase))
+    cases
+
 (** Verify non-registered keepers → get_phase returns None, and
     registered keepers in every phase → pipeline_stage_of_phase produces
     a non-None mapping. This tests the production boundary:
@@ -728,11 +746,13 @@ let () =
       test_case "resolve_done reports prior outcome" `Quick
         test_resolve_done_reports_prior_outcome;
     ];
-    "pipeline_stage_phase", [
-      test_case "exhaustive 11-phase mapping" `Quick
-        test_pipeline_stage_of_phase_exhaustive;
-      test_case "unregistered keeper → offline" `Quick
-        test_pipeline_stage_unregistered_is_offline;
+	    "pipeline_stage_phase", [
+	      test_case "exhaustive 11-phase mapping" `Quick
+	        test_pipeline_stage_of_phase_exhaustive;
+	      test_case "offline projection details remain distinct" `Quick
+	        test_pipeline_stage_detail_distinguishes_offline_projection;
+	      test_case "unregistered keeper → offline" `Quick
+	        test_pipeline_stage_unregistered_is_offline;
       test_case "sensitivity: active phases ≠ offline" `Quick
         test_pipeline_stage_sensitivity;
     ];

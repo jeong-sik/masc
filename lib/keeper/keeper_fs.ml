@@ -31,7 +31,7 @@ let ensure_dir (path : string) : string =
           Ok ()
         with
         | Eio.Cancel.Cancelled _ as exn ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
               ();
@@ -44,7 +44,7 @@ let ensure_dir (path : string) : string =
             Keeper_disk_pressure.note_exception
               ~site:"filesystem_runtime.ensure_dir"
               exn;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
               ();
@@ -89,7 +89,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
         Keeper_disk_pressure.note_if_disk_exhaustion
           ~site:"filesystem_runtime.save_atomic"
           msg;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string FsFailures)
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
           ();
@@ -105,7 +105,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
       Keeper_disk_pressure.note_exception
         ~site:"filesystem_runtime.save_atomic"
         exn;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string FsFailures)
         ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]
         ();

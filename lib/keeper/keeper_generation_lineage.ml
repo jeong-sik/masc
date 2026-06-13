@@ -237,7 +237,7 @@ let record_handoff_artifacts
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string GenerationLineageFailures)
              ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Index_append))]
              ();
@@ -245,7 +245,7 @@ let record_handoff_artifacts
              "keeper:%s failed to append generation index %s: %s"
              child.name index_path (Printexc.to_string exn))
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string GenerationLineageFailures)
         ~labels:[("keeper", child.name); ("site", Keeper_generation_lineage_failure_site.(to_label Manifest_save))]
         ();
@@ -260,7 +260,7 @@ let load_json_file_opt path =
     let report_drop ~reason ~detail =
       Safe_ops.report_persistence_read_drop
         ~on_drop:(fun () ->
-          Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+          Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
             ~labels:[("surface", surface); ("reason", reason)]
             ())
         ~surface

@@ -292,10 +292,10 @@ correlator the receipt does.
   bound-actor-tolerant fallback.  Surfaces the misconfiguration once
   instead of paying per-turn `no_tool_capable_provider` events.
 
-- **`masc_keeper_turn_fsm_transitions_total`** (#11326) — Prometheus
+- **`masc_keeper_turn_fsm_transitions_total`** (#11326) — OTel metric-store
   counter bumped inside `Keeper_turn_fsm.emit_transition`.  Labels
   `from`/`to`/`keeper` carry the typed ADT vocabulary (e.g.
-  `to=failed:turn_livelock_blocked`) so PromQL can chart turn-state
+  `to=failed:turn_livelock_blocked`) so telemetry queries can chart turn-state
   distribution per keeper without ETL on the log line.  Distinct from
   `masc_keeper_fsm_edge_transitions_total`, which encodes the cross
   sub-FSM edges (`ksm_to_kcl_routing`, etc.) used by
@@ -312,7 +312,7 @@ correlator the receipt does.
 | Step 4b | `emit_transition` wired at the 4 pre-dispatch silent-skip sites | merged (#11269) |
 | Step 4c | `emit_transition` at run_keeper_cycle entry + success exit (`Idle → Phase_gating`, `Completing → Done`) | merged (#11288) |
 | Step 4d | `emit_transition` `Streaming → Completing` on stop_reason | merged (#11308) |
-| Step 4e | Prometheus counter `masc_keeper_turn_fsm_transitions_total` for typed turn-state aggregation | merged (#11326) |
+| Step 4e | OTel metric-store counter `masc_keeper_turn_fsm_transitions_total` for typed turn-state aggregation | merged (#11326) |
 | Step 4f | `Failure_turn_livelock_blocked` variant + runtime-build redirect to `Failure_provider_error` | merged (#11340) |
 | Step 4g | `emit_transition` `Phase_gating → Runtime_routing → Awaiting_provider` middle of dispatch lane | merged (#11347) |
 | Step 4 (run_turn side) | `Awaiting_provider → Streaming` + `Streaming ⇄ Awaiting_tool_result` from inside `keeper_agent_run.run_turn` | pending |

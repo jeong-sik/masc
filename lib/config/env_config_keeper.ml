@@ -640,7 +640,7 @@ end
     (adaptive throttling).
 
     Default off. Phase A.2 emit is purely additive — it increments a new
-    Prometheus counter ([masc_keeper_runtime_saturation_signal_total])
+    Otel_metric_store counter ([masc_keeper_runtime_saturation_signal_total])
     with a typed [kind] label sourced from {!Runtime_saturation_signal.kind}. *)
 module RuntimeSaturationSignal = struct
   let enabled () =

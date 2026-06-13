@@ -156,8 +156,8 @@ let test_parse_dune_project_version () =
     (Build_identity.parse_dune_project_version "(lang dune 3.22)\n")
 
 let build_identity_probe_failure_count site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_build_identity_probe_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_build_identity_probe_failures
     ~labels:[("site", site)]
     ()
 

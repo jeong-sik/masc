@@ -75,7 +75,7 @@ let test_classify_none_is_no_handler () =
 
 let test_string_vocabulary_parity () =
   (* Dispatch wraps emit outcome strings "handled" and "no_handler".
-     Both must remain valid arms in the typed sum so the prometheus
+     Both must remain valid arms in the typed sum so the otel_metric_store
      counter label set is preserved. *)
   (check bool)
     "handled present in typed sum"

@@ -1,5 +1,5 @@
-(** RFC-0217 S1 — OTel metric bridge (push-model replacement for Prometheus
-    /metrics scrape). A {!sample} mirrors one Prometheus_store cell; a registered
+(** RFC-0217 S1 — OTel metric bridge (push-model replacement for Otel_metric_store
+    /metrics scrape). A {!sample} mirrors one Otel_metric_store_core cell; a registered
     source is polled by the OTel backend each export tick and emitted as OTLP. *)
 
 type kind =
@@ -18,6 +18,6 @@ type sample = {
 
 (** [register_source f] registers [f] as a metric source. [f] returns the current
     accumulated samples and is called by the OTel backend on each export tick
-    (Collector.on_tick) — the observable equivalent of a Prometheus scrape.
+    (Collector.on_tick) — the observable equivalent of a Otel_metric_store scrape.
     Idempotent across the process: each call adds one source. *)
 val register_source : (unit -> sample list) -> unit

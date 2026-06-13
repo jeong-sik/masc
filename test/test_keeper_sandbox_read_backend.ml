@@ -14,7 +14,7 @@ module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
-module Fd_accountant = Masc.Fd_accountant
+module Fd_accountant = Fd_accountant
 module Env_config_keeper = Env_config_keeper
 
 (* ── Helpers ─────────────────────────────────────────────────────── *)

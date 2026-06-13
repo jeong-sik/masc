@@ -100,7 +100,7 @@ let create
 
 let current_state_for_test (t : t) : L.state = !(t.state)
 
-(* -- Prometheus emission ------------------------------------------- *)
+(* -- Otel_metric_store emission ------------------------------------------- *)
 
 let kill_labels (t : t) (failure : L.failure) =
     [
@@ -206,7 +206,7 @@ let observe_chunk_clock (t : t) ~(at : float) : unit =
      then t.max_inter_chunk_s := gap);
   t.last_chunk_at := Some at
 
-let prometheus_recorder (t : t) : L.recorder =
+let otel_metric_store_recorder (t : t) : L.recorder =
   let _labels = [ ("runtime_id", t.runtime_id); ("provider", t.provider_label) ] in
   {
     L.record_ttft = (fun _seconds -> ());
@@ -237,7 +237,7 @@ let step_with_event (t : t) (evt : Agent_sdk.Types.sse_event) : unit =
          | L.Chunk (_, at) -> observe_chunk_clock t ~at
          | L.Tick _ | L.Provider_wire_error _ -> ());
         let new_state, output =
-          L.step ~recorder:(prometheus_recorder t) t.budget !(t.state) le
+          L.step ~recorder:(otel_metric_store_recorder t) t.budget !(t.state) le
         in
         t.state := new_state;
         if L.is_terminal new_state then stop_tick_fiber t;
@@ -337,7 +337,7 @@ let start_tick_fiber (t : t) ~(sw : Eio.Switch.t)
                    | L.Chunk (_, at) -> observe_chunk_clock t ~at
                    | L.Tick _ | L.Provider_wire_error _ -> ());
                   let new_state, output =
-                    L.step ~recorder:(prometheus_recorder t)
+                    L.step ~recorder:(otel_metric_store_recorder t)
                       t.budget !(t.state) event
                   in
                   t.state := new_state;

@@ -61,13 +61,11 @@
   masc.keeper_types_profile_sandbox
   masc.keeper_pressure
   masc.keeper_memory_taxonomy
-  masc.keeper_prompt_names
   masc.keeper_tool_response
   masc.runtime_provider_labels
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
-  masc.prometheus
   masc.json_field
   masc.types_boundary
   masc.cdal_runtime

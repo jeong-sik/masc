@@ -237,12 +237,12 @@ let test_registered_descriptor_bypasses_tool_access_allowlist () =
          | _ -> false))
 
 let counter_for_tool_not_allowed ~keeper ~tool ~reason =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string ToolNotAllowed)
     ~labels:[ ("keeper", keeper); ("tool", tool); ("reason", reason) ]
     ()
 
-(* #13xxx: tool_not_allowed Prometheus counter *)
+(* #13xxx: tool_not_allowed Otel_metric_store counter *)
 let test_tool_not_allowed_increments_counter_for_unknown_tool () =
   (* Unknown names are still rejected by the descriptor/registry existence
      gate. Registered tools are not rejected merely because tool_access is

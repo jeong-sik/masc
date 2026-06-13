@@ -76,7 +76,7 @@ let sanitize_event (value : event) =
    This surfaces "which kind of event / actor had invalid UTF-8 at the emit
    site" without requiring post-hoc forensics on the read-path repair log.
    Log fires once per (kind × actor) via a new call since the Warn channel
-   has no built-in dedup; operators should correlate with the Prometheus
+   has no built-in dedup; operators should correlate with the Otel_metric_store
    repair counter for frequency. *)
 let sanitize_event_traced (value : event) : event =
   let sanitized = sanitize_event value in

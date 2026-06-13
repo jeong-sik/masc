@@ -27,7 +27,7 @@
       failure reason + return updated meta.
 
     Pure helper move — no callback injection, all references reach
-    external modules (Keeper_unified_turn, Agent_sdk, Log, Prometheus,
+    external modules (Keeper_unified_turn, Agent_sdk, Log, Otel_metric_store,
     Keeper_metrics, Keeper_registry, Keeper_turn_slot,
     Keeper_failure_policy) or other siblings
     ([Keeper_heartbeat_loop_in_turn_pulse], [Observations]). *)
@@ -74,7 +74,7 @@ let run_keeper_cycle_with_slot
         "%s: fatal environment error — promoting to Keeper_fiber_crash: %s"
         meta_after_cursor_persist.name
         e_str;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string HeartbeatFailures)
         ~labels:[ "keeper", meta_after_cursor_persist.name; "phase", "fatal_environment" ]
         ();
@@ -98,7 +98,7 @@ let run_keeper_cycle_with_slot
        Log.Keeper.error
          "keeper:%s read_meta returned None after turn failure, using stale meta"
          meta_after_cursor_persist.name;
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string MetaReadFailures)
          ~labels:
            [ "keeper", meta_after_cursor_persist.name; "site", "none_after_failure" ]
@@ -109,7 +109,7 @@ let run_keeper_cycle_with_slot
          "keeper:%s read_meta failed after turn failure (%s), using stale meta"
          meta_after_cursor_persist.name
          e;
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string MetaReadFailures)
          ~labels:
            [ "keeper", meta_after_cursor_persist.name; "site", "error_after_failure" ]

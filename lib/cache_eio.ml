@@ -337,7 +337,7 @@ let get config ~key : (cache_entry option, string) result =
   let cache_label = [ "cache", "eio" ] in
   match located with
   | None ->
-    Prometheus.inc_counter Prometheus.metric_cache_misses_total ~labels:cache_label ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_cache_misses_total ~labels:cache_label ();
     (* Trigger batch eviction check even on miss *)
     let _evicted = maybe_evict_expired config in
     Ok None
@@ -345,8 +345,8 @@ let get config ~key : (cache_entry option, string) result =
     (try
        if is_expired entry
        then (
-         Prometheus.inc_counter
-           Prometheus.metric_cache_misses_total
+         Otel_metric_store.inc_counter
+           Otel_metric_store.metric_cache_misses_total
            ~labels:cache_label
            ();
          (* Auto-delete expired entries *)
@@ -354,7 +354,7 @@ let get config ~key : (cache_entry option, string) result =
          let _evicted = maybe_evict_expired config in
          Ok None)
        else (
-         Prometheus.inc_counter Prometheus.metric_cache_hits_total ~labels:cache_label ();
+         Otel_metric_store.inc_counter Otel_metric_store.metric_cache_hits_total ~labels:cache_label ();
          let _evicted = maybe_evict_expired config in
          Ok (Some entry))
      with

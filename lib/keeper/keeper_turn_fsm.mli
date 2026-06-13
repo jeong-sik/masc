@@ -23,6 +23,6 @@ val emit_transition :
   _ turn_state ->
   unit
 (** Emit a structured FSM transition log line (+ [Keeper_transition_audit] WAL
-    row + Prometheus counters). The line format is
+    row + Otel_metric_store counters). The line format is
     [\[fsm:transition\] <prev> -> <state> action=<action> stop_before=.. stop_after=..];
     a missing [?prev] renders as ["-"]. Pinned by [test_keeper_turn_fsm_emit]. *)

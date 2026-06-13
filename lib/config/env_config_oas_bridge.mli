@@ -25,7 +25,7 @@ type caller =
   | Unknown of string
 
 (** Stable lowercase string identifier for [caller], used by
-    Prometheus labels and env-var name construction. *)
+    Otel_metric_store labels and env-var name construction. *)
 val caller_key : caller -> string
 
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the

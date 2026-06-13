@@ -164,12 +164,6 @@ let classify_structured_shell_op args =
   | None -> Ungated
 ;;
 
-let classify_non_catalog_tool ~tool_name =
-  match tool_name with
-  | "shell_exec" -> Some Shell
-  | _ -> None
-;;
-
 let classify_catalog_tool ~tool_name =
   match tool_name with
   | "masc_web_fetch" | "masc_web_search" -> Some Web
@@ -207,8 +201,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_cleanup_zombies"
   | "masc_gc"
   | "masc_operator_action"
-  | "masc_operator_confirm"
-  | "masc_tool_admin_update" -> Some Generic_write
+  | "masc_operator_confirm" -> Some Generic_write
   | "masc_agent_card"
   | "masc_agent_fitness"
   | "masc_agents"
@@ -238,7 +231,6 @@ let classify_catalog_tool ~tool_name =
   | "masc_status"
   | "masc_task_history"
   | "masc_tasks"
-  | "masc_tool_admin_snapshot"
   | "masc_tool_help"
   | "masc_tool_list"
   | "masc_tool_stats" -> Some Ungated
@@ -251,6 +243,7 @@ let classify_descriptor_tool ~tool_name ~arguments =
   | "tool_search_files" -> Some (classify_structured_shell_op arguments)
   | "tool_read_file" -> Some Filesystem_read
   | "tool_write_file" | "tool_edit_file" -> Some Workspace_write
+  | "shell_exec" -> Some Shell
   | _ -> None
 ;;
 
@@ -260,10 +253,7 @@ let classify_normalized ~tool_name ~arguments ~is_read_only =
   | None ->
     (match classify_catalog_tool ~tool_name with
      | Some resource_class -> resource_class
-     | None ->
-       (match classify_non_catalog_tool ~tool_name with
-        | Some resource_class -> resource_class
-        | None -> if is_read_only then Ungated else Generic_write))
+     | None -> if is_read_only then Ungated else Generic_write)
 ;;
 
 let classify ~tool_name ~arguments ~is_read_only =

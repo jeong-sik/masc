@@ -16,7 +16,7 @@ include module type of Workspace_state
     [variant] label.  The emit runs through
     {!Workspace_hooks.fsm_drift_observer_fn}, wired to
     {!Workspace.record_fsm_drift} by [lib/workspace.ml].  [masc_workspace]
-    cannot call Prometheus directly — it sits below that module
+    cannot call Otel_metric_store directly — it sits below that module
     in the library dep graph. *)
 val drift_variant_label : Workspace_task_lifecycle.drift -> string
 

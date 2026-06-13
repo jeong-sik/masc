@@ -40,7 +40,7 @@ let register_record_pre_compact (f : (keeper_name:string -> context_ratio:float 
     the default with a one-time warn (parse-correctness, not silent
     coercion — a stale operator typo should not push the emergency
     floor outside the policy envelope, but it also should not block
-    boot). The effective value is exposed via Prometheus gauge
+    boot). The effective value is exposed via Otel_metric_store gauge
     {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}
     so operators can see what the running process is actually using.
 
@@ -99,13 +99,13 @@ let emergency_compact_ratio_threshold : float =
   (* Surface the effective value for operators via /metrics. Registered
      here so the gauge exists from module init regardless of whether any
      compaction has fired yet. *)
-  Prometheus.register_gauge
+  Otel_metric_store.register_gauge
     ~name:Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     ~help:
       "Effective emergency compaction ratio threshold (env-overridable via \
        MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD; clamped to [0.5, 0.99])."
     ();
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     effective;
   effective
@@ -344,7 +344,7 @@ let compact_if_needed_typed
        overrun magnitude as a typed payload that surfaces on the
        post-compact JSONL record below ([tokens_divergence] /
        [messages_divergence]), so operators can detect estimator
-       drift without a free-floating Prometheus counter. *)
+       drift without a free-floating Otel_metric_store counter. *)
     let saved_tokens, tokens_divergence =
       match
         Keeper_token_count.saved
@@ -363,15 +363,15 @@ let compact_if_needed_typed
       | `Saved n -> n, None
       | `Divergent n -> 0, Some n
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string Compactions)
       ~labels:[ "keeper", meta.name ]
       ();
-    Prometheus.set_gauge
+    Otel_metric_store.set_gauge
       Keeper_metrics.(to_string CompactionRatioChange)
       ~labels:[ "keeper", meta.name ]
       (ratio -. new_ratio);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CompactionSavedTokens)
       ~labels:[ "keeper", meta.name ]
       ~delta:(float_of_int saved_tokens)
@@ -388,7 +388,7 @@ let compact_if_needed_typed
     let bump_pair_repair kind count =
       if count > 0
       then
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CompactionPairRepairFabrications)
           ~labels:[ "keeper", meta.name; "kind", kind ]
           ~delta:(float_of_int count)

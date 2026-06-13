@@ -4,7 +4,7 @@ last_verified: 2026-05-12
 code_refs:
   - lib/core/masc_runtime_events.ml
   - lib/keeper/keeper_event_bridge.ml
-  - lib/telemetry_unified.ml
+  - lib/telemetry_unified/telemetry_unified.ml
 ---
 
 # OAS Observability Truth Audit (2026-04-15)
@@ -33,7 +33,7 @@ This audit records the producer -> bridge -> durable store -> dashboard consumer
 
 ### 4. Server Read Path
 
-- `lib/telemetry_unified.ml` exposes the durable store as telemetry source `oas_event`.
+- `lib/telemetry_unified/telemetry_unified.ml` exposes the durable store as telemetry source `oas_event`.
 - Dashboard consumers read it through `/api/v1/dashboard/telemetry?source=oas_event`.
 
 ### 5. Dashboard Consumer Path

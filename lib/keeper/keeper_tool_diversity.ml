@@ -113,7 +113,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
   let underused_tools =
     List.sort_uniq String.compare summary.underused_tools
   in
-  Prometheus.set_gauge
+  Otel_metric_store.set_gauge
     Keeper_metrics.(to_string ToolUnderusedAllowedCount)
     ~labels:[ ("keeper", keeper_name) ]
     (float_of_int (List.length underused_tools));
@@ -122,7 +122,7 @@ let record_underused_tool_metrics ~keeper_name ~available_tools summary =
        let value =
          if List.mem tool underused_tools then 1.0 else 0.0
        in
-       Prometheus.set_gauge
+       Otel_metric_store.set_gauge
          Keeper_metrics.(to_string ToolUnderusedAllowed)
          ~labels:[ ("keeper", keeper_name); ("tool", tool) ]
          value)

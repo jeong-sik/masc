@@ -3,4 +3,6 @@
 (library
  (name keeper_metrics)
  (public_name masc.keeper_metrics)
- (wrapped false))
+ (wrapped false)
+ (modules keeper_measurement keeper_metrics keeper_prompt_names keeper_token_count)
+ (libraries yojson))

@@ -353,7 +353,7 @@ let provider_label label =
   if label = "" then "unknown_provider" else label
 
 let emit_provider_error_metric ~runtime_id ~provider error =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     provider_error_total_metric
     ~labels:
       [ label_kind, Provider_error.to_error_kind error

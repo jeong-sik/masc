@@ -233,7 +233,7 @@ describe('buildFleetRows runtime labels', () => {
         status: 'active',
         keepalive_running: true,
         stop_cause: {
-          code: 'no_tool_capable_provider',
+          code: 'runtime_exhausted',
           source: 'runtime_blocker_class',
           label: 'no tool capable provider',
           summary: 'no provider can satisfy tool surface',
@@ -244,7 +244,7 @@ describe('buildFleetRows runtime labels', () => {
     ], EMPTY_TOOL_QUALITY)
 
     expect(row?.stop_cause).toMatchObject({
-      code: 'no_tool_capable_provider',
+      code: 'runtime_exhausted',
       source: 'runtime_blocker_class',
       summary: 'no provider can satisfy tool surface',
     })

@@ -1,7 +1,0 @@
-(include_subdirs no)
-(library
- (name masc_keeper_registry_types_turn_phase)
- (public_name masc.keeper_registry_types_turn_phase)
- (wrapped false)
- (preprocess (pps ppx_tla))
- (modules keeper_registry_types_turn_phase))

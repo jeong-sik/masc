@@ -38,7 +38,7 @@ REQUIRED_VERIFY_GATE_IDS = (
     "tla_prompt_spec_liveness",
     "post_act_log_contract",
 )
-PROMETHEUS_METRIC_SOURCES = {
+METRIC_SERIES_SOURCES = {
     "keeper_turn_success_rate": ["masc_keeper_turns_total"],
     "keeper_skipping_turn_rate_5m": ["masc_keeper_semaphore_wait_timeout_total"],
     "pricing_catalog_miss_total": ["masc_pricing_catalog_miss_total"],
@@ -152,7 +152,7 @@ def metric_gate(
         "metric_name": metric_name,
         "metric_snapshot_key": metric_name,
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
-        "prometheus_sources": PROMETHEUS_METRIC_SOURCES.get(metric_name, []),
+        "metric_series_sources": METRIC_SERIES_SOURCES.get(metric_name, []),
         "value": value,
         "predicate": predicate,
     }
@@ -212,9 +212,9 @@ def admission_backpressure_gate(metrics: dict[str, Any] | None) -> VerifyGate:
         "admission_queue_depth": queue_depth,
         "admission_queue_wait_ms": wait_ms,
         "metric_source": "GOAL_LOOP_METRICS_JSON (--metrics-json)",
-        "prometheus_sources": {
-            "admission_queue_depth": PROMETHEUS_METRIC_SOURCES["admission_queue_depth"],
-            "admission_queue_wait_ms": PROMETHEUS_METRIC_SOURCES[
+        "metric_series_sources": {
+            "admission_queue_depth": METRIC_SERIES_SOURCES["admission_queue_depth"],
+            "admission_queue_wait_ms": METRIC_SERIES_SOURCES[
                 "admission_queue_wait_ms"
             ],
         },

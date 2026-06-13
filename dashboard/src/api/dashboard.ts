@@ -1188,11 +1188,9 @@ function decodeGoalVerificationPrincipal(
   raw: unknown,
 ): GoalVerificationRequest['requested_by'] | null {
   if (!isRecord(raw)) return null
-  const kind = asString(raw.kind)
   const id = asString(raw.id)
-  if (!kind || !id) return null
+  if (!id) return null
   return {
-    kind,
     id,
     display_name: asNullableString(raw.display_name),
   }

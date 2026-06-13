@@ -210,12 +210,12 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 ### Runtime Lens Boundary (provider/model identity in JSON)
 
 The Runtime Lens redacts provider/model identity at **external** surfaces
-(Prometheus labels, dashboard OAS bridge, provider error envelopes,
+(metric labels, dashboard OAS bridge, provider error envelopes,
 keeper unified metrics redacted variants). It must **NOT** redact at
 **internal observability** surfaces (boot log, audit log,
 operator-facing `Log.*.info`).
 
-Before adding a new `*_to_yojson` function or Prometheus emitter that
+Before adding a new `*_to_yojson` function or metric emitter that
 touches provider/model identity, read
 and apply its 3-question decision rule (who reads it / is there a
 `redacted_*` companion / sibling field consistency).

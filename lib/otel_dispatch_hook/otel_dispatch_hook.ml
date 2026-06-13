@@ -1,7 +1,6 @@
 (** OTel Dispatch Hook — records tool call spans via a Tool_dispatch observer.
 
     Creates an OTel span for each tool call using data from [Tool_result.result].
-    Also records a Prometheus histogram observation for tool call duration.
 
     Span attributes use OpenTelemetry GenAI semantic-convention keys
     ([gen_ai.tool.name], [gen_ai.operation.name]) so vendors that
@@ -75,13 +74,8 @@ let tool_span_attrs (result : Tool_result.result) =
   gen_ai_attrs @ status_attrs
 ;;
 
-(** Record a tool call as an OTel span and Prometheus histogram observation. *)
+(** Record a tool call as an OTel span. *)
 let on_tool_result (result : Tool_result.result) : unit =
-  (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
-  Prometheus.observe_histogram
-    "masc_tool_call_duration_seconds"
-    ~labels:[ "tool_name", Tool_result.tool_name result; "phase", cold_warm_phase () ]
-    (Tool_result.duration_ms result /. 1000.0);
   (* OTel span: only when enabled *)
   if enabled ()
   then emit_span ~name:("tool/" ^ Tool_result.tool_name result) ~attrs:(tool_span_attrs result)

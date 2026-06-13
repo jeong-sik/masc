@@ -76,7 +76,7 @@ let skill_route_text =
 let worktree_text =
   "--- Worktree changes ---\n\
    M lib/keeper/keeper_hooks_oas.ml\n\
-   M lib/prometheus.ml\n\
+   M lib/otel_metric_store.ml\n\
    A test/test_keeper_prompt_metrics.ml"
 
 let turn_instructions_text =

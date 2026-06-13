@@ -208,9 +208,7 @@ let test_supervisor_policy_runtime_exhausted_retryable_reasons () =
 
 let test_supervisor_policy_runtime_exhausted_terminal_reasons () =
   let terminal_reasons =
-    [ Keeper_meta_contract.No_tool_capable None
-    ; Keeper_meta_contract.Other_detail "opaque free-text"
-    ]
+    [ Keeper_meta_contract.Other_detail "opaque free-text" ]
   in
   List.iter
     (fun reason ->
@@ -653,7 +651,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   in
   let denial_metric = Keeper_metrics.(to_string SpawnSlotDenied) in
   let denial_count surface =
-    Masc.Prometheus.metric_value_or_zero
+    Masc.Otel_metric_store.metric_value_or_zero
       denial_metric
       ~labels:
         [
@@ -664,7 +662,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
       ()
   in
   let fork_total () =
-    Masc.Prometheus.metric_total
+    Masc.Otel_metric_store.metric_total
       Keeper_metrics.(to_string DomainPoolFork)
   in
   FD.note ~site:"test_spawn_admission_no_fork"
@@ -950,12 +948,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let attempt_labels = [ ("keeper", name) ] in
       let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
       let attempts_before =
-        Masc.Prometheus.metric_value_or_zero
+        Masc.Otel_metric_store.metric_value_or_zero
           Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc.Prometheus.metric_value_or_zero
+        Masc.Otel_metric_store.metric_value_or_zero
           Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
@@ -972,12 +970,12 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
+        (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "restart started outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
+        (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       match Reg.get ~base_path:config.base_path name with
@@ -1009,12 +1007,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
         [ ("keeper", name); ("outcome", "meta_unavailable") ]
       in
       let attempts_before =
-        Masc.Prometheus.metric_value_or_zero
+        Masc.Otel_metric_store.metric_value_or_zero
           Keeper_metrics.(to_string RestartAttempts)
           ~labels:attempt_labels ()
       in
       let outcomes_before =
-        Masc.Prometheus.metric_value_or_zero
+        Masc.Otel_metric_store.metric_value_or_zero
           Keeper_metrics.(to_string RestartOutcomes)
           ~labels:outcome_labels ()
       in
@@ -1031,12 +1029,12 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       Sup.sweep_and_recover ctx;
       check (float 0.001) "restart attempt metric incremented"
         (attempts_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
+        (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartAttempts)
            ~labels:attempt_labels ());
       check (float 0.001) "missing-meta outcome metric incremented"
         (outcomes_before +. 1.0)
-        (Masc.Prometheus.metric_value_or_zero
+        (Masc.Otel_metric_store.metric_value_or_zero
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:outcome_labels ());
       check bool "keeper unregistered after missing meta" false
@@ -1045,7 +1043,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 
 (* Reproduces the 2026-04-25 incident pattern: 8 keepers crashed silently
-   after the supervisor exhausted max_restarts. The ERROR log + Prometheus
+   after the supervisor exhausted max_restarts. The ERROR log + Otel_metric_store
    counter + structured OAS event emitted from sweep_and_recover give
    operators the signal that was missing. *)
 let test_max_restarts_exhaustion_emits_dead_alert () =
@@ -1080,7 +1078,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
       let baseline =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1095,7 +1093,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       in
       Sup.sweep_and_recover ctx;
       let after =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "metric_keeper_dead_total incremented by 1"
@@ -1220,10 +1218,10 @@ let test_stale_storm_pause_skips_restart () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
       let baseline_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let baseline_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1238,10 +1236,10 @@ let test_stale_storm_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let after_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "stale_storm_paused counter incremented by 1"
@@ -1294,7 +1292,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_fleet_batch { distinct_count = 3 }));
       let baseline_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1309,7 +1307,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       in
       Sup.sweep_and_recover ctx;
       let after_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "legacy fleet batch follows restart/dead budget"
@@ -1347,11 +1345,11 @@ let test_provider_timeout_loop_pause_skips_restart () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Provider_timeout_loop { count = 3 }));
       let baseline_pause =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let baseline_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1366,11 +1364,11 @@ let test_provider_timeout_loop_pause_skips_restart () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           "masc_keeper_provider_timeout_loop_paused_total"
       in
       let after_dead =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string DeadTotal)
       in
       check (float 0.001) "provider_timeout_loop counter incremented by 1"
@@ -1471,7 +1469,7 @@ let test_non_storm_crashed_restarts_normally () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Heartbeat_consecutive_failures 3));
       let baseline_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -1485,7 +1483,7 @@ let test_non_storm_crashed_restarts_normally () =
       in
       Sup.sweep_and_recover ctx;
       let after_pause =
-        Masc.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
       in
       check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
         baseline_pause after_pause;
@@ -1651,7 +1649,7 @@ let test_sweep_auto_resumes_after_backoff () =
       check bool "precondition: paused keeper is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1682,7 +1680,7 @@ let test_sweep_auto_resumes_after_backoff () =
       check bool "auto-resumed keeper is reconciled into registry" true
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
@@ -1795,7 +1793,7 @@ let test_operator_pause_not_auto_resumed () =
       check bool "precondition: operator pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1821,7 +1819,7 @@ let test_operator_pause_not_auto_resumed () =
       check bool "operator pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
@@ -1874,7 +1872,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
       check bool "precondition: timeout pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1906,7 +1904,7 @@ let test_turn_timeout_blocker_without_resume_policy_not_auto_resumed () =
       check bool "timeout pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"
@@ -1963,7 +1961,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       check bool "precondition: capacity pause is not bootable" false
         (List.mem name (KR.bootable_keeper_names config));
       let baseline_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1993,7 +1991,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       check bool "capacity pause is not reconciled into registry" false
         (Reg.is_registered ~base_path:config.base_path name);
       let after_auto_resume =
-        Masc.Prometheus.metric_total
+        Masc.Otel_metric_store.metric_total
           Keeper_metrics.(to_string AutoResumedTotal)
       in
       check (float 0.001) "metric_keeper_auto_resumed_total NOT incremented"

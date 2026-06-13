@@ -40,7 +40,7 @@ let get_or_create keeper_name =
 let record_imminent ~keeper_name ~ts =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       "masc_context_overflow_imminent_total"
       ~labels:[ ("keeper", keeper_name) ] ();
     let grace = grace_window_seconds () in
@@ -61,7 +61,7 @@ let record_imminent ~keeper_name ~ts =
          until record_action clears it. *)
       s.no_action_fired_for_pending <- true;
       s.pending_since <- Some ts;
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         "masc_context_overflow_no_action_total"
         ~labels:[ ("keeper", keeper_name) ] ();
       Log.Server.warn
@@ -82,7 +82,7 @@ let record_action ~keeper_name =
   with_lock (fun () ->
     match Hashtbl.find_opt state keeper_name with
     | Some s when Option.is_some s.pending_since ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         "masc_context_overflow_action_taken_total"
         ~labels:[ ("keeper", keeper_name) ] ();
       s.pending_since <- None;

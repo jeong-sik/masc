@@ -95,7 +95,7 @@ let personas_root_opt () =
   with
   | Sys_error _ -> None
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ProfileLoadFailures)
       ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_root) ]
       ();
@@ -111,7 +111,7 @@ let persona_profile_path_opt name =
     with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
         ();
@@ -137,7 +137,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
     try Config_dir_resolver.personas_dirs () with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Load_persona_extended) ]
         ();
@@ -155,7 +155,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
     then
       match Safe_ops.read_file_safe path with
       | Error msg ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ProfileLoadFailures)
           ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Agent_md_read) ]
           ();
@@ -210,7 +210,7 @@ let list_persona_summaries () : persona_summary list =
     try Config_dir_resolver.personas_dirs () with
     | Sys_error _ -> []
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label List_persona_summaries) ]
         ();

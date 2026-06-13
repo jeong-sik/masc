@@ -18,12 +18,12 @@ let observe_goal_attainment_metrics (goal : Goal_store.goal) attainment =
     | Some pct -> (1.0, float_of_int pct)
     | None -> (0.0, 0.0)
   in
-  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_pct
+  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_pct
     ~help:goal_attainment_pct_help ~labels ();
-  Prometheus.set_gauge Prometheus.metric_goal_attainment_pct ~labels pct;
-  Prometheus.register_gauge ~name:Prometheus.metric_goal_attainment_measured
+  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_pct ~labels pct;
+  Otel_metric_store.register_gauge ~name:Otel_metric_store.metric_goal_attainment_measured
     ~help:goal_attainment_measured_help ~labels ();
-  Prometheus.set_gauge Prometheus.metric_goal_attainment_measured ~labels
+  Otel_metric_store.set_gauge Otel_metric_store.metric_goal_attainment_measured ~labels
     measured
 
 

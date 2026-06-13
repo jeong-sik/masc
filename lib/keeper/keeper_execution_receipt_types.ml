@@ -68,7 +68,7 @@ type slot_release_phase =
    - to_tla_symbol (ppx-generated) emits the symbol attached per variant
    - all_symbols / all_states (ppx-generated) enumerate the type
    Defining slot_release_phase_to_string in terms of to_tla_symbol means
-   JSON/Prometheus wire and TLA correspondence catalog cannot drift.
+   JSON/Otel_metric_store wire and TLA correspondence catalog cannot drift.
    Mirrors the receipt wire pattern from earlier correspondence checks. *)
 let slot_release_phase_to_string = to_tla_symbol
 

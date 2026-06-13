@@ -8,6 +8,8 @@
     degrade into a metric-only smoke test that never proves
     [model_used] is actually filled. *)
 
+open Masc
+
 let () =
   let dir =
     Filename.concat
@@ -17,7 +19,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 ;;
 
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 module Judge = Dashboard_governance_judge
 
 let metric_name = "masc_governance_response_model_empty_total"
@@ -26,7 +28,7 @@ let count_for ~source =
   Prom.metric_value_or_zero metric_name ~labels:[ "source", source ] ()
 ;;
 
-(* Metric is registered at module load via [Prometheus.register_counter
+(* Metric is registered at module load via [Otel_metric_store.register_counter
    ~labels:[]] in [dashboard_governance_judge.ml]. [get_metric_value
    ~labels:[] ()] returns [Some 0.0] when registration ran, [None]
    otherwise.

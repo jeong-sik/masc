@@ -34,7 +34,7 @@
     sees the same fact restated repeatedly per task. This module records
     each failure under a closed-sum [family] fingerprint and classifies
     the result so the caller can emit one durable [`Threshold_silence]
-    ERROR plus a Prometheus counter, and demote noisy intermediate
+    ERROR plus a Otel_metric_store counter, and demote noisy intermediate
     emissions to DEBUG.
 
     Closed sum types, no catch-all. The [family] enum captures every
@@ -56,7 +56,7 @@
 
     For now, the [`Threshold_silence] outcome gives the operator a
     one-line ERROR after [default_silence_threshold] identical failures
-    and a Prometheus counter for dashboarding; subsequent failures
+    and a Otel_metric_store counter for dashboarding; subsequent failures
     return [`Repeated] and the caller is expected to DEBUG-log instead
     of ERROR-log.
 
@@ -84,7 +84,7 @@ type status_kind =
 
 (** Closed-enum mirror of [Types_core.task_action]. Adding a new action
     upstream forces an arm here. Used for both fingerprinting and the
-    Prometheus label. *)
+    Otel_metric_store label. *)
 type transition_action =
   | Claim
   | Start
@@ -132,7 +132,7 @@ type family =
           of the families above. Kept as an explicit constructor —
           not a catch-all match arm — so the [classify] function
           remains exhaustive and the [Other_invalid_state] case is
-          visible to operators via the Prometheus label. *)
+          visible to operators via the Otel_metric_store label. *)
 
 (** Stable string label for log/metric dimensions. Total. *)
 val family_to_string : family -> string

@@ -190,7 +190,6 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             metric_name = by_id[gate_id].evidence["metric_name"]
             command = " ".join(by_id[gate_id].command or [])
             self.assertIn(metric_name, command)
-            self.assertNotIn("prometheus query", command)
             self.assertEqual(
                 by_id[gate_id].evidence["metric_source"],
                 "GOAL_LOOP_METRICS_JSON (--metrics-json)",
@@ -211,8 +210,8 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
             list(goal_loop_verify_pipeline.REQUIRED_VERIFY_GATE_IDS),
         )
 
-    def test_prometheus_sources_cover_metric_backed_snapshot_keys(self) -> None:
-        sources = goal_loop_verify_pipeline.PROMETHEUS_METRIC_SOURCES
+    def test_metric_series_sources_cover_metric_backed_snapshot_keys(self) -> None:
+        sources = goal_loop_verify_pipeline.METRIC_SERIES_SOURCES
         self.assertEqual(
             sources["persistence_utf8_repair_total"],
             ["masc_persistence_utf8_repair_total"],

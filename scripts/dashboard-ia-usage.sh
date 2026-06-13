@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # RFC-0049 PR-2 — Dashboard IA usage report.
 #
-# Scrapes the MASC server's Prometheus /metrics endpoint and produces a
+# Scrapes the MASC server's OTel /metrics endpoint and produces a
 # Markdown report ranking dashboard surfaces and sections by open count.
 # Splits direct opens from redirect-driven opens (the redirected_from=none
 # vs everything-else distinction RFC-0048 §4.4 needs for deletion thresholds).
@@ -28,7 +28,7 @@
 # Notes:
 #   - Counters are cumulative since process start. The "--since" label is
 #     printed in the report header but does NOT perform windowed queries;
-#     real time-windowed analysis via PromQL is deferred to PR-2.5.
+#     real time-windowed analysis requires an external time-series backend.
 #   - Compatible with bash 3.2 (macOS default) and bash 4+. All aggregation
 #     happens inside awk so no associative arrays in shell.
 
@@ -221,7 +221,7 @@ awk -v endpoint="$ENDPOINT" \
     print ""
     print "- **Direct opens** (`redirected_from=none`) are the deletion-threshold metric per RFC-0048 §4.4."
     print "- A section with high **Total** but low **Direct** is alive only because of legacy bookmarks; the redirect can stay, the section component can be deleted."
-    print "- Counters are cumulative since process start. Range queries (`--since=7d`) require Prometheus + PR-2.5."
+    print "- Counters are cumulative since process start. Range queries (`--since=7d`) require an external time-series backend."
   }
 
   function sort_desc(keys, vals, n,    i, j, tk, tv) {

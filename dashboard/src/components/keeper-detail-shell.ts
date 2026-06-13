@@ -88,7 +88,12 @@ export function KeeperDetailHeaderInfo({
         <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>
-          <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
+          <${KeeperPhaseAndStage}
+            phase=${keeper.lifecycle_phase ?? keeper.phase}
+            pipelineStage=${keeper.pipeline_stage}
+            pipelineStageDetail=${keeper.pipeline_stage_detail}
+            phaseEnteredAtSec=${phaseEnteredAtSec}
+          />
           <${KeeperModelChip} keeper=${keeper} />
         </div>
         ${keeper.koreanName || keeper.created_at ? html`

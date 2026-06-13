@@ -1,7 +1,6 @@
 (** OTel Dispatch Hook — registers a [Tool_dispatch] observer that
-    records each tool call as both a Prometheus histogram observation
-    (always active) and an OpenTelemetry span (gated by
-    {!Otel_config.enabled}).
+    records each handled tool call as an OpenTelemetry span gated by
+    {!Otel_config.enabled}.
 
     Span attributes use OpenTelemetry GenAI semantic-convention keys
     ([gen_ai.tool.name], [gen_ai.operation.name]) so Datadog

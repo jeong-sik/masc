@@ -100,8 +100,8 @@ let observe_probe_failure ~site exn =
   match exn with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
-      Prometheus.metric_build_identity_probe_failures
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_build_identity_probe_failures
       ~labels:[ "site", site ]
       ();
     Log.Identity.warn "build_identity %s failed: %s" site (Printexc.to_string exn)

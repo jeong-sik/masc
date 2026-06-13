@@ -1,4 +1,8 @@
-(** GADT Capability and Verified Shell IR definitions. *)
+(** GADT Capability and Verified Shell IR definitions.
+
+    Risk classification is the single source of truth for shell safety.
+    [Safe_IR] wrapping happens after allowlist validation; no redundant
+    capability or mutation checks are performed here. *)
 
 type yes = Yes
 type no = No
@@ -50,3 +54,7 @@ let classify_program_flags (p : Masc_exec.Exec_program.t) : cap_flags =
   | None ->
       (* Fail-closed: classify unknown binaries as needing full capabilities *)
       { read_fs = true; write_fs = true; network = true; spawn = true }
+
+let shell_ir : type phase. phase verified_ir -> Masc_exec.Shell_ir.t = function
+  | Safe_IR ir -> ir
+  | Unsafe_IR ir -> ir

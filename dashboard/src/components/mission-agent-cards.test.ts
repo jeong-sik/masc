@@ -92,7 +92,7 @@ describe('mission keeper runtime helpers', () => {
   })
 
   it('labels backend runtime blocker classes used by keeper_status_bridge', () => {
-    expect(keeperRuntimeBlockerLabel('no_tool_capable_provider')).toBe('도구 실행 런타임 없음')
+    expect(keeperRuntimeBlockerLabel('runtime_exhausted')).toBe('런타임 후보 소진')
     expect(keeperRuntimeBlockerLabel('fiber_unresolved')).toBe('Fiber 미해결')
     expect(keeperRuntimeBlockerLabel('stale_turn_timeout')).toBe('오래된 턴 만료')
     expect(keeperRuntimeBlockerLabel('stale_termination_storm')).toBe('Stale 종료 폭주')
@@ -107,12 +107,12 @@ describe('mission keeper runtime helpers', () => {
     const keeper = {
       name: 'tool-less',
       status: 'idle',
-      runtime_blocker_class: 'no_tool_capable_provider',
-      runtime_blocker_summary: 'no_tool_capable_provider',
+      runtime_blocker_class: 'runtime_exhausted',
+      runtime_blocker_summary: 'runtime_exhausted',
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.',
+      '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.',
     )
   })
 

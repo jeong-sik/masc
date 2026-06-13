@@ -184,7 +184,7 @@ let canonical_keeper_meta_key_names =
      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
      | _ -> fallback_canonical_keeper_meta_key_names)
   | Error msg ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string MetaJsonFailures)
       ~labels:[("site", "seed_parse")]
       ();
@@ -208,7 +208,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
     (match unknown with
      | [] -> ()
      | _ :: _ ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string MetaJsonFailures)
          ~labels:[("site", "unknown_keys")]
          ();

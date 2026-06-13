@@ -162,7 +162,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     if not (String.equal old_value new_value) then
       let len = String.length new_value in
       if len > Keeper_config.prompt_render_max_bytes then
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TurnUpUpdateFailures)
           ~labels:[("keeper", old.name); ("site", Keeper_turn_up_update_failure_site.(to_label Prompt_cap))]
           ();
@@ -297,7 +297,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     validate_sandbox_settings ~allowed_paths
   with
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string TurnUpUpdateFailures)
         ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_validation))]
         ();
@@ -310,7 +310,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Turn_up ()) ~sandbox_profile
        with
        | Error err ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string TurnUpUpdateFailures)
              ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_preflight))]
              ();
@@ -329,7 +329,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
          in
          (match runtime_assignment_result with
           | Error err ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnUpUpdateFailures)
               ~labels:
                 [ ( "keeper", p.name )
@@ -346,7 +346,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
           | Ok () ->
             (match write_meta ctx.config updated with
              | Error e ->
-                 Prometheus.inc_counter
+                 Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string WriteMetaFailures)
                    ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
                    ();

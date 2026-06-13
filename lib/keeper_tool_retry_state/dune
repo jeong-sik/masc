@@ -17,7 +17,7 @@
 ; same retry cycle are informational; once the same fingerprint
 ; repeats default_silence_threshold times across cycles, the log
 ; surface is silenced and one durable Threshold_silence ERROR plus
-; the existing Prometheus counter (metric_keeper_tools_oas_failures)
+; the existing Otel_metric_store counter (metric_keeper_tools_oas_failures)
 ; carries the durable signal.
 ;
 ; This sub-library hosts the public retry classifier/contract and uses

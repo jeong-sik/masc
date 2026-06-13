@@ -79,7 +79,7 @@ val execute_tool_eio :
       downstream helpers that still consult ambient
       handles see the current request scope (tests can
       otherwise leave a finished switch in the global slot).
-    - Bumps the [Prometheus.record_request] counter for
+    - Bumps the [Otel_metric_store.record_request] counter for
       every inbound call.
 
     [profile] defaults to [Full]; [internal_keeper_runtime]

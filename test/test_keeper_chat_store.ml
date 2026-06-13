@@ -1,5 +1,5 @@
 module K = Masc.Keeper_chat_store
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let rec remove_tree path =
   if Sys.file_exists path then

@@ -111,7 +111,7 @@ The following metrics must exist as machine-readable counters.
 Rules:
 
 - every safety counter must be queryable without log parsing
-- dashboard may summarize them, but Prometheus-style metric or equivalent numeric surface is the source of truth
+- dashboard may summarize them, but an OTel metric or equivalent numeric surface is the source of truth
 - any increment must annotate keeper name, state, and failure cohort in logs or structured event stream
 - injected validation runs must carry a machine-readable `planned_test=true` or equivalent annotation so planned suppression events do not increment `masc_keeper_unplanned_self_preservation_total`
 

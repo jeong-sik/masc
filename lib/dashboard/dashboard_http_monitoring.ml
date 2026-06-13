@@ -218,8 +218,8 @@ let governance_monitoring_json ~(now_ts : float) ~(base_path : string)
 let credential_monitoring_json () : Yojson.Safe.t =
   let archived_starvation =
     int_of_float
-      (Prometheus.metric_total
-         Prometheus.metric_config_credential_archived_starvation)
+      (Otel_metric_store.metric_total
+         Otel_metric_store.metric_config_credential_archived_starvation)
   in
   let needs_attention = archived_starvation > 0 in
   `Assoc [
@@ -228,7 +228,7 @@ let credential_monitoring_json () : Yojson.Safe.t =
     ( "credential_archived_starvation_total",
       `Int archived_starvation );
     ( "metric_name",
-      `String Prometheus.metric_config_credential_archived_starvation );
+      `String Otel_metric_store.metric_config_credential_archived_starvation );
     ( "reason",
       if needs_attention then
         `String "bare_form_keeper_credential_archived_after_starvation"

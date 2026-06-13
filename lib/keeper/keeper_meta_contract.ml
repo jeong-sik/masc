@@ -84,12 +84,6 @@ type proactive_runtime =
 
 (* ── Structured blocker classification ──────────────────────── *)
 
-(** Telemetry detail for [No_tool_capable] runtime exhaustion. *)
-type no_tool_capable_detail = Keeper_internal_error.no_tool_capable_detail = {
-  configured_labels : string list;
-  provider_rejections : (string * string) list;
-}
-
 type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -99,7 +93,6 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
-  | No_tool_capable of no_tool_capable_detail option
   | Other_detail of string
 
 (** Total typed retryability for a runtime-exhaustion reason.
@@ -167,7 +160,6 @@ type blocker_class =
   | Sdk_input_required
 
 let blocker_class_to_string = function
-  | Runtime_exhausted (No_tool_capable _) -> "runtime_exhausted_no_tool_capable"
   | Runtime_exhausted _ -> "runtime_exhausted"
   | Capacity_backpressure -> "capacity_backpressure"
   | Ambiguous_post_commit_timeout -> "ambiguous_post_commit_timeout"
@@ -196,7 +188,6 @@ let blocker_class_to_string = function
 ;;
 
 let blocker_class_of_serialized_string = function
-  | "runtime_exhausted_no_tool_capable" -> Some (Runtime_exhausted (No_tool_capable None))
   | "runtime_exhausted" -> Some (Runtime_exhausted (Other_detail "runtime_exhausted"))
   | "capacity_backpressure" -> Some Capacity_backpressure
   | "ambiguous_post_commit_timeout" -> Some Ambiguous_post_commit_timeout
@@ -241,8 +232,6 @@ let runtime_exhaustion_summary = function
     "Runtime exhausted after the per-OAS-call ceiling (max_execution_time_s) fired."
   | Capacity_exhausted ->
     "Runtime exhausted; all providers reported capacity backpressure."
-  | No_tool_capable _ ->
-    "Runtime exhausted; no configured provider can satisfy the requested tool surface."
   | Other_detail _ ->
     "Runtime exhausted; inspect runtime attempts for the dominant root cause."
 ;;
@@ -287,7 +276,7 @@ let runtime_exhaustion_reason_of_json json =
    pattern called out in CLAUDE.md
    "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
    [blocker_class] the only authoritative class eliminates that recovery path;
-   [detail] carries free-form context for UI / Prometheus labels (no
+   [detail] carries free-form context for UI / Otel_metric_store labels (no
    classification semantics). *)
 type blocker_info = {
   klass : blocker_class;

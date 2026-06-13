@@ -336,7 +336,7 @@ External 채널 어댑터의 경계는 Channel Gate:
 
 병행해서 굵직하게 본 흐름:
 
-- **Telemetry typed labels** (~22 PR): Prometheus metric label 의 free-form string 을 `*_failure_site` / `*_kind` / `*_operation` 같은 closed sum 으로 교체. cardinality 닫고, 새 label 누락을 컴파일 타임에 잡기 위함.
+- **Telemetry typed labels** (~22 PR): metric label 의 free-form string 을 `*_failure_site` / `*_kind` / `*_operation` 같은 closed sum 으로 교체. cardinality 닫고, 새 label 누락을 컴파일 타임에 잡기 위함.
 - **TLA+ spec maintenance** (~31 PR `docs(tla-audit)`): keeper / runtime / decision FSM 의 TLA spec 을 main 코드와 일치시키는 audit + buggy-cfg 검증. `KeeperOASAdvanced.tla` 같은 mutation-testing 스타일 spec 이 들어 있음.
 - **Sub-lib extraction** (`refactor(keeper)` 35 PR + `refactor(dashboard)` 17 PR): `lib/` 평면을 sub-library 로 쪼개는 작업이 RFC-0056 이후 지속.
 

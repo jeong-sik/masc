@@ -1,6 +1,6 @@
 (** Dashboard surface/section open counters (RFC-0049).
 
-    Increments aggregate Prometheus counters
+    Increments aggregate Otel_metric_store counters
     [dashboard_surface_open_total] and [dashboard_section_open_total] in
     response to a [POST /api/v1/dashboard/nav-event] from the dashboard.
 
@@ -35,6 +35,6 @@ val is_valid_section : surface:string -> string -> bool
     [redirected_from], or [redirected_from] referring to an unknown pair. *)
 val parse_event_json : Yojson.Safe.t -> (event, string) result
 
-(** [record event] increments the relevant Prometheus counters.
+(** [record event] increments the relevant Otel_metric_store counters.
     Idempotent w.r.t. counter registration. *)
 val record : event -> unit

@@ -9,7 +9,7 @@
 ; livelock guard itself is correct (the underlying turn cannot make
 ; progress); what is missing is *escalation* — after N identical
 ; blocks, demote the per-block ERROR to DEBUG and emit a single
-; explicit Threshold_park ERROR plus a Prometheus counter, so
+; explicit Threshold_park ERROR plus a Otel_metric_store counter, so
 ; operators see one durable signal instead of a flapping stream.
 ;
 ; This sub-library hosts the livelock classifier/contract and uses

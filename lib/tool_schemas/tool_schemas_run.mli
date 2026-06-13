@@ -11,7 +11,8 @@
     - [masc_run_deliverable] — record the final output;
       required [task_id], [deliverable].
     - [masc_run_get]         — retrieve plan + logs +
-      deliverables for one run; required [task_id].
+      deliverables for one run, creating an empty scaffold when
+      missing; required [task_id].
     - [masc_run_list]        — list all runs with status; no
       required params.
 

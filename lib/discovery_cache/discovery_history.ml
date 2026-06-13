@@ -96,9 +96,6 @@ let observe_failure ~site ~base_path exn =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       let site = failure_site_label site in
-      Prometheus.inc_counter Prometheus.metric_discovery_history_failures
-        ~labels:[("site", site)]
-        ();
       Log.Discovery.error "discovery_history: %s failed base_path=%s: %s"
         site base_path (Printexc.to_string exn)
 

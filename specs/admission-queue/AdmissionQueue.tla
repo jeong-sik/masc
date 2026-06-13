@@ -30,7 +30,7 @@
 \*   release_count           | Admission_queue_metrics.on_release calls
 \*   runtime_input           | raw runtime_id argument to with_permit
 \*   runtime_recorded        | Keeper_runtime_profile.canonicalize runtime_input
-\*   fd_count                | Prometheus.approximate_open_fd_count ()
+\*   fd_count                | telemetry approximate open FD count
 \*
 \* Out-of-scope (not in main today):
 \*   - priority-sorted waiter list (the [waiter] / [insert_sorted] helpers
@@ -43,7 +43,7 @@
 EXTENDS TLC, Naturals
 
 CONSTANTS
-    FdThreshold,    \* Prometheus.fd_warn_threshold; small in the model
+    FdThreshold,    \* telemetry FD warning threshold; small in the model
     FdGuardNum,     \* numerator of the guard fraction (OCaml = 9)
     FdGuardDen      \* denominator (OCaml = 10)
 

@@ -34,6 +34,7 @@ function lowerToken(value: string | null | undefined): string {
  *  normalize token casing before comparing. */
 export interface KeeperPausedInput {
   paused?: boolean | null
+  lifecycle_phase?: Keeper['lifecycle_phase'] | string | null
   phase?: Keeper['phase'] | string | null
   pipeline_stage?: Keeper['pipeline_stage'] | string | null
   pause_state?: Keeper['pause_state'] | string | null
@@ -45,6 +46,7 @@ export interface KeeperPausedInput {
  *  status `paused`. */
 export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
   if (keeper.paused === true) return true
+  if (lowerToken(keeper.lifecycle_phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.pipeline_stage) === PAUSED_LOWER_TOKEN) return true
   if (lowerToken(keeper.pause_state) === PAUSED_LOWER_TOKEN) return true
@@ -70,7 +72,7 @@ const CRASHED_PHASES: ReadonlySet<string> = new Set<string>([
 ])
 
 export function isKeeperCrashed(keeper: Keeper): boolean {
-  const phase = keeper.phase
+  const phase = keeper.lifecycle_phase ?? keeper.phase
   return typeof phase === 'string' && CRASHED_PHASES.has(phase)
 }
 
@@ -99,6 +101,7 @@ export function isCrashedPhase(phase: string | null | undefined): boolean {
  *  one of the three off-tokens (`offline | inactive | unbooted`).
  *  Routing them through this predicate closes the undercount. */
 export interface KeeperOfflineInput {
+  lifecycle_phase?: Keeper['lifecycle_phase'] | string | null
   phase?: Keeper['phase'] | string | null
   status?: string | null
 }
@@ -107,7 +110,7 @@ export interface KeeperOfflineInput {
  *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
  *  off-tokens emitted in `keeper.status`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
-  const phase = lowerToken(keeper.phase)
+  const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
   if (
     phase === 'offline'
     || phase === 'stopped'

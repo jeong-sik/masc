@@ -128,7 +128,7 @@ type snapshot = {
 
 val fd_snapshot : unit -> snapshot
 (** [fd_snapshot ()] returns a point-in-time observability snapshot
-    suitable for the [/metrics] Prometheus endpoint (PR-5) and the
+    suitable for the [/metrics] Otel_metric_store endpoint (PR-5) and the
     dashboard System Health panel. Best-effort: missing platform data
     is reported as [-1] rather than raising. *)
 

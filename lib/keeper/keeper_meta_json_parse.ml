@@ -326,7 +326,7 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
    synthesised one.  Closes the silent-recovery gap noted in
    .tmp/memory-compacting-analysis.html (continuity ts recovery). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string ContinuityTsRecovered)
     ~help:
       "Total [parse_last_continuity_update_ts] events where the \
@@ -343,7 +343,7 @@ let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojso
   if parsed_ts <= 0.0 && String.trim continuity_summary <> ""
   then begin
     let synthetic = Time_compat.now () in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ContinuityTsRecovered)
       ();
     Log.Keeper.warn

@@ -167,7 +167,7 @@ let get_telemetry_store config : Dated_jsonl.t =
 let telemetry_eio_surface = "telemetry_eio"
 
 let observe_telemetry_drop ~reason =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[ ("surface", telemetry_eio_surface); ("reason", reason) ]
     ()
 

@@ -7,7 +7,7 @@
 # This is a structural check; PR-H tests the predicates themselves.
 #
 # The validator deliberately greps for the literal label string the
-# producer uses with [Prometheus.inc_counter ... ~labels:[("edge", "...")]].
+# producer uses when emitting the labelled FSM edge counter.
 # A wiring rename will surface as a validator failure rather than a
 # silently dead counter.
 

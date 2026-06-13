@@ -48,7 +48,7 @@ let run_record_of_json (json : Yojson.Safe.t) : run_record option =
     let deliverable = Safe_ops.json_string ~default:"" "deliverable" json in
     Some { task_id; agent_name; plan; deliverable; created_at; updated_at }
   | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "run_of_json: missing required fields";
     None
 
@@ -64,7 +64,7 @@ let log_entry_of_json (json : Yojson.Safe.t) : log_entry option =
   | Some timestamp, Some note ->
     Some { timestamp; note }
   | _ ->
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Parsing))] ();
     Log.Misc.error "log_entry_of_json: missing required fields";
     None
 
@@ -109,8 +109,7 @@ let read_run config task_id : (run_record, string) result =
   if not (path_exists config path) then
     Error
       (Printf.sprintf
-         "Run not found for task %s (expected at %s). \
-          Call masc_run_init with this task_id first to create the run."
+         "No execution run record exists yet for task %s (expected run.json at %s)."
          task_id path)
   else
     match run_record_of_json (read_json config path) with
@@ -262,28 +261,36 @@ let read_logs config ~task_id ?limit () : log_entry list =
         file;
       List.of_seq (Queue.to_seq ring)
 
-(** Get run details *)
-let get config ~task_id : (Yojson.Safe.t, string) result =
-  match read_run config task_id with
+(** Get run details. Missing runs are bootstrapped so resume/read paths do
+    not block autonomous keeper turns before any explicit masc_run_init call. *)
+let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
+  let read_or_create_run () =
+    let path = run_json_path config task_id in
+    if path_exists config path then
+      read_run config task_id
+    else
+      init config ~task_id ~agent_name
+  in
+  match read_or_create_run () with
   | Error e -> Error e
   | Ok run ->
-      let plan_content =
-        let text = read_text_file (plan_path config task_id) in
-        if text = "" then run.plan else text
-      in
-      let deliverable_content =
-        let text = read_text_file (deliverable_path config task_id) in
-        if text = "" then run.deliverable else text
-      in
-      let logs = read_logs config ~task_id ~limit:50 () in
-      let json = `Assoc [
-        ("run", run_record_to_json run);
-        ("plan", `String plan_content);
-        ("deliverable", `String deliverable_content);
-        ("logs", `List (List.map log_entry_to_json logs));
-        ("log_count", `Int (List.length logs));
-      ] in
-      Ok json
+    let plan_content =
+      let text = read_text_file (plan_path config task_id) in
+      if text = "" then run.plan else text
+    in
+    let deliverable_content =
+      let text = read_text_file (deliverable_path config task_id) in
+      if text = "" then run.deliverable else text
+    in
+    let logs = read_logs config ~task_id ~limit:50 () in
+    let json = `Assoc [
+      ("run", run_record_to_json run);
+      ("plan", `String plan_content);
+      ("deliverable", `String deliverable_content);
+      ("logs", `List (List.map log_entry_to_json logs));
+      ("log_count", `Int (List.length logs));
+    ] in
+    Ok json
 
 (** List runs *)
 let list config : Yojson.Safe.t =

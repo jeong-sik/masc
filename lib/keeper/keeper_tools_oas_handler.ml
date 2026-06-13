@@ -71,7 +71,7 @@ let make_keeper_tool_handler
         ~site:"input_validation"
         ~ts
         ();
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "input_validation" ]
         ();
@@ -99,7 +99,7 @@ let make_keeper_tool_handler
       let prior_fails = failure_count_get failure_counts key in
       if prior_fails >= max_consecutive_failures
       then (
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ToolsOasFailures)
           ~labels:[ "tool", name; "site", "blocked" ]
           ();
@@ -126,7 +126,7 @@ let make_keeper_tool_handler
             (workflow_rejection_scope_block_get failure_counts)
         with
         | Some block ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ToolsOasFailures)
             ~labels:[ "tool", name; "site", "workflow_scope_blocked" ]
             ();

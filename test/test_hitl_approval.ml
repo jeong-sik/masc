@@ -114,7 +114,7 @@ let test_approval_queue_failure_metric_labels_site () =
       "audit-approvals"
   in
   let before =
-    Masc.Prometheus.metric_value_or_zero
+    Masc.Otel_metric_store.metric_value_or_zero
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels
       ()
@@ -135,7 +135,7 @@ let test_approval_queue_failure_metric_labels_site () =
         ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
-        Masc.Prometheus.metric_value_or_zero
+        Masc.Otel_metric_store.metric_value_or_zero
           Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels
           ()

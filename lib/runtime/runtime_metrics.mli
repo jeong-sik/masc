@@ -1,4 +1,4 @@
-(** Runtime telemetry emitters (RFC-0206). Re-homed prometheus counter ticks
+(** Runtime telemetry emitters (RFC-0206). Re-homed otel_metric_store counter ticks
     from deleted [Runtime_metrics]; metric-name strings preserved verbatim
     (operator dashboard seam). *)
 

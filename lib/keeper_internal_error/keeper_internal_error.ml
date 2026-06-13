@@ -1,5 +1,4 @@
-(** Keeper_internal_error — the [masc_internal_error] ADT, its JSON codec, the
-    Prometheus accounting attached to construction, and the reverse-direction
+(** Keeper_internal_error — the [masc_internal_error] ADT, its JSON codec, and the reverse-direction
     SDK envelope parser.
 
     This is the structured *typed envelope* carried across the
@@ -88,11 +87,6 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
-type no_tool_capable_detail = {
-  configured_labels : string list;
-  provider_rejections : (string * string) list;
-}
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -102,7 +96,6 @@ type runtime_exhaustion_reason =
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
-  | No_tool_capable of no_tool_capable_detail option
   | Other_detail of string
 
 let runtime_exhaustion_reason_retryable = function
@@ -111,7 +104,6 @@ let runtime_exhaustion_reason_retryable = function
   | Connection_refused | Dns_failure | No_providers_available | All_providers_failed ->
     true
   | Structural_attempt_timeout _ -> true
-  | No_tool_capable _ -> false
   | Other_detail _ -> false
 
 let runtime_exhaustion_reason_to_json = function
@@ -124,19 +116,6 @@ let runtime_exhaustion_reason_to_json = function
   | Structural_attempt_timeout { detail } ->
     `Assoc [ "tag", `String "structural_attempt_timeout"; "detail", `String detail ]
   | Capacity_exhausted -> `String "capacity_exhausted"
-  | No_tool_capable None -> `String "no_tool_capable"
-  | No_tool_capable (Some { configured_labels; provider_rejections }) ->
-    let rejections_json =
-      List.map
-        (fun (label, reason) ->
-           `Assoc [ "label", `String label; "reason", `String reason ])
-        provider_rejections
-    in
-    `Assoc
-      [ "tag", `String "no_tool_capable"
-      ; "configured_labels", Json_util.json_string_list configured_labels
-      ; "provider_rejections", `List rejections_json
-      ]
   | Other_detail msg -> `Assoc [ "tag", `String "other_detail"; "message", `String msg ]
 
 let runtime_exhaustion_reason_of_json = function
@@ -147,7 +126,6 @@ let runtime_exhaustion_reason_of_json = function
   | `String "candidates_filtered_after_cycles" -> Some Candidates_filtered_after_cycles
   | `String "max_turns_exceeded" -> Some Max_turns_exceeded
   | `String "capacity_exhausted" -> Some Capacity_exhausted
-  | `String "no_tool_capable" -> Some (No_tool_capable None)
   | `Assoc fields ->
     (match List.assoc_opt "tag" fields with
      | Some (`String "structural_attempt_timeout") ->
@@ -158,26 +136,6 @@ let runtime_exhaustion_reason_of_json = function
        (match List.assoc_opt "message" fields with
          | Some (`String msg) -> Some (Other_detail msg)
          | _ -> None)
-     | Some (`String "no_tool_capable") ->
-       let configured_labels =
-         match List.assoc_opt "configured_labels" fields with
-         | Some (`List xs) -> List.filter_map (function `String s -> Some s | _ -> None) xs
-         | _ -> []
-       in
-       let provider_rejections =
-         match List.assoc_opt "provider_rejections" fields with
-         | Some (`List xs) ->
-           List.filter_map
-             (function
-               | `Assoc rf ->
-                 (match List.assoc_opt "label" rf, List.assoc_opt "reason" rf with
-                   | Some (`String label), Some (`String reason) -> Some (label, reason)
-                   | _ -> None)
-               | _ -> None)
-             xs
-         | _ -> []
-       in
-       Some (No_tool_capable (Some { configured_labels; provider_rejections }))
      | _ -> None)
   | _ -> None
 
@@ -197,8 +155,6 @@ type masc_internal_error =
       detail : string;
       exit_code : int option;
     }
-  (* [No_tool_capable_provider] reclassified into [Runtime_exhausted
-     { reason = No_tool_capable _ }] — see keeper_meta_contract.ml. *)
   | Accept_rejected of {
       scope : string;
       model : string option;
@@ -486,14 +442,6 @@ let summary_of_masc_internal_error = function
            is_retry
            (retry_admission_denial_to_yojson denial_reason
             |> Yojson.Safe.to_string))
-  | Runtime_exhausted { runtime_id; reason = No_tool_capable (Some detail) } ->
-    let runtime_id = runtime_id_to_string runtime_id in
-    Some
-      (Printf.sprintf
-         "No tool-capable provider for runtime %s; rejected_candidate_count=%d; configured_candidate_count=%d"
-         runtime_id
-         (List.length detail.provider_rejections)
-         (List.length detail.configured_labels))
   | Runtime_exhausted _
   | Resumable_cli_session _
   | Accept_rejected _
@@ -504,20 +452,6 @@ let summary_of_masc_internal_error = function
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _ -> None
-
-(* Per-kind classification counter so dashboards/Grafana can watch the
-   fleet-wide rate per error class.  Emitted at construction so every
-   [sdk_error_of_masc_internal_error] call site is covered. *)
-let masc_oas_error_total_metric = "masc_oas_error_total"
-
-let () =
-  Prometheus.register_counter
-    ~name:masc_oas_error_total_metric
-    ~help:
-      "Total MASC-internal errors emitted as Agent_sdk.Error.Internal \
-       payloads, classified by structured error kind. Labels: kind, \
-       runtime_id (originating runtime id or \"unknown\")."
-    ()
 
 let kind_of_masc_internal_error = function
   | Runtime_exhausted _ -> "runtime_exhausted"
@@ -555,13 +489,6 @@ let runtime_id_of_masc_internal_error = function
   | Internal_contract_rejected _ -> "unknown"
 
 let sdk_error_of_masc_internal_error err =
-  Prometheus.inc_counter masc_oas_error_total_metric
-    ~labels:
-      [
-        ("kind", kind_of_masc_internal_error err);
-        ("runtime_id", runtime_id_of_masc_internal_error err);
-      ]
-    ();
   Agent_sdk.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
 
@@ -646,34 +573,6 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                    exit_code = int_opt_of_assoc "exit_code" json;
                  })
           | _ -> None)
-      | Some (`String "no_tool_capable_provider") -> (
-          match string_opt_of_assoc "runtime_id" json with
-          | Some runtime_id ->
-            let configured_labels =
-              string_list_of_assoc "configured_labels" json
-            in
-            let rejections =
-              match
-                provider_rejections_of_assoc "provider_rejections" json
-              with
-              | [] ->
-                provider_rejection_reasons_of_assoc
-                  "rejection_reasons" json
-              | provider_rejections -> provider_rejections
-            in
-            let detail : no_tool_capable_detail =
-              { configured_labels
-              ; provider_rejections =
-                  List.map (fun r -> (r.provider_label, r.reason)) rejections
-              }
-            in
-            Some
-              (Runtime_exhausted
-                 {
-                   runtime_id;
-                   reason = No_tool_capable (Some detail);
-                 })
-          | None -> None)
       | Some (`String "accept_rejected") -> (
           match string_opt_of_assoc "scope" json, string_opt_of_assoc "reason" json with
           | Some scope, Some reason ->

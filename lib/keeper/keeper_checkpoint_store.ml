@@ -66,7 +66,7 @@ let prune_oas_history ~(session_dir : string) : unit =
          | exn ->
              Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
                path (Printexc.to_string exn);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_cleanup))]
                ())
@@ -108,7 +108,7 @@ let save_oas_history ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t) : u
     prune_oas_history ~session_dir
   | Error msg ->
     Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CheckpointFailures)
       ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_save))]
       ()
@@ -127,7 +127,7 @@ let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string lis
         | exn ->
             Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
               path (Printexc.to_string exn);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CheckpointFailures)
               ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_delete))]
               ();
@@ -150,7 +150,7 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
        | exn ->
            Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
              ckpt.session_id (Printexc.to_string exn);
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string CheckpointFailures)
              ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_fallback))]
              ());
@@ -171,7 +171,7 @@ let save_oas ~(session_dir : string) (ckpt : Agent_sdk.Checkpoint.t)
                   | exn ->
                       Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
                         ckpt.session_id (Printexc.to_string exn);
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string CheckpointFailures)
                         ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Oas_archive_primary))]
                         ());

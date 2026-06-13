@@ -32,8 +32,7 @@ let string_contains ~needle haystack =
     added to the type, append it here — the compiler will refuse to build if
     the match in [to_string] / [of_serialized_string] is incomplete. *)
 let all_variants : blocker_class list =
-  [ Runtime_exhausted (No_tool_capable None)
-  ; Runtime_exhausted (Other_detail "test")
+  [ Runtime_exhausted (Other_detail "test")
   ; Runtime_exhausted Connection_refused
   ; Runtime_exhausted Dns_failure
   ; Runtime_exhausted No_providers_available
@@ -82,39 +81,25 @@ let test_roundtrip () =
             "blocker_class_of_serialized_string returned None for %S (from variant)"
             s
         | Some result ->
-          (* Runtime_exhausted with non-No_tool_capable payloads all collapse
-             to [Other_detail] on deserialization — that is the expected
-             lossy round-trip.  Only [No_tool_capable] must be exact. *)
+          (* Runtime_exhausted payloads collapse to [Other_detail] on
+             deserialization — that is the expected lossy round-trip. *)
           let s' = blocker_class_to_string result in
           check string ("round-trip string for " ^ s) s s'))
     all_variants
 ;;
 
-(* ── No_tool_capable specific test ─────────────────────────────── *)
-
-let test_no_tool_capable_mapping () =
-  let s = blocker_class_to_string (Runtime_exhausted (No_tool_capable None)) in
-  check string "No_tool_capable serializes correctly" "runtime_exhausted_no_tool_capable" s;
-  match blocker_class_of_serialized_string "runtime_exhausted_no_tool_capable" with
-  | None -> fail "deserialization of runtime_exhausted_no_tool_capable returned None"
-  | Some (Runtime_exhausted (No_tool_capable None)) -> ()
-  | Some other ->
-    let s' = blocker_class_to_string other in
-    failf "expected Runtime_exhausted No_tool_capable, got %S" s'
-;;
-
 (* ── Uniqueness test ───────────────────────────────────────────── *)
 
-(** [Runtime_exhausted] sub-variants (except [No_tool_capable]) all collapse to
-    the same ["runtime_exhausted"] string — this is the intended lossy design.
-    We test uniqueness on the *canonical* strings (one per top-level variant). *)
+(** [Runtime_exhausted] sub-variants all collapse to the same
+    ["runtime_exhausted"] string — this is the intended lossy design.  We test
+    uniqueness on the *canonical* strings (one per top-level variant). *)
 let test_string_uniqueness () =
   let strings = List.map blocker_class_to_string all_variants in
   let rec check_unique seen = function
     | [] -> ()
     | s :: rest ->
       (* "runtime_exhausted" appears for every Runtime_exhausted sub-variant
-         except No_tool_capable — skip duplicates of that specific string. *)
+         — skip duplicates of that specific string. *)
       if s = "runtime_exhausted" then check_unique seen rest
       else if List.mem s seen
       then failf "duplicate blocker_class string: %S" s
@@ -137,7 +122,7 @@ let test_unknown_string () =
 (** Pin the variant count so additions are visible in diffs.  When adding a
     new [blocker_class] variant, bump this number and add the variant to
     [all_variants]. *)
-let expected_variant_count = 34
+let expected_variant_count = 33
 
 let test_variant_count () =
   let count = List.length all_variants in
@@ -253,18 +238,10 @@ let test_structural_timeout_maps_to_oas_timeout () =
   | None -> fail "structural timeout should map to Some blocker_class"
 ;;
 
-(* ── No_tool_capable round-trip removal: typed-reason consumer ──── *)
+(* ── Provider runtime record classification ────────────────────── *)
 
-(* The consumer [runtime_blocker_surface_of_failure_reason] now reads the
-   typed [reason = Some (No_tool_capable _)] field on
-   [Provider_runtime_error] instead of reparsing [code =
-   "no_tool_capable_provider"].  These tests pin that the typed-match path
-   yields the same blocker surface the old string-match produced, and that a
-   non-no_tool_capable provider error still falls through to the
-   provider_runtime_error catch-all (no widening). *)
-
-let no_tool_capable_surface_exn
-      ?(detail = "no tool-capable provider found (runtime=r labels=[a])")
+let provider_runtime_surface_exn
+      ?(detail = "provider runtime failed")
       ~reason
       ~code
       ()
@@ -285,40 +262,9 @@ let no_tool_capable_surface_exn
     fail "runtime_blocker_surface_of_failure_reason returned None for Provider_runtime_error"
 ;;
 
-let test_no_tool_capable_typed_reason_surface () =
-  (* Both producer shapes: with and without telemetry detail. *)
-  let detail_shape =
-    no_tool_capable_surface_exn
-      ~reason:
-        (Some
-           (No_tool_capable
-              (Some { configured_labels = [ "a" ]; provider_rejections = [] })))
-      ~code:"no_tool_capable_provider"
-      ()
-  in
-  let none_shape =
-    no_tool_capable_surface_exn
-      ~reason:(Some (No_tool_capable None))
-      ~code:"no_tool_capable_provider"
-      ()
-  in
-  List.iter
-    (fun (label, surface) ->
-       check string
-         (label ^ ": blocker_class is runtime_exhausted_no_tool_capable")
-         "runtime_exhausted_no_tool_capable"
-         surface.KSB.blocker_class;
-       (* Old string-match produced [Runtime_exhausted (No_tool_capable None)]
-          with continue_gate = false (Runtime_exhausted _ is non-gating). *)
-       check bool (label ^ ": continue_gate false") false surface.KSB.continue_gate)
-    [ "detail shape", detail_shape; "none shape", none_shape ]
-;;
-
-let test_non_no_tool_capable_provider_error_falls_through () =
-  (* A provider error without a No_tool_capable typed reason must route to the
-     generic provider_runtime_error catch-all, not the no-tool-capable arm. *)
+let test_typed_provider_reason_falls_through () =
   let surface =
-    no_tool_capable_surface_exn
+    provider_runtime_surface_exn
       ~reason:(Some Connection_refused)
       ~code:"runtime_exhausted_connection_refused"
       ()
@@ -331,7 +277,7 @@ let test_non_no_tool_capable_provider_error_falls_through () =
 
 let test_reason_none_provider_error_falls_through () =
   let surface =
-    no_tool_capable_surface_exn ~reason:None ~code:"provider_error"
+    provider_runtime_surface_exn ~reason:None ~code:"provider_error"
       ()
   in
   check string
@@ -342,7 +288,7 @@ let test_reason_none_provider_error_falls_through () =
 
 let test_tool_retry_provider_error_uses_sdk_surface () =
   let surface =
-    no_tool_capable_surface_exn
+    provider_runtime_surface_exn
       ~reason:None
       ~code:"agent_error_tool_retry_exhausted:attempts=2,limit=2"
       ~detail:"Tool retry budget exhausted after 2/2 retries: masc_library_search {}"
@@ -374,7 +320,6 @@ let () =
     "blocker_class_exhaustiveness"
     [ ( "serialization"
       , [ test_case "round-trip" `Quick test_roundtrip
-        ; test_case "no_tool_capable mapping" `Quick test_no_tool_capable_mapping
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
         ; test_case "variant count pin" `Quick test_variant_count
@@ -386,11 +331,9 @@ let () =
         ; test_case "structural timeout → oas_agent_execution_timeout" `Quick
             test_structural_timeout_maps_to_oas_timeout
         ] )
-    ; ( "no_tool_capable_typed_reason"
-      , [ test_case "typed reason -> no_tool_capable surface" `Quick
-            test_no_tool_capable_typed_reason_surface
-        ; test_case "non-NTC provider error falls through" `Quick
-            test_non_no_tool_capable_provider_error_falls_through
+    ; ( "provider_runtime_record"
+      , [ test_case "typed reason falls through" `Quick
+            test_typed_provider_reason_falls_through
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
         ; test_case "tool retry provider record uses sdk surface" `Quick

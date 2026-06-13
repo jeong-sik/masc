@@ -789,8 +789,8 @@ let validation_labels ~tool ~result ~reason =
   [ "tool", tool; "result", result; "reason", reason ]
 
 let validation_metric_value ~tool ~result ~reason =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_tool_input_validation
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_tool_input_validation
     ~labels:(validation_labels ~tool ~result ~reason)
     ()
 

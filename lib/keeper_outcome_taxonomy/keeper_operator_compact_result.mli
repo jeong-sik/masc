@@ -1,7 +1,7 @@
 (** Keeper_operator_compact_result — closed sum for the [result] label on
     [metric_keeper_operator_compact].
 
-    The metric registration in [prometheus.ml] already documented the
+    The metric registration in [otel_metric_store.ml] already documented the
     closed set verbatim:
 
         "Total operator-invoked masc_keeper_compact calls
@@ -9,7 +9,7 @@
 
     Locks the contract: a typo or new value at one emit site is now a
     compile error at [to_label] (the type's witness) instead of a
-    silent cardinality drift on the Prometheus surface. *)
+    silent cardinality drift on the Otel_metric_store surface. *)
 
 type t =
   | Ok (** Compaction applied successfully. *)

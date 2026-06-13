@@ -9,7 +9,7 @@
     that dispatches FSM state transitions (e.g. [on_compaction_started],
     [on_handoff_started]), the [on_exn] handler MUST:
 
-    1. Increment a Prometheus counter (e.g.
+    1. Increment a Otel_metric_store counter (e.g.
        [masc_keeper_lifecycle_callback_failures_total{callback=...}])
        so the failure is observable in Grafana.
     2. Record the failure via [Keeper_callback_failure.record] for

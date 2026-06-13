@@ -867,11 +867,11 @@ lib/tool_local_runtime.ml,79,None,unclassified
 lib/tool_local_runtime.ml,85,None,unclassified
 lib/tool_local_runtime.ml,216,None,unclassified
 lib/tool_local_runtime.ml,287,None,unclassified
-lib/tool_misc_admin.ml,60,None,unclassified
-lib/tool_misc_admin.ml,66,None,unclassified
-lib/tool_misc_admin.ml,244,None,unclassified
-lib/tool_misc_admin.ml,249,false,unclassified
-lib/tool_misc_admin.ml,321,None,unclassified
+lib/tool_misc_introspection.ml,60,None,unclassified
+lib/tool_misc_introspection.ml,66,None,unclassified
+lib/tool_misc_introspection.ml,244,None,unclassified
+lib/tool_misc_introspection.ml,249,false,unclassified
+lib/tool_misc_introspection.ml,321,None,unclassified
 lib/tool_misc_web_fetch.ml,86,false,unclassified
 lib/tool_misc_web_search.ml,159,false,unclassified
 lib/tool_misc_web_search.ml,268,None,unclassified

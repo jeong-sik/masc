@@ -48,7 +48,7 @@ let drain ?(site = "unspecified") t =
       | _ -> []
     in
     let outcome = if events = [] then "empty" else "drained" in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string EventBusDrain)
       ~labels:[ "site", site; "outcome", outcome ]
       ();
@@ -90,7 +90,7 @@ let start_background_drain ~clock t =
               "%s: keeper_turn event-bus drain failed: %s"
               t.keeper_name
               (Printexc.to_string exn);
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string EventBusDrain)
               ~labels:
                 [ ( "site"

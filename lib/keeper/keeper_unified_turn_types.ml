@@ -98,7 +98,6 @@ let runtime_exhaustion_reason_code
   | Keeper_internal_error.Structural_attempt_timeout _ ->
     "runtime_exhausted_structural_attempt_timeout"
   | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
-  | Keeper_internal_error.No_tool_capable _ -> "runtime_exhausted_no_tool_capable"
   | Keeper_internal_error.Other_detail detail -> runtime_exhaustion_detail_code detail
 ;;
 
@@ -121,79 +120,12 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.Structural_attempt_timeout { detail }
   | Keeper_internal_error.Capacity_exhausted ->
     Keeper_meta_contract.Capacity_exhausted
-  | Keeper_internal_error.No_tool_capable detail ->
-    let detail =
-      Option.map
-        (fun (detail : Keeper_internal_error.no_tool_capable_detail) ->
-           { Keeper_meta_contract.configured_labels = detail.configured_labels
-           ; provider_rejections = detail.provider_rejections
-           })
-        detail
-    in
-    Keeper_meta_contract.No_tool_capable detail
   | Keeper_internal_error.Other_detail detail ->
     Keeper_meta_contract.Other_detail detail
 ;;
 
 let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   match Keeper_internal_error.classify_masc_internal_error_of_string raw_error with
-  (* No_tool_capable specific cases first — more specific than generic Runtime_exhausted *)
-  | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
-         ; reason = Keeper_internal_error.No_tool_capable (Some detail)
-         ; _
-         }) ->
-    let rejection_summary =
-      match detail.provider_rejections with
-      | [] -> ""
-      | rejections ->
-        Printf.sprintf
-          " [%d providers rejected: %s]"
-          (List.length rejections)
-          (String.concat
-             "; "
-             (List.map
-                (fun (label, reason) ->
-                   Printf.sprintf "%s: %s" label reason)
-                rejections))
-    in
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
-             ; detail =
-                 Printf.sprintf
-               "no tool-capable provider found (runtime=%s labels=[%s]%s)"
-               (ntcp_runtime_id)
-               (String.concat ", " detail.configured_labels)
-               rejection_summary
-             ; provider_id = None
-         ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
-         ; reason =
-             Some
-               (registry_reason_of_internal_reason
-                  (Keeper_internal_error.No_tool_capable (Some detail)))
-         })
-  | Some
-      (Keeper_internal_error.Runtime_exhausted
-         { runtime_id = ntcp_runtime_id
-         ; reason = Keeper_internal_error.No_tool_capable None
-         ; _
-         }) ->
-    Some
-      (Keeper_registry.Provider_runtime_error
-         { code = "no_tool_capable_provider"
-         ; detail = "no tool-capable provider found"
-         ; provider_id = None
-         ; http_status = None
-         ; runtime_id = Some (ntcp_runtime_id)
-         ; reason =
-             Some
-               (registry_reason_of_internal_reason
-                  (Keeper_internal_error.No_tool_capable None))
-         })
-  (* Generic Runtime_exhausted catch-all — after No_tool_capable specifics *)
   | Some (Keeper_internal_error.Runtime_exhausted { reason; runtime_id }) ->
     Some
       (Keeper_registry.Provider_runtime_error

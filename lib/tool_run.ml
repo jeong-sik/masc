@@ -24,6 +24,7 @@ module Float = Stdlib.Float
 (** Tool handler context *)
 type context = {
   config: Workspace.config;
+  agent_name: string option;
 }
 
 open Tool_args
@@ -113,7 +114,7 @@ let handle_run_get ~tool_name ~start_time ctx args : Tool_result.result =
   if String.equal task_id "" then
     task_id_required ~tool_name ~start_time
   else
-    match Run_eio.get ctx.config ~task_id with
+    match Run_eio.get ?agent_name:ctx.agent_name ctx.config ~task_id with
     | Ok json -> Tool_result.make_ok ~tool_name ~start_time ~data:json ()
     | Error e ->
         Tool_result.make_err
@@ -233,7 +234,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
   (* masc_run_get *)
   {
     name = "masc_run_get";
-    description = "Retrieve full execution history (plan, timestamped logs, deliverable) for a task as markdown. \\nUse when resuming work on a task, reviewing progress, or preparing a handoff. \\nPair with masc_run_list to find task IDs, masc_run_log to add entries.";
+    description = "Retrieve full execution history (plan, timestamped logs, deliverable) for a task as markdown. \\nIf the task has no run record yet, create an empty run scaffold and return it so resume flow can continue. \\nUse when resuming work on a task, reviewing progress, or preparing a handoff. \\nPair with masc_run_log to add entries.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -262,7 +263,7 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let read_only_tools = [ "masc_run_get"; "masc_run_list" ]
+let read_only_tools = [ "masc_run_list" ]
 
 let () =
   List.iter

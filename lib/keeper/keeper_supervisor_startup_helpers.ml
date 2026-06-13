@@ -56,7 +56,7 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   if Sys.file_exists searched
   then ()
   else (
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string PersonaDriftMissing)
       ~labels:[ "keeper", meta.name ]
       ();

@@ -20,6 +20,7 @@ module Keeper_sandbox_factory = Masc.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc.Keeper_turn_sandbox_runtime
 module Keeper_tool_execute_command_semantics = Masc.Keeper_tool_execute_command_semantics
+module Keeper_tool_execute_command_words = Masc.Keeper_tool_execute_command_words
 module Keeper_sandbox_docker = Masc.Keeper_sandbox_docker
 module Keeper_types = Keeper_types
 module Keeper_alerting_path = Masc.Keeper_alerting_path
@@ -227,6 +228,16 @@ let setup ?tool_access ~sandbox f =
   let meta = make_meta ?tool_access ~name:"minjae" ~sandbox () in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
+  let repos_toml = Filename.concat config_dir "repositories.toml" in
+  write_file repos_toml
+    (Printf.sprintf
+       "[repository.masc]\n\
+        name = \"masc\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/masc\"\n\
+        status = \"Active\"\n\
+        keepers = [\"minjae\"]\n"
+       playground);
   f ~config ~meta ~playground
 
 let setup_with_tool_access ~sandbox f =
@@ -250,6 +261,16 @@ let setup_with_tool_access ~sandbox f =
   in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
+  let repos_toml = Filename.concat config_dir "repositories.toml" in
+  write_file repos_toml
+    (Printf.sprintf
+       "[repository.masc]\n\
+        name = \"masc\"\n\
+        url = \"%s\"\n\
+        local_path = \"repos/masc\"\n\
+        status = \"Active\"\n\
+        keepers = [\"minjae\"]\n"
+       playground);
   f ~config ~meta ~playground
 
 let with_turn_sandbox_factory ~config ~meta f =
@@ -1094,7 +1115,19 @@ let test_execute_git_push_requires_write_tool_access_before_docker () =
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
   ensure_dir repo;
+  git_ok ~cwd:playground [ "init"; "-q" ];
+  git_ok ~cwd:playground [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:playground [ "config"; "user.name"; "test" ];
+  git_ok ~cwd:playground [ "commit"; "--allow-empty"; "-m"; "initial"; "-q" ];
+  git_ok ~cwd:playground [ "branch"; "-m"; "main" ];
   git_ok ~cwd:repo [ "init"; "-q" ];
+  git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:repo [ "config"; "user.name"; "test" ];
+  git_ok ~cwd:repo [ "remote"; "add"; "origin"; playground ];
+  git_ok ~cwd:repo [ "fetch"; "origin"; "-q" ];
+  git_ok ~cwd:repo [ "branch"; "-m"; "main" ];
+  git_ok ~cwd:repo [ "reset"; "--hard"; "origin/main" ];
+  git_ok ~cwd:repo [ "branch"; "--set-upstream-to=origin/main"; "main" ];
   let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->

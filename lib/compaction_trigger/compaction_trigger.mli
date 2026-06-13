@@ -2,7 +2,7 @@
 
     Replaces the prior [string] / [string option] representation in
     [compaction_event.trigger] and [pre_compact_event.trigger] so the
-    Prometheus [trigger] label has bounded cardinality (5 values) while
+    Otel_metric_store [trigger] label has bounded cardinality (5 values) while
     structured numerical detail (ratio, counts, thresholds) is preserved
     in the JSON receipt via [to_detail_json]. *)
 
@@ -25,12 +25,12 @@ type t =
       }
   | Manual
 
-(** Closed label set (5 values) for Prometheus / SSE [trigger] label.
+(** Closed label set (5 values) for Otel_metric_store / SSE [trigger] label.
     Use this anywhere cardinality matters. *)
 val to_label : t -> string
 
 (** Human-readable rendering with embedded numerical detail.  Use for
-    [Log.*] string interpolation only — NOT for Prometheus labels. *)
+    [Log.*] string interpolation only — NOT for Otel_metric_store labels. *)
 val to_human : t -> string
 
 (** Structured JSON detail with all numerical fields preserved.  Use

@@ -73,7 +73,7 @@ val pp_validation_error : Format.formatter -> validation_error -> unit
 val show_validation_error : validation_error -> string
 
 val validation_error_outcome_label : validation_error -> string
-(** Stable snake_case label for Prometheus metric outcome labels
+(** Stable snake_case label for Otel_metric_store metric outcome labels
     ([masc_workspace_bind_normalize_outcome_total] in RFC P3-a). The
     pattern match is exhaustive so a new [validation_error] variant
     forces an update here rather than silently aggregating to an

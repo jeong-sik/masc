@@ -192,7 +192,7 @@ let sweep_and_recover (ctx : _ context) =
            with
            | Ok () -> ()
            | Error err ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string WriteMetaFailures)
                ~labels:[ "keeper", entry.name; "phase", "stale_turn_timeout_stamp" ]
                ();
@@ -202,7 +202,7 @@ let sweep_and_recover (ctx : _ context) =
       "%s: supervisor forcing unresolved watchdog-stopped keeper to crashed (%s)"
       entry.name
       msg;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
@@ -333,9 +333,9 @@ let sweep_and_recover (ctx : _ context) =
          Printf.sprintf "restart budget exhausted (%d), last: %s" max_restarts msg
        in
        publish_phase_lifecycle ~phase:Keeper_state_machine.Dead entry.name detail ();
-       (* Loud alert: structured Dead event + Prometheus counter so a fleet-wide
+       (* Loud alert: structured Dead event + Otel_metric_store counter so a fleet-wide
        silent crash (8 keepers, 2026-04-25) is impossible to miss in dashboard
-       or PromQL. The free-form [event="dead"] on masc.keeper.lifecycle does
+       or metric queries. The free-form [event="dead"] on masc.keeper.lifecycle does
        not carry restart_count or the structured failure reason. *)
        let last_fr_str =
          Option.map Keeper_registry.failure_reason_to_string entry.last_failure_reason
@@ -346,7 +346,7 @@ let sweep_and_recover (ctx : _ context) =
          ~restart_count:entry.restart_count
          ~last_failure_reason:last_fr_str
          ();
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string DeadTotal)
          ~labels:
            [ "keeper", entry.name; "reason", Option.value last_fr_str ~default:"unknown" ]
@@ -380,7 +380,7 @@ let sweep_and_recover (ctx : _ context) =
   List.iter
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string RestartAttempts)
          ~labels:[ "keeper", old_entry.name ]
          ();
@@ -411,7 +411,7 @@ let sweep_and_recover (ctx : _ context) =
               "%s: register_restarting refused — restart_budget_remaining=false \
                (BudgetNeverRevives guard tripped); routing to mark_dead"
               old_entry.name;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
               ();
@@ -433,7 +433,7 @@ let sweep_and_recover (ctx : _ context) =
               old_entry.name
               (Printf.sprintf "attempt %d" attempt)
               ();
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
               ();
@@ -452,12 +452,12 @@ let sweep_and_recover (ctx : _ context) =
                 old_entry.name
                 attempt
                 max_restarts;
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string NearExhaustionTotal)
                 ~labels:[ "keeper", old_entry.name ]
                 ()))
        | _ ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
            ();
@@ -511,7 +511,7 @@ let sweep_and_recover (ctx : _ context) =
              "%s: paused meta prune failed: %s"
              name
              (Printexc.to_string exn);
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string SupervisorCleanupFailures)
              ~labels:
                [ "keeper", name
@@ -556,7 +556,7 @@ let sweep_and_recover (ctx : _ context) =
              name
              runtime_id
              reason;
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string AutoResumeBlockedTotal)
              ~labels:[ "keeper", name; "runtime", runtime_id ]
              ()
@@ -606,7 +606,7 @@ let sweep_and_recover (ctx : _ context) =
                  name
                  (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
                  ();
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string AutoResumedTotal)
                  ~labels:[ "keeper", name ]
                  ();
@@ -619,7 +619,7 @@ let sweep_and_recover (ctx : _ context) =
                     Env_config.KeeperSupervisor.auto_resume_max_sec
                     (resume_after_sec *. 2.0))
              | Error err ->
-               Prometheus.inc_counter
+               Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[ "keeper", name; "phase", "auto_resume" ]
                  ();

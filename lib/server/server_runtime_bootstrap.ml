@@ -75,10 +75,10 @@ let init_runtime_context env =
   (clock, mono_clock, net, domain_mgr, proc_mgr, fs)
 
 let record_tool_policy_init_failure ~base_path msg =
-  Prometheus.inc_counter Prometheus.metric_tool_policy_init_failed
+  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_init_failed
     ~labels:[("base_path", base_path)]
     ();
-  Prometheus.inc_counter Prometheus.metric_error_events
+  Otel_metric_store.inc_counter Otel_metric_store.metric_error_events
     ~labels:[("type", Error_event_type.(to_label Missing_config))]
     ();
   Log.Server.error "Fatal tool policy config load failure: %s" msg
@@ -87,7 +87,7 @@ let metric_keeper_runtime_config_load_failures =
   "masc_keeper_runtime_config_load_failures_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:metric_keeper_runtime_config_load_failures
     ~help:
       "Total Keeper_runtime_config.load_and_apply failures. Bootstrap logs WARN; \
@@ -105,7 +105,7 @@ let record_runtime_toml_load_failure msg =
   in
   Option.iter
     (fun reason ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          metric_keeper_runtime_config_load_failures
          ~labels:[ "reason", reason ]
          ())
@@ -190,8 +190,8 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   in
   Server_startup_state.note_runtime_resolution ~path_diagnostics
     ~config_resolution;
-  (* RFC-0107 Phase D.4 — wire piaf connection pool Prometheus exporter.
-     Metric registration itself runs at [Prometheus] module load; this
+  (* RFC-0107 Phase D.4 — wire piaf connection pool Otel_metric_store exporter.
+     Metric registration itself runs at [Otel_metric_store] module load; this
      call is the explicit dependency-order anchor and warms the snapshot
      accessor so a misconfigured pool surfaces here rather than at first
      [/metrics] scrape. *)
@@ -211,7 +211,7 @@ let restore_persisted_sessions (state : Mcp_server.server_state) =
     ~agents_path:(Workspace.agents_dir state.workspace_config)
 
 let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Prometheus.reconcile_active_agents_gauge (Workspace.masc_dir state.workspace_config)
+  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir state.workspace_config)
 
 
 (* Startup maintenance extracted to
@@ -299,7 +299,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let missing_prompt_files = Prompt_registry.validate_required_prompt_files () in
   if missing_prompt_files <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "required prompt files missing: %s"
       (missing_prompt_files
       |> List.map (fun (key, path) -> Printf.sprintf "%s -> %s" key path)
@@ -308,7 +308,7 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   let invalid_prompt_templates = Prompt_registry.validate_prompt_templates () in
   if invalid_prompt_templates <> [] then
     begin
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_error_events ~labels:[("type", Error_event_type.(to_label Missing_config))] ();
     Log.Misc.error "prompt templates use unknown variables: %s"
       (invalid_prompt_templates
       |> List.map (fun (key, variable) -> Printf.sprintf "%s -> %s" key variable)
@@ -444,23 +444,23 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          that might issue an LLM call.  Placed here — before server
          state creation — so it is impossible for an init-time LLM
          call (e.g. a warmup probe, early keeper fiber) to capture
-         the default noop sink instead of the Prometheus-backed one. *)
+         the default noop sink instead of the Otel_metric_store-backed one. *)
       Llm_metric_bridge.install ();
       Llm_metric_bridge.init ~base_path;
       Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
       (* #13885: install backend mutex observers from the top-level
          masc layer.  Backend/workspace sub-libraries cannot depend on
-         Prometheus without creating dependency cycles, but the global
+         Otel_metric_store without creating dependency cycles, but the global
          observer refs can be wired before any FileSystem backend writes. *)
       Backend.FileSystem.set_mutex_observers
         ~acquire:(fun ~op ~seconds ->
-          Prometheus.observe_histogram
-            Prometheus.metric_backend_mutex_acquire_sec
+          Otel_metric_store.observe_histogram
+            Otel_metric_store.metric_backend_mutex_acquire_sec
             ~labels:[ ("op", op) ]
             seconds)
         ~held:(fun ~op ~seconds ->
-          Prometheus.observe_histogram
-            Prometheus.metric_backend_mutex_held_sec
+          Otel_metric_store.observe_histogram
+            Otel_metric_store.metric_backend_mutex_held_sec
             ~labels:[ ("op", op) ]
             seconds);
       Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
@@ -555,14 +555,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
             Fs_compat.cleanup_atomic_orphans ~base_path ()
           in
           if deleted > 0 then
-            Prometheus.inc_counter
-              Prometheus.metric_fs_atomic_orphans_cleaned
+            Otel_metric_store.inc_counter
+              Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
               ~delta:(float_of_int deleted)
               ();
           if preserved > 0 then
-            Prometheus.inc_counter
-              Prometheus.metric_fs_atomic_orphans_cleaned
+            Otel_metric_store.inc_counter
+              Otel_metric_store.metric_fs_atomic_orphans_cleaned
               ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
               ~delta:(float_of_int preserved)
               ();
@@ -588,8 +588,8 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          let groups = Auth.audit_token_uniqueness base_path in
          List.iter
            (fun (token_hash_prefix, agent_names) ->
-             Prometheus.inc_counter
-               Prometheus.metric_auth_credential_token_duplicate
+             Otel_metric_store.inc_counter
+               Otel_metric_store.metric_auth_credential_token_duplicate
                ~labels:[ ("token_hash_prefix", token_hash_prefix) ]
                ();
              Log.Server.warn

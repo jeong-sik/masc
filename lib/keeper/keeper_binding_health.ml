@@ -400,7 +400,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
           state.cooldown_until <- new_until;
           Runtime_metrics.on_provider_cooldown
             ~provider:provider_key ~reason:"failure_threshold";
-          Prometheus.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
+          Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
             ~labels:[("provider", provider_key)] cooldown_dur
         end
       end
@@ -427,7 +427,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         state.cooldown_until <- new_until;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"soft_rate_limit";
-        Prometheus.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
+        Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
           ~labels:[("provider", provider_key)] cooldown_dur
       end
     | Capacity_backpressure ->
@@ -447,7 +447,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         state.cooldown_until <- new_until;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"capacity_backpressure";
-        Prometheus.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
+        Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
           ~labels:[("provider", provider_key)] cooldown_dur
       end
     | Hard_quota ->
@@ -464,7 +464,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         state.cooldown_until <- new_until;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"hard_quota";
-        Prometheus.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
+        Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
           ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
       end
     | Terminal_failure ->
@@ -482,7 +482,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         state.cooldown_until <- new_until;
         Runtime_metrics.on_provider_cooldown
           ~provider:provider_key ~reason:"terminal_failure";
-        Prometheus.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
+        Otel_metric_store.observe_histogram Keeper_metrics.(to_string ProviderBlockDurationSec)
           ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
       end)
 

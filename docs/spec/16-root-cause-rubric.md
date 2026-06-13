@@ -41,7 +41,7 @@ The rubric is applied two ways:
 | Color | `#0066cc` |
 | Marker | A request path, state transition, or error branch exists without a corresponding metric / span / `correlation_id` propagation |
 | Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
-| Issue body triggers | "metric", "correlation_id", "Prometheus", "span", "observability gap" |
+| Issue body triggers | "metric", "correlation_id", "OTel", "span", "observability gap" |
 
 ### BND — OAS-MASC Boundary Violation
 

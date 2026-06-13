@@ -5,7 +5,7 @@ import {
   extractBatchTerminations,
 } from './keeper-reactivity-monitor'
 import { isKeeperPaused } from '../lib/keeper-predicates'
-import type { ParsedMetric } from './prometheus-metrics'
+import type { ParsedMetric } from './otel-metrics'
 import type { Keeper } from '../types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────

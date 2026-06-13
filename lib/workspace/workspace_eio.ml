@@ -82,9 +82,9 @@ let create_config ~fs ?clock base_path =
     pubsub_max_messages = Backend.pubsub_max_messages;
   } in
   let backend = Backend.FileSystem.create ~fs ?clock backend_config in
-  (* Prometheus mutex observers are installed from lib/prometheus.ml so
+  (* Otel_metric_store mutex observers are installed from lib/otel_metric_store.ml so
      this extracted workspace library does not depend on the top-level
-     Prometheus module. *)
+     Otel_metric_store module. *)
   {
     base_path;
     lock_expiry_minutes = 30;

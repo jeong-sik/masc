@@ -3,10 +3,10 @@
 open Keeper_hooks_oas_types
 open Keeper_hooks_oas_response_metrics
 
-let cost_emit_source_metric = Prometheus.metric_cost_emit_zero_source
+let cost_emit_source_metric = Otel_metric_store.metric_cost_emit_zero_source
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:cost_emit_source_metric
     ~help:
       "Total cost.jsonl emits where cost_usd ended up as 0.0 due to a \
@@ -35,7 +35,7 @@ let classify_cost_usd_source ~usage_missing ~usage_trusted ~runtime_unmetered
 
 let record_cost_emit_source source =
   if not (String.equal source cost_source_computed) then
-    Prometheus.inc_counter cost_emit_source_metric
+    Otel_metric_store.inc_counter cost_emit_source_metric
       ~labels:[ (label_source, source) ]
       ()
 
@@ -249,8 +249,8 @@ let emit_cost_event
       ?telemetry
       ()
   in
-  Prometheus.inc_counter
-    Prometheus.metric_cost_ledger_status
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_cost_ledger_status
     ~labels:
       [
         (label_provider, assembled.provider);
@@ -263,7 +263,7 @@ let emit_cost_event
   (try Dated_jsonl.append store entry
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string MetricEmitDropped)
           ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
           ();

@@ -30,7 +30,7 @@ let tok_per_sec_from_ms ~tokens ~ms =
 
 let observe_inference_rate metric ~model_bucket = function
   | Some rate when positive_finite rate ->
-    Prometheus.observe_histogram metric ~labels:[ "model_bucket", model_bucket ] rate
+    Otel_metric_store.observe_histogram metric ~labels:[ "model_bucket", model_bucket ] rate
   | _ -> ()
 ;;
 
@@ -50,7 +50,7 @@ let observe_inference_telemetry
      the latency/rate metrics (prompt_tok/s, decode_tok/s) that are
      unique to the [InferenceTelemetry] event payload. *)
   observe_inference_rate
-    Prometheus.metric_oas_inference_prompt_tok_per_sec
+    Otel_metric_store.metric_oas_inference_prompt_tok_per_sec
     ~model_bucket
     (tok_per_sec_from_ms ~tokens:prompt_tokens ~ms:prompt_ms);
   let decode_tok_s =
@@ -59,15 +59,15 @@ let observe_inference_telemetry
     | _ -> tok_per_sec_from_ms ~tokens:completion_tokens ~ms:decode_ms
   in
   observe_inference_rate
-    Prometheus.metric_oas_inference_decode_tok_per_sec
+    Otel_metric_store.metric_oas_inference_decode_tok_per_sec
     ~model_bucket
     decode_tok_s
 ;;
 
 let observe_inference_cost ~provider ~model_bucket = function
   | Some cost when positive_finite cost ->
-    Prometheus.observe_histogram
-      Prometheus.metric_oas_inference_cost_usd
+    Otel_metric_store.observe_histogram
+      Otel_metric_store.metric_oas_inference_cost_usd
       ~labels:[ "provider", provider; "model_bucket", model_bucket ]
       cost
   | _ -> ()

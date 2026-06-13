@@ -1,6 +1,6 @@
 (* test/test_fsm_drift_counter.ml
 
-   #9795: pin the canonical Prometheus metric name + label
+   #9795: pin the canonical Otel_metric_store metric name + label
    shape for task FSM drift observability.  The single current
    [Workspace_task_lifecycle.drift] variant ([Claimed_to_done_skip])
    was warn-only until this counter was added; now ratchet
@@ -8,15 +8,15 @@
    measured instead of scraped from logs.
 
    Layering: [masc_workspace] (home of [Workspace_task]) sits below
-   [masc.Prometheus] in the library dep graph, so the emit
+   [masc.Otel_metric_store] in the library dep graph, so the emit
    runs through [Workspace_hooks.fsm_drift_observer_fn] which
-   [Workspace_prometheus_hooks.install] wires to the Prometheus adapter. This test
+   [Workspace_metric_hooks.install] wires to the Otel_metric_store adapter. This test
    exercises the wired observer directly for
    counter mechanics, and [Workspace_task.drift_variant_label]
    for the enum→label mapping that keeps Grafana rules
    aligned with the sealed [drift] variant. *)
 
-let () = Masc.Workspace_prometheus_hooks.install ()
+let () = Masc.Workspace_metric_hooks.install ()
 
 let fsm_drift_metric = "masc_task_fsm_drift_total"
 
@@ -26,7 +26,7 @@ let record_fsm_drift ~variant ~force =
 ;;
 
 let counter_for ~variant ~force =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     fsm_drift_metric
     ~labels:[
       ("variant", variant);
@@ -36,15 +36,15 @@ let counter_for ~variant ~force =
 
 let test_metric_name_stable () =
   let metric =
-    Masc.Prometheus.snapshot ()
-    |> List.find_opt (fun (m : Masc.Prometheus.metric) ->
+    Masc.Otel_metric_store.snapshot ()
+    |> List.find_opt (fun (m : Masc.Otel_metric_store.metric) ->
       String.equal m.name fsm_drift_metric && m.labels = [])
   in
   Alcotest.(check bool)
     "fsm drift registered as counter"
     true
     (match metric with
-     | Some m -> m.metric_type = Masc.Prometheus.Counter
+     | Some m -> m.metric_type = Masc.Otel_metric_store.Counter
      | None -> false)
 
 (* Exhaustive enum → label mapping.  Adding a new

@@ -77,7 +77,7 @@ let supervise_keepalive
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WorkspaceInitFailures)
          ~labels:[ "keeper", meta.name ]
          ();
@@ -88,7 +88,7 @@ let supervise_keepalive
         (match write_meta ctx.config synced with
          | Ok () -> ()
          | Error msg ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string WriteMetaFailures)
              ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
              ();
@@ -100,7 +100,7 @@ let supervise_keepalive
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string PresenceSyncFailures)
           ~labels:[ "keeper", meta.name ]
           ();

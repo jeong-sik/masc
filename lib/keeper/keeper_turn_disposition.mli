@@ -43,7 +43,7 @@ type t =
   | Provider_error of Keeper_turn_terminal_code.t
   (** Runtime-layer termination promoted to operator-facing
           disposition. The inner code preserves the typed runtime cause
-          for diagnostics (Prometheus / dashboard / bin/masc-trace).
+          for diagnostics (Otel_metric_store / dashboard / bin/masc-trace).
           [to_wire (Provider_error code) = Keeper_turn_terminal_code.to_wire code].
           PR-3 readers match on this constructor instead of
           [String.starts_with ~prefix:"api_error_"]. *)

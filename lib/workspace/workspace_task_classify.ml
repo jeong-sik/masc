@@ -18,7 +18,7 @@ open Workspace_identity
 
 (* #9795: FSM drift observability. [masc_workspace] sits below the
    [masc] library in the dep graph, so it cannot call
-   [Prometheus.inc_counter] directly. The variant→label mapping
+   [Otel_metric_store.inc_counter] directly. The variant→label mapping
    stays here (pattern-matches the sealed drift enum), and the
    emit runs through a [Workspace_hooks] callback wired by
    [lib/workspace.ml] at startup.  Exhaustive pattern-match forces

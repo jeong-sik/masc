@@ -7,7 +7,7 @@
       rejects the event.
     - [drain] decrements depth by batch size and never below zero.
     - Multiple subscribers under the same purpose coexist (both tracked).
-    - [publish] updates the Prometheus publish-total counter and
+    - [publish] updates the Otel_metric_store publish-total counter and
       accumulates publish-block-seconds (value > 0 after one publish).
 *)
 
@@ -115,19 +115,19 @@ let test_publish_updates_counters () =
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
     let before_total =
-      Masc.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
+      Masc.Otel_metric_store.metric_value_or_zero "masc_oas_bus_publish_total" ()
     in
     let before_block =
-      Masc.Prometheus.metric_value_or_zero
+      Masc.Otel_metric_store.metric_value_or_zero
         "masc_oas_bus_publish_block_seconds_total" ()
     in
     I.publish bus (mk_custom_event "x");
     I.publish bus (mk_custom_event "y");
     let after_total =
-      Masc.Prometheus.metric_value_or_zero "masc_oas_bus_publish_total" ()
+      Masc.Otel_metric_store.metric_value_or_zero "masc_oas_bus_publish_total" ()
     in
     let after_block =
-      Masc.Prometheus.metric_value_or_zero
+      Masc.Otel_metric_store.metric_value_or_zero
         "masc_oas_bus_publish_block_seconds_total" ()
     in
     check bool "publish_total incremented by at least 2"

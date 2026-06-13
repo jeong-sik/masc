@@ -1167,7 +1167,8 @@ let internal_descriptors : t list =
   ; masc_plan_descriptor "update" "masc_plan_update"
       "Update a workspace plan." ~readonly:false
   ; masc_plan_descriptor "get" "masc_plan_get"
-      "Read the current plan." ~readonly:true
+      "Read the current plan, creating an empty planning context when missing."
+      ~readonly:false
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
       "Bind a task to a plan slot." ~readonly:false
   ; masc_plan_descriptor "get_task" "masc_plan_get_task"
@@ -1184,7 +1185,8 @@ let internal_descriptors : t list =
   ; masc_run_descriptor "masc_run_list"
       "List recent runs." ~readonly:true
   ; masc_run_descriptor "masc_run_get"
-      "Read a single run by id." ~readonly:true
+      "Read a single run by id, creating an empty run record when missing."
+      ~readonly:false
   ; masc_run_descriptor "masc_run_log"
       "Read or append run log events." ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
@@ -1234,10 +1236,6 @@ let internal_descriptors : t list =
      LLM-native WebSearch / WebFetch descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
-  ; masc_misc_descriptor "tool_admin_snapshot" "masc_tool_admin_snapshot"
-      "Read tool-admin inventory snapshot." ~readonly:true
-  ; masc_misc_descriptor "tool_admin_update" "masc_tool_admin_update"
-      "Update tool-admin metadata." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
   ; masc_control_descriptor "pause" "masc_pause"
       "Pause a paused/runnable agent." ~readonly:false

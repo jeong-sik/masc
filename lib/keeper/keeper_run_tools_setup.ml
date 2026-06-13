@@ -65,7 +65,7 @@ let prepare_agent_setup
                     "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, \
                      using default 5"
                     s;
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string ConfigEnvParseFailures)
                     ~labels:[ "var", "MASC_KEEPER_TOOL_DECAY_TURNS" ]
                     ();
@@ -511,7 +511,7 @@ let prepare_agent_setup
                ()
            with
            | Error detail ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string ToolSelectionFailures)
                ~labels:[ "keeper", meta.name; "phase", "runtime_resolve" ]
                ();
@@ -525,7 +525,7 @@ let prepare_agent_setup
            | Ok providers ->
              (match providers with
               | [] ->
-                Prometheus.inc_counter
+                Otel_metric_store.inc_counter
                   Keeper_metrics.(to_string ToolSelectionFailures)
                   ~labels:[ "keeper", meta.name; "phase", "runtime_no_provider" ]
                   ();
@@ -574,7 +574,7 @@ let prepare_agent_setup
                  with
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
-                   Prometheus.inc_counter
+                   Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string ToolSelectionFailures)
                      ~labels:[ "keeper", meta.name; "phase", "topk_llm" ]
                      ();
@@ -585,7 +585,7 @@ let prepare_agent_setup
                      (Printexc.to_string exn);
                    [])))
         | _ ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ToolSelectionFailures)
             ~labels:[ "keeper", meta.name; "phase", "topk_llm_no_eio" ]
             ();

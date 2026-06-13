@@ -17,8 +17,8 @@ module Float = Stdlib.Float
 
 (** Tool_misc — Miscellaneous operations (facade).
 
-    Dispatches auth, config, tool inventory, and feature flag handlers to
-    [Tool_misc_admin].
+    Dispatches config introspection and tool inventory helpers to
+    [Tool_misc_introspection].
 
     Retains: dashboard, verify_handoff, gc, cleanup_zombies,
     tool_stats, tool_help.
@@ -168,10 +168,7 @@ let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
 (* ================================================================ *)
 
 let tool_inventory_json ctx ~include_hidden =
-  let admin_ctx : Tool_misc_admin.context =
-    { config = ctx.config; agent_name = ctx.agent_name }
-  in
-  Tool_misc_admin.tool_inventory_json admin_ctx ~include_hidden
+  Tool_misc_introspection.tool_inventory_json ctx ~include_hidden
 
 (* ================================================================ *)
 (* Dispatch (facade)                                                *)
@@ -179,12 +176,9 @@ let tool_inventory_json ctx ~include_hidden =
 
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let admin_ctx : Tool_misc_admin.context =
-    { config = ctx.config; agent_name = ctx.agent_name }
-  in
   match name with
   | "masc_config" ->
-      Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
+      Some (Tool_misc_introspection.handle_config ~tool_name:name ~start_time:start args)
   | "masc_dashboard" ->
       Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
@@ -198,20 +192,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
       Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" ->
       Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_admin_snapshot" ->
-      Some
-        (Tool_misc_admin.handle_tool_admin_snapshot
-           ~tool_name:name
-           ~start_time:start
-           admin_ctx
-           args)
-  | "masc_tool_admin_update" ->
-      Some
-        (Tool_misc_admin.handle_tool_admin_update
-           ~tool_name:name
-           ~start_time:start
-           admin_ctx
-           args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
@@ -223,8 +203,6 @@ let schemas = Tool_schemas_misc.schemas
 let tool_spec_read_only =
   [
     "masc_tool_help";
-    "masc_web_search";
-    "masc_web_fetch";
     "masc_dashboard";
   ]
 

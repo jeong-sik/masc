@@ -12,7 +12,7 @@
 module TP = Masc.Timeout_policy
 
 let counter_for ~layer ~origin =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     TP.metric_overshoot_total
     ~labels:[ ("layer", layer); ("origin", origin) ]
     ()

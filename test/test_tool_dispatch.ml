@@ -239,7 +239,7 @@ let () =
               check bool "contains registered name" true
                 (List.mem "__enum_check_xyz" all));
         ] );
-      (* PR-S3: the OTel/Prometheus span wrapper is injected, not referenced
+      (* PR-S3: the OTel/Otel_metric_store span wrapper is injected, not referenced
          inline. These tests assert the injection MECHANISM fires — they prove
          guarded_dispatch routes through [!span_wrapper_ref], so registering
          [Tool_telemetry.with_span] at the composition root is sufficient for

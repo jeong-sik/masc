@@ -3,8 +3,8 @@
    See keeper_fsm_guard_runtime.mli for the contract. *)
 
 let bump_counter ~action ~stage =
-  Prometheus.inc_counter
-    Prometheus.metric_fsm_guard_violation
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_fsm_guard_violation
     ~labels:[ "action", action; "stage", stage ]
     ()
 ;;
@@ -20,7 +20,7 @@ let bump_counter ~action ~stage =
    module dependency cycle ([Keeper_registry] already depends on this
    module), so the catch is widened to all exceptions.  The counter is
    bumped and the exception re-raised with its original backtrace intact
-   ([bump_counter] runs a [Prometheus.inc_counter] call in between, which
+   ([bump_counter] runs a [Otel_metric_store.inc_counter] call in between, which
    would otherwise clobber [Printexc]'s current backtrace). *)
 let wrap_unit ~action ~stage thunk =
   try thunk () with

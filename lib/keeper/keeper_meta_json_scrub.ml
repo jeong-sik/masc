@@ -58,7 +58,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaJsonFailures)
            ~labels:[("site", "scrub")]
            ();

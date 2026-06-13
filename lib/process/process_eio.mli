@@ -45,7 +45,7 @@ val should_retry_unix_fallback : exn -> bool
 val process_timeout_observer_fn :
   (program:string -> timeout_sec:float -> origin:Timeout_origin.t -> unit) Atomic.t
 (** Hook fired from every [run_argv*] timeout branch.  Default no-op so
-    [masc_process] carries no [Prometheus] dependency.  [lib/workspace.ml]
+    [masc_process] carries no [Otel_metric_store] dependency.  [lib/workspace.ml]
     wires it at module load to emit [masc_process_timeout_total].
     [program] is [Filename.basename argv0] (~10-20 distinct programs fleet-wide);
     [origin] is one of {!Timeout_origin.process_origins}, so the metric’s

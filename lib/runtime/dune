@@ -25,7 +25,6 @@
   masc.tool_types
   masc.tool_catalog_surfaces
   masc.masc_tool_dispatch
-  masc.prometheus
   masc.config
   masc.config_dir_resolver
   masc.masc_event_bus

@@ -1019,11 +1019,19 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let durable_names =
             paused |> member "durable_names" |> to_list |> List.map to_string
           in
-          let names = paused |> member "names" |> to_list |> List.map to_string in
-          Alcotest.(check int) "durable paused count" 1
-            (paused |> member "durable_count" |> to_int);
-          Alcotest.(check (list string)) "durable paused names"
-            [ "durable-paused" ] durable_names;
+	          let names = paused |> member "names" |> to_list |> List.map to_string in
+	          Alcotest.(check int) "durable paused count" 1
+	            (paused |> member "durable_count" |> to_int);
+	          Alcotest.(check int) "registry paused count" 0
+	            (paused |> member "registry_paused_count" |> to_int);
+	          Alcotest.(check string) "legacy running count semantics"
+	            "legacy alias for registry_paused_count"
+	            (paused |> member "running_count_semantics" |> to_string);
+	          Alcotest.(check string) "registry paused semantics"
+	            "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running"
+	            (paused |> member "registry_paused_semantics" |> to_string);
+	          Alcotest.(check (list string)) "durable paused names"
+	            [ "durable-paused" ] durable_names;
           Alcotest.(check int) "durable paused autoboot count" 1
             (paused |> member "autoboot_enabled_count" |> to_int);
           Alcotest.(check (list string)) "durable paused autoboot names"

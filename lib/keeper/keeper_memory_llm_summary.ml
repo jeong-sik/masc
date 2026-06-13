@@ -30,14 +30,14 @@ let summary_max_tokens = 512
    .tmp/memory-compacting-analysis.html (LLM-summary triple-silent
    fallback chain). *)
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~help:
       "Total [summarize_with_provider] attempts classified by label \
        [outcome] (ok_summary | timed_out | http_error | empty_response). \
        Labels: [outcome], [provider] (model_id), [runtime_id]."
     ();
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
     ~help:
       "Total [summarize_with_providers] runs where every provider \
@@ -132,7 +132,7 @@ let record_summary_outcome
     ~(runtime_id : string)
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(outcome : Keeper_memory_llm_summary_outcome.t) =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~labels:
       [ ("outcome", Keeper_memory_llm_summary_outcome.to_label outcome)
@@ -206,7 +206,7 @@ let summarize_with_providers
   match go providers with
   | Some _ as summary -> summary
   | None ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
         ~labels:[("runtime_id", runtime_id)]
         ();

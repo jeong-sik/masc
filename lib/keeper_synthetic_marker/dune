@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_synthetic_marker)
- (public_name masc.keeper_synthetic_marker)
- (wrapped false)
- (modules keeper_synthetic_marker)
- (libraries masc_core))

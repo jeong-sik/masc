@@ -103,7 +103,7 @@ let test_rfc_0134_new_variants_disjoint () =
 let test_legacy_constants_byte_compat () =
   (* The three pre-RFC string constants in Safe_ops must be the wire
      forms of the corresponding typed constructors so PR-2 can swap
-     callers without changing Prometheus label cardinality. *)
+     callers without changing Otel_metric_store label cardinality. *)
   Alcotest.(check string)
     "list_dir_error matches Safe_ops constant"
     Safe.persistence_read_drop_reason_list_dir_error

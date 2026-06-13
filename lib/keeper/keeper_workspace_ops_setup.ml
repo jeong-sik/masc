@@ -1,5 +1,5 @@
 (* Grep operation setup:
-    coreutils resolution, Prometheus metric, history observation,
+    coreutils resolution, Otel_metric_store metric, history observation,
     and the shared process-result renderer.
 
     Extracted from the Grep dispatcher as part of godfile near-threshold split. *)
@@ -18,15 +18,15 @@ open Keeper_tool_shared_runtime
    this module's call sites. *)
 let coreutils = (Host_config.host ()).coreutils
 
-(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the metric name
+(* Domain-owned Otel_metric_store metric (RFC-0043 Phase 0): the metric name
    and registration live next to the bumper here rather than in the
-   central prometheus.ml registry, keeping that file under the
+   central otel_metric_store.ml registry, keeping that file under the
    godfile-size-regression cap. *)
 let metric_bash_history_append_failures =
   "masc_bash_history_append_failures_total"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:metric_bash_history_append_failures
     ~help:
       "Total bash-history audit append failures observed at \
@@ -45,7 +45,7 @@ let observe_history_append ~root ~keeper_name entry =
   match Masc_exec.Bash_history.append ~base_path:root ~keeper_name entry with
   | Ok () -> ()
   | Error exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         metric_bash_history_append_failures ();
       Log.KeeperExec.warn
         "bash_history.append failed: keeper=%s base=%s exn=%s"

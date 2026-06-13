@@ -29,7 +29,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       ~usage:result.usage
       ~context_max
   in
-  (* #9959: surface classification into Prometheus exactly once per
+  (* #9959: surface classification into Otel_metric_store exactly once per
      turn. Other [classify_usage_trust] call sites serialize the
      trust into JSONL but do not bump the counter. *)
   record_usage_trust ~keeper_name:meta.name ~trust:usage_trust;
@@ -93,7 +93,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       then "noop"
       else "tool_called"
     in
-    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
+    Otel_metric_store.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;

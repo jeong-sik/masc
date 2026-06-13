@@ -1,8 +1,0 @@
-(include_subdirs no)
-
-(library
- (name masc_keeper_oas_timeout_message)
- (public_name masc.keeper_oas_timeout_message)
- (wrapped false)
- (modules keeper_oas_timeout_message)
- (libraries masc_core))

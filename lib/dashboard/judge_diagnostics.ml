@@ -33,26 +33,26 @@ let format_unparseable_response ~judge_label ~reason raw =
 
 let record_lenient_fallback ~judge_label raw =
   let labels = [("judge", String.lowercase_ascii judge_label)] in
-  Prometheus.inc_counter
-    Prometheus.metric_governance_judge_unparseable
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_governance_judge_unparseable
     ~labels
     ();
-  Prometheus.inc_counter
-    Prometheus.metric_governance_lenient_json_fallback_hit
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_governance_lenient_json_fallback_hit
     ~labels
     ();
   format_lenient_fallback ~judge_label raw
 
 let record_unparseable_response ~judge_label ~reason raw =
   let labels = [("judge", String.lowercase_ascii judge_label)] in
-  Prometheus.inc_counter
-    Prometheus.metric_governance_judge_unparseable
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_governance_judge_unparseable
     ~labels
     ();
   format_unparseable_response ~judge_label ~reason raw
 
 let int_metric_value metric_name ~labels =
-  int_of_float (Prometheus.metric_value_or_zero metric_name ~labels ())
+  int_of_float (Otel_metric_store.metric_value_or_zero metric_name ~labels ())
 
 let lenient_fallback_metrics_json ~judge_label =
   let judge = String.lowercase_ascii judge_label in
@@ -62,10 +62,10 @@ let lenient_fallback_metrics_json ~judge_label =
       ("judge", `String judge);
       ( "governance_judge_unparseable_total",
         `Int
-          (int_metric_value Prometheus.metric_governance_judge_unparseable
+          (int_metric_value Otel_metric_store.metric_governance_judge_unparseable
              ~labels) );
       ( "governance_lenient_json_fallback_hit_total",
         `Int
           (int_metric_value
-             Prometheus.metric_governance_lenient_json_fallback_hit ~labels) );
+             Otel_metric_store.metric_governance_lenient_json_fallback_hit ~labels) );
     ]

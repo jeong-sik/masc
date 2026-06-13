@@ -10,10 +10,20 @@
 
 (** {1 Types} *)
 
+type attachment = {
+  id : string;
+  att_type : string;
+  name : string;
+  size : int;
+  mime_type : string;
+  data : string;
+}
+
 type chat_message = {
   role : string;
   content : string;
   ts : float option;
+  attachments : attachment list option;
 }
 
 (** {1 I/O} *)
@@ -27,6 +37,7 @@ val append_pair :
   keeper_name:string ->
   user_content:string ->
   assistant_content:string ->
+  user_attachments:attachment list ->
   unit
 
 (** [load ~base_dir ~keeper_name] returns the most recent

@@ -452,7 +452,7 @@ let assemble_hooks
         let after_uses, after_results = tool_pair_counts repaired in
         let record kind delta =
           if delta > 0 then
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string ToolPairRepair)
               ~labels:[ "keeper", agent_name; "kind", kind; "site", "keeper_reducer" ]
               ~delta:(float_of_int delta)

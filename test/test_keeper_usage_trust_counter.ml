@@ -1,7 +1,7 @@
 (* test/test_keeper_usage_trust_counter.ml
 
    #9959 defensive layer test: verify the new [record_usage_trust]
-   helper increments the right Prometheus counters for each
+   helper increments the right Otel_metric_store counters for each
    [usage_trust] variant and isolates labels across keepers.
 
    The upstream root cause (accumulated values leaking into
@@ -11,7 +11,7 @@
 
 module UM = Masc.Keeper_unified_metrics
 module UT = Keeper_usage_trust
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let outcome_for ~keeper ~outcome =
   Prom.metric_value_or_zero

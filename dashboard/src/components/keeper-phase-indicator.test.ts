@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PHASE_STYLES, getPhaseStyle } from './keeper-phase-indicator'
+import { PHASE_STYLES, getPhaseStyle, pipelineStageDetailLabel } from './keeper-phase-indicator'
 
 // ================================================================
 // PHASE_STYLES
@@ -112,5 +112,18 @@ describe('getPhaseStyle', () => {
       expect(style.label).toBeTruthy()
       expect(style.color).toMatch(/^var\(--/)
     }
+  })
+})
+
+describe('pipelineStageDetailLabel', () => {
+  it('renders operator-facing labels for offline detail reasons', () => {
+    expect(pipelineStageDetailLabel('launch_pending_no_fiber')).toBe('기동 대기')
+    expect(pipelineStageDetailLabel('clean_stop_terminal')).toBe('정상 정지')
+    expect(pipelineStageDetailLabel('restart_budget_exhausted_terminal')).toBe('재시작 한도 소진')
+    expect(pipelineStageDetailLabel('structural_failure_terminal')).toBe('구조 실패')
+  })
+
+  it('keeps unknown future details readable', () => {
+    expect(pipelineStageDetailLabel('future_detail_value')).toBe('future detail value')
   })
 })

@@ -1,7 +1,7 @@
 (** OTel Spans — OpenTelemetry span lifecycle for masc.
 
-    When [MASC_OTEL_ENABLED=true], creates real OTel spans exported via OTLP.
-    When disabled (default), all operations are zero-cost no-ops.
+    When [MASC_OTEL_ENABLED=true] (default), creates real OTel spans exported via OTLP.
+    When explicitly disabled, all operations are zero-cost no-ops.
 
     @since 2.103.0 *)
 
@@ -12,6 +12,14 @@ val init : unit -> unit
 (** [is_exporter_active ()] reports whether an OTLP exporter backend is registered. *)
 val is_exporter_active : unit -> bool
 
+(** [last_successful_export ()] returns the Unix timestamp of the last
+    successful export, or [None] if the exporter has never been active. *)
+val last_successful_export : unit -> float option
+
+(** [consecutive_failures ()] returns the number of consecutive health check
+    or export failures since the last successful connection. *)
+val consecutive_failures : unit -> int
+
 (** Setup OTLP exporter with a custom setup thunk.
     No-op when [enabled=false]. Sets [is_exporter_active] accordingly. *)
 val setup_exporter_with :
@@ -19,7 +27,7 @@ val setup_exporter_with :
 
 (** Setup OTLP exporter using the cohttp-eio HTTP/protobuf backend.
     Forks a 500ms tick fiber under [sw] for periodic batch flush.
-    No-op when [MASC_OTEL_ENABLED] is not set. *)
+    No-op when OTel is explicitly disabled. *)
 val setup_exporter : sw:Eio.Switch.t -> Eio_unix.Stdenv.base -> unit
 
 (** Flush pending spans and remove the OTLP backend.

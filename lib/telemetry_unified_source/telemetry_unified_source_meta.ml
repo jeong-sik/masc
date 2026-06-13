@@ -8,10 +8,6 @@ open Telemetry_unified_source
 
 let observe_source_read_failure source ~site ~error =
   let source = source_to_string source in
-  Prometheus.inc_counter
-    Prometheus.metric_telemetry_unified_source_read_failures
-    ~labels:[ ("source", source); ("site", site) ]
-    ();
   Log.Telemetry.warn
     "telemetry_unified source read failure: source=%s site=%s error=%s"
     source site error

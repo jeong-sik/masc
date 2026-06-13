@@ -46,7 +46,7 @@ type state = {
    [masc_after_turn_response_model_empty_total] introduced by
    #10083; separate metric name keeps governance vs keeper
    attribution clean while sharing the [unknown_provider]
-   marker string so PromQL can union-aggregate across both. *)
+   marker string so metric queries can union-aggregate across both. *)
 let governance_response_model_empty_metric =
   "masc_governance_response_model_empty_total"
 
@@ -60,26 +60,26 @@ let governance_compute_in_flight_metric =
   "masc_governance_judge_compute_in_flight"
 
 let () =
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:governance_response_model_empty_metric
     ~help:
       "Count of governance compute_judgments cycles where \
        [response.model] was empty.  Labels: \
        [source=telemetry_resolved | unknown_source]."
     ();
-  Prometheus.register_counter
+  Otel_metric_store.register_counter
     ~name:governance_compute_total_metric
     ~help:
       "Count of governance judge compute_judgments attempts. Labels: \
        [outcome=ok|error, reason=ok|timeout|error|cancelled]."
     ();
-  Prometheus.register_histogram
+  Otel_metric_store.register_histogram
     ~name:governance_compute_duration_metric
     ~help:
       "Observed governance judge compute_judgments duration in seconds. \
        Labels: [outcome=ok|error, reason=ok|timeout|error|cancelled]."
     ();
-  Prometheus.register_gauge
+  Otel_metric_store.register_gauge
     ~name:governance_compute_in_flight_metric
     ~help:"Current in-flight governance judge compute_judgments attempts."
     ()
@@ -656,7 +656,7 @@ let compute_judgments
        than hanging the daemon fiber indefinitely (#8319).
        #9629: caller uses run_with_caller so this judge resolves its
        budget through Env_config_oas_bridge
-       and surfaces in the per-caller Prometheus counter. *)
+       and surfaces in the per-caller Otel_metric_store counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
@@ -692,7 +692,7 @@ let compute_judgments
           | Response_model -> ()
           | Telemetry_resolved | Unknown_source ->
               let source = governance_model_source_to_string model_source in
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 governance_response_model_empty_metric
                 ~labels:[ ("source", source) ]
                 ();
@@ -752,7 +752,7 @@ let mark_compute_start (st : state) =
      overwriting the freshest count. *)
   with_lock st (fun () ->
       st.compute_in_flight <- st.compute_in_flight + 1;
-      Prometheus.set_gauge governance_compute_in_flight_metric
+      Otel_metric_store.set_gauge governance_compute_in_flight_metric
         (float_of_int st.compute_in_flight);
       st.compute_in_flight)
 
@@ -784,12 +784,12 @@ let mark_compute_finish (st : state) ~started_at ~outcome ~reason
         st.last_compute_timeout_sec <- timeout_sec;
         st.last_compute_outcome <- Some outcome;
         st.last_compute_reason <- Some reason;
-        Prometheus.set_gauge governance_compute_in_flight_metric
+        Otel_metric_store.set_gauge governance_compute_in_flight_metric
           (float_of_int st.compute_in_flight);
         st.compute_in_flight)
   in
-  Prometheus.inc_counter governance_compute_total_metric ~labels ();
-  Prometheus.observe_histogram governance_compute_duration_metric
+  Otel_metric_store.inc_counter governance_compute_total_metric ~labels ();
+  Otel_metric_store.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
   (* Single emission at the outcome-derived level (never two lines). *)
   Log.Governance.emit

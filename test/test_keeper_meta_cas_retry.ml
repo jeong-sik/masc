@@ -109,8 +109,8 @@ let test_retry_succeeds_after_concurrent_bump () =
        version and succeed. *)
     let cycle_payload = { caller_view with goal = "cycle payload" } in
     let before_retry_metric =
-      Prometheus.metric_value_or_zero
-        Prometheus.metric_write_meta_cas_retry_total
+      Otel_metric_store.metric_value_or_zero
+        Otel_metric_store.metric_write_meta_cas_retry_total
         ~labels:[("keeper_name", "beta")]
         ()
     in
@@ -121,8 +121,8 @@ let test_retry_succeeds_after_concurrent_bump () =
      | Ok () -> ()
      | Error e -> fail ("retry write failed: " ^ e));
     let after_retry_metric =
-      Prometheus.metric_value_or_zero
-        Prometheus.metric_write_meta_cas_retry_total
+      Otel_metric_store.metric_value_or_zero
+        Otel_metric_store.metric_write_meta_cas_retry_total
         ~labels:[("keeper_name", "beta")]
         ()
     in

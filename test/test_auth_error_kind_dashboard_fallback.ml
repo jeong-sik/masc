@@ -4,12 +4,12 @@
     The two prior inline warn sites at [lib/server/server_auth.ml] used
     Printf format strings that the OCaml lexer concatenates across the
     [\<newline><whitespace>] escape into a single line. Operators key
-    prometheus log alerts on the literal [silent:dashboard_actor_fallback]
+    otel_metric_store log alerts on the literal [silent:dashboard_actor_fallback]
     prefix and on the [Remediation:] substring in the [token_mismatch]
     arm, so the consolidated helper MUST emit the byte-identical message.
 
     These tests lock the rendered string for both outcome arms against an
-    explicit hex-literal expected value, and check that the prometheus
+    explicit hex-literal expected value, and check that the otel_metric_store
     label list matches the prior call. Reference:
     [auth_error_kind.mli §Dashboard actor fallback typed surface]. *)
 
@@ -32,7 +32,7 @@ let test_outcome_none_log_message_byte_equivalent () =
   Alcotest.(check string) "byte-equivalent rendering" expected actual
 
 let test_outcome_none_log_message_starts_with_alert_prefix () =
-  (* Lock the [silent:dashboard_actor_fallback] prefix — prometheus log
+  (* Lock the [silent:dashboard_actor_fallback] prefix — otel_metric_store log
      alerts grep for this literal substring. *)
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "ab12cd34" }
@@ -170,7 +170,7 @@ let test_outcome_error_non_token_mismatch_no_remediation () =
        ~affix:"falling back to request actor hint."
        msg)
 
-(* ----- Prometheus label correspondence ------------------------------- *)
+(* ----- Otel_metric_store label correspondence ------------------------------- *)
 
 let labels_eq actual expected =
   let sort = List.sort compare in
@@ -183,7 +183,7 @@ let test_outcome_none_labels () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "x" }
   in
-  let labels = Aek.dashboard_actor_fallback_prometheus_labels fb in
+  let labels = Aek.dashboard_actor_fallback_metric_labels fb in
   labels_eq labels [ ("outcome", Sda.to_label Sda.None_resolved) ];
   Alcotest.(check string)
     "outcome label is 'none'"
@@ -201,7 +201,7 @@ let test_outcome_error_labels_include_err_kind () =
     ; token_hash_prefix = "x"
     }
   in
-  let labels = Aek.dashboard_actor_fallback_prometheus_labels fb in
+  let labels = Aek.dashboard_actor_fallback_metric_labels fb in
   labels_eq labels
     [ ("outcome", Sda.to_label Sda.Error_classified)
     ; ("err_kind", "token_mismatch")
@@ -213,7 +213,7 @@ let test_outcome_error_labels_include_err_kind () =
 
 let test_outcome_error_labels_for_every_err_kind () =
   (* Walk every modelled [Auth_error_kind.t] and confirm the
-     prometheus label list shape is stable: ("outcome", "error") +
+     otel_metric_store label list shape is stable: ("outcome", "error") +
      ("err_kind", <stable_label>). This guards against the
      [Other]-collapse anti-pattern (CLAUDE.md §Workaround Rejection Bar
      §2 String/Substring classifier). *)
@@ -229,7 +229,7 @@ let test_outcome_error_labels_for_every_err_kind () =
         ; token_hash_prefix = "x"
         }
       in
-      let labels = Aek.dashboard_actor_fallback_prometheus_labels fb in
+      let labels = Aek.dashboard_actor_fallback_metric_labels fb in
       let outcome =
         List.assoc_opt "outcome" labels
         |> Option.value ~default:"<missing>"
@@ -246,10 +246,10 @@ let test_outcome_error_labels_for_every_err_kind () =
         err_kind_lbl)
     Aek.all
 
-(* ----- Side-effect: prometheus counter increments -------------------- *)
+(* ----- Side-effect: otel_metric_store counter increments -------------------- *)
 
 let test_outcome_none_increments_counter () =
-  let module Prom = Masc.Prometheus in
+  let module Prom = Masc.Otel_metric_store in
   let labels = [ ("outcome", "none") ] in
   let before =
     Prom.metric_value_or_zero
@@ -257,7 +257,7 @@ let test_outcome_none_increments_counter () =
   in
   (* Drive the helper directly via the same internal entry point as
      server_auth.ml — exercise [Auth_error_kind] then increment via the
-     prometheus surface. The helper itself lives in [Server_auth] so we
+     otel_metric_store surface. The helper itself lives in [Server_auth] so we
      call [record_dashboard_actor_fallback] there. *)
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "feedface" }
@@ -273,7 +273,7 @@ let test_outcome_none_increments_counter () =
     after
 
 let test_outcome_error_increments_counter_with_err_kind () =
-  let module Prom = Masc.Prometheus in
+  let module Prom = Masc.Otel_metric_store in
   let labels =
     [ ("outcome", "error"); ("err_kind", "unauthorized") ]
   in
@@ -314,9 +314,9 @@ let suite =
       test_outcome_error_token_mismatch_byte_equivalent
   ; test_case "Outcome_error+other err_kind: no remediation tail" `Quick
       test_outcome_error_non_token_mismatch_no_remediation
-  ; test_case "Outcome_none: prometheus labels" `Quick
+  ; test_case "Outcome_none: otel_metric_store labels" `Quick
       test_outcome_none_labels
-  ; test_case "Outcome_error: prometheus labels include err_kind" `Quick
+  ; test_case "Outcome_error: otel_metric_store labels include err_kind" `Quick
       test_outcome_error_labels_include_err_kind
   ; test_case "Outcome_error: label shape stable across err_kind" `Quick
       test_outcome_error_labels_for_every_err_kind

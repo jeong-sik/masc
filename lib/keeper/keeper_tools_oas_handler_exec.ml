@@ -251,7 +251,7 @@ let execute_with_observers
         ~site:"error_result"
         ~ts
         ();
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
@@ -279,7 +279,7 @@ let execute_with_observers
             surface through [Keeper_tool_retry_state] so
             attempts 2+ within the same retry cycle and
             identical failures across cycles are demoted to
-            DEBUG, with one durable ERROR plus a Prometheus
+            DEBUG, with one durable ERROR plus a Otel_metric_store
             counter when the silence threshold trips.
 
             [WORKAROUND-CARRYOVER]: this is a noise-dedupe
@@ -324,7 +324,7 @@ let execute_with_observers
               name
               n
               detail;
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string ToolsOasFailures)
               ~labels:
                 [ "tool", name
@@ -335,7 +335,7 @@ let execute_with_observers
          the human-readable WARN envelope is unified above. *)
       (match deterministic_reason with
        | Some reason ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ToolsOasFailures)
            ~labels:
              [ "tool", name
@@ -572,7 +572,7 @@ let execute_with_observers
           max_consecutive_failures
           (Printexc.to_string exn)
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ToolsOasFailures)
       ~labels:[ "tool", name; "site", "exception" ]
       ();

@@ -63,7 +63,7 @@ let reconcile_keepalive_keepers
         | Ok (Some _meta) -> () (* paused, skip *)
         | Ok None -> ()
         | Error err ->
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:
               [ ("operation", Runtime_observation_query_operation.(to_label Reconcile_read_meta))

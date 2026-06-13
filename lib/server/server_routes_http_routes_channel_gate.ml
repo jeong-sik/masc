@@ -324,7 +324,7 @@ let handle_gate_keepers ~sw ~clock state request reqd =
 
 (** GET /api/v1/gate/keeper-status?name=<keeper>
 
-    Authenticated single-keeper status for connector admin surfaces. *)
+    Authenticated single-keeper status for connector control routes. *)
 let handle_gate_keeper_status ~sw ~clock state request reqd =
   match query_param request "name" with
   | Some raw_name ->
@@ -478,6 +478,20 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"channel_gate" (fun state _req reqd ->
          handle_gate_message ~sw ~clock state request reqd
        ) request reqd)
+
+  |> Http.Router.prefix_get "/api/v1/gate/message/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_result"
+         (fun state _req reqd ->
+           Server_routes_http_keeper_stream.handle_keeper_chat_request_result
+             state request reqd)
+         request reqd)
+
+  |> Http.Router.prefix_post "/api/v1/gate/message/requests/" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_keeper_msg_cancel"
+         (fun state _req reqd ->
+           Server_routes_http_keeper_stream.handle_keeper_chat_request_cancel
+             state request reqd)
+         request reqd)
 
   |> Http.Router.get "/api/v1/gate/health" (fun request reqd ->
        with_public_read (fun state _req reqd ->

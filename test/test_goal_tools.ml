@@ -49,7 +49,7 @@ let parse_json_result (result : Tool_result.result) =
   else Alcotest.fail ((Tool_result.message result))
 ;;
 
-let principal_json ~kind ~id = `Assoc [ "kind", `String kind; "id", `String id ]
+let principal_json ~id = `Assoc [ "id", `String id ]
 
 let get_string_field json field =
   match Yojson.Safe.Util.member field json with
@@ -373,11 +373,7 @@ let test_goal_transition_verification_to_completion () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Agent
-          ; id = "agent-alpha"
-          ; display_name = Some "agent-alpha"
-          }
-        ]
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
     ; required_verdicts = Some 1
     }
   in
@@ -395,7 +391,7 @@ let test_goal_transition_verification_to_completion () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let transitioned_json =
@@ -429,7 +425,7 @@ let test_goal_transition_verification_to_completion () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
+            ; "principal", principal_json ~id:"agent-alpha"
             ; "decision", `String "approve"
             ; "note", `String "checked receipt and tests"
             ; ( "evidence_refs"
@@ -499,11 +495,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Agent
-          ; id = "agent-alpha"
-          ; display_name = Some "agent-alpha"
-          }
-        ]
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
     ; required_verdicts = Some 1
     }
   in
@@ -521,7 +513,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let transitioned_json =
@@ -542,7 +534,7 @@ let test_goal_transition_rejected_verification_retains_evidence () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
+            ; "principal", principal_json ~id:"agent-alpha"
             ; "decision", `String "reject"
             ; "note", `String "receipt did not prove completion"
             ; "evidence_refs", `List [ `String "receipt:agent-alpha:turn-7" ]
@@ -603,11 +595,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Agent
-          ; id = "agent-alpha"
-          ; display_name = Some "agent-alpha"
-          }
-        ]
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
     ; required_verdicts = Some 1
     }
   in
@@ -625,7 +613,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let transitioned_json =
@@ -646,7 +634,7 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "reject_completion"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ; "note", `String "operator rejected the completion claim"
             ])
   in
@@ -688,11 +676,7 @@ let test_goal_transition_approval_gate () =
   let verifier_policy =
     { Goal_verification.inherit_mode = Goal_verification.Extend
     ; principals =
-        [ { kind = Goal_verification.Agent
-          ; id = "agent-alpha"
-          ; display_name = Some "agent-alpha"
-          }
-        ]
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
     ; required_verdicts = Some 1
     }
   in
@@ -717,7 +701,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let transitioned_json =
@@ -738,7 +722,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "request_id", `String request_id
-            ; "principal", principal_json ~kind:"agent" ~id:"agent-alpha"
+            ; "principal", principal_json ~id:"agent-alpha"
             ; "decision", `String "approve"
             ])
   in
@@ -762,7 +746,7 @@ let test_goal_transition_approval_gate () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let approved_json =
@@ -807,7 +791,7 @@ let test_goal_completion_requires_linked_task () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let error_json = expect_error completed in
@@ -846,7 +830,7 @@ let test_goal_completion_blocks_open_tasks () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ])
   in
   let error_json = expect_error completed in
@@ -873,7 +857,7 @@ let test_goal_completion_override_allows_empty_goal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "request_complete"
-            ; "actor", principal_json ~kind:"operator" ~id:"planner"
+            ; "actor", principal_json ~id:"planner"
             ; "override_note", `String "metric-only manual completion"
             ])
   in
@@ -891,7 +875,7 @@ let test_goal_completion_override_allows_empty_goal () =
      |> fun json -> get_string_field json "phase")
 ;;
 
-let test_operator_actions_require_operator_principal () =
+let test_operator_actions_accept_id_only_actor () =
   with_workspace
   @@ fun config ->
   let goal, _kind =
@@ -907,24 +891,30 @@ let test_operator_actions_require_operator_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "operator_block"
-            ; "actor", principal_json ~kind:"agent" ~id:"agent-alpha"
+            ; "actor", principal_json ~id:"agent-alpha"
             ])
   in
-  let error_json = expect_error blocked in
+  let blocked_json =
+    match blocked with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
   check
     string
-    "agent blocked by validation"
-    "validation_error"
-    (get_string_field error_json "error_code");
+    "actor id-only transition blocks goal"
+    "blocked"
+    (blocked_json
+     |> Yojson.Safe.Util.member "goal"
+     |> fun json -> get_string_field json "phase");
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal
-    | None -> fail "goal missing after rejected operator_block"
+    | None -> fail "goal missing after operator_block"
   in
-  check string "phase unchanged" "executing" (Goal_phase.to_string saved_goal.phase)
+  check string "phase changed" "blocked" (Goal_phase.to_string saved_goal.phase)
 ;;
 
-let test_completion_approval_requires_operator_principal () =
+let test_completion_approval_accepts_id_only_actor () =
   with_workspace
   @@ fun config ->
   let goal, _kind =
@@ -946,24 +936,30 @@ let test_completion_approval_requires_operator_principal () =
         (`Assoc
             [ "goal_id", `String goal.id
             ; "action", `String "approve_completion"
-            ; "actor", principal_json ~kind:"agent" ~id:"agent-alpha"
+            ; "actor", principal_json ~id:"agent-alpha"
             ])
   in
-  let error_json = expect_error approved in
+  let approved_json =
+    match approved with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
   check
     string
-    "agent approval blocked by validation"
-    "validation_error"
-    (get_string_field error_json "error_code");
+    "id-only actor approval completes goal"
+    "completed"
+    (approved_json
+     |> Yojson.Safe.Util.member "goal"
+     |> fun json -> get_string_field json "phase");
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal
-    | None -> fail "goal missing after rejected approve_completion"
+    | None -> fail "goal missing after approve_completion"
   in
   check
     string
-    "phase unchanged"
-    "awaiting_approval"
+    "phase changed"
+    "completed"
     (Goal_phase.to_string saved_goal.phase)
 ;;
 
@@ -1023,13 +1019,13 @@ let () =
             `Quick
             test_goal_completion_override_allows_empty_goal
         ; test_case
-            "operator-only actions enforce operator principal"
+            "operator actions accept id-only actor"
             `Quick
-            test_operator_actions_require_operator_principal
+            test_operator_actions_accept_id_only_actor
         ; test_case
-            "approval requires operator principal"
+            "approval accepts id-only actor"
             `Quick
-            test_completion_approval_requires_operator_principal
+            test_completion_approval_accepts_id_only_actor
         ] )
     ]
 ;;

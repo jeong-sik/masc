@@ -11,7 +11,7 @@
 \*   continue_gate_required, context_polluted, keeper_decision sum type
 \*   incl. NeedsContinueGate) appear anywhere in the codebase.  Three
 \*   OCaml modules touch the OAS surface — lib/oas_compat/, lib/keeper/
-\*   oas_execution_error_phase.ml (7-phase Prometheus label only), and
+\*   oas_execution_error_phase.ml (7-phase metric label only), and
 \*   lib/keeper/keeper_oas_checkpoint.ml — but none model the bridge's
 \*   most operationally important distinction (clean Eio cancellation
 \*   rollback vs cases where an outside-world tool mutation has already

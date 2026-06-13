@@ -12,10 +12,10 @@ Missing production evidence is represented as `BLOCKED`; mapped but unrun
 commands are represented as `SKIPPED`.
 
 Metric gates read snapshot keys from the JSON passed via `--metrics-json`; the
-gate evidence records those snapshot keys separately from any underlying
-`masc_*` Prometheus series used to derive them. The rendered command examples
-therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of naming a
-non-repo `prometheus` CLI.
+gate evidence records those snapshot keys separately from the underlying
+`masc_*` metric series used to derive them. The rendered command examples
+therefore query `GOAL_LOOP_METRICS_JSON` with `jq` instead of requiring an
+external metrics CLI.
 
 Covered gate groups:
 

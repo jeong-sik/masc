@@ -40,7 +40,7 @@ let require_net () =
 (** Helper: get optional net. *)
 let get_net_opt () = Eio_context.get_net_opt ()
 
-(** Stable string label for Prometheus bucketing — keeps the
+(** Stable string label for Otel_metric_store bucketing — keeps the
     metric [tag] dimension separated from per-tool [name]. *)
 let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   match tag with
@@ -110,7 +110,8 @@ let dispatch
         ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
         ~name
         ~args
-    | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
+    | Mod_run ->
+      Tool_run.dispatch { Tool_run.config; agent_name = Some agent_name } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
     | Mod_state -> Tool_workspace.dispatch { Tool_workspace.config; agent_name } ~name ~args
     | Mod_control ->
@@ -176,7 +177,7 @@ let dispatch
       | Some i -> String.sub raw 0 i
       | None -> if String.length raw > 80 then String.sub raw 0 80 else raw
     in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string TagDispatchFailures)
       ~labels:[ "tag", string_of_tag tag ]
       ();

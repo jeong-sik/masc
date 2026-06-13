@@ -251,7 +251,7 @@ let test_correction_pipeline_log_preserves_detail_fields () =
     ]
 
 let tool_policy_unloaded_metric accessor =
-  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_unloaded_query
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_tool_policy_unloaded_query
     ~labels:[("accessor", accessor)]
     ()
 
@@ -269,7 +269,7 @@ let test_tool_policy_unloaded_accessors_emit_metric () =
   init_registry ()
 
 let tool_policy_init_failed_metric base_path =
-  Prometheus.metric_value_or_zero Prometheus.metric_tool_policy_init_failed
+  Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_tool_policy_init_failed
     ~labels:[("base_path", base_path)]
     ()
 

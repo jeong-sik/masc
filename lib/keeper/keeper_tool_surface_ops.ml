@@ -40,8 +40,8 @@ let cache_ttl_seconds env_var ~default =
   | Some raw ->
       let trimmed = String.trim raw in
       let emit_failure reason =
-        Prometheus.inc_counter
-          Prometheus.metric_tool_keeper_cache_ttl_parse_failures
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_tool_keeper_cache_ttl_parse_failures
           ~labels:[ ("env_var", env_var); ("reason", reason) ]
           ();
         Log.Keeper.warn
@@ -85,8 +85,8 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
       in
       if Atomic.compare_and_set cache_ref cache next then value
       else begin
-        Prometheus.inc_counter
-          Prometheus.metric_tool_keeper_cache_cas_conflicts ();
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
         cached_text_by_key cache_ref ~key ~ttl_s compute
       end
 module For_testing = struct
@@ -505,6 +505,49 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
+let has_string_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  String.length value >= prefix_len
+  && String.equal (String.sub value 0 prefix_len) prefix
+;;
+
+let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
+
+let direct_reply_visible_text body =
+  try
+    let json = Yojson.Safe.from_string body in
+    match Json_util.get_string json "reply" with
+    | None -> None
+    | Some reply ->
+        let visible =
+          reply
+          |> Keeper_skill_routing.strip_skill_route_lines
+          |> Keeper_execution.strip_state_blocks_text
+          |> String.trim
+        in
+        if visible = ""
+           || has_string_prefix ~prefix:continuation_checkpoint_prefix visible
+        then None
+        else Some visible
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Yojson.Json_error _ -> None
+;;
+
+let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
+  if get_bool args "direct_reply" false && tool_result_success result then (
+    let user_content = get_string args "message" "" |> String.trim in
+    match user_content, direct_reply_visible_text (tool_result_body result) with
+    | "", _ | _, None -> ()
+    | _, Some assistant_content ->
+        Keeper_chat_store.append_pair
+          ~base_dir:config.base_path
+          ~keeper_name:name
+          ~user_content
+          ~assistant_content
+          ~user_attachments:[])
+;;
+
 (* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor
    projection.  Constructs a fresh [Keeper_types_profile.context] from the
    threaded Eio resources and delegates to the existing [Turn.preflight_*]
@@ -543,6 +586,11 @@ let keeper_msg_body
                let result = Turn.handle_keeper_msg keeper_ctx resolved_args in
                if tool_result_success result
                then begin
+                 append_direct_chat_pair_if_reply
+                   ~config
+                   ~name
+                   ~args:resolved_args
+                   result;
                  invalidate_keeper_list_cache ();
                  invalidate_status_cache name
                end;
@@ -586,6 +634,11 @@ let handle_keeper_msg ctx args : tool_result =
                let result = Turn.handle_keeper_msg ctx resolved_args in
                if tool_result_success result
                then begin
+                 append_direct_chat_pair_if_reply
+                   ~config:ctx.config
+                   ~name
+                   ~args:resolved_args
+                   result;
                  invalidate_keeper_list_cache ();
                  invalidate_status_cache name
                end;

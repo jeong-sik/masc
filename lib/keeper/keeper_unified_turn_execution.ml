@@ -407,7 +407,7 @@ let run (ctx : ctx)
           reason
           (String.concat ", " committed_tools)
           err_preview;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TurnErrorAfterTools)
           ~labels:[ "keeper", meta.name; "reason", reason ]
           ();
@@ -441,7 +441,7 @@ let run (ctx : ctx)
         in
         if EC.is_transient_network_error err
         then (
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:
               [ "keeper", meta.name
@@ -463,7 +463,7 @@ let run (ctx : ctx)
             meta.name
             (String.concat ", " committed_tools)
             err_preview;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string TurnErrorAfterTools)
           ~labels:[ "keeper", meta.name ]
           ();
@@ -691,7 +691,7 @@ let run (ctx : ctx)
             (EC.max_transient_retries ())
             delay
             (short_preview (Agent_sdk.Error.to_string err));
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string OasExecutionErrors)
             ~labels:
               [ "keeper", meta.name
@@ -766,7 +766,7 @@ let run (ctx : ctx)
                    ^ ": "
                    ^ Agent_sdk.Error.to_string err
                };
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string OasExecutionErrors)
             ~labels:
               [ "keeper", meta.name
@@ -808,7 +808,7 @@ let run (ctx : ctx)
          timeout_sec
      in
      Log.Keeper.error "%s: %s" meta.name msg;
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string TurnTimeoutCommitted)
        ~labels:[ "keeper", meta.name ]
        ();
@@ -838,7 +838,7 @@ let run (ctx : ctx)
             meta.name
             (String.concat ", " committed_tools)
             msg;
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string TurnTimeoutCommitted)
             ~labels:[ "keeper", meta.name ]
             ();
@@ -880,7 +880,7 @@ let run (ctx : ctx)
              evidence recorded for next-turn observation"
             meta.name
             (String.concat ", " committed_tools);
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string TurnTimeoutCommitted)
             ~labels:[ "keeper", meta.name ]
             ();

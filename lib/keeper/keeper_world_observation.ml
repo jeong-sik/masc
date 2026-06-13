@@ -376,7 +376,7 @@ let collect_board_events_with_cursor_policy
       | None ->
         if final_events <> []
         then (
-          Prometheus.inc_counter
+          Otel_metric_store.inc_counter
             Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Cursor_stale)) ]
             ();
@@ -388,7 +388,7 @@ let collect_board_events_with_cursor_policy
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:[ ("operation", Runtime_observation_query_operation.(to_label Board_events)) ]
       ();
@@ -815,7 +815,7 @@ let keeper_cycle_decision
                    tag is always added first, so the list is never empty.
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string ObservationQueryFailures)
                 ~labels:
                   [ ("operation", Runtime_observation_query_operation.(to_label Empty_run_reasons))

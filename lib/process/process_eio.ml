@@ -30,7 +30,7 @@ let runtime_state : runtime option Atomic.t = Atomic.make None
 
 (** Observability hook: invoked when an Eio process call hits its
     [timeout_sec] budget.  Default no-op so the lower [masc_process]
-    layer carries no [Prometheus] dependency.  Wired from [lib/workspace.ml]
+    layer carries no [Otel_metric_store] dependency.  Wired from [lib/workspace.ml]
     at module load to emit [masc_process_timeout_total].
 
     Cardinality: callers should pass [program = Filename.basename argv0]

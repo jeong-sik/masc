@@ -9,11 +9,11 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_execution
 
-(** [stimulus_urgency_to_string u] returns the Prometheus / log label
+(** [stimulus_urgency_to_string u] returns the Otel_metric_store / log label
     for [u] ([immediate] / [normal] / [low]). *)
 val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
 
-(** [stimulus_class_to_string c] returns the Prometheus / log label for
+(** [stimulus_class_to_string c] returns the Otel_metric_store / log label for
     a stimulus class. *)
 val stimulus_class_to_string : Keeper_event_queue.stimulus_class -> string
 
@@ -42,7 +42,7 @@ type heartbeat_event_intake = {
 }
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
-    increments Prometheus, logs the consumption, and returns a list of
+    increments Otel_metric_store, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
     classes). [Stay_silent_recovery] also writes a reaction-ledger entry. *)
 val consume_single_heartbeat_stimulus
@@ -52,7 +52,7 @@ val consume_single_heartbeat_stimulus
   -> Keeper_world_observation.pending_board_event list
 
 (** [consume_board_stimulus_batch ~meta_after_triage batch] increments
-    Prometheus per stimulus, logs debounce coalescing, and returns the
+    Otel_metric_store per stimulus, logs debounce coalescing, and returns the
     pending board events derived from [batch]. *)
 val consume_board_stimulus_batch
   :  meta_after_triage:keeper_meta

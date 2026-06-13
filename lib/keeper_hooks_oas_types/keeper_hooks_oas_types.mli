@@ -6,7 +6,7 @@
     Re-included by Keeper_hooks_oas so existing callers continue to use
     [Keeper_hooks_oas.cost_status] etc. unchanged. *)
 
-(** Prometheus + JSON label-key string constants used across
+(** Otel_metric_store + JSON label-key string constants used across
     keeper_hooks_oas.ml call sites. *)
 val label_keeper : string
 val label_callback : string
@@ -84,7 +84,7 @@ val key_error : string
 val key_ts : string
 val key_max_cost_usd : string
 
-(** Callback name labels used as Prometheus + log identifiers. *)
+(** Callback name labels used as Otel_metric_store + log identifiers. *)
 val callback_label_after_turn_sse_broadcast : string
 val callback_label_post_tool_log_write : string
 val callback_label_on_tool_executed : string

@@ -23,9 +23,6 @@ open Tool_schemas_specs_types
    hand-written schema, and Phase 1 collapses all three into a typed
    SSOT. *)
 
-let admin_section_enum_strings = [ "auth" ]
-;;
-
 let config_category_enum_strings =
   [ "server"
   ; "auth"
@@ -129,84 +126,6 @@ let masc_gc_spec : tool_spec =
   }
 ;;
 
-let masc_web_search_spec : tool_spec =
-  { name = "masc_web_search"
-  ; description =
-      "Search the public web and return top result titles, URLs, and snippets. Read-only \
-       helper for current-information lookups before deeper file or repo work. Uses \
-       configured web-search providers with structured fallback behavior and returns \
-       structured JSON."
-  ; parameters =
-      [ { p_name = "query"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Search query text"
-        ; p_required = true
-        }
-      ; { p_name = "limit"
-        ; p_type = T_int { min = Some 1; max = Some 10; default = Some 5 }
-        ; p_description = "Maximum number of results to return (default 5, max 10)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_web_fetch_spec : tool_spec =
-  { name = "masc_web_fetch"
-  ; description =
-      "Fetch a web page by URL and return agent-readable extracted content. Read-only \
-       helper for reading selected sources after web search before citing them. Prefers \
-       article/main/body content, strips script/style/navigation noise, returns markdown \
-       by default, and extracts <title> plus description metadata when present."
-  ; parameters =
-      [ { p_name = "url"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "URL to fetch (http or https only)"
-        ; p_required = true
-        }
-      ; { p_name = "timeout"
-        ; p_type = T_int { min = Some 1; max = Some 60; default = Some 15 }
-        ; p_description = "Request timeout in seconds (default 15, max 60)"
-        ; p_required = false
-        }
-      ; { p_name = "extractMode"
-        ; p_type =
-            T_string { enum = Some [ "markdown"; "text" ]; default = Some "markdown" }
-        ; p_description =
-            "Output extraction mode. markdown preserves readable headings/lists/links; \
-             text returns flattened plain text."
-        ; p_required = false
-        }
-      ; { p_name = "maxChars"
-        ; p_type = T_int { min = Some 1; max = Some 100000; default = Some 50000 }
-        ; p_description = "Maximum extracted content characters to return"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_tool_admin_snapshot_spec : tool_spec =
-  { name = "masc_tool_admin_snapshot"
-  ; description =
-      "Return a unified admin snapshot of tool inventory, auth/RBAC, and command-plane \
-       surfaces."
-  ; parameters =
-      [ { p_name = "include_hidden"
-        ; p_type = T_bool { default = Some true }
-        ; p_description = "Include hidden tools in tool_inventory (default: true)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_tool_stats_spec : tool_spec =
   { name = "masc_tool_stats"
   ; description =
@@ -229,55 +148,6 @@ let masc_cleanup_zombies_spec : tool_spec =
   ; description =
       "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
   ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
-let masc_tool_admin_update_spec : tool_spec =
-  { name = "masc_tool_admin_update"
-  ; description =
-      "Apply auth updates through a single admin entrypoint. Use after \
-       masc_tool_admin_snapshot to review current state before making changes. \
-       Additional sections (unit_policy, keeper_policy) are not yet implemented and \
-       will be added here when their handlers land."
-  ; parameters =
-      [ { p_name = "section"
-        ; p_type = T_string { enum = Some admin_section_enum_strings; default = None }
-        ; p_description = "Config section to update (currently only auth is implemented)"
-        ; p_required = true
-        }
-      ; { p_name = "enabled"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Enable or disable auth for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "require_token"
-        ; p_type = T_bool { default = None }
-        ; p_description = "Require tokens for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "token_expiry_hours"
-        ; p_type = T_int { min = None; max = None; default = None }
-        ; p_description = "Token expiry in hours for section=auth"
-        ; p_required = false
-        }
-      ; { p_name = "unit_id"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Managed unit id for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "policy"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit policy envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ; { p_name = "budget"
-        ; p_type = T_object { default = None }
-        ; p_description = "Unit budget envelope for section=unit_policy"
-        ; p_required = false
-        }
-      ]
   ; additional_properties = false
   ; behavior_contract = []
   }
@@ -546,12 +416,8 @@ let phase6_specs : tool_spec list =
   ; masc_tool_help_spec
   ; masc_dashboard_spec
   ; masc_gc_spec
-  ; masc_web_search_spec
-  ; masc_web_fetch_spec
-  ; masc_tool_admin_snapshot_spec
   ; masc_tool_stats_spec
   ; masc_cleanup_zombies_spec
-  ; masc_tool_admin_update_spec
     (* PR-1 (paving stone): control group *)
   ; masc_pause_spec
   ; masc_resume_spec

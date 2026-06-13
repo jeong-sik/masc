@@ -45,5 +45,5 @@ val of_string : string -> t
     to typed reject happens in Phase B). *)
 val to_label : t -> string
 (** [to_label Off = "off"], [Dry_run = "dry_run"], [Strict = "strict"].
-    Used as the Prometheus [mode] label so operators can break down
+    Used as the Otel_metric_store [mode] label so operators can break down
     [masc_auth_strict_would_reject_total] by mode. *)

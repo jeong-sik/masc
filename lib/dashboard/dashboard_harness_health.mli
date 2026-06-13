@@ -50,7 +50,7 @@ type harness_verdict_item =
     access in [keeper_compact_policy] when assembling the
     snapshot JSON.  [trigger] is the closed-sum classification
     of the gate that fired — pair with [Compaction_trigger.to_label]
-    for Prometheus emission and [to_detail_json] for SSE/JSON. *)
+    for Otel_metric_store emission and [to_detail_json] for SSE/JSON. *)
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string

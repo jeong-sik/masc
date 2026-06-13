@@ -6,7 +6,7 @@
    tail:
      - [guard_transition] / [observe_phase_dwell] / [emit_transition]: telemetry
        / audit / metrics emission (Log.Keeper, Keeper_transition_audit,
-       Prometheus + Keeper_metrics, Keeper_fsm_guard_runtime).
+       Otel_metric_store + Keeper_metrics, Keeper_fsm_guard_runtime).
      - [require_active_state]: identity guard whose [@@fsm_guard] ppx_tla
        expansion injects [Keeper_fsm_guard_runtime].
 
@@ -21,7 +21,7 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
   | Ok _ -> ()
   | Error violation ->
       (* Log first: [wrap_unit] catches the raised exception only to
-         bump the Prometheus counter, then re-raises. Anything
+         bump the Otel_metric_store counter, then re-raises. Anything
          sequenced after [wrap_unit] would never run, so the
          diagnostic warn has to precede it for operators to see
          *which* transition violated. *)
@@ -67,7 +67,7 @@ let observe_phase_dwell ~keeper_name ~from_label =
     (* Cancel-aware: bare [try ... with _ -> ()] would swallow
        [Eio.Cancel.Cancelled] and break switch teardown. *)
     Safe_ops.protect ~default:() (fun () ->
-      Prometheus.observe_histogram
+      Otel_metric_store.observe_histogram
         Keeper_metrics.(to_string TurnPhaseDuration)
         ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
         dwell)
@@ -139,7 +139,7 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
     ; turn_fsm_stop_signaled_after = Option.map (fun c -> c.stop_signaled_after) ctx
     ; turn_fsm_wall_clock_at = now
     };
-  Prometheus.inc_counter Keeper_metrics.(to_string TurnFsmTransitions)
+  Otel_metric_store.inc_counter Keeper_metrics.(to_string TurnFsmTransitions)
     ~labels:
       [ ("from", prev_label);
         ("to", state_label);

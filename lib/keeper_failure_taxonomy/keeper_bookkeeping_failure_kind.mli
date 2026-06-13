@@ -1,7 +1,7 @@
 (** Keeper_bookkeeping_failure_kind — closed sum for the [kind] label on
     [metric_keeper_turn_slot_bookkeeping_failures].
 
-    The metric registration in [prometheus.ml] already documented the
+    The metric registration in [otel_metric_store.ml] already documented the
     closed set verbatim:
 
         "Total keeper turn-slot release bookkeeping callbacks that

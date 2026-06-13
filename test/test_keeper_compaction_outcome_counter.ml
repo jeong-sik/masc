@@ -12,7 +12,7 @@
                     escalate). *)
 
 module EC = Masc.Keeper_context_runtime
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let counter_for ~keeper ~outcome =
   Prom.metric_value_or_zero

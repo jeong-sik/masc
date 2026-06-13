@@ -81,11 +81,13 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
          && Option.is_none meta.runtime.last_blocker) );
   ]
 
-let running_paused_keeper_names () =
+let registry_paused_keeper_names () =
   Keeper_registry.all ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
+
+let running_paused_keeper_names = registry_paused_keeper_names
 
 let running_keeper_names ?base_path () =
   Keeper_registry.all ?base_path ()
@@ -160,8 +162,12 @@ let paused_keepers_health_json_of_scan ~running_names durable_scan =
   `Assoc [
     ("count", `Int (List.length names));
     ("names", `List (List.map (fun name -> `String name) names));
+    ("registry_paused_count", `Int (List.length running_names));
+    ("registry_paused_names", `List (List.map (fun name -> `String name) running_names));
+    ("registry_paused_semantics", `String "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running");
     ("running_count", `Int (List.length running_names));
     ("running_names", `List (List.map (fun name -> `String name) running_names));
+    ("running_count_semantics", `String "legacy alias for registry_paused_count");
     ("durable_count", `Int (List.length durable_scan.names));
     ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
     ( "autoboot_enabled_count",

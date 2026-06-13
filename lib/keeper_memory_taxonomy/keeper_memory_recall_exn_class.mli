@@ -1,7 +1,7 @@
 (** Keeper_memory_recall_exn_class — closed sum for the [exception_class]
     label on the memory-bank history swallow counter.
 
-    Bounds the Prometheus label cardinality of the swallowed-exception
+    Bounds the Otel_metric_store label cardinality of the swallowed-exception
     counter emitted from [Keeper_memory_recall.load_history_user_messages].
 
     The previous implementation (PR #15781) passed [Printexc.to_string exn]
@@ -9,7 +9,7 @@
     detail (byte offsets, file paths, payload fragments from
     [Yojson.Json_error]; per-syscall context from [Unix.Unix_error]; raw
     [Failure] messages) so each distinct exception instance created a new
-    Prometheus time-series. Review on PR #15781 flagged this as unbounded label
+    Otel_metric_store time-series. Review on PR #15781 flagged this as unbounded label
     cardinality / balloonable in-process metric memory.
 
     [classify] is a *constructor-level* pattern match on the OCaml [exn]
@@ -40,6 +40,6 @@ val classify : exn -> t
 
 val to_label : t -> string
 (** Render the classification as the wire label value used by
-    Prometheus. Returns one of the lowercase strings
+    Otel_metric_store. Returns one of the lowercase strings
     {[ "yojson_parse_error" ]}, {[ "io_error" ]}, {[ "type_error" ]},
     {[ "other" ]}. *)

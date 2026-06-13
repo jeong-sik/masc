@@ -64,8 +64,8 @@ let run_safe ~caller ~timeout_s fn =
        of collapsing all OAS timeouts into the same "after N.Ns"
        string. *)
     let wall = elapsed () in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_timeout
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_timeout
       ~labels:[
         ("caller", caller);
         ("timeout_s", Printf.sprintf "%.1f" timeout_s);
@@ -90,7 +90,7 @@ let run_safe ~caller ~timeout_s fn =
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque
        cancel message ate both wall-duration class and the inner cancel reason.
-       Bucket boundaries are kept identical so PromQL can union the two
+       Bucket boundaries are kept identical so metric queries can union the two
        sources into one bimodal view (fast/short_tail/mid_tail/long_mid/
        long_tail). [inner=...] surfaces the parent fiber's exception payload
        so [Eio.Cancel.Cancel_hook] vs supervisor-pause vs runtime-rotation
@@ -109,8 +109,8 @@ let run_safe ~caller ~timeout_s fn =
       | Failure msg -> "Failure(" ^ msg ^ ")"
       | _ -> Printexc.to_string inner_exn
     in
-    Prometheus.inc_counter
-      Prometheus.metric_oas_bridge_cancel
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_oas_bridge_cancel
       ~labels:[
         ("caller", caller);
         ("bucket", bucket);
@@ -138,7 +138,7 @@ let run_safe ~caller ~timeout_s fn =
 
 (** [run_with_caller ~caller fn] — single entry point that resolves
     the per-caller timeout from [Env_config_oas_bridge] and labels
-    the resulting Prometheus counter.  The remaining trusted OAS
+    the resulting Otel_metric_store counter.  The remaining trusted OAS
     callers are evaluator/advisory flows with caller-specific defaults
     owned by [Env_config_oas_bridge]; removed runtime-invocation
     surfaces must not reappear as hidden timeout configuration. *)

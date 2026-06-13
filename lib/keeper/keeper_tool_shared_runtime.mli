@@ -184,7 +184,7 @@ val tag_dispatch_fn
     different type on error (e.g. [string option]) use this directly.
     [with_registry_meta] is the convenience wrapper for the common
     [string]-returning case; its [None] branch calls [error_json].
-    [source_layer] is the Prometheus label value (e.g. ["fs_resolver"],
+    [source_layer] is the Otel_metric_store label value (e.g. ["fs_resolver"],
     ["masc_path_resolver"], ["tool_dispatcher"]). *)
 val find_registry_meta
   :  keeper_name:string

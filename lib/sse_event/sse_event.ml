@@ -326,7 +326,7 @@ let context_compacted
     payload_json
 ;;
 
-(** Emit a [context_overflow_imminent] envelope.  Prometheus gauge +
+(** Emit a [context_overflow_imminent] envelope.  Otel_metric_store gauge +
     tracker side effects stay in the runtime arm. *)
 let context_overflow_imminent
       ~(ts_unix : float)
@@ -507,7 +507,7 @@ let merge_addendum_into_record
 
 (** Emit an [agent_completed] envelope.  The runtime arm in
     [runtime_event_bridge.ml] retains its [observe_inference_cost]
-    side effect (Prometheus histogram) and invokes
+    side effect (Otel_metric_store histogram) and invokes
     [agent_completed_result_fields result] to project the
     [Agent_sdk] [Result.t] into the [result_fields] addendum. *)
 let agent_completed

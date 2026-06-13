@@ -30,7 +30,7 @@ open Alcotest
 open Masc
 
 module Acct = Keeper_accountability
-module Prom = Prometheus
+module Prom = Otel_metric_store
 
 (* --- helpers ------------------------------------------------------ *)
 

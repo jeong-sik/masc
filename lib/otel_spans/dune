@@ -12,6 +12,7 @@
   ambient-context-eio
   eio
   eio.unix
+  unix
   cohttp
   cohttp-eio
   uri

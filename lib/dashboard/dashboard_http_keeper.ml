@@ -537,15 +537,31 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                   ("trust_observatory", trust_observatory);
                 ]
               in
-              let profile = Dashboard_execution_helpers.get_agent_profile m.name in
-	            `Assoc ([
-              ("name", `String m.name);
-              ("pipeline_stage", `String
-                (match registry_entry with
-                 | Some entry ->
-                   Keeper_status_runtime.pipeline_stage_of_phase entry.phase
-                 | None -> "offline"));
-              ("runtime_class", `String "keeper");
+	              let profile = Dashboard_execution_helpers.get_agent_profile m.name in
+	              let lifecycle_phase =
+	                Option.map
+	                  (fun (entry : Keeper_registry.registry_entry) ->
+	                    Keeper_state_machine.phase_to_string entry.phase)
+	                  registry_entry
+	              in
+	              let pipeline_stage =
+	                match registry_entry with
+	                | Some entry ->
+	                  Keeper_status_runtime.pipeline_stage_of_phase entry.phase
+	                | None -> "offline"
+	              in
+	              let pipeline_stage_detail =
+	                match registry_entry with
+	                | Some entry ->
+	                  Keeper_status_runtime.pipeline_stage_detail_of_phase entry.phase
+	                | None -> "registry_absent"
+	              in
+		            `Assoc ([
+	              ("name", `String m.name);
+	              ("pipeline_stage", `String pipeline_stage);
+	              ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+	              ("pipeline_stage_detail", `String pipeline_stage_detail);
+	              ("runtime_class", `String "keeper");
               ("phase", Json_util.string_opt_to_json phase);
               ("conditions", conditions_json);
               ("outcomes", outcomes_json);

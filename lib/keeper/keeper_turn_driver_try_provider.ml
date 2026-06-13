@@ -300,7 +300,7 @@ let run_try_provider
   | Ok config ->
     let liveness_mode = Keeper_attempt_liveness_config.current_mode () in
     (* MASC stores one neutral runtime-lane budget; concrete provider/model
-       identities remain on the OAS side.  Prometheus receives only the public,
+       identities remain on the OAS side.  Otel_metric_store receives only the public,
        bounded provider bucket for TTFT/inter-chunk grouping. *)
     let candidate_key = Keeper_attempt_liveness_config.runtime_candidate_key in
     let provider_label = Runtime_candidate.provider_label candidate in

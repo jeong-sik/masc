@@ -65,8 +65,8 @@ let execute_tool_eio
      the current request scope. *)
   Eio_context.set_switch sw;
   Eio_context.set_clock clock;
-  (* Prometheus: count every inbound tool call *)
-  Prometheus.record_request ();
+  (* Otel_metric_store: count every inbound tool call *)
+  Otel_metric_store.record_request ();
   let config = state.Mcp_server.workspace_config in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls.
@@ -287,7 +287,10 @@ let execute_tool_eio
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
-                   Tool_run.dispatch { Tool_run.config } ~name ~args:coerced_args
+                   Tool_run.dispatch
+                     { Tool_run.config; agent_name = Some agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_agent ->
                    Tool_agent.dispatch
                      { Tool_agent.config; agent_name }

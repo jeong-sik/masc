@@ -204,8 +204,8 @@ let params_of_json_schema schema =
           pairs
     | _ -> []
   in
-  Prometheus_hotpath.observe
-    ~metric:Prometheus_hotpath.metric_oas_params_of_schema_sec
+  Otel_metric_hotpath.observe
+    ~metric:Otel_metric_hotpath.metric_oas_params_of_schema_sec
     ~start:__t0;
   result
 

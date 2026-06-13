@@ -11,7 +11,7 @@ module KHS = Masc.Keeper_keepalive_signal
 module KST = Keeper_state_machine
 module KFS = Masc.Keeper_fs
 module KTS = Masc.Keeper_types_support
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -276,7 +276,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
         [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
       in
       let before =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -303,7 +303,7 @@ let test_compaction_completion_without_started_is_nonfatal () =
         ~keeper_name:meta.name
         lifecycle;
       let after =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -386,7 +386,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
         [ ("keeper", meta.name); ("event", "compaction_started") ]
       in
       let before =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -396,7 +396,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
         ~keeper_name:meta.name
         KST.Compaction_started;
       let after =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -420,7 +420,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         [ ("keeper", "missing-keeper"); ("event", "compaction_started") ]
       in
       let before =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -430,7 +430,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         ~keeper_name:"missing-keeper"
         KST.Compaction_started;
       let after =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
@@ -463,7 +463,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         [ ("keeper", "missing-keeper"); ("reason", "invalid_transition") ]
       in
       let before =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
@@ -473,7 +473,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         ~keeper_name:"missing-keeper"
         KST.Compaction_started;
       let after =
-        Masc.Prometheus.get_metric_value
+        Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0

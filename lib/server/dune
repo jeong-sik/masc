@@ -73,13 +73,12 @@
   masc.keeper_pressure
   masc.keeper_failure_taxonomy
   masc.keeper_memory_taxonomy
-  masc.keeper_toml_loader
-  masc.keeper_runtime_config
+  masc.keeper_toml
+  masc.keeper_runtime
   masc.runtime_provider_labels
   masc.runtime_model
   masc.runtime
   masc.model_inference_metrics
-  masc.prometheus
   masc.auth
   masc.json_field
   masc.types_boundary

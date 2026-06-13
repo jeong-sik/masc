@@ -113,8 +113,10 @@ val read_logs :
   log_entry list
 
 (** Bundle {!run_record} + plan text + deliverable text + last 50 logs
-    into a single JSON object. *)
+    into a single JSON object. Creates the run scaffold first when
+    [run.json] is missing. *)
 val get :
+  ?agent_name:string ->
   Workspace_utils.config ->
   task_id:string ->
   (Yojson.Safe.t, string) result

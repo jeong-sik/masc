@@ -151,7 +151,7 @@ let execution_cache : cached_surface =
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let record_invalidation_failure ~callback ~message exn =
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ "callback", callback ]
     ();

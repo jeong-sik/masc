@@ -157,8 +157,8 @@ let handle_masc_plan ~(config : Workspace.config) ~name ~args =
   Tool_plan.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-let handle_masc_run ~(config : Workspace.config) ~name ~args =
-  let ctx : Tool_run.context = { config } in
+let handle_masc_run ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_run.context = { config; agent_name = Some meta.name } in
   Tool_run.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 

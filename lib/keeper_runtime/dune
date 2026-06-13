@@ -1,0 +1,13 @@
+(include_subdirs no)
+
+(library
+ (name masc_keeper_runtime)
+ (public_name masc.keeper_runtime)
+ (wrapped false)
+ (modules keeper_oas_timeout_message keeper_sandbox_error keeper_terminal_reason keeper_synthetic_marker keeper_runtime_config)
+ (libraries
+  masc.config
+  masc.keeper_toml
+  masc.config_dir_resolver
+  masc.fs_compat
+  masc.masc_core))

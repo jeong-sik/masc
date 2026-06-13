@@ -279,7 +279,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                           (`Assoc [ ("error", `String msg) ])
                           ~status:`Bad_request ~extra_headers:cors))
 
-      (* RFC-0217 S4-2 — Prometheus /metrics scrape endpoint removed; metrics
+      (* RFC-0217 S4-2 — Otel_metric_store /metrics scrape endpoint removed; metrics
          now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors

@@ -1,7 +1,7 @@
 open Alcotest
 
 module G = Masc.Governance_cases_snapshot
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 
 let persistence_surface = "governance_cases_snapshot"
 

@@ -5,7 +5,7 @@
 
     Pure FSM. No IO, no clock read, no fiber. Caller (PR-2) supplies
     monotonic timestamps via {!event} and consumes {!output} for
-    Prometheus / log emission. *)
+    Otel_metric_store / log emission. *)
 
 type budget = {
   ttft_max : float;

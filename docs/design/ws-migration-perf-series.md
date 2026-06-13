@@ -326,7 +326,7 @@ bounded client staleness is the safer failure mode.
 ### Literal-name metric reads at surface boundaries
 
 #10106 reads the WS delivery counters by string constant rather than
-by `Prometheus.metric_*` module-level constants.  This decouples the
+by backend module-level constants.  This decouples the
 consumer (transport-health) from the producers (the various WS PRs)
 so they can merge in any order.  If a metric has not been registered
 yet, `metric_value_or_zero` returns 0.0 — a semantically honest "no
@@ -453,7 +453,7 @@ All seven PRs are additive and flagged.  Emergency rollback steps:
   cache, bytes cache, delta construction, backpressure gate.
 - `lib/server/server_ws_standalone.ml` — handshake and subscriber
   registration for the standalone WS port.
-- `lib/transport_metrics.ml` — Prometheus metric helpers and the
+- `lib/transport_metrics.ml` — transport metric helpers and the
   `transport_health_json` payload.
 - `dashboard/src/dashboard-ws.ts` — client WS handshake, ack,
   subscribe/delta handling.

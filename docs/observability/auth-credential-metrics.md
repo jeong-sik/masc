@@ -4,16 +4,26 @@ last_verified: 2026-06-05
 code_refs:
   - lib/auth.ml
   - lib/auth/auth.mli
+  - lib/auth/auth_metric_store.ml
+  - lib/otel_metric_store.ml
+  - lib/otel_metric_store/otel_identity_metric_names.ml
+  - lib/otel_metric_store/otel_identity_metric_names.mli
   - lib/server/server_runtime_bootstrap.ml
   - lib/server/server_bootstrap_loops.ml
-  - lib/prometheus.ml
-  - lib/prometheus/prometheus.mli
-  - infrastructure/monitoring/auth-credential-alerts.yml
+  - lib/server/server_runtime_startup_credentials.ml
+  - lib/server/server_runtime_startup_maintenance.ml
+  - lib/otel_metric_store/otel_metric_store_core.mli
 ---
 
 # Auth Credential Surface Metrics
 
-How to read the boot-time and runtime credential state exposed by `/metrics` and the alerting rules that turn them into pages. The surface was introduced by PR #15112 to close the bare-form keeper credential ping-pong between PR-#10440 (`Auth.ensure_credential_alias` writes a short-form alias at every boot) and PR-3b2 #11155 (`Auth.archive_bare_for_canonical` archives any bare-form file unconditionally), which had been accumulating about 20 archive epoch directories per day for 17 days before discovery.
+How to read the boot-time and runtime credential state exposed by `/metrics`.
+The surface was introduced by PR #15112 to close the bare-form keeper
+credential ping-pong between PR-#10440 (`Auth.ensure_credential_alias` writes a
+short-form alias at every boot) and PR-3b2 #11155
+(`Auth.archive_bare_for_canonical` archives any bare-form file unconditionally),
+which had been accumulating about 20 archive epoch directories per day for 17
+days before discovery.
 
 ## Background
 
@@ -24,12 +34,12 @@ The credential subsystem exposes its state on **seven surfaces** (six original +
 | 1. API (mli)            | `lib/auth/auth.mli`                                       | typed contract              | Compile-time |
 | 2. Tests                | `test/test_auth.ml` (credentials group 22-32)             | assertions                  | CI guards |
 | 3. Boot log             | `[Server] startup bare alias audit: ...`                  | text (operator-readable)    | One-shot boot |
-| 4. Prom gauge (snapshot)| `masc_auth_bare_alias{state=...}`                          | numeric end-state           | Time-series + alert |
+| 4. OTel gauge (snapshot)| `masc_auth_bare_alias{state=...}`                         | numeric end-state           | Time-series + alert |
 | 5. Periodic fiber       | `start_bare_alias_audit_fiber` (60s default)              | gauge refresh + heartbeat   | Mid-run regression |
-| 6. Prom counter (flow)  | `masc_auth_bare_alias_outcome_total{outcome=...}`         | per-call dispatch events    | Transient regression catch |
-| 7. AlertManager rule    | `infrastructure/monitoring/auth-credential-alerts.yml`    | derived alarm               | Operator page |
+| 6. OTel counter (flow)  | `masc_auth_bare_alias_outcome_total{outcome=...}`         | per-call dispatch events    | Transient regression catch |
+| 7. External alert query | backend-specific config                                   | derived alarm               | Operator page |
 
-Surfaces 3 and 4 carry the *same data* — by design — but for different consumers (log grep vs Prometheus scrape). Surfaces 4 and 6 are complementary: the gauge gives end-state visible per scrape, the counter gives per-call events visible via `rate(...)`. The audit pass (2026-05-14) confirmed no genuine duplication; the only addition needed was flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
+Surfaces 3 and 4 carry the *same data* — by design — but for different consumers (log grep vs metrics scrape). Surfaces 4 and 6 are complementary: the gauge gives end-state visible per scrape, the counter gives per-call events visible via `rate(...)`. The audit pass (2026-05-14) confirmed no genuine duplication; the only addition needed was flow + heartbeat surfaces to catch what the snapshot gauges cannot show.
 
 ## γ Classifier (lib/auth.ml)
 
@@ -41,7 +51,7 @@ Surfaces 3 and 4 carry the *same data* — by design — but for different consu
 | `Bare_alive_alias` | Redirect stub aimed at the *same* UUID file as the canonical credential                     | Keep (PR-#10440 alias) |
 | `Bare_dead`       | Direct credential, orphan redirect, or stub whose canonical is itself a direct credential    | Archive (PR-3b2 policy) |
 
-`archive_bare_for_canonical` dispatches on the variant. `bare_alias_audit` aggregates the variant counts across the entire keeper roster and mirrors them into the Prometheus gauges.
+`archive_bare_for_canonical` dispatches on the variant. `bare_alias_audit` aggregates the variant counts across the entire keeper roster and mirrors them into the OTel gauges.
 
 ## Gauges
 
@@ -101,11 +111,16 @@ The snapshot gauge `masc_auth_bare_alias` shows *end-state* after a boot; this c
 
 Heartbeat counter — increments on every successful tick of `start_bare_alias_audit_fiber`. Unlabeled. Default tick rate is 1/60s ≈ 0.0166 ticks/s.
 
-A `rate(...[5m]) < 0.01` for 2m means the fiber stopped publishing heartbeats — the gauges may retain their last set value indefinitely while no longer reflecting reality. This is a *narrower* signal than `absent(masc_auth_bare_alias)`: gauges stay present (last value held by Prometheus), only the heartbeat stops.
+A `rate(...[5m]) < 0.01` for 2m means the fiber stopped publishing heartbeats —
+the gauges may retain their last set value indefinitely while no longer
+reflecting reality. This is a narrower signal than missing
+`masc_auth_bare_alias`: gauges stay present with their last observed value, only
+the heartbeat stops.
 
-## Alert rules
+## Alert intents
 
-`infrastructure/monitoring/auth-credential-alerts.yml` carries five rules:
+Repo-local backend rule files are retired. Operators should encode equivalent
+queries in the active OTel backend. The rule intent is:
 
 | Group | Alert | Severity | Trigger |
 |-------|-------|----------|---------|
@@ -117,7 +132,8 @@ A `rate(...[5m]) < 0.01` for 2m means the fiber stopped publishing heartbeats �
 | `masc_auth_bare_alias_flow`     | `AuthBareAliasDeadArchiveOngoing`  | critical | `rate(outcome="dead_archive") > 0` for 5m -- transient regression caught before snapshot |
 | `masc_auth_bare_alias_flow`     | `AuthBareAliasAuditFiberStalled`   | warning  | `rate(audit_ticks) < 0.01` for 2m -- fiber stalled, gauges stale-but-present |
 
-Evaluation interval 30s matches `masc_goal_loop_observe_contract` so the operator cadence stays consistent across surfaces.
+Use the same evaluation interval as adjacent production metric alerts so the
+operator cadence stays consistent across surfaces.
 
 ## Operator playbook
 
@@ -126,7 +142,7 @@ Evaluation interval 30s matches `masc_goal_loop_observe_contract` so the operato
 1. Check `masc_auth_archive_pruned_total` rate -- if it is also climbing, the ping-pong is actively producing archive events.
 2. `cat <base_path>/.masc/auth/.archive/` -- recent epoch dirs (sort by mtime) name the regression cycle.
 3. Inspect a representative bare file: `cat <base_path>/.masc/auth/agents/<bare>.json`. A `{"redirect_to": "...json"}` stub whose target differs from the canonical's redirect target is the `Bare_dead` shape.
-4. Confirm the running binary actually has commit `5d9ac2a7` (Prometheus metric definitions) and `2be6f22f` (periodic fiber) -- if `masc_auth_bare_alias` is absent from the scrape, the binary is older than PR #15112.
+4. Confirm the running binary actually has commit `5d9ac2a7` (metric definitions) and `2be6f22f` (periodic fiber) -- if `masc_auth_bare_alias` is absent from the scrape, the binary is older than PR #15112.
 
 ### Alert: `AuthArchiveEpochsExcessive`
 
@@ -209,7 +225,7 @@ heartbeat, not a fiber stall.
 ### Why not the in-app dashboard
 
 `dashboard/src/` does not consume `/metrics`. Runtime, keeper turn FSM,
-and all other Prometheus domains share the same gap — none surface in
+and all other metrics domains share the same gap — none surface in
 the in-app dashboard. Adding only auth-credential there would be an
 N-of-M patch (AGENT-LLM-A.md software-development §workaround #3). The
 correct unblock is a separate RFC for in-app metric viz across all
@@ -222,12 +238,12 @@ in the meantime.
 - PR-3a #11146 archived bare files only when their token differed from the canonical (dual-identity guard).
 - PR-3b1 #11152 starved the runtime caller (`tool_workspace.canonicalize_if_keeper`) so all short-form runtime requests resolve through canonical.
 - PR-3b2 #11155 generalised the archive helper to remove any bare-form file regardless of shape -- under the assumption that PR-3b1 had killed every short-form caller. It missed the PR-#10440 alias writer running in the same boot, producing the ping-pong.
-- PR #15112 (2026-05-14) introduced the γ classifier, the retention sweep, the periodic audit fiber, the Prometheus surface, and these alert rules.
+- PR #15112 (2026-05-14) introduced the γ classifier, the retention sweep, the periodic audit fiber, and the metric surface.
 
 ## Related
 
 - `docs/observability/runtime-metrics.md` -- same observability pattern for runtime routing decisions.
-- `docs/observability/goal-loop-observe-metrics.md` -- the boot-time exporter contract that this surface plugs into (`metric_config_credential_archived_starvation_total` is part of the GoalLoop contract presence check).
+- `docs/observability/goal-loop-verify-pipeline.md` -- the Verify artifact contract that consumes production metric snapshots.
 - `RFC-0019 Keeper Credential Unification` is withdrawn; this auth metric surface
   remains scoped to bearer/admin credential aliasing, not repository GitHub
   identity materialization.

@@ -291,10 +291,10 @@ dune runtest test/test_tool_call_quality_benchmark.ml
   observation 1 회.
 - `masc_oas_make_tool_bundle_sec` — sum/count, 매 keeper turn 1 회.
 
-masc 의 `Prometheus.observe_histogram` 은 sum + `_count` 만 저장하므로
+masc 의 hot-path metric surface 는 sum + `_count` 만 저장하므로
 *평균(avg = sum/count)* 까지가 in-tree 측정 한계다. p50/p95/p99 quantile 이
-필요하면 외부 Prometheus scraper + `histogram_quantile()` 또는 별도 raw-sample
-경로가 필요하다 (현재 Phase B 범위 밖).
+필요하면 외부 time-series backend 또는 별도 raw-sample 경로가 필요하다
+(현재 Phase B 범위 밖).
 
 ### Smoke run
 
@@ -304,7 +304,7 @@ BENCH_ITERATIONS=50 BENCH_WARMUP_ITERATIONS=1 \
   ./scripts/harness_tool_call_quality.sh --live --keepers bench-analyst \
     --models <provider:model>
 
-# 2. /metrics 스크레이프 + CSV 저장.
+# 2. OTel metric text snapshot + CSV 저장.
 ./scripts/harness_oas_dispatch.sh scrape --label baseline
 
 # 3. 비교 (e.g. memoization 적용 전후, 또는 hist on/off).

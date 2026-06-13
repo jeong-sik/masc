@@ -117,7 +117,7 @@ let append_lineage_artifacts_best_effort
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string RolloverFailures)
         ~labels:[("keeper", child.name); ("site", "lineage_append")]
         ();
@@ -253,7 +253,7 @@ let maybe_rollover_oas_handoff
         let () =
           Cancel_safe.observe
             ~on_exn:(fun exn ->
-              Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+              Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:[ ("keeper", base_meta.name); ("callback", "on_handoff_started") ] ();
               Keeper_callback_failure.record ~base_dir ~meta:base_meta
                 ~callback:"on_handoff_started" exn)
@@ -281,7 +281,7 @@ let maybe_rollover_oas_handoff
                   ~agent_name:base_meta.agent_name
                   ~ctx:save_ctx ~generation:next_generation with
           | Error e ->
-              Prometheus.inc_counter
+              Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", base_meta.name); ("site", "rollover_handoff_save")]
                 ();
@@ -292,7 +292,7 @@ let maybe_rollover_oas_handoff
           | Ok _checkpoint ->
               (match Keeper_id.Trace_id.of_string new_trace_id with
                | Error err ->
-                 Prometheus.inc_counter
+                 Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string RolloverFailures)
                    ~labels:[("keeper", base_meta.name); ("site", "invalid_trace_id")]
                    ();

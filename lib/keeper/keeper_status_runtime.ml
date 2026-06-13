@@ -548,3 +548,22 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
   | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> "offline"
+
+(** Explain the lossy [pipeline_stage] label without changing its wire value.
+    Consumers that need exact lifecycle authority should read [lifecycle_phase];
+    this field explains why two phases can share a single stage label. *)
+let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string =
+  match phase with
+  | Keeper_state_machine.Offline -> "launch_pending_no_fiber"
+  | Keeper_state_machine.Running -> "phase_running_idle"
+  | Keeper_state_machine.Failing -> "health_or_turn_failure_probe"
+  | Keeper_state_machine.Overflowed -> "context_overflow_pending_compaction"
+  | Keeper_state_machine.Compacting -> "context_compaction_in_progress"
+  | Keeper_state_machine.HandingOff -> "generation_handoff_in_progress"
+  | Keeper_state_machine.Draining -> "graceful_shutdown_draining"
+  | Keeper_state_machine.Paused -> "operator_or_policy_paused"
+  | Keeper_state_machine.Stopped -> "clean_stop_terminal"
+  | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
+  | Keeper_state_machine.Restarting -> "supervisor_restart_backoff_elapsed"
+  | Keeper_state_machine.Dead -> "restart_budget_exhausted_terminal"
+  | Keeper_state_machine.Zombie -> "structural_failure_terminal"

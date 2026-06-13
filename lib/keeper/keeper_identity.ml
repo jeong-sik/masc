@@ -156,7 +156,7 @@ let show_validation_error err =
   Format.pp_print_flush fmt ();
   Buffer.contents buf
 
-(* Stable snake_case label for Prometheus metric outcome labels. Keep
+(* Stable snake_case label for Otel_metric_store metric outcome labels. Keep
    exhaustive — adding a new variant must require updating this match
    so no telemetry path silently aggregates to a generic bucket. *)
 let validation_error_outcome_label = function

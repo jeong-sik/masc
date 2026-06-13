@@ -253,7 +253,7 @@ let save_profile ~base_path (profile : behavioral_profile) =
 let persistence_surface = "governance_anomaly_profile"
 
 let record_persistence_read_drop ~reason () =
-  Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+  Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
     ~labels:[("surface", persistence_surface); ("reason", reason)]
     ()
 

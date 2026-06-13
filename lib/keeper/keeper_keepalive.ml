@@ -101,7 +101,7 @@ let persist_directive_meta_update
   | Ok () ->
     Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
   | Error msg ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
       ();
@@ -114,7 +114,7 @@ let set_keeper_paused_state ~agent_name paused =
     ~identity:agent_name
     ~on_missing:(fun () ->
       let action = if paused then "pause" else "resume" in
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "pause_resume_not_in_registry" ]
         ();
@@ -143,7 +143,7 @@ let wakeup_keeper_by_agent_name ~agent_name =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "wakeup_not_in_registry" ]
         ();
@@ -155,7 +155,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
   with_keeper_entry_by_identity
     ~identity:agent_name
     ~on_missing:(fun () ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DirectiveFailures)
         ~labels:[ "keeper", agent_name; "site", "claim_not_in_registry" ]
         ();
@@ -240,7 +240,7 @@ let reconcile_current_task_id_for_heartbeat ~config ~agent_name =
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[ "keeper", agent_name; "phase", "grpc_heartbeat" ]
       ();
@@ -315,7 +315,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     (match write_meta ~force:true ctx.config synced with
      | Ok () -> ()
      | Error e ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[ "keeper", synced.name; "phase", "bootstrap" ]
          ();
@@ -324,7 +324,7 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", m.name; "phase", "bootstrap-catch" ]
       ();
@@ -369,7 +369,7 @@ let dispatch_fiber_started ~base_path keeper_name =
   match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
   | Ok _ -> ()
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "fiber_started_rejected" ]
       ();
@@ -449,7 +449,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
   =
   match repair_identity_drift_for_keepalive ~ctx m with
   | None ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string HeartbeatFailures)
       ~labels:[ "keeper", m.name; "phase", "identity_drift_unrepairable" ]
       ();
@@ -547,7 +547,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           with
           | Eio.Cancel.Cancelled _ -> ()
           | e ->
-            Prometheus.inc_counter
+            Otel_metric_store.inc_counter
               Keeper_metrics.(to_string CleanupTrackingFailures)
               ~labels:[ "keeper", live_meta.name; "site", "heartbeat_finally" ]
               ();
@@ -582,7 +582,7 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
                if Atomic.get stop
                then record_stopped "manual stop"
                else (
-                 Prometheus.inc_counter
+                 Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string HeartbeatFailures)
                    ~labels:[ "keeper", live_meta.name; "phase", "loop_crash" ]
                    ();
@@ -621,7 +621,7 @@ let stop_keepalive ?base_path name =
           (try close_fn () with
            | Eio.Cancel.Cancelled _ as e -> raise e
            | _exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                "masc_keeper_grpc_close_failures"
                ~labels:[ "keeper", entry.meta.name ]
                ())

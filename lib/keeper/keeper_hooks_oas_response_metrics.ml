@@ -13,7 +13,7 @@ open Keeper_hooks_oas_types
 let tool_use_failure_metric = Keeper_metrics.(to_string ToolUseFailure)
 
 let record_tool_use_failure ~keeper_name ~tool_name =
-  Prometheus.inc_counter tool_use_failure_metric
+  Otel_metric_store.inc_counter tool_use_failure_metric
     ~labels:[ (label_keeper, keeper_name); (label_tool, tool_name) ] ()
 
 (* #10083 originally patched empty [response.model] leaks by recovering a
@@ -23,13 +23,13 @@ let record_tool_use_failure ~keeper_name ~tool_name =
    signals for missing or selector-like response.model values, but their
    labels never carry the concrete model id. *)
 let empty_response_model_metric =
-  Prometheus.metric_after_turn_response_model_empty
+  Otel_metric_store.metric_after_turn_response_model_empty
 
 let alias_response_model_metric =
-  Prometheus.metric_after_turn_response_model_alias
+  Otel_metric_store.metric_after_turn_response_model_alias
 
 let empty_response_content_metric =
-  Prometheus.metric_after_turn_response_content_empty
+  Otel_metric_store.metric_after_turn_response_content_empty
 
 (* zero_usage moved to Keeper_hooks_oas_types (intra-library file split). *)
 
@@ -49,7 +49,7 @@ let resolve_after_turn_model ~keeper_name
         source_telemetry_resolved
       else source_unknown_source
     in
-    Prometheus.inc_counter empty_response_model_metric
+    Otel_metric_store.inc_counter empty_response_model_metric
       ~labels:[ (label_keeper, keeper_name); (label_source, source) ] ();
     Log.Keeper.warn
       "keeper:%s after_turn response.model empty -> runtime_lane source=%s"
@@ -58,7 +58,7 @@ let resolve_after_turn_model ~keeper_name
   end else begin
     if is_runtime_selector_alias raw_model then (
       let source_telemetry_canonical = "telemetry_canonical" in
-      Prometheus.inc_counter alias_response_model_metric
+      Otel_metric_store.inc_counter alias_response_model_metric
         ~labels:
           [
             (label_keeper, keeper_name);
@@ -112,7 +112,7 @@ let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =
   if not (List.exists content_block_has_visible_or_tool_progress response.content)
   then
-    Prometheus.inc_counter empty_response_content_metric
+    Otel_metric_store.inc_counter empty_response_content_metric
       ~labels:
         [
           (label_keeper, keeper_name);
@@ -142,7 +142,7 @@ let record_usage_anomaly_metrics ~keeper_name usage_trust =
     in
     List.iter
       (fun reason ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string UsageAnomalies)
 	           ~labels:
 	             [
@@ -157,7 +157,7 @@ let record_keeper_tool_duration_metric
     ~(keeper_name : string)
     (summary : tool_execution_summary)
   : unit =
-  Prometheus.observe_histogram
+  Otel_metric_store.observe_histogram
     Keeper_metrics.(to_string ToolCallDuration)
     ~labels:
       [label_keeper, keeper_name
@@ -196,13 +196,13 @@ let record_llm_tok_s_metrics
   in
   (match prompt_tok_s_opt with
    | Some v when v > 0.0 ->
-     Prometheus.observe_histogram
-       Prometheus.metric_llm_prompt_tok_per_sec ~labels v
+     Otel_metric_store.observe_histogram
+       Otel_metric_store.metric_llm_prompt_tok_per_sec ~labels v
    | _ -> ());
   (match decode_tok_s_opt with
    | Some v when v > 0.0 ->
-     Prometheus.observe_histogram
-       Prometheus.metric_llm_decode_tok_per_sec ~labels v
+     Otel_metric_store.observe_histogram
+       Otel_metric_store.metric_llm_decode_tok_per_sec ~labels v
    | _ -> ())
 
 (** Emit the after-turn wall-clock latency histogram.  A zero/negative
@@ -213,25 +213,25 @@ let record_llm_inference_latency_metric
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let labels = [("model", runtime_lane_label)] in
-  Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
+  Otel_metric_store.inc_counter Otel_metric_store.metric_after_turn_hook ~labels ();
   match telemetry with
   | Some t ->
     let observed_latency_ms =
       match t.request_latency_ms with
       | Some latency_ms when latency_ms > 0 -> latency_ms
       | _ ->
-          Prometheus.inc_counter
-            Prometheus.metric_after_turn_telemetry_zero_latency
+          Otel_metric_store.inc_counter
+            Otel_metric_store.metric_after_turn_telemetry_zero_latency
             ~labels ();
           1
     in
-    Prometheus.observe_histogram
-      Prometheus.metric_llm_inference_duration
+    Otel_metric_store.observe_histogram
+      Otel_metric_store.metric_llm_inference_duration
       ~labels
       (Float.of_int observed_latency_ms /. ms_per_second)
   | None ->
-    Prometheus.inc_counter
-      Prometheus.metric_after_turn_telemetry_missing
+    Otel_metric_store.inc_counter
+      Otel_metric_store.metric_after_turn_telemetry_missing
       ~labels ()
 
 let wall_tokens_per_second

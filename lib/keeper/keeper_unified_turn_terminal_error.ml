@@ -6,7 +6,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
     Keeper_registry.mark_turn_runtime_exhausted
       ~base_path:config.Workspace.base_path
       keeper_name;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string FsmEdgeTransitions)
       ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
       ();
@@ -17,7 +17,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       (Agent_sdk.Error.to_string err)
       attempt
       (String.concat ", " attempted_runtimes);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
@@ -29,7 +29,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_runtimes err =
       ~base_path:config.Workspace.base_path
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name

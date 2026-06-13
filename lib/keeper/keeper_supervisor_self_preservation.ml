@@ -83,7 +83,7 @@ let publish_suppression
 let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
   if ratio >= 0.99
   then (
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SelfPreservationUniversal)
       ~labels:[ "cohort", dominant_key ]
       ();

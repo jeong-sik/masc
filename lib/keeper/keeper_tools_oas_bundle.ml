@@ -182,8 +182,8 @@ let make_tool_bundle
             Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
       }
   in
-  Prometheus_hotpath.observe
-    ~metric:Prometheus_hotpath.metric_oas_make_tool_bundle_sec
+  Otel_metric_hotpath.observe
+    ~metric:Otel_metric_hotpath.metric_oas_make_tool_bundle_sec
     ~start:__t0;
   bundle
 ;;

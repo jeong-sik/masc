@@ -56,3 +56,8 @@ val keeper_surface_status :
 (** Derive pipeline stage directly from phase (RFC-0002).
     Deterministic mapping, no 30s recency heuristic. *)
 val pipeline_stage_of_phase : Keeper_state_machine.phase -> string
+
+(** Human/operator-facing explanation for the lossy [pipeline_stage] label.
+    For example, [Offline], [Stopped], and [Dead] all map to ["offline"],
+    but their detail strings remain distinct. *)
+val pipeline_stage_detail_of_phase : Keeper_state_machine.phase -> string

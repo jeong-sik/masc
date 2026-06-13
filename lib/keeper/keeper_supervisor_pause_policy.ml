@@ -88,7 +88,7 @@ let handle_crash_auto_pause
           keeper cannot run while paused and (b) other keepers see the
           claim and skip.  The released task ID is not separately audited
           here; [last_blocker] in [runtime] already carries the pause
-          reason, and Prometheus [keeper_paused_total] is incremented
+          reason, and Otel_metric_store [keeper_paused_total] is incremented
           below.  Discovered 2026-05-05 fleet-stuck. *)
      (match
         write_meta_with_merge
@@ -104,7 +104,7 @@ let handle_crash_auto_pause
       with
       | Ok () -> ()
       | Error err ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[ "keeper", entry.name; "phase", "blocker_pause" ]
           ();
@@ -119,17 +119,17 @@ let handle_crash_auto_pause
        "%s: %s pause: meta missing, cannot persist paused=true"
        entry.name
        reason_tag;
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_meta_missing" ]
        ()
    | Error err ->
      Log.Keeper.warn "%s: %s pause read_meta failed: %s" entry.name reason_tag err;
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_read_meta" ]
        ());
-  Prometheus.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
+  Otel_metric_store.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
   publish_phase_lifecycle
     ~phase:Keeper_state_machine.Paused
     entry.name
@@ -300,7 +300,7 @@ let handle_auto_pause_from_meta
   | Ok () ->
     (match metric_name with
      | Some name ->
-       Prometheus.inc_counter name ~labels:[ "keeper", meta.name ] ()
+       Otel_metric_store.inc_counter name ~labels:[ "keeper", meta.name ] ()
      | None -> ());
     Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
     Keeper_turn_helpers.dispatch_keeper_phase_event_checked
@@ -311,7 +311,7 @@ let handle_auto_pause_from_meta
     Log.Keeper.error "%s: %s" meta.name log_message;
     Ok paused_meta
   | Error err ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name
               ; "phase", Printf.sprintf "%s_pause" reason_tag

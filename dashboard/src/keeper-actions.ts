@@ -1,9 +1,10 @@
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
-  sendKeeperMessageDetailed,
+  cancelQueuedKeeperMessage,
   streamKeeperMessage,
 } from './api/keeper'
+import { asString, isRecord } from './components/common/normalize'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
@@ -34,8 +35,6 @@ import {
 import { abortKeeperThreadMessage, applyKeeperStreamEvent } from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
-  KEEPER_STREAM_IDLE_POLL_MS,
-  KEEPER_STREAM_IDLE_TIMEOUT_MS,
 } from './config/constants'
 
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
@@ -122,7 +121,7 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
   try {
     const text = await callMcpTool('masc_keeper_status', {
       name: keeperName,
-      fast: true,
+      fast: false,
       include_context: false,
       include_metrics_overview: false,
       include_memory_bank: false,
@@ -190,23 +189,16 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, assistantId, controller)
-  let idleTimeoutId: ReturnType<typeof setInterval> | null = null
+  let requestId: string | null = null
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
-
-    let lastEventAt = Date.now()
-    idleTimeoutId = setInterval(() => {
-      if (Date.now() - lastEventAt > KEEPER_STREAM_IDLE_TIMEOUT_MS) {
-        if (idleTimeoutId != null) clearInterval(idleTimeoutId)
-        idleTimeoutId = null
-        abortKeeperThreadMessage(keeperName)
-      }
-    }, KEEPER_STREAM_IDLE_POLL_MS)
 
     await streamKeeperMessage(keeperName, message, {
       signal: controller.signal,
       onEvent: event => {
-        lastEventAt = Date.now()
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST' && isRecord(event.value)) {
+          requestId = asString(event.value.request_id, '').trim() || requestId
+        }
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
           throw new Error(error)
@@ -216,48 +208,36 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
 
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
-    const finalText = finalEntry?.text.trim() || '(empty reply)'
+    const finalText = finalEntry?.text.trim() ?? ''
+    const finalDelivery =
+      !finalText && finalEntry?.delivery === 'queued'
+        ? 'queued' as KeeperConversationDelivery
+        : 'delivered' as KeeperConversationDelivery
 
     finalizeAssistantEntry(keeperName, assistantId, {
-      text: finalText,
-      delivery: 'delivered',
+      text: finalText || (finalDelivery === 'queued' ? '' : '(empty reply)'),
+      delivery: finalDelivery,
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
     })
   } catch (err) {
     if (isAbortError(err)) {
+      if (requestId) {
+        try {
+          await cancelQueuedKeeperMessage(requestId)
+        } catch (cancelErr) {
+          console.warn(`[keeper] queue cancel failed for ${keeperName}`, cancelErr instanceof Error ? cancelErr.message : cancelErr)
+        }
+      }
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
         streamState: null,
-        error: '스트림 취소됨',
+        error: '요청 취소됨',
         timestamp: new Date().toISOString(),
       })
-      setRecordValue(keeperActionErrors, keeperName, '스트림 취소됨')
+      setRecordValue(keeperActionErrors, keeperName, '요청 취소됨')
       throw err
-    }
-
-    const fallbackAllowed =
-      !((keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId)?.text.trim())
-
-    if (fallbackAllowed) {
-      try {
-        const reply = await sendKeeperMessageDetailed(keeperName, message)
-        finalizeAssistantEntry(keeperName, assistantId, {
-          text: reply.text.trim() || '(empty reply)',
-          rawText: reply.details?.replyText ?? (reply.text.trim() || '(empty reply)'),
-          delivery: 'delivered',
-          streamState: null,
-          details: reply.details,
-          error: null,
-          timestamp: new Date().toISOString(),
-        })
-        finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered', error: null })
-        await refreshDashboardState()
-        return
-      } catch (fallbackErr) {
-        console.warn(`[keeper] stream fallback also failed for ${keeperName}`, fallbackErr instanceof Error ? fallbackErr.message : fallbackErr)
-      }
     }
 
     const errorMessage =
@@ -275,7 +255,6 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    if (idleTimeoutId != null) clearInterval(idleTimeoutId)
     clearActiveStream(keeperName)
     setRecordValue(keeperSending, keeperName, false)
     setRecordValue(keeperStreamStartedAt, keeperName, null)

@@ -3,7 +3,7 @@
 
     Bridges OAS [Agent_sdk.Hooks] callbacks with MASC's keeper accounting:
     records OAS-reported usage/cost with explicit unknowns, records
-    Prometheus metrics, and gates pre-tool execution via [Keeper_guards].
+    Otel_metric_store metrics, and gates pre-tool execution via [Keeper_guards].
     Concrete provider/model identity remains OAS-owned; keeper-facing
     projections use neutral runtime lanes.  The [make_hooks] entry point
     wires every callback used by the keeper runtime turn loop. *)
@@ -20,7 +20,7 @@ val keeper_denied_tools : string list
 (** {1 Tool-failure metrics} *)
 
 val tool_use_failure_metric : string
-(** Prometheus metric name for tool-use failures. *)
+(** Otel_metric_store metric name for tool-use failures. *)
 
 val record_tool_use_failure : keeper_name:string -> tool_name:string -> unit
 (** Increment [tool_use_failure_metric] for [(keeper, tool)]. *)
@@ -58,7 +58,7 @@ val classify_usage_trust :
 
 val record_usage_anomaly_metrics :
   keeper_name:string -> Keeper_usage_trust.t -> unit
-(** Emit Prometheus counters for each anomaly category in the verdict. *)
+(** Emit Otel_metric_store counters for each anomaly category in the verdict. *)
 
 (** {1 Cost ledger}
 
@@ -102,7 +102,7 @@ val wall_tokens_per_second :
 (** {1 Cost emit source} *)
 
 val cost_emit_source_metric : string
-(** Prometheus metric for the cost-emit source label. *)
+(** Otel_metric_store metric for the cost-emit source label. *)
 
 val classify_cost_usd_source :
   usage_missing:bool ->

@@ -1,7 +1,7 @@
-(** OCaml GC stats sampler for Prometheus export.
+(** OCaml GC stats sampler for Otel_metric_store export.
 
     Polls [Gc.quick_stat] once per [interval] seconds and writes the seven
-    {!Prometheus} GC gauge metrics ([masc_gc_minor_words],
+    {!Otel_metric_store} GC gauge metrics ([masc_gc_minor_words],
     [masc_gc_major_words], [masc_gc_heap_words], [masc_gc_live_words],
     [masc_gc_compactions], [masc_gc_promoted_words],
     [masc_memory_usage_bytes]).
@@ -17,7 +17,7 @@
 
 val sample_once : unit -> unit
 (** [sample_once ()] reads [Gc.quick_stat] once and updates the seven
-    Prometheus GC gauges. Exposed for unit tests so the sampler can be
+    Otel_metric_store GC gauges. Exposed for unit tests so the sampler can be
     exercised without spawning an Eio fiber. *)
 
 val run :

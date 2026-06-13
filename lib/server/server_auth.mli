@@ -117,7 +117,7 @@ val record_dashboard_actor_fallback :
     Consolidates the two prior inline warn sites (Ok None / Error err
     arms in [dashboard_actor_for_request]) onto a single helper. The
     rendered log message is byte-equivalent to the prior format strings
-    — prometheus log alerts keyed on the literal
+    — otel_metric_store log alerts keyed on the literal
     [silent:dashboard_actor_fallback] prefix continue to fire.
 
     WORKAROUND-CARRYOVER: the fallback path itself remains (the

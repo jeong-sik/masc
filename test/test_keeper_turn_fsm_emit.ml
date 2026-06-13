@@ -15,7 +15,7 @@
 
 open Masc
 module F = Keeper_turn_fsm
-module P = Prometheus
+module P = Otel_metric_store
 
 (* ── Compile-time signature anchor ─────────────────────────── *)
 

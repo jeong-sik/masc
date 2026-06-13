@@ -6,7 +6,7 @@
 
 open Alcotest
 module DH = Discovery_history
-module P = Prometheus
+module P = Otel_metric_store
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;

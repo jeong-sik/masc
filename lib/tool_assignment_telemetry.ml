@@ -161,7 +161,7 @@ let rng_mu = Eio.Mutex.create ()
 let with_rng f = Eio.Mutex.use_ro rng_mu (fun () -> f rng)
 
 let record_failure_metric ?(delta = 1.0) ~site () =
-  Prometheus.inc_counter Prometheus.metric_tool_assignment_telemetry_failures
+  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_assignment_telemetry_failures
     ~labels:[ ("site", site) ] ~delta ()
 
 let observe_failure ~site ~error =

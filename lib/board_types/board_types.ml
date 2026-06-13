@@ -132,7 +132,7 @@ type post_kind =
 
 (* Closed sum for the legacy automation-author classification. Relocated
    here from board_core_classify so the board metric hook surface
-   (board_metrics_hooks.ml / board_prometheus_hooks.ml) can reference it
+   (board_metrics_hooks.ml / board_metric_hooks_adapter.ml) can reference it
    without a board_core_classify -> board_metrics_hooks -> board_core_classify
    cycle. board_core_classify re-exports it via [include Board_types]. *)
 type automation_label =

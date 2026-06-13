@@ -57,6 +57,7 @@ export interface StatusTraySummary {
   latestJournalEntries: JournalEntry[]
   counts: {
     totalKeepers: number
+    freshKeepers: number
     staleKeepers: number
     keeperAttention: number
     pendingVerificationTasks: number
@@ -174,7 +175,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
   const totalKeepers = input.keepers.length
   const staleCount = input.keepers.filter(keeper => input.staleKeeperNames.has(keeper.name)).length
   const keeperAttention = countKeeperAttention(input.keepers)
-  const activeKeepers = Math.max(0, totalKeepers - staleCount)
+  const freshKeepers = Math.max(0, totalKeepers - staleCount)
   const pendingVerificationTasks = countPendingVerification(input.tasks)
 
   let transport: StatusTrayItem
@@ -268,6 +269,7 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
     latestJournalEntries: latest,
     counts: {
       totalKeepers,
+      freshKeepers,
       staleKeepers: staleCount,
       keeperAttention,
       pendingVerificationTasks,
@@ -281,11 +283,11 @@ export function summarizeStatusTray(input: StatusTrayInput): StatusTraySummary {
         key: 'fleet',
         tone: fleetTone,
         label: 'Keepers',
-        value: totalKeepers === 0 ? 'none' : `${activeKeepers}/${totalKeepers}`,
+        value: totalKeepers === 0 ? 'none' : `fresh ${freshKeepers}/${totalKeepers}`,
         detail: staleCount > 0
-          ? `${staleCount} stale heartbeat${staleCount === 1 ? '' : 's'}`
+          ? `${staleCount} stale heartbeat${staleCount === 1 ? '' : 's'}; freshness is separate from running fibers`
           : keeperAttention > 0
-            ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention`
+            ? `${keeperAttention} keeper${keeperAttention === 1 ? '' : 's'} need attention; heartbeat freshness is current`
             : 'keeper heartbeats are current',
       },
       activity: {
@@ -395,8 +397,8 @@ function PopoverContent({
       <div class="grid gap-3">
         <div class="grid grid-cols-3 gap-2">
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
-            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Total</div>
-            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.totalKeepers}</div>
+            <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Fresh</div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">${summary.counts.freshKeepers}/${summary.counts.totalKeepers}</div>
           </div>
           <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1.5">
             <div class="font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Stale</div>

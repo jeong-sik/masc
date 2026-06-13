@@ -518,8 +518,8 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       ~on_backend_ready:(fun _backend ->
         Log.Backend.info "Board: JSONL default backend";
         Board_agent_effect_hooks.install ();
-        Board_prometheus_hooks.install ();
-        Workspace_prometheus_hooks.install ();
+        Board_metric_hooks_adapter.install ();
+        Workspace_metric_hooks.install ();
         Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
         Atomic.set Task.Handlers.record_verdict_fn (fun ~task_id ~req ~result () ->
           Eval_calibration.record_verdict ~task_id ~req ~result ());

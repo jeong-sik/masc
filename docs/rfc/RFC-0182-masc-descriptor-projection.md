@@ -136,12 +136,12 @@ Each of the 10 live metadata-only tools gets a corresponding `Tool_spec.register
 | Tool | Proposed module | Q3 visibility |
 |---|---|---|
 | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate` | `mcp_tool_runtime.ml` (Mod_inline) | `Default` (preserved) |
-| `masc_set_param` | `mcp_tool_runtime.ml` or new `tool_admin.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
+| `masc_set_param` | `mcp_tool_runtime.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
 | `masc_tool_revoke` | `tool_shard.ml` (Mod_shard) — existing `masc_tool_grant` is registered here | `Default` (preserved) |
 
 All 7 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata (`required_permission = Some Masc_domain.CanXxx`) is preserved as-is — moved from raw `tool_catalog.ml` entries to `Tool_spec.create ~required_permission`.
 
-Q1 (module layout) resolution: **hybrid — no new tool_admin.ml module**. Audit found existing dispatchers (`mcp_tool_runtime.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New module would proliferate single-purpose files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` placement is implementer's choice between `mcp_tool_runtime.ml` and a new `tool_admin.ml`; if only `masc_set_param` needs it, prefer existing.
+Q1 (module layout) resolution: existing dispatchers only. Audit found existing dispatchers (`mcp_tool_runtime.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New single-purpose modules would proliferate files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` stays with `mcp_tool_runtime.ml`.
 
 ### 3.3 Dead tool metadata + test cleanup (8 tools)
 
@@ -245,7 +245,7 @@ Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descripto
 
 The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
 
-- **Q1 (module layout)** — *resolved*: hybrid. No new `tool_admin.ml` module; keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`) and reuse `tool_shard.ml` for shard tools (existing `masc_tool_grant` lives there). `masc_set_param` may either reuse `mcp_tool_runtime.ml` or get a new single-purpose module — implementer's choice with preference for the former. Rationale in §3.2.
+- **Q1 (module layout)** — *resolved*: existing dispatchers only. Keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`) and reuse `tool_shard.ml` for shard tools (existing `masc_tool_grant` lives there). `masc_set_param` stays with `mcp_tool_runtime.ml`. Rationale in §3.2.
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 

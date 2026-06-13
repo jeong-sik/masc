@@ -186,16 +186,6 @@ let run_keeper_cycle
               ();
             let failure_reason =
               match Keeper_turn_driver.classify_masc_internal_error err with
-              | Some
-                  (Keeper_turn_driver.Runtime_exhausted
-                     { runtime_id
-                     ; reason = Keeper_turn_driver.No_tool_capable _
-                     ; _
-                     }) ->
-                Keeper_turn_fsm.Failure_no_capable_provider
-                  { runtime_id = runtime_id
-                  ; detail = error_message
-                  }
               | _ when EC.is_runtime_exhausted_error err ->
                 Keeper_turn_fsm.Failure_runtime_unavailable
                   { base = effective_runtime_runtime_name
@@ -317,7 +307,7 @@ let run_keeper_cycle
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create ~keeper_name:meta.name ()
                in
-               (* PR-J: [?site] labels the call-site so PromQL can attribute
+               (* PR-J: [?site] labels the call-site so metric queries can attribute
          drain pressure to background polling vs unsubscribe vs the
          retry path. [outcome=drained] when at least one event was
          pulled, [outcome=empty] otherwise (the latter is the no-op
@@ -358,7 +348,7 @@ let run_keeper_cycle
                      with
                      | Ok () -> ()
                      | Error err ->
-                       Prometheus.inc_counter
+                       Otel_metric_store.inc_counter
                          Keeper_metrics.(to_string WriteMetaFailures)
                          ~labels:[ "keeper", entry.meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Turn_start) ]
                          ();
@@ -421,7 +411,7 @@ let run_keeper_cycle
                         "%s: unsubscribe_event_bus in turn cleanup raised: %s"
                         meta.name
                         (Printexc.to_string e);
-                      Prometheus.inc_counter
+                      Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string TurnCleanupFailures)
                         ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Unsubscribe_event_bus) ]
                         ());
@@ -436,7 +426,7 @@ let run_keeper_cycle
                        "%s: mark_turn_finished in turn cleanup raised: %s"
                        meta.name
                        (Printexc.to_string e);
-                     Prometheus.inc_counter
+                     Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string TurnCleanupFailures)
                        ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
@@ -581,7 +571,7 @@ let run_keeper_cycle
                     ~keeper_name:meta.name
                     trajectory_acc
                     (Trajectory.Gated "input_required");
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
                     ();
@@ -599,12 +589,12 @@ let run_keeper_cycle
                   let is_transient = EC.is_transient_network_error err in
                   (match Keeper_turn_driver.classify_masc_internal_error err with
                    | Some (Keeper_turn_driver.Provider_timeout _) ->
-                     Prometheus.inc_counter
+                     Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string OasTimeoutClassifications)
                        ~labels:[ "classification", "structural_budget" ]
                        ()
                    | Some (Keeper_turn_driver.Turn_timeout _) ->
-                     Prometheus.inc_counter
+                     Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string OasTimeoutClassifications)
                        ~labels:[ "classification", "turn_wall_clock" ]
                        ()
@@ -618,7 +608,7 @@ let run_keeper_cycle
                           then "structural_budget"
                           else "other_timeout"
                         in
-                        Prometheus.inc_counter
+                        Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
                           ~labels:[ "classification", classification ]
                           ()
@@ -626,7 +616,7 @@ let run_keeper_cycle
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
                   let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
                     ();
@@ -644,18 +634,8 @@ let run_keeper_cycle
                        then
                          Keeper_turn_fsm.Failure_receipt_lost
                            { primary_error = e_str; fallback_path = None }
-                       else
-                         match Keeper_turn_driver.classify_masc_internal_error err with
-                         | Some
-                             (Keeper_turn_driver.Runtime_exhausted
-                                { runtime_id
-                                ; reason = Keeper_turn_driver.No_tool_capable _
-                                ; _
-                                }) ->
-                           Keeper_turn_fsm.Failure_no_capable_provider
-                             { runtime_id = runtime_id
-                             ; detail = short_preview e_str
-                             }
+                      else
+                        match Keeper_turn_driver.classify_masc_internal_error err with
                          | _ ->
                            Keeper_turn_fsm.Failure_provider_error
                              { kind = sdk_error_kind err; detail = short_preview e_str }
@@ -692,7 +672,7 @@ let run_keeper_cycle
                      then " (provider_timeout, policy handled)"
                      else "")
                     (short_preview e_str);
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string OasExecutionErrors)
                     ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
                     ();
@@ -756,7 +736,7 @@ let run_keeper_cycle
                             ~committed_tools
                             ~error_detail:e_str
                         in
-                        Prometheus.inc_counter
+                        Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string TurnErrorAfterTools)
                           ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
                           ();
@@ -783,7 +763,7 @@ let run_keeper_cycle
                                (short_preview e_str))
                         in
                         Log.Keeper.error "%s" (Agent_sdk.Error.to_string combined_err);
-                        Prometheus.inc_counter
+                        Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string RuntimeSyncFailures)
                           ~labels:
                             [ "keeper", meta.name; "site", "ambiguous_partial_pause" ]
@@ -838,7 +818,7 @@ dominant source of the observed CAS race exhaustion after
                    with
                    | Ok () -> ()
                    | Error msg ->
-                     Prometheus.inc_counter
+                     Otel_metric_store.inc_counter
                        Keeper_metrics.(to_string WriteMetaFailures)
                        ~labels:
                          [ "keeper", updated_meta.name
@@ -857,7 +837,7 @@ dominant source of the observed CAS race exhaustion after
                        Log.Keeper.error
                          "write_meta failed after unified turn failure: %s"
                          msg);
-                  Prometheus.inc_counter
+                  Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();

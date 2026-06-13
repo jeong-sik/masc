@@ -39,11 +39,6 @@ type capacity_retry_after =
   | Synthetic_default of float
   | No_retry_hint
 
-type no_tool_capable_detail = {
-  configured_labels : string list;
-  provider_rejections : (string * string) list;
-}
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
@@ -53,7 +48,6 @@ type runtime_exhaustion_reason =
   | Max_turns_exceeded
   | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
-  | No_tool_capable of no_tool_capable_detail option
   | Other_detail of string
 
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool

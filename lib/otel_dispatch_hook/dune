@@ -12,5 +12,4 @@
   masc.tool_types
   masc.masc_tool_dispatch
   masc.otel_spans
-  masc.otel_genai
-  masc.prometheus))
+  masc.otel_genai))

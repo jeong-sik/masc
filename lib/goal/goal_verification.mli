@@ -20,22 +20,13 @@
     ([lib/goal/goal_store.ml], [lib/workspace_goals.ml],
     [lib/tool_goal_*]) pattern-match on the variants
     ([Approve] / [Reject] / [Open] / [Approved] / [Rejected]
-    / [Cancelled] / [Operator] / [Agent] / [Extend] /
-    [Replace] / [Pending] / [Passed] / [Failed]) and access
-    record fields ([principal.kind], [policy.principals],
-    [request.goal_id], …) directly. *)
+    / [Cancelled] / [Extend] / [Replace] / [Pending] /
+    [Passed] / [Failed]) and access record fields
+    ([policy.principals], [request.goal_id], …) directly. *)
 
 (** {1 Principals} *)
 
-type principal_kind =
-  | Operator
-  | Agent
-  (** Who's signing off.  [Operator] = a human-tier reviewer
-      acting through the operator surface.  [Agent] = an autonomous
-      agent submitting a verdict. *)
-
 type goal_principal = {
-  kind : principal_kind;
   id : string;
   display_name : string option;
 }
@@ -44,17 +35,10 @@ type goal_principal = {
     name); [display_name] is the human-readable label
     surfaced in events and dashboards. *)
 
-val principal_kind_to_yojson : principal_kind -> Yojson.Safe.t
-val principal_kind_of_yojson :
-  Yojson.Safe.t -> (principal_kind, string) result
-(** Lower-cased string round-trip
-    (["operator"] / ["agent"]).  Whitespace and case are
-    normalised on read. *)
-
 val goal_principal_to_yojson : goal_principal -> Yojson.Safe.t
 val goal_principal_of_yojson :
   Yojson.Safe.t -> (goal_principal, string) result
-(** Object round-trip with required [kind] / [id] (non-empty)
+(** Object round-trip with required [id] (non-empty)
     and optional [display_name]. *)
 
 (** {1 Policy} *)

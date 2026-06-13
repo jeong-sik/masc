@@ -11,7 +11,7 @@
     instead of [(bool * string) option].
 
     Internal: 11 helpers (activity emission, JSON field upsert,
-    Prometheus counter, identity canonicalization, surface-of-
+    Otel_metric_store counter, identity canonicalization, surface-of-
     record helpers, board author canonicalizer) stay private — the
     .mli pins the dispatch contract, not the identity-spoof
     plumbing. *)
@@ -23,7 +23,7 @@ val ensure_board_post_author :
 (** [ensure_board_post_author ~agent_name args] enforces the
     [masc_board_post] author-identity contract: when [args.author]
     differs from [agent_name] (after canonicalization), records
-    the spoof attempt via the Prometheus counter and rewrites the
+    the spoof attempt via the Otel_metric_store counter and rewrites the
     author field to the canonical keeper name.
 
     Returns the (possibly mutated) [args] JSON object.  Specialised

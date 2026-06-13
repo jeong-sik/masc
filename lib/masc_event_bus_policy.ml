@@ -42,8 +42,8 @@ let masc_domain =
 ;;
 
 let () =
-  Prometheus.register_gauge
-    ~name:Prometheus.metric_oas_bus_capacity
+  Otel_metric_store.register_gauge
+    ~name:Otel_metric_store.metric_oas_bus_capacity
     ~help:
       "Configured [Eio.Stream] buffer size per subscriber on each MASC \
        event bus.  Labels: [bus] (oas_runtime | masc_domain | ...) and \
@@ -60,8 +60,8 @@ let create_bus (t : t) : Agent_sdk.Event_bus.t =
       ~policy:t.policy
       ()
   in
-  Prometheus.set_gauge
-    Prometheus.metric_oas_bus_capacity
+  Otel_metric_store.set_gauge
+    Otel_metric_store.metric_oas_bus_capacity
     ~labels:
       [ ("bus", t.bus_name)
       ; ("policy", to_policy_label t.policy)

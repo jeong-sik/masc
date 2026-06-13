@@ -1,4 +1,4 @@
-(** Keeper error recording (Log + Prometheus dedup + last_error persistence).
+(** Keeper error recording (Log + Otel_metric_store dedup + last_error persistence).
 
     Extracted from keeper_registry.ml (lines 456-506) as part of the
     godfile decomp campaign. The MASC/OAS Error-Warn Reduction Goal §P6
@@ -23,7 +23,7 @@ let record ~base_path ?details name err =
      (system_log_2026-05-16 sample, 299 events/day; verifier
      sandbox_docker ~48%). First occurrence keeps ERROR — operators
      must still see *new* failure modes. Repeated occurrences demote
-     to DEBUG and bump a Prometheus counter so the dashboard still
+     to DEBUG and bump a Otel_metric_store counter so the dashboard still
      reflects the retry rate without paging operators.
 
      WORKAROUND-CARRYOVER: this is symptom suppression. The root fix
@@ -45,7 +45,7 @@ let record ~base_path ?details name err =
       | None ->
         Log.Keeper.error "registry: recording error name=%s error=%s" name err)
    | `Repeated count ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string RecordingErrorDedup)
        ~labels:[ "keeper", name; "error_kind", kind_label ]
        ();

@@ -158,11 +158,6 @@ let local_worker_tool_schemas ?names () :
   | None -> Ok all_schemas
   | Some values -> resolve_named_schemas all_schemas values
 
-(** Admin tool names that should be excluded from autonomous agents.
-    SSOT: Tool_catalog_surfaces.admin_surface_tools. *)
-let admin_tool_names : string list =
-  Tool_catalog_surfaces.admin_surface_tools
-
 (** Role-catalog candidates for workspace leads and fleet leaders.
     SSOT: Tool_catalog_surfaces.workspace_role_tools.
     [build_tool_catalog] filters against surfaced tool names so stale
@@ -185,7 +180,7 @@ let filter_catalog_to_available ~available names =
     [role] determines which subset of tools the agent sees:
     - ["worker"]: execution-focused tools
     - ["workspace_lead"]: workspace and orchestration tools
-    - [_]: all non-admin tools (autonomous default)
+    - [_]: all available spawned/local worker tools
     Returns tool names (unprefixed). *)
 let build_tool_catalog ~(role : string) () : string list =
   let all_names =
@@ -198,11 +193,7 @@ let build_tool_catalog ~(role : string) () : string list =
         filter_catalog_to_available ~available:all_names execution_tool_names
     | "workspace_lead" | "fleet_leader" ->
         filter_catalog_to_available ~available:all_names workspace_tool_names
-    | _ ->
-        (* autonomous: all except admin.  Replace per-name [List.mem]
-           scan over [admin_tool_names] with O(1) Hashtbl lookup. *)
-        let admin_set = name_set admin_tool_names in
-        List.filter (fun name -> not (Hashtbl.mem admin_set name)) all_names
+    | _ -> all_names
   in
   Json_util.dedupe_keep_order filtered
 

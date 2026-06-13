@@ -282,7 +282,7 @@ let enqueue_append (entry : append_entry) =
   in
   if dropped
   then (
-    Prometheus.inc_counter Prometheus.metric_keeper_tool_call_log_queue_dropped ();
+    Otel_metric_store.inc_counter Otel_metric_store.metric_keeper_tool_call_log_queue_dropped ();
     let dropped_count = Atomic.fetch_and_add append_queue_dropped 1 + 1 in
     if dropped_count = 1 || dropped_count mod 1024 = 0
     then

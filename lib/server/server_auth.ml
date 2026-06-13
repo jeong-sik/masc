@@ -276,13 +276,13 @@ let sanitize_dashboard_actor_name raw =
 
 (* Consolidates the two prior [silent:dashboard_actor_fallback] warn sites
    (Ok None / Error err arms in [dashboard_actor_for_request]) onto a single
-   helper. The message rendering and prometheus labels are owned by
+   helper. The message rendering and otel_metric_store labels are owned by
    [Auth_error_kind] so the contract is round-tripped through a typed
    record rather than two parallel inline format strings.
 
    Log dedup: a stale dashboard token triggers this path on *every* HTTP
    request the browser makes.  Without a cooldown, 140+ identical WARN
-   lines/day accumulate for the same token hash prefix.  The Prometheus
+   lines/day accumulate for the same token hash prefix.  The Otel_metric_store
    counter is always incremented (metrics remain accurate); the log line
    is emitted at most once per [warn_cooldown_sec] per token prefix. *)
 let warn_cooldown_sec = 300.0
@@ -302,9 +302,9 @@ let record_dashboard_actor_fallback
     Log.Auth.warn "%s"
       (Auth_error_kind.dashboard_actor_fallback_log_message fb)
   end;
-  Prometheus.inc_counter
-    Prometheus.metric_silent_dashboard_actor_fallback
-    ~labels:(Auth_error_kind.dashboard_actor_fallback_prometheus_labels fb)
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_silent_dashboard_actor_fallback
+    ~labels:(Auth_error_kind.dashboard_actor_fallback_metric_labels fb)
     ()
 
 let dashboard_actor_for_request ~base_path request =
@@ -334,7 +334,7 @@ let dashboard_actor_for_request ~base_path request =
              flow through [Auth_error_kind.dashboard_actor_fallback], giving
              callers a typed handle on *why* the fallback fired. The
              string emitted by [dashboard_actor_fallback_log_message] is
-             byte-equivalent to the prior inline format so prometheus log
+             byte-equivalent to the prior inline format so otel_metric_store log
              alerts keyed on the literal prefix continue to fire.
              Reference: Reverse Engineering Design Map §개선 #2. *)
           let fb : Auth_error_kind.dashboard_actor_fallback =

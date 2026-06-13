@@ -2,7 +2,7 @@
     keeper_unified_metrics.ml.
 
     Largest cluster in this godfile — writes the per-turn decision
-    record JSONL (event bus + Prometheus + receipt). *)
+    record JSONL (event bus + Otel_metric_store + receipt). *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -389,7 +389,7 @@ let append_decision_record
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DecisionAuditFlushFailures)
         ~labels:[("keeper", meta.name)]
         ();

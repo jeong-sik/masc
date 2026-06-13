@@ -33,7 +33,7 @@ let heartbeat_history_persistence_surface = "keeper_heartbeat_history"
 let report_heartbeat_history_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter Otel_metric_store.metric_persistence_read_drops
         ~labels:[("surface", heartbeat_history_persistence_surface); ("reason", reason)]
         ())
     ~surface:heartbeat_history_persistence_surface
@@ -175,7 +175,7 @@ let write_heartbeat_snapshot
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string HeartbeatFailures)
              ~labels:[("keeper", meta_current.name); ("site", "history_load")]
              ();
@@ -184,7 +184,7 @@ let write_heartbeat_snapshot
            []
        in
        if !parse_errors > 0 then begin
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
            ~labels:[("keeper", meta_current.name); ("site", "history_parse")]
            ();
@@ -367,7 +367,7 @@ let write_heartbeat_snapshot
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
            ~labels:[("keeper", meta_current.name); ("site", "thompson_penalty")]
            ();
@@ -469,7 +469,7 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string SseBroadcastFailures)
          ~labels:[("keeper", meta_current.name)]
          ();
@@ -484,7 +484,7 @@ let write_heartbeat_snapshot
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string HeartbeatFailures)
          ~labels:[("keeper", meta_current.name); ("site", "flush_tool_usage")]
          ();

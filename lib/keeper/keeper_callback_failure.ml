@@ -11,7 +11,7 @@ let record ~(base_dir : string) ~(meta : Keeper_meta_contract.keeper_meta)
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ ->
     let error = Printexc.to_string exn in
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LifecycleCallbackFailures)
       ~labels:[("callback", callback)] ();
     Log.Keeper.warn "keeper:%s lifecycle callback %s raised: %s"

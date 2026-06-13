@@ -36,7 +36,7 @@ SSOT 다.
 | 운영 keeper 수 | 12+ | 사용자 확인 |
 | 50+ keeper | aspirational, baseline 가정 아님 | 사용자 확인 |
 | 인프라 | 단일 Railway 인스턴스 | 사용자 확인 |
-| 기존 prometheus | 존재 (`lib/prometheus.ml`, `/metrics`) | 코드 확인 |
+| OTel metric text | 존재 (`Otel_metric_store`, `/metrics`) | 코드 확인 |
 | Runtime_events | 존재 (`lib/core/masc_runtime_events.ml`) | 코드 확인 |
 
 본 baseline 은 12+ keeper 의 **현재 동작** 을 sample 하여 기록하는
@@ -51,11 +51,11 @@ SSOT 다.
 
 | metric | 출처 | 수집 방법 | 비고 |
 |--------|------|----------|------|
-| WS parse cache hit ratio | `masc_ws_parse_cache_{hits,misses}_total` | `/metrics` 카운터 합산 | 이미 export 됨 |
-| WS bytes cache hit ratio | `masc_ws_bytes_cache_{hits,misses}_total` | `/metrics` 카운터 합산 | 이미 export 됨 |
+| WS parse cache hit ratio | `masc_ws_parse_cache_{hits,misses}_total` | OTel metric text 카운터 합산 | 이미 export 됨 |
+| WS bytes cache hit ratio | `masc_ws_bytes_cache_{hits,misses}_total` | OTel metric text 카운터 합산 | 이미 export 됨 |
 | in-process caches | `lib/cache_eio.ml`, `lib/dashboard/dashboard_cache.ml` | **미export** | Phase 0.2.A |
 
-`cache_eio` / `dashboard_cache` 는 hit/miss 카운터가 prometheus 에
+`cache_eio` / `dashboard_cache` 는 hit/miss 카운터가 OTel metric store 에
 등록되어 있지 않다. 사후 sampling (시점별 cache size 기록) 은
 의미 없는 숫자가 되므로, **이 두 모듈에 카운터를 추가하는 것을
 별도 PR (Phase 0.2.A) 로 명시하고**, 본 baseline 보고서에는 "not
@@ -103,8 +103,8 @@ phase label 도입은 0.2.C 로 분리한다.
 | GC major pause P99 | 동일 | 동일 | 동일 |
 | heap_words / live_words | 동일 | 동일 | 동일 |
 
-OCaml 의 `Gc.quick_stat` 은 정량 정보가 풍부하지만 prometheus
-gauge 로 export 되지 않은 상태다. 외부 권고 ("GC 18% 향상") 의
+OCaml 의 `Gc.quick_stat` 은 정량 정보가 풍부하지만 OTel gauge 로
+export 되지 않은 상태다. 외부 권고 ("GC 18% 향상") 의
 검증은 이 sampler 가 들어오기 전까지는 불가능하다. 본 PR 은 그
 사실을 명시한다.
 
@@ -192,7 +192,7 @@ diff 는 wiring 하지 않는다 (Phase 0.2.F).
 - 본 baseline 은 **단일 Railway 인스턴스 + 12+ keeper** 의 측정
   값만 보고한다. 환경이 다르면 (다중 region, 50+ keeper) 새 baseline
   을 다시 14 일 쌓아야 한다.
-- prometheus counter 는 server restart 시 0 으로 초기화된다.
+- OTel counter 는 server restart 시 0 으로 초기화된다.
   daily 보고서는 누적이 아니라 **순간 snapshot** 이며, rate 는
   14 일 분량에서 계산한다.
 - macOS 와 Linux 의 RSS 측정 경로가 다르다 (`ps` vs `/proc`). 두

@@ -68,7 +68,7 @@ val task_auto_release_observed_fn :
 (** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at
-    startup ([lib/workspace.ml]) to a Prometheus histogram
+    startup ([lib/workspace.ml]) to a Otel_metric_store histogram
     [masc_workspace_broadcast_duration_seconds] labelled by [msg_type] so
     operators can compare regular broadcasts against
     [cache_invalidated] / mention follow-ups. *)

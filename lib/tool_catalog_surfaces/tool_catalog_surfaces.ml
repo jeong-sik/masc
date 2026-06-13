@@ -190,18 +190,6 @@ let session_min_surface_tools =
   ]
 ;;
 
-let admin_surface_tools =
-  [ "masc_tool_admin_update"
-  ; "masc_tool_admin_snapshot"
-  ; "masc_config"
-  ; "masc_board_delete"
-  ; "masc_pause"
-  ; "masc_resume"
-  ; "masc_runtime_verify"
-  ; "masc_runtime_ollama_probe"
-  ]
-;;
-
 (* System-internal tools: hidden from the public Full profile, callable
    directly (allow_direct_call_when_hidden), and scoped for tool-usage logging.
    This is a flat visibility list, not an actor surface — consumers project it

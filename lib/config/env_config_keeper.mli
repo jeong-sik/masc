@@ -215,7 +215,7 @@ module RuntimeSaturationSignal : sig
   val enabled : unit -> bool
   (** [MASC_RUNTIME_SATURATION_SIGNAL_ENABLED] flag. Default false.
 
-      When true, {!Runtime_attempt_fsm} emits a Prometheus counter
+      When true, {!Runtime_attempt_fsm} emits a Otel_metric_store counter
       ([masc_keeper_runtime_saturation_signal_total]) with a typed
       [kind] label whenever a saturation event matching
       {!Runtime_saturation_signal.t} is observed. Used to feed

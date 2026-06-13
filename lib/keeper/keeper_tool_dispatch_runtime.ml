@@ -311,7 +311,7 @@ let execute_keeper_tool_call_with_outcome
       Keeper_failure_circuit_breaker.record_success ~keeper_name:meta.name;
       result
     | `Failure, Malformed_structured parse_error ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
         ~labels:[ "keeper", meta.name; "tool", name ]
         ();
@@ -375,7 +375,7 @@ let execute_keeper_tool_call_with_outcome
                 to inspect the descriptor/denylist state."
                name )
        in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ToolNotAllowed)
          ~labels:[ "keeper", meta.name; "tool", name; "reason", reason ]
          ();

@@ -96,7 +96,7 @@ let auto_recoverable_paused_keeper_names ?now config =
          Some meta.name
        | Ok (Some _) | Ok None -> None
        | Error msg ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ ("keeper", name); ("site", "auto_recoverable_paused_read") ]
            ();
@@ -326,7 +326,7 @@ let ensure_keeper_meta config name =
       match write_meta config updated with
       | Ok () -> Ok { updated with meta_version = updated.meta_version + 1 }
       | Error e ->
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
           ();
@@ -501,7 +501,7 @@ let start_supervisor_sweep ctx =
         let on_beat _beat =
           (try Keeper_supervisor.sweep_and_recover ctx
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string SupervisorSweepFailures)
                ~labels:[("origin", "keeper_runtime")]
                ();
@@ -584,7 +584,7 @@ let start_supervisor_sweep ctx =
                                  flooded by invalid TOML drift. Root fix is
                                  keeper TOML correction + runtime.toml
                                  [keeper_assignable] policy (separate RFC). *)
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)
                                 ~labels:
                                   [ "keeper", entry.name
@@ -597,14 +597,14 @@ let start_supervisor_sweep ctx =
                           | `Threshold_disable ->
                               (* One explicit escalation at the moment
                                  the reconciler parks this keeper. *)
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string TomlReconcileDedup)
                                 ~labels:
                                   [ "keeper", entry.name
                                   ; "outcome", "threshold_disable"
                                   ]
                                 ();
-                              Prometheus.inc_counter
+                              Otel_metric_store.inc_counter
                                 Keeper_metrics.(to_string ReconcileDisabled)
                                 ~labels:[ "keeper", entry.name ]
                                 ();
@@ -627,7 +627,7 @@ let start_supervisor_sweep ctx =
               | Keeper_state_machine.Dead
               | Keeper_state_machine.Zombie -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string TomlReconcileSweepFailures)
                ~labels:[("origin", "keeper_runtime")]
                ();
@@ -636,7 +636,7 @@ let start_supervisor_sweep ctx =
           (* #10125: advance the supervisor liveness gauge after a
              completed beat.  Stale gauge (now - last > 2 × interval)
              tells operators the sweep stopped. *)
-          Prometheus.set_gauge
+          Otel_metric_store.set_gauge
             Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
             ~labels:[ ("base_path", base_path) ]
             (Unix.gettimeofday ());
@@ -659,14 +659,14 @@ let start_supervisor_sweep ctx =
     (* #10125: counter increments once per actual Pulse start.
        After a server restart, if this stays at 0 the supervisor
        never came up — operators alert on absence of advancement. *)
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string SupervisorSweepStarts)
       ~labels:[ ("base_path", base_path) ]
       ();
     (* Initialize the liveness gauge to "now" so dashboards do not
        start at unixtime=0 (which would look infinitely stale).  The
        on_beat will overwrite this on every subsequent sweep. *)
-    Prometheus.set_gauge
+    Otel_metric_store.set_gauge
       Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ~labels:[ ("base_path", base_path) ]
       (Unix.gettimeofday ());
@@ -680,7 +680,7 @@ let start_supervisor_sweep ctx =
     the sweep stalls; tests use it to verify the gauge advances. *)
 let supervisor_sweep_age_seconds ~(base_path : string) : float option =
   match
-    Prometheus.get_metric_value
+    Otel_metric_store.get_metric_value
       Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
       ~labels:[ ("base_path", base_path) ]
       ()

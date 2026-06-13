@@ -1,6 +1,0 @@
-(include_subdirs no)
-(library
- (name masc_keeper_token_count)
- (public_name masc.keeper_token_count)
- (wrapped false)
- (modules keeper_token_count))

@@ -168,7 +168,6 @@ let runtime_reason_is_structural_attempt_timeout
   | Keeper_turn_driver.Candidates_filtered_after_cycles
   | Keeper_turn_driver.Max_turns_exceeded
   | Keeper_turn_driver.Capacity_exhausted
-  | Keeper_turn_driver.No_tool_capable _
   | Keeper_turn_driver.Other_detail _ -> false
 
 let degraded_retry_bypasses_slot_phase_guard
@@ -180,8 +179,7 @@ let degraded_retry_bypasses_slot_phase_guard
      for a guard that decides whether to bypass slot-phase admission. *)
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Provider_timeout _) -> true
-  | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ })
-    when runtime_reason_is_structural_attempt_timeout reason ->
+  | Some (Keeper_turn_driver.Runtime_exhausted { reason = Keeper_turn_driver.Structural_attempt_timeout _; _ }) ->
       true
   | Some
       ( Keeper_turn_driver.Runtime_exhausted _
@@ -209,13 +207,16 @@ let reclassify_provider_timeout_for_attempt
   match err, provider_timeout_budget with
   | Agent_sdk.Error.Api (Timeout { message }), Some budget
     when EC.is_structural_oas_timeout_message message ->
+      let estimated_remaining_after_timeout =
+        Float.max 0.0 (budget.remaining_turn_budget_sec -. budget.effective_timeout_sec)
+      in
       Keeper_turn_driver.sdk_error_of_masc_internal_error
         (Keeper_turn_driver.Provider_timeout
            { budget_sec = budget.effective_timeout_sec
            ; keeper_turn_timeout_sec = budget.keeper_turn_timeout_sec
            ; estimated_input_tokens = budget.estimated_input_tokens
            ; source = budget.source
-           ; remaining_turn_budget_sec = Some budget.remaining_turn_budget_sec
+           ; remaining_turn_budget_sec = Some estimated_remaining_after_timeout
            ; min_required_sec = min_provider_timeout_budget_sec
            ; phase = "runtime_attempt_watchdog"
            })
@@ -506,7 +507,7 @@ let sync_keeper_paused_state_impl
       config synced_meta
   with
   | Error err ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[("keeper", meta.name);
                  ("phase",
@@ -717,7 +718,7 @@ let post_turn_resilience_handles
        | exn -> Error (Printexc.to_string exn))
     with
     | Error detail ->
-        Prometheus.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
+        Otel_metric_store.inc_counter Keeper_metrics.(to_string OasExecutionErrors)
           ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Resilience_audit_store))]
           ();
         Log.Keeper.error
@@ -777,7 +778,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate approved but keeper resume sync failed: %s"
                meta.name err);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "resume_sync")]
                ()
@@ -794,7 +795,7 @@ let enqueue_partial_commit_continue_gate
              Log.Keeper.error
                "%s: partial-commit continue gate rejected but keeper pause sync failed: %s (reason=%s)"
                meta.name err reason);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RuntimeSyncFailures)
                ~labels:[("keeper", meta.name); ("site", "pause_sync")]
                ())

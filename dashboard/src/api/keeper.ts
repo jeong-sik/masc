@@ -1,6 +1,6 @@
-// MASC Dashboard — Keeper messaging (direct, operator-mediated, SSE streaming)
+// MASC Dashboard — Keeper messaging (operator-mediated queue, SSE streaming)
 
-import { isRecord } from '../components/common/normalize'
+import { asString, isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
   normalizeKeeperConversationDetails,
@@ -8,6 +8,7 @@ import {
 import type { KeeperConversationDetails } from '../types'
 import {
   currentDashboardActor,
+  apiRequestErrorFromResponse,
   jsonHeaders,
   runOperatorAction,
   fetchWithTimeout,
@@ -64,9 +65,127 @@ export { KeeperTransitionsSchemaDriftError } from './schemas/keeper-transitions'
 
 // --- Types ---
 
-interface KeeperToolReply {
+export interface KeeperToolReply {
   text: string
   details: KeeperConversationDetails | null
+}
+
+export type QueuedKeeperMessageStatus =
+  | 'queued'
+  | 'running'
+  | 'done'
+  | 'error'
+  | 'lost'
+  | 'cancelled'
+
+export interface QueuedKeeperMessageSubmission {
+  requestId: string
+  keeperName: string
+  status: QueuedKeeperMessageStatus
+  message?: string
+}
+
+export interface QueuedKeeperMessageResult {
+  requestId: string
+  keeperName: string
+  status: QueuedKeeperMessageStatus
+  submittedAt?: number
+  completedAt?: number
+  elapsedSec?: number
+  ok?: boolean
+  result?: unknown
+}
+
+export interface QueuedKeeperMessageCancelResult {
+  requestId: string
+  status: QueuedKeeperMessageStatus
+  message?: string
+}
+
+const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatus>([
+  'done',
+  'error',
+  'lost',
+  'cancelled',
+])
+
+const CONTINUATION_CHECKPOINT_PREFIX = 'Continuation checkpoint saved;'
+
+function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
+  switch (asString(value, '').trim()) {
+    case 'queued':
+      return 'queued'
+    case 'running':
+      return 'running'
+    case 'done':
+      return 'done'
+    case 'error':
+      return 'error'
+    case 'lost':
+      return 'lost'
+    case 'cancelled':
+      return 'cancelled'
+    default:
+      return 'error'
+  }
+}
+
+function optionalNumberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function parseQueuedKeeperMessageSubmission(data: unknown): QueuedKeeperMessageSubmission {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message queue response missing request_id')
+  }
+  return {
+    requestId,
+    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    message: asString(record?.message),
+  }
+}
+
+function parseQueuedKeeperMessageResult(data: unknown): QueuedKeeperMessageResult {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message result response missing request_id')
+  }
+  return {
+    requestId,
+    keeperName: (asString(record?.keeper_name) ?? asString(record?.destination_id, '')).trim(),
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    submittedAt: record ? optionalNumberField(record, 'submitted_at') : undefined,
+    completedAt: record ? optionalNumberField(record, 'completed_at') : undefined,
+    elapsedSec: record ? optionalNumberField(record, 'elapsed_sec') : undefined,
+    ok: typeof record?.ok === 'boolean' ? record.ok : undefined,
+    result: record?.result,
+  }
+}
+
+function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessageCancelResult {
+  const record = isRecord(data) ? data : null
+  const requestId = asString(record?.request_id, '').trim()
+  if (!requestId) {
+    throw new Error('keeper message cancel response missing request_id')
+  }
+  return {
+    requestId,
+    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    message: asString(record?.message),
+  }
+}
+
+export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult): boolean {
+  return TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES.has(result.status)
+}
+
+export function isKeeperContinuationCheckpointText(text: string): boolean {
+  return text.trim().startsWith(CONTINUATION_CHECKPOINT_PREFIX)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
@@ -124,6 +243,83 @@ export async function sendKeeperMessageDetailed(
   return callKeeperMessageViaOperator(name, message)
 }
 
+export async function submitQueuedKeeperMessage(
+  name: string,
+  message: string,
+): Promise<QueuedKeeperMessageSubmission> {
+  const response = await runOperatorAction({
+    actor: currentDashboardActor(),
+    action_type: 'keeper_message',
+    target_type: 'keeper',
+    target_id: name,
+    payload: {
+      message,
+      direct_reply: true,
+    },
+  })
+  const operatorResult = isRecord(response.result) ? response.result : null
+  const queuePayload =
+    operatorResult && isRecord(operatorResult.result)
+      ? operatorResult.result
+      : operatorResult
+  return parseQueuedKeeperMessageSubmission(queuePayload)
+}
+
+export async function fetchQueuedKeeperMessageResult(
+  requestId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<QueuedKeeperMessageResult> {
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}`
+  const resp = await fetchWithTimeout(
+    path,
+    { headers: jsonHeaders(), signal: opts.signal },
+    DEFAULT_GET_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('GET', path, resp)
+  }
+  return parseQueuedKeeperMessageResult(await resp.json())
+}
+
+export async function cancelQueuedKeeperMessage(
+  requestId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<QueuedKeeperMessageCancelResult> {
+  const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
+  const resp = await fetchWithTimeout(
+    path,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: '{}',
+      signal: opts.signal,
+    },
+    DEFAULT_POST_TIMEOUT_MS,
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, resp)
+  }
+  return parseQueuedKeeperMessageCancelResult(await resp.json())
+}
+
+export function queuedKeeperMessageError(result: QueuedKeeperMessageResult): string {
+  const payload = isRecord(result.result) ? result.result : null
+  const message = asString(payload?.message) ?? asString(payload?.reason)
+  const error = asString(payload?.error)
+  return message ?? error ?? `Keeper message request ${result.requestId} ended with ${result.status}`
+}
+
+export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): KeeperToolReply {
+  const payload = isRecord(result.result) ? result.result : null
+  const rawReply = asString(payload?.reply, '').trim()
+  const details = normalizeKeeperConversationDetails(payload ?? result.result)
+  const fallback = rawReply || queuedKeeperMessageError(result)
+  return {
+    text: formatKeeperVisibleReply(fallback || '(empty reply)'),
+    details,
+  }
+}
+
 // --- SSE streaming ---
 
 function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
@@ -161,28 +357,50 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
   return event.type === 'RUN_FINISHED' || event.type === 'RUN_ERROR'
 }
 
+export interface StreamAttachment {
+  id: string
+  type: 'image' | 'file'
+  name: string
+  size: number
+  mimeType: string
+  data: string
+}
+
 export async function streamKeeperMessage(
   name: string,
   message: string,
   {
     signal,
     onEvent,
+    attachments,
   }: {
     signal?: AbortSignal
     onEvent: (event: KeeperChatStreamEvent) => void
+    attachments?: StreamAttachment[]
   },
 ): Promise<void> {
+  const body: Record<string, unknown> = {
+    name,
+    message,
+    direct_reply: true,
+  }
+  if (attachments && attachments.length > 0) {
+    body.attachments = attachments.map(att => ({
+      id: att.id,
+      type: att.type,
+      name: att.name,
+      size: att.size,
+      mime_type: att.mimeType,
+      data: att.data,
+    }))
+  }
   const res = await fetch('/api/v1/keepers/chat/stream', {
     method: 'POST',
     headers: {
       ...jsonHeaders(),
       Accept: 'text/event-stream',
     },
-    body: JSON.stringify({
-      name,
-      message,
-      direct_reply: true,
-      }),
+    body: JSON.stringify(body),
     signal,
   })
 

@@ -9,10 +9,10 @@
 # whatever workload matches the comparison you want, then invoke this
 # script to capture the histogram values.
 #
-# Caveat: masc's [Prometheus.observe_histogram] currently tracks the
-# cumulative sum and _count only (no buckets). Quantiles (p50/p95/p99)
-# therefore require either an external Prometheus scraper with proper
-# bucketing or a raw-sample collection mode (out of scope for Phase B
+# Caveat: masc's hot-path metric surface currently tracks the cumulative
+# sum and _count only (no buckets). Quantiles (p50/p95/p99) therefore
+# require either an external metrics backend with proper bucketing or a
+# raw-sample collection mode (out of scope for Phase B
 # baseline). The CSV emitted here records sum, count, and arithmetic
 # mean, which is sufficient for the Phase B decision gate (>= 2% turn
 # budget threshold from the plan).
@@ -40,7 +40,7 @@ Modes:
   diff <baseline.csv> <current.csv>
       Prints a row-by-row delta (sum / count / avg) between two scrape CSVs
       so the wise-nibbling-lerdorf Phase B decision gate can be evaluated
-      without spinning up an external Prometheus stack.
+      without spinning up an external metrics backend.
 
 Environment:
   MASC_DISABLE_HOTPATH_HIST=1 on the server side disables the Phase B

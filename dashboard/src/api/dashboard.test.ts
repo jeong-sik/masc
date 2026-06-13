@@ -926,15 +926,15 @@ describe('dashboard goals decoding', () => {
               id: 'gvr-1',
               goal_id: 'goal-1',
               target_phase: 'completed',
-              requested_by: { kind: 'operator', id: 'planner' },
+              requested_by: { id: 'planner' },
               policy_snapshot: {
-                principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
-                eligible_principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
+                principals: [{ id: 'keeper-alpha' }],
+                eligible_principals: [{ id: 'keeper-alpha' }],
                 required_verdicts: 1,
               },
               votes: [
                 {
-                  principal: { kind: 'keeper', id: 'keeper-alpha', display_name: 'keeper-alpha' },
+                  principal: { id: 'keeper-alpha', display_name: 'keeper-alpha' },
                   decision: 'approve',
                   note: 'checked receipt and tests',
                   evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
@@ -1565,7 +1565,7 @@ describe('fetchKeeperConfig', () => {
 
   it('preserves terminal runtime blocker classes through config fetch and display labeling', async () => {
     const cases = [
-      ['no_tool_capable_provider', '도구 실행 런타임 없음'],
+      ['runtime_exhausted', '런타임 후보 소진'],
       ['provider_runtime_error', '런타임 호출 오류'],
       ['tool_route_recoverable_failure', '도구 라우팅 복구 가능 실패'],
       ['fiber_unresolved', 'Fiber 미해결'],

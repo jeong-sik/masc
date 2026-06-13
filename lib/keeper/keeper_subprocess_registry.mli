@@ -52,7 +52,7 @@ val unregister : keeper_id:string -> pid:int -> unit
 val pids_for : keeper_id:string -> int list
 
 (** Sum of currently-tracked pids across all keepers. Useful for
-    Prometheus gauge. *)
+    Otel_metric_store gauge. *)
 val total_pids : unit -> int
 
 (** Drain all pids tracked for [keeper_id]:

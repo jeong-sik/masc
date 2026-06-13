@@ -90,7 +90,7 @@ let audit_today_path base_dir =
 let get_audit_store ?base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:
         [ "keeper", "aggregate"
@@ -247,7 +247,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Keeper_fd_pressure.note_exception ~site:"approval_audit.read_recent" exn;
-        Prometheus.inc_counter
+        Otel_metric_store.inc_counter
           Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels:
             [ "keeper",
@@ -507,10 +507,10 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
    | Some f ->
      Cancel_safe.observe
        ~on_exn:(fun exn ->
-         Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+         Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
            ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_resolution") ]
            ();
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
            ();
@@ -861,7 +861,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ApprovalQueueFailures)
         ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule) ]
         ();
@@ -1024,7 +1024,7 @@ let expire_stale ~max_wait_s =
        let reason =
          Printf.sprintf "approval timed out after %.0fs" (now -. entry.requested_at)
        in
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string ApprovalQueueFailures)
          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Approval_expired) ]
          ();
@@ -1058,10 +1058,10 @@ let expire_stale ~max_wait_s =
        | Some f ->
          Cancel_safe.observe
            ~on_exn:(fun exn ->
-             Prometheus.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
+             Otel_metric_store.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[ ("keeper", entry.keeper_name); ("callback", "on_approval_expire") ]
                ();
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string ApprovalQueueFailures)
                ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
                ();

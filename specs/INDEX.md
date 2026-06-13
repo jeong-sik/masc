@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-06-04T15:59:49Z (HEAD: 915cc0a7b0)
+Generated: 2026-06-05T08:11:35Z (HEAD: 896a1eafe4)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -28,7 +28,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AdmissionQueue.tla | AdmissionQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:FdThresholdEnforced, inv:RuntimeNameCanonical, inv:ReleaseCountBounded, inv:ActiveCounterConsistent} buggy={inv:TypeOK, inv:FdThresholdEnforced, inv:RuntimeNameCanonical, inv:ReleaseCountBounded, inv:ActiveCounterConsistent} | df3972fa536a |
+| AdmissionQueue.tla | AdmissionQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:FdThresholdEnforced, inv:RuntimeNameCanonical, inv:ReleaseCountBounded, inv:ActiveCounterConsistent} buggy={inv:TypeOK, inv:FdThresholdEnforced, inv:RuntimeNameCanonical, inv:ReleaseCountBounded, inv:ActiveCounterConsistent} | 5e2e2941bf6d |
 
 ### specs/auth (1 specs)
 
@@ -119,13 +119,13 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | 69416fba4415 |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cb2c1f4ce874 |
 | KeeperFleetPressureAdmission.tla | KeeperFleetPressureAdmission | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 896bfc64bc24 |
-| KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | 4e340310d5d9 |
+| KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | 1eb01d6ff32f |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 127b595d597d |
 | KeeperLaunchPending.tla | KeeperLaunchPending | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 893e873e20e4 |
 | KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 1ee66a63435a |
-| KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:StrictStopPreemption, prop:EventualTermination} | d6ab477b89da |
+| KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicRuntimeFallback, prop:StrictStopPreemption, prop:EventualTermination} | 6a288b34a171 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 7ac6ec2c5bf3 |
-| KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 11c397e4c6dc |
+| KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 2b313c94357a |
 | KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 04f8e04c4fe0 |
 | KeeperReconcileLiveness.tla | KeeperReconcileLiveness | manual | 2 | 1 | clean={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness, prop:CompactingResolves, prop:HandoffResolves, prop:DrainingResolves} buggy={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness} | 18d07a4d48f9 |
 | KeeperRolloverDecision.tla | KeeperRolloverDecision | manual | 2 | 1 | clean={inv:SignalGateOverflowOnly} buggy={inv:SignalGateOverflowOnly} | eb2aa357aa35 |

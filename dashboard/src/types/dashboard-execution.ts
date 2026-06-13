@@ -782,7 +782,6 @@ export interface GoalCompletionSummary {
 
 export interface GoalVerificationVote {
   principal: {
-    kind: string
     id: string
     display_name?: string | null
   }
@@ -797,13 +796,12 @@ export interface GoalVerificationRequest {
   goal_id: string
   target_phase: string
   requested_by: {
-    kind: string
     id: string
     display_name?: string | null
   }
   policy_snapshot: {
-    principals: Array<{ kind: string; id: string; display_name?: string | null }>
-    eligible_principals: Array<{ kind: string; id: string; display_name?: string | null }>
+    principals: Array<{ id: string; display_name?: string | null }>
+    eligible_principals: Array<{ id: string; display_name?: string | null }>
     required_verdicts: number
   }
   votes: GoalVerificationVote[]

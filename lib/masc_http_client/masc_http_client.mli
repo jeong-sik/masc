@@ -86,7 +86,7 @@ module Pool : module type of Pool
 val pool_singleton_opt : unit -> Pool.t option
 (** [pool_singleton_opt ()] returns the per-process [Pool.t] if it
     has been lazy-initialized by a prior HTTP call, [None] otherwise.
-    Read-only accessor for telemetry consumers (Phase D.4 Prometheus
+    Read-only accessor for telemetry consumers (Phase D.4 Otel_metric_store
     exporter); does not trigger pool initialization.  Callers that
     need the pool initialized should issue a request through
     [post_sync] / [get_sync] / [get_response_sync] instead. *)

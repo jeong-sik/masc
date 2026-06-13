@@ -40,8 +40,8 @@ let with_eio_temp_base_path f =
       f ())
 
 let failure_metric site =
-  Prometheus.metric_value_or_zero
-    Prometheus.metric_tool_assignment_telemetry_failures
+  Otel_metric_store.metric_value_or_zero
+    Otel_metric_store.metric_tool_assignment_telemetry_failures
     ~labels:[ ("site", site) ]
     ()
 

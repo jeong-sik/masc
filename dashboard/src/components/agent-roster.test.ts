@@ -302,6 +302,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -332,6 +334,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 0,
       pausedKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -360,6 +364,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -389,6 +395,8 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 1,
     })
   })
@@ -414,7 +422,46 @@ describe('countRuntimeKinds', () => {
       agents: 1,
       keepers: 1,
       pausedKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 1,
       totalRuntimes: 2,
+    })
+  })
+
+  it('does not count offline non-paused keeper rows as running fibers', () => {
+    const runningKeepers = Array.from({ length: 2 }, (_, index) => ({
+      name: `running-${index}`,
+      status: 'active',
+      registered: true,
+      keepalive_running: true,
+    } as Keeper))
+    const pausedKeepers = Array.from({ length: 6 }, (_, index) => ({
+      name: `paused-${index}`,
+      status: 'paused',
+      paused: true,
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+    const offlineKeepers = Array.from({ length: 9 }, (_, index) => ({
+      name: `offline-${index}`,
+      status: 'offline',
+      registered: true,
+      keepalive_running: false,
+    } as Keeper))
+
+    const result = countRuntimeKinds([], [
+      ...runningKeepers,
+      ...pausedKeepers,
+      ...offlineKeepers,
+    ])
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 2,
+      pausedKeepers: 6,
+      offlineKeepers: 9,
+      keeperRows: 17,
+      totalRuntimes: 17,
     })
   })
 })
@@ -656,8 +703,8 @@ describe('AgentRoster live-only cards', () => {
         paused: true,
         registered: false,
         keepalive_running: false,
-        runtime_blocker_class: 'no_tool_capable_provider',
-        runtime_blocker_summary: 'no_tool_capable_provider',
+        runtime_blocker_class: 'runtime_exhausted',
+        runtime_blocker_summary: 'runtime_exhausted',
         agent: {
           exists: true,
           status: 'busy',
@@ -684,8 +731,8 @@ describe('AgentRoster live-only cards', () => {
     expect(labels).not.toContain('작업 중')
 
     const text = container.textContent ?? ''
-    expect(text).toContain('일시정지 원인: 도구 실행 런타임 없음')
-    expect(text).toContain('요구 도구를 실행할 수 있는 runtime lane이 없어 descriptor 또는 tool surface 확인이 필요합니다.')
+    expect(text).toContain('일시정지 원인: 런타임 후보 소진')
+    expect(text).toContain('런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.')
   })
 
   it('uses heartbeat and full keeper model for cards when action/model fallbacks disagree', async () => {

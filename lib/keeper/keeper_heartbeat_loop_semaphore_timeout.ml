@@ -108,7 +108,7 @@ let handle_semaphore_wait_timeout
   in
   let blocker_class = semaphore_wait_timeout_blocker_class timeout in
   Log.Keeper.warn "%s: skipping turn (%s)" meta_after_triage.name log_diagnostic;
-  Prometheus.inc_counter
+  Otel_metric_store.inc_counter
     Keeper_metrics.(to_string SemaphoreWaitTimeout)
     ~labels:
       [ "keeper", meta_after_triage.name

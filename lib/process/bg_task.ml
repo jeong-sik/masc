@@ -104,7 +104,7 @@ let set_sidecar_failure_observer f =
    drain-pipe read errors.  Labels are closed-vocabulary:
    [fd_kind = "stdout" | "stderr"] (call-site tagged) and
    [err_kind = "unix_error" | "other"] (typed match arm).
-   Cardinality bound: 2 × 2 = 4.  See top-level Prometheus
+   Cardinality bound: 2 × 2 = 4.  See top-level Otel_metric_store
    module for the registered counter. *)
 let drain_failure_observer :
     ((fd_kind:string -> err_kind:string -> unit) option) Atomic.t =

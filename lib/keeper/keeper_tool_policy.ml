@@ -82,7 +82,7 @@ let warn_unloaded_policy_config_once ~accessor ~outcome =
    [outcome] from the caller so the log line accurately describes
    what the call site did. *)
 let observe_unloaded_policy_config ~accessor ~outcome =
-  Prometheus.inc_counter Prometheus.metric_tool_policy_unloaded_query
+  Otel_metric_store.inc_counter Otel_metric_store.metric_tool_policy_unloaded_query
     ~labels:[("accessor", accessor)]
     ();
   warn_unloaded_policy_config_once ~accessor ~outcome

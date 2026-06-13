@@ -147,9 +147,9 @@ val provider_supports_runtime_mcp_policy
 val provider_debug_label : Llm_provider.Provider_config.t -> string
 
 (** [provider_kind_label cfg] returns the provider kind alone — used
-    as the [provider_kind=] Prometheus counter label. *)
+    as the [provider_kind=] Otel_metric_store counter label. *)
 val provider_kind_label : Llm_provider.Provider_config.t -> string
 
-(** {1 Prometheus filter-rejection counter (#10474)} *)
+(** {1 Otel_metric_store filter-rejection counter (#10474)} *)
 
 

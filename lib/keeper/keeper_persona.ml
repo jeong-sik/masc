@@ -8,7 +8,6 @@ open Keeper_tool_persona_runtime
 
 module Turn = Keeper_turn
 type tool_result = Keeper_types_profile.tool_result
-
 let persona_list_handler args : tool_result =
   let detailed = get_bool args "detailed" true in
   let personas = list_persona_summaries () in

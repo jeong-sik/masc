@@ -44,7 +44,7 @@ val strip_skill_route_lines : string -> string
 (** [count_skill_route_lines s] returns the number of lines in [s]
     whose trimmed lowercased prefix is "skill:" or "skill_reason:".
     Pure, no side effects.  Main-library callers use this alongside
-    {!strip_skill_route_lines} to emit a Prometheus counter for
+    {!strip_skill_route_lines} to emit a Otel_metric_store counter for
     resonance-loop input detection without violating the
     dependency-leaf boundary of this sub-library (RFC-0056 Phase
     1B). *)

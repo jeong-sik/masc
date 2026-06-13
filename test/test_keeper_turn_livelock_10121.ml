@@ -3,7 +3,7 @@
    #10121 reports 10 (keeper, turn) pairs retrying 4-12× over
    4+ hours with no FSM guard.  This test pins the
    observability surface that surfaces those retries directly
-   to Prometheus instead of leaving them buried in log lines:
+   to Otel_metric_store instead of leaving them buried in log lines:
 
      1. The first start of any (keeper, turn_id) is [Fresh] —
         no reattempt counter increment.
@@ -35,7 +35,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module L = Masc.Keeper_turn_livelock
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 (* Keeper_turn_livelock now uses Eio.Mutex (was Stdlib.Mutex; the latter
    raised EDEADLK whenever two Eio fibers contended). Every public entry

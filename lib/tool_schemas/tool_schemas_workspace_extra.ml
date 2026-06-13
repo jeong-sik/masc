@@ -29,7 +29,6 @@ let goal_transition_action_enum =
   ]
 
 let goal_vote_decision_enum = [ "approve"; "reject" ]
-let goal_principal_kind_enum = [ "operator"; "agent" ]
 let goal_inherit_mode_enum = [ "extend"; "replace" ]
 
 let enum_schema ?description values =
@@ -50,11 +49,10 @@ let goal_principal_schema =
       ( "properties",
         `Assoc
           [
-            ("kind", enum_schema goal_principal_kind_enum);
             ("id", `Assoc [ ("type", `String "string") ]);
             ("display_name", `Assoc [ ("type", `String "string") ]);
           ] );
-      ("required", `List [ `String "kind"; `String "id" ]);
+      ("required", `List [ `String "id" ]);
     ]
 
 let goal_verifier_policy_schema =
@@ -155,7 +153,7 @@ The actor field records who initiated the transition.";
       name = "masc_goal_verify";
       description =
         "Submit one verifier vote on an open goal verification request. \
-Supports mixed operator and agent principals, one vote per principal, and N-of-M quorum resolution.";
+Supports id-only principals, one vote per principal, and N-of-M quorum resolution.";
       input_schema =
         `Assoc
           [

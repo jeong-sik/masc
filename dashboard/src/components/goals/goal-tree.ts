@@ -364,7 +364,7 @@ const EMPTY_GOAL_VERIFICATION_SUMMARY: GoalVerificationSummary = {
 }
 
 function verificationPrincipalLabel(principal: GoalVerificationRequest['requested_by']) {
-  return `${principal.kind}:${principal.display_name ?? principal.id}`
+  return principal.display_name ?? principal.id
 }
 
 function verificationStatusLabel(
@@ -442,7 +442,7 @@ function GoalVerificationEvidencePanel({
       ${policy && policy.eligible_principals.length > 0 ? html`
         <div class="mt-3 flex flex-wrap gap-1.5">
           ${policy.eligible_principals.map(principal => html`
-            <span key=${`${principal.kind}:${principal.id}`} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
+            <span key=${principal.id} class="${DECK_CHIP} font-medium text-[var(--color-fg-secondary)]">
               ${verificationPrincipalLabel(principal)}
             </span>
           `)}
@@ -453,7 +453,7 @@ function GoalVerificationEvidencePanel({
           ${votes.map(vote => {
             const evidenceRefs = vote.evidence_refs ?? []
             return html`
-              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
+              <div key=${`${vote.principal.id}:${vote.submitted_at}`} class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-2 text-xs text-[var(--color-fg-secondary)]">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="font-semibold text-[var(--color-fg-primary)]">${verificationPrincipalLabel(vote.principal)}</span>
                   <span class="${DECK_CHIP} uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${vote.decision}</span>
@@ -877,7 +877,6 @@ function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
           goal_id: node.id,
           action,
           actor: {
-            kind: 'operator',
             id: actorId,
             display_name: actorId,
           },

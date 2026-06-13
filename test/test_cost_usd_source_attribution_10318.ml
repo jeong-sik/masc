@@ -104,7 +104,7 @@ let test_preview_runtime_without_oas_cost_is_unreported () =
 (* --- counter wiring (only non-computed sources tick) ------------- *)
 
 let counter_for source =
-  Masc.Prometheus.metric_value_or_zero
+  Masc.Otel_metric_store.metric_value_or_zero
     H.cost_emit_source_metric
     ~labels:[ ("source", source) ]
     ()

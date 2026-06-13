@@ -217,7 +217,7 @@ let sanitize_checkpoint_message
                (* Over count or aggregate byte budget: stub the result.
                   The two triggers are split into separate [reason]
                   labels (and named in [stub_content]) so operators
-                  reading the Prometheus rate or inspecting a stubbed
+                  reading the Otel_metric_store rate or inspecting a stubbed
                   checkpoint know which cap to revisit, and so an
                   LLM that later reads the checkpoint can tell that a
                   payload was removed (and why) rather than silently
@@ -239,8 +239,8 @@ let sanitize_checkpoint_message
                    tool_chars
                in
                let () =
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_context_tool_result_compacted
+                 Otel_metric_store.inc_counter
+                   Otel_metric_store.metric_keeper_context_tool_result_compacted
                    ~labels:[ "action", "stubbed"; "reason", stub_reason ]
                    ()
                in
@@ -267,8 +267,8 @@ let sanitize_checkpoint_message
                   itself; the counter increment is what surfaces the
                   rate to operators without log scraping. *)
                let () =
-                 Prometheus.inc_counter
-                   Prometheus.metric_keeper_context_tool_result_compacted
+                 Otel_metric_store.inc_counter
+                   Otel_metric_store.metric_keeper_context_tool_result_compacted
                    ~labels:
                      [ "action", "truncated"; "reason", "over_single_byte" ]
                    ()
@@ -592,25 +592,25 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   in
   (match oas_result with
    | Error (Parse_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_parse))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_store))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_io))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sdk))]
          ();
@@ -639,7 +639,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
         (match Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir sanitized with
          | Ok () -> ()
          | Error detail ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sanitize_save))]
                ();

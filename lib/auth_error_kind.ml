@@ -1,11 +1,11 @@
 (** Closed-enum classification of [Masc_domain.t] for auth-related logging
-    and prometheus metric labels.
+    and otel_metric_store metric labels.
 
     Replaces inline string-label matching at:
     - [lib/server/server_auth.ml] dashboard_actor_fallback warn/counter
     - [lib/mcp_server_eio_execute.ml] silent_auth_token_error_kind
 
-    The string labels are stable contract for prometheus dashboards and
+    The string labels are stable contract for otel_metric_store dashboards and
     must round-trip through [to_string] / [of_string]. The variant is
     closed so that any new auth-relevant [Masc_domain.t] constructor that
     needs its own label requires an explicit code change here, not a
@@ -126,7 +126,7 @@ let dashboard_actor_fallback_log_message fb =
          falling back to request actor hint.%s"
         fb.token_hash_prefix err_kind_label hint err_str extra_hint
 
-let dashboard_actor_fallback_prometheus_labels fb =
+let dashboard_actor_fallback_metric_labels fb =
   match fb.outcome with
   | Outcome_none ->
       [ ( "outcome"

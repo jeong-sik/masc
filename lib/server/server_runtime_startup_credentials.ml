@@ -64,7 +64,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
      | Some line -> Log.Misc.warn "%s" line
      | None -> ());
     List.iter (fun r ->
-      Prometheus.inc_counter Prometheus.metric_egress_audit_missing
+      Otel_metric_store.inc_counter Otel_metric_store.metric_egress_audit_missing
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       active_missings;
     List.iter
@@ -75,7 +75,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
       inactive_missings;
     List.iter (fun r ->
       Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
-      Prometheus.inc_counter Prometheus.metric_egress_audit_stale_orphan
+      Otel_metric_store.inc_counter Otel_metric_store.metric_egress_audit_stale_orphan
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       orphans;
     Log.Misc.info
@@ -212,7 +212,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
      for ping-pong regression. *)
   (* [Auth.bare_alias_audit] mirrors the result into the
      [masc_auth_bare_alias{state=...}] gauges so the boot signal
-     stays surfaced on every Prometheus scrape. The INFO line below
+     stays surfaced on every Otel_metric_store scrape. The INFO line below
      is the one-shot boot log mirror; the WARN that follows is the
      regression canary. *)
   let audit =
@@ -244,8 +244,8 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
       in
       let success_count = List.length successes in
       if success_count > 0 then begin
-        Prometheus.inc_counter
-          Prometheus.metric_auth_credential_token_rotated
+        Otel_metric_store.inc_counter
+          Otel_metric_store.metric_auth_credential_token_rotated
           ~labels:[
             ("token_hash_prefix", outcome.token_hash_prefix);
             ("scope", "bootable_keepers");

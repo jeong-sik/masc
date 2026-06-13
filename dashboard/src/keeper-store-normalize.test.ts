@@ -46,6 +46,24 @@ describe('normalizeKeepers phase field', () => {
       { name: 'phase-test', status: 'active', phase: 'running' },
     ])
     expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Running')
+  })
+
+  it('preserves explicit lifecycle phase and pipeline stage detail', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'offline-detail-test',
+        status: 'offline',
+        phase: 'running',
+        lifecycle_phase: 'Offline',
+        pipeline_stage: 'offline',
+        pipeline_stage_detail: 'launch_pending_no_fiber',
+      },
+    ])
+    expect(keeper?.phase).toBe('Running')
+    expect(keeper?.lifecycle_phase).toBe('Offline')
+    expect(keeper?.pipeline_stage).toBe('offline')
+    expect(keeper?.pipeline_stage_detail).toBe('launch_pending_no_fiber')
   })
 
   it('normalizes handing_off to HandingOff', () => {

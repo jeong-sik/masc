@@ -154,9 +154,9 @@ function formatEligible(seconds?: number | null): string | null {
 }
 
 function conversationStateLabel(sending: boolean, hydrating: boolean): string {
-  if (sending) return 'live reply'
-  if (hydrating) return 'syncing history'
-  return 'ready'
+  if (sending) return '답변 중...'
+  if (hydrating) return '불러오는 중...'
+  return '대기 중'
 }
 
 function conversationStateClass(sending: boolean, hydrating: boolean): string {

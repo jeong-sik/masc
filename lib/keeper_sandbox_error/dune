@@ -1,6 +1,0 @@
-(include_subdirs no)
-(library
- (name masc_keeper_sandbox_error)
- (public_name masc.keeper_sandbox_error)
- (wrapped false)
- (modules keeper_sandbox_error))

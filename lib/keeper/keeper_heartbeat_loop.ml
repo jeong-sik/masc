@@ -211,12 +211,12 @@ let run_keepalive_unified_turn
            is visible fleet-wide. *)
         List.iter
           (fun reason_str ->
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_heartbeat_snapshot.proactive_skip_reason_metric
                ~labels:[ "keeper", meta_after_triage.name; "reason", reason_str ]
                ())
           admission_reason_strs;
-        (* #10940 follow-up — Prometheus counters aggregate skip reasons
+        (* #10940 follow-up — Otel_metric_store counters aggregate skip reasons
            across time, but operators need recent skip verdict context
            when diagnosing idle/quiet keepers. Stamping the registry on
            every skip preserves that local context. *)
@@ -405,7 +405,7 @@ let run_keepalive_unified_turn
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string CycleExceptions)
         ~labels:[ "keeper", meta_after_triage.name ]
         ();
@@ -484,7 +484,7 @@ let run_smart_heartbeat_gate
        in
        if not (Keeper_event_queue.is_empty queue)
        then (
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string EventQueueOverride)
            ~labels:[ "keeper", meta_current.name; "reason", "event_queue" ]
            ();
@@ -496,7 +496,7 @@ let run_smart_heartbeat_gate
              ~config
              ~meta:meta_current
          then (
-           Prometheus.inc_counter
+           Otel_metric_store.inc_counter
              Keeper_metrics.(to_string EventQueueOverride)
              ~labels:[ "keeper", meta_current.name; "reason", "durable_state" ]
              ();
@@ -544,7 +544,7 @@ let run_smart_heartbeat_gate
       in
       (match gated with
        | Keeper_heartbeat_smart.Skip_idle _ ->
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_heartbeat_snapshot.proactive_skip_reason_metric
            ~labels:[ "keeper", meta_current.name; "reason", "no_visible_consumers" ]
            ();
@@ -585,11 +585,11 @@ let run_smart_heartbeat_gate
             [should_emit] does not immediately re-classify as Skip_idle,
             and let the cycle proceed (presence/board/turn dispatch).
             Spec: KeeperHeartbeat.tla HeartbeatTick — turn_state must
-            transition to "running". Prometheus counter is the operator-
+            transition to "running". Otel_metric_store counter is the operator-
             visible positive signal for the #12271 fix path. *)
          Log.Keeper.info "smart heartbeat: idle wake — cycle resumed (post=consumed)";
          last_heartbeat_cycle_ts := Time_compat.now ();
-         Prometheus.inc_counter
+         Otel_metric_store.inc_counter
            Keeper_metrics.(to_string SkipIdleWakeResumed)
            ~labels:[ "keeper", meta_current.name ]
            ()

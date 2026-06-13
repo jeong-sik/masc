@@ -11,7 +11,7 @@ let resolved_agent_names ~(config : Workspace.config) ~(agent_name : string) =
     with
     | Sys_error _ | Yojson.Json_error _ -> agent_name
     | exn ->
-      Prometheus.inc_counter
+      Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ReconcileFailures)
         ~labels:[("keeper", agent_name); ("phase", "resolve_agent")]
         ();
@@ -26,7 +26,7 @@ let task_id_of_owned_active_task ~(keeper_name : string) (task : Masc_domain.tas
   match Keeper_id.Task_id.of_string task.id with
   | Ok task_id -> Some task_id
   | Error msg ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[("keeper", keeper_name); ("phase", "task_id_parse")]
       ();
@@ -62,7 +62,7 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[("keeper", meta.name); ("phase", "owned_tasks_query")]
       ();
@@ -144,7 +144,7 @@ let sync_current_task_id_from_backlog ~(config : Workspace.config)
      with
      | Ok () -> ()
      | Error msg ->
-       Prometheus.inc_counter
+       Otel_metric_store.inc_counter
          Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[("keeper", meta.name); ("phase", "reconcile_task_id")]
          ();

@@ -46,6 +46,38 @@ type outbound_message = {
   turn_stats : turn_stats option;
 }
 
+(** Durable MASC message request envelope.
+
+    This is the layer shared by dashboard chat, Connectors, and future
+    MASC<->MASC peers: a producer submits a request, receives a
+    [request_id], then observes live projections and reconciles terminal
+    state by id.  [modalities] is intentionally open-string JSON so the
+    text-only dashboard path can grow into image/audio/file parts without
+    another route shape. *)
+type message_request_status =
+  | Accepted
+  | Queued
+  | Running
+  | Done
+  | Failed
+  | Lost
+  | Cancelled
+
+type message_request = {
+  request_id : string;
+  destination_type : string;
+  destination_id : string;
+  channel : string;
+  actor_id : string option;
+  status : message_request_status;
+  modalities : string list;
+  transport : string option;
+  metadata : (string * string) list;
+}
+
+val message_request_status_to_string : message_request_status -> string
+val message_request_to_json : message_request -> Yojson.Safe.t
+
 (** {1 Validation} *)
 
 type validation_error =

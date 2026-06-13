@@ -251,7 +251,6 @@ describe('GoalTree', () => {
         goal_id: 'goal-ready',
         action: 'request_complete',
         actor: {
-          kind: 'operator',
           id: 'dashboard-test',
           display_name: 'dashboard-test',
         },

@@ -205,7 +205,7 @@ else
   exit 1
 fi
 
-# Poll Prometheus for the SSE external-subscriber count instead of a
+# Poll /metrics for the SSE external-subscriber count instead of a
 # fixed sleep. The Python client above needs time for:
 #   1. socket connect
 #   2. upgrade request/response (101 Switching Protocols)
@@ -226,7 +226,7 @@ fi
 # [Sse.subscribe_external], so /health could report the new WS session
 # even while the SSE fanout registry was still missing the subscriber.
 #
-# Falls back to the old 1-second wait if /metrics is unavailable.
+# Falls back to the old 1-second wait if metric text is unavailable.
 ws_target_subscribers=1
 if [[ "$ws_subscribers_before" =~ ^[0-9]+$ ]]; then
   ws_target_subscribers=$(( ws_subscribers_before + 1 ))

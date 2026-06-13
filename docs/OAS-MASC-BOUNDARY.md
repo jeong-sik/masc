@@ -168,7 +168,7 @@ OAS  ──does not know──→ MASC
   label key for dashboard compatibility but emit the neutral `runtime` lane;
   liveness budget history also uses a single neutral runtime candidate key
   instead of retaining concrete provider/model keys.
-  Provider-error and OAS-run-timeout Prometheus counters follow the same
+  Provider-error and OAS-run-timeout metric counters follow the same
   projection rule: they retain error kind, runtime, capacity scope, and timeout
   source, but the historical `provider` label value is the neutral `runtime`
   lane rather than a concrete provider/model identity.

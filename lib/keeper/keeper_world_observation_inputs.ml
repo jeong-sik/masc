@@ -91,7 +91,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
         [ ("operation", Runtime_observation_query_operation.(to_label Read_backlog_counts)) ]
@@ -105,7 +105,7 @@ let count_active_agents ~(config : Workspace.config) : int =
   try List.length (Workspace.get_agents_raw config) with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
         [ ("operation", Runtime_observation_query_operation.(to_label Count_active_agents)) ]

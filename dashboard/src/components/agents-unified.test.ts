@@ -54,7 +54,7 @@ vi.mock('./common/filter-chips', () => ({
 }))
 vi.mock('./agent-roster', () => ({
   AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
-  countRuntimeKinds: vi.fn(() => ({ agents: 0, keepers: 0, pausedKeepers: 0, totalRuntimes: 0 })),
+  countRuntimeKinds: vi.fn(() => ({ agents: 0, keepers: 0, pausedKeepers: 0, offlineKeepers: 0, keeperRows: 0, totalRuntimes: 0 })),
 }))
 
 vi.mock('../router', () => ({
@@ -68,15 +68,16 @@ vi.mock('../store', () => ({
   agents: { value: [] },
   keepers: { value: [] },
   executionLoaded: { value: false },
+  shellCounts: { value: null },
 }))
 vi.mock('../namespace-truth-store', () => ({
   namespaceTruth: { value: null },
 }))
 vi.mock('../runtime-counts', () => ({
-  formatKeeperRosterCount: vi.fn(() => '상세 16 / 활성 4 / 일시정지 12 / 설정 16'),
-  formatRuntimeRosterCount: vi.fn(() => '상세 20 / 활성 8 / 키퍼 설정 16'),
+  formatKeeperRosterCount: vi.fn(() => '상세 16 / 런타임 가동 4 / 일시정지 12 / 설정 16'),
+  formatRuntimeRosterCount: vi.fn(() => '상세 20 / 런타임 가동 8 / 키퍼 설정 16'),
   resolveRuntimeCounts: vi.fn(() => ({
-    live: { agents: 4, keepers: 4, pausedKeepers: 12, tasks: 0, totalRuntimes: 8, available: true },
+    live: { agents: 4, keepers: 4, pausedKeepers: 12, offlineKeepers: 0, keeperRows: 16, tasks: 0, totalRuntimes: 8, available: true },
     configured: { keepers: 16, totalRuntimes: 8, source: 'namespace-truth' },
     source: 'execution',
   })),
@@ -121,9 +122,9 @@ describe('AgentsUnified', () => {
     expect(roster!.getAttribute('data-filter')).toBe('all')
     expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="chip-count-all"]')?.textContent)
-      .toBe('상세 20 / 활성 8 / 키퍼 설정 16')
+      .toBe('상세 20 / 런타임 가동 8 / 키퍼 설정 16')
     expect(container.querySelector('[data-testid="chip-count-keepers"]')?.textContent)
-      .toBe('상세 16 / 활성 4 / 일시정지 12 / 설정 16')
+      .toBe('상세 16 / 런타임 가동 4 / 일시정지 12 / 설정 16')
   })
 
   it('switches to agents view via filter chips', async () => {

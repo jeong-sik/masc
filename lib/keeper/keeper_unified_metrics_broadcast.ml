@@ -43,7 +43,7 @@ let broadcast_lifecycle_events ~(name : string)
      | exn ->
          Log.Keeper.error "compaction SSE broadcast failed: %s"
            (Printexc.to_string exn);
-         Prometheus.inc_counter Keeper_metrics.(to_string MetricsSseFailures) ~labels:[("kind", Keeper_metrics_sse_failure_kind.(to_label Compaction))] ());
+         Otel_metric_store.inc_counter Keeper_metrics.(to_string MetricsSseFailures) ~labels:[("kind", Keeper_metrics_sse_failure_kind.(to_label Compaction))] ());
   match handoff_json with
   | Some ((`Assoc _ as handoff)) ->
       let from_generation =
@@ -71,6 +71,6 @@ let broadcast_lifecycle_events ~(name : string)
       | exn ->
           Log.Keeper.error "handoff SSE broadcast failed: %s"
             (Printexc.to_string exn);
-          Prometheus.inc_counter Keeper_metrics.(to_string MetricsSseFailures) ~labels:[("kind", Keeper_metrics_sse_failure_kind.(to_label Handoff))] ())
+          Otel_metric_store.inc_counter Keeper_metrics.(to_string MetricsSseFailures) ~labels:[("kind", Keeper_metrics_sse_failure_kind.(to_label Handoff))] ())
   | _ -> ()
 

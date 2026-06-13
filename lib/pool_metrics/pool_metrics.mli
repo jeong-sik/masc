@@ -1,8 +1,8 @@
-(** RFC-0107 Phase D.4 — Prometheus exporter for the piaf-backed
+(** RFC-0107 Phase D.4 — Otel_metric_store exporter for the piaf-backed
     connection pool defined in {!Masc_http_client.Pool}.
 
     Read-only adapter: snapshots [Pool.stats] and pushes 5 metric
-    families to the Prometheus registry on each scrape.  The pool
+    families to the Otel_metric_store registry on each scrape.  The pool
     itself is not modified; the lazy singleton is observed via
     {!Masc_http_client.pool_singleton_opt}.
 
@@ -15,8 +15,8 @@
     - [masc_pool_create_total] (counter)
 
     The cumulative counters use [Pool.stats.*_total] snapshot values
-    written directly via [Prometheus.set_gauge] on Counter-typed
-    metrics; the metric_type registered in {!Prometheus.init} controls
+    written directly via [Otel_metric_store.set_gauge] on Counter-typed
+    metrics; the metric_type registered in {!Otel_metric_store.init} controls
     text-format rendering (TYPE counter), so the cumulative-monotonic
     invariant holds as long as [Pool] never resets its counters. *)
 
@@ -52,11 +52,11 @@ val current_snapshot : unit -> Masc_http_client.Pool.stats option
     pool has not been lazy-initialized yet (no HTTP traffic since
     process start). *)
 
-(** {1 Prometheus integration} *)
+(** {1 Otel_metric_store integration} *)
 
 val register : unit -> unit
 (** [register ()] is the explicit bootstrap hook.  Metric registration
-    itself happens at module-load time inside {!Prometheus.init}, so
+    itself happens at module-load time inside {!Otel_metric_store.init}, so
     [register] is idempotent and currently a no-op beyond a one-shot
     snapshot warm-up.  Kept as the public bootstrap API per
     RFC-0107 Phase D.4 §"register entry point". *)

@@ -382,61 +382,30 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
   in
   let metrics : Llm_provider.Metrics.t =
     { Llm_provider.Metrics.
-      on_cache_hit = (fun ~model_id ->
-        Llm_metric_bridge.emit_cache_hit ~model_id);
-      on_cache_miss = (fun ~model_id ->
-        Llm_metric_bridge.emit_cache_miss ~model_id);
+      on_cache_hit = (fun ~model_id:_ -> ());
+      on_cache_miss = (fun ~model_id:_ -> ());
       on_request_start = (fun ~model_id ->
-        record_attempt_start capture ~model_id;
-        Llm_metric_bridge.emit_request_start ~model_id);
+        record_attempt_start capture ~model_id);
       on_request_end = (fun ~model_id ~latency_ms ->
-        ensure_terminal_attempt capture ~model_id ~latency_ms ~error:None;
-        (* Forward to Prometheus so per-model latency is visible on
-           the dashboard. Without this, the runtime capture records
-           latency internally but never exports it — the global
-           Llm_metric_bridge sink is not consulted because this
-           per-call metrics object takes precedence. *)
-        match latency_ms with
-        | Some latency_ms ->
-            Llm_metric_bridge.emit_request_latency ~model_id ~latency_ms ()
-        | None -> ());
+        ensure_terminal_attempt capture ~model_id ~latency_ms ~error:None);
       on_error = (fun ~model_id ~error ->
         ensure_terminal_attempt capture ~model_id ~latency_ms:None
-          ~error:(Some error);
-        Llm_metric_bridge.emit_error ~model_id ~error);
-      on_capability_drop = (fun ~model_id ~field ->
-        (* The explicit metrics object bypasses the global
-           Llm_metric_bridge sink, so capability-drop telemetry must be
-           forwarded here just like latency and HTTP status. *)
-        Llm_metric_bridge.emit_capability_drop ~model_id ~field);
-      on_http_status = (fun ~provider ~model_id ~status ->
-        (* Forward HTTP status to the Prometheus counter. When callers
-           pass this per-call metrics sink explicitly, OAS does not
-           consult the global Llm_metric_bridge sink, so we must
-           re-emit here to avoid blackholing provider counters for
-           captured turns. *)
-        Llm_metric_bridge.emit_http_status ~provider ~model_id ~status);
-      on_circuit_state = (fun ~provider ~model_id ~provider_key ~state ->
-        Llm_metric_bridge.emit_circuit_state ~provider ~model_id ~provider_key
-          ~state);
-      on_retry = (fun ~provider ~model_id ~attempt ->
-        Llm_metric_bridge.emit_retry ~provider ~model_id ~attempt);
-      on_token_usage = (fun ~provider ~model_id ~input_tokens ~output_tokens ->
-        Llm_metric_bridge.emit_token_usage
-          ~provider ~model_id ~input_tokens ~output_tokens);
-      on_tool_calls = (fun ~provider ~model_id ~count ->
-        Llm_metric_bridge.emit_tool_calls ~provider ~model_id ~count);
-      on_streaming_first_chunk = (fun ~provider ~model_id ~ttfrc_ms ->
-        capture.streaming.ttfrc_ms <- Some ttfrc_ms;
-        Llm_metric_bridge.emit_streaming_first_chunk ~provider ~model_id
-          ~ttfrc_ms);
-      on_streaming_chunk = (fun ~provider ~model_id ~chunk_index ~inter_chunk_ms ->
+          ~error:(Some error));
+      on_capability_drop = (fun ~model_id:_ ~field:_ -> ());
+      on_http_status = (fun ~provider:_ ~model_id:_ ~status:_ -> ());
+      on_circuit_state =
+        (fun ~provider:_ ~model_id:_ ~provider_key:_ ~state:_ -> ());
+      on_retry = (fun ~provider:_ ~model_id:_ ~attempt:_ -> ());
+      on_token_usage =
+        (fun ~provider:_ ~model_id:_ ~input_tokens:_ ~output_tokens:_ -> ());
+      on_tool_calls = (fun ~provider:_ ~model_id:_ ~count:_ -> ());
+      on_streaming_first_chunk = (fun ~provider:_ ~model_id:_ ~ttfrc_ms ->
+        capture.streaming.ttfrc_ms <- Some ttfrc_ms);
+      on_streaming_chunk = (fun ~provider:_ ~model_id:_ ~chunk_index:_ ~inter_chunk_ms ->
         capture.streaming.inter_chunk_count <-
           capture.streaming.inter_chunk_count + 1;
         capture.streaming.inter_chunk_total_ms <-
-          capture.streaming.inter_chunk_total_ms +. inter_chunk_ms;
-        Llm_metric_bridge.emit_streaming_chunk ~provider ~model_id
-          ~chunk_index ~inter_chunk_ms);
+          capture.streaming.inter_chunk_total_ms +. inter_chunk_ms);
     }
   in
   (capture, metrics)

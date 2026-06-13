@@ -65,7 +65,7 @@ open Tool_args
      (Planning_eio is the persistence boundary; the error is opaque
       to the caller and not retryable with different args).
    - "task_id is required" / "content is required" / resolve_task_id
-     parse errors / "not found" lookups / set_current_task validation
+     parse errors / set_current_task validation
      → Workflow_rejection (caller-input violations; same args won't
       succeed on retry). *)
 
@@ -171,7 +171,7 @@ let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
         ~start_time
         e
   | Ok task_id ->
-      let result = Planning_eio.load ctx.config ~task_id in
+      let result = Planning_eio.load_or_init ctx.config ~task_id in
       match result with
       | Ok plan_ctx ->
           let markdown = Planning_eio.get_context_markdown plan_ctx in
@@ -184,9 +184,9 @@ let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
       | Error e ->
           Tool_result.make_err
             ~tool_name
-            ~class_:Tool_result.Workflow_rejection
+            ~class_:Tool_result.Runtime_failure
             ~start_time
-            (Printf.sprintf "Planning context not found: %s" e)
+            (Printf.sprintf "Failed to load planning context: %s" e)
 
 let handle_plan_set_task ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
@@ -255,7 +255,7 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_plan_get" ]
+let tool_spec_read_only = [ "masc_plan_get_task" ]
 
 let () =
   let is_plan = function

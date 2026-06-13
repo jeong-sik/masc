@@ -56,7 +56,7 @@ let dispatch_recurring_keepalive
            with
            | exn ->
              Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
-             Prometheus.inc_counter
+             Otel_metric_store.inc_counter
                Keeper_metrics.(to_string RecurringFailures)
                ~labels:[ "task", task.id; "phase", "task_execution" ]
                ();
@@ -65,7 +65,7 @@ let dispatch_recurring_keepalive
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
-    Prometheus.inc_counter
+    Otel_metric_store.inc_counter
       Keeper_metrics.(to_string RecurringFailures)
       ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
       ();

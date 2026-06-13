@@ -18,8 +18,8 @@ async function loadRuntimePanel() {
   vi.doMock('./runtime-monitor', () => ({
     RuntimeMonitor: () => html`<div data-testid="runtime-monitor">RuntimeMonitor</div>`,
   }))
-  vi.doMock('./prometheus-metrics', () => ({
-    PrometheusMetrics: () => html`<div data-testid="prometheus">PrometheusMetrics</div>`,
+  vi.doMock('./otel-metrics', () => ({
+    OtelMetrics: () => html`<div data-testid="metrics">OtelMetrics</div>`,
   }))
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
@@ -62,7 +62,7 @@ describe('RuntimePanel', () => {
     vi.doUnmock('../router')
     vi.doUnmock('./oas-health-chip')
     vi.doUnmock('./runtime-monitor')
-    vi.doUnmock('./prometheus-metrics')
+    vi.doUnmock('./otel-metrics')
     vi.doUnmock('./verification-specs-panel')
     vi.doUnmock('./cost-dashboard')
     vi.doUnmock('./common/filter-chips')
@@ -86,7 +86,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('Transport diagnostics')
     expect(container.textContent).toContain('Feature cleanup')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('PrometheusMetrics')
+    expect(container.textContent).toContain('OtelMetrics')
     expect(container.textContent).toContain('VerificationSpecsPanel')
   })
 
@@ -102,7 +102,7 @@ describe('RuntimePanel', () => {
 
     const detailIds = [
       'runtime-details-providers',
-      'runtime-details-prometheus',
+      'runtime-details-metrics',
       'runtime-details-verification',
     ]
     for (const id of detailIds) {
@@ -114,14 +114,14 @@ describe('RuntimePanel', () => {
   })
 
   it('explicit drill-down views bypass progressive disclosure', async () => {
-    route.value.params = { view: 'prometheus' }
+    route.value.params = { view: 'metrics' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    const prometheus = container.querySelector('[data-testid="prometheus"]')
-    expect(prometheus).not.toBeNull()
-    expect(prometheus?.closest('details')).toBeNull()
+    const metrics = container.querySelector('[data-testid="metrics"]')
+    expect(metrics).not.toBeNull()
+    expect(metrics?.closest('details')).toBeNull()
   })
 
   it('renders only OasHealthChip and RuntimeMonitor for providers view', async () => {
@@ -132,18 +132,18 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).not.toContain('PrometheusMetrics')
+    expect(container.textContent).not.toContain('OtelMetrics')
   })
 
-  it('renders only PrometheusMetrics for prometheus view', async () => {
-    route.value.params = { view: 'prometheus' }
+  it('renders only OtelMetrics for metrics view', async () => {
+    route.value.params = { view: 'metrics' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     expect(container.textContent).not.toContain('OasHealthChip')
     expect(container.textContent).not.toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('PrometheusMetrics')
+    expect(container.textContent).toContain('OtelMetrics')
   })
 
   it('renders FilterChips with runtime view options', async () => {
@@ -156,7 +156,7 @@ describe('RuntimePanel', () => {
     // Chips are split across two FilterChips strips (Primary then Advanced)
     // with a divider between them. The positional order reflects the
     // Primary[default, providers] → Advanced[cost, audit, stress,
-    // prometheus, verification] layout.
+    // metrics, verification] layout.
     expect(chips.length).toBe(7)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('런타임')
@@ -187,7 +187,7 @@ describe('RuntimePanel', () => {
 
     expect(container.textContent).toContain('OasHealthChip')
     expect(container.textContent).toContain('RuntimeMonitor')
-    expect(container.textContent).toContain('PrometheusMetrics')
+    expect(container.textContent).toContain('OtelMetrics')
   })
 
   it('passes current view value to FilterChips', async () => {

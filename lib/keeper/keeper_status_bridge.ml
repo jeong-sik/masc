@@ -368,8 +368,6 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
         true, Some "paused", Some "inspect_blocker_before_resume"
       | Some blocker when is_runtime_exhausted_blocker_class blocker.blocker_class ->
         true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
-      | Some blocker when is_no_tool_capable_blocker_class blocker.blocker_class ->
-        true, Some "provider_tool_capability_missing", Some "inspect_provider_tool_lane"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
       | Some blocker when is_stale_turn_timeout_blocker_class blocker.blocker_class ->

@@ -88,8 +88,8 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
     | Some (effective_timeout_sec, used_wall_clock_retry_budget) ->
       let source =
         if used_wall_clock_retry_budget
-        then "turn_budget_wall_clock_retry"
-        else "turn_budget_per_attempt_retry"
+        then "retry_wall_clock_limited"
+        else "retry_per_attempt_limited"
       in
       Some
         {
@@ -121,8 +121,8 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
       in
       let source =
         if capped_by_turn_budget
-        then "turn_budget_capped"
-        else "turn_budget"
+        then "first_attempt_limited_by_turn_budget"
+        else "first_attempt_adaptive_timeout"
       in
       Some
         {

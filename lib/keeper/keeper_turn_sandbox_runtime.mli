@@ -26,6 +26,9 @@ val container_path_of_host :
 val container_cwd_of_host :
   t -> host_cwd:string -> string
 
+val host_cwd_of_container :
+  t -> container_cwd:string -> (string, string) result
+
 val run_command_with_status :
   ?ok_exit_codes:int list ->
   t ->

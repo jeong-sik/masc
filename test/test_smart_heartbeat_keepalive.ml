@@ -10,6 +10,7 @@ module Types = Masc_domain
     loop integration tests (which require Eio fibers + Workspace I/O). *)
 
 open Alcotest
+open Masc
 module HS = Masc.Keeper_heartbeat_smart
 
 (* ── agent_status derivation from keeper_meta fields ─── *)
@@ -324,7 +325,7 @@ let test_after_wake_emit_unchanged () =
    be registered (no dead series), accept a [keeper] label, and increment
    monotonically. *)
 
-module Prom = Masc.Prometheus
+module Prom = Masc.Otel_metric_store
 
 let test_skip_idle_wake_resumed_metric_registered () =
   let labels = [ ("keeper", "test_keeper_a") ] in

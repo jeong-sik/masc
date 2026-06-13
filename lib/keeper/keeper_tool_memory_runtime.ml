@@ -57,8 +57,8 @@ let memory_bank_persistence_surface = "keeper_tool_memory_bank"
 let report_memory_bank_read_drop ~path ~reason ~detail =
   Safe_ops.report_persistence_read_drop
     ~on_drop:(fun () ->
-      Prometheus.inc_counter
-        Prometheus.metric_persistence_read_drops
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_persistence_read_drops
         ~labels:[ "surface", memory_bank_persistence_surface; "reason", reason ]
         ())
     ~surface:memory_bank_persistence_surface
@@ -442,7 +442,7 @@ let keeper_memory_search_json
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Prometheus.inc_counter
+     Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DecisionAuditFlushFailures)
        ~labels:[ "keeper", meta.name ]
        ();

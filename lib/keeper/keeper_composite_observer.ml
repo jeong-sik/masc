@@ -152,9 +152,9 @@ let take_fsm_guard_buckets limit buckets =
 ;;
 
 let fsm_guard_violation_breakdown () =
-  Prometheus.snapshot ()
-  |> List.filter_map (fun (metric : Prometheus.metric) ->
-    if String.equal metric.name Prometheus.metric_fsm_guard_violation
+  Otel_metric_store.snapshot ()
+  |> List.filter_map (fun (metric : Otel_metric_store.metric) ->
+    if String.equal metric.name Otel_metric_store.metric_fsm_guard_violation
        && metric.value > 0.0
     then
       match List.assoc_opt "action" metric.labels, List.assoc_opt "stage" metric.labels with
@@ -412,15 +412,15 @@ let compute_invariants
     phase_derivation_agreement = check_phase_derivation_agreement entry;
   }
 
-(* Prometheus bump — one counter tick per violated invariant per snapshot.
-   Called from [observe]. PromQL rate/increase distinguishes transient
+(* Otel_metric_store bump — one counter tick per violated invariant per snapshot.
+   Called from [observe]. Backend rate/increase queries distinguish transient
    from steady-state violations. Labels bounded: keeper × invariant (5)
    ≤ ~250 series on a 50-keeper host. Mirrors the naming pattern in
-   [Runtime_strategy_trace.bump_prometheus_counter]. *)
+   [Runtime_strategy_trace.bump_otel_metric_store_counter]. *)
 let bump_invariant_violations ~(keeper_name : string) (inv : invariants_check) =
   let bump key satisfied =
     if not satisfied then
-      Prometheus.inc_counter Keeper_metrics.(to_string InvariantViolations)
+      Otel_metric_store.inc_counter Keeper_metrics.(to_string InvariantViolations)
         ~labels:[
           ("keeper", keeper_name);
           ("invariant", invariant_key_to_string key);
@@ -529,7 +529,7 @@ let observe
        else int_of_float (max 0.0 (Time_compat.now () -. last)));
     last_turn_ts = entry.meta.runtime.usage.last_turn_ts;
     fsm_guard_violations =
-      Prometheus.metric_total Prometheus.metric_fsm_guard_violation
+      Otel_metric_store.metric_total Otel_metric_store.metric_fsm_guard_violation
       |> int_of_float;
     fsm_guard_violation_breakdown = fsm_guard_violation_breakdown ();
   }

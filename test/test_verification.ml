@@ -4,7 +4,7 @@
 let () = Mirage_crypto_rng_unix.use_default ()
 
 module V = Masc.Verification
-module P = Masc.Prometheus
+module P = Masc.Otel_metric_store
 module VS = Workspace_verification_store
 module CU = Workspace_utils
 

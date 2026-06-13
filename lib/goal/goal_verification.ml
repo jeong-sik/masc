@@ -1,29 +1,4 @@
-type principal_kind =
-  | Operator
-  | Agent
-
-let principal_kind_to_string = function
-  | Operator -> "operator"
-  | Agent -> "agent"
-
-let principal_kind_of_string = function
-  | "operator" -> Some Operator
-  | "agent" -> Some Agent
-  | _ -> None
-
-let principal_kind_to_yojson kind =
-  `String (principal_kind_to_string kind)
-
-let principal_kind_of_yojson = function
-  | `String raw -> (
-      match String.trim raw |> String.lowercase_ascii |> principal_kind_of_string with
-      | Some kind -> Ok kind
-      | None -> Error ("principal_kind_of_yojson: " ^ raw))
-  | json ->
-      Error ("principal_kind_of_yojson: " ^ Yojson.Safe.to_string json)
-
 type goal_principal = {
-  kind : principal_kind;
   id : string;
   display_name : string option;
 }
@@ -31,29 +6,24 @@ type goal_principal = {
 let goal_principal_to_yojson (principal : goal_principal) =
   `Assoc
     [
-      ("kind", principal_kind_to_yojson principal.kind);
       ("id", `String principal.id);
       ( "display_name", Json_util.string_opt_to_json principal.display_name );
     ]
 
 let goal_principal_of_yojson = function
   | `Assoc fields as json -> (
-      match principal_kind_of_yojson (Json_util.assoc_member_opt "kind" json |> Option.value ~default:`Null) with
-      | Error msg -> Error msg
-      | Ok kind -> (
-          match Json_util.assoc_member_opt "id" json with
-          | Some (`String id) when String.trim id <> "" ->
-              Ok
-                {
-                  kind;
-                  id;
-                  display_name = Json_util.get_string json "display_name" ;
-                }
-          | Some (`String _) -> Error "goal_principal_of_yojson: id must be non-empty"
-          | other ->
-              Error
-                ("goal_principal_of_yojson: invalid id " ^
-                 (match other with Some v -> Yojson.Safe.to_string v | None -> "null"))))
+      match Json_util.assoc_member_opt "id" json with
+      | Some (`String id) when String.trim id <> "" ->
+          Ok
+            {
+              id = String.trim id;
+              display_name = Json_util.get_string json "display_name" ;
+            }
+      | Some (`String _) -> Error "goal_principal_of_yojson: id must be non-empty"
+      | other ->
+          Error
+            ("goal_principal_of_yojson: invalid id " ^
+             (match other with Some v -> Yojson.Safe.to_string v | None -> "null")))
   | json ->
       Error ("goal_principal_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -492,10 +462,10 @@ let write_state config (state : state) =
   Workspace_utils.write_json config (requests_recovery_path config) json
 
 let principal_key (principal : goal_principal) =
-  Printf.sprintf "%s:%s" (principal_kind_to_string principal.kind) principal.id
+  principal.id
 
-let principal_equal left right =
-  String.equal (principal_key left) (principal_key right)
+let principal_equal (left : goal_principal) (right : goal_principal) =
+  String.equal left.id right.id
 
 let dedupe_principals principals =
   let seen = Hashtbl.create 16 in

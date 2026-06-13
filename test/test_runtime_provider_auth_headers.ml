@@ -484,6 +484,68 @@ let provider_cfg () =
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
 
+(* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
+   Provider_config. Before the fix the adapter dropped both binding
+   fields, so keep_alive fell back to OAS_OLLAMA_KEEP_ALIVE / "-1" and
+   num_ctx to the Ollama Modelfile default. *)
+let ollama_keep_alive_runtime_toml =
+  {|
+[runtime]
+default = "ollama.qwen-local"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen-local]
+api-name = "qwen3:32b"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama.qwen-local]
+max-concurrent = 1
+keep-alive = "30m"
+num-ctx = 16384
+|}
+
+let test_runtime_adapter_threads_binding_keep_alive_and_num_ctx () =
+  match Runtime_toml.parse_string ollama_keep_alive_runtime_toml with
+  | Error errors ->
+    failf
+      "expected Ollama keep-alive runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       check (option string) "binding keep_alive parsed" (Some "30m")
+         binding.Runtime_schema.keep_alive;
+       check (option int) "binding num_ctx parsed" (Some 16384)
+         binding.Runtime_schema.num_ctx;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check bool "kind" true
+            (provider_cfg.kind = Llm_provider.Provider_config.Ollama);
+          check (option string) "provider config keep_alive" (Some "30m")
+            provider_cfg.keep_alive;
+          check (option int) "provider config num_ctx" (Some 16384)
+            provider_cfg.num_ctx)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default () =
+  let provider_cfg = provider_cfg () in
+  check (option string) "keep_alive unset without TOML value" None
+    provider_cfg.keep_alive;
+  check (option int) "num_ctx unset without TOML value" None
+    provider_cfg.num_ctx
+
 let runtime_or_fail ?(provider = runpod_provider) () =
   let cfg =
     { Runtime_schema.providers = [ provider ]
@@ -783,6 +845,14 @@ let () =
             "runtime adapter materializes GLM Coding Plan provider"
             `Quick
             test_runtime_adapter_materializes_glm_coding_provider
+        ; test_case
+            "runtime adapter threads binding keep-alive and num-ctx"
+            `Quick
+            test_runtime_adapter_threads_binding_keep_alive_and_num_ctx
+        ; test_case
+            "runtime adapter leaves keep-alive and num-ctx unset by default"
+            `Quick
+            test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default
         ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick

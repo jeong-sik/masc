@@ -12,17 +12,24 @@ type pending_request =
   }
 
 type t =
-  { mutable next_server_id : int
+  { next_server_id : int Atomic.t
   ; pending : (int, pending_request) Hashtbl.t
+  ; mutex : Eio.Mutex.t
+    (** Guards [pending]. [send_request], [resolve_pending], and [reject_all]
+        may run on different Eio fibers, so every access to the hash table must
+        be serialized. *)
   }
 
-let create () : t = { next_server_id = 1; pending = Hashtbl.create 16 }
+let create () : t =
+  { next_server_id = Atomic.make 1
+  ; pending = Hashtbl.create 16
+  ; mutex = Eio.Mutex.create ()
+  }
+;;
 
 (** Allocate a fresh server-side JSON-RPC ID. *)
 let alloc_server_id (router : t) : int =
-  let id = router.next_server_id in
-  router.next_server_id <- id + 1;
-  id
+  Atomic.fetch_and_add router.next_server_id 1
 ;;
 
 (** Build a JSON-RPC request object. *)
@@ -54,6 +61,7 @@ let send_request
   let request_json = build_request server_id method_ params in
   let payload = Yojson.Safe.to_string request_json in
   let promise, resolver = Eio.Promise.create () in
+  Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
   Hashtbl.add router.pending server_id { client_id; method_; promise; resolver };
   Lsp_process_manager.write_message proc payload;
   promise
@@ -78,6 +86,7 @@ let resolve_pending
       (server_id : int)
       (result : (Yojson.Safe.t, string) result)
   =
+  Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
   match Hashtbl.find_opt router.pending server_id with
   | Some req ->
     Hashtbl.remove router.pending server_id;
@@ -88,6 +97,7 @@ let resolve_pending
 (** Reject all pending requests with an error.
     Used when the LSP process crashes or the connection closes. *)
 let reject_all (router : t) (reason : string) =
+  Eio.Mutex.use_rw ~protect:true router.mutex @@ fun () ->
   Hashtbl.iter
     (fun server_id req ->
        Eio.Promise.resolve req.resolver (Error reason);

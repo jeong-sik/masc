@@ -513,7 +513,6 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                     ~max_idle_turns:
                       (Keeper_runtime_resolved.reactive_max_idle_turns ())
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
-                    ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
                     ~trajectory_acc

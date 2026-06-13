@@ -603,47 +603,12 @@ module RuntimeSaturationSignal = struct
     get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Runtime Runtime Overrides}
-
-    Runtime-only narrowing of the MASC runtime provider set. The underlying
-    runtime profile (loaded from [runtime.toml]) is unchanged; this filter is
-    applied by the named-runtime execution path via [~provider_filter] on every
-    keeper turn, so switching between full runtime and a single-provider
-    fallback is a pure env-var change with no file or code edit.
-
-    Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
-    hard mode, or A/B testing a single provider. *)
-module KeeperRuntimeProviderFilter = struct
-  (** Comma-separated provider kind allowlist for every keeper runtime call.
-      Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [glm], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
-      [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
-      Matching is case-insensitive; empty entries are dropped.
-
-      Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Keeper_turn_driver.run_named], which applies it during MASC runtime
-      provider resolution. The runtime keeps only matching providers from
-      the resolved profile; if the filter leaves zero providers, OAS falls back
-      to the unfiltered profile (see [apply_provider_filter] safety net).
-
-      [None] (env var unset or blank) = full runtime, unfiltered.
-
-      Env: [MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST]. Default: unset. *)
-  let provider_allowlist () : string list option =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST" with
-    | None -> None
-    | Some raw ->
-      let parts =
-        raw
-        |> String.split_on_char ','
-        |> List.map String.trim
-        |> List.filter (fun s -> s <> "")
-      in
-      (match parts with
-       | [] -> None
-       | _ -> Some parts)
-  ;;
-end
+(* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
+   deleted (audit F8): its value was threaded as [?provider_filter] into
+   [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
+   which silently ignored it after the RFC-0206 single-runtime purge. The knob
+   was dead while its docs were live; deletion documents reality. Provider
+   selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
 
 (** {1 Transient Retry Backoff}
 

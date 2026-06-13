@@ -14,7 +14,6 @@ let run
   ~state_snapshot_source
   ~librarian_messages
   ~post_turn_t0
-  ?provider_filter
   ~runtime_id
   ~inference_telemetry
   ()
@@ -87,7 +86,6 @@ let run
   (try
      let memory_summarizer =
        Keeper_memory_llm_summary.make
-         ?provider_filter
          ~runtime_id
          ~keeper_name:meta.name
          ()

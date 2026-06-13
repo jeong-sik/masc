@@ -31,7 +31,6 @@ let finalize
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
-    ?provider_filter
     ~runtime_id_string
     ~prompt_metrics
     ~ctx_composition
@@ -202,7 +201,6 @@ let finalize
       ~state_snapshot_source
       ~librarian_messages
       ~post_turn_t0
-      ?provider_filter
       ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry
       ();

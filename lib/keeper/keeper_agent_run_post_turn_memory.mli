@@ -20,7 +20,6 @@ val run :
   state_snapshot_source:string ->
   librarian_messages:Agent_sdk.Types.message list ->
   post_turn_t0:float ->
-  ?provider_filter:string list ->
   runtime_id:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit ->

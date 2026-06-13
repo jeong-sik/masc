@@ -995,6 +995,19 @@ let mark_keeper_failing config (meta : Keeper_meta_contract.keeper_meta) =
       ("keeper failing transition failed: "
        ^ Keeper_state_machine.transition_error_to_string err)
 
+let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_meta) =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.Workspace.base_path
+      meta.name
+      Keeper_state_machine.Restart_budget_exhausted
+  with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.fail
+      ("keeper restart-budget exhaustion failed: "
+       ^ Keeper_state_machine.transition_error_to_string err)
+
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
       let config_root = make_config_root dir in
@@ -1447,6 +1460,46 @@ let test_health_json_distinguishes_failing_executable_keepers () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))
+
+let test_health_json_explains_nonrecoverable_failing_keeper () =
+  with_temp_dir "health-nonrecoverable-failing-keeper" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "capacity-failing";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = state.Mcp_server.workspace_config in
+        let failing =
+          make_keeper_meta ~name:"capacity-failing"
+            ~trace_id:"trace-capacity-failing" ()
+        in
+        write_keeper_meta_exn config failing;
+        with_running_keeper_metas config [ failing ] (fun () ->
+          mark_keeper_failing config failing;
+          exhaust_keeper_restart_budget config failing;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          Alcotest.(check (list string))
+            "health includes nonrecoverable failing keeper in blocked targets"
+            [ "capacity-failing"; "example" ]
+            (fleet_safety |> member "blocked_keeper_names" |> to_list
+             |> List.map to_string);
+          Alcotest.(check (list (pair string string)))
+            "health explains nonrecoverable failing keeper"
+            [ ("capacity-failing", "phase_failing"); ("example", "not_registered") ]
+            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+             |> List.map (fun row ->
+                  ( row |> member "keeper" |> to_string
+                  , row |> member "reason" |> to_string ))))))
 
 let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
   with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
@@ -2995,6 +3048,9 @@ let () =
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;
+          Alcotest.test_case
+            "health json explains nonrecoverable failing keeper"
+            `Quick test_health_json_explains_nonrecoverable_failing_keeper;
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;

@@ -23,6 +23,34 @@ include module type of Workspace_task_claim
 
 (** {1 Task transitions} *)
 
+(** Typed transition result. [noop = true] marks the idempotent case
+    (e.g. release on an already-Todo task): status unchanged, no
+    write/events. RFC-0088 §1 follow-up — callers must branch on this
+    field, not on the message string. *)
+type transition_outcome =
+  { message : string
+  ; noop : bool
+  }
+
+val transition_task_outcome_r :
+  config -> agent_name:string -> task_id:string -> action:Masc_domain.task_action ->
+  ?prepare_verification_request:
+    (task:Masc_domain.task ->
+     assignee:string ->
+     verification_id:string ->
+     evidence_refs:string list ->
+     (unit, string) result) ->
+  ?compensate_verification_request:(verification_id:string -> unit) ->
+  ?prepare_verification_verdict:
+    (task:Masc_domain.task ->
+     verifier:string ->
+     verification_id:string ->
+     decision:[ `Approve of string | `Reject of string ] ->
+     (unit, string) result) ->
+  ?expected_version:int -> ?notes:string -> ?reason:string ->
+  ?handoff_context:Masc_domain.task_handoff_context ->
+  ?force:bool -> unit -> transition_outcome Masc_domain.masc_result
+
 val transition_task_r :
   config -> agent_name:string -> task_id:string -> action:Masc_domain.task_action ->
   ?prepare_verification_request:
@@ -50,6 +78,12 @@ val release_task_r :
 val force_release_task_r :
   config -> agent_name:string -> task_id:string ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
+
+(** [force_release_task_r] with the typed no-op flag; see {!transition_outcome}. *)
+val force_release_task_outcome_r :
+  config -> agent_name:string -> task_id:string ->
+  ?handoff_context:Masc_domain.task_handoff_context ->
+  unit -> transition_outcome Masc_domain.masc_result
 
 val force_done_task_r :
   config -> agent_name:string -> task_id:string ->

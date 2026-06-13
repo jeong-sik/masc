@@ -421,10 +421,17 @@ let handle_keeper_task_tool
          force-released. Example: reason='assignee offline >10 min, no heartbeat'."
     else (
       let agent = keeper_agent_sender ~meta in
-      let result = Workspace.force_release_task_r config ~agent_name:agent ~task_id () in
+      let outcome_result =
+        Workspace.force_release_task_outcome_r config ~agent_name:agent ~task_id ()
+      in
+      let result =
+        Result.map
+          (fun (o : Workspace.transition_outcome) -> o.message)
+          outcome_result
+      in
       let is_noop =
-        match result with
-        | Ok msg -> String_util.contains_substring_ci msg "no-op"
+        match outcome_result with
+        | Ok outcome -> outcome.noop
         | Error _ -> false
       in
       let () =

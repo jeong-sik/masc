@@ -153,26 +153,36 @@ let rec drop_left n xs =
 let thread_parent_table : (string, string) Hashtbl.t =
   Hashtbl.create 16
 
+let thread_parent_table_mu = Eio.Mutex.create ()
+
 let register_thread ~thread_id ~parent_channel_id =
   let tid = String.trim thread_id in
   let pid = String.trim parent_channel_id in
   if tid <> "" && pid <> "" then
-    Hashtbl.replace thread_parent_table tid pid
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.replace thread_parent_table tid pid
 
 let parent_channel_of_thread ~channel_id : string option =
   let cid = String.trim channel_id in
   if cid = "" then None
-  else Hashtbl.find_opt thread_parent_table cid
+  else Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.find_opt thread_parent_table cid
 
 let is_known_thread ~channel_id =
   let cid = String.trim channel_id in
-  cid <> "" && Hashtbl.mem thread_parent_table cid
+  cid <> ""
+  && Eio.Mutex.use_ro thread_parent_table_mu
+    @@ fun () -> Hashtbl.mem thread_parent_table cid
 
-let registered_thread_count () = Hashtbl.length thread_parent_table
+let registered_thread_count () =
+  Eio.Mutex.use_ro thread_parent_table_mu
+  @@ fun () -> Hashtbl.length thread_parent_table
 
 let unregister_thread ~thread_id =
   let tid = String.trim thread_id in
-  if tid <> "" then Hashtbl.remove thread_parent_table tid
+  if tid <> "" then
+    Eio.Mutex.use_rw ~protect:true thread_parent_table_mu
+    @@ fun () -> Hashtbl.remove thread_parent_table tid
 
 (* ── Trigger policy registry ──────────────────────────────────────
    Set once at gateway startup by [set_trigger_policy]. Read by

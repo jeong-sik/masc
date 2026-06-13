@@ -60,9 +60,9 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
   | Agent_sdk.Hooks.Nudge msg ->
     check
       bool
-      "board_get nudge says post_id is required"
+      "board_get nudge names the routable tool, not the hallucinated alias"
       true
-      (contains_substring msg "keeper_board_get requires post_id");
+      (contains_substring msg "keeper_board_post_get requires post_id");
     check
       bool
       "board_get nudge points to board discovery tools"
@@ -72,7 +72,7 @@ let test_on_idle_board_get_nudge_names_post_id_discovery () =
       bool
       "board_get nudge forbids empty args"
       true
-      (contains_substring msg "Do not call keeper_board_get with {}")
+      (contains_substring msg "Do not call keeper_board_post_get with {}")
   | other ->
     fail
       (Printf.sprintf

@@ -89,6 +89,31 @@ let drain_handshake req ic oc nonce =
    | Some _ -> failwith "ws handshake: Sec-WebSocket-Accept mismatch"
    | None -> failwith "ws handshake: Sec-WebSocket-Accept header missing")
 
+(* Writer fiber body, shared with the unit tests via the .mli.
+   [take] blocks for the next queued frame; [write_string] pushes the
+   encoded bytes onto the TLS flow.
+
+   The [Eio.Io] containment is intentional (audit T7): the writer runs
+   on the per-session switch, so letting a TLS/WSS write failure escape
+   would fail that switch and tear down the whole gateway client (outer
+   fork in [connect]).  Failure *detection* stays delegated to the
+   reader path ([Wss_closed] in [Discord_gateway_client]) and the
+   heartbeat ACK timeout — but the cause is recorded here instead of
+   dropped.  [Eio.Cancel.Cancelled] is deliberately not caught: switch
+   teardown still cancels the writer silently. *)
+let writer_loop ~take ~write_string =
+  try
+    let rec loop () =
+      let frame = take () in
+      let buf = Buffer.create 128 in
+      Ws_io.write_frame_to_buf ~mode:(Client random_string) buf frame;
+      write_string (Buffer.contents buf);
+      loop ()
+    in
+    loop ()
+  with Eio.Io _ as e ->
+    Log.Discord.warn "wss writer fiber terminated: %s" (Printexc.to_string e)
+
 (* Builds the session-local resources (socket, TLS flow, writer fiber)
    on the given inner switch. Returns the read/write closures only —
    close is wired by the outer [connect] via the promise pair. *)
@@ -140,17 +165,10 @@ let build_session ~sw ~env ~url =
 
   let write_queue = Eio.Stream.create 16 in
   let writer () =
-    try
-      let rec loop () =
-        let frame = Eio.Stream.take write_queue in
-        let buf = Buffer.create 128 in
-        Ws_io.write_frame_to_buf ~mode:(Client random_string) buf frame;
-        Eio.Buf_write.with_flow flow (fun oc ->
-          Eio.Buf_write.string oc (Buffer.contents buf));
-        loop ()
-      in
-      loop ()
-    with Eio.Io _ -> ()
+    writer_loop
+      ~take:(fun () -> Eio.Stream.take write_queue)
+      ~write_string:(fun s ->
+        Eio.Buf_write.with_flow flow (fun oc -> Eio.Buf_write.string oc s))
   in
   Eio.Fiber.fork ~sw writer;
 

@@ -377,6 +377,7 @@ let test_thread_registry_round_trip () =
   check int "count restored" before (Discord_state.registered_thread_count ())
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "channel_gate_discord_state"
     [
       ( "status",

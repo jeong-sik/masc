@@ -83,6 +83,7 @@ let test_http_json_explicitly_disabled_entries_surface () =
 ;;
 
 let () =
+  Eio_main.run @@ fun _env ->
   Alcotest.run
     "server_dashboard_http_memory_subsystems"
     [ ( "request"

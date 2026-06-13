@@ -36,6 +36,22 @@ let force_release_task_r config ~agent_name ~task_id ?handoff_context ()
     ()
 ;;
 
+(** Force-release with the typed no-op flag (release on an already-Todo task).
+    Callers needing to distinguish a real release from the idempotent no-op
+    must use this instead of sniffing the message string. *)
+let force_release_task_outcome_r config ~agent_name ~task_id ?handoff_context ()
+  : transition_outcome Masc_domain.masc_result
+  =
+  transition_task_outcome_r
+    config
+    ~agent_name
+    ~task_id
+    ~action:Masc_domain.Release
+    ?handoff_context
+    ~force:true
+    ()
+;;
+
 (** Force-done a task regardless of assignee. Keeper privilege. *)
 let force_done_task_r config ~agent_name ~task_id ~notes ()
   : string Masc_domain.masc_result

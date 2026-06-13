@@ -655,6 +655,15 @@ let test_policy_marks_live_admission_caps_transient () =
     (Policy.is_transient_admission_memory_text
        "The assistant is currently stuck in a repetitive loop due to the full goal capacity.");
   Alcotest.(check bool)
+    "bare capacity cap snapshot is transient"
+    true
+    (Policy.is_transient_admission_memory_text "none (capacity 3/3)");
+  Alcotest.(check bool)
+    "goal id full cap snapshot is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "goal-1779348737104-9783 (full 3/3)");
+  Alcotest.(check bool)
     "wip slot blocker is transient"
     true
     (Policy.is_transient_admission_memory_text

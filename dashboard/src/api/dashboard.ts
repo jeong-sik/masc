@@ -1660,12 +1660,49 @@ export interface ToolMetricsResponse extends TelemetryFreshnessMetadata {
   registered_count: number
 }
 
+export interface DashboardScheduledAutomationFsm {
+  state: string
+  active_count: number
+  terminal_count: number
+  next_due_at?: string | null
+}
+
+export interface DashboardScheduledAutomationRequest {
+  schedule_id: string
+  status: string
+  risk_class: string
+  approval_required: boolean
+  source: string
+  requested_at?: number
+  requested_at_iso?: string
+  due_at?: number
+  due_at_iso?: string
+  expires_at?: number | null
+  expires_at_iso?: string | null
+  payload_digest?: string
+  payload_kind?: string | null
+}
+
+export interface DashboardScheduledAutomation {
+  schema?: string
+  source?: string
+  generated_at?: string
+  request_count: number
+  request_limit: number
+  truncated: boolean
+  counts: Record<string, number>
+  derived_counts?: Record<string, number>
+  fsm: DashboardScheduledAutomationFsm
+  requests: DashboardScheduledAutomationRequest[]
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   config_resolution?: DashboardConfigResolution
   runtime_resolution?: DashboardRuntimeResolution
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
+  scheduled_automation?: DashboardScheduledAutomation
 }
 
 export type {

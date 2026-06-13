@@ -315,6 +315,11 @@ let execute_tool_eio
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args
+                 | Mod_schedule ->
+                   Tool_schedule.dispatch
+                     { Tool_schedule.config; agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_misc ->
                    Tool_misc.dispatch
                      { Tool_misc.config; agent_name }

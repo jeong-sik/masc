@@ -65,6 +65,7 @@
   agent_sdk
   agent_sdk.base
   agent_sdk.llm_provider
+  masc_schedule
   masc.tool_types
   masc.attribution
   masc.exec_policy

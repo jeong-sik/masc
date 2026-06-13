@@ -109,6 +109,10 @@ let reject config ?grant_id ?approved_at ~schedule_id ~approved_by ~reason () =
     ~decision:(Schedule_domain.Reject reason) ()
 ;;
 
+let cancel config ~schedule_id =
+  Schedule_store.cancel_request config ~schedule_id |> map_store
+;;
+
 let due_candidates config ~now =
   match Schedule_store.refresh_due config ~now with
   | Error err -> Error (Store_error err)

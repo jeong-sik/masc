@@ -15,6 +15,7 @@ type store_error =
   | Schedule_not_found
   | Grant_already_recorded
   | Invalid_initial_status of string
+  | Invalid_status_transition of string
   | Grant_validation_failed of Schedule_domain.grant_error
 
 val store_error_to_string : store_error -> string
@@ -38,6 +39,11 @@ val insert_request :
 val record_grant :
   Workspace_utils.config ->
   Schedule_domain.execution_grant ->
+  (Schedule_domain.schedule_request, store_error) result
+
+val cancel_request :
+  Workspace_utils.config ->
+  schedule_id:string ->
   (Schedule_domain.schedule_request, store_error) result
 
 val refresh_due :

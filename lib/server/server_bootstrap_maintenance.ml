@@ -39,6 +39,39 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       Tool_metrics_persist.enqueue r
     | _ -> ());
   Tool_metrics_persist.start_flush_fiber ~sw ~clock ~base_path:state.workspace_config.base_path;
+  (* RFC-0234 scheduled automation runner.  Tool-facing create/approve/list
+     paths only mutate the durable ledger; this loop is the production caller
+     that observes due rows and emits at-most-once generic wake signals.  It
+     catches per-tick failures so a corrupt schedule row or transient write
+     error cannot cancel unrelated keeper/server fibers. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "schedule_runner")
+    (fun () ->
+      let interval = 15.0 in
+      let rec loop () =
+        (try
+           match Schedule_runner.tick state.workspace_config ~now:(Time_compat.now ()) with
+           | Ok result ->
+             if result.Schedule_runner.emitted <> [] then
+               Log.Server.info
+                 "schedule_runner: due_changed=%d emitted=%d"
+                 result.due_changed
+                 (List.length result.emitted)
+           | Error err ->
+             Log.Server.warn
+               "schedule_runner: tick failed: %s"
+               (Schedule_runner.runner_error_to_string err)
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn
+             "schedule_runner: tick crashed: %s"
+             (Printexc.to_string exn));
+        Eio.Time.sleep clock interval;
+        loop ()
+      in
+      loop ());
   (* Bare-alias audit fiber (PR #15112 surface refresh): re-run the
      classifier every minute so the [masc_auth_bare_alias] gauges
      reflect mid-run regressions, not only the boot snapshot. The

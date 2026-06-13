@@ -1,0 +1,341 @@
+type context =
+  { config : Workspace.config
+  ; agent_name : string
+  }
+
+let ( let* ) = Result.bind
+
+let trim_nonempty value =
+  let trimmed = String.trim value in
+  if String.equal trimmed "" then None else Some trimmed
+;;
+
+let string_opt args key =
+  match Json_util.get_string args key with
+  | None -> None
+  | Some value -> trim_nonempty value
+;;
+
+let required_string args key =
+  match string_opt args key with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s is required" key)
+;;
+
+let optional_float args key = Json_util.get_float args key
+let optional_int args key = Json_util.get_int args key
+let optional_bool args key = Json_util.get_bool args key
+
+let parse_due_at args =
+  match optional_float args "due_at_unix", string_opt args "due_at_iso" with
+  | Some due_at, _ -> Ok due_at
+  | None, Some iso ->
+    (match Masc_domain.parse_iso8601_opt iso with
+     | Some due_at -> Ok due_at
+     | None -> Error "due_at_iso must be a parseable ISO-8601 timestamp")
+  | None, None -> Error "one of due_at_unix or due_at_iso is required"
+;;
+
+let actor_kind_of_arg args key default =
+  match string_opt args key with
+  | None -> Ok default
+  | Some raw ->
+    (match Schedule_domain.actor_kind_of_string raw with
+     | Ok kind -> Ok kind
+     | Error msg -> Error msg)
+;;
+
+let source_of_arg args =
+  match string_opt args "source" with
+  | None -> Ok Schedule_domain.Operator_request
+  | Some raw ->
+    (match Schedule_domain.schedule_source_of_string raw with
+     | Ok source -> Ok source
+     | Error msg -> Error msg)
+;;
+
+let risk_class_of_arg args =
+  let* raw = required_string args "risk_class" in
+  match Schedule_domain.risk_class_of_string raw with
+  | Ok risk_class -> Ok risk_class
+  | Error msg -> Error msg
+;;
+
+let status_of_arg args =
+  match string_opt args "status" with
+  | None -> Ok None
+  | Some raw ->
+    (match Schedule_domain.schedule_status_of_string raw with
+     | Ok status -> Ok (Some status)
+     | Error msg -> Error msg)
+;;
+
+let actor_from_args args ~prefix ~default_id ~default_kind =
+  let id =
+    match string_opt args (prefix ^ "_id") with
+    | Some id -> id
+    | None -> default_id
+  in
+  let* kind = actor_kind_of_arg args (prefix ^ "_kind") default_kind in
+  let display_name = string_opt args (prefix ^ "_display_name") in
+  if String.equal (String.trim id) ""
+  then Error (prefix ^ "_id must not be empty")
+  else Ok Schedule_domain.{ id; kind; display_name }
+;;
+
+let approved_by_from_args args =
+  let* id = required_string args "approved_by_id" in
+  Ok
+    Schedule_domain.
+      { id
+      ; kind = Human_operator
+      ; display_name = string_opt args "approved_by_display_name"
+      }
+;;
+
+let payload_from_args args =
+  match Json_util.assoc_member_opt "payload" args with
+  | Some (`Assoc _ as payload) -> Ok payload
+  | Some _ -> Error "payload must be an object envelope"
+  | None ->
+    let* kind = required_string args "payload_kind" in
+    let schema_version =
+      (* DET-OK: absent schema_version means the stable schedule payload v1
+         contract, not provider-derived guessing. *)
+      optional_int args "payload_schema_version" |> Option.value ~default:1
+    in
+    let* body =
+      match Json_util.assoc_member_opt "payload_body" args with
+      | None -> Ok (`Assoc [])
+      | Some (`Assoc _ as body) -> Ok body
+      | Some _ -> Error "payload_body must be an object"
+    in
+    Ok
+      (`Assoc
+        [ "kind", `String kind
+        ; "schema_version", `Int schema_version
+        ; "body", body
+        ])
+;;
+
+let schedule_request_json (request : Schedule_domain.schedule_request) =
+  match Schedule_domain.schedule_request_to_yojson request with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ ( "due_at_iso"
+           , `String (Masc_domain.iso8601_of_unix_seconds request.due_at) )
+         ; ( "requested_at_iso"
+           , `String (Masc_domain.iso8601_of_unix_seconds request.requested_at) )
+         ; ( "requires_separate_human_grant"
+           , `Bool (Schedule_domain.requires_separate_human_grant request) )
+         ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
+         ])
+  | other -> other
+;;
+
+let ok ~tool_name ~start_time data =
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+;;
+
+let workflow_error ~tool_name ~start_time message =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    ~data:(Tool_args.error_assoc [ "message", `String message ])
+    message
+;;
+
+let runtime_error ~tool_name ~start_time message =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    ~data:(Tool_args.error_assoc [ "message", `String message ])
+    message
+;;
+
+let request_result ~tool_name ~start_time = function
+  | Ok request -> ok ~tool_name ~start_time (schedule_request_json request)
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+;;
+
+(* TEL-OK: schedule tools return [Tool_result.t] through the shared
+   [Tool_dispatch] paths; [Server_bootstrap_maintenance] installs the canonical
+   dispatch observer that records tool telemetry and metrics once for keeper and
+   MCP calls. *)
+let handle_create ~tool_name ~start_time ctx args =
+  let result =
+    let* due_at = parse_due_at args in
+    let* payload = payload_from_args args in
+    let* risk_class = risk_class_of_arg args in
+    let* source = source_of_arg args in
+    let* requested_by =
+      actor_from_args args ~prefix:"requested_by" ~default_id:"operator"
+        ~default_kind:Schedule_domain.Human_operator
+    in
+    let* scheduled_by =
+      actor_from_args args ~prefix:"scheduled_by" ~default_id:ctx.agent_name
+        ~default_kind:Schedule_domain.Automated_actor
+    in
+    let schedule_id = string_opt args "schedule_id" in
+    let requested_at = optional_float args "requested_at_unix" in
+    let expires_at = optional_float args "expires_at_unix" in
+    let approval_required =
+      (* DET-OK: omitted approval_required uses the domain risk policy; callers
+         must opt in only to stricter approval. *)
+      optional_bool args "approval_required" |> Option.value ~default:false
+    in
+    Schedule_service.create ctx.config ?schedule_id ?requested_at ?expires_at
+      ~approval_required ~requested_by ~scheduled_by ~due_at ~payload ~risk_class
+      ~source ()
+    |> Result.map_error Schedule_service.service_error_to_string
+  in
+  match result with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok request -> request_result ~tool_name ~start_time (Ok request)
+;;
+
+let take limit items =
+  let rec loop acc remaining = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | item :: rest -> loop (item :: acc) (remaining - 1) rest
+  in
+  loop [] limit items
+;;
+
+let handle_list ~tool_name ~start_time ctx args =
+  match status_of_arg args with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok status ->
+    let raw_limit =
+      (* DET-OK: list limit is a bounded projection default for read ergonomics;
+         it does not change schedule eligibility or ordering. *)
+      optional_int args "limit" |> Option.value ~default:50
+    in
+    let limit = min 200 (max 1 raw_limit) in
+    let schedules =
+      Schedule_service.list ctx.config ?status ()
+      |> take limit
+      |> List.map schedule_request_json
+    in
+    ok ~tool_name ~start_time
+      (`Assoc
+        [ "status", `String "ok"
+        ; "limit", `Int limit
+        ; "schedules", `List schedules
+        ])
+;;
+
+let handle_get ~tool_name ~start_time ctx args =
+  match required_string args "schedule_id" with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok schedule_id ->
+    (match Schedule_service.get ctx.config ~schedule_id with
+     | None -> workflow_error ~tool_name ~start_time "schedule not found"
+     | Some request -> ok ~tool_name ~start_time (schedule_request_json request))
+;;
+
+let handle_cancel ~tool_name ~start_time ctx args =
+  let result =
+    let* schedule_id = required_string args "schedule_id" in
+    let* cancelled_by_id = required_string args "cancelled_by_id" in
+    let* cancelled_by_kind =
+      actor_kind_of_arg args "cancelled_by_kind" Schedule_domain.Human_operator
+    in
+    let* reason = required_string args "reason" in
+    let* request =
+      Schedule_service.cancel ctx.config ~schedule_id
+      |> Result.map_error Schedule_service.service_error_to_string
+    in
+    Ok (request, cancelled_by_id, cancelled_by_kind, reason)
+  in
+  match result with
+  | Error msg -> workflow_error ~tool_name ~start_time msg
+  | Ok (request, cancelled_by_id, cancelled_by_kind, reason) ->
+    ok ~tool_name ~start_time
+      (`Assoc
+        [ "status", `String "ok"
+        ; "schedule", schedule_request_json request
+        ; ( "cancelled_by"
+          , `Assoc
+              [ "id", `String cancelled_by_id
+              ; "kind", `String (Schedule_domain.actor_kind_to_string cancelled_by_kind)
+              ] )
+        ; "reason", `String reason
+        ])
+;;
+
+let handle_approve ~tool_name ~start_time ctx args =
+  let result =
+    let* schedule_id = required_string args "schedule_id" in
+    let* approved_by = approved_by_from_args args in
+    let grant_id = string_opt args "grant_id" in
+    let approved_at = optional_float args "approved_at_unix" in
+    Schedule_service.approve ctx.config ?grant_id ?approved_at ~schedule_id
+      ~approved_by ()
+    |> Result.map_error Schedule_service.service_error_to_string
+  in
+  request_result ~tool_name ~start_time result
+;;
+
+let handle_reject ~tool_name ~start_time ctx args =
+  let result =
+    let* schedule_id = required_string args "schedule_id" in
+    let* approved_by = approved_by_from_args args in
+    let* reason = required_string args "reason" in
+    let grant_id = string_opt args "grant_id" in
+    let approved_at = optional_float args "approved_at_unix" in
+    Schedule_service.reject ctx.config ?grant_id ?approved_at ~schedule_id
+      ~approved_by ~reason ()
+    |> Result.map_error Schedule_service.service_error_to_string
+  in
+  request_result ~tool_name ~start_time result
+;;
+
+let dispatch ctx ~name ~args : Tool_result.result option =
+  let start_time = Time_compat.now () in
+  let handle f =
+    try Some (f ~tool_name:name ~start_time ctx args) with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Some
+        (runtime_error ~tool_name:name ~start_time
+           (Printf.sprintf "schedule tool failed: %s" (Printexc.to_string exn)))
+  in
+  let open Tool_schemas_schedule in
+  match find_definition name with
+  | Some { action = Create_request; _ } -> handle handle_create
+  | Some { action = List_requests; _ } -> handle handle_list
+  | Some { action = Get_request; _ } -> handle handle_get
+  | Some { action = Cancel_request; _ } -> handle handle_cancel
+  | Some { action = Approve_request; _ } -> handle handle_approve
+  | Some { action = Reject_request; _ } -> handle handle_reject
+  | _ -> None
+;;
+
+let schemas = Tool_schemas_schedule.schemas
+
+let () =
+  List.iter
+    (fun (definition : Tool_schemas_schedule.definition) ->
+      let schema : Masc_domain.tool_schema = definition.schema in
+      let is_read_only = definition.read_only in
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:schema.name
+           ~description:schema.description
+           ~module_tag:Tool_dispatch.Mod_schedule
+           ~input_schema:schema.input_schema
+           ~handler_binding:Tag_dispatch
+           ~is_read_only
+           ~is_idempotent:is_read_only
+           ~effect_domain:
+             (if is_read_only
+              then Tool_catalog.Read_only
+              else Tool_catalog.Masc_workspace)
+           ()))
+    Tool_schemas_schedule.definitions
+;;

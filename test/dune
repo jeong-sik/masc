@@ -1064,6 +1064,11 @@
  (modules test_schedule_runner)
  (libraries masc_test_deps masc_schedule))
 
+(test
+ (name test_schedule_tool_wiring)
+ (modules test_schedule_tool_wiring)
+ (libraries masc_test_deps masc_schedule))
+
 ; Typed TOML field resolution helper (RFC-0141 Phase 1).
 
 (test

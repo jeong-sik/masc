@@ -12,6 +12,7 @@ type store_error =
   | Schedule_not_found
   | Grant_already_recorded
   | Invalid_initial_status of string
+  | Invalid_status_transition of string
   | Grant_validation_failed of Schedule_domain.grant_error
 
 let ( let* ) = Result.bind
@@ -21,6 +22,7 @@ let store_error_to_string = function
   | Schedule_not_found -> "schedule not found"
   | Grant_already_recorded -> "grant already recorded"
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
+  | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
   | Grant_validation_failed err ->
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
 ;;
@@ -233,6 +235,27 @@ let record_grant config (grant : Schedule_domain.execution_grant) =
           let next_state = bump_state state ~schedules ~grants in
           write_state config next_state;
           Ok updated_request))
+;;
+
+let cancel_request config ~schedule_id =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let state = read_state config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if Schedule_domain.is_terminal request.status || request.status = Running
+      then
+        Error
+          (Invalid_status_transition
+             "only pending, scheduled, or due requests can be cancelled")
+      else
+        let updated_request =
+          { request with Schedule_domain.status = Schedule_domain.Cancelled }
+        in
+        let schedules = replace_schedule state.schedules updated_request in
+        let next_state = bump_state state ~schedules ~grants:state.grants in
+        write_state config next_state;
+        Ok updated_request)
 ;;
 
 let refresh_due config ~now =

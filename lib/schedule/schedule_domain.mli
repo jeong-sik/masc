@@ -33,6 +33,8 @@ type schedule_status =
   | Cancelled
   | Expired
 
+val all_schedule_statuses : schedule_status list
+
 type schedule_source =
   | Operator_request
   | Automated_request

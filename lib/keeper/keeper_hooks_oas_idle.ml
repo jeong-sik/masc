@@ -24,12 +24,28 @@ let suggest_alternatives ~(allowed_tools : string list)
 
 let includes_tool name tools = List.exists (String.equal name) tools
 
+let schema_visible_name name =
+  match Keeper_tool_visibility_projection.public_alias_for_internal name with
+  | Some public_name -> public_name
+  | None -> name
+
+let schema_visible_keep_order names =
+  names
+  |> List.map schema_visible_name
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+
+let allowed_visible_candidates candidates ~allowed_tools =
+  candidates
+  |> List.filter (fun name -> includes_tool name allowed_tools)
+  |> schema_visible_keep_order
+
 let recovery_hint ~allowed_tools ~tool_names =
   if includes_tool "keeper_tool_search" tool_names then
     Some
       (let code_search =
-         [ "Grep"; "Read"; "Execute" ]
-         |> List.filter (fun name -> includes_tool name allowed_tools)
+         allowed_visible_candidates
+           [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
+           ~allowed_tools
        in
        let next =
          match code_search with
@@ -106,8 +122,9 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     in
     let preferred =
       if includes_tool "keeper_tool_search" tool_names then
-        [ "Grep"; "Read"; "Execute"; "keeper_stay_silent" ]
-        |> List.filter (fun name -> includes_tool name allowed_tools)
+        allowed_visible_candidates
+          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute"; "keeper_stay_silent" ]
+          ~allowed_tools
       else if includes_tool "keeper_tools_list" tool_names
               && includes_tool "keeper_surface_read" allowed_tools
       then
@@ -117,6 +134,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     in
     Keeper_types_profile_toml_normalizers.dedupe_keep_order
       (preferred @ base)
+    |> schema_visible_keep_order
     |> List.filteri (fun i _ -> i < 5)
   in
   let alt_str = match alternatives with

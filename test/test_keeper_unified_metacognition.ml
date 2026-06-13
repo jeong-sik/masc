@@ -172,6 +172,51 @@ let test_on_idle_tool_search_loop_suggests_code_search () =
             (Agent_sdk.Hooks.classify_decision other)))
 ;;
 
+let test_on_idle_tool_search_loop_maps_internal_file_tools () =
+  let decision =
+    HK.on_idle_decision_with_threshold
+      ~skip_at:3
+      ~consecutive_idle_turns:1
+      ~allowed_tools:
+        [ "keeper_context_status"
+        ; "keeper_tool_search"
+        ; "tool_search_files"
+        ; "tool_read_file"
+        ; "tool_execute"
+        ; "keeper_stay_silent"
+        ]
+      ~tool_names:[ "keeper_tool_search" ]
+  in
+  match decision with
+  | Agent_sdk.Hooks.Nudge msg ->
+    check
+      bool
+      "tool_search loop maps internal search_files to Grep"
+      true
+      (contains_substring msg "Available alternatives: Grep, Read, Execute");
+    check
+      bool
+      "tool_search loop maps internal ids in source hint"
+      true
+      (contains_substring msg "switch to Grep then Read then Execute");
+    check
+      bool
+      "tool_search loop does not expose internal search_files"
+      false
+      (contains_substring msg "tool_search_files");
+    check
+      bool
+      "tool_search loop does not expose internal execute"
+      false
+      (contains_substring msg "tool_execute")
+  | other ->
+    fail
+      (Printf.sprintf
+         "expected Nudge, got %s"
+         (Agent_sdk.Hooks.decision_kind_to_string
+            (Agent_sdk.Hooks.classify_decision other)))
+;;
+
 let test_on_idle_final_warning_before_skip () =
   let decision =
     HK.on_idle_decision_with_threshold
@@ -277,6 +322,10 @@ let () =
             "on_idle tool_search loop suggests code search"
             `Quick
             test_on_idle_tool_search_loop_suggests_code_search
+        ; test_case
+            "on_idle tool_search loop maps internal file tools"
+            `Quick
+            test_on_idle_tool_search_loop_maps_internal_file_tools
         ; test_case
             "on_idle final warning before skip"
             `Quick

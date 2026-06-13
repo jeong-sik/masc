@@ -658,5 +658,26 @@ let claim_next config ~agent_name =
     Returns list of (task_id, assignee) pairs that were released. *)
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
-  []
+  match Workspace_backlog.read_backlog_r config with
+  | Error _ -> []
+  | Ok backlog ->
+    let now = Unix.time () in
+    let stale_tasks =
+      List.filter_map
+        (fun (task : Masc_domain.task) ->
+           match task.task_status with
+           | Claimed { assignee; claimed_at }
+           | InProgress { assignee; started_at=claimed_at } ->
+             (match parse_iso_time_opt claimed_at with
+              | Some t when now -. t > ttl_seconds -> Some (task.id, assignee)
+              | _ -> None)
+           | _ -> None)
+        backlog.tasks
+    in
+    List.iter
+      (fun (task_id, assignee) ->
+         let _ = Workspace_task.force_release_task_r config ~agent_name:assignee ~task_id () in
+         ())
+      stale_tasks;
+    stale_tasks
 ;;

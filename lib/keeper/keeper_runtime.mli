@@ -41,6 +41,27 @@ type boot_meta_resolution = {
 }
 (** Result of [load_or_materialize_boot_meta]. *)
 
+type boot_meta_failure = {
+  keeper_name : string;
+  base_path : string;
+  reason : string;
+  error : string;
+  recorded_at : string;
+  recorded_at_unix : float;
+}
+(** Last boot/materialization failure observed for one keeper in one
+    workspace.  Kept in memory so health surfaces the current supervisor
+    blocker without scraping logs. *)
+
+val boot_meta_failure_reason : string -> string
+(** Classify a raw boot/materialization error into a stable reason label. *)
+
+val boot_meta_failure_for :
+  base_path:string -> name:string -> boot_meta_failure option
+(** Lookup the last boot/materialization failure for [name] in [base_path], if
+    the current process has observed one.  Cleared when the keeper loads or
+    materializes successfully. *)
+
 type autoboot_exclusion = {
   keeper_name : string;
   reason : string;

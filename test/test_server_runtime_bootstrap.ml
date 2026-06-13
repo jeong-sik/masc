@@ -1271,6 +1271,23 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
              |> to_int);
           Alcotest.(check int) "health exposes blocked shortfall" 2
             (fleet_safety |> member "blocked_count" |> to_int);
+          Alcotest.(check (list string)) "health names blocked keepers"
+            [ "capacity-paused"; "example" ]
+            (fleet_safety |> member "blocked_keeper_names" |> to_list
+             |> List.map to_string);
+          let blocked_detail name =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find (fun row -> row |> member "name" |> to_string = name)
+          in
+          Alcotest.(check string) "health explains paused blocked keeper"
+            "paused"
+            (blocked_detail "capacity-paused" |> member "reason" |> to_string);
+          Alcotest.(check string) "health explains config-only blocked keeper"
+            "not_running"
+            (blocked_detail "example" |> member "reason" |> to_string);
+          Alcotest.(check string) "health suggests paused action"
+            "resume_or_leave_paused"
+            (blocked_detail "capacity-paused" |> member "action" |> to_string);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks target-capacity blocker"

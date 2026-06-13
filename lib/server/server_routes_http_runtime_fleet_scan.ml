@@ -377,6 +377,8 @@ let empty_keeper_phase_counts =
 type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
+  ; recovering_names : string list
+  ; executable_names : string list
   }
 
 let keeper_phase_snapshot ?base_path () =
@@ -384,33 +386,44 @@ let keeper_phase_snapshot ?base_path () =
   |> List.fold_left
        (fun acc (entry : Keeper_registry.registry_entry) ->
           let counts = acc.counts in
-          let executable =
-            if Keeper_state_machine.can_execute_turn entry.phase then
-              counts.executable + 1
-            else counts.executable
+          let can_execute = Keeper_state_machine.can_execute_turn entry.phase in
+          let executable = if can_execute then counts.executable + 1 else counts.executable in
+          let executable_names =
+            if can_execute then entry.name :: acc.executable_names
+            else acc.executable_names
           in
           (* Keepers in Failing phase with restart budget remaining are
              expected to recover on the next heartbeat cycle — count them
              separately so fleet safety does not report a spurious shortfall
              during transient failures (issue #17218). *)
-          let recovering =
+          let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when entry.conditions.restart_budget_remaining ->
-              counts.recovering + 1
-            | _ -> counts.recovering
+              when entry.conditions.restart_budget_remaining -> true
+            | _ -> false
+          in
+          let recovering =
+            if is_recovering then counts.recovering + 1 else counts.recovering
+          in
+          let recovering_names =
+            if is_recovering then entry.name :: acc.recovering_names
+            else acc.recovering_names
           in
           match entry.phase with
           | Keeper_state_machine.Running ->
             {
               counts = { counts with running = counts.running + 1; executable };
               running_names = entry.name :: acc.running_names;
+              recovering_names;
+              executable_names;
             }
           | Keeper_state_machine.Failing ->
             {
               acc with
               counts =
                 { counts with failing = counts.failing + 1; recovering; executable };
+              recovering_names;
+              executable_names;
             }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
@@ -423,16 +436,112 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
           | Keeper_state_machine.Zombie ->
-            { acc with counts = { counts with executable } })
-       { counts = empty_keeper_phase_counts; running_names = [] }
+            { acc with counts = { counts with executable }; executable_names })
+       {
+         counts = empty_keeper_phase_counts;
+         running_names = [];
+         recovering_names = [];
+         executable_names = [];
+       }
   |> fun snapshot ->
-  { snapshot with running_names = sorted_unique_strings snapshot.running_names }
+  {
+    snapshot with
+    running_names = sorted_unique_strings snapshot.running_names;
+    recovering_names = sorted_unique_strings snapshot.recovering_names;
+    executable_names = sorted_unique_strings snapshot.executable_names;
+  }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
+
+let string_set_of_list values =
+  List.fold_left (fun acc value -> String_set.add value acc) String_set.empty values
+
+let json_string_list_field field = function
+  | `Assoc fields -> (
+      match List.assoc_opt field fields with
+      | Some (`List values) ->
+          values
+          |> List.filter_map (function
+               | `String value -> Some value
+               | _ -> None)
+          |> sorted_unique_strings
+      | _ -> [])
+  | _ -> []
+
+let blocked_keeper_action = function
+  | "paused" -> "resume_or_leave_paused"
+  | "meta_read_error" -> "repair_keeper_meta_file"
+  | "not_bootable" -> "add_keeper_toml_or_disable_stale_autoboot_meta"
+  | "goal_required" -> "add_goal_or_goal_horizon_to_keeper_toml"
+  | "sandbox_profile_required" -> "add_sandbox_profile_to_keeper_toml"
+  | "sandbox_settings_invalid" -> "repair_keeper_sandbox_settings"
+  | "sandbox_preflight_failed" -> "inspect_keeper_sandbox_preflight"
+  | "keeper_capacity_limit" -> "raise_capacity_or_stop_other_keepers"
+  | "invalid_profile" | "config_parse_failed" -> "repair_keeper_toml_config"
+  | "missing_meta" -> "run_keeper_up_or_recreate_meta"
+  | "bootstrap_failed" -> "inspect_keeper_autoboot_logs"
+  | "not_running" -> "start_or_recover_keeper"
+  | _ -> "inspect_keeper_autoboot_logs"
+
+let blocked_keeper_detail_json
+    ?base_path
+    ~bootable_set
+    ~capacity_set
+    ~paused_set
+    ~read_error_set
+    name =
+  let is_paused = String_set.mem name paused_set in
+  let is_bootable = String_set.mem name bootable_set in
+  let is_capacity = String_set.mem name capacity_set in
+  let has_read_error = String_set.mem name read_error_set in
+  let last_failure =
+    match base_path with
+    | None -> None
+    | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
+  in
+  let reason =
+    if is_paused then "paused"
+    else if has_read_error then "meta_read_error"
+    else
+      match last_failure with
+      | Some failure -> failure.Keeper_runtime.reason
+      | None ->
+          if not is_bootable then "not_bootable"
+          else if not is_capacity then "not_running"
+          else "unknown"
+  in
+  let last_failure_fields =
+    match last_failure with
+    | None ->
+        [
+          ("last_bootstrap_reason", `Null);
+          ("last_bootstrap_error", `Null);
+          ("last_bootstrap_recorded_at", `Null);
+        ]
+    | Some failure ->
+        [
+          ("last_bootstrap_reason", `String failure.Keeper_runtime.reason);
+          ("last_bootstrap_error", `String failure.Keeper_runtime.error);
+          ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
+        ]
+  in
+  `Assoc
+    ([
+       ("name", `String name);
+       ("reason", `String reason);
+       ("action", `String (blocked_keeper_action reason));
+       ("bootable", `Bool is_bootable);
+       ("reaction_capacity", `Bool is_capacity);
+       ("paused", `Bool is_paused);
+       ("meta_read_error", `Bool has_read_error);
+     ]
+     @ last_failure_fields)
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
+    ?base_path
+    ?reaction_capacity_names
     ~phase_counts
     ~paused_keepers_json
     () =
@@ -456,6 +565,38 @@ let keeper_fleet_safety_health_json
   in
   let bootable_count = List.length bootable_names in
   let target_count = List.length autoboot_scan.autoboot_names in
+  let reaction_capacity_names =
+    match reaction_capacity_names with
+    | Some names -> sorted_unique_strings names
+    | None -> running_keeper_names ?base_path ()
+  in
+  let bootable_set = string_set_of_list bootable_names in
+  let capacity_set = string_set_of_list reaction_capacity_names in
+  let paused_set =
+    paused_keepers_json
+    |> json_string_list_field "autoboot_enabled_names"
+    |> string_set_of_list
+  in
+  let read_error_set =
+    autoboot_scan.read_errors
+    |> List.map fst
+    |> string_set_of_list
+  in
+  let blocked_keeper_names =
+    autoboot_scan.autoboot_names
+    |> List.filter (fun name -> not (String_set.mem name capacity_set))
+    |> sorted_unique_strings
+  in
+  let blocked_keeper_reasons =
+    blocked_keeper_names
+    |> List.map
+         (blocked_keeper_detail_json
+            ?base_path
+            ~bootable_set
+            ~capacity_set
+            ~paused_set
+            ~read_error_set)
+  in
   let minimum_running_fibers =
     if target_count <= 1 then target_count else 2
   in
@@ -551,6 +692,9 @@ let keeper_fleet_safety_health_json
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_count", `Int blocked_count
     ; "blocked_keepers", `Int blocked_count
+    ; ( "blocked_keeper_names"
+      , `List (List.map (fun name -> `String name) blocked_keeper_names) )
+    ; "blocked_keeper_reasons", `List blocked_keeper_reasons
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers

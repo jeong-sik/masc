@@ -40,6 +40,87 @@ type boot_meta_resolution = {
   materialized : bool;
 }
 
+type boot_meta_failure = {
+  keeper_name : string;
+  base_path : string;
+  reason : string;
+  error : string;
+  recorded_at : string;
+  recorded_at_unix : float;
+}
+
+let boot_meta_failures : (string, boot_meta_failure) Hashtbl.t =
+  Hashtbl.create 32
+let boot_meta_failures_mu = Stdlib.Mutex.create ()
+
+let boot_meta_failure_key ~base_path ~name = base_path ^ "\000" ^ name
+
+let with_boot_meta_failures_lock f =
+  Stdlib.Mutex.lock boot_meta_failures_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock boot_meta_failures_mu) f
+
+let boot_meta_failure_reason (error : string) : string =
+  let error_lc = String.lowercase_ascii error in
+  let contains needle = String_util.contains_substring error_lc needle in
+  if contains "goal is required" then "goal_required"
+  else if contains "sandbox_profile is required" then "sandbox_profile_required"
+  else if contains "allowed_paths" then "sandbox_settings_invalid"
+  else if contains "preflight" then "sandbox_preflight_failed"
+  else if contains "max active keepers" || contains "max active reached" then
+    "keeper_capacity_limit"
+  else if contains "invalid keeper profile" || contains "invalid profile.runtime_id" then
+    "invalid_profile"
+  else if contains "parse" || contains "syntax" then "config_parse_failed"
+  else if contains "no persistent meta" then "missing_meta"
+  else "bootstrap_failed"
+
+let record_boot_meta_failure ~base_path ~name ~error =
+  let failure =
+    {
+      keeper_name = name;
+      base_path;
+      reason = boot_meta_failure_reason error;
+      error;
+      recorded_at = now_iso ();
+      recorded_at_unix = Time_compat.now ();
+    }
+  in
+  with_boot_meta_failures_lock (fun () ->
+      Hashtbl.replace boot_meta_failures
+        (boot_meta_failure_key ~base_path ~name)
+        failure)
+
+let clear_boot_meta_failure ~base_path ~name =
+  with_boot_meta_failures_lock (fun () ->
+      Hashtbl.remove boot_meta_failures
+        (boot_meta_failure_key ~base_path ~name))
+
+let clear_boot_meta_failures_for_base_path base_path =
+  with_boot_meta_failures_lock (fun () ->
+      let keys =
+        Hashtbl.fold
+          (fun key (failure : boot_meta_failure) acc ->
+            if String.equal failure.base_path base_path then key :: acc else acc)
+          boot_meta_failures
+          []
+      in
+      List.iter (Hashtbl.remove boot_meta_failures) keys)
+
+let boot_meta_failure_for ~base_path ~name =
+  with_boot_meta_failures_lock (fun () ->
+      Hashtbl.find_opt boot_meta_failures
+        (boot_meta_failure_key ~base_path ~name))
+
+let remember_boot_meta_result ctx name result =
+  let base_path = ctx.config.base_path in
+  match result with
+  | Ok _ ->
+      clear_boot_meta_failure ~base_path ~name;
+      result
+  | Error error ->
+      record_boot_meta_failure ~base_path ~name ~error;
+      result
+
 type autoboot_exclusion = {
   keeper_name : string;
   reason : string;
@@ -128,6 +209,25 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
+let first_non_empty_goal_candidate candidates =
+  candidates
+  |> List.find_map (function
+       | None -> None
+       | Some raw ->
+         let value = normalize_goal_horizon_text raw in
+         if value = "" then None else Some value)
+
+let declarative_materialization_goal
+    (defaults : Keeper_types_profile.keeper_profile_defaults) =
+  first_non_empty_goal_candidate
+    [
+      defaults.goal;
+      defaults.short_goal;
+      defaults.mid_goal;
+      defaults.long_goal;
+      defaults.will;
+      defaults.instructions;
+    ]
 
 let invalid_profile_defaults_error ~keeper_name detail =
   if String_util.contains_substring detail "runtime_id" then
@@ -185,7 +285,17 @@ let ensure_keeper_meta config name =
       apply_default defaults.social_model meta.social_model
       |> Keeper_social_model.normalize_social_model in
     (* --- Personality --- *)
-    let target_goal = apply_default defaults.goal meta.goal in
+    let target_goal =
+      match defaults.goal with
+      | Some goal -> goal
+      | None -> (
+          match normalize_goal_horizon_text meta.goal with
+          | "" -> (
+              match declarative_materialization_goal defaults with
+              | Some derived -> derived
+              | None -> meta.goal)
+          | normalized -> normalized)
+    in
     let target_short_goal = apply_default defaults.short_goal meta.short_goal in
     let target_mid_goal = apply_default defaults.mid_goal meta.mid_goal in
     let target_long_goal = apply_default defaults.long_goal meta.long_goal in
@@ -336,39 +446,58 @@ let ensure_keeper_meta config name =
     Error (Printf.sprintf "no persistent meta for %s — run keeper_up to initialize" name)
   | Error msg -> Error msg
 
+let declarative_materialization_args name =
+  let fields = [ ("name", `String name) ] in
+  let fields =
+    match load_keeper_profile_defaults_result name with
+    | Error _ -> fields
+    | Ok defaults -> (
+        match declarative_materialization_goal defaults with
+        | None -> fields
+        | Some goal ->
+            Log.Keeper.info
+              "bootstrapping declarative keeper %s with derived goal from TOML defaults"
+              name;
+            ("goal", `String goal) :: fields)
+  in
+  `Assoc (List.rev fields)
+
 let load_or_materialize_boot_meta (ctx : _ context) name
     : (boot_meta_resolution, string) result =
-  match ensure_keeper_meta ctx.config name with
-  | Ok meta -> Ok { meta; materialized = false }
-  | Error original_error -> (
-      match Config_dir_resolver.keeper_toml_path_opt name with
-      | None -> Error original_error
-      | Some toml_path ->
-          Log.Keeper.info
-            "bootstrapping declarative keeper %s from %s"
-            name toml_path;
-          let result =
-            Keeper_turn.handle_keeper_up ctx
-              (`Assoc [ ("name", `String name) ])
-          in
-          if not (tool_result_success result) then
-            Error
-              (Printf.sprintf
-                 "failed to materialize declarative keeper %s from %s: %s"
-                 name toml_path (tool_result_body result))
-          else
-            match read_meta ctx.config name with
-            | Ok (Some meta) -> Ok { meta; materialized = true }
-            | Ok None ->
-                Error
-                  (Printf.sprintf
-                     "materialized declarative keeper %s from %s but no meta was written"
-                     name toml_path)
-            | Error msg ->
-                Error
-                  (Printf.sprintf
-                     "materialized declarative keeper %s from %s but failed to reload meta: %s"
-                     name toml_path msg))
+  let result =
+    match ensure_keeper_meta ctx.config name with
+    | Ok meta -> Ok { meta; materialized = false }
+    | Error original_error -> (
+        match Config_dir_resolver.keeper_toml_path_opt name with
+        | None -> Error original_error
+        | Some toml_path ->
+            Log.Keeper.info
+              "bootstrapping declarative keeper %s from %s"
+              name toml_path;
+            let result =
+              Keeper_turn.handle_keeper_up ctx
+                (declarative_materialization_args name)
+            in
+            if not (tool_result_success result) then
+              Error
+                (Printf.sprintf
+                   "failed to materialize declarative keeper %s from %s: %s"
+                   name toml_path (tool_result_body result))
+            else
+              match ensure_keeper_meta ctx.config name with
+              | Ok meta -> Ok { meta; materialized = true }
+              | Error msg when String_util.contains_substring msg "no persistent meta" ->
+                  Error
+                    (Printf.sprintf
+                       "materialized declarative keeper %s from %s but no meta was written"
+                       name toml_path)
+              | Error msg ->
+                  Error
+                    (Printf.sprintf
+                       "materialized declarative keeper %s from %s but failed to reload meta: %s"
+                       name toml_path msg))
+  in
+  remember_boot_meta_result ctx name result
 
 type keeper_bootstrap_stats = {
   scanned: int;
@@ -747,4 +876,5 @@ let stop_keepalive ?base_path name =
 
 let reset_test_state base_path =
   stop_supervisor_sweep base_path;
+  clear_boot_meta_failures_for_base_path base_path;
   Hashtbl.remove existing_keepalive_bootstrap_done base_path

@@ -1304,6 +1304,7 @@
 (include stanzas/test_channel_gate_metrics.inc)
 
 (include stanzas/test_channel_gate_discord_state_in_process.inc)
+
 (include stanzas/test_gate_surface.inc)
 
 (include stanzas/test_discord_gateway_state.inc)
@@ -1314,6 +1315,8 @@
 
 (include stanzas/test_discord_rest_client.inc)
 
+(include stanzas/test_discord_wss_writer.inc)
+
 (include stanzas/test_keeper_chat_discord.inc)
 
 (include stanzas/test_ci_run_tests_script.inc)
@@ -1323,7 +1326,9 @@
 (include stanzas/test_continuity_forward_filter.inc)
 
 (include stanzas/test_otel_runtime_observables.inc)
+
 (include stanzas/test_otel_zero_fill.inc)
+
 (include stanzas/test_workspace_bootstrap.inc)
 
 (include stanzas/test_workspace_base_path_cache.inc)
@@ -1471,6 +1476,7 @@
 (include stanzas/test_keeper_execution_join.inc)
 
 (include stanzas/test_keeper_msg_async_path_traversal.inc)
+
 (include stanzas/test_keeper_msg_cancel.inc)
 
 (include stanzas/test_turn_record.inc)
@@ -1874,9 +1880,7 @@
  (name test_rfc_0085_pr4_tool_library_proof_store)
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep)
- (deps
-  ../lib/tool_library.ml
-  ../lib/cdal_runtime/proof_store.ml))
+ (deps ../lib/tool_library.ml ../lib/cdal_runtime/proof_store.ml))
 
 ; Verify the shared MCP dispatch finalizer fires typed observers and applies
 ; the result transformer before observers run.
@@ -1912,23 +1916,22 @@
 ; removed.
 
 (test
-  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
-  (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
-  (libraries alcotest ast_grep)
-  (deps
-   (source_tree ../lib)
-   (source_tree ../bin)))
+ (name test_rfc_0085_pr8_config_dir_resolver_host_config)
+ (modules test_rfc_0085_pr8_config_dir_resolver_host_config)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))
 
 ; RFC-0085 PR-7 — Retroactive AST test for retired_pg_env_keys +
 ; clear_retired_pg_envs deletion (#15468 user-identified legacy;
 ; shipped without a regression test; restored by #15495).
 
 (test
-  (name test_rfc_0085_pr7_retired_pg_envs_purge)
-  (modules test_rfc_0085_pr7_retired_pg_envs_purge)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/server/server_runtime_bootstrap.ml))
+ (name test_rfc_0085_pr7_retired_pg_envs_purge)
+ (modules test_rfc_0085_pr7_retired_pg_envs_purge)
+ (libraries alcotest ast_grep)
+ (deps ../lib/server/server_runtime_bootstrap.ml))
 
 ; RFC-0086 — keeper namespace bulk promotion invariant.
 ; Pins G-A (Phase 2.A wave 1, #15474): every .ml/.mli under
@@ -1955,117 +1958,115 @@
 ; restored by #15495).
 
 (test
-  (name test_rfc_0085_pr18_execution_surfaces_rename)
-  (modules test_rfc_0085_pr18_execution_surfaces_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/server/server_dashboard_http_execution_surfaces.ml
-   ../lib/server/server_dashboard_http_namespace_truth.ml
-   ../lib/server/server_dashboard_http_namespace_truth_support.ml))
+ (name test_rfc_0085_pr18_execution_surfaces_rename)
+ (modules test_rfc_0085_pr18_execution_surfaces_rename)
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/server/server_dashboard_http_execution_surfaces.ml
+  ../lib/server/server_dashboard_http_namespace_truth.ml
+  ../lib/server/server_dashboard_http_namespace_truth_support.ml))
 
 ; RFC-0085 PR-17 — Retroactive AST test for 4 dead deletion + 2 rename
 ; (#15485 shipped without a regression test; restored by #15495).
 
 (test
-  (name test_rfc_0085_pr17_dead_purge_and_rename)
-  (modules test_rfc_0085_pr17_dead_purge_and_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/workspace/workspace_utils_paths_backend.ml
-   ../lib/server_base_path_diagnostics.ml
-   ../lib/dashboard/dashboard_briefing.ml
-   ../lib/gate/channel_gate_metrics.ml))
+ (name test_rfc_0085_pr17_dead_purge_and_rename)
+ (modules test_rfc_0085_pr17_dead_purge_and_rename)
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/workspace/workspace_utils_paths_backend.ml
+  ../lib/server_base_path_diagnostics.ml
+  ../lib/dashboard/dashboard_briefing.ml
+  ../lib/gate/channel_gate_metrics.ml))
 
 ; RFC-0085 PR-16 — Retroactive AST test for dashboard_http_core rename
 ; (#15484 shipped without a regression test; restored by #15495).
 
 (test
-  (name test_rfc_0085_pr16_dashboard_http_core_rename)
-  (modules test_rfc_0085_pr16_dashboard_http_core_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/server/server_dashboard_http_core.ml))
+ (name test_rfc_0085_pr16_dashboard_http_core_rename)
+ (modules test_rfc_0085_pr16_dashboard_http_core_rename)
+ (libraries alcotest ast_grep)
+ (deps ../lib/server/server_dashboard_http_core.ml))
 
 ; RFC-0085 PR-15 — Retroactive AST test for tool_schemas_inline rename
 ; (#15483 shipped without a regression test; restored by #15495).
 
 (test
-  (name test_rfc_0085_pr15_tool_schemas_inline_rename)
-  (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/tool_schemas/tool_schemas_inline.ml
-   ../lib/tool_schemas/tool_schemas_inline_infra.ml))
+ (name test_rfc_0085_pr15_tool_schemas_inline_rename)
+ (modules test_rfc_0085_pr15_tool_schemas_inline_rename)
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/tool_schemas/tool_schemas_inline.ml
+  ../lib/tool_schemas/tool_schemas_inline_infra.ml))
 
 ; RFC-0085 PR-14 — dispatch / dispatch_structured / guarded_dispatch
 ; 3-step chain inlined; guarded_dispatch is the only dispatch entry.
 
 (test
-  (name test_rfc_0085_pr14_dispatch_inline)
-  (modules test_rfc_0085_pr14_dispatch_inline)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/tool/tool_dispatch.ml
-   ../lib/keeper/keeper_tool_registered_runtime.ml))
+ (name test_rfc_0085_pr14_dispatch_inline)
+ (modules test_rfc_0085_pr14_dispatch_inline)
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/tool/tool_dispatch.ml
+  ../lib/keeper/keeper_tool_registered_runtime.ml))
 
 ; RFC-0085 PR-13 — Underscore-prefix audit: 1 truly-dead deletion +
 ; 8 active rename across 7 modules.
 
 (test
-  (name test_rfc_0085_pr13_underscore_rename)
-  (modules test_rfc_0085_pr13_underscore_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/governance_pipeline_risk.ml
-   ../lib/config_dir_resolver/config_dir_resolver.ml
-   ../lib/keeper/keeper_tool_surface_ops.ml
-   ../lib/board_tool_adapter/board_tool_cache.ml
-   ../lib/tool_workspace.ml))
+ (name test_rfc_0085_pr13_underscore_rename)
+ (modules test_rfc_0085_pr13_underscore_rename)
+ (libraries alcotest ast_grep)
+ (deps
+  ../lib/governance_pipeline_risk.ml
+  ../lib/config_dir_resolver/config_dir_resolver.ml
+  ../lib/keeper/keeper_tool_surface_ops.ml
+  ../lib/board_tool_adapter/board_tool_cache.ml
+  ../lib/tool_workspace.ml))
 
 ; RFC-0085 PR-12 — Tool_spec list bindings renamed (drop misleading
 ; _ prefix that signalled "unused" in OCaml but was wrong because the
 ; bindings are actively used by List.mem in the Tool_spec.register loop).
 
 (test
-  (name test_rfc_0085_pr12_tool_spec_rename)
-  (modules test_rfc_0085_pr12_tool_spec_rename)
-  (libraries alcotest ast_grep)
-  (deps
-   ../lib/tool_workspace.ml))
+ (name test_rfc_0085_pr12_tool_spec_rename)
+ (modules test_rfc_0085_pr12_tool_spec_rename)
+ (libraries alcotest ast_grep)
+ (deps ../lib/tool_workspace.ml))
 
 ; RFC-0085 PR-11 — Env_config_core deprecation mechanism removed.
 
 (test
-  (name test_rfc_0085_pr11_deprecation_purge)
-  (modules test_rfc_0085_pr11_deprecation_purge)
-  (libraries alcotest ast_grep)
-  (deps
-   (source_tree ../lib)
-   (source_tree ../bin)))
+ (name test_rfc_0085_pr11_deprecation_purge)
+ (modules test_rfc_0085_pr11_deprecation_purge)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))
 
 ; RFC-0085 PR-10 — home + assets_dir env readers absorbed into
 ; Host_config.t; Env_config_core.assets_dir_opt fully removed,
 ; home_dir_opt demoted to file-private.
 
 (test
-  (name test_rfc_0085_pr10_home_assets_purge)
-  (modules test_rfc_0085_pr10_home_assets_purge)
-  (libraries alcotest ast_grep masc.host_config)
-  (deps
-   (source_tree ../lib)
-   (source_tree ../bin)))
+ (name test_rfc_0085_pr10_home_assets_purge)
+ (modules test_rfc_0085_pr10_home_assets_purge)
+ (libraries alcotest ast_grep masc.host_config)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))
 
 ; RFC-0085 PR-9 — Env_config_core.base_path_opt + base_path_raw_opt
 ; public-surface purge; 9 caller migrate to Host_config.from_env;
 ; Host_config.t gains base_path (normalised) + base_path_raw fields.
 
 (test
-  (name test_rfc_0085_pr9_base_path_opt_purge)
-  (modules test_rfc_0085_pr9_base_path_opt_purge)
-  (libraries alcotest ast_grep)
-  (deps
-   (source_tree ../lib)
-   (source_tree ../bin)))
+ (name test_rfc_0085_pr9_base_path_opt_purge)
+ (modules test_rfc_0085_pr9_base_path_opt_purge)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))
 
 ; Regression for local-overrotation: Execute / tool_execute must not route
 ; sandbox_profile=local through Docker merely because DockerPlayground is on.

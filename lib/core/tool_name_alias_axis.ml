@@ -13,7 +13,6 @@ let public_aliases =
   ; { public_name = "Grep"; internal_name = "tool_search_files" }
   ; { public_name = "Search"; internal_name = "tool_search_files" }
   ; { public_name = "search_files"; internal_name = "tool_search_files" }
-  ; { public_name = "Glob"; internal_name = "tool_search_files" }
   ; { public_name = "WebSearch"; internal_name = "masc_web_search" }
   ; { public_name = "Write"; internal_name = "tool_write_file" }
   ]

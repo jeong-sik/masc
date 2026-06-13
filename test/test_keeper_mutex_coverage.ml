@@ -6,7 +6,7 @@ let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
 let wait_for_done request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
-    | Some ({ status = Done _; _ } as entry) -> entry
+    | Keeper_msg_async.Found ({ status = Done _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not complete" request_id)
     | _ ->
@@ -19,7 +19,7 @@ let wait_for_done request_id =
 let wait_for_done_with_clock clock request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
-    | Some ({ status = Done _; _ } as entry) -> entry
+    | Keeper_msg_async.Found ({ status = Done _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not complete" request_id)
     | _ ->
@@ -32,7 +32,7 @@ let wait_for_done_with_clock clock request_id =
 let wait_for_running request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
-    | Some ({ status = Running; _ } as entry) -> entry
+    | Keeper_msg_async.Found ({ status = Running; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not start" request_id)
     | _ ->
@@ -45,7 +45,7 @@ let wait_for_running request_id =
 let wait_for_lost request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
-    | Some ({ status = Lost _; _ } as entry) -> entry
+    | Keeper_msg_async.Found ({ status = Lost _; _ } as entry) -> entry
     | _ when remaining <= 0 ->
       failwith (Printf.sprintf "request %s did not become lost" request_id)
     | _ ->
@@ -156,13 +156,14 @@ let test_keeper_msg_async_recovers_done_from_disk () =
      | _ -> false);
   Keeper_msg_async.For_testing.forget request_id;
   match Keeper_msg_async.poll ~base_path request_id with
-  | Some { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
     Alcotest.(check bool) "body persisted" true (String.length body > 0)
-  | Some entry ->
+  | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered done, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | None -> Alcotest.fail "expected persisted request"
+  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+    Alcotest.fail "expected persisted request"
 ;;
 
 let test_keeper_msg_async_marks_recovered_inflight_lost () =
@@ -185,21 +186,23 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   ignore (wait_for_running request_id : Keeper_msg_async.entry);
   Keeper_msg_async.For_testing.forget request_id;
   match Keeper_msg_async.poll ~base_path request_id with
-  | Some { Keeper_msg_async.status = Lost { reason }; _ } ->
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Lost { reason }; _ } ->
     Alcotest.(check bool) "lost reason retained" true (String.length reason > 0);
     Keeper_msg_async.For_testing.forget request_id;
     (match Keeper_msg_async.poll ~base_path request_id with
-     | Some { Keeper_msg_async.status = Lost _; _ } -> ()
-     | Some entry ->
+     | Keeper_msg_async.Found { Keeper_msg_async.status = Lost _; _ } -> ()
+     | Keeper_msg_async.Found entry ->
        Alcotest.failf
          "expected persisted lost, got %s"
          (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-     | None -> Alcotest.fail "expected persisted lost request")
-  | Some entry ->
+     | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+       Alcotest.fail "expected persisted lost request")
+  | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected recovered lost, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | None -> Alcotest.fail "expected persisted request"
+  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+    Alcotest.fail "expected persisted request"
 ;;
 
 let test_keeper_msg_async_marks_cancelled_worker_lost () =
@@ -284,13 +287,14 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   Eio.Promise.resolve notify_release_late ();
   Eio.Time.sleep clock 0.05;
   match Keeper_msg_async.poll request_id with
-  | Some { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
+  | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = false; body }; _ } ->
     Alcotest.(check string) "late worker result cannot overwrite timeout" timeout_body body
-  | Some entry ->
+  | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected timeout to remain terminal, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
-  | None -> Alcotest.fail "expected timeout request to remain pollable"
+  | Keeper_msg_async.Absent | Keeper_msg_async.Unreadable _ ->
+    Alcotest.fail "expected timeout request to remain pollable"
 ;;
 
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
@@ -334,8 +338,10 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   Alcotest.(check int) "removed stale disk record" 1 removed;
   Alcotest.(check bool) "record file removed" false (Sys.file_exists path);
   match Keeper_msg_async.poll ~base_path request_id with
-  | None -> ()
-  | Some entry ->
+  | Keeper_msg_async.Absent -> ()
+  | Keeper_msg_async.Unreadable reason ->
+    Alcotest.failf "expected stale disk record to be gone, got unreadable: %s" reason
+  | Keeper_msg_async.Found entry ->
     Alcotest.failf
       "expected stale disk record to be gone, got %s"
       (Keeper_msg_async.status_to_string entry.Keeper_msg_async.status)
@@ -359,6 +365,119 @@ let test_keeper_msg_async_rejects_oversized_request_id () =
          "129-char request id rejected"
          None
          (Keeper_msg_async.For_testing.record_path ~base_path ~request_id:too_long))
+;;
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path)
+  then (
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let write_disk_record ~base_path ~request_id content =
+  match Keeper_msg_async.For_testing.record_path ~base_path ~request_id with
+  | None -> Alcotest.fail "expected safe record path"
+  | Some path ->
+    mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path content
+;;
+
+let test_keeper_msg_async_load_record_absent_id () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-absent-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       match
+         Keeper_msg_async.For_testing.load_record
+           ~base_path
+           ~request_id:"kmsg_never_existed_0_0"
+       with
+       | Keeper_msg_async.Absent -> ()
+       | Keeper_msg_async.Found _ -> Alcotest.fail "expected absent, got found"
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.failf "expected absent, got unreadable: %s" reason)
+;;
+
+let test_keeper_msg_async_load_record_corrupt_json_is_unreadable () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-corrupt-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_corrupt_0_0" in
+       write_disk_record ~base_path ~request_id "{ this is not json";
+       (match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+        | Keeper_msg_async.Unreadable reason ->
+          Alcotest.(check bool)
+            "unreadable reason non-empty"
+            true
+            (String.length reason > 0)
+        | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
+        | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent");
+       (* poll must surface the same distinction to callers. *)
+       match Keeper_msg_async.poll ~base_path request_id with
+       | Keeper_msg_async.Unreadable _ -> ()
+       | Keeper_msg_async.Found _ -> Alcotest.fail "expected poll unreadable, got found"
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected poll unreadable, got absent")
+;;
+
+let test_keeper_msg_async_load_record_missing_status_is_unreadable () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-missing-status-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_missing_status_0_0" in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "request_id", `String request_id
+                ; "keeper_name", `String "alpha"
+                ; "submitted_at", `Float 1.0
+                ]));
+       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.(check bool)
+           "reason mentions missing fields"
+           true
+           (contains_substring ~needle:"missing required fields" reason)
+       | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent")
+;;
+
+let test_keeper_msg_async_load_record_unknown_status_is_unreadable () =
+  with_eio_env
+  @@ fun _env ->
+  let base_path = temp_dir "keeper-msg-load-unknown-status-" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+       let request_id = "kmsg_unknown_status_0_0" in
+       write_disk_record
+         ~base_path
+         ~request_id
+         (Yojson.Safe.to_string
+            (`Assoc
+                [ "request_id", `String request_id
+                ; "keeper_name", `String "alpha"
+                ; "status", `String "sideways"
+                ; "submitted_at", `Float 1.0
+                ]));
+       match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+       | Keeper_msg_async.Unreadable reason ->
+         Alcotest.(check bool)
+           "reason mentions unknown status"
+           true
+           (contains_substring ~needle:"unknown status" reason)
+       | Keeper_msg_async.Found _ -> Alcotest.fail "expected unreadable, got found"
+       | Keeper_msg_async.Absent -> Alcotest.fail "expected unreadable, got absent")
 ;;
 
 let test_yield_meter_noops_without_runnable_fiber () =
@@ -445,6 +564,22 @@ let () =
             "oversized request id rejected"
             `Quick
             test_keeper_msg_async_rejects_oversized_request_id
+        ; test_case
+            "load_record absent id is Absent"
+            `Quick
+            test_keeper_msg_async_load_record_absent_id
+        ; test_case
+            "load_record corrupt JSON is Unreadable"
+            `Quick
+            test_keeper_msg_async_load_record_corrupt_json_is_unreadable
+        ; test_case
+            "load_record missing status field is Unreadable"
+            `Quick
+            test_keeper_msg_async_load_record_missing_status_is_unreadable
+        ; test_case
+            "load_record unknown status is Unreadable"
+            `Quick
+            test_keeper_msg_async_load_record_unknown_status_is_unreadable
         ] )
     ; ( "eio_guard"
       , [ test_case

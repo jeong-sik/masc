@@ -30,6 +30,7 @@ type request_status =
   | Pending
   | Assigned of string
   | Completed of verdict
+  | Disputed of string list  (** conflicting verdict submissions from verifiers *)
 
 type verification_request = {
   id: string;
@@ -103,6 +104,20 @@ val pending_for_agent :
   base_path:string ->
   agent:string ->
   verification_request list
+
+(** [list_disputed base_path] returns all requests in [Disputed] status. *)
+val list_disputed :
+  base_path:string ->
+  verification_request list
+
+(** [resolve_dispute ~base_path ~req_id ~verdict] transitions a [Disputed]
+    request back to [Completed] with the given [verdict]. Returns [Error]
+    if the request is not in [Disputed] state. *)
+val resolve_dispute :
+  base_path:string ->
+  req_id:string ->
+  verdict:verdict ->
+  (verification_request, string) result
 
 (** {1 Attribution envelope (Layer 1)}
 

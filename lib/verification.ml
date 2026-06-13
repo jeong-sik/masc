@@ -124,6 +124,7 @@ and request_status =
   | Pending
   | Assigned of string    (** Verifier agent name *)
   | Completed of verdict
+  | Disputed of string list  (** conflicting verdict submissions from verifiers *)
 [@@deriving show]
 
 (** Serialization *)
@@ -137,6 +138,8 @@ let request_status_to_yojson = function
       (match base with
        | `Assoc fields -> `Assoc (("status", `String "completed") :: fields)
        | _ -> `Assoc [("status", `String "completed")])
+  | Disputed agents ->
+      `Assoc [("status", `String "disputed"); ("verifiers", `List (List.map (fun a -> `String a) agents))]
 
 let request_status_of_yojson = function
   | `Assoc fields ->
@@ -160,6 +163,12 @@ let request_status_of_yojson = function
            (match verdict_of_yojson (`Assoc fields) with
             | Ok v -> Ok (Completed v)
             | Error e -> Error e)
+       | Some (`String "disputed") ->
+           (match List.assoc_opt "verifiers" fields with
+            | Some (`List verifiers) ->
+               let names = List.filter_map (function `String n -> Some n | _ -> None) verifiers in
+               Ok (Disputed names)
+            | _ -> Error "disputed status requires 'verifiers' array field")
        | other ->
            let got =
              match other with
@@ -257,7 +266,7 @@ let request_of_yojson = function
            (Json_util.excerpt other))
 
 let request_status_is_actionable = function
-  | Pending | Assigned _ -> true
+  | Pending | Assigned _ | Disputed _ -> true
   | Completed _ -> false
 
 let request_is_actionable (req : verification_request) =
@@ -554,16 +563,35 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
       match validate_cross_agent ~worker:req.worker ~verifier with
       | Error e -> Error e
       | Ok () ->
-          (* Persist the verifier into the record, not just validate it.
-             Before this fix callers that skipped [assign_verifier] left
-             [req.verifier = None] forever, which surfaced as "approved
-             without approver" in the dashboard projection. *)
-          let updated =
-            { req with status = Completed verdict; verifier = Some verifier }
-          in
-          match save_request base_path updated with
-          | Ok _ -> Ok updated
-          | Error e -> Error e
+          match req.status with
+          | Disputed existing ->
+              (* Already in dispute; add new verifier to the list *)
+              let updated = { req with status = Disputed (existing @ [verifier]); verifier = Some verifier } in
+              (match save_request base_path updated with
+               | Ok _ -> Ok updated
+               | Error e -> Error e)
+          | Completed existing_verdict ->
+              if existing_verdict = verdict then
+                (* Same verdict from another verifier — keep existing completion *)
+                Ok req
+              else
+                (* Conflicting verdict — enter dispute resolution *)
+                let existing_verifier = Option.value ~default:"unknown" req.verifier in
+                let updated = { req with status = Disputed [existing_verifier; verifier]; verifier = Some verifier } in
+                (match save_request base_path updated with
+                 | Ok _ -> Ok updated
+                 | Error e -> Error e)
+          | Pending | Assigned _ ->
+              (* Persist the verifier into the record, not just validate it.
+                 Before this fix callers that skipped [assign_verifier] left
+                 [req.verifier = None] forever, which surfaced as "approved
+                 without approver" in the dashboard projection. *)
+              let updated =
+                { req with status = Completed verdict; verifier = Some verifier }
+              in
+              match save_request base_path updated with
+              | Ok _ -> Ok updated
+              | Error e -> Error e
 
 (* Marker verifier recorded when auto_verify transitions a request to
    Completed without a human/LLM judge. Keeps approved_by non-null in the
@@ -599,7 +627,7 @@ let pending_for_agent ~base_path ~agent =
            | Some v -> String.equal v agent
            | None -> not (String.equal req.worker agent))
       | Assigned v -> String.equal v agent
-      | Completed _ -> false)
+      | Completed _ | Disputed _ -> false)
 
 (* --- Attribution envelope conversion (Layer 1) ---
    Verification is hybrid: Schema_match / Contains / Not_contains are Det
@@ -651,8 +679,30 @@ let evidence_of_request (req : verification_request) : Yojson.Safe.t =
 
 let attribution_of_request (req : verification_request) : Attribution.t option =
   match req.status with
-  | Pending | Assigned _ -> None
+  | Pending | Assigned _ | Disputed _ -> None
   | Completed verdict ->
     let origin = origin_of_criteria req.criteria in
     let evidence = evidence_of_request req in
     Some (to_attribution ~origin ~evidence verdict)
+
+(** List all verification requests currently in dispute. *)
+let list_disputed ~base_path =
+  list_requests base_path
+  |> List.filter (fun req ->
+      match req.status with
+      | Disputed _ -> true
+      | _ -> false)
+
+(** Resolve a disputed request by adopting the given verdict,
+    transitioning it back to Completed. *)
+let resolve_dispute ~base_path ~req_id ~verdict =
+  match load_request base_path req_id with
+  | Error e -> Error e
+  | Ok req ->
+      match req.status with
+      | Disputed _ ->
+          let updated = { req with status = Completed verdict } in
+          (match save_request base_path updated with
+           | Ok _ -> Ok updated
+           | Error e -> Error e)
+      | _ -> Error "Request is not in disputed state"

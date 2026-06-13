@@ -524,6 +524,22 @@ let test_reject_reason_describes_mixed_non_progress_response () =
     true
     (contains ~needle:"image_count=1" reason)
 
+let test_sse_event_progress_kind_classifies_known_deltas () =
+  let open Agent_sdk.Types in
+  let kind event = Masc.Keeper_agent_run_turn_helpers.sse_event_progress_kind event in
+  Alcotest.(check (option string))
+    "text delta"
+    (Some "sse_text_delta")
+    (kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
+  Alcotest.(check (option string))
+    "thinking delta"
+    (Some "sse_thinking_delta")
+    (kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
+  Alcotest.(check (option string))
+    "tool arg delta"
+    (Some "sse_tool_arg_delta")
+    (kind (ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }))
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -561,5 +577,7 @@ let () =
             test_custom_accept_reject_preserves_predicate_reason;
           Alcotest.test_case "mixed non-progress rejection is diagnosed" `Quick
             test_reject_reason_describes_mixed_non_progress_response;
+          Alcotest.test_case "sse progress classifies known deltas" `Quick
+            test_sse_event_progress_kind_classifies_known_deltas;
         ] );
     ]

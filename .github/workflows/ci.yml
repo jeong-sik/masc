@@ -968,6 +968,9 @@ jobs:
           chmod +x scripts/check-toml-syntax.sh
           scripts/check-toml-syntax.sh
 
+      - name: Check YAML syntax
+        run: python3 scripts/ci/check-yaml-syntax.py
+
       - name: Check keeper prompt paths drift (#6527 iter9)
         run: |
           chmod +x scripts/validate-prompt-paths.sh

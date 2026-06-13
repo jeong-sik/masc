@@ -444,6 +444,8 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("stale", `Bool (bool_member status "stale"));
       ("stale_after_sec", `Int (int_member status "stale_after_sec"));
       ("error", `String (string_member status "error"));
+      ("status_source", `String (string_member status "status_source"));
+      ("gateway_state", `String (string_member status "gateway_state"));
       ("status_path", `String (string_member status "status_path"));
       ("binding_store_path", `String (string_member status "binding_store_path"));
       ("audit_path", `String (string_member status "audit_path"));

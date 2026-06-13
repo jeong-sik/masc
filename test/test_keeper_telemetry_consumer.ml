@@ -23,6 +23,18 @@ module KTC = Masc.Keeper_telemetry_consumer
 let target_iters = 5
 let inter_sleep_s = 0.02
 let total_expected_wall_clock_s = float_of_int target_iters *. inter_sleep_s
+let temp_counter = ref 0
+
+let temp_base_path prefix =
+  incr temp_counter;
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "%s_%d_%d_%.0f" prefix !temp_counter (Unix.getpid ())
+         (Unix.gettimeofday ()))
+  in
+  Fs_compat.mkdir_p dir;
+  dir
 
 (* Marker used to break out of [Switch.run] once the assertion data is
    collected. Using [Switch.fail] would propagate as the switch's
@@ -35,9 +47,10 @@ let test_drain_loop_yields_to_co_located_fiber () =
   Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     let bus = Agent_sdk.Event_bus.create () in
+    let base_path = temp_base_path "keeper_telemetry_consumer" in
     (try
       Eio.Switch.run (fun sw ->
-        KTC.spawn_subscriber ~sw ~clock ~bus;
+        KTC.spawn_subscriber ~sw ~clock ~base_path ~bus;
         for _ = 1 to target_iters do
           Eio.Time.sleep clock inter_sleep_s;
           incr counter

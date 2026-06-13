@@ -838,7 +838,8 @@ let handle_wss_closed t ~now_mono ~code ~reason =
                 (Printf.sprintf "Discord fatal close %d: %s" code reason)
           ; resume_context = None
           }
-        , [ Log
+        , [ Close_wss { code; reason }
+          ; Log
               { level = `Error
               ; message =
                   Printf.sprintf
@@ -855,7 +856,8 @@ let handle_wss_closed t ~now_mono ~code ~reason =
             ~resume_context
         in
         ( t'
-        , [ Schedule_backoff { delay_ms }
+        , [ Close_wss { code; reason }
+          ; Schedule_backoff { delay_ms }
           ; Log
               { level = `Warn
               ; message =

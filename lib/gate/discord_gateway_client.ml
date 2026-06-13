@@ -1,8 +1,9 @@
 (* RFC-0203 Phase 1.2b.3 — I/O loop bridging Discord_wss_connection and
    Discord_gateway_state.
 
-   Single session, no reconnect. Phase 1.4 will wrap this in a backoff
-   loop that re-creates the WSS connection on Reconnect_requested. *)
+   The state machine owns reconnect/backoff decisions. This I/O loop
+   applies those effects by closing the current WSS session before
+   opening the next one. *)
 
 type intent = Discord_gateway_state.intent =
   | Guilds

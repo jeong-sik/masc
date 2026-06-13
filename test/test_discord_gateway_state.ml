@@ -1046,6 +1046,7 @@ let test_wss_closed_from_connected_is_resumable () =
   (match S.state m' with
    | S.Reconnect_pending { resumable = true; _ } -> ()
    | _ -> fail "expected Reconnect_pending resumable=true");
+  check bool "Close_wss emitted" true (has_close_wss effects);
   check bool "Schedule_backoff emitted" true
     (has_schedule_backoff effects)
 
@@ -1063,6 +1064,7 @@ let test_wss_closed_fatal_goes_to_failed () =
   (match S.state m' with
    | S.Failed _ -> ()
    | _ -> fail "expected Failed for fatal close code 4014");
+  check bool "Close_wss emitted" true (has_close_wss effects);
   check bool "no Schedule_backoff on fatal close" false
     (has_schedule_backoff effects)
 

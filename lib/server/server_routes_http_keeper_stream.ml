@@ -73,10 +73,18 @@ let handle_keeper_chat_request_result state request reqd =
         Keeper_msg_async.poll
           ~base_path:state.Mcp_server.workspace_config.base_path request_id
       with
-      | None ->
+      | Keeper_msg_async.Absent ->
           respond_json_value_with_cors ~status:`Not_found request reqd
             (keeper_chat_stream_error_json "request_id not found")
-      | Some entry ->
+      | Keeper_msg_async.Unreadable reason ->
+          respond_json_value_with_cors ~status:`Internal_server_error request
+            reqd
+            (keeper_chat_stream_error_json
+               (Printf.sprintf
+                  "request record unreadable: %s — request was accepted but \
+                   its result is lost"
+                  reason))
+      | Keeper_msg_async.Found entry ->
           respond_json_value_with_cors ~status:`OK request reqd
             (Keeper_msg_async.entry_to_json entry) )
 

@@ -172,11 +172,11 @@ let create_context ~session_id ~inputs =
 
 (* --- Structural checks --- *)
 
-let finding_counter = ref 0
+let finding_counter = Atomic.make 0
 
 let next_finding_id () =
-  incr finding_counter;
-  Printf.sprintf "adv-%04d" !finding_counter
+  let n = Atomic.fetch_and_add finding_counter 1 in
+  Printf.sprintf "adv-%04d" (n + 1)
 
 (** Check for large diffs that may indicate scope creep. *)
 let check_diff_size diff =
@@ -317,7 +317,7 @@ let check_untested_additions inputs =
 (* --- Main evaluation --- *)
 
 let evaluate ctx =
-  finding_counter := 0;
+  Atomic.set finding_counter 0;
   let diff_findings =
     List.filter_map
       (fun input ->

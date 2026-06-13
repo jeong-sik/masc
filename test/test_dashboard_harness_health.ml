@@ -103,6 +103,7 @@ let test_pre_compact_store_setter_records_event () =
   check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
 
 let () =
+  Eio_main.run @@ fun _env ->
   run
     "dashboard_harness_health"
     [

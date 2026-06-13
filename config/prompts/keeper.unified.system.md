@@ -70,7 +70,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 Tool responses include a `cwd` field that reflects where the command actually ran. The exact path you see depends on your sandbox backend:
 
 - **Docker keepers** (sandbox_profile=docker, or Local-meta inside an enabled docker playground): `cwd` is the in-container path, e.g. `/home/keeper/playground/KEEPER/repos/REPO`. This is where commands actually executed inside your container. Pass that path back as a `cwd` argument on the next turn — relative form (`repos/REPO`) also works because the tool resolves both.
-- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's filesystem, e.g. `/Users/.../.masc/playground/KEEPER/repos/REPO`. This is the only form the tool accepts here.
+- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's runtime storage. Reuse the exact `cwd` returned by the previous tool response when local mode requires an absolute cwd; do not invent one from memory.
 
 Older turns in your context may show host paths (`/Users/...`) for what is now a Docker-effective keeper — that history is stale. Ignore the absolute form and re-issue using the relative path (`repos/REPO`); the response from the next call will surface the correct in-container `cwd`.
 

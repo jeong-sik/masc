@@ -1,6 +1,13 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import { AlertTriangle, GitCompareArrows, RefreshCw, Route, ShieldAlert } from 'lucide-preact'
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  GitCompareArrows,
+  RefreshCw,
+  Route,
+} from 'lucide-preact'
 import { fetchDashboardPrompts, type DashboardPromptItem, type PromptSource } from '../api'
 import { ActionButton } from './common/button'
 import { ErrorState } from './common/feedback-state'
@@ -16,15 +23,16 @@ type AssemblyLane =
   | 'manifest'
 
 type WarningSeverity = 'critical' | 'warn' | 'info'
+type AssemblyStageRole = 'source_prep' | 'model_input' | 'evidence'
 
 interface AssemblyStageSpec {
   id: string
   order: number
   title: string
   lane: AssemblyLane
-  timing: string
-  injection: string
-  codeSite: string
+  role: AssemblyStageRole
+  messageSlot: string
+  summary: string
   promptKeys: string[]
 }
 
@@ -33,9 +41,6 @@ export interface KeeperPromptAssemblyRow {
   order: number
   title: string
   lane: AssemblyLane
-  timing: string
-  injection: string
-  codeSite: string
   promptKey: string
   source: PromptSource | 'computed'
   hasOverride: boolean
@@ -55,8 +60,24 @@ export interface KeeperPromptAssemblyWarning {
   expected: string
 }
 
+export interface KeeperPromptAssemblyStage {
+  id: string
+  order: number
+  title: string
+  lane: AssemblyLane
+  role: AssemblyStageRole
+  messageSlot: string
+  summary: string
+  rows: KeeperPromptAssemblyRow[]
+  bytes: number
+  estimatedTokens: number
+  overrideCount: number
+  missingCount: number
+}
+
 export interface KeeperPromptAssemblyReport {
   rows: KeeperPromptAssemblyRow[]
+  stages: KeeperPromptAssemblyStage[]
   warnings: KeeperPromptAssemblyWarning[]
   activePromptRoots: string[]
   stats: {
@@ -74,21 +95,21 @@ const STAGES: AssemblyStageSpec[] = [
   {
     id: 'registry-bootstrap',
     order: 1,
-    title: 'Registry bootstrap',
+    title: '소스 확정',
     lane: 'registry',
-    timing: 'server startup / prompt reload',
-    injection: 'Prompt markdown, default, and runtime override are resolved before Keeper run context is built.',
-    codeSite: 'Prompt_defaults.bootstrap_runtime -> Prompt_registry',
+    role: 'source_prep',
+    messageSlot: 'not sent',
+    summary: '파일, default, runtime override 중 이 턴에 쓸 본문을 고릅니다.',
     promptKeys: ['keeper.world', 'keeper.capabilities', 'keeper.unified.system'],
   },
   {
     id: 'base-system',
     order: 2,
-    title: 'Base system prompt',
+    title: 'System',
     lane: 'system_prompt',
-    timing: 'Keeper_run_context.prepare_run_context',
-    injection: 'Hard identity, raw behavior files, continuity, world, capabilities, and persona profile become the base system prompt.',
-    codeSite: 'Keeper_prompt.build_keeper_system_prompt',
+    role: 'model_input',
+    messageSlot: 'system',
+    summary: '정체성, 행동 규칙, world, capabilities가 기본 system prompt가 됩니다.',
     promptKeys: [
       'keeper.constitution',
       'keeper.world',
@@ -99,11 +120,11 @@ const STAGES: AssemblyStageSpec[] = [
   {
     id: 'unified-world',
     order: 3,
-    title: 'Unified world state',
+    title: 'User / World',
     lane: 'user_message',
-    timing: 'Keeper_unified_prompt.build_prompt',
-    injection: 'Turn intent and current world state are rendered as the user-facing world/context prompt.',
-    codeSite: 'Keeper_unified_prompt.build_prompt',
+    role: 'model_input',
+    messageSlot: 'user',
+    summary: '턴 의도와 현재 world state가 user-facing context로 붙습니다.',
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
@@ -119,21 +140,21 @@ const STAGES: AssemblyStageSpec[] = [
   {
     id: 'turn-soft-context',
     order: 4,
-    title: 'Turn soft context',
+    title: 'Runtime Context',
     lane: 'extra_system_context',
-    timing: 'Keeper_turn.build_turn_prompt callback',
-    injection: 'Continuity snapshot, durable memory, skill route, worktree, telemetry feedback, and turn instructions are appended as soft context.',
-    codeSite: 'Keeper_turn.build_turn_prompt',
+    role: 'model_input',
+    messageSlot: 'context',
+    summary: 'continuity, memory, repo/task hint, turn instruction이 추가됩니다.',
     promptKeys: ['keeper.reply_guidelines'],
   },
   {
     id: 'oas-hook',
     order: 5,
-    title: 'OAS pre-turn hook',
+    title: 'Provider Patch',
     lane: 'oas_hook',
-    timing: 'Keeper_run_tools_hooks.before_turn_params',
-    injection: 'Temporal summary, claimed-task nudge, retry hint, Memory OS recall, tool filter, and tool choice are finalized before provider dispatch.',
-    codeSite: 'Keeper_run_tools_hooks.before_turn_params',
+    role: 'model_input',
+    messageSlot: 'provider',
+    summary: 'Memory OS recall, tool preference, retry hint, tool filter가 확정됩니다.',
     promptKeys: [
       'keeper.memory_os_recall.context',
       'keeper.memory_os_recall.facts_section',
@@ -146,11 +167,11 @@ const STAGES: AssemblyStageSpec[] = [
   {
     id: 'manifest-edge',
     order: 6,
-    title: 'Manifest edge',
+    title: '증거 기록',
     lane: 'manifest',
-    timing: 'Keeper_agent_run.run_turn dispatch',
-    injection: 'Prompt metrics, fingerprints, and context_injected edges are recorded after final context assembly.',
-    codeSite: 'Keeper_agent_run.append_manifest(context_injected)',
+    role: 'evidence',
+    messageSlot: 'not sent',
+    summary: '최종 조립 후 fingerprint와 context_injected edge를 기록합니다.',
     promptKeys: [],
   },
 ]
@@ -193,9 +214,9 @@ const STALE_RULES: Array<{
   {
     id: 'playground-path',
     severity: 'warn',
-    title: 'Legacy playground path example',
+    title: 'Host storage path still visible',
     pattern: /\.masc\/playground\//,
-    expected: 'Use runtime-provided repo/worktree paths, not playground-era paths.',
+    expected: 'Keep keeper-facing examples sandbox-relative unless a live tool response explicitly returns a host cwd.',
   },
 ]
 
@@ -236,26 +257,34 @@ function promptRoot(filePath: string | null): string | null {
   return filePath.slice(0, idx + marker.length - 1)
 }
 
-function laneTone(lane: AssemblyLane): StatusChipTone {
-  switch (lane) {
-    case 'extra_system_context':
-    case 'oas_hook':
-      return 'warn'
-    case 'system_prompt':
-      return 'bad'
-    case 'manifest':
-      return 'info'
-    case 'registry':
-      return 'ok'
-    default:
-      return 'neutral'
-  }
-}
-
 function severityTone(severity: WarningSeverity): StatusChipTone {
   if (severity === 'critical') return 'bad'
   if (severity === 'warn') return 'warn'
   return 'info'
+}
+
+function stageRows(rows: KeeperPromptAssemblyRow[], stage: AssemblyStageSpec): KeeperPromptAssemblyRow[] {
+  return rows.filter(row => row.order === stage.order)
+}
+
+function buildStages(rows: KeeperPromptAssemblyRow[]): KeeperPromptAssemblyStage[] {
+  return STAGES.map(stage => {
+    const rowsForStage = stageRows(rows, stage)
+    return {
+      id: stage.id,
+      order: stage.order,
+      title: stage.title,
+      lane: stage.lane,
+      role: stage.role,
+      messageSlot: stage.messageSlot,
+      summary: stage.summary,
+      rows: rowsForStage,
+      bytes: rowsForStage.reduce((sum, row) => sum + row.bytes, 0),
+      estimatedTokens: rowsForStage.reduce((sum, row) => sum + row.estimatedTokens, 0),
+      overrideCount: rowsForStage.filter(row => row.hasOverride).length,
+      missingCount: rowsForStage.filter(row => row.missing).length,
+    }
+  })
 }
 
 export function buildKeeperPromptAssemblyReport(
@@ -271,9 +300,6 @@ export function buildKeeperPromptAssemblyReport(
         order: stage.order,
         title: stage.title,
         lane: stage.lane,
-        timing: stage.timing,
-        injection: stage.injection,
-        codeSite: stage.codeSite,
         promptKey: '(computed)',
         source: 'computed',
         hasOverride: false,
@@ -294,9 +320,6 @@ export function buildKeeperPromptAssemblyReport(
         order: stage.order,
         title: stage.title,
         lane: stage.lane,
-        timing: stage.timing,
-        injection: stage.injection,
-        codeSite: stage.codeSite,
         promptKey,
         source: prompt?.source ?? 'missing',
         hasOverride: prompt?.has_override ?? false,
@@ -324,7 +347,7 @@ export function buildKeeperPromptAssemblyReport(
       id: rule.id,
       severity: rule.severity,
       title: rule.title,
-      detail: `${hits.length} prompt(s) still contain ${rule.id}.`,
+      detail: `${hits.length} prompt(s) need cleanup.`,
       promptKeys: hits,
       expected: rule.expected,
     })
@@ -357,9 +380,11 @@ export function buildKeeperPromptAssemblyReport(
   const promptBytes = rows.reduce((sum, row) => sum + row.bytes, 0)
   const estimatedTokens = rows.reduce((sum, row) => sum + row.estimatedTokens, 0)
   const criticalCount = warnings.filter(warning => warning.severity === 'critical').length
+  const stages = buildStages(rows)
 
   return {
     rows,
+    stages,
     warnings,
     activePromptRoots,
     stats: {
@@ -380,142 +405,275 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KiB`
 }
 
-function PromptAssemblyContent({ report, compact = false }: { report: KeeperPromptAssemblyReport; compact?: boolean }) {
-  const hotspotRows = report.rows.filter(row =>
-    row.lane === 'extra_system_context' || row.lane === 'oas_hook' || row.hasOverride || row.missing,
+function stageTone(stage: KeeperPromptAssemblyStage): StatusChipTone {
+  if (stage.missingCount > 0) return 'bad'
+  if (stage.overrideCount > 0) return 'warn'
+  if (stage.lane === 'registry' || stage.lane === 'manifest') return 'neutral'
+  return 'ok'
+}
+
+function stageStatusLabel(stage: KeeperPromptAssemblyStage): string {
+  if (stage.missingCount > 0) return 'missing'
+  if (stage.overrideCount > 0) return 'override'
+  if (stage.role === 'evidence') return 'recorded'
+  if (stage.role === 'source_prep') return 'resolved'
+  return 'sent'
+}
+
+function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
+  if (row.missing) return 'bad'
+  if (row.hasOverride) return 'warn'
+  if (row.source === 'file') return 'ok'
+  if (row.source === 'computed') return 'neutral'
+  return 'info'
+}
+
+function stageMicrocopy(stage: KeeperPromptAssemblyStage): string {
+  const promptCount = stage.rows.filter(row => row.promptKey !== '(computed)').length
+  const promptLabel = promptCount > 0 ? `${promptCount} prompts` : 'computed'
+  const tokenLabel = stage.estimatedTokens > 0 ? `${stage.estimatedTokens.toLocaleString()} tok` : 'no token payload'
+  return `${promptLabel} · ${tokenLabel}`
+}
+
+function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
+  const promptCount = stages.reduce(
+    (sum, stage) => sum + stage.rows.filter(row => row.promptKey !== '(computed)').length,
+    0,
   )
-  const visibleRows = compact ? hotspotRows.slice(0, 12) : report.rows
+  const tokenCount = stages.reduce((sum, stage) => sum + stage.estimatedTokens, 0)
+  return `${promptCount} prompts · ${tokenCount.toLocaleString()} tok`
+}
+
+function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
+  return `${report.stats.totalRows} rows · ${report.stats.warningCount} cleanup · ${report.stats.criticalCount} critical · ${report.stats.estimatedTokens.toLocaleString()} tok`
+}
+
+function FlowEdgeStage({
+  stage,
+  label,
+  className = '',
+}: {
+  stage: KeeperPromptAssemblyStage
+  label: string
+  className?: string
+}) {
+  return html`
+    <div class=${`rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 ${className}`}>
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</span>
+        <${StatusChip} tone=${stageTone(stage)}>${stageStatusLabel(stage)}<//>
+      </div>
+      <div class="mb-1 flex items-center gap-2">
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">#${stage.order}</span>
+        <div class="text-xs font-semibold text-[var(--color-fg-primary)]">${stage.title}</div>
+      </div>
+      <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${stage.summary}</div>
+      <div class="mt-2 border-t border-[var(--color-border-default)] pt-2 font-mono text-3xs text-[var(--color-fg-disabled)]">
+        ${stageMicrocopy(stage)}
+      </div>
+    </div>
+  `
+}
+
+function ModelInputStage({
+  stage,
+  index,
+  isLast,
+}: {
+  stage: KeeperPromptAssemblyStage
+  index: number
+  isLast: boolean
+}) {
+  const messageTone: StatusChipTone = index === 0 ? 'info' : index === 1 ? 'ok' : 'warn'
 
   return html`
+    <li class="relative min-w-0 border-l border-[var(--color-border-default)] pl-3">
+      ${!isLast ? html`
+        <div class="pointer-events-none absolute -right-3 top-7 z-10 hidden h-5 w-5 items-center justify-center rounded-full border border-[var(--accent-20)] bg-[var(--color-bg-elevated)] text-[var(--color-accent-fg)] xl:flex">
+          <${ArrowRight} size=${12} />
+        </div>
+      ` : null}
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">#${stage.order}</span>
+        <${StatusChip} tone=${stageTone(stage)}>${stageStatusLabel(stage)}<//>
+      </div>
+      <div class="mb-1 flex flex-wrap items-center gap-2">
+        <${StatusChip} tone=${messageTone} uppercase=${false}>${stage.messageSlot}<//>
+        <div class="text-xs font-semibold leading-tight text-[var(--color-fg-primary)]">${stage.title}</div>
+      </div>
+      <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${stage.summary}</div>
+      <div class="mt-2 font-mono text-3xs text-[var(--color-fg-disabled)]">${stageMicrocopy(stage)}</div>
+    </li>
+  `
+}
+
+function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
+  const sourceStage = stages.find(stage => stage.role === 'source_prep')
+  const modelStages = stages.filter(stage => stage.role === 'model_input')
+  const evidenceStage = stages.find(stage => stage.role === 'evidence')
+
+  return html`
+    <div class="grid gap-3 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,3fr)_minmax(0,0.8fr)]">
+      ${sourceStage ? html`<${FlowEdgeStage} stage=${sourceStage} label="Before model" className="order-2 xl:order-none" />` : null}
+      <section class="order-1 rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-3 xl:order-none">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] pb-2">
+          <div class="flex items-center gap-2">
+            <${StatusChip} tone="info">Model sees<//>
+            <span class="text-xs font-semibold text-[var(--color-fg-primary)]">실제 주입 순서</span>
+          </div>
+          <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${modelInputMicrocopy(modelStages)}</span>
+        </div>
+        <ol class="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          ${modelStages.map((stage, index) => html`
+            <${ModelInputStage}
+              key=${stage.id}
+              stage=${stage}
+              index=${index}
+              isLast=${index === modelStages.length - 1}
+            />
+          `)}
+        </ol>
+      </section>
+      ${evidenceStage ? html`<${FlowEdgeStage} stage=${evidenceStage} label="After model" className="order-3 xl:order-none" />` : null}
+    </div>
+  `
+}
+
+function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] }) {
+  if (warnings.length === 0) {
+    return html`
+      <div class="mt-3 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]">
+        <${CheckCircle2} size=${14} />
+        <span>현재 prompt audit warning이 없습니다.</span>
+      </div>
+    `
+  }
+
+  return html`
+    <details class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-8)]">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+        <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
+          <${AlertTriangle} size=${14} />
+          Cleanup queue
+        </span>
+        <span class="flex items-center gap-2">
+          <${StatusChip} tone=${warnings.some(warning => warning.severity === 'critical') ? 'bad' : 'warn'}>
+            ${warnings.length} item${warnings.length === 1 ? '' : 's'}
+          <//>
+        </span>
+      </summary>
+      <div class="grid gap-2 border-t border-[var(--color-border-default)] p-3">
+        ${warnings.map(warning => html`
+          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+            <div class="mb-1 flex flex-wrap items-center gap-2">
+              <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${warning.title}</span>
+              <${StatusChip} tone=${severityTone(warning.severity)}>${warning.severity}<//>
+            </div>
+            <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${warning.detail} ${warning.expected}</div>
+            <div class="mt-2 flex flex-wrap gap-1">
+              ${warning.promptKeys.map(key => html`
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
+              `)}
+            </div>
+          </div>
+        `)}
+      </div>
+    </details>
+  `
+}
+
+function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemblyReport; compact: boolean }) {
+  if (compact) return null
+
+  return html`
+    <details class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+        <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
+          <${GitCompareArrows} size=${14} />
+          Source evidence
+        </span>
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${report.stats.totalRows} rows · ${report.stats.estimatedTokens.toLocaleString()} tok est</span>
+      </summary>
+      <div class="border-t border-[var(--color-border-default)] p-3">
+        ${report.activePromptRoots.length > 0 ? html`
+          <div class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
+            <div class="mb-1 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">active prompt root</div>
+            ${report.activePromptRoots.map(root => html`
+              <code class="block break-all text-2xs text-[var(--color-fg-secondary)]">${root}</code>
+            `)}
+          </div>
+        ` : null}
+        <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)]">
+          <table class="min-w-[860px] w-full border-collapse text-left text-2xs">
+            <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
+              <tr>
+                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">step</th>
+                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">prompt</th>
+                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">source</th>
+                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">weight</th>
+                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">fingerprint</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${report.rows.map(row => html`
+                <tr class="border-t border-[var(--color-border-default)] ${row.hasOverride
+                  ? 'bg-[var(--warn-8)]'
+                  : row.missing
+                    ? 'bg-[var(--bad-8)]'
+                    : ''}">
+                  <td class="px-3 py-2 align-top">
+                    <div class="font-mono text-[var(--color-fg-disabled)]">#${row.order}</div>
+                    <div class="text-xs font-medium text-[var(--color-fg-primary)]">${row.title}</div>
+                  </td>
+                  <td class="px-3 py-2 align-top">
+                    <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${row.promptKey}</div>
+                    ${row.filePath ? html`<div class="mt-1 max-w-[320px] truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${row.filePath}>${row.filePath}</div>` : null}
+                  </td>
+                  <td class="px-3 py-2 align-top">
+                    <div class="flex flex-wrap gap-1">
+                      <${StatusChip} tone=${sourceTone(row)}>${row.source}<//>
+                      ${row.hasOverride ? html`<${StatusChip} tone="warn">override<//>` : null}
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">
+                    <div>${formatBytes(row.bytes)}</div>
+                    <div class="text-3xs text-[var(--color-fg-disabled)]">${row.estimatedTokens ? `${row.estimatedTokens.toLocaleString()} tok est` : '-'}</div>
+                  </td>
+                  <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">${row.fingerprint}</td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+  `
+}
+
+function PromptAssemblyContent({ report, compact = false }: { report: KeeperPromptAssemblyReport; compact?: boolean }) {
+  return html`
     <div
-      class="rounded-[var(--r-1)] border border-[var(--warn-30)] p-4"
-      style="background:linear-gradient(135deg,var(--bad-10),var(--warn-8) 48%,var(--accent-8));"
+      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4"
     >
-      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div class="mb-1 flex items-center gap-2">
-            <${Route} size=${16} class="text-[var(--color-status-warn)]" />
-            <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Keeper 최종 프롬프트 조립표</h3>
+      <div class="mb-4 border-b border-[var(--color-border-default)] pb-3">
+        <div class="max-w-4xl">
+          <div class="mb-1 flex flex-wrap items-center gap-2">
+            <${Route} size=${16} class="text-[var(--color-accent-fg)]" />
+            <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Keeper prompt injection map</h3>
             <${StatusChip} tone=${report.stats.criticalCount > 0 ? 'bad' : report.stats.warningCount > 0 ? 'warn' : 'ok'}>
               ${report.stats.criticalCount > 0 ? 'critical drift' : report.stats.warningCount > 0 ? 'watch drift' : 'clean'}
             <//>
+            <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
-          <p class="m-0 max-w-3xl text-xs leading-relaxed text-[var(--color-fg-muted)]">
-            system prompt, user/world message, OAS extra_system_context, tool hook가 어느 순서로 합쳐지는지 보여줍니다.
-            byte/fingerprint는 현재 effective prompt 기준입니다.
+          <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+            가운데 4칸만 실제 모델 입력입니다. 양쪽의 source 준비와 evidence 기록은 주입 전후 진단 단계입니다.
           </p>
         </div>
-        <div class="grid grid-cols-2 gap-2 text-right sm:grid-cols-4">
-          <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">rows</div>
-            <div class="font-mono text-sm text-[var(--color-fg-secondary)]">${report.stats.totalRows}</div>
-          </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2">
-            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-status-warn)]">warnings</div>
-            <div class="font-mono text-sm text-[var(--color-status-warn)]">${report.stats.warningCount}</div>
-          </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--bad-20)] bg-[var(--bad-10)] px-3 py-2">
-            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--bad-light)]">critical</div>
-            <div class="font-mono text-sm text-[var(--bad-light)]">${report.stats.criticalCount}</div>
-          </div>
-          <div class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-2">
-            <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-accent-fg)]">est tokens</div>
-            <div class="font-mono text-sm text-[var(--color-accent-fg)]">${report.stats.estimatedTokens.toLocaleString()}</div>
-          </div>
-        </div>
       </div>
 
-      ${report.activePromptRoots.length > 0 ? html`
-        <div class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
-          <div class="mb-1 flex items-center gap-2 text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            <${GitCompareArrows} size=${13} />
-            active prompt root
-          </div>
-          <div class="flex flex-col gap-1">
-            ${report.activePromptRoots.map(root => html`
-              <code class="break-all text-2xs text-[var(--color-fg-secondary)]">${root}</code>
-            `)}
-          </div>
-        </div>
-      ` : null}
-
-      ${report.warnings.length > 0 ? html`
-        <div class="mb-4 grid gap-2">
-          ${report.warnings.map(warning => html`
-            <div class="rounded-[var(--r-1)] border ${warning.severity === 'critical'
-              ? 'border-[var(--bad-30)] bg-[var(--bad-10)]'
-              : warning.severity === 'warn'
-                ? 'border-[var(--warn-30)] bg-[var(--warn-10)]'
-                : 'border-[var(--accent-20)] bg-[var(--accent-10)]'} px-3 py-2">
-              <div class="mb-1 flex flex-wrap items-center gap-2">
-                <${warning.severity === 'critical' ? ShieldAlert : AlertTriangle} size=${14} />
-                <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${warning.title}</span>
-                <${StatusChip} tone=${severityTone(warning.severity)}>${warning.severity}<//>
-              </div>
-              <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${warning.detail} ${warning.expected}</div>
-              <div class="mt-1 flex flex-wrap gap-1">
-                ${warning.promptKeys.map(key => html`
-                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
-                `)}
-              </div>
-            </div>
-          `)}
-        </div>
-      ` : null}
-
-      <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
-        <table class="min-w-[980px] w-full border-collapse text-left text-2xs">
-          <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
-            <tr>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">stage</th>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">lane</th>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">prompt/source</th>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">injection</th>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">size</th>
-              <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">fingerprint</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${visibleRows.map(row => html`
-              <tr class="border-t border-[var(--color-border-default)] ${row.hasOverride
-                ? 'bg-[var(--warn-8)]'
-                : row.missing
-                  ? 'bg-[var(--bad-8)]'
-                  : ''}">
-                <td class="px-3 py-2 align-top">
-                  <div class="font-mono text-[var(--color-fg-disabled)]">#${row.order}</div>
-                  <div class="text-xs font-medium text-[var(--color-fg-primary)]">${row.title}</div>
-                  <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">${row.timing}</div>
-                </td>
-                <td class="px-3 py-2 align-top">
-                  <${StatusChip} tone=${laneTone(row.lane)} uppercase=${false}>${row.lane}<//>
-                  <div class="mt-1 font-mono text-3xs text-[var(--color-fg-disabled)]">${row.codeSite}</div>
-                </td>
-                <td class="px-3 py-2 align-top">
-                  <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${row.promptKey}</div>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    <${StatusChip} tone=${row.missing ? 'bad' : row.hasOverride ? 'warn' : row.source === 'file' ? 'ok' : 'neutral'}>${row.source}<//>
-                    ${row.hasOverride ? html`<${StatusChip} tone="warn">override<//>` : null}
-                  </div>
-                  ${row.filePath ? html`<div class="mt-1 max-w-[260px] truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${row.filePath}>${row.filePath}</div>` : null}
-                </td>
-                <td class="px-3 py-2 align-top text-xs leading-relaxed text-[var(--color-fg-muted)]">${row.injection}</td>
-                <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">
-                  <div>${formatBytes(row.bytes)}</div>
-                  <div class="text-3xs text-[var(--color-fg-disabled)]">${row.estimatedTokens ? `${row.estimatedTokens.toLocaleString()} tok est` : '-'}</div>
-                </td>
-                <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">${row.fingerprint}</td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </div>
-
-      ${compact && hotspotRows.length > visibleRows.length ? html`
-        <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">
-          Showing ${visibleRows.length} hotspot rows out of ${hotspotRows.length}. Open Prompt Registry for the full assembly table.
-        </div>
-      ` : null}
+      <${PromptFlowMap} stages=${report.stages} />
+      <${CleanupDetails} warnings=${report.warnings} />
+      <${SourceEvidenceDetails} report=${report} compact=${compact} />
     </div>
   `
 }

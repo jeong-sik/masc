@@ -84,12 +84,29 @@ let filter_forward_looking_summary (summary : string) : string =
                 || String_util.contains_substring_ci payload "tool surface"
                 || String_util.contains_substring_ci payload "tool-surface")))
   in
+  let is_stale_goal_capacity_line line =
+    let payload = String.trim line in
+    let markers =
+      [
+        "goal cap";
+        "goal_cap";
+        "goal capacity";
+        "active_goal_ids";
+        "새 작업 못";
+        "작업 못 받";
+      ]
+    in
+    List.exists
+      (fun marker -> String_util.contains_substring_ci payload marker)
+      markers
+  in
   let kept =
     summary
     |> String.split_on_char '\n'
     |> List.filter (fun line -> not (is_backward_line line))
     |> List.filter (fun line -> not (is_inert_next_line line))
     |> List.filter (fun line -> not (is_stale_tool_surface_line line))
+    |> List.filter (fun line -> not (is_stale_goal_capacity_line line))
     |> List.filter (fun line -> String.trim line <> "")
   in
   match kept with

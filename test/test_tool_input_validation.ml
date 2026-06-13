@@ -495,6 +495,9 @@ let keeper_board_post_get_schema =
 let keeper_task_done_schema =
   find_schema_exn "keeper_task_done" Config.raw_all_tool_schemas
 
+let keeper_task_claim_schema =
+  find_schema_exn "keeper_task_claim" Config.raw_all_tool_schemas
+
 let tool_execute_schema =
   find_schema_exn "tool_execute" Config.raw_all_tool_schemas
 
@@ -1357,6 +1360,11 @@ let assert_schema_requires label schema field =
     true
     (List.mem field (schema_required_fields schema))
 
+let schema_property_names schema =
+  match Yojson.Safe.Util.member "properties" schema with
+  | `Assoc props -> List.map fst props
+  | _ -> []
+
 let assert_validation_rejects ~label ~schema ~tool_name ~args ~snippets =
   match Tool_input_validation.validate_args ~schema ~name:tool_name ~args () with
   | Error result ->
@@ -1409,6 +1417,26 @@ let test_high_risk_tool_contract_rejection_corpus () =
     ]
 
 let test_keeper_tool_hint_contracts_match_required_fields () =
+  Alcotest.(check bool)
+    "keeper_task_claim schema accepts optional task_id"
+    true
+    (List.mem "task_id" (schema_property_names keeper_task_claim_schema));
+  Alcotest.(check bool)
+    "keeper_task_claim schema does not require task_id"
+    false
+    (List.mem "task_id" (schema_required_fields keeper_task_claim_schema));
+  (match
+     Tool_input_validation.validate_args
+       ~schema:keeper_task_claim_schema
+       ~name:"keeper_task_claim"
+       ~args:(`Assoc [ "task_id", `String "task-123" ])
+       ()
+   with
+   | Ok _ -> ()
+   | Error result ->
+     Alcotest.failf
+       "keeper_task_claim task_id should validate: %s"
+       (Yojson.Safe.to_string (Tool_result.data result)));
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "task_id";
   assert_schema_requires "keeper_task_done schema" keeper_task_done_schema "result";
   assert_schema_requires
@@ -1421,6 +1449,10 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
     false
     (List.mem "hearth" (schema_required_fields keeper_board_post_schema));
   let hints = read_source_file "config/prompts/keeper.tool_hints.toml" in
+  assert_contains
+    "keeper_task_claim hint names optional task_id"
+    hints
+    "task_id:";
   assert_contains
     "keeper_task_done hint names task_id"
     hints

@@ -30,6 +30,13 @@ Next plan: use keeper_task_claim after checking live policy
 Constraints: tool surface: masc_* only; no keeper_* tools visible
 OpenQuestions: why did the previous turn see stale tools?|}
 
+let stale_goal_cap_summary =
+  {|Goal: maintain keeper context
+Next plan: claim task-952 directly after checking tasks
+Next: use keeper_task_claim with task-952
+Constraints: current goal cap 4/3 means 새 작업 못 받음; active_goal_ids stale
+OpenQuestions: is goal capacity really full?|}
+
 let test_strips_backward () =
   let filtered =
     Masc.Keeper_memory_policy.filter_forward_looking_summary full_summary
@@ -113,6 +120,18 @@ let test_drops_stale_tool_surface_claims () =
   Alcotest.(check bool) "live-policy action still kept"
     true (Astring.String.is_infix ~affix:"keeper_task_claim" filtered)
 
+let test_drops_stale_goal_capacity_claims () =
+  let filtered =
+    Masc.Keeper_memory_policy.filter_forward_looking_summary
+      stale_goal_cap_summary
+  in
+  Alcotest.(check bool) "stale goal cap removed"
+    false (Astring.String.is_infix ~affix:"goal cap" filtered);
+  Alcotest.(check bool) "stale active_goal_ids removed"
+    false (Astring.String.is_infix ~affix:"active_goal_ids" filtered);
+  Alcotest.(check bool) "live task-specific action kept"
+    true (Astring.String.is_infix ~affix:"task-952" filtered)
+
 let () =
   Alcotest.run "continuity forward filter"
     [ ( "filter_forward_looking_summary",
@@ -128,5 +147,7 @@ let () =
             test_drops_inert_idle_directives;
           Alcotest.test_case "drops stale tool surface claims" `Quick
             test_drops_stale_tool_surface_claims;
+          Alcotest.test_case "drops stale goal-cap claims" `Quick
+            test_drops_stale_goal_capacity_claims;
         ] );
     ]

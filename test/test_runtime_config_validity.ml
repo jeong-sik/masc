@@ -52,7 +52,13 @@ let test_repo_runtime_toml_loads () =
           check bool "Gemma4 chat-template-token thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Chat_template_token)
+               Runtime_schema.Chat_template_token);
+          (* Native Ollama /api/chat never serializes tool_choice
+             (oas backend_ollama.ml:24); declaring true here would override
+             oas models.toml false while the transport drops forced tool
+             choice. *)
+          check bool "Gemma4 forced tool_choice disabled" false
+            caps.supports_tool_choice
         | None -> fail "expected Gemma4 capabilities"));
     (match
        List.find_opt

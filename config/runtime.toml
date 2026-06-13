@@ -112,7 +112,12 @@ preserve-thinking = false
 streaming = true
 
 [models.gemma4-26b-a4b-qat.capabilities]
-supports-tool-choice = true
+# This runtime rides OAS native Ollama /api/chat, which does not serialize
+# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
+# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
+# applies this override last) while the transport silently drops forced tool
+# choice. Do not re-enable without a serializer path + model-side proof.
+supports-tool-choice = false
 thinking-control-format = "chat_template_token"
 supports-native-streaming = true
 supports-top-k = true

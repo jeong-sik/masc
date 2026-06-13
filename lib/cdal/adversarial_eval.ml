@@ -172,11 +172,11 @@ let create_context ~session_id ~inputs =
 
 (* --- Structural checks --- *)
 
-let finding_counter = Atomic.make 0
-
-let next_finding_id () =
-  let n = Atomic.fetch_and_add finding_counter 1 in
-  Printf.sprintf "adv-%04d" (n + 1)
+let assign_finding_ids findings =
+  List.mapi
+    (fun i (finding : advisory_finding) ->
+      { finding with finding_id = Printf.sprintf "adv-%04d" (i + 1) })
+    findings
 
 (** Check for large diffs that may indicate scope creep. *)
 let check_diff_size diff =
@@ -186,7 +186,7 @@ let check_diff_size diff =
   if line_count > 500 then
     Some
       {
-        finding_id = next_finding_id ();
+        finding_id = "";
         severity = "warn";
         category = "scope";
         summary =
@@ -220,7 +220,7 @@ let check_missing_interface inputs =
       if not (List.mem mli_path mli_files) then
         Some
           {
-            finding_id = next_finding_id ();
+            finding_id = "";
             severity = "info";
             category = "encapsulation";
             summary =
@@ -263,7 +263,7 @@ let check_unsafe_patterns inputs =
               then
                 Some
                   {
-                    finding_id = next_finding_id ();
+                    finding_id = "";
                     severity = "warn";
                     category = "safety";
                     summary =
@@ -303,7 +303,7 @@ let check_untested_additions inputs =
   if lib_files <> [] && not has_test_file then
     [
       {
-        finding_id = next_finding_id ();
+        finding_id = "";
         severity = "info";
         category = "testing";
         summary =
@@ -317,7 +317,6 @@ let check_untested_additions inputs =
 (* --- Main evaluation --- *)
 
 let evaluate ctx =
-  Atomic.set finding_counter 0;
   let diff_findings =
     List.filter_map
       (fun input ->
@@ -331,6 +330,7 @@ let evaluate ctx =
   let test_findings = check_untested_additions ctx.inputs in
   let findings =
     diff_findings @ interface_findings @ unsafe_findings @ test_findings
+    |> assign_finding_ids
   in
   { findings; input_count = List.length ctx.inputs; is_advisory = true }
 

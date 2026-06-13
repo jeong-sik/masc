@@ -147,16 +147,16 @@ let verdict_to_hook_decision (v : Core.verdict) : Agent_sdk.Hooks.hook_decision 
     Log.Verifier.warn "%s" reason;
     Agent_sdk.Hooks.Continue
   | Core.Fail reason ->
-    Log.Verifier.error "FAIL (skipping tool): %s" reason;
-    Agent_sdk.Hooks.Skip
+    Log.Verifier.error "FAIL (rejecting tool): %s" reason;
+    Agent_sdk.Hooks.Reject { msg = reason }
 ;;
 
 let continue_with_degraded_verifier ~tool_name ~reason =
   Log.Verifier.error
-    "verification degraded for %s; allowing tool to continue: %s"
+    "verification degraded for %s; blocking tool: %s"
     tool_name
     reason;
-  Agent_sdk.Hooks.Continue
+  Agent_sdk.Hooks.Skip
 ;;
 
 let handle_pre_tool_use

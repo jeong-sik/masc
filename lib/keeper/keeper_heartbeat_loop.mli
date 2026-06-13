@@ -88,6 +88,33 @@ val provider_timeout_policy_decision :
     This heartbeat-loop path is reached after the keeper turn returned, so
     timeout evidence is not liveness loss by itself. *)
 
+(** Outcome of one keepalive cycle evaluation.
+
+    [cycle_crashed = true] means the cycle's catch-all swallowed an
+    exception to keep the keeper fiber alive (T6 audit). The failure
+    has already been recorded via
+    [Keeper_registry.increment_turn_failures] — the same counter the
+    unified-turn failure path uses — so the caller dispatches
+    [Turn_failed]. A crashed cycle must not refresh the
+    work-as-heartbeat lease. *)
+type keepalive_turn_outcome = {
+  meta : keeper_meta;
+  cycle_crashed : bool;
+}
+
+(** Record a swallowed keepalive-cycle exception as a turn failure:
+    increments the registry turn-failure counter (shared with
+    [Keeper_unified_turn_failure]), bumps the CycleExceptions counter
+    and logs at ERROR. Does not raise. *)
+val record_crashed_cycle_failure :
+  base_path:string -> keeper_name:string -> exn -> unit
+
+(** Pure: post-turn status event derived from the registry
+    turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
+    [0] maps to [Turn_succeeded]. *)
+val turn_status_event :
+  turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
+
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
@@ -96,7 +123,7 @@ val run_keepalive_unified_turn :
   proactive_warmup_elapsed:bool ->
   reactive_wake:bool ->
   shared_context:Agent_sdk.Context.t ->
-  keeper_meta
+  keepalive_turn_outcome
 
 val refresh_work_as_heartbeat :
   ctx:'a context ->

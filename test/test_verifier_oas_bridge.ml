@@ -133,9 +133,9 @@ let test_warn_to_continue () =
 
 let test_fail_to_skip () =
   let decision = Verifier_oas.verdict_to_hook_decision (Core.Fail "critical error") in
-  Alcotest.(check bool) "Fail -> Skip"
+  Alcotest.(check bool) "Fail -> Reject"
     true
-    (decision = Agent_sdk.Hooks.Skip)
+    (decision = Agent_sdk.Hooks.Reject "critical error")
 
 (* ================================================================ *)
 (* read_only_predicate                                               *)

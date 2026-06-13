@@ -12,6 +12,14 @@ type gateway_event =
   | Ignored
   | Open_wss
 
+type reconnect_method =
+  | Resume
+  | Fresh_identify
+
+type reconnect_outcome =
+  | Reconnect_succeeded
+  | Reconnect_failed
+
 type inbound_outcome =
   | Dropped_unbound
   | Dispatch_unavailable
@@ -62,6 +70,14 @@ let reply_outcome_label = function
   | Reply_send_ok -> "sent"
   | Reply_send_failed -> "send_error"
 
+let reconnect_method_label = function
+  | Resume -> "resume"
+  | Fresh_identify -> "fresh_identify"
+
+let reconnect_outcome_label = function
+  | Reconnect_succeeded -> "succeeded"
+  | Reconnect_failed -> "failed"
+
 let inc name ~labels =
   Otel_metric_store_core.inc_counter name ~labels ()
 
@@ -100,3 +116,11 @@ let record_reply outcome =
   inc
     Otel_transport_metric_names.metric_discord_outbound_replies
     ~labels:[ "outcome", reply_outcome_label outcome ]
+
+let record_gateway_reconnect_outcome ~method_ ~outcome =
+  inc
+    Otel_transport_metric_names.metric_discord_gateway_reconnect_outcomes
+    ~labels:
+      [ "method", reconnect_method_label method_
+      ; "outcome", reconnect_outcome_label outcome
+      ]

@@ -154,17 +154,19 @@ let transient_blocker_markers =
 ;;
 
 let durable_meta_markers =
-  [ "stale"
-  ; "outdated"
-  ; "obsolete"
-  ; "incorrectly"
+  [ "memory os holds stale"
+  ; "stale goal_cap information"
+  ; "incorrectly suggests"
   ; "disproved"
   ; "disproving"
   ; "mismatch"
   ; "contradict"
   ; "root cause"
-  ; "fix"
-  ; "fixed"
+  ; "diagnosed"
+  ; "diagnosis"
+  ; "fix landed"
+  ; "fix implemented"
+  ; "fixed by"
   ]
 ;;
 

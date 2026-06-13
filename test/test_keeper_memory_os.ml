@@ -664,6 +664,19 @@ let test_policy_marks_live_admission_caps_transient () =
     (Policy.is_transient_admission_memory_text
        "goal-1779348737104-9783 (full 3/3)");
   Alcotest.(check bool)
+    "live goal_cap compact blocker is transient"
+    true
+    (Policy.is_transient_admission_memory_text "goal_cap 3/3 blocks claims");
+  Alcotest.(check bool)
+    "live WIP cap compact blocker is transient"
+    true
+    (Policy.is_transient_admission_memory_text "WIP cap 3/3 blocks claims");
+  Alcotest.(check bool)
+    "live corrected goal cap snapshot is transient"
+    true
+    (Policy.is_transient_admission_memory_text
+       "**Goal cap 3/3 — slots: 899/912/907 — corrected from stale 899/903/908** Goal cap 3/3 — slots occupied by: task-899 (keeper-qa-king-agent), task-912 (codex-mcp-client), task-907 (keeper-taskmaster-agent). Agent owns no task. **Why**: Task-907 was reassigned to taskmaster between turns — masc-improver never actually held it. **How to apply**: Re-check live board before claiming; do not assume task ownership from prior turn's claim result.");
+  Alcotest.(check bool)
     "wip slot blocker is transient"
     true
     (Policy.is_transient_admission_memory_text

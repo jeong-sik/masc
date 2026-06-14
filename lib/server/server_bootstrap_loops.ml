@@ -357,7 +357,8 @@ let start_keeper_loops
     event_bus;
   (* Telemetry feedback loop: observe OAS per-turn signals without
      deserializing provider/model-bearing payloads. *)
-  Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
+  Keeper_telemetry_consumer.spawn_subscriber
+    ~sw ~clock ~base_path:(Env_config.base_path ()) ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
       ~purpose:"lifecycle_listener"

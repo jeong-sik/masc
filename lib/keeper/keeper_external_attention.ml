@@ -19,6 +19,17 @@ let persistence_surface = "keeper_external_attention"
 
 let default_claim_stale_after_s = 900.0
 
+(* Dedup scan window for [record]. The store is append-only and
+   unbounded, so parsing the whole file on every record is O(file) per
+   call — O(N^2) across N inbound messages on the Discord hot path. The
+   dedup check only needs to catch gateway *redelivery* (Discord replays
+   missed events after a RESUME), which is bounded to recent events, so
+   scanning the last [dedup_window_bytes] is both sufficient and O(1) in
+   file size (one [Fs_compat.read_slice]). A record older than the
+   window can in principle be re-appended on a very late redelivery —
+   that is a rare, harmless duplicate, never data loss. *)
+let dedup_window_bytes = 64 * 1024
+
 (* RFC-0232 P5: the surface vocabulary moved to the shared [Surface_ref]
    module; this equation re-exports it so existing consumers keep
    constructing/matching [Keeper_external_attention.Dashboard] etc. *)
@@ -436,8 +447,39 @@ let recorded_item_by_event_id events event_id =
       | Recorded _ | Claimed_for_turn _ | Resolved _ | Ignored _ -> None)
     events
 
+(* Events from the last [dedup_window_bytes] of the store, for the
+   redelivery dedup check in [record]. Reads a bounded tail via
+   [read_slice] instead of folding the whole file, so it stays O(window)
+   regardless of how large the append-only store has grown. The slice
+   starts mid-line (and the writer may be mid-append), so only the bytes
+   strictly between the first and last newline are complete lines —
+   parsing just those avoids feeding a partial line to [parse_line]
+   (which would otherwise log a spurious read-drop on every call). *)
+let load_recent_events ~base_path ~keeper_name =
+  let path = attention_path ~base_path ~keeper_name in
+  match Fs_compat.file_size path with
+  | None -> []
+  | Some size when size <= dedup_window_bytes ->
+      (* Small store: the full scan is already within the window. *)
+      load_events ~base_path ~keeper_name
+  | Some size ->
+      let from = size - dedup_window_bytes in
+      let slice = Fs_compat.read_slice ~path ~from ~len:dedup_window_bytes in
+      (match String.index_opt slice '\n', String.rindex_opt slice '\n' with
+       | Some i, Some j when j > i ->
+           String.sub slice (i + 1) (j - i - 1)
+           |> String.split_on_char '\n'
+           |> List.filter_map (fun line ->
+                  let line = String.trim line in
+                  if line = "" then None else parse_line ~file_path:path line)
+       | _ ->
+           (* Fewer than two newlines in the window: no complete line to
+              dedup against. Accept the (rare) duplicate over a partial
+              parse. *)
+           [])
+
 let record ~base_path (item : item) =
-  let events = load_events ~base_path ~keeper_name:item.keeper_name in
+  let events = load_recent_events ~base_path ~keeper_name:item.keeper_name in
   match recorded_item_by_event_id events item.event_id with
   | Some existing -> `Duplicate existing
   | None -> (

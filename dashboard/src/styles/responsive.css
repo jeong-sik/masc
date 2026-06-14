@@ -1,11 +1,6 @@
 /* MASC Dashboard — Responsive Overrides (Task 292) */
 
 @media (max-width: 1024px) {
-  .app-shell {
-    width: calc(100% - 16px);
-    margin: 8px auto 16px;
-  }
-
   .dashboard-header {
     flex-direction: column;
     align-items: flex-start;
@@ -77,5 +72,17 @@
     justify-content: flex-start !important;
     padding-bottom: 4px;
     &::-webkit-scrollbar { display: none; }
+  }
+}
+
+/* Touch targets — coarse pointers (touch) and narrow viewports deserve
+   the WCAG 2.5.5 / Apple HIG 44px minimum. height (inline on .btn / py on
+   ActionButton) and min-height (this) are independent properties, so
+   desktop keeps the compact inline height while touch/narrow lifts to 44px.
+   Icon-only .btn (22x22) is excluded — its square geometry is intentional. */
+@media (max-width: 768px), (pointer: coarse) {
+  .btn:not([data-icon="true"]),
+  [data-action-button] {
+    min-height: 44px;
   }
 }

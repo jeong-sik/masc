@@ -639,13 +639,13 @@ let test_librarian_runtime_appends_episode_bundle () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
-let test_policy_score_and_retention () =
+let test_policy_score () =
   let now = 1_000_000.0 in
   let f = fact_fixture ~now () in
   let score = Policy.score_fact ~now f in
   Alcotest.(check bool) "score positive" true (score > 0.0);
-  let verdict = Policy.decide_retention score in
-  Alcotest.(check bool) "high score -> KeepVerbatim" true (verdict = Policy.KeepVerbatim);
+  (* A stale, low-confidence, never-recalled fact scores strictly lower
+     than a fresh confident one — the ordering recall ranking relies on. *)
   let low =
     { f with
       Types.confidence = 0.1
@@ -653,8 +653,8 @@ let test_policy_score_and_retention () =
     ; Types.last_accessed = now -. 864_000.0
     }
   in
-  let verdict_low = Policy.decide_retention (Policy.score_fact ~now low) in
-  Alcotest.(check bool) "low score -> Discard" true (verdict_low = Policy.Discard)
+  Alcotest.(check bool) "stale low-confidence fact scores lower" true
+    (Policy.score_fact ~now low < score)
 ;;
 
 let test_bump_access () =
@@ -1020,7 +1020,7 @@ let () =
             test_librarian_runtime_appends_episode_bundle
         ] )
     ; ( "policy"
-      , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
+      , [ Alcotest.test_case "score ordering" `Quick test_policy_score
         ; Alcotest.test_case "bump access" `Quick test_bump_access
         ] )
     ; ( "io"

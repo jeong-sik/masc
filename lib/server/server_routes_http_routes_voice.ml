@@ -67,6 +67,47 @@ let serve_clip ~token request reqd =
     let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
     Httpun.Reqd.respond_with_string reqd response body)
 
+(* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
+   this adds no public-read capability headers: the transcribe route is
+   owner-bearer-gated, not token-capability-gated (RFC-0236 §2.2/§3.4). *)
+let respond_json ?(status = `OK) ~request reqd json =
+  Http.Response.json_value ~status ~compress:true ~request json reqd
+
+(** RFC-0236 P1 — transcribe browser-captured speech.
+
+    Raw audio bytes in the request body (audio/webm, audio/mp4, ...), Scribe
+    v2 via [Voice_bridge.transcribe_audio], and the whole transcribe record
+    ([{status; text; language_code; endpoint_id}]) is returned so the dashboard
+    can show the detected language. The dashboard renders only [text].
+
+    Transcription spends an ElevenLabs API call per request, so this is
+    owner-gated: [CanBroadcast] is owner-only in the permission matrix (a
+    [Worker] keeper may not spend the operator's STT quota). This is the auth
+    asymmetry with the GET audio route — that route is [with_public_read]
+    because the token is an unguessable capability; transcribe has no
+    capability, only the dashboard bearer.
+
+    Input audio is a transient temp file, removed on every exit path; nothing
+    is persisted (unlike RFC-0235 output clips, which are SSOT chat records). *)
+let handle_transcribe _state request reqd body =
+  if String.length body = 0 then
+    respond_json ~status:`Bad_request ~request reqd
+      (`Assoc [ ("error", `String "empty audio body") ])
+  else
+    let tmp = Filename.temp_file "masc_voice_transcribe_" ".webm" in
+    (* finally absorbs [Sys_error] internally (CLAUDE.md §OCaml: a finally
+       that raises [Fun.Finally_raised] would mask the original exception).
+       Out-of-memory / async exceptions are out of scope for temp cleanup. *)
+    Fun.protect
+      ~finally:(fun () -> (try Sys.remove tmp with Sys_error _ -> ()))
+      (fun () ->
+        Fs_compat.save_file tmp body;
+        match Voice_bridge.transcribe_audio ~audio_file:tmp () with
+        | Ok json -> respond_json ~request reqd json
+        | Error err ->
+          respond_json ~status:`Bad_request ~request reqd
+            (`Assoc [ ("error", `String err) ]))
+
 let add_routes router =
   router
   |> Http.Router.prefix_get "/api/v1/voice/audio/" (fun request reqd ->
@@ -84,4 +125,13 @@ let add_routes router =
                     ; ("reason", `String "expected 32-char hex (128-bit)")
                     ])
            | Some token -> serve_clip ~token request reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/voice/transcribe" (fun request reqd ->
+       (* RFC-0236 P1: browser-captured speech → text. Owner-only
+          ([CanBroadcast]) — each call spends an ElevenLabs STT credit, so
+          unlike the GET audio route this carries no public capability. *)
+       with_token_permission_auth ~permission:Masc_domain.CanBroadcast
+         (fun state _agent_name _req reqd ->
+           Http.Request.read_body_async reqd (fun body ->
+             handle_transcribe state request reqd body))
          request reqd)

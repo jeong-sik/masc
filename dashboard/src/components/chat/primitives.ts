@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import { JsonViewerCard } from '../common/json-viewer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ActionButton } from '../common/button'
+import { useVoiceInput } from './voice-input'
 import { formatTimeHms } from '../../lib/format-time'
 import { formatCost } from '../../lib/format-number'
 import { isSubmitEnter } from '../../lib/keyboard'
@@ -737,6 +738,15 @@ export function ChatComposer({
 }) {
   const [elapsed, setElapsed] = useState(0)
 
+  // RFC-0236 P1: speak to compose. Transcribed text appends to the draft at a
+  // newline; an empty draft is replaced outright. Send stays manual (no
+  // auto-send) so the operator can correct a transcription before it lands.
+  const voice = useVoiceInput({
+    onTranscribed: (text) => {
+      onDraftChange(draft.trim() === '' ? text : `${draft}\n${text}`)
+    },
+  })
+
   useEffect(() => {
     if (!streaming || !streamStartedAt) {
       setElapsed(0)
@@ -820,6 +830,15 @@ export function ChatComposer({
               </span>
             `
           : null}
+        ${voice.supported ? html`
+          <${ActionButton}
+            variant=${voice.state === 'recording' ? 'danger' : 'ghost'}
+            onClick=${() => (voice.state === 'recording' ? voice.stop() : voice.start())}
+            disabled=${voice.state === 'transcribing' || disabled}
+            aria-label=${voice.state === 'recording' ? '녹음 중지' : '음성으로 입력'}
+            title=${voice.state === 'recording' ? '녹음 중지' : voice.state === 'transcribing' ? '음성 인식 중' : '음성으로 입력'}
+          >${voice.state === 'recording' ? '■ 녹음중' : voice.state === 'transcribing' ? '전사 중…' : '🎤 음성'}<//>
+        ` : null}
         <${ActionButton}
           variant=${isStreamWarning && !canQueue ? 'danger' : 'primary'}
           onClick=${onSend}

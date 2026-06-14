@@ -17,6 +17,22 @@ module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_meta_json = Masc.Keeper_meta_json
 module MC = Masc.Keeper_meta_contract
 
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  dir
+
+let cleanup_dir dir =
+  let rec rm path =
+    if Sys.is_directory path
+    then (
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path)
+    else Unix.unlink path
+  in
+  try rm dir with _ -> ()
+
 let test_turn_timeout_blocker_class_roundtrip () =
   let cls = Keeper_meta_contract.Turn_timeout in
   let label = Keeper_meta_contract.blocker_class_to_string cls in
@@ -123,6 +139,93 @@ let legacy_base_json name =
       "tool_access", `List [];
     ]
 
+let make_meta name =
+  match Keeper_meta_json_parse.meta_of_json (legacy_base_json name) with
+  | Ok meta -> meta
+  | Error err -> fail ("parse base: " ^ err)
+
+let test_stay_silent_loop_detection_pauses_keeper () =
+  let base_path = temp_dir "masc-stay-silent-pause-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "stay-silent-paused" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let paused_meta =
+         Masc.Keeper_unified_turn_stay_silent.mark_loop_detected
+           ~config
+           meta
+           ~streak:10
+           ~threshold:10
+       in
+       check bool "returned meta paused" true paused_meta.paused;
+       check
+         (option (float 0.001))
+         "manual pause has no auto-resume"
+         None
+       paused_meta.auto_resume_after_sec;
+       (match paused_meta.runtime.last_blocker with
+        | Some { Keeper_meta_contract.klass = Stay_silent_loop; detail } ->
+          check
+            string
+            "blocker detail"
+            "stay_silent loop detected: streak=10 threshold=10; manual pause applied"
+            detail
+        | Some _ -> fail "expected Stay_silent_loop blocker"
+        | None -> fail "expected stay_silent loop blocker");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused
+       | None -> fail "expected registered keeper")
+
+let test_idle_detected_repeated_failure_pauses_keeper () =
+  let base_path = temp_dir "masc-idle-detected-pause-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "idle-detected-paused" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let err =
+         Agent_sdk.Error.Agent
+           (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 4 })
+       in
+       for _ = 1 to Masc.Keeper_behavioral_regime.turn_fail_streak_threshold do
+         Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+           ~config
+           ~meta
+           ~updated_meta:meta
+           ~is_auto_recoverable:false
+           ~err
+           ~error_text:(Agent_sdk.Error.to_string err)
+       done;
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         let paused_meta = entry.Masc.Keeper_registry.meta in
+         check bool "registry meta paused" true paused_meta.paused;
+         check
+           (option (float 0.001))
+           "manual pause has no auto-resume"
+           None
+           paused_meta.auto_resume_after_sec;
+         (match paused_meta.runtime.last_blocker with
+          | Some { Keeper_meta_contract.klass = Sdk_idle_detected; detail } ->
+            check
+              string
+              "blocker detail"
+              "idle loop detected: consecutive_idle_turns=4; manual pause applied"
+              detail
+          | Some _ -> fail "expected Sdk_idle_detected blocker"
+          | None -> fail "expected idle-detected blocker")
+       | None -> fail "expected registered keeper")
+
 let test_legacy_last_blocker_pair_rejected () =
   let legacy_json =
     match legacy_base_json "legacy-blocker-pair" with
@@ -179,5 +282,15 @@ let () =
             test_legacy_last_blocker_pair_rejected;
           test_case "legacy blocker string rejected" `Quick
             test_legacy_last_blocker_string_rejected;
+        ] );
+      ( "stay_silent loop",
+        [
+          test_case "loop detection pauses keeper for manual resume" `Quick
+            test_stay_silent_loop_detection_pauses_keeper;
+        ] );
+      ( "idle-detected loop",
+        [
+          test_case "repeated IdleDetected pauses keeper for manual resume" `Quick
+            test_idle_detected_repeated_failure_pauses_keeper;
         ] );
     ]

@@ -24,7 +24,7 @@ let recovery_stimulus ~now ~keeper_name ~streak ~threshold =
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
     Printf.sprintf
-      "stay_silent loop detected: streak=%d threshold=%d; recovery stimulus queued"
+      "stay_silent loop detected: streak=%d threshold=%d; manual pause applied"
       streak
       threshold
   in
@@ -53,7 +53,6 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
     ~base_path:config.base_path
     meta.name
     stimulus;
-  Keeper_registry.wakeup ~base_path:config.base_path meta.name;
   (try
      Keeper_reaction_ledger.record_event_queue_stimulus
        ~base_path:config.base_path
@@ -65,14 +64,9 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
      Log.Keeper.warn
        "%s: failed to persist stay-silent recovery stimulus in reaction ledger: %s"
        meta.name
-       (Printexc.to_string exn));
-  Log.Keeper.warn
-    "%s: stay_silent loop escalated to blocker and recovery stimulus \
-     (streak=%d threshold=%d)"
-    meta.name
-    streak
-    threshold;
-  Keeper_meta_contract.map_runtime
+         (Printexc.to_string exn));
+  let blocked_meta =
+    Keeper_meta_contract.map_runtime
     (fun rt ->
        { rt with
          last_blocker =
@@ -82,6 +76,32 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
                 Keeper_meta_contract.Stay_silent_loop)
        })
     meta
+  in
+  match
+    Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
+      ~config
+      ~meta:blocked_meta
+      ~paused:true
+      ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+  with
+  | Ok paused_meta ->
+    Log.Keeper.warn
+      "%s: stay_silent loop escalated to blocker and manual pause \
+       (streak=%d threshold=%d)"
+      meta.name
+      streak
+      threshold;
+    paused_meta
+  | Error pause_err ->
+    Keeper_registry.wakeup ~base_path:config.base_path meta.name;
+    Log.Keeper.error
+      "%s: stay_silent loop pause sync failed: %s; recovery stimulus queued \
+       instead (streak=%d threshold=%d)"
+      meta.name
+      pause_err
+      streak
+      threshold;
+    blocked_meta
 ;;
 
 let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_latched =

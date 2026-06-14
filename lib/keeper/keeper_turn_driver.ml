@@ -216,4 +216,11 @@ module For_testing = struct
   let checkpoint_after_attempt = checkpoint_after_attempt
   let success_selected_model_raw = success_selected_model_raw
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
+  let last_tool_progress_context_string_of_messages messages =
+    messages
+    |> Keeper_turn_driver_try_provider.For_testing.last_tool_progress_context_of_messages
+    |> Keeper_turn_driver_try_provider.For_testing.format_last_tool_progress_context
+
+  let sdk_error_of_nonretryable_attempt_error =
+    Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
 end

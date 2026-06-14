@@ -104,10 +104,12 @@ val refresh_progress_updated_line : Workspace.config -> string -> unit
 val persist_meta :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> (unit, string) result
 
-(** Persist [m] with a CAS bump on [meta_version]. When [force] is
-    set, the version is bumped without checking the disk version. *)
+(** Persist [m] with a CAS bump on [meta_version]: the write is rejected
+    if the on-disk version has moved since [m] was read. There is no force
+    / bypass path — cumulative usage counters are a monotone invariant
+    (RFC-0225 §3.2, RFC-0237), so callers that lost a race must resolve the
+    conflict through {!write_meta_with_merge}, not overwrite the disk. *)
 val write_meta :
-  ?force:bool ->
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result

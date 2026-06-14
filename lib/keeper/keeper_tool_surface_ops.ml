@@ -133,7 +133,10 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
               trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
               generation = meta.runtime.generation + 1 } }
         in
-        (match Keeper_meta_store.write_meta ~force:true config updated_meta with
+        (match
+           Keeper_meta_store.write_meta_with_merge
+             ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+         with
          | Ok () ->
              Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
              Ok

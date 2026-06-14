@@ -619,11 +619,11 @@ let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojs
 let operator_action_http_json ~state ~sw ~clock request ~args =
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~base_path:(Mcp_server.workspace_config state).base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = state.Mcp_server.workspace_config
+    { config = (Mcp_server.workspace_config state)
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
@@ -638,11 +638,11 @@ let operator_action_http_json ~state ~sw ~clock request ~args =
 let operator_confirm_http_json ~state ~sw ~clock request ~args =
   let actor =
     Server_auth.dashboard_actor_for_request
-      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~base_path:(Mcp_server.workspace_config state).base_path
       request
   in
   let ctx : _ Operator_control.context =
-    { config = state.Mcp_server.workspace_config
+    { config = (Mcp_server.workspace_config state)
     ; agent_name = Option.value ~default:"dashboard" actor
     ; sw
     ; clock
@@ -702,7 +702,7 @@ let dashboard_bootstrap_http_json
         ?clock:state.Mcp_server.clock
         ~request
         ~light:true
-        state.Mcp_server.workspace_config)
+        (Mcp_server.workspace_config state))
   in
   let execution =
     slice "execution" (fun () -> dashboard_execution_http_json ~state ~sw ~clock request)
@@ -714,12 +714,12 @@ let dashboard_bootstrap_http_json
        bypassing Dashboard_cache and re-reading goals/backlog on every load. *)
     slice "planning" (fun () ->
       let cache_key =
-        Printf.sprintf "planning:%s" state.Mcp_server.workspace_config.base_path
+        Printf.sprintf "planning:%s" (Mcp_server.workspace_config state).base_path
       in
       Dashboard_cache.get_or_compute cache_key
         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            dashboard_planning_http_json ~config:state.Mcp_server.workspace_config)))
+            dashboard_planning_http_json ~config:(Mcp_server.workspace_config state))))
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
@@ -736,16 +736,16 @@ let dashboard_bootstrap_http_json
     (* Share the standalone /api/v1/dashboard/goals cache (same key + ttl). *)
     slice "goals" (fun () ->
       let cache_key =
-        Printf.sprintf "goals_tree:%s" state.Mcp_server.workspace_config.base_path
+        Printf.sprintf "goals_tree:%s" (Mcp_server.workspace_config state).base_path
       in
       Dashboard_cache.get_or_compute cache_key
         ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (fun () ->
           Domain_pool_ref.submit_io_or_inline (fun () ->
-            dashboard_goals_tree_http_json ~config:state.Mcp_server.workspace_config)))
+            dashboard_goals_tree_http_json ~config:(Mcp_server.workspace_config state))))
   in
   let goal_loop_status =
     slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json ~base_path:state.Mcp_server.workspace_config.base_path ())
+      Dashboard_goal_loop.status_json ~base_path:(Mcp_server.workspace_config state).base_path ())
   in
   `Assoc
     [ "served_at", `String (Masc_domain.now_iso ())

@@ -649,7 +649,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       Some (Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
-  Audit_log.log_tool_call state.Mcp_server.workspace_config
+  Audit_log.log_tool_call (Mcp_server.workspace_config state)
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then (
@@ -716,7 +716,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
-         (try Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+         (try Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
@@ -793,7 +793,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
     (* fire-and-forget: activity graph emission must not change the tool-call result. *)
-    ignore (Activity_graph.emit state.Mcp_server.workspace_config
+    ignore (Activity_graph.emit (Mcp_server.workspace_config state)
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:"tool.called"

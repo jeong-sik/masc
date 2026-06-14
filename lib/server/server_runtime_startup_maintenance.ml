@@ -9,14 +9,14 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
      let days =
        Safe_ops.get_env_int_logged "MASC_JSONL_RETENTION_DAYS" ~default:30
      in
-     let masc = Workspace.masc_dir state.workspace_config in
+     let masc = Workspace.masc_dir (Mcp_server.workspace_config state) in
      let prune_dir dir =
        if Sys.file_exists dir then
          Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
        else 0
      in
      let tool_metrics_dir =
-       Filename.concat state.workspace_config.base_path "data/tool-metrics"
+       Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
        prune_dir (Filename.concat masc "audit")
@@ -57,7 +57,7 @@ let startup_prune_auth_archive (state : Mcp_server.server_state) =
      in
      let kept, pruned =
        Auth.prune_archive
-         ~base_path:state.workspace_config.base_path
+         ~base_path:(Mcp_server.workspace_config state).base_path
          ~retention_days:days
          ~min_keep
      in
@@ -82,7 +82,7 @@ let startup_prune_auth_archive (state : Mcp_server.server_state) =
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
   (try
      let traces_dir =
-       Filename.concat (Workspace.masc_root_dir state.workspace_config) "traces"
+       Filename.concat (Workspace.masc_root_dir (Mcp_server.workspace_config state)) "traces"
      in
      if Sys.file_exists traces_dir then begin
        let moved_total = ref 0 in

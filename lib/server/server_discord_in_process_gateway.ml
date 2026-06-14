@@ -515,7 +515,7 @@ let start ~sw ~env ~clock ~state =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.workspace_config
+        ~config:(Mcp_server.workspace_config state)
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -534,13 +534,13 @@ let start ~sw ~env ~clock ~state =
             on_event
               ~dispatch
               ~clock
-              ~base_dir:state.Mcp_server.workspace_config.base_path
+              ~base_dir:(Mcp_server.workspace_config state).base_path
               ev)
           ~on_ambient:(fun ev ->
             (* Read base_path per event: [workspace_config] is mutable
                (workspace-switch tools swap it). *)
             on_ambient
-              ~base_dir:state.Mcp_server.workspace_config.base_path ev)
+              ~base_dir:(Mcp_server.workspace_config state).base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

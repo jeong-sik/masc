@@ -30,7 +30,7 @@ let keeper_reaction_ledger_health_json () =
       ; "keepers", `List []
       ]
   | Some state ->
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     let keeper_names =
       try Keeper_meta_store.keeper_names config |> sorted_unique_strings |> take 64 with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -65,10 +65,10 @@ let bool_field name = function
 (* Scope keeper counts to the active workspace's base_path so a running
    keeper from another workspace cannot mask a local outage in fleet
    safety. `bootable_keeper_count` is already derived from
-   `state.workspace_config`, so the running count must use the same scope. *)
+   `(Mcp_server.workspace_config state)`, so the running count must use the same scope. *)
 let runtime_base_path_opt () =
   match current_server_state_opt () with
-  | Some state -> Some state.Mcp_server.workspace_config.base_path
+  | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
 
 let keeper_fleet_runtime_resolution_base_fields
@@ -184,7 +184,7 @@ let keeper_fleet_runtime_resolution_light_fields () =
       Some
         (keeper_fleet_meta_scan
            ~include_paused_details:false
-           state.Mcp_server.workspace_config)
+           (Mcp_server.workspace_config state))
     | None -> None
   in
   keeper_fleet_runtime_resolution_base_fields

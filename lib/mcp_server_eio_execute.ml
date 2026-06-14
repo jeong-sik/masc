@@ -67,7 +67,7 @@ let execute_tool_eio
   Eio_context.set_clock clock;
   (* Otel_metric_store: count every inbound tool call *)
   Otel_metric_store.record_request ();
-  let config = state.Mcp_server.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   let registry = state.Mcp_server.session_registry in
   (* Fix 3: Cache workspace_initialized to avoid repeated stat syscalls. *)
   let workspace_init_cached = Workspace.is_initialized config in

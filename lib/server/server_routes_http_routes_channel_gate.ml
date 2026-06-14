@@ -122,7 +122,7 @@ let handle_gate_message ~sw ~clock state request reqd =
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net
-        ~config:state.Mcp_server.workspace_config
+        ~config:(Mcp_server.workspace_config state)
     in
     let result =
       try
@@ -256,7 +256,7 @@ let handle_gate_connector_status _state request reqd =
 
 let gate_keeper_ctx ~sw ~clock state =
   {
-    Keeper_tool_surface.config = state.Mcp_server.workspace_config;
+    Keeper_tool_surface.config = (Mcp_server.workspace_config state);
     agent_name = "gate:connector";
     sw;
     clock;
@@ -377,7 +377,7 @@ let handle_bind_for_connector ~sw ~clock state request reqd
         | Ok true -> (
             let actor_name =
               sanitized_dashboard_actor_for_request
-                ~base_path:state.Mcp_server.workspace_config.base_path request
+                ~base_path:(Mcp_server.workspace_config state).base_path request
               |> Option.value ~default:"dashboard"
               |> String.trim
             in
@@ -411,7 +411,7 @@ let handle_unbind_for_connector state request reqd
       else
         let actor_name =
           sanitized_dashboard_actor_for_request
-            ~base_path:state.Mcp_server.workspace_config.base_path request
+            ~base_path:(Mcp_server.workspace_config state).base_path request
           |> Option.value ~default:"dashboard"
           |> String.trim
         in

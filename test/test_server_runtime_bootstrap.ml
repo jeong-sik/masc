@@ -807,7 +807,7 @@ let test_constructor_is_pure () =
 let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
       let state = Mcp_server.create_state ~base_path:dir in
-      let agents = Workspace.agents_dir state.Mcp_server.workspace_config in
+      let agents = Workspace.agents_dir (Mcp_server.workspace_config state) in
       Fs_compat.mkdir_p agents;
       write_file (Filename.concat agents "test-agent.json") "{}";
       Server_runtime_bootstrap.restore_persisted_sessions state;
@@ -1024,7 +1024,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
         (fun () ->
           let state = Mcp_server.create_state ~base_path:dir in
           Server_auth.server_state := Some state;
-          let config = state.Mcp_server.workspace_config in
+          let config = (Mcp_server.workspace_config state) in
           write_keeper_meta_exn config
             (make_keeper_meta ~name:"durable-paused" ~trace_id:"trace-paused"
                ~paused:true ());
@@ -1194,7 +1194,7 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
           { (make_keeper_meta
                ~name:"timeout-without-policy"
@@ -1254,7 +1254,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
@@ -1343,7 +1343,7 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"retired-keeper" ~trace_id:"trace-retired" ());
         let request = Httpun.Request.create `GET "/health" in
@@ -1384,7 +1384,7 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let phase_paused =
           make_keeper_meta ~name:"phase-paused" ~trace_id:"trace-phase-paused" ()
         in
@@ -1432,7 +1432,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let paused =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
@@ -1488,7 +1488,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
       (fun () ->
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let failing =
           make_keeper_meta ~name:"capacity-failing"
             ~trace_id:"trace-capacity-failing" ()
@@ -1525,7 +1525,7 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
         Config_dir_resolver.reset ();
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"cursor-swept" ~trace_id:"trace-cursor" ());
         let stimulus post_id updated_at : Keeper_event_queue.stimulus =

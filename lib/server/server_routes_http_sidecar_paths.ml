@@ -27,7 +27,7 @@ let runtime_base_path ?base_path () =
      | _ -> Sys.getcwd ())
 ;;
 
-let request_base_path state = state.Mcp_server.workspace_config.base_path
+let request_base_path state = (Mcp_server.workspace_config state).base_path
 let dir_exists path = Sys.file_exists path && Sys.is_directory path
 
 let project_root_from_executable () =

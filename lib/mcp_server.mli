@@ -173,7 +173,7 @@ val schema_markdown : string
 (** {1 Server state} *)
 
 type server_state = {
-  mutable workspace_config : Workspace.config;
+  workspace_config : Workspace.config Atomic.t;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
@@ -185,10 +185,17 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [workspace_config] is mutable so workspace-switch tools can swap
-    backends mid-flight.  Eio handles are [option] because
-    the legacy non-Eio bootstrap ({!create_state}) still
-    needs to construct a state without an active switch. *)
+    [workspace_config] is stored in an atomic reference so
+    workspace-switch tools can swap backends without tearing reads
+    in concurrent request/background fibers.  Eio handles are
+    [option] because the legacy non-Eio bootstrap ({!create_state})
+    still needs to construct a state without an active switch. *)
+
+val workspace_config : server_state -> Workspace.config
+(** Current workspace configuration. *)
+
+val set_workspace_config : server_state -> Workspace.config -> unit
+(** Atomically replace the active workspace configuration. *)
 
 val create_state : base_path:string -> server_state
 (** Legacy bootstrap.  Every Eio handle is [None]; the

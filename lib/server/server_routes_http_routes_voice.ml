@@ -73,6 +73,23 @@ let serve_clip ~token request reqd =
 let respond_json ?(status = `OK) ~request reqd json =
   Http.Response.json_value ~status ~compress:true ~request json reqd
 
+let audio_temp_suffix request =
+  let media_type =
+    match Http.Request.header request "content-type" with
+    | None -> ""
+    | Some raw ->
+      let raw = String.lowercase_ascii (String.trim raw) in
+      (match String.index_opt raw ';' with
+       | None -> raw
+       | Some idx -> String.trim (String.sub raw 0 idx))
+  in
+  match media_type with
+  | "audio/mp4" | "audio/x-m4a" -> ".mp4"
+  | "audio/mpeg" | "audio/mp3" -> ".mp3"
+  | "audio/ogg" -> ".ogg"
+  | "audio/wav" | "audio/wave" | "audio/x-wav" -> ".wav"
+  | "audio/webm" | _ -> ".webm"
+
 (** RFC-0236 P1 — transcribe browser-captured speech.
 
     Raw audio bytes in the request body (audio/webm, audio/mp4, ...), Scribe
@@ -81,32 +98,32 @@ let respond_json ?(status = `OK) ~request reqd json =
     can show the detected language. The dashboard renders only [text].
 
     Transcription spends an ElevenLabs API call per request, so this is
-    owner-gated: [CanBroadcast] is owner-only in the permission matrix (a
-    [Worker] keeper may not spend the operator's STT quota). This is the auth
-    asymmetry with the GET audio route — that route is [with_public_read]
-    because the token is an unguessable capability; transcribe has no
-    capability, only the dashboard bearer.
+    admin/owner-gated with [CanAdmin]. [CanBroadcast] is intentionally too
+    broad here: worker tokens have it for normal chat/broadcast writes, but
+    they must not spend the operator's STT quota. This is the auth asymmetry
+    with the GET audio route — that route is [with_public_read] because the
+    token is an unguessable capability; transcribe has no capability, only the
+    dashboard bearer.
 
-    Input audio is a transient temp file, removed on every exit path; nothing
-    is persisted (unlike RFC-0235 output clips, which are SSOT chat records). *)
+    Input audio is a transient temp file registered with the Eio switch for
+    cleanup on every exit path; nothing is persisted (unlike RFC-0235 output
+    clips, which are SSOT chat records). *)
 let handle_transcribe _state request reqd body =
   if String.length body = 0 then
     respond_json ~status:`Bad_request ~request reqd
       (`Assoc [ ("error", `String "empty audio body") ])
   else
-    let tmp = Filename.temp_file "masc_voice_transcribe_" ".webm" in
-    (* finally absorbs [Sys_error] internally (CLAUDE.md §OCaml: a finally
-       that raises [Fun.Finally_raised] would mask the original exception).
-       Out-of-memory / async exceptions are out of scope for temp cleanup. *)
-    Fun.protect
-      ~finally:(fun () -> (try Sys.remove tmp with Sys_error _ -> ()))
-      (fun () ->
-        Fs_compat.save_file tmp body;
-        match Voice_bridge.transcribe_audio ~audio_file:tmp () with
-        | Ok json -> respond_json ~request reqd json
-        | Error err ->
-          respond_json ~status:`Bad_request ~request reqd
-            (`Assoc [ ("error", `String err) ]))
+    Eio.Switch.run (fun sw ->
+      let tmp = Filename.temp_file "masc_voice_transcribe_" (audio_temp_suffix request) in
+      Eio.Switch.on_release sw (fun () ->
+        try Sys.remove tmp with
+        | Sys_error _ -> ());
+      Fs_compat.save_file tmp body;
+      match Voice_bridge.transcribe_audio ~audio_file:tmp () with
+      | Ok json -> respond_json ~request reqd json
+      | Error err ->
+        respond_json ~status:`Bad_request ~request reqd
+          (`Assoc [ ("error", `String err) ]))
 
 let add_routes router =
   router
@@ -127,10 +144,10 @@ let add_routes router =
            | Some token -> serve_clip ~token request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/voice/transcribe" (fun request reqd ->
-       (* RFC-0236 P1: browser-captured speech → text. Owner-only
-          ([CanBroadcast]) — each call spends an ElevenLabs STT credit, so
-          unlike the GET audio route this carries no public capability. *)
-       with_token_permission_auth ~permission:Masc_domain.CanBroadcast
+       (* RFC-0236 P1: browser-captured speech -> text. Admin/owner-only
+          ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
+          the GET audio route this carries no public capability. *)
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state _agent_name _req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              handle_transcribe state request reqd body))

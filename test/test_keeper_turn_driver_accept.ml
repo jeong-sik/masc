@@ -538,7 +538,11 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
   Alcotest.(check (option string))
     "tool arg delta"
     (Some "sse_tool_arg_delta")
-    (kind (ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }))
+    (kind (ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }));
+  Alcotest.(check (option string))
+    "stream incomplete"
+    (Some "sse_stream_incomplete")
+    (kind (StreamIncomplete { reason = "max_output_tokens" }))
 
 let () =
   Alcotest.run "keeper_turn_driver_accept"

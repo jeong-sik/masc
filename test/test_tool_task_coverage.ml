@@ -1355,6 +1355,21 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
           = ctx.agent_name)
 )
 
+(* scope_widened is threaded from Claim_next_claimed through
+   build_claim_observation_payload into the todo_claim fragment. Assert both
+   boolean values so a regression that drops the field (or hardcodes it) is
+   caught. *)
+let () = test "claim_observation_payload_carries_scope_widened" (fun () ->
+  let open Yojson.Safe.Util in
+  let scope_widened_of b =
+    Task.Tool.build_claim_observation_payload ~now:0.0 ~agent_name:"agent-x"
+      ~task_id:"task-001" ~scope_widened:b
+    |> member "todo_claim" |> member "scope_widened" |> to_bool
+  in
+  assert (scope_widened_of true = true);
+  assert (scope_widened_of false = false)
+)
+
 let () =
   test "handle_claim_next_reports_internal_errors_as_tool_failure" (fun () ->
     let ctx = make_test_ctx () in

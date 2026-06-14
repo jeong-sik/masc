@@ -49,7 +49,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(report.stats.totalRows).toBeGreaterThan(10)
     expect(report.stats.overrideRows).toBeGreaterThanOrEqual(2)
     expect(report.stages.map(stage => stage.title)).toEqual(
-      expect.arrayContaining(['소스 확정', 'System', 'User / World']),
+      expect.arrayContaining(['Prompt sources', 'System rules', 'World message']),
     )
     expect(report.stages.find(stage => stage.id === 'registry-bootstrap')?.messageSlot).toBe('not sent')
     expect(report.stages.filter(stage => stage.role === 'model_input').map(stage => stage.id)).toEqual([
@@ -58,6 +58,12 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.visiblePromptKeys).toEqual([
+      'keeper.unified.system',
+      'keeper.turn_intent',
+      'keeper.turn_intent.claim_guidance_a',
+    ])
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.hiddenPromptCount).toBe(6)
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)

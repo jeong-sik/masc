@@ -27,6 +27,7 @@ val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t 
 
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
+val decay_stale_facts : keeper_id:string -> now:float -> ?n:int -> unit -> unit
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 
 module For_testing : sig

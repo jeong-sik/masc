@@ -316,3 +316,17 @@ let read_episodes_tail ~keeper_id ~n =
   let events = read_events_tail ~keeper_id ~n in
   if events = [] then read_episode_files_tail ~keeper_id ~n else events
 ;;
+(** Post-turn stale detection: reads [n] recent facts, increments stale_factor
+    for facts without recent verification, and appends updated records. *)
+let decay_stale_facts ~keeper_id ~now ?(n = 50) () =
+  read_facts_tail ~keeper_id ~n
+  |> List.map (fun fact ->
+    let stale_factor =
+      match fact.last_verified_at with
+      | None -> Float.min 1.0 (fact.stale_factor +. 0.1)
+      | Some ts when now -. ts > 3600.0 -> Float.min 1.0 (fact.stale_factor +. 0.1)
+      | _ -> fact.stale_factor
+    in
+    { fact with stale_factor })
+  |> List.iter (append_fact ~keeper_id)
+;;

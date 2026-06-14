@@ -2,7 +2,6 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   AlertTriangle,
-  CheckCircle2,
   GitCompareArrows,
   RefreshCw,
   Route,
@@ -69,8 +68,6 @@ export interface KeeperPromptAssemblyStage {
   summary: string
   rows: KeeperPromptAssemblyRow[]
   promptCount: number
-  visiblePromptKeys: string[]
-  hiddenPromptCount: number
   bytes: number
   estimatedTokens: number
   overrideCount: number
@@ -272,8 +269,7 @@ function stageRows(rows: KeeperPromptAssemblyRow[], stage: AssemblyStageSpec): K
 function buildStages(rows: KeeperPromptAssemblyRow[]): KeeperPromptAssemblyStage[] {
   return STAGES.map(stage => {
     const rowsForStage = stageRows(rows, stage)
-    const promptRows = rowsForStage.filter(row => row.promptKey !== '(computed)')
-    const visiblePromptKeys = promptRows.slice(0, 3).map(row => row.promptKey)
+    const promptCount = rowsForStage.filter(row => row.promptKey !== '(computed)').length
     return {
       id: stage.id,
       order: stage.order,
@@ -283,9 +279,7 @@ function buildStages(rows: KeeperPromptAssemblyRow[]): KeeperPromptAssemblyStage
       messageSlot: stage.messageSlot,
       summary: stage.summary,
       rows: rowsForStage,
-      promptCount: promptRows.length,
-      visiblePromptKeys,
-      hiddenPromptCount: Math.max(0, promptRows.length - visiblePromptKeys.length),
+      promptCount,
       bytes: rowsForStage.reduce((sum, row) => sum + row.bytes, 0),
       estimatedTokens: rowsForStage.reduce((sum, row) => sum + row.estimatedTokens, 0),
       overrideCount: rowsForStage.filter(row => row.hasOverride).length,
@@ -449,36 +443,7 @@ function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
 
 function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
   const modelStages = report.stages.filter(stage => stage.role === 'model_input')
-  return `${modelStages.length} slots · ${report.stats.estimatedTokens.toLocaleString()} tok · ${report.stats.warningCount} cleanup`
-}
-
-function cleanupLabel(report: KeeperPromptAssemblyReport): string {
-  if (report.stats.criticalCount > 0) return `${report.stats.criticalCount} urgent cleanup`
-  if (report.stats.warningCount > 0) return `${report.stats.warningCount} cleanup`
-  return 'clean'
-}
-
-function cleanupTone(report: KeeperPromptAssemblyReport): StatusChipTone {
-  if (report.stats.criticalCount > 0) return 'bad'
-  if (report.stats.warningCount > 0) return 'warn'
-  return 'ok'
-}
-
-function PromptKeyPills({ stage }: { stage: KeeperPromptAssemblyStage }) {
-  if (stage.promptCount === 0) {
-    return html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">computed after assembly</span>`
-  }
-
-  return html`
-    <div class="mt-2 flex flex-wrap gap-1">
-      ${stage.visiblePromptKeys.map(key => html`
-        <span class="max-w-full break-all rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
-      `)}
-      ${stage.hiddenPromptCount > 0 ? html`
-        <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-disabled)]">+${stage.hiddenPromptCount}</span>
-      ` : null}
-    </div>
-  `
+  return `${modelStages.length} slots · ${report.stats.estimatedTokens.toLocaleString()} tok`
 }
 
 function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; index: number }) {
@@ -496,7 +461,6 @@ function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; i
         ${stage.summary}
         <span class="font-mono text-[var(--color-fg-disabled)]"> ${stageMicrocopy(stage)}</span>
       </div>
-      <${PromptKeyPills} stage=${stage} />
     </li>
   `
 }
@@ -514,7 +478,7 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
         <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${modelInputMicrocopy(modelStages)}</span>
       </div>
       <div class="mb-2 text-3xs leading-relaxed text-[var(--color-fg-muted)]">
-        Prompt sources are resolved before slot 1; fingerprints and context edges are recorded after slot 4.
+        아래 4개 줄이 provider 요청 직전의 모델 입력입니다. source/audit details는 접어 둡니다.
       </div>
       <ol>
         ${modelStages.map((stage, index) => html`
@@ -526,25 +490,20 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
 }
 
 function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] }) {
-  if (warnings.length === 0) {
-    return html`
-      <div class="mt-3 flex items-center gap-2 rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]">
-        <${CheckCircle2} size=${14} />
-        <span>현재 prompt audit warning이 없습니다.</span>
-      </div>
-    `
-  }
+  if (warnings.length === 0) return null
+
+  const hasCritical = warnings.some(warning => warning.severity === 'critical')
 
   return html`
-    <details class="mt-3 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-8)]">
+    <details class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
-          <${AlertTriangle} size=${14} />
-          Prompt cleanup backlog
+          ${hasCritical ? html`<${AlertTriangle} size=${14} />` : null}
+          Prompt maintenance notes
         </span>
         <span class="flex items-center gap-2">
-          <${StatusChip} tone=${warnings.some(warning => warning.severity === 'critical') ? 'bad' : 'warn'}>
-            ${warnings.length} item${warnings.length === 1 ? '' : 's'}
+          <${StatusChip} tone=${hasCritical ? 'bad' : 'neutral'}>
+            ${warnings.length} note${warnings.length === 1 ? '' : 's'}
           <//>
         </span>
       </summary>
@@ -646,11 +605,10 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <${Route} size=${16} class="text-[var(--color-accent-fg)]" />
             <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Turn prompt recipe</h3>
-            <${StatusChip} tone=${cleanupTone(report)}>${cleanupLabel(report)}<//>
             <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
           <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            모델이 매 턴 실제로 받는 message slot만 먼저 보여줍니다. 파일 경로, fingerprint, 전체 row 표는 developer evidence 안에 보관합니다.
+            모델이 매 턴 실제로 받는 message slot만 먼저 보여줍니다. 파일 경로와 감사용 세부 정보는 아래에서 펼쳐 볼 수 있습니다.
           </p>
         </div>
       </div>

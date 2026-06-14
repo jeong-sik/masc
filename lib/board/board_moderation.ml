@@ -1,7 +1,7 @@
 (** Board_moderation — operator-visible moderation queue and action audit trail.
 
-    Single-writer in-memory store.  Callers must not share the global store
-    across concurrent fibers without external serialisation. *)
+    The in-memory store is protected by an [Eio.Mutex.t]; public operations are
+    safe to call from concurrent Eio fibers. *)
 
 (** {1 Reason codes} *)
 
@@ -102,11 +102,13 @@ type store = {
   report_count_by_target : (target_kind * string, int) Hashtbl.t;
   latest_action_by_target : (target_kind * string, action_kind * float) Hashtbl.t;
   last_flag_by_reporter : (string, float) Hashtbl.t;
+  mutex : Eio.Mutex.t;
 }
 
 let max_note_length = 500
 
 let global_store : store option ref = ref None
+let global_store_mutex = Eio.Mutex.create ()
 
 let default_flag_rate_limit_sec = 1.0
 
@@ -127,7 +129,10 @@ let make_store () : store =
     report_count_by_target = Hashtbl.create 64;
     latest_action_by_target = Hashtbl.create 64;
     last_flag_by_reporter = Hashtbl.create 64;
+    mutex = Eio.Mutex.create ();
   }
+
+let with_lock s f = Eio.Mutex.use_rw ~protect:true s.mutex (fun () -> f ())
 
 let target_key target_kind target_id = (target_kind, target_id)
 
@@ -164,68 +169,76 @@ let store () : store =
   match !global_store with
   | Some s -> s
   | None ->
-      let s = make_store () in
-      global_store := Some s;
-      s
+      Eio.Mutex.use_rw ~protect:true global_store_mutex (fun () ->
+        match !global_store with
+        | Some s -> s
+        | None ->
+            let s = make_store () in
+            global_store := Some s;
+            s)
 
 let reset_for_test () : unit =
-  global_store := None
+  Eio.Mutex.use_rw ~protect:true global_store_mutex (fun () ->
+    global_store := None)
 
 (** {1 Queue operations} *)
 
 let flag ~target_kind ~target_id ~reporter ~reason =
   let s = store () in
-  let now = Time_compat.now () in
-  let target_key = target_key target_kind target_id in
-  if Hashtbl.mem s.unresolved_by_target target_key then
-    Error (Printf.sprintf "target %s is already flagged and pending review" target_id)
-  else
-    let window_sec = flag_rate_limit_sec () in
-    let retry_after = retry_after_for_reporter s ~reporter ~now ~window_sec in
-    match retry_after with
-    | Some remaining ->
-        Error
-          (Printf.sprintf
-             "reporter %s is rate limited; retry after %.3fs"
-             reporter remaining)
-    | None ->
-        let entry_id = Random_id.prefixed ~prefix:"mq-" ~bytes:16 in
-        let entry = {
-          entry_id;
-          target_kind;
-          target_id;
-          reporter;
-          reason;
-          flagged_at = now;
-          resolved   = false;
-        } in
-        Hashtbl.replace s.queue entry_id entry;
-        Hashtbl.replace s.unresolved_by_target target_key entry_id;
-        increment_report_count s target_key;
-        Hashtbl.replace s.last_flag_by_reporter reporter now;
-        Ok entry
+  with_lock s (fun () ->
+    let now = Time_compat.now () in
+    let target_key = target_key target_kind target_id in
+    if Hashtbl.mem s.unresolved_by_target target_key then
+      Error (Printf.sprintf "target %s is already flagged and pending review" target_id)
+    else
+      let window_sec = flag_rate_limit_sec () in
+      let retry_after = retry_after_for_reporter s ~reporter ~now ~window_sec in
+      match retry_after with
+      | Some remaining ->
+          Error
+            (Printf.sprintf
+               "reporter %s is rate limited; retry after %.3fs"
+               reporter remaining)
+      | None ->
+          let entry_id = Random_id.prefixed ~prefix:"mq-" ~bytes:16 in
+          let entry = {
+            entry_id;
+            target_kind;
+            target_id;
+            reporter;
+            reason;
+            flagged_at = now;
+            resolved   = false;
+          } in
+          Hashtbl.replace s.queue entry_id entry;
+          Hashtbl.replace s.unresolved_by_target target_key entry_id;
+          increment_report_count s target_key;
+          Hashtbl.replace s.last_flag_by_reporter reporter now;
+          Ok entry)
 
 let get_queue ?resolved () =
   let s = store () in
-  let entries =
-    Hashtbl.fold (fun _k v acc -> v :: acc) s.queue []
-  in
-  let filtered =
-    match resolved with
-    | None       -> entries
-    | Some want  -> List.filter (fun e -> e.resolved = want) entries
-  in
-  List.sort (fun a b -> Float.compare b.flagged_at a.flagged_at) filtered
+  with_lock s (fun () ->
+    let entries =
+      Hashtbl.fold (fun _k v acc -> v :: acc) s.queue []
+    in
+    let filtered =
+      match resolved with
+      | None       -> entries
+      | Some want  -> List.filter (fun e -> e.resolved = want) entries
+    in
+    List.sort (fun a b -> Float.compare b.flagged_at a.flagged_at) filtered)
 
 let resolve_entry ~entry_id =
   let s = store () in
-  match Hashtbl.find_opt s.queue entry_id with
-  | None -> Error (Printf.sprintf "moderation queue entry not found: %s" entry_id)
-  | Some e ->
-      if not e.resolved then
-        Hashtbl.remove s.unresolved_by_target (target_key e.target_kind e.target_id);
-      Hashtbl.replace s.queue entry_id { e with resolved = true };
-      Ok ()
+  with_lock s (fun () ->
+    match Hashtbl.find_opt s.queue entry_id with
+    | None -> Error (Printf.sprintf "moderation queue entry not found: %s" entry_id)
+    | Some e ->
+        if not e.resolved then
+          Hashtbl.remove s.unresolved_by_target (target_key e.target_kind e.target_id);
+        Hashtbl.replace s.queue entry_id { e with resolved = true };
+        Ok ())
 
 (** {1 Audit trail} *)
 
@@ -253,42 +266,44 @@ let record_action ~target_kind ~target_id ~actor ~action ?reason ?note () =
     acted_at;
   } in
   let target_key = target_key target_kind target_id in
-  (match Hashtbl.find_opt s.unresolved_by_target target_key with
-   | None -> ()
-   | Some entry_id ->
-       Hashtbl.remove s.unresolved_by_target target_key;
-       (match Hashtbl.find_opt s.queue entry_id with
-        | Some qe when not qe.resolved ->
-            Hashtbl.replace s.queue entry_id { qe with resolved = true }
-        | _ -> ()));
-  update_latest_action s target_key action acted_at;
-  s.audit := entry :: !(s.audit);
-  Ok entry
+  with_lock s (fun () ->
+    (match Hashtbl.find_opt s.unresolved_by_target target_key with
+     | None -> ()
+     | Some entry_id ->
+         Hashtbl.remove s.unresolved_by_target target_key;
+         (match Hashtbl.find_opt s.queue entry_id with
+          | Some qe when not qe.resolved ->
+              Hashtbl.replace s.queue entry_id { qe with resolved = true }
+          | _ -> ()));
+    update_latest_action s target_key action acted_at;
+    s.audit := entry :: !(s.audit);
+    Ok entry)
 
 let get_audit_trail ?target_id ?actor ?(limit = 100) () =
   let cap = min limit 500 in
   let s = store () in
-  let entries = !(s.audit) in
-  let filtered =
-    entries
-    |> (match target_id with
-        | None    -> Fun.id
-        | Some id -> List.filter (fun e -> e.target_id = id))
-    |> (match actor with
-        | None -> Fun.id
-        | Some a -> List.filter (fun e -> e.actor = a))
-  in
-  (* Already newest-first since we prepend on record *)
-  let sorted = List.sort (fun a b -> Float.compare b.acted_at a.acted_at) filtered in
-  let n = List.length sorted in
-  if n <= cap then sorted
-  else
-    let rec take acc i = function
-      | []     -> List.rev acc
-      | _ when i >= cap -> List.rev acc
-      | x :: xs -> take (x :: acc) (i + 1) xs
+  with_lock s (fun () ->
+    let entries = !(s.audit) in
+    let filtered =
+      entries
+      |> (match target_id with
+          | None    -> Fun.id
+          | Some id -> List.filter (fun e -> e.target_id = id))
+      |> (match actor with
+          | None -> Fun.id
+          | Some a -> List.filter (fun e -> e.actor = a))
     in
-    take [] 0 sorted
+    (* Already newest-first since we prepend on record *)
+    let sorted = List.sort (fun a b -> Float.compare b.acted_at a.acted_at) filtered in
+    let n = List.length sorted in
+    if n <= cap then sorted
+    else
+      let rec take acc i = function
+        | []     -> List.rev acc
+        | _ when i >= cap -> List.rev acc
+        | x :: xs -> take (x :: acc) (i + 1) xs
+      in
+      take [] 0 sorted)
 
 (** {1 Target projection} *)
 
@@ -300,27 +315,28 @@ let moderation_status_of_action = function
 
 let target_summary ~target_kind ~target_id =
   let s = store () in
-  let target_key = target_key target_kind target_id in
-  let report_count =
-    Hashtbl.find_opt s.report_count_by_target target_key |> Option.value ~default:0
-  in
-  let has_unresolved =
-    match Hashtbl.find_opt s.unresolved_by_target target_key with
-    | None -> false
-    | Some entry_id -> (
-        match Hashtbl.find_opt s.queue entry_id with
-        | Some entry when not entry.resolved -> true
-        | _ -> false)
-  in
-  let moderation_status =
-    if has_unresolved then
-      "flagged"
-    else
-      match Hashtbl.find_opt s.latest_action_by_target target_key with
-      | None -> "none"
-      | Some (action, _acted_at) -> moderation_status_of_action action
-  in
-  { report_count; moderation_status }
+  with_lock s (fun () ->
+    let target_key = target_key target_kind target_id in
+    let report_count =
+      Hashtbl.find_opt s.report_count_by_target target_key |> Option.value ~default:0
+    in
+    let has_unresolved =
+      match Hashtbl.find_opt s.unresolved_by_target target_key with
+      | None -> false
+      | Some entry_id -> (
+          match Hashtbl.find_opt s.queue entry_id with
+          | Some entry when not entry.resolved -> true
+          | _ -> false)
+    in
+    let moderation_status =
+      if has_unresolved then
+        "flagged"
+      else
+        match Hashtbl.find_opt s.latest_action_by_target target_key with
+        | None -> "none"
+        | Some (action, _acted_at) -> moderation_status_of_action action
+    in
+    { report_count; moderation_status })
 
 (** {1 JSON projection} *)
 

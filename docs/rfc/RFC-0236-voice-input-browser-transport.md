@@ -72,11 +72,12 @@ downstream of it already works.
 1. **Mirror RFC-0235.** Input is the dual of output: one new route, reusing the
    existing engine. No new store, no new engine, no config change.
 
-2. **Owner-gated, not capability-gated.** RFC-0235's audio route is `with_public_read`
-   because the token is an unguessable capability. Transcription has no such token —
-   it spends an ElevenLabs API call per request. It must be gated by the authenticated
-   dashboard owner (the same gate every dashboard write route uses). An unauthenticated
-   client must not be able to spend the owner's STT quota.
+2. **Admin/owner-gated, not capability-gated.** RFC-0235's audio route is
+   `with_public_read` because the token is an unguessable capability. Transcription
+   has no such token — it spends an ElevenLabs API call per request. It must be gated
+   by `CanAdmin`, not `CanBroadcast`: worker tokens can broadcast/chat, but must not
+   spend the operator's STT quota. An unauthenticated or worker-token client must not
+   be able to invoke STT.
 
 3. **Text, not audio, crosses the boundary.** The browser captures audio, the server
    transcribes, and only `{text}` returns. The operator reviews the text in the
@@ -96,14 +97,16 @@ downstream of it already works.
 
 ### 3.1 Route — `POST /api/v1/voice/transcribe`
 
-- **auth**: dashboard owner bearer gate (the same middleware the chat-send route uses;
-  not `with_public_read`). Unauthenticated → 401/403, no API spend.
-- **body**: `multipart/form-data`, field `audio` (the recorded blob), optional
-  `language_code`.
+- **auth**: dashboard admin/owner bearer gate (`CanAdmin`, not `with_public_read` and
+  not `CanBroadcast`). Unauthenticated or worker-token requests -> 401/403, no API
+  spend.
+- **body**: raw recorded audio bytes. The `content-type` header is preserved by the
+  browser upload and used only to choose a temp-file suffix (`.webm`, `.mp4`, `.wav`,
+  ...), so the downstream multipart upload presents the provider a plausible filename.
 - **handler**: write the upload to a temp file, call
   `Voice_bridge.transcribe_audio ~audio_file ?language_code ()`, delete the temp file
-  on every exit path (Eio `Switch.on_release`; for the `Fun.protect` caveat see
-  CLAUDE.md §OCaml — finally must absorb exceptions internally).
+  with `Eio.Switch.on_release` on every exit path. The release hook absorbs
+  `Sys_error` internally so it does not mask the original transcribe failure.
 - **success**: `200 {"text": "..."}`.
 - **failure**: `400 {"error": "<reason>"}` (`"no enabled STT endpoints configured"`,
   STT HTTP error, parse error, empty/oversized upload).
@@ -128,7 +131,7 @@ accepted by ElevenLabs Scribe. No client-side transcoding in P1.
 |---|---|---|
 | Capability | token = unguessable filename | none |
 | Cost per request | bandwidth (file already exists) | one ElevenLabs API call |
-| Gate | `with_public_read` (token is the key) | dashboard owner bearer |
+| Gate | `with_public_read` (token is the key) | `CanAdmin` dashboard owner bearer |
 | Persistence | clip is a SSOT chat record | audio is transient; only text returns |
 
 ## §4 Changes, by phase (each independently shippable)
@@ -138,11 +141,13 @@ accepted by ElevenLabs Scribe. No client-side transcoding in P1.
 - `POST /api/v1/voice/transcribe` route in `lib/server/server_routes_http_routes_voice.ml`
   (the module RFC-0235 introduced), registered in `server_routes_http.ml` next to the
   output route.
-- Owner auth gate (mirror the chat-send route's middleware).
+- Admin/owner auth gate (`CanAdmin`); `CanBroadcast` is intentionally too broad for
+  quota-spending STT.
 - Composer microphone button + `MediaRecorder` + draft fill
   (`dashboard/src/components/chat/primitives.ts`).
-- Unit test for the route (stub `transcribe_audio`, assert `{text}` / 400 shapes),
-  composer a11y/unit test (button states).
+- Regression tests for route registration and auth-matrix invariants
+  (`Worker` can `CanBroadcast` but cannot `CanAdmin`), plus composer
+  a11y/unit tests.
 
 ### P2 — Quality of life
 
@@ -165,10 +170,16 @@ accepted by ElevenLabs Scribe. No client-side transcoding in P1.
 
 ## §6 Validation
 
-- `dune build @install test/` green (route compiles; transcribe path exercised via stub).
+- Focused OCaml build: `scripts/dune-local.sh build test/test_http_server_eio.exe
+  test/test_auth.exe test/test_types_coverage.exe`.
+- Route registration: `test_http_server_eio.exe test '^router$' 10`.
+- Auth invariant: `test_auth.exe test '^permissions$'` and
+  `test_types_coverage.exe test '^permissions$'` pin that `Worker` can broadcast but
+  cannot admin.
 - Composer: mic button renders with recording state; draft fills from a stubbed
   `{text}` (unit test). Live STT is a manual smoke against the provisioned endpoint.
-- Auth: unauthenticated `POST /api/v1/voice/transcribe` → 401/403 with no API spend.
+- Auth: unauthenticated or worker-token `POST /api/v1/voice/transcribe` → 401/403
+  with no API spend.
 
 ## §7 Workaround self-check (CLAUDE.md signatures)
 

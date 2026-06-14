@@ -4,6 +4,10 @@
     (capability-token URLs, raw-bytes response, 1h TTL reaping). *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t
-(** Register [GET /api/v1/voice/audio/:token] on the given router. Plugged
-    into the router assembly in {!Server_routes_http} alongside the
+(** Register voice HTTP routes on the given router:
+
+    - [GET /api/v1/voice/audio/:token] for capability-token TTS clip fetches.
+    - [POST /api/v1/voice/transcribe] for admin-gated browser STT uploads.
+
+    Plugged into the router assembly in {!Server_routes_http} alongside the
     artifacts route. *)

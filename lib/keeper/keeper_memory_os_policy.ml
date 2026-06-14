@@ -23,8 +23,12 @@ let access_factor ~alpha access_count =
   (1.0 +. float access_count) ** alpha
 ;;
 
+(** Stale penalty: stale_factor 0.0 = no penalty, 1.0 = zero contribution. *)
+let stale_penalty fact =
+  1.0 -. Float.min 1.0 (Float.max 0.0 fact.stale_factor)
+;;
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
+  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count *. stale_penalty fact
 ;;
 
 let score_tool_result

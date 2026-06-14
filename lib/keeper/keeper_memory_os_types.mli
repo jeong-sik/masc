@@ -24,6 +24,8 @@ type fact =
   ; first_seen : float
   ; last_accessed : float
   ; valid_until : float option
+  ; stale_factor : float
+  ; last_verified_at : float option
   ; schema_version : string
   }
 

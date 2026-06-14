@@ -524,7 +524,10 @@ let is_voice_server_available ~sw:_ ~clock ~net =
     let now = Time_compat.now () in
     let cache = Atomic.get health_cache in
     if now -. cache.check_time < cache_duration cache
-    then Option.value cache.available ~default:false
+    then
+      (* NDT-OK: [available] is None only before the first probe; defaulting to
+         false means "treat as unavailable" until a probe completes. *)
+      Option.value cache.available ~default:false
     else (
       let check () =
         let uri =

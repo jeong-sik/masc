@@ -91,7 +91,9 @@ type status_bucket =
 
 let status_bucket_of_request (req : V.verification_request) : status_bucket =
   match req.status with
-  | V.Pending | V.Assigned _ -> Pending
+  (* Disputed = conflicting verifier verdicts, not yet resolved → surfaced as
+     in-progress (Pending) rather than a final Approved/Rejected. *)
+  | V.Pending | V.Assigned _ | V.Disputed _ -> Pending
   | V.Completed V.Pass -> Approved
   | V.Completed (V.Fail _ | V.Partial _) -> Rejected
 
@@ -114,6 +116,11 @@ let derive_status_fields (req : V.verification_request)
       status_bucket_to_string Rejected, Some "fail", reason, req.verifier
   | V.Completed (V.Partial (_, reason)) ->
       status_bucket_to_string Rejected, Some "partial", reason, req.verifier
+  | V.Disputed verifiers ->
+      (* Unresolved conflicting verdicts: shown as Pending bucket, with the
+         disputing verifiers preserved in the reason field (not approved). *)
+      status_bucket_to_string Pending, Some "disputed",
+      String.concat ", " verifiers, None
 
 (** Per-request JSON row. *)
 let request_to_json (req : V.verification_request) : Yojson.Safe.t =
@@ -240,7 +247,8 @@ let is_rejected (req : V.verification_request) : bool =
   match req.status with
   | V.Completed (V.Fail _) | V.Completed (V.Partial _) -> true
   | V.Completed V.Pass -> false
-  | V.Pending | V.Assigned _ -> false
+  (* Disputed is unresolved, not a rejection. *)
+  | V.Pending | V.Assigned _ | V.Disputed _ -> false
 
 let bucket_of_status (req : V.verification_request) : string =
   req |> status_bucket_of_request |> status_bucket_to_string

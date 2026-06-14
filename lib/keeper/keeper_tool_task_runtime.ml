@@ -771,7 +771,8 @@ let handle_keeper_task_tool
     in
     let claim_scope, claimed_task_fields =
       match result with
-      | Workspace.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+      | Workspace.Claim_next_claimed
+          { task_id; title; priority; released_task_id; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -781,7 +782,7 @@ let handle_keeper_task_tool
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
-                  ~task_id );
+                  ~task_id ~scope_widened );
               ( "claimed_task",
                 `Assoc
                   [

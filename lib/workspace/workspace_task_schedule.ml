@@ -670,8 +670,11 @@ let release_stale_claims config ~ttl_seconds =
            | InProgress { assignee; started_at=claimed_at } ->
              (match parse_iso_time_opt claimed_at with
               | Some t when now -. t > ttl_seconds -> Some (task.id, assignee)
-              | _ -> None)
-           | _ -> None)
+              | Some _ | None -> None)
+           (* Exhaustive over task_status: non-claimed states are never stale.
+              Explicit arms (no [_ ->]) so a new variant fails compilation
+              rather than being silently treated as not-stale (fragile-match). *)
+           | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> None)
         backlog.tasks
     in
     List.iter

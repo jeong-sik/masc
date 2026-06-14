@@ -238,25 +238,11 @@ let wip_admission_rejection_json
       (task_id, (rejection : Keeper_wip_admission.rejection))
   =
   `Assoc
-    [ "kind", `String "claim_wip_admission_rejection"
-    ; "task_id", `String task_id
+    [ "task_id", `String task_id
     ; "reason", `String (Keeper_wip_admission.reject_reason_to_string rejection.reason)
-    ; "axis", `String (Keeper_wip_admission.reject_reason_axis rejection.reason)
-    ; "cap_kind", `String "wip_claim_admission"
     ; "current", `Int rejection.current
     ; "limit", `Int rejection.limit
     ; "scope_key", `String rejection.scope_key
-    ; "action", `String "finish_or_release_existing_wip_before_claiming_more"
-    ; ( "suggested_tools"
-      , `List
-          [ `String "keeper_tasks_list"
-          ; `String "keeper_task_done"
-          ; `String "masc_transition"
-          ] )
-    ; ( "scope_note"
-      , `String
-          "This is a claim-admission cap for active WIP, not a request to create \
-           a new repo, goal, or task." )
     ]
 ;;
 
@@ -265,12 +251,8 @@ let wip_admission_rejection_action = function
   | (task_id, (rejection : Keeper_wip_admission.rejection)) :: _ ->
     Some
       (Printf.sprintf
-         "WIP claim admission rejected task %s: axis=%s reason=%s current=%d \
-          limit=%d scope=%s. ACTION: finish, release, or inspect existing active \
-          WIP in this scope before claiming more; do not create unrelated repos, \
-          goals, or tasks to bypass this cap."
+         "WIP admission rejected task %s: %s current=%d limit=%d scope=%s. ACTION: finish/release existing WIP in this scope before claiming more."
          task_id
-         (Keeper_wip_admission.reject_reason_axis rejection.reason)
          (Keeper_wip_admission.reject_reason_to_string rejection.reason)
          rejection.current
          rejection.limit
@@ -283,19 +265,7 @@ let wip_admission_result_fields rejections =
   | rejections ->
     [ ( "wip_admission"
       , `Assoc
-          [ "kind", `String "claim_wip_admission"
-          ; "action", `String "finish_or_release_existing_wip_before_claiming_more"
-          ; ( "suggested_tools"
-            , `List
-                [ `String "keeper_tasks_list"
-                ; `String "keeper_task_done"
-                ; `String "masc_transition"
-                ] )
-          ; ( "scope_note"
-            , `String
-                "Claim admission is saturated for active WIP; do not create \
-                 unrelated repos, goals, or tasks as a workaround." )
-          ; "rejected_count", `Int (List.length rejections)
+          [ "rejected_count", `Int (List.length rejections)
           ; "rejections", `List (List.map wip_admission_rejection_json rejections)
           ] )
     ]
@@ -801,7 +771,8 @@ let handle_keeper_task_tool
     in
     let claim_scope, claimed_task_fields =
       match result with
-      | Workspace.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
+      | Workspace.Claim_next_claimed
+          { task_id; title; priority; released_task_id; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id
               ~effective_mode:claim_goal_scope.mode
@@ -811,7 +782,7 @@ let handle_keeper_task_tool
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
                   ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
-                  ~task_id );
+                  ~task_id ~scope_widened );
               ( "claimed_task",
                 `Assoc
                   [

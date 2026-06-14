@@ -82,7 +82,7 @@ let workflow_rejection_payload_json
     message
 
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
-    ~(task_id : string) : Yojson.Safe.t =
+    ~(task_id : string) ~(scope_widened : bool) : Yojson.Safe.t =
   `Assoc
     [
       ("event_type", `String "collaboration.todo.claim_observed");
@@ -106,6 +106,7 @@ let build_claim_observation_payload ~(now : float) ~(agent_name : string)
           [
             ("todo_id", `String task_id);
             ("state", `String "claim_verified");
+            ("scope_widened", `Bool scope_widened);
             ("claimed_by", `String agent_name);
             ("winner_actor_id", `String agent_name);
             ("logical_clock", `Null);
@@ -113,8 +114,8 @@ let build_claim_observation_payload ~(now : float) ~(agent_name : string)
           ] );
     ]
 
-let append_claim_observation message ~now ~agent_name ~task_id =
-  let payload = build_claim_observation_payload ~now ~agent_name ~task_id in
+let append_claim_observation message ~now ~agent_name ~task_id ~scope_widened =
+  let payload = build_claim_observation_payload ~now ~agent_name ~task_id ~scope_widened in
   message ^ "\nclaim_observation=" ^ Yojson.Safe.to_string payload
 
 let verdict_to_string (result : Anti_rationalization.review_result) =

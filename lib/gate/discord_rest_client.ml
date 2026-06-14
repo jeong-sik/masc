@@ -107,11 +107,54 @@ let send_message ~token ~channel_id ~content ?reply_to_message_id () =
   | Error msg -> Error (Network msg)
   | Ok (status, body) -> parse_response ~status ~body
 
-(* Truncate content to Discord's message_content_limit for PATCH edits.
+(* Byte length of the UTF-8 sequence whose lead byte is [c]. An invalid
+   lead byte counts as 1 so iteration always makes progress. *)
+let utf8_lead_len c =
+  if c land 0x80 = 0 then 1
+  else if c land 0xE0 = 0xC0 then 2
+  else if c land 0xF0 = 0xE0 then 3
+  else if c land 0xF8 = 0xF0 then 4
+  else 1
+
+(* Split [s] at the byte offset following its first [limit] Unicode
+   scalar values. Returns [(head, tail)] where [head] is a valid-UTF-8
+   prefix of at most [limit] codepoints and [tail] is the remainder ([""]
+   when [s] already fits). Discord measures message length in Unicode
+   scalar units, so cutting on codepoint (not byte) boundaries avoids both
+   the 400 rejection a mid-codepoint byte cut produces and the needless
+   over-chunking of multi-byte text (e.g. Korean, 3 bytes/char). *)
+let split_at_codepoint s ~limit =
+  let n = String.length s in
+  if limit <= 0 || n = 0 then (s, "")
+  else begin
+    let rec walk pos cps =
+      if pos >= n then (s, "")
+      else if cps >= limit then
+        (String.sub s 0 pos, String.sub s pos (n - pos))
+      else
+        let step = min (utf8_lead_len (Char.code s.[pos])) (n - pos) in
+        walk (pos + step) (cps + 1)
+    in
+    walk 0 0
+  end
+
+(* Split [s] into a list of chunks each at most [limit] Unicode scalar
+   values, every chunk valid UTF-8. Empty input yields [[]]. *)
+let chunk_by_codepoint s ~limit =
+  let rec loop acc rest =
+    if String.length rest = 0 then List.rev acc
+    else
+      let head, tail = split_at_codepoint rest ~limit in
+      if String.length head = 0 then List.rev (rest :: acc)
+      else loop (head :: acc) tail
+  in
+  loop [] s
+
+(* Truncate content to Discord's message_content_limit for PATCH edits,
+   on a codepoint boundary so the result is valid UTF-8.
    Discord rejects messages exceeding 2000 Unicode scalar units. *)
 let truncate_to_limit content =
-  if String.length content <= message_content_limit then content
-  else String.sub content 0 message_content_limit
+  fst (split_at_codepoint content ~limit:message_content_limit)
 
 let build_edit_request ~token ~channel_id ~message_id ~content () =
   let url =

@@ -88,8 +88,8 @@ export function ConfirmDialogOverlay() {
     <${DialogOverlay}
       labelledBy="confirm-dialog-title"
       onClose=${handleClose}
-      overlayClass="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      panelClass="w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-[var(--r-2)] border border-[var(--dialog-panel-border)] shadow-[var(--shadow-raised)] overflow-hidden"
+      overlayClass="fixed inset-0 z-[100] flex items-center justify-center p-4 max-[768px]:items-end max-[768px]:p-0"
+      panelClass="w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-[var(--r-2)] border border-[var(--dialog-panel-border)] shadow-[var(--shadow-raised)] overflow-hidden max-[768px]:max-w-full max-[768px]:rounded-b-none"
     >
       <div class="p-5">
         <div class="flex items-start gap-4">
@@ -108,7 +108,7 @@ export function ConfirmDialogOverlay() {
             onClick=${state.onCancel}
           >${state.cancelText}<//>
           <button type="button"
-            class="px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
+            class="min-h-[44px] px-4 py-2 rounded-[var(--r-1)] text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
             onClick=${state.onConfirm}
           >${state.confirmText}</button>
         </div>

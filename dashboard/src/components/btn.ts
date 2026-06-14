@@ -190,7 +190,7 @@ export function Btn(props: BtnProps): VNode {
   return html`
     <button
       type=${props.type ?? 'button'}
-      class=${props.class}
+      class=${['btn', props.class].filter(Boolean).join(' ')}
       data-testid=${props.testId}
       data-variant=${variant}
       data-size=${size}

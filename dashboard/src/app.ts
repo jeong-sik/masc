@@ -37,6 +37,7 @@ import { ThemeSwitch } from './components/theme-switch'
 import { EmergencyStopControl } from './components/emergency-stop-control'
 import { TransportBeacon } from './components/transport-beacon'
 import { DashboardSurfaceTabs } from './components/dashboard-surface-tabs'
+import { MobileBottomBar } from './components/mobile-nav'
 import { SkipLink } from './components/skip-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
@@ -313,10 +314,10 @@ export function App() {
               <${LazyAuthStatus} />
             <//>
             <${ConnectionStatus} />
-            <${TransportBeacon} />
             <${ErrorCounterBadge} />
-            <${ThemeSwitch} />
-            <${BuildIdentityBadge} />
+            <div class="max-[768px]:hidden"><${TransportBeacon} /></div>
+            <div class="max-[768px]:hidden"><${ThemeSwitch} /></div>
+            <div class="max-[768px]:hidden"><${BuildIdentityBadge} /></div>
           </div>
         </div>
       </header>
@@ -347,17 +348,21 @@ export function App() {
         ${compactChromeMode
           ? null
           : html`
-            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+            ${mobileMenuOpen.value ? html`
+              <button type="button" aria-label="Close navigation" tabindex=${-1} class="hidden max-[768px]:block fixed inset-0 z-40 cursor-pointer bg-black/50" onClick=${() => { mobileMenuOpen.value = false }}></button>
+            ` : null}
+            <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-[var(--t-slow)] ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 max-[768px]:fixed max-[768px]:inset-y-0 max-[768px]:left-0 max-[768px]:z-50 max-[768px]:m-0 max-[768px]:w-72 max-[768px]:max-h-none max-[768px]:rounded-none max-[768px]:border-r ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
               <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
             </aside>
           `}
 
         <main id="main-content" tabindex=${-1} class=${compactChromeMode ? 'min-w-0 flex-1 overflow-hidden bg-[var(--shell-main-bg)] backdrop-blur-lg' : 'min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0'}>
-          <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : focusMode ? 'h-full overflow-y-auto p-3 max-[520px]:p-2' : 'h-full overflow-y-auto p-4'}>
+          <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : focusMode ? 'h-full overflow-y-auto p-3 max-[520px]:p-2 max-[768px]:pb-16' : 'h-full overflow-y-auto p-4 max-[768px]:pb-16'}>
             <${DashboardMain} />
           </div>
         </main>
       </div>
+      ${!compactChromeMode ? html`<${MobileBottomBar} currentTab=${currentTab} onMenuToggle=${() => { mobileMenuOpen.value = !mobileMenuOpen.value }} />` : null}
 
       ${selectedAgentName.value
         ? html`<${Suspense} fallback=${null}><${LazyAgentDetailOverlay} /><//>`

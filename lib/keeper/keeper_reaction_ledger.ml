@@ -7,7 +7,6 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Stay_silent_recovery
-  | Unknown of string
 
 type reaction_kind =
   | Turn_started
@@ -24,7 +23,6 @@ let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
   | Bootstrap -> "bootstrap"
   | Stay_silent_recovery -> "stay_silent_recovery"
-  | Unknown value -> value
 ;;
 
 let reaction_kind_to_string = function
@@ -44,48 +42,14 @@ let option_json f = function
 
 let list_json values = `List (List.map (fun value -> `String value) values)
 
-let payload_json payload =
-  try
-    Ok (Yojson.Safe.from_string payload)
-  with
-  | Yojson.Json_error msg -> Error msg
-;;
-
-let payload_field name payload =
-  match payload_json payload with
-  | Ok (`Assoc fields) -> List.assoc_opt name fields
-  | Ok _ | Error _ -> None
-;;
-
-let payload_parse_error payload =
-  match payload_json payload with
-  | Ok _ -> None
-  | Error msg -> Some msg
-;;
-
-let payload_float_field name payload =
-  match payload_field name payload with
-  | Some (`Float value) -> Some value
-  | Some (`Int value) -> Some (float_of_int value)
-  | _ -> None
-;;
-
-let payload_preview payload =
-  let limit = 512 in
-  if String.length payload <= limit
-  then payload
-  else String.sub payload 0 limit ^ "...[truncated]"
-;;
-
 let digest_id prefix payload = prefix ^ ":" ^ Digest.to_hex (Digest.string payload)
 let board_stimulus_id ~post_id = "board:" ^ post_id
 
 let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
-  match Keeper_event_queue.classify stimulus with
-  | Board_signal -> Board_signal
-  | Bootstrap -> Bootstrap
-  | Stay_silent_recovery -> Stay_silent_recovery
-  | Unsupported prefix -> Unknown prefix
+  match stimulus.payload with
+  | Keeper_event_queue.Board_signal _ -> Board_signal
+  | Keeper_event_queue.Bootstrap -> Bootstrap
+  | Keeper_event_queue.Stay_silent_recovery -> Stay_silent_recovery
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -99,7 +63,6 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
          [ stimulus.post_id
          ; stimulus_kind_to_string kind
          ; Printf.sprintf "%.6f" stimulus.arrived_at
-         ; stimulus.payload
          ])
 ;;
 
@@ -136,20 +99,34 @@ let base_fields ~record_kind ~event_id ~keeper_name ~recorded_at =
   ]
 ;;
 
+let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
+  match payload with
+  | Keeper_event_queue.Board_signal bs ->
+    let limit = 256 in
+    let title =
+      if String.length bs.title <= limit
+      then bs.title
+      else String.sub bs.title 0 limit ^ "...[truncated]"
+    in
+    Printf.sprintf
+      "board_signal kind=%s author=%s title=%s"
+      (match bs.kind with
+       | Keeper_event_queue.Post_created -> "post_created"
+       | Keeper_event_queue.Comment_added -> "comment_added")
+      bs.author
+      title
+  | Keeper_event_queue.Bootstrap -> "bootstrap"
+  | Keeper_event_queue.Stay_silent_recovery -> "stay_silent_recovery"
+;;
+
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
   let kind = stimulus_kind_of_event_queue stimulus in
   let stimulus_id = stimulus_id_of_event_queue stimulus in
   let recorded_at = Time_compat.now () in
   let board_updated_at =
-    match kind with
-    | Board_signal -> payload_float_field "updated_at_unix" stimulus.payload
-    | Bootstrap | Stay_silent_recovery | Unknown _ -> None
-  in
-  let parse_error =
-    match kind with
-    | Board_signal | Stay_silent_recovery ->
-      payload_parse_error stimulus.payload
-    | Bootstrap | Unknown _ -> None
+    match stimulus.payload with
+    | Keeper_event_queue.Board_signal bs -> bs.updated_at
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Stay_silent_recovery -> None
   in
   `Assoc
     (base_fields
@@ -166,8 +143,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
              ; "urgency", `String (urgency_to_string stimulus.urgency)
              ; "arrived_at_unix", `Float stimulus.arrived_at
              ; "board_updated_at_unix", option_json (fun value -> `Float value) board_updated_at
-             ; "payload_parse_error", option_json (fun value -> `String value) parse_error
-             ; "payload_preview", `String (payload_preview stimulus.payload)
+             ; "payload_preview", `String (stimulus_payload_preview stimulus.payload)
              ] )
        ])
 ;;

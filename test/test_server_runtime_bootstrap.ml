@@ -1036,12 +1036,14 @@ let test_health_json_surfaces_durable_paused_keepers () =
             ; urgency = Immediate
             ; arrived_at = 1234.5
             ; payload =
-                Yojson.Safe.to_string
-                  (`Assoc
-                     [ "source", `String "board_signal"
-                     ; "kind", `String "post_created"
-                     ; "post_id", `String "health-post-1"
-                     ])
+                Keeper_event_queue.Board_signal
+                  { kind = Keeper_event_queue.Post_created
+                  ; author = ""
+                  ; title = ""
+                  ; content = ""
+                  ; hearth = None
+                  ; updated_at = None
+                  }
             }
           in
           Keeper_reaction_ledger.record_event_queue_stimulus
@@ -1533,13 +1535,14 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           ; urgency = Immediate
           ; arrived_at = updated_at +. 10.0
           ; payload =
-              Yojson.Safe.to_string
-                (`Assoc
-                   [ "source", `String "board_signal"
-                   ; "kind", `String "post_created"
-                   ; "post_id", `String post_id
-                   ; "updated_at_unix", `Float updated_at
-                   ])
+              Keeper_event_queue.Board_signal
+                { kind = Keeper_event_queue.Post_created
+                ; author = ""
+                ; title = ""
+                ; content = ""
+                ; hearth = None
+                ; updated_at = Some updated_at
+                }
           }
         in
         List.iter

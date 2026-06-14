@@ -14,7 +14,6 @@ type stimulus_kind =
   | Board_signal
   | Bootstrap
   | Stay_silent_recovery
-  | Unknown of string
 
 type reaction_kind =
   | Turn_started

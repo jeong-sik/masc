@@ -199,12 +199,15 @@ let pending_board_event_of_stimulus
   (stimulus : Keeper_event_queue.stimulus)
   : pending_board_event option
   =
-  Board_signal.of_stimulus_payload stimulus.payload
-  |> Option.map
-       (pending_board_event_of_board_signal
-          ~continuity_summary
-          ~meta
-          ~arrived_at:stimulus.arrived_at)
+  match stimulus.payload with
+  | Keeper_event_queue.Board_signal bs ->
+    Some
+      (pending_board_event_of_board_signal
+         ~continuity_summary
+         ~meta
+         ~arrived_at:stimulus.arrived_at
+         (Board_signal.board_signal_of_board_stimulus ~post_id:stimulus.post_id bs))
+  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Stay_silent_recovery -> None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

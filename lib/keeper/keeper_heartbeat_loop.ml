@@ -44,7 +44,6 @@ let with_in_turn_liveness_pulse =
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
 let stimulus_urgency_to_string = Stimulus_intake.stimulus_urgency_to_string
-let stimulus_class_to_string = Stimulus_intake.stimulus_class_to_string
 let pending_board_event_of_stimulus = Stimulus_intake.pending_board_event_of_stimulus
 let record_recovery_stimulus_turn_started =
   Stimulus_intake.record_recovery_stimulus_turn_started

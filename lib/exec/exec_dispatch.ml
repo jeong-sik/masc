@@ -422,14 +422,20 @@ let rec dispatch_pipeline ?base_host_env ?stdin_content ?on_output_chunk stages 
                        let stderr = stderr ^ stage_result.stderr in
                        if status_is_timeout stage_result.status
                        then (
+                         (* OCaml binds [else] to the nearest [if]: without
+                            the parentheses the [else] below attached to
+                            [if not is_final], so a streamed final-stage
+                            timeout re-emitted output that had already been
+                            streamed live, and a non-streamed (redirected)
+                            stage timeout emitted nothing. *)
                          let () =
                            if stage_streamed
-                           then
+                           then (
                              if not is_final
                              then
                                emit_stdout_if_captured
                                  on_output_chunk
-                                 stage_result.stdout
+                                 stage_result.stdout)
                            else
                              emit_pipeline_stage_result
                                ~emit_stdout:true

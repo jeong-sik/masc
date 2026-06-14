@@ -82,10 +82,13 @@ let recovery_hint ~allowed_tools ~tool_names =
       | [ one ] -> one
       | many -> String.concat " or " many
     in
+    (* The routable tool is keeper_board_post_get; "keeper_board_get" has no
+       dispatch route (models hallucinate it, which is why both names trigger
+       this hint above) — the nudge must name the tool that actually exists. *)
     Some
       (Printf.sprintf
-         "keeper_board_get requires post_id; if no post_id is visible, use %s first. \
-          Do not call keeper_board_get with {}."
+         "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
+          Do not call keeper_board_post_get with {}."
          discovery)
   else
     None

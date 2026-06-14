@@ -228,6 +228,65 @@ let () =
   assert (List.mem (`Stdout "out") !chunks);
   assert (List.mem (`Stderr "err") !chunks)
 
+(* --- decomposed pipeline: streamed final-stage timeout must not re-emit ---
+
+   Regression for the dangling-else in the decomposed-chain timeout branch:
+   the [else] bound to [if not is_final] instead of [if stage_streamed], so a
+   streamed final stage that timed out (exit 124) re-emitted its already
+   streamed stdout through [emit_pipeline_stage_result ~emit_stdout:true].
+   Stage 1 carries a redirect to force the decomposed path. *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
+  let upstream_stage =
+    Simple
+      {
+        bin = sh_bin;
+        args =
+          [ Lit ("-c", default_meta); Lit ("printf upstream", default_meta) ];
+        env = [];
+        cwd = None;
+        redirects = [ Masc_exec.Redirect_scope.Fd_to_fd { src = 2; dst = 1 } ];
+        sandbox = host_sandbox;
+      }
+  in
+  let timeout_stage =
+    Simple
+      {
+        bin = sh_bin;
+        args =
+          [
+            Lit ("-c", default_meta);
+            Lit ("cat >/dev/null; printf visible; exit 124", default_meta);
+          ];
+        env = [];
+        cwd = None;
+        redirects = [];
+        sandbox = host_sandbox;
+      }
+  in
+  let chunks = ref [] in
+  let result =
+    Masc_exec.Exec_dispatch.dispatch_pipeline
+      ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
+      [ upstream_stage; timeout_stage ]
+  in
+  assert (result.status = Unix.WEXITED 124);
+  assert (result.stdout = "visible");
+  let streamed_stdout =
+    List.rev !chunks
+    |> List.filter_map (function
+         | `Stdout c -> Some c
+         | `Stderr _ -> None)
+    |> String.concat ""
+  in
+  (* Old parse re-emitted the captured stdout after the live stream:
+     "visiblevisible". *)
+  assert (streamed_stdout = "visible")
+
 (* --- dispatch pipeline exit code: last nonzero wins --- *)
 
 let () =

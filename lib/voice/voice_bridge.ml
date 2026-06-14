@@ -482,14 +482,18 @@ let attempt_tts_endpoint
 
 (** Check if Voice MCP server is available (non-blocking, cached)
     Circuit Breaker pattern - shorter cache on failure for faster recovery *)
-let voice_server_available = ref None
+type health_cache = {
+  available : bool option;
+  check_time : float;
+  health_target : string option;
+}
 
-let voice_server_check_time = ref 0.0
-let voice_server_health_target = ref None
+let health_cache : health_cache Atomic.t =
+  Atomic.make { available = None; check_time = 0.0; health_target = None }
 
 (** Cache duration: 30s on success, 5s on failure (Circuit Breaker) *)
-let cache_duration () =
-  match !voice_server_available with
+let cache_duration cache =
+  match cache.available with
   | Some true -> 30.0 (* Success: cache longer *)
   | Some false -> 5.0 (* Failure: retry sooner *)
   | None -> 0.0 (* No cache: check immediately *)
@@ -504,7 +508,7 @@ let session_endpoint_result () =
 let is_voice_server_available ~sw:_ ~clock ~net =
   match session_endpoint_result () with
   | Error _ ->
-    voice_server_available := Some false;
+    Atomic.set health_cache { (Atomic.get health_cache) with available = Some false };
     false
   | Ok endpoint ->
     let health_target =
@@ -512,16 +516,19 @@ let is_voice_server_available ~sw:_ ~clock ~net =
       | Ok url -> url
       | Error _ -> Uri.to_string (voice_health_uri ())
     in
-    if !voice_server_health_target <> Some health_target
-    then (
-      voice_server_health_target := Some health_target;
-      voice_server_available := None;
-      voice_server_check_time := 0.0);
+    let cache = Atomic.get health_cache in
+    if cache.health_target <> Some health_target
+    then
+      Atomic.set health_cache
+        { available = None; check_time = 0.0; health_target = Some health_target };
     let now = Time_compat.now () in
-    if now -. !voice_server_check_time < cache_duration ()
-    then Option.value !voice_server_available ~default:false
+    let cache = Atomic.get health_cache in
+    if now -. cache.check_time < cache_duration cache
+    then
+      (* NDT-OK: [available] is None only before the first probe; defaulting to
+         false means "treat as unavailable" until a probe completes. *)
+      Option.value cache.available ~default:false
     else (
-      voice_server_check_time := now;
       let check () =
         let uri =
           match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
@@ -533,7 +540,6 @@ let is_voice_server_available ~sw:_ ~clock ~net =
         with
         | Ok (code, _) ->
           let available = code >= 200 && code < 300 in
-          voice_server_available := Some available;
           Ok available
         | Error msg ->
           (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding
@@ -542,15 +548,16 @@ let is_voice_server_available ~sw:_ ~clock ~net =
              the availability probe would mask cancellation as Ok false. *)
           Eio.Fiber.check ();
           Log.Transport.warn "voice server check failed: %s" msg;
-          voice_server_available := Some false;
           Ok false
       in
-      with_timeout ~clock ~timeout:2.0 check
-      |> function
-      | Ok available -> available
-      | Error _ ->
-        voice_server_available := Some false;
-        false)
+      let available =
+        match with_timeout ~clock ~timeout:2.0 check with
+        | Ok available -> available
+        | Error _ -> false
+      in
+      Atomic.set health_cache
+        { (Atomic.get health_cache) with available = Some available; check_time = now };
+      available)
 ;;
 
 let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =

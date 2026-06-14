@@ -401,6 +401,39 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
   | None -> fail "expected fallback voice_output progress memory row"
 ;;
 
+(* Regression for the 2026-06-14 sangsu voice self-echo loop: the raw
+   voice_output row must stay durable in the memory bank, but it must not
+   appear in the auto-injected recent-note summary that drives the next
+   turn, or the model will answer its own spoken text repeatedly. *)
+let test_voice_output_row_is_excluded_from_memory_recent_notes () =
+  let config = test_config () in
+  let meta = make_keeper_meta "voice-recent-note-filter-keeper" in
+  let message = "this should not echo back as a recent note" in
+  let raw =
+    Masc.Keeper_tool_voice_runtime.handle_voice_tool
+      ~config
+      ~meta
+      ~name:"keeper_voice_speak"
+      ~args:(`Assoc [ "message", `String message ])
+      ()
+  in
+  let json = Yojson.Safe.from_string raw in
+  check bool "fallback memory recorded" true
+    Yojson.Safe.Util.(member "memory_recorded" json |> to_bool);
+  let memory_path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let lines = read_lines memory_path in
+  let summary =
+    Masc.Keeper_memory_bank.summarize_memory_bank_lines lines ~recent_limit:4
+  in
+  let has_voice_text =
+    List.exists
+      (fun (row : Masc.Keeper_memory_bank.keeper_memory_line) ->
+         String.equal row.text message)
+      summary.recent_notes
+  in
+  check bool "voice_output source not in recent_notes" false has_voice_text
+;;
+
 let test_keeper_voice_session_start_does_not_store_session_name_as_voice () =
   Eio_main.run
   @@ fun env ->
@@ -618,6 +651,10 @@ let () =
             "keeper_voice_speak fallback records memory"
             `Quick
             test_keeper_voice_speak_text_fallback_records_memory_bank_row
+        ; test_case
+            "voice_output row is excluded from memory recent notes"
+            `Quick
+            test_voice_output_row_is_excluded_from_memory_recent_notes
         ; test_case
             "session_start does not store session_name as voice"
             `Quick

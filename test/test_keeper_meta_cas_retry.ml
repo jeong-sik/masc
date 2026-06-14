@@ -199,6 +199,58 @@ let test_monotonic_usage_counters_on_cas_retry () =
     check int "last_* observation stays with the caller" 777
       final.runtime.usage.last_latency_ms)
 
+(* Characterization of the hazard the dashboard write sites carried:
+   [write_meta ~force:true] from a stale snapshot bypasses CAS and
+   rewinds cumulative usage counters that a concurrent turn advanced.
+   This is why the dashboard PATCH/pause/tool-config paths
+   (server_dashboard_http_keeper_api_post.ml, keeper_turn_up_update.ml)
+   must route through [write_meta_with_merge]
+   ~merge:heartbeat_fields_from_disk instead of [~force:true]. If a
+   future change reverts a dashboard write back to [~force:true], the
+   counter regression this test pins becomes reachable again. *)
+let test_force_write_rewinds_usage_counters () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"delta" in
+    (match Keeper_meta_store.write_meta ~force:true config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let caller_view = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let with_usage (m : Keeper_meta_contract.keeper_meta) usage =
+      { m with runtime = { m.runtime with usage } }
+    in
+    (* Concurrent turn advances counters on disk. *)
+    let racing =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 42 }
+    in
+    (match Keeper_meta_store.write_meta config racing with
+     | Ok () -> ()
+     | Error e -> fail ("racing write failed: " ^ e));
+    (* A stale snapshot force-write (the old dashboard behavior) ignores
+       the disk version and clobbers the advanced counter. *)
+    let stale =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 5 }
+    in
+    (match Keeper_meta_store.write_meta ~force:true config stale with
+     | Ok () -> ()
+     | Error e -> fail ("stale force write failed: " ^ e));
+    let final = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check int "force:true rewinds total_turns from the concurrent disk value"
+      5 final.runtime.usage.total_turns)
+
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
@@ -218,6 +270,8 @@ let () =
             test_retry_succeeds_after_concurrent_bump;
           test_case "usage counters stay monotonic on stale retry (RFC-0225 §3.2)"
             `Quick test_monotonic_usage_counters_on_cas_retry;
+          test_case "force:true rewinds counters (dashboard hazard characterization)"
+            `Quick test_force_write_rewinds_usage_counters;
         ] );
       ( "is_version_conflict_error",
         [

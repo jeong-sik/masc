@@ -64,6 +64,16 @@ let test_decide_call_err_retryable_last () =
   | Exhausted { last_err = Some _ } -> ()
   | _ -> Alcotest.fail "retryable + last should yield Exhausted with last_err"
 
+let test_decide_call_err_accept_on_exhaustion_preserves_last_err () =
+  match
+    decide ~accept_on_exhaustion:true ~is_last:true
+      (Call_err (mk_http_err ~code:429 ()))
+  with
+  | Exhausted { last_err = Some _ } -> ()
+  | _ ->
+    Alcotest.fail
+      "accept_on_exhaustion should not discard the final Call_err"
+
 let test_decide_call_err_terminal_not_last () =
   match
     decide ~accept_on_exhaustion:false ~is_last:false
@@ -145,6 +155,8 @@ let () =
             test_decide_call_err_retryable_not_last
         ; Alcotest.test_case "retryable last" `Quick
             test_decide_call_err_retryable_last
+        ; Alcotest.test_case "accept_on_exhaustion preserves Call_err" `Quick
+            test_decide_call_err_accept_on_exhaustion_preserves_last_err
         ; Alcotest.test_case "terminal not-last" `Quick
             test_decide_call_err_terminal_not_last
         ; Alcotest.test_case "accept-rejected via Call_err" `Quick

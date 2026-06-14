@@ -104,10 +104,25 @@ let search_memory_bank
     if query = "" then filtered
     else List.filter (fun m -> contains_ci m.text query) filtered
   in
+  (* Phase5+ GC: TTL-based stale-fact filter. Exclude facts older than
+     the TTL for their kind. *)
+  let ttl_for_kind kind =
+    let kind_lwr = String.lowercase_ascii kind in
+    if String_util.contains_substring_ci kind_lwr "goal" then 86400.0
+    else if String_util.contains_substring_ci kind_lwr "decision" then 3600.0
+    else if String_util.contains_substring_ci kind_lwr "fact" then 300.0
+    else 600.0
+  in
+  let active =
+    List.filter (fun m ->
+      let age = now_ts -. m.score in
+      age <= ttl_for_kind m.kind)
+      matched
+  in
   (* Scoring: priority * recency_weight.
      recency_weight normalizes age relative to the oldest note in the result set.
      No hardcoded decay constant — uses min/max normalization. *)
-  let ts_values = List.map (fun m -> m.score) matched in
+  let ts_values = List.map (fun m -> m.score) active in
   let min_ts =
     match ts_values with
     | [] -> now_ts
@@ -115,7 +130,7 @@ let search_memory_bank
   in
   let max_age = max 1.0 (now_ts -. min_ts) in
   let scored =
-    matched
+    active
     |> List.map (fun m ->
          let age = max 0.0 (now_ts -. m.score) in
          let recency_weight =
@@ -148,9 +163,22 @@ let search_memory_bank
   let sorted =
     scored
     |> List.sort (fun a b -> Float.compare b.score a.score)
+  in
+  (* Phase5+ GC: dedup by text after score-sorting.
+     Prefers the highest-scored duplicate (already on top post-sort). *)
+  let seen = Hashtbl.create 16 in
+  let deduped =
+    List.filter (fun m ->
+      let key = String.lowercase_ascii m.text in
+      if Hashtbl.mem seen key then false
+      else (Hashtbl.replace seen key (); true))
+      sorted
+  in
+  let limited =
+    deduped
     |> take limit
   in
-  (sorted, total_candidates)
+  (limited, total_candidates)
 
 let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
   `Assoc [

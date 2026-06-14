@@ -48,6 +48,16 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
     expect(report.stats.totalRows).toBeGreaterThan(10)
     expect(report.stats.overrideRows).toBeGreaterThanOrEqual(2)
+    expect(report.stages.map(stage => stage.title)).toEqual(
+      expect.arrayContaining(['소스 확정', 'System', 'User / World']),
+    )
+    expect(report.stages.find(stage => stage.id === 'registry-bootstrap')?.messageSlot).toBe('not sent')
+    expect(report.stages.filter(stage => stage.role === 'model_input').map(stage => stage.id)).toEqual([
+      'base-system',
+      'unified-world',
+      'turn-soft-context',
+      'oas-hook',
+    ])
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)
@@ -74,5 +84,18 @@ describe('buildKeeperPromptAssemblyReport', () => {
       ]),
     )
     expect(report.stats.criticalCount).toBe(2)
+  })
+
+  it('labels host-storage prompt residue without legacy-era wording', () => {
+    const report = buildKeeperPromptAssemblyReport([
+      prompt({
+        key: 'keeper.world',
+        effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
+      }),
+    ])
+
+    const warning = report.warnings.find(item => item.id === 'playground-path')
+    expect(warning?.title).toBe('Host storage path still visible')
+    expect(warning?.title.toLowerCase()).not.toContain('legacy')
   })
 })

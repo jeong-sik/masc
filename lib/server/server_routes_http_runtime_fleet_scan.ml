@@ -472,7 +472,7 @@ type blocked_keeper_reason =
   | Paused
   | Meta_read_error
   | Not_bootable
-  | Boot_failure of Keeper_runtime.boot_meta_failure_reason
+  | Bootstrap_failed
   | Not_running
   | Unknown
 
@@ -480,7 +480,7 @@ let blocked_keeper_reason_label = function
   | Paused -> "paused"
   | Meta_read_error -> "meta_read_error"
   | Not_bootable -> "not_bootable"
-  | Boot_failure reason -> Keeper_runtime.boot_meta_failure_reason_to_string reason
+  | Bootstrap_failed -> "bootstrap_failed"
   | Not_running -> "not_running"
   | Unknown -> "unknown"
 
@@ -488,13 +488,7 @@ let blocked_keeper_action = function
   | Paused -> "resume_or_leave_paused"
   | Meta_read_error -> "repair_keeper_meta_file"
   | Not_bootable -> "add_keeper_toml_or_disable_stale_autoboot_meta"
-  | Boot_failure Goal_required -> "add_goal_or_goal_horizon_to_keeper_toml"
-  | Boot_failure Sandbox_profile_required -> "add_sandbox_profile_to_keeper_toml"
-  | Boot_failure Config_parse_failed
-  | Boot_failure Invalid_profile -> "repair_keeper_toml_config"
-  | Boot_failure Missing_meta -> "run_keeper_up_or_recreate_meta"
-  | Boot_failure Meta_read_error -> "repair_keeper_meta_file"
-  | Boot_failure Bootstrap_failed -> "inspect_keeper_autoboot_logs"
+  | Bootstrap_failed -> "inspect_keeper_autoboot_logs"
   | Not_running -> "start_or_recover_keeper"
   | Unknown -> "inspect_keeper_autoboot_logs"
 
@@ -519,7 +513,7 @@ let blocked_keeper_detail_json
     else if has_read_error then Meta_read_error
     else
       match last_failure with
-      | Some failure -> Boot_failure failure.Keeper_runtime.reason
+      | Some _ -> Bootstrap_failed
       | None ->
           if not is_bootable then Not_bootable
           else if not is_capacity then Not_running
@@ -536,7 +530,7 @@ let blocked_keeper_detail_json
     | Some failure ->
         [
           ( "last_bootstrap_reason"
-          , `String (blocked_keeper_reason_label (Boot_failure failure.Keeper_runtime.reason)) );
+          , `String (blocked_keeper_reason_label Bootstrap_failed) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]

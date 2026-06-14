@@ -101,7 +101,7 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
       Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [
         Agent_sdk.Types.Text
-          (Printf.sprintf "[Compacted %d messages into summary]\n%s"
+          (Printf.sprintf "[MEMORY_SUMMARY] Compacted %d older messages\n%s"
              (List.length msgs) (String.concat "\n" lines))
       ];
       name = None;

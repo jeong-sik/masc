@@ -49,6 +49,10 @@ val decide_compaction
     tuple. *)
 val compaction_policy_of_keeper : Keeper_meta_contract.keeper_meta -> float * int * int
 
+(** OAS strategy chain used by checkpoint compaction before the
+    keeper-private tool-result fold reducer. *)
+val checkpoint_compaction_strategies : unit -> Context_compact_oas.strategy list
+
 (** [compact_if_needed_typed ~meta ~now_ts ctx] evaluates the compaction
     gates and either returns [ctx] unchanged or applies the OAS
     strategy chain plus the keeper-private fold reducer.

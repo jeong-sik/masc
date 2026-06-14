@@ -12,6 +12,16 @@ let check_string label expected actual =
 let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
+let test_checkpoint_compaction_uses_summarize_old () =
+  let strategies =
+    KCP.checkpoint_compaction_strategies ()
+    |> List.map Context_compact_oas.strategy_name
+  in
+  Alcotest.(check (list string))
+    "checkpoint compaction summarizes old context before importance pruning"
+    [ "PruneToolOutputs"; "MergeContiguous"; "SummarizeOld"; "DropLowImportance" ]
+    strategies
+
 (* ── compaction_decision_to_string ───────────────────────────────────── *)
 
 let test_to_string_applied () =
@@ -210,6 +220,11 @@ let () =
         [
           Alcotest.test_case "emergency threshold in (0,1]" `Quick
             test_emergency_threshold_in_range;
+        ] );
+      ( "strategies",
+        [
+          Alcotest.test_case "checkpoint compaction summarizes old context"
+            `Quick test_checkpoint_compaction_uses_summarize_old;
         ] );
       ( "decide_compaction",
         [

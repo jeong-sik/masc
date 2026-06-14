@@ -52,14 +52,18 @@ let guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state () =
         (fun () -> invalid_arg detail)
 
 (* Per-keeper last-transition wallclock, used to record the dwell time
-   spent in [prev] state when a transition fires. Single-domain Eio
-   means Hashtbl ops are atomic at OCaml level (no preemption inside a
-   single op), so no explicit mutex is required. Stale entries left
-   behind by terminal transitions are bounded by keeper count. *)
+   spent in [prev] state when a transition fires. Keeper turns run on
+   concurrent Eio fibers, so serialize Hashtbl access with an [Eio.Mutex.t].
+   Stale entries left behind by terminal transitions are bounded by keeper
+   count. *)
 let last_transition_at : (string, float) Hashtbl.t = Hashtbl.create 64
+let last_transition_mu = Eio.Mutex.create ()
 
 let observe_phase_dwell ~keeper_name ~from_label =
-  match Hashtbl.find_opt last_transition_at keeper_name with
+  match
+    Eio.Mutex.use_ro last_transition_mu (fun () ->
+      Hashtbl.find_opt last_transition_at keeper_name)
+  with
   | None -> ()
   | Some prev_at ->
     let now = Unix.gettimeofday () in
@@ -82,7 +86,8 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
   (match prev with
    | Some _ -> observe_phase_dwell ~keeper_name ~from_label:prev_label
    | None -> ());
-  Hashtbl.replace last_transition_at keeper_name now;
+  Eio.Mutex.use_rw ~protect:true last_transition_mu (fun () ->
+    Hashtbl.replace last_transition_at keeper_name now);
   let classified =
     match prev with
     | Some from_state ->

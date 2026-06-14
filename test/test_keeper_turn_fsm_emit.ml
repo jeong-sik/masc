@@ -17,22 +17,25 @@ open Masc
 module F = Keeper_turn_fsm
 module P = Otel_metric_store
 
+let run_eio f = Eio_main.run (fun _env -> f ())
+
 (* ── Compile-time signature anchor ─────────────────────────── *)
 
 let test_emit_transition_signature_stable () =
   (* Pass concrete values so a signature drift (e.g. removing
      [?prev], or moving [keeper_name] off labelled args) fails
      to type-check. *)
-  F.emit_transition
-    ~keeper_name:"alice"
-    ~turn_id:42
-    ~prev:F.Phase_gating
-    (F.Cancelled F.Cancelled_phase_gate_close);
-  F.emit_transition
-    ~keeper_name:"bob"
-    ~turn_id:0
-    (F.Failed (F.Failure_runtime_error "noop"));
-  F.emit_transition ~keeper_name:"carol" ~turn_id:1 F.Idle;
+  run_eio (fun () ->
+    F.emit_transition
+      ~keeper_name:"alice"
+      ~turn_id:42
+      ~prev:F.Phase_gating
+      (F.Cancelled F.Cancelled_phase_gate_close);
+    F.emit_transition
+      ~keeper_name:"bob"
+      ~turn_id:0
+      (F.Failed (F.Failure_runtime_error "noop"));
+    F.emit_transition ~keeper_name:"carol" ~turn_id:1 F.Idle);
   Alcotest.(check bool)
     "emit_transition accepts ?prev / labelled args / int turn_id"
     true
@@ -190,11 +193,12 @@ let test_invalid_emit_transition_fails_closed_and_bumps_counter () =
   let before = read_fsm_guard_count ~stage in
   let raised =
     try
-      F.emit_transition
-        ~keeper_name:"alice"
-        ~turn_id:13457
-        ~prev:F.Idle
-        F.Done;
+      run_eio (fun () ->
+        F.emit_transition
+          ~keeper_name:"alice"
+          ~turn_id:13457
+          ~prev:F.Idle
+          F.Done);
       false
     with
     | Invalid_argument _ -> true

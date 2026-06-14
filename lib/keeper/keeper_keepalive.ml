@@ -308,7 +308,10 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
           }
       }
     in
-    (match write_meta ~force:true ctx.config synced with
+    (match
+       write_meta_with_merge
+         ~merge:Keeper_meta_merge.monotonic_usage_counters ctx.config synced
+     with
      | Ok () -> ()
      | Error e ->
        Otel_metric_store.inc_counter

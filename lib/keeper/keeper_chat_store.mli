@@ -86,6 +86,18 @@ val authority_of_label : string -> speaker_authority option
 (** Identity of the user-line author. [speaker_id] / [speaker_name] are
     absent when the route supplies none (the dashboard is a single
     authenticated operator and carries no per-user identity). *)
+type audio_clip = {
+  token : string;
+  mime : string;
+  duration_sec : float option;
+  message_text : string;
+}
+(** Persistable audio clip (RFC-0235 P1). Written on an assistant line
+    when the keeper synthesized a voice utterance; [token] is the
+    [/api/v1/voice/audio/:token] capability, [message_text] doubles as
+    the caption. Same shape as {!Keeper_chat_broadcast}'s SSE payload so
+    the two never drift. *)
+
 type speaker = {
   speaker_id : string option;
   speaker_name : string option;
@@ -114,6 +126,11 @@ type chat_message = {
           older lines, tool/assistant lines, and lines whose persisted
           [speaker_authority] label fails to parse (reported as a
           persistence read drop, row otherwise kept). *)
+  audio : audio_clip option;
+      (** RFC-0235 P1: present when this assistant line was a synthesized
+          voice utterance (keeper_voice_speak). [None] on every other
+          line and on rows written before voice transport; the dashboard
+          renders a play button when present. *)
   mentions : Keeper_identity.Keeper_id.t list;
       (** RFC-0232 §3.3: mention ids parsed once at append from the
           persisted user content (plus connector-supplied explicit
@@ -170,6 +187,7 @@ val append_assistant_message :
   content:string ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
+  ?audio:audio_clip ->
   unit ->
   unit
 

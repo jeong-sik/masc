@@ -575,9 +575,18 @@ let submit_verdict ~base_path ~req_id ~verifier ~verdict =
                 (* Same verdict from another verifier — keep existing completion *)
                 Ok req
               else
-                (* Conflicting verdict — enter dispute resolution *)
-                let existing_verifier = Option.value ~default:"unknown" req.verifier in
-                let updated = { req with status = Disputed [existing_verifier; verifier]; verifier = Some verifier } in
+                (* Conflicting verdict — enter dispute resolution.
+                   req.verifier is normally Some (Completed sets it); if a prior
+                   path left it None, record only the new verifier rather than
+                   inventing an "unknown" sentinel. Avoids the Option.value
+                   ~default magic-string deterministic-boundary debt and keeps a
+                   bogus "unknown" verifier out of the dispute list. *)
+                let disputers =
+                  match req.verifier with
+                  | Some existing -> [ existing; verifier ]
+                  | None -> [ verifier ]
+                in
+                let updated = { req with status = Disputed disputers; verifier = Some verifier } in
                 (match save_request base_path updated with
                  | Ok _ -> Ok updated
                  | Error e -> Error e)

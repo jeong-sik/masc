@@ -62,6 +62,15 @@
   .dashboard-panel {
     padding: 12px !important;
   }
+
+  .dashboard-main-scroll {
+    padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .dashboard-status-tray,
+  .dashboard-focus-mode-toggle {
+    bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 @media (max-width: 480px) {

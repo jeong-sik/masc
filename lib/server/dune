@@ -21,6 +21,7 @@
   masc.embedded_config
   masc.masc_tool_surface
   masc.operator
+  masc.voice_bridge_core
   yojson
   otoml
   base64

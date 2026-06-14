@@ -365,7 +365,7 @@ let attempt_tts_endpoint
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
   match adapter.transport with
   | Voice_runtime_overlay.Openai_compat | Voice_runtime_overlay.Elevenlabs_direct ->
-    let audio_file = make_audio_file ~agent_id in
+    let audio_file = make_audio_file () in
     (match
        speak_via_http_tts_to_file
          endpoint

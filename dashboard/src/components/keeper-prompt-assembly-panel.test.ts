@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { cleanup, render } from '@testing-library/preact'
+import { html } from 'htm/preact'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { DashboardPromptItem } from '../api'
-import { buildKeeperPromptAssemblyReport } from './keeper-prompt-assembly-panel'
+import { buildKeeperPromptAssemblyReport, KeeperPromptAssemblyPanel } from './keeper-prompt-assembly-panel'
+
+afterEach(() => {
+  cleanup()
+})
 
 function prompt(overrides: Partial<DashboardPromptItem>): DashboardPromptItem {
   return {
@@ -58,12 +64,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.visiblePromptKeys).toEqual([
-      'keeper.unified.system',
-      'keeper.turn_intent',
-      'keeper.turn_intent.claim_guidance_a',
-    ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.hiddenPromptCount).toBe(6)
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(9)
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)
@@ -103,5 +104,49 @@ describe('buildKeeperPromptAssemblyReport', () => {
     const warning = report.warnings.find(item => item.id === 'playground-path')
     expect(warning?.title).toBe('Host storage path still visible')
     expect(warning?.title.toLowerCase()).not.toContain('legacy')
+  })
+
+  it('keeps source-row details out of the default recipe view', () => {
+    const { container } = render(html`
+      <${KeeperPromptAssemblyPanel}
+        prompts=${[
+          prompt({
+            key: 'keeper.world',
+            effective: 'world override',
+            override_value: 'world override',
+            source: 'override',
+            has_override: true,
+            file_path: '/tmp/.masc/config/prompts/keeper.world.md',
+          }),
+          prompt({
+            key: 'keeper.capabilities',
+            effective: 'tool policy',
+            file_path: '/tmp/.masc/config/prompts/keeper.capabilities.md',
+          }),
+          prompt({
+            key: 'keeper.unified.system',
+            effective: 'unified prompt',
+            file_path: '/tmp/.masc/config/prompts/keeper.unified.system.md',
+          }),
+        ]}
+      />
+    `)
+
+    const defaultRoute = container.querySelector('[data-prompt-route-default]')
+    expect(defaultRoute).not.toBeNull()
+    expect(defaultRoute?.textContent).toContain('Source text')
+    expect(defaultRoute?.textContent).toContain('Model request')
+    expect(defaultRoute?.textContent).toContain('Audit record')
+    expect(defaultRoute?.textContent).toContain('system')
+    expect(defaultRoute?.textContent).toContain('user')
+    expect(defaultRoute?.textContent).not.toContain('keeper.world')
+    expect(defaultRoute?.textContent).not.toContain('fingerprint')
+    expect(defaultRoute?.textContent).not.toContain('tok est')
+
+    const evidence = container.querySelector('[data-developer-evidence]')
+    expect(evidence).not.toBeNull()
+    expect(evidence?.hasAttribute('open')).toBe(false)
+    expect(evidence?.textContent).toContain('keeper.world')
+    expect(evidence?.textContent).toContain('fingerprint')
   })
 })

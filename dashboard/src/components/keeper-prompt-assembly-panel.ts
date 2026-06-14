@@ -1,10 +1,14 @@
 import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   AlertTriangle,
+  ClipboardCheck,
+  FileText,
   GitCompareArrows,
   RefreshCw,
   Route,
+  Send,
 } from 'lucide-preact'
 import { fetchDashboardPrompts, type DashboardPromptItem, type PromptSource } from '../api'
 import { ActionButton } from './common/button'
@@ -170,7 +174,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'manifest',
     role: 'evidence',
     messageSlot: 'not sent',
-    summary: '최종 조립 후 fingerprint와 context_injected edge를 기록합니다.',
+    summary: '최종 조립 후 감사 record와 context_injected edge를 기록합니다.',
     promptKeys: [],
   },
 ]
@@ -429,21 +433,24 @@ function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
   return 'info'
 }
 
+function resolvedBlockLabel(count: number): string {
+  if (count <= 0) return 'runtime computed'
+  return `${count} resolved block${count === 1 ? '' : 's'}`
+}
+
 function stageMicrocopy(stage: KeeperPromptAssemblyStage): string {
-  const promptLabel = stage.promptCount > 0 ? `${stage.promptCount} prompts` : 'computed'
-  const tokenLabel = stage.estimatedTokens > 0 ? `${stage.estimatedTokens.toLocaleString()} tok` : 'no token payload'
-  return `${promptLabel} · ${tokenLabel}`
+  if (stage.missingCount > 0) return `${stage.missingCount} missing`
+  if (stage.overrideCount > 0) return `${stage.overrideCount} customized`
+  return resolvedBlockLabel(stage.promptCount)
 }
 
 function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
-  const promptCount = stages.reduce((sum, stage) => sum + stage.promptCount, 0)
-  const tokenCount = stages.reduce((sum, stage) => sum + stage.estimatedTokens, 0)
-  return `${promptCount} prompts · ${tokenCount.toLocaleString()} tok`
+  return `${stages.length} model message${stages.length === 1 ? '' : 's'}`
 }
 
 function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
   const modelStages = report.stages.filter(stage => stage.role === 'model_input')
-  return `${modelStages.length} slots · ${report.stats.estimatedTokens.toLocaleString()} tok`
+  return modelInputMicrocopy(modelStages)
 }
 
 function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; index: number }) {
@@ -459,32 +466,79 @@ function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; i
       </div>
       <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         ${stage.summary}
-        <span class="font-mono text-[var(--color-fg-disabled)]"> ${stageMicrocopy(stage)}</span>
+        <span class="text-[var(--color-fg-disabled)]"> ${stageMicrocopy(stage)}</span>
       </div>
     </li>
   `
 }
 
+function PromptFlowPhase({
+  icon: Icon,
+  eyebrow,
+  title,
+  summary,
+  meta,
+  children,
+}: {
+  icon: typeof FileText
+  eyebrow: string
+  title: string
+  summary: string
+  meta: string
+  children?: ComponentChildren
+}) {
+  return html`
+    <section class="min-w-0 border-l border-[var(--color-border-default)] pl-3">
+      <div class="mb-2 flex min-w-0 items-center gap-2">
+        <${Icon} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
+        <div class="min-w-0">
+          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${eyebrow}</div>
+          <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">${title}</div>
+        </div>
+      </div>
+      <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${summary}</p>
+      <div class="mt-2 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${meta}</div>
+      ${children}
+    </section>
+  `
+}
+
 function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
   const modelStages = stages.filter(stage => stage.role === 'model_input')
+  const sourceStage = stages.find(stage => stage.role === 'source_prep')
+  const auditStage = stages.find(stage => stage.role === 'evidence')
 
   return html`
-    <section class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-3">
-      <div class="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] pb-2">
-        <div class="flex items-center gap-2">
-          <${StatusChip} tone="info">Model sees<//>
-          <span class="text-xs font-semibold text-[var(--color-fg-primary)]">turn input recipe</span>
-        </div>
-        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${modelInputMicrocopy(modelStages)}</span>
-      </div>
-      <div class="mb-2 text-3xs leading-relaxed text-[var(--color-fg-muted)]">
-        아래 4개 줄이 provider 요청 직전의 모델 입력입니다. source/audit details는 접어 둡니다.
-      </div>
-      <ol>
-        ${modelStages.map((stage, index) => html`
-          <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
-        `)}
-      </ol>
+    <section data-prompt-route-default class="grid gap-4 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.5fr)_minmax(0,0.75fr)]">
+      <${PromptFlowPhase}
+        icon=${FileText}
+        eyebrow="not sent"
+        title="Source text"
+        summary=${sourceStage?.summary ?? 'Choose the effective prompt text for this turn.'}
+        meta=${sourceStage ? resolvedBlockLabel(sourceStage.promptCount) : 'no source blocks'}
+      />
+
+      <${PromptFlowPhase}
+        icon=${Send}
+        eyebrow="model sees"
+        title="Model request"
+        summary="These message slots are the only default view because this is what the provider receives for the turn."
+        meta=${modelInputMicrocopy(modelStages)}
+      >
+        <ol class="mt-3">
+          ${modelStages.map((stage, index) => html`
+            <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
+          `)}
+        </ol>
+      <//>
+
+      <${PromptFlowPhase}
+        icon=${ClipboardCheck}
+        eyebrow="not sent"
+        title="Audit record"
+        summary=${auditStage?.summary ?? 'Record the final assembly for inspection.'}
+        meta="source evidence stays collapsed"
+      />
     </section>
   `
 }
@@ -531,13 +585,13 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
   if (compact) return null
 
   return html`
-    <details class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+    <details data-developer-evidence class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           <${GitCompareArrows} size=${14} />
           Developer evidence
         </span>
-        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${report.stats.totalRows} rows · ${report.stats.estimatedTokens.toLocaleString()} tok est</span>
+        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${report.stats.totalRows} source rows</span>
       </summary>
       <div class="border-t border-[var(--color-border-default)] p-3">
         ${report.activePromptRoots.length > 0 ? html`
@@ -608,7 +662,8 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
             <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
           <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            모델이 매 턴 실제로 받는 message slot만 먼저 보여줍니다. 파일 경로와 감사용 세부 정보는 아래에서 펼쳐 볼 수 있습니다.
+            Read left to right: choose source text, send the model-visible messages, then record the audit trail.
+            Raw prompt keys, file paths, and source rows stay in Developer evidence.
           </p>
         </div>
       </div>

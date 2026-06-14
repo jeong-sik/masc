@@ -74,6 +74,7 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   | Agent_sdk.Types.SSEError _ -> Some "sse_error"
   | Agent_sdk.Types.SSEParseFailed _ -> Some "sse_parse_failed"
   | Agent_sdk.Types.SSEUnknownEventType _ -> Some "sse_unknown_event_type"
+  | Agent_sdk.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
   | Agent_sdk.Types.Connected -> Some "sse_connected"
   | Agent_sdk.Types.Timeout _ -> Some "sse_timeout"
 

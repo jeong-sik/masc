@@ -157,6 +157,7 @@ let participant_and_detail_of_event = function
   | Finalize_requested detail -> None, detail.reason
   | Input_required detail -> detail.participant_name, Some detail.question
   | Input_provided detail -> detail.participant_name, Some detail.request_id
+  | Pending_input_updated _ -> None, Some "pending_input_updated"
   | Session_completed detail -> None, detail.outcome
   | Session_failed detail -> None, detail.outcome
 ;;
@@ -204,6 +205,7 @@ let event_name_of_kind = function
   | Finalize_requested _ -> "finalize_requested"
   | Input_required _ -> "input_required"
   | Input_provided _ -> "input_provided"
+  | Pending_input_updated _ -> "pending_input_updated"
   | Session_completed _ -> "session_completed"
   | Session_failed _ -> "session_failed"
 ;;
@@ -283,6 +285,8 @@ let structured_fields_of_event = function
   | Input_required _ ->
     None, None, None, None, None, None, None, None, None, None, None
   | Input_provided _ ->
+    None, None, None, None, None, None, None, None, None, None, None
+  | Pending_input_updated _ ->
     None, None, None, None, None, None, None, None, None, None, None
   | Session_completed detail ->
     None, None, None, None, None, None, None, None, None, None, detail.outcome

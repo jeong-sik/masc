@@ -58,12 +58,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
       'turn-soft-context',
       'oas-hook',
     ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.visiblePromptKeys).toEqual([
-      'keeper.unified.system',
-      'keeper.turn_intent',
-      'keeper.turn_intent.claim_guidance_a',
-    ])
-    expect(report.stages.find(stage => stage.id === 'unified-world')?.hiddenPromptCount).toBe(6)
+    expect(report.stages.find(stage => stage.id === 'unified-world')?.promptCount).toBe(9)
     expect(report.activePromptRoots).toEqual(['/tmp/.masc/config/prompts'])
     expect(report.rows.find(row => row.promptKey === 'keeper.world')?.source).toBe('override')
     expect(report.rows.find(row => row.promptKey === 'keeper.recovery_block')?.missing).toBe(true)

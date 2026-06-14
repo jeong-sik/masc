@@ -150,6 +150,24 @@ let test_frontend_transport_routes_present () =
     (has_route `POST "/webrtc/answer")
 ;;
 
+let test_voice_routes_present () =
+  let routes = Server_routes_http_routes_voice.add_routes (Router.create ()) in
+  let has_route meth path =
+    List.exists
+      (fun (route : Router.route) ->
+         String.equal route.path path && List.mem meth route.methods)
+      (Router.routes routes)
+  in
+  Alcotest.(check bool)
+    "GET /api/v1/voice/audio/ capability route"
+    true
+    (has_route `GET "/api/v1/voice/audio/");
+  Alcotest.(check bool)
+    "POST /api/v1/voice/transcribe route"
+    true
+    (has_route `POST "/api/v1/voice/transcribe")
+;;
+
 let test_frontend_canonical_loopback_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard?agent=agent_code" in
@@ -398,6 +416,7 @@ let router_tests =
     , `Quick
     , test_router_method_index_preserves_exact_405 )
   ; "frontend transport routes present", `Quick, test_frontend_transport_routes_present
+  ; "voice routes present", `Quick, test_voice_routes_present
   ; ( "frontend canonical localhost redirect"
     , `Quick
     , test_frontend_canonical_loopback_location_localhost )

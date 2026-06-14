@@ -992,6 +992,7 @@ let test_permissions_for_role_admin () =
 let test_has_permission_worker () =
   check bool "worker can read" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
   check bool "worker can broadcast" true (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanBroadcast);
+  check bool "worker cannot admin" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanAdmin);
   check bool "worker cannot reset" false (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReset)
 
 let test_has_permission_admin () =

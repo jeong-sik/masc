@@ -152,7 +152,7 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
-let test_runtime_toml_canonicalizes_legacy_protocol_alias () =
+let test_runtime_toml_rejects_legacy_protocol_aliases () =
   let content =
     {|
 [runtime]
@@ -174,6 +174,44 @@ max-concurrent = 1
 |}
   in
   match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
+  | Error errors ->
+    check bool "rejects provider_d-http"
+      true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "providers.legacy_openai_compat.protocol"
+            && String.equal err.message
+                 "unknown protocol \"provider_d-http\": expected one of \
+                  messages-cli, messages-http, openai-compatible-cli, \
+                  openai-compatible-http, ollama-http")
+         errors)
+
+let test_runtime_toml_accepts_messages_caching_capability () =
+  let content =
+    {|
+[runtime]
+default = "anthropic.claude-opus-4"
+
+[providers.anthropic]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[providers.anthropic.capabilities]
+uses-messages-caching = true
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[anthropic.claude-opus-4]
+max-concurrent = 2
+|}
+  in
+  match Runtime_toml.parse_string content with
   | Error errors ->
     fail
       (errors
@@ -183,12 +221,11 @@ max-concurrent = 1
   | Ok config ->
     (match config.providers with
      | [ provider ] ->
-       check string "canonical protocol" "openai-compatible-http"
-         provider.Runtime_schema.protocol;
-       check bool "chat-completions api format" true
-         (match provider.Runtime_schema.api_format with
-          | Chat_completions_api -> true
-          | Messages_api | Ollama_api -> false)
+       (match provider.Runtime_schema.capabilities with
+        | Some caps ->
+          check bool "uses_anthropic_caching from uses-messages-caching" true
+            caps.uses_anthropic_caching
+        | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
 let deepseek_runtime_toml =
@@ -822,9 +859,13 @@ let () =
             `Quick
             test_runtime_toml_trims_env_credential_key
         ; test_case
-            "runtime TOML canonicalizes legacy protocol alias"
+            "runtime TOML rejects legacy protocol aliases"
             `Quick
-            test_runtime_toml_canonicalizes_legacy_protocol_alias
+            test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case
+            "runtime TOML reads uses-messages-caching capability"
+            `Quick
+            test_runtime_toml_accepts_messages_caching_capability
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

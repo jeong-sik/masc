@@ -447,7 +447,9 @@ let log_call
          global could attach an unrelated concurrent run's identity. A
          [None] field now persists as absent, which is honest. *)
       let model_field =
-        if model = "" then [] else [ "model", `String "runtime" ]
+        if model = ""
+        then []
+        else [ "model", `String (Boundary_redaction.to_string Boundary_redaction.runtime_model_label) ]
       in
       let runtime_profile_field =
         match runtime_profile with

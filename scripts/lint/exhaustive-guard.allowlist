@@ -647,7 +647,6 @@ lib/operator/operator_digest_types.ml:17
 lib/operator/operator_judgment.ml:35
 lib/otel/otel_config.ml:9
 lib/otel/otel_trace_context.ml:103
-lib/tool_call_quality_benchmark/post_verifier.ml:57
 lib/procedural_memory.ml:86
 lib/process/bg_task.ml:430
 lib/process/exec_tap.ml:171
@@ -662,9 +661,6 @@ lib/resilience/audit.ml:52
 lib/resilience/degradation.ml:64
 lib/resilience/keeper_bridge.ml:14
 lib/resilience/keeper_bridge.ml:182
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml:50
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml:63
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml:136
 lib/sdk_tool_contract.ml:261
 lib/sdk_tool_contract.ml:266
 lib/sdk_tool_contract.ml:271

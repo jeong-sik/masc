@@ -47,7 +47,7 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
-    ?(max_idle_turns = 3)
+    ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
@@ -139,16 +139,11 @@ let run_named
   in
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
-  let execution_idle_timeout_s =
-    (* Keep parsing [turn.execution_idle_timeout_sec] for compatibility, but do
-       not forward it on the keeper path until OAS proves active tool execution
-       is excluded from idle accounting. Otherwise this becomes another MASC
-       knob that can kill a healthy long-running tool call. *)
-    let (_resolved_but_not_forwarded : float option) =
-      Keeper_runtime_resolved.execution_idle_timeout_sec ()
-    in
-    None
-  in
+  (* RFC-0206: execution_idle_timeout is intentionally not forwarded on the
+     keeper path until OAS proves active tool execution is excluded from idle
+     accounting. Passing [None] keeps the previous behavior without exposing a
+     dead compatibility knob. *)
+  let execution_idle_timeout_s = None in
   let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
     runtime_id;
     error_runtime_id;

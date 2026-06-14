@@ -1,21 +1,10 @@
-(** Keeper_memory_os_policy — deterministic importance scoring and
-    retention decisions for the Memory OS. *)
+(** Keeper_memory_os_policy — deterministic importance scoring for the
+    Memory OS. *)
 
 open Keeper_memory_os_types
 
-(** Explicit retention verdict. The librarian extracts facts; this
-    policy decides how each fact should be materialised in working
-    memory. *)
-type retention_verdict =
-  | KeepVerbatim
-  | Summarize
-  | ReferenceOnly
-  | Discard
-
 val default_lambda : float
 val default_alpha : float
-val keep_verbatim_score_threshold : float
-val summarize_score_threshold : float
 
 (** Composite importance score for a fact.
 
@@ -34,11 +23,6 @@ val score_tool_result
   -> access_count:int
   -> unit
   -> float
-
-(** Map a score to a retention verdict using fixed thresholds. *)
-val decide_retention : float -> retention_verdict
-
-val verdict_to_string : retention_verdict -> string
 
 (** Lightweight keyword access bump.
 

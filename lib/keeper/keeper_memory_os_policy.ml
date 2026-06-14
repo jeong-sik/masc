@@ -1,22 +1,14 @@
-(** Keeper_memory_os_policy — deterministic importance scoring and
-    retention decisions for the Memory OS.
+(** Keeper_memory_os_policy — deterministic importance scoring for the
+    Memory OS.
 
-    The LLM librarian decides *what facts exist*; this module decides
-    *how to retain them* using a deterministic composite score and
-    explicit retention verdicts. *)
+    The LLM librarian decides *what facts exist*; this module assigns
+    each fact a deterministic composite importance score (used by recall
+    ranking). *)
 
 open Keeper_memory_os_types
 
-type retention_verdict =
-  | KeepVerbatim
-  | Summarize
-  | ReferenceOnly
-  | Discard
-
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
-let keep_verbatim_score_threshold = 0.75
-let summarize_score_threshold = 0.35
 
 (** Forgetting curve: recency decays exponentially with a half-life
     controlled by [lambda]. *)
@@ -46,21 +38,6 @@ let score_tool_result
   =
   let base_confidence = if was_successful then 0.9 else 0.5 in
   base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
-;;
-
-let decide_retention score =
-  if score >= keep_verbatim_score_threshold
-  then KeepVerbatim
-  else if score >= summarize_score_threshold
-  then Summarize
-  else Discard
-;;
-
-let verdict_to_string = function
-  | KeepVerbatim -> "keep_verbatim"
-  | Summarize -> "summarize"
-  | ReferenceOnly -> "reference_only"
-  | Discard -> "discard"
 ;;
 
 let string_contains substring str =

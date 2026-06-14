@@ -9,7 +9,9 @@ open Keeper_memory_os_types
 
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
-let default_recency_bonus = 0.1
+let default_recency_boost_rate = 0.005  (* bonus per turn of non-access *)
+let default_max_recency_boost = 0.05    (* cap at 0.05 after ~10 turns *)
+let turn_seconds = 2.0                  (* approximate seconds per LLM turn *)
 
 (** Forgetting curve: recency decays exponentially with a half-life
     controlled by [lambda]. *)
@@ -18,29 +20,37 @@ let recency_factor ~lambda ~now last_accessed =
   if delta <= 0.0 then 1.0 else exp (-.lambda *. delta)
 ;;
 
-(** Access boost: each recall incrementally increases the weight of a
-    fact, governed by [alpha] (sub-linear by default). *)
-let access_factor ~alpha access_count =
-  (1.0 +. float access_count) ** alpha
-;;
+(** Time-based inverse recency bonus: facts that haven't been accessed
+    recently get a small additive boost, making them more competitive
+    against frequently-accessed fresh facts.
 
-(** Inverse recency bonus: facts with lower confidence get a larger
-    additive boost, preventing high-confidence stale facts from
-    permanently dominating the ranking.
+    Unlike the confidence-only approach (which gives 0 boost to
+    confidence=1.00 facts), this version tracks actual wall-clock time
+    since last access:
 
-    conf=1.00 -> bonus=0.0 (no boost for max-confidence facts)
-    conf=0.90 -> bonus=0.01 (small boost for typical facts)
-    conf=0.50 -> bonus=0.05 (larger boost for low-confidence facts)
+    - 0 turns since access  -> bonus = 0.0  (recently accessed, no boost)
+    - 5 turns  (10s)        -> bonus = 0.025
+    - 10 turns (20s)        -> bonus = 0.05  (capped)
 
-    This is additive, so it works orthogonally to the multiplicative
-    decay in [score_fact]. *)
-let recency_bonus confidence =
-  default_recency_bonus *. (1.0 -. confidence)
+    At 0.05 cap, a stale fact can at most gain 5% of its score from
+    the recency bonus — significant enough to prevent permanent
+    freezing, but not enough to dominate over genuinely important
+    facts. *)
+let recency_bonus ~now last_accessed =
+  let delta = max 0.0 (now -. last_accessed) in
+  let turns = delta /. turn_seconds in
+  min default_max_recency_boost (turns *. default_recency_boost_rate)
 ;;
 
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
   let base = fact.confidence *. recency_factor ~lambda ~now fact.last_accessed in
-  (base +. recency_bonus fact.confidence) *. access_factor ~alpha fact.access_count
+  (base +. recency_bonus ~now fact.last_accessed) *. access_factor ~alpha fact.access_count
+;;
+
+(** Access boost: each recall incrementally increases the weight of a
+    fact, governed by [alpha] (sub-linear by default). *)
+let access_factor ~alpha access_count =
+  (1.0 +. float access_count) ** alpha
 ;;
 
 let score_tool_result
@@ -53,7 +63,7 @@ let score_tool_result
       ()
   =
   let base_confidence = if was_successful then 0.9 else 0.5 in
-  (base_confidence *. recency_factor ~lambda ~now created_at +. recency_bonus base_confidence) *. access_factor ~alpha access_count
+  (base_confidence *. recency_factor ~lambda ~now created_at +. recency_bonus ~now created_at) *. access_factor ~alpha access_count
 ;;
 
 let string_contains substring str =

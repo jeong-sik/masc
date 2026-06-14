@@ -35,3 +35,5 @@ val bump_access_for_turn
   -> fact list
   -> turn_text:string
   -> fact list
+type retention_verdict = KeepVerbatim | Summarize | ReferenceOnly | Discard
+val decide_retention : float -> retention_verdict

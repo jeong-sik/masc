@@ -13,7 +13,7 @@ related: ["RFC-0074", "RFC-0007"]
 
 ## 1. Problem (evidence-grounded)
 
-Keeper Execute failure census (`~/me/.masc/tool_calls/2026-06/{08..14}.jsonl`, 22,902 calls):
+Keeper Execute failure census (`<base-path>/.masc/tool_calls/2026-06/{08..14}.jsonl`, 22,902 calls):
 
 - `git_gh_auth_error` = **146** failures (3.55%). Top signature: `fatal: could not read Username for 'https://github.com'` (72), `You are not logged into any GitHub hosts` (23).
 - The auth-failing keepers are `taskmaster` (55), `sangsu` (30), `issue_king` (10) — and they **have provisioned tokens**: `secrets/<keeper>/env/GH_TOKEN` and `GITHUB_TOKEN` exist for them.

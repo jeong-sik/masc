@@ -41,7 +41,7 @@ let paused_state_requires_approval (old : keeper_meta) =
   Keeper_approval_queue.has_pending_for_keeper ~keeper_name:old.name
   || blocker_requires_continue_gate old
 
-let update_keeper ?(force = false) ?(preserve_prompt_defaults = false)
+let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
@@ -378,7 +378,19 @@ let update_keeper ?(force = false) ?(preserve_prompt_defaults = false)
               err;
             tool_result_error err
           | Ok () ->
-            (match write_meta ~force ctx.config updated with
+            (* CAS-merge instead of a force write: a dashboard/turn-up edit
+               builds [updated] from a meta snapshot ([old]), so a concurrent
+               keeper turn that bumped cumulative usage counters between the
+               read and this write would otherwise be silently rewound
+               (total_turns 385->370, 2026-06-10). [heartbeat_fields_from_disk]
+               keeps the caller's edited fields but takes the monotonic
+               counters as [max latest caller]. *)
+            (match
+               write_meta_with_merge
+                 ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+                 ctx.config
+                 updated
+             with
              | Error e ->
                  Otel_metric_store.inc_counter
                    Keeper_metrics.(to_string WriteMetaFailures)

@@ -468,20 +468,29 @@ let json_string_list_field field = function
       | _ -> [])
   | _ -> []
 
+type blocked_keeper_reason =
+  | Paused
+  | Meta_read_error
+  | Not_bootable
+  | Bootstrap_failed
+  | Not_running
+  | Unknown
+
+let blocked_keeper_reason_label = function
+  | Paused -> "paused"
+  | Meta_read_error -> "meta_read_error"
+  | Not_bootable -> "not_bootable"
+  | Bootstrap_failed -> "bootstrap_failed"
+  | Not_running -> "not_running"
+  | Unknown -> "unknown"
+
 let blocked_keeper_action = function
-  | "paused" -> "resume_or_leave_paused"
-  | "meta_read_error" -> "repair_keeper_meta_file"
-  | "not_bootable" -> "add_keeper_toml_or_disable_stale_autoboot_meta"
-  | "goal_required" -> "add_goal_or_goal_horizon_to_keeper_toml"
-  | "sandbox_profile_required" -> "add_sandbox_profile_to_keeper_toml"
-  | "sandbox_settings_invalid" -> "repair_keeper_sandbox_settings"
-  | "sandbox_preflight_failed" -> "inspect_keeper_sandbox_preflight"
-  | "keeper_capacity_limit" -> "raise_capacity_or_stop_other_keepers"
-  | "invalid_profile" | "config_parse_failed" -> "repair_keeper_toml_config"
-  | "missing_meta" -> "run_keeper_up_or_recreate_meta"
-  | "bootstrap_failed" -> "inspect_keeper_autoboot_logs"
-  | "not_running" -> "start_or_recover_keeper"
-  | _ -> "inspect_keeper_autoboot_logs"
+  | Paused -> "resume_or_leave_paused"
+  | Meta_read_error -> "repair_keeper_meta_file"
+  | Not_bootable -> "add_keeper_toml_or_disable_stale_autoboot_meta"
+  | Bootstrap_failed -> "inspect_keeper_autoboot_logs"
+  | Not_running -> "start_or_recover_keeper"
+  | Unknown -> "inspect_keeper_autoboot_logs"
 
 let blocked_keeper_detail_json
     ?base_path
@@ -500,17 +509,15 @@ let blocked_keeper_detail_json
     | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
   in
   let reason =
-    if is_paused then "paused"
-    else if has_read_error then "meta_read_error"
+    if is_paused then Paused
+    else if has_read_error then Meta_read_error
     else
       match last_failure with
-      | Some failure ->
-          Keeper_runtime.boot_meta_failure_reason_to_string
-            failure.Keeper_runtime.reason
+      | Some _ -> Bootstrap_failed
       | None ->
-          if not is_bootable then "not_bootable"
-          else if not is_capacity then "not_running"
-          else "unknown"
+          if not is_bootable then Not_bootable
+          else if not is_capacity then Not_running
+          else Unknown
   in
   let last_failure_fields =
     match last_failure with
@@ -523,9 +530,7 @@ let blocked_keeper_detail_json
     | Some failure ->
         [
           ( "last_bootstrap_reason"
-          , `String
-              (Keeper_runtime.boot_meta_failure_reason_to_string
-                 failure.Keeper_runtime.reason) );
+          , `String (blocked_keeper_reason_label Bootstrap_failed) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]
@@ -533,7 +538,7 @@ let blocked_keeper_detail_json
   `Assoc
     ([
        ("name", `String name);
-       ("reason", `String reason);
+       ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action reason));
        ("bootable", `Bool is_bootable);
        ("reaction_capacity", `Bool is_capacity);

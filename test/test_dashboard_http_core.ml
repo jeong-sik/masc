@@ -52,6 +52,20 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let rec mkdir_p path =
+  if Sys.file_exists path then ()
+  else begin
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755
+  end
+
 let with_cached_surface_success
       (surface : Server_dashboard_http_cache.cached_surface)
       json
@@ -945,6 +959,47 @@ let test_dashboard_shell_light_includes_runtime_health_ssot () =
      | `Assoc _ -> true
      | _ -> false)
 
+let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  ignore (Workspace.init config ~agent_name:None);
+  let config_root =
+    Filename.concat
+      (Filename.concat config.base_path Common.masc_dirname)
+      "config"
+  in
+  let keepers_dir = Filename.concat config_root "keepers" in
+  mkdir_p keepers_dir;
+  write_file
+    (Filename.concat keepers_dir "base.toml")
+    "[keeper]\nautoboot_enabled = false\n";
+  write_file
+    (Filename.concat keepers_dir "alpha.toml")
+    "[keeper]\nautoboot_enabled = true\npersona_name = \"alpha\"\n";
+  write_file
+    (Filename.concat keepers_dir "beta.toml")
+    "[keeper]\nautoboot_enabled = true\npersona_name = \"beta\"\n";
+  with_env "MASC_CONFIG_DIR" config_root @@ fun () ->
+  Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () -> Config_dir_resolver.reset ())
+    (fun () ->
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check int)
+        "configured_keepers follows declarative runtime keeper TOML"
+        2
+        (json |> member "configured_keepers" |> to_int);
+      Alcotest.(check int)
+        "persisted_keepers exposes durable meta count separately"
+        0
+        (json |> member "persisted_keepers" |> to_int);
+      Alcotest.(check int)
+        "counts.persisted_keepers mirrors top-level persisted_keepers"
+        0
+        (json |> member "counts" |> member "persisted_keepers" |> to_int))
+
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   ignore (Workspace.init config ~agent_name:None);
@@ -1176,6 +1231,8 @@ let () =
             test_shell_snapshot_wire_light_reads_shell_light;
           test_case "light shell carries runtime health SSOT" `Quick
             test_dashboard_shell_light_includes_runtime_health_ssot;
+          test_case "shell separates configured and persisted keeper counts" `Quick
+            test_dashboard_shell_separates_configured_and_persisted_keeper_counts;
           test_case "light shell counts agents from summary fields" `Quick
             test_dashboard_shell_light_counts_agents_from_summary_fields;
           test_case "RFC-0138 tools wire returns snapshot when actor omitted" `Quick

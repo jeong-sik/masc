@@ -337,6 +337,126 @@ let test_librarian_accepts_integer_confidence () =
   | None -> Alcotest.fail "expected librarian output to parse"
 ;;
 
+let test_librarian_preserves_admission_memory_text () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-filter-transient-cap"
+    ; generation = 1
+    ; messages = [ text_message "Goal cap moved while the agent was working." ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "Mixed durable memory and transient admission state"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Goal cap is 3/3, blocking new task claims."
+                ; "confidence", `Float 0.95
+                ; "category", `String "constraint"
+                ; "source_turn", `Int 3
+                ]
+            ; `Assoc
+                [ ( "claim"
+                  , `String
+                      "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+                  )
+                ; "confidence", `Float 0.9
+                ; "category", `String "fact"
+                ; "source_turn", `Int 4
+                ]
+            ] )
+      ; ( "open_items"
+        , `List
+            [ `String "Wait for goal cap 3/3 before claiming new task."
+            ; `String "Audit Memory OS write-side filtering."
+            ] )
+      ; ( "constraints"
+        , `List
+            [ `String "Goal cap 3/3 is blocking task claim."
+            ; `String "Use worktrees for code changes."
+            ] )
+      ; "preserved_tool_refs", `List [ `String "call_transient_cap" ]
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | Some episode ->
+    (match episode.Types.claims with
+     | [ transient_fact; diagnostic_fact ] ->
+       Alcotest.(check string)
+         "keeps admission snapshot claim"
+         "Goal cap is 3/3, blocking new task claims."
+         transient_fact.Types.claim;
+       Alcotest.(check int) "admission claim turn preserved" 3 transient_fact.Types.source.turn;
+       Alcotest.(check string)
+         "keeps diagnostic claim"
+         "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+         diagnostic_fact.Types.claim;
+       Alcotest.(check int) "diagnostic claim turn preserved" 4 diagnostic_fact.Types.source.turn
+     | claims -> Alcotest.failf "expected two claims, got %d" (List.length claims));
+    Alcotest.(check (list string))
+      "keeps open items verbatim"
+      [ "Wait for goal cap 3/3 before claiming new task."
+      ; "Audit Memory OS write-side filtering."
+      ]
+      episode.Types.open_items;
+    Alcotest.(check (list string))
+      "keeps constraints verbatim"
+      [ "Goal cap 3/3 is blocking task claim."
+      ; "Use worktrees for code changes."
+      ]
+      episode.Types.constraints;
+    Alcotest.(check (option (pair int int)))
+      "source range covers preserved claims"
+      (Some (3, 4))
+      episode.Types.source_turn_range
+  | None -> Alcotest.fail "expected admission episode to parse"
+;;
+
+let test_librarian_preserves_pure_admission_episode () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-pure-transient-cap"
+    ; generation = 1
+    ; messages = [ text_message "Claim was rejected by goal cap." ]
+    }
+  in
+  let raw =
+    `Assoc
+      [ ( "episode_summary"
+        , `String "Agent is blocked by goal_cap 3/3 and cannot claim new tasks." )
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "Goal cap is 3/3, blocking new task claims."
+                ; "confidence", `Float 0.95
+                ; "category", `String "constraint"
+                ; "source_turn", `Int 3
+                ]
+            ] )
+      ; "open_items", `List [ `String "Wait for goal cap 3/3 before claiming new task." ]
+      ; "constraints", `List [ `String "Goal cap 3/3 is blocking task claim." ]
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match Librarian.episode_of_output ~now:1_000_000.0 inp raw with
+  | Some episode ->
+    Alcotest.(check string)
+      "summary preserved"
+      "Agent is blocked by goal_cap 3/3 and cannot claim new tasks."
+      episode.Types.episode_summary;
+    Alcotest.(check int) "claim preserved" 1 (List.length episode.Types.claims);
+    Alcotest.(check (list string))
+      "open items preserved"
+      [ "Wait for goal cap 3/3 before claiming new task." ]
+      episode.Types.open_items;
+    Alcotest.(check (list string))
+      "constraints preserved"
+      [ "Goal cap 3/3 is blocking task claim." ]
+      episode.Types.constraints
+  | None -> Alcotest.fail "expected admission-only episode to be preserved"
+;;
+
 let test_librarian_rejects_invalid_claims () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-invalid"; generation = 0; messages = [] }
@@ -796,6 +916,78 @@ let test_recall_context_renders_sanitized_memory () =
         (contains "ignore prior instructions" ctx)))
 ;;
 
+let test_recall_context_preserves_admission_memory () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let keeper_id = "virtual-memory-keeper" in
+      let now = 1_000_000.0 in
+      let base_fact = fact_fixture ~now () in
+      let useful_fact =
+        { base_fact with
+          Types.claim =
+            "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
+        ; Types.confidence = 0.93
+        ; Types.category = "fact"
+        ; Types.access_count = 3
+        }
+      in
+      let transient_fact =
+        { base_fact with
+          Types.claim = "Goal cap is 3/3, blocking new task claims."
+        ; Types.confidence = 0.99
+        ; Types.category = "constraint"
+        ; Types.access_count = 6
+        ; Types.source = { base_fact.source with turn = 7 }
+        }
+      in
+      let transient_episode =
+        { Types.trace_id = "trace-transient-cap"
+        ; Types.generation = 1
+        ; Types.episode_summary =
+            "Agent is blocked by goal_cap 3/3 and cannot claim new tasks."
+        ; Types.claims = [ transient_fact ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (7, 7)
+        ; Types.created_at = now
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      let useful_episode =
+        { Types.trace_id = "trace-stale-cap-diagnostic"
+        ; Types.generation = 2
+        ; Types.episode_summary = "Memory OS stale goal_cap blocker was diagnosed."
+        ; Types.claims = [ useful_fact ]
+        ; Types.open_items = []
+        ; Types.constraints = []
+        ; Types.preserved_tool_refs = []
+        ; Types.source_turn_range = Some (8, 8)
+        ; Types.created_at = now +. 1.0
+        ; Types.schema_version = Types.schema_version
+        }
+      in
+      Memory_io.append_episode_bundle ~keeper_id transient_episode;
+      Memory_io.append_episode_bundle ~keeper_id useful_episode;
+      let ctx = Recall.render_context ~keeper_id ~now ~max_facts:5 ~max_episodes:5 () in
+      Alcotest.(check bool)
+        "keeps stale diagnostic fact"
+        true
+        (contains "Memory OS holds stale goal_cap information" ctx);
+      Alcotest.(check bool)
+        "keeps admission cap fact"
+        true
+        (contains "Goal cap is 3/3" ctx);
+      Alcotest.(check bool)
+        "keeps admission cap episode"
+        true
+        (contains "cannot claim new tasks" ctx);
+      Alcotest.(check bool)
+        "keeps stale diagnostic episode"
+        true
+        (contains "Memory OS stale goal_cap blocker was diagnosed" ctx)))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -810,6 +1002,14 @@ let () =
             "librarian accepts integer confidence"
             `Quick
             test_librarian_accepts_integer_confidence
+        ; Alcotest.test_case
+            "librarian preserves admission memory text"
+            `Quick
+            test_librarian_preserves_admission_memory_text
+        ; Alcotest.test_case
+            "librarian preserves pure admission episode"
+            `Quick
+            test_librarian_preserves_pure_admission_episode
         ; Alcotest.test_case
             "librarian rejects invalid claims"
             `Quick
@@ -846,6 +1046,10 @@ let () =
             "renders sanitized memory"
             `Quick
             test_recall_context_renders_sanitized_memory
+        ; Alcotest.test_case
+            "preserves admission memory"
+            `Quick
+            test_recall_context_preserves_admission_memory
         ; Alcotest.test_case
             "render_if_enabled default is on"
             `Quick

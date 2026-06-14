@@ -500,8 +500,11 @@ let dashboard_shell_payload_json
         dashboard_general_agent_count agents, agents_ms)
     in
     let tasks, tasks_ms = measure_ms "tasks" (fun () -> dashboard_tasks_safe config) in
+    let persisted_keepers, persisted_keepers_ms =
+      measure_ms "persisted_keepers" (fun () -> keeper_count config)
+    in
     let configured_keepers, configured_keepers_ms =
-      measure_ms "configured_keepers" (fun () -> keeper_count config)
+      measure_ms "configured_keepers" (fun () -> configured_keeper_count config)
     in
     let meta_cognition_r = ref (`Null, 0) in
     let config_resolution_r = ref (`Null, 0) in
@@ -553,8 +556,10 @@ let dashboard_shell_payload_json
             [ "agents", `Int general_agents
             ; "tasks", `Int (List.length tasks)
             ; "keepers", `Int active_keepers
+            ; "persisted_keepers", `Int persisted_keepers
             ; "total_runtimes", `Int (general_agents + active_keepers)
             ] )
+      ; "persisted_keepers", `Int persisted_keepers
       ; "configured_keepers", `Int configured_keepers
       ; "providers", provider_capacity_json ()
       ; "meta_cognition", meta_cognition_json
@@ -569,11 +574,13 @@ let dashboard_shell_payload_json
             ; "workspace_root", `String config.base_path
             ; "workspace_path", `String config.workspace_path
             ; "keeper_count_source", `String "runtime_keepalive"
-            ; "configured_keeper_count_source", `String "keeper_meta"
+            ; "configured_keeper_count_source", `String "keeper_toml"
+            ; "persisted_keeper_count_source", `String "keeper_meta"
             ; "status_ms", `Int status_ms
             ; "agents_ms", `Int agents_ms
             ; "tasks_ms", `Int tasks_ms
             ; "keepers_ms", `Int keepers_ms
+            ; "persisted_keepers_ms", `Int persisted_keepers_ms
             ; "configured_keepers_ms", `Int configured_keepers_ms
             ; "meta_cognition_ms", `Int meta_cognition_ms
             ; "config_resolution_ms", `Int config_resolution_ms

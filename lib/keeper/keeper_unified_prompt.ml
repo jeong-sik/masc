@@ -543,6 +543,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
             - Scan the backlog with keeper_tasks_list and claim a matching task.\n\
             - Read the board with keeper_board_list and join an active discussion.\n\
             - Post your intended focus to the board so other keepers can align.\n\
+            Do not ask the operator what repo, goal, or task to create unless \
+            the operator explicitly requested new repo, goal, or task creation.\n\
             Do not stay silent when you have no goal.\n"
          else "");
         (if meta.short_goal <> "" && meta.short_goal <> meta.goal then

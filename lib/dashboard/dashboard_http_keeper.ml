@@ -43,6 +43,14 @@ let keeper_names (config : Workspace.config) =
 let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
+let configured_runtime_keeper_names config =
+  let loader_level_names = Keeper_types_profile.loader_level_keeper_toml_key_names in
+  Keeper_meta_store.configured_keeper_names config
+  |> List.filter (fun name -> not (List.exists (String.equal name) loader_level_names))
+
+let configured_keeper_count (config : Workspace.config) : int =
+  List.length (configured_runtime_keeper_names config)
+
 let non_empty_trimmed_string_opt value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed

@@ -93,14 +93,16 @@ let keeper_fleet_runtime_resolution_base_fields
       keeper_fleet_safety_health_json
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
+        ~phase_snapshot
         ~phase_counts
         ~paused_keepers_json
         ()
-    | None ->
-      keeper_fleet_safety_health_json
-        ~phase_counts
-        ~paused_keepers_json
-        ()
+  | None ->
+    keeper_fleet_safety_health_json
+      ~phase_snapshot
+      ~phase_counts
+      ~paused_keepers_json
+      ()
   in
   let fields =
     [ "keeper_fibers", `Int keeper_fibers

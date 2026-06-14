@@ -134,7 +134,9 @@ let copy_missing_config_root_seed ~src ~dst =
   Fs_compat.mkdir_p dst;
   Sys.readdir src
   |> Array.iter (fun name ->
-    if String.equal name "keepers"
+    if
+      String.equal name "keepers"
+      || String.equal name Config_dir_resolver.tool_policy_toml_filename
     then ()
     else
       copy_missing_tree

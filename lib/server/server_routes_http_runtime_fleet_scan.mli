@@ -68,12 +68,16 @@ type keeper_phase_counts = {
 type keeper_phase_snapshot = {
   counts : keeper_phase_counts;
   running_names : string list;
+  recovering_names : string list;
+  executable_names : string list;
+  phase_names : (string * string) list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
+  ?phase_snapshot:keeper_phase_snapshot ->
   phase_counts:keeper_phase_counts ->
   paused_keepers_json:Yojson.Safe.t ->
   unit ->

@@ -711,12 +711,14 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
        | Error e -> Error (Rest_error e))
     else
       let rec send_chunks first rest =
-        let rlen = String.length rest in
-        let chunk, remaining =
-          if rlen <= limit then rest, None
-          else
-            ( String.sub rest 0 limit
-            , Some (String.sub rest limit (rlen - limit)) )
+        (* Split on a codepoint boundary: the Discord limit is in Unicode
+           scalar values, and a mid-codepoint byte cut yields invalid
+           UTF-8 that Discord rejects with a 400. *)
+        let chunk, remaining_str =
+          Discord_rest_client.split_at_codepoint rest ~limit
+        in
+        let remaining =
+          if remaining_str = "" then None else Some remaining_str
         in
         let ref_id = if first then reply_to_message_id else None in
         match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with

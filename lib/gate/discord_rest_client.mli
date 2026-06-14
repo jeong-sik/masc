@@ -16,6 +16,22 @@ val message_content_limit : int
 (** Discord text-message content limit, in Unicode scalar units.
     Messages longer than this must be split into multiple payloads. *)
 
+val split_at_codepoint : string -> limit:int -> string * string
+(** [split_at_codepoint s ~limit] returns [(head, tail)] where [head] is
+    a valid-UTF-8 prefix of [s] of at most [limit] Unicode scalar values
+    and [tail] is the remainder ([""] when [s] fits). Splitting on
+    codepoint boundaries (not bytes) keeps each piece valid UTF-8 so
+    Discord does not reject it with a 400. *)
+
+val chunk_by_codepoint : string -> limit:int -> string list
+(** [chunk_by_codepoint s ~limit] splits [s] into chunks of at most
+    [limit] Unicode scalar values each, every chunk valid UTF-8.
+    [chunk_by_codepoint "" ~limit] is [[]]. *)
+
+val truncate_to_limit : string -> string
+(** Truncate to {!message_content_limit} Unicode scalar values on a
+    codepoint boundary (valid UTF-8). Used for PATCH edits. *)
+
 (** Typed error from Discord REST. Closed sum — anything Discord
     returns that does not map to one of these becomes [Other]
     (preserving the JSON for inspection) so we never silently consume
@@ -63,7 +79,8 @@ val edit_message :
     [PATCH /api/v10/channels/{channel_id}/messages/{message_id}].
     Used for streaming message display — the message content is updated
     in-place on Discord. Content exceeding {!message_content_limit} is
-    silently truncated to the first 2000 characters.
+    silently truncated to the first 2000 Unicode scalar values on a
+    codepoint boundary (see {!truncate_to_limit}).
 
     @raise nothing — failures are surfaced as typed {!error}. *)
 

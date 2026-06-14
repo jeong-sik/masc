@@ -29,16 +29,13 @@ let send_message ~token ~channel_id ~content =
           "keeper_chat_discord: send_message failed: %s" err_str
   else
     let rec send_chunks rest =
-      let rlen = String.length rest in
-      if rlen = 0 then ()
+      if String.length rest = 0 then ()
       else
-        let chunk =
-          if rlen <= limit then rest
-          else String.sub rest 0 limit
-        in
-        let remaining =
-          if rlen <= limit then ""
-          else String.sub rest limit (rlen - limit)
+        (* Split on a codepoint boundary: Discord measures the limit in
+           Unicode scalar values, and a mid-codepoint byte cut produces
+           invalid UTF-8 that Discord rejects with a 400. *)
+        let chunk, remaining =
+          Discord_rest_client.split_at_codepoint rest ~limit
         in
         (match Discord_rest_client.send_message ~token ~channel_id ~content:chunk () with
          | Ok _msg_id -> send_chunks remaining
@@ -52,12 +49,10 @@ let send_message ~token ~channel_id ~content =
     in
     send_chunks content
 
-(* Truncate to Discord message limit for PATCH edits, with redaction. *)
+(* Truncate to Discord message limit for PATCH edits, with redaction.
+   Cuts on a codepoint boundary so the PATCH body stays valid UTF-8. *)
 let truncate content =
-  let content = Observability_redact.redact_text content in
-  let limit = Discord_rest_client.message_content_limit in
-  if String.length content <= limit then content
-  else String.sub content 0 limit
+  Discord_rest_client.truncate_to_limit (Observability_redact.redact_text content)
 
 let is_ascii_space = function
   | ' ' | '\n' | '\r' | '\t' -> true
@@ -79,16 +74,14 @@ let streaming_patch_content content =
 
 let final_head_and_overflow content =
   let redacted = Observability_redact.redact_text content in
-  let limit = Discord_rest_client.message_content_limit in
-  let rlen = String.length redacted in
-  let head =
-    if rlen <= limit then redacted
-    else String.sub redacted 0 limit
+  (* Split head/overflow on a codepoint boundary so the head PATCH and
+     the overflow follow-up are each valid UTF-8 (a byte cut would split
+     a multi-byte char across the two). *)
+  let head, overflow_str =
+    Discord_rest_client.split_at_codepoint redacted
+      ~limit:Discord_rest_client.message_content_limit
   in
-  let overflow =
-    if rlen <= limit then None
-    else Some (String.sub redacted limit (rlen - limit))
-  in
+  let overflow = if overflow_str = "" then None else Some overflow_str in
   (head, overflow)
 
 let edit_message_silent ~token ~channel_id ~message_id ~content =

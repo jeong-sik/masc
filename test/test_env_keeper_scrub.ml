@@ -106,6 +106,38 @@ let extra_allow_env_override () =
          (Env_keeper_scrub.is_allowed "CUSTOM_OK_SECRET"))
 ;;
 
+let mem entry env = Array.to_list env |> List.exists (fun e -> e = entry)
+
+(* A non-C host locale would localise strerror and silently break the
+   EINTR retry marker; filter_environment_c_messages must pin messages to
+   C while leaving character encoding to the host. *)
+let c_messages_pins_message_locale () =
+  let input =
+    [| "PATH=/usr/bin"
+     ; "LC_ALL=ko_KR.UTF-8"
+     ; "LC_MESSAGES=fr_FR.UTF-8"
+     ; "LANG=ko_KR.UTF-8"
+     ; "LC_CTYPE=ko_KR.UTF-8"
+    |]
+  in
+  let out = Env_keeper_scrub.filter_environment_c_messages input in
+  Alcotest.(check bool) "LC_MESSAGES pinned to C" true (mem "LC_MESSAGES=C" out);
+  Alcotest.(check bool) "LC_ALL neutralised to empty" true (mem "LC_ALL=" out);
+  Alcotest.(check bool) "host LC_ALL value dropped" false
+    (mem "LC_ALL=ko_KR.UTF-8" out);
+  Alcotest.(check bool) "host LC_MESSAGES value dropped" false
+    (mem "LC_MESSAGES=fr_FR.UTF-8" out);
+  (* encoding categories are left to the host so UTF-8 output survives *)
+  Alcotest.(check bool) "LANG retained" true (mem "LANG=ko_KR.UTF-8" out);
+  Alcotest.(check bool) "LC_CTYPE retained" true (mem "LC_CTYPE=ko_KR.UTF-8" out)
+;;
+
+let c_messages_pins_even_without_host_locale () =
+  let out = Env_keeper_scrub.filter_environment_c_messages [| "PATH=/usr/bin" |] in
+  Alcotest.(check bool) "LC_MESSAGES=C appended" true (mem "LC_MESSAGES=C" out);
+  Alcotest.(check bool) "LC_ALL= appended" true (mem "LC_ALL=" out)
+;;
+
 let () =
   Alcotest.run
     "env keeper scrub"
@@ -123,6 +155,12 @@ let () =
             filter_environment_keeps_only_allowed
         ; Alcotest.test_case "drops unknown keys without equals" `Quick
             filter_environment_drops_entries_without_equals
+        ] )
+    ; ( "c_messages_locale"
+      , [ Alcotest.test_case "pins message locale to C" `Quick
+            c_messages_pins_message_locale
+        ; Alcotest.test_case "pins even without host locale" `Quick
+            c_messages_pins_even_without_host_locale
         ] )
     ]
 ;;

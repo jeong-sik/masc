@@ -162,25 +162,6 @@ let source_turn_range claims =
     Some (lo, hi)
 ;;
 
-let is_transient_admission_memory_text =
-  Keeper_memory_os_policy.is_transient_admission_memory_text
-;;
-
-let keep_librarian_fact fact =
-  not (is_transient_admission_memory_text fact.claim)
-;;
-
-let keep_librarian_text text =
-  not (is_transient_admission_memory_text text)
-;;
-
-let episode_has_durable_content ~episode_summary ~claims ~open_items ~constraints =
-  (not (is_transient_admission_memory_text episode_summary))
-  || claims <> []
-  || open_items <> []
-  || constraints <> []
-;;
-
 let episode_of_output ?now (inp : input) (raw : string) : episode option =
   let now =
     match now with
@@ -206,28 +187,18 @@ let episode_of_output ?now (inp : input) (raw : string) : episode option =
          , Some preserved_tool_refs ) ->
          (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
           | Some claims ->
-            let claims = List.filter keep_librarian_fact claims in
-            let open_items = List.filter keep_librarian_text open_items in
-            let constraints = List.filter keep_librarian_text constraints in
-            if episode_has_durable_content
-                 ~episode_summary
-                 ~claims
-                 ~open_items
-                 ~constraints
-            then
-              Some
-                { trace_id = inp.trace_id
-                ; generation = inp.generation
-                ; episode_summary
-                ; claims
-                ; open_items
-                ; constraints
-                ; preserved_tool_refs
-                ; source_turn_range = source_turn_range claims
-                ; created_at = now
-                ; schema_version
-                }
-            else None
+            Some
+              { trace_id = inp.trace_id
+              ; generation = inp.generation
+              ; episode_summary
+              ; claims
+              ; open_items
+              ; constraints
+              ; preserved_tool_refs
+              ; source_turn_range = source_turn_range claims
+              ; created_at = now
+              ; schema_version
+              }
           | None -> None)
        | _ -> None)
     | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None

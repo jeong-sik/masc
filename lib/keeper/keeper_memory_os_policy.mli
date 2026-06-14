@@ -40,12 +40,6 @@ val decide_retention : float -> retention_verdict
 
 val verdict_to_string : retention_verdict -> string
 
-(** [is_transient_admission_memory_text text] is true for live
-    task-admission/capacity blocker snapshots such as "goal_cap 3/3
-    blocks claims". These are useful in the turn that produced them, but
-    stale quickly and must not be auto-recalled as durable constraints. *)
-val is_transient_admission_memory_text : string -> bool
-
 (** Lightweight keyword access bump.
 
     Increments [access_count] and updates [last_accessed] for facts

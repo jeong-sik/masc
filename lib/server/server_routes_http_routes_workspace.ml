@@ -4,7 +4,7 @@ open Server_routes_http_pages
 
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.workspace_config.base_path
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
 let sanitize_log_value ?(max_bytes = 240) s =
   let without_controls =
@@ -98,7 +98,7 @@ let classify_workspace_query
 
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
-  let config = state.Mcp_server.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   let lookup_repository repo_id =
     match Repo_store.find ~base_path:project_base repo_id with
     | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)

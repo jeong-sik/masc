@@ -86,7 +86,7 @@ let resolve_telemetry_n ~has_time_window ~(n_param : string option) =
    as part of godfile near-threshold split. *)
 let handle_telemetry request reqd =
   with_public_read (fun state req reqd ->
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     let base_path = config.base_path in
     let masc_root = Workspace.masc_root_dir config in
     let float_query_param req key =

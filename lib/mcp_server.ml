@@ -477,7 +477,7 @@ let schema_markdown =
 
 (** MCP Server state *)
 type server_state = {
-  mutable workspace_config: Workspace.config;
+  workspace_config: Workspace.config Atomic.t;  (* Atomic swap so workspace-switch tools update without data races. *)
   session_registry: Session.registry;
   on_sse_broadcast: (Yojson.Safe.t -> unit) option Atomic.t;  (* SSE push callback, Atomic for cross-fiber visibility *)
   sw: Eio.Switch.t option; (* Request/runtime fibers for HTTP/MCP handlers *)
@@ -488,6 +488,9 @@ type server_state = {
   net: Eio_context.eio_net option; (* For network calls - P3a: replaces global ref *)
 }
 
+let workspace_config state = Atomic.get state.workspace_config
+let set_workspace_config state config = Atomic.set state.workspace_config config
+
 let create_state ~base_path =
   let config = Workspace.default_config base_path in
   let registry = Session.create () in
@@ -496,7 +499,7 @@ let create_state ~base_path =
     Session.push_notification_to_active_agents registry ~event
   );
   let state = {
-    workspace_config = config;
+    workspace_config = Atomic.make config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = None;
@@ -507,7 +510,7 @@ let create_state ~base_path =
     net = None;
   } in
   Board_tool.set_agent_lookup (fun name ->
-    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
+    try Workspace.is_agent_session_bound (workspace_config state) ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 
@@ -552,7 +555,7 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
   );
   Keeper_supervisor.set_global_switch sw;
   let state = {
-    workspace_config = config;
+    workspace_config = Atomic.make config;
     session_registry = registry;
     on_sse_broadcast = Atomic.make None;
     sw = Some sw;
@@ -562,10 +565,10 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
     mono_clock = Some mono_clock;
     net = Some net;
   } in
-  (* Board post kind auto-classification: reads state.workspace_config so
+  (* Board post kind auto-classification: reads [workspace_config state] so
      workspace changes via set_workspace are reflected automatically. *)
   Board_tool.set_agent_lookup (fun name ->
-    try Workspace.is_agent_session_bound state.workspace_config ~agent_name:name
+    try Workspace.is_agent_session_bound (workspace_config state) ~agent_name:name
     with Sys_error _ | Not_found | Invalid_argument _ -> false);
   state
 

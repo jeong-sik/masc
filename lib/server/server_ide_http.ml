@@ -9,12 +9,12 @@ open Server_utils
 open Masc_domain
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.workspace_config.base_path
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
 let resolve_workspace_base ~state ~uri =
   let project_base = base_path_of_state state in
-  let config = state.Mcp_server.workspace_config in
+  let config = (Mcp_server.workspace_config state) in
   let lookup_repository repo_id =
     match Repo_store.find ~base_path:project_base repo_id with
     | Ok repo -> Some (Repo_store.local_path ~base_path:project_base repo)
@@ -233,7 +233,7 @@ let add_routes router =
   |> Http.Router.get "/api/v1/status" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let workspace_state = Workspace.read_state config in
          let tempo = Tempo.get_tempo config in
          let json = `Assoc [

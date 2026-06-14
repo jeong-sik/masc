@@ -58,7 +58,7 @@ let mapping_of_json keeper_id (json : Yojson.Safe.t) :
   | _ -> Error "expected JSON object body"
 
 let handle_list_mappings state req reqd =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
       Http.Response.json_value ~status:`Internal_server_error ~request:req
@@ -74,7 +74,7 @@ let handle_list_mappings state req reqd =
         reqd
 
 let handle_get_mapping state keeper_id req reqd =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
       Http.Response.json_value ~status:`Internal_server_error ~request:req
@@ -103,7 +103,7 @@ let handle_get_mapping state keeper_id req reqd =
             reqd)
 
 let handle_save_mapping state keeper_id req reqd =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   Http.Request.read_body_async reqd (fun body_str ->
       let response status message =
         Http.Response.json_value ~status ~request:req

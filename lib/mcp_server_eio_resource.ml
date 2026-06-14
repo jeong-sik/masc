@@ -31,7 +31,7 @@ let handle_read_resource_eio state id params =
         make_error_typed ~id Mcp_error_code.Invalid_params "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let registry = state.Mcp_server.session_registry in
 
         let read_messages_json ~since_seq ~limit =

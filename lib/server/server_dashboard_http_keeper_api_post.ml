@@ -61,7 +61,7 @@ let handle_keeper_tools_post state req reqd =
     if String.length name = 0 then
       respond_error reqd "keeper name required"
     else
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       match Keeper_meta_store.read_meta config name with
       | Error msg -> respond_error ~status:`Not_found reqd msg
       | Ok None -> respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
@@ -288,7 +288,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
   if String.length name = 0 then
     respond_error ~ok:false reqd "keeper name is required"
   else
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     try
       let args = Yojson.Safe.from_string body_str in
       let action = Safe_ops.json_string ~default:"" "action" args in
@@ -353,7 +353,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = state.Mcp_server.workspace_config in
+    let config = (Mcp_server.workspace_config state) in
     match Keeper_meta_store.read_meta config name with
     | Error msg -> respond_error ~status:`Not_found reqd msg
     | Ok None ->
@@ -451,7 +451,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
   | Error msg ->
       respond_error ~ok:false reqd msg
     | Ok directive ->
-        let config = state.Mcp_server.workspace_config in
+        let config = (Mcp_server.workspace_config state) in
         let action_str =
           match directive with
           | `Pause -> "pause"
@@ -630,7 +630,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
         reqd
   | Ok (names, directive) ->
-      let config = state.Mcp_server.workspace_config in
+      let config = (Mcp_server.workspace_config state) in
       let action_str =
         match directive with
         | `Pause -> "pause"

@@ -109,7 +109,7 @@ let mission_cache =
 let _mission_cache = mission_cache
 
 let start_mission_refresh_loop ~state ~sw ~clock =
-  let workspace_config = state.Mcp_server.workspace_config in
+  let workspace_config = (Mcp_server.workspace_config state) in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = state_dashboard_runtime_caps state in
   let mission_refresh_timeout_s = 60.0 in
@@ -154,7 +154,7 @@ let start_mission_refresh_loop ~state ~sw ~clock =
 let dashboard_briefing_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
+    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
   in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
@@ -164,7 +164,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       ?mono_clock
       ~sw
       ~clock
-      ~config:state.Mcp_server.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       (fun ~config ~sw ->
          Dashboard_briefing.json
            ?actor
@@ -193,7 +193,7 @@ let dashboard_briefing_http_json ~state ~sw ~clock request =
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
         dashboard_cache_key
-          state.Mcp_server.workspace_config
+          (Mcp_server.workspace_config state)
           "mission"
           (Option.value ~default:"" actor)
       in
@@ -215,10 +215,10 @@ let dashboard_session_http_json ~state ~sw ~clock request =
        Dashboard_briefing.session_json
          ?actor:
            (dashboard_actor_for_request
-              ~base_path:state.Mcp_server.workspace_config.base_path
+              ~base_path:(Mcp_server.workspace_config state).base_path
               request)
          ~session_id:trimmed_id
-         ~config:state.Mcp_server.workspace_config
+         ~config:(Mcp_server.workspace_config state)
          ~sw
          ~clock
          ~proc_mgr:state.Mcp_server.proc_mgr
@@ -249,14 +249,14 @@ let dashboard_session_http_json ~state ~sw ~clock request =
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.workspace_config.base_path request
+    dashboard_actor_for_request ~base_path:(Mcp_server.workspace_config state).base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
     Dashboard_briefing_sections.json
       ?actor
       ~force
-      ~config:state.Mcp_server.workspace_config
+      ~config:(Mcp_server.workspace_config state)
       ~sw
       ~clock
       ~proc_mgr:state.Mcp_server.proc_mgr
@@ -267,7 +267,7 @@ let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
   else (
     let cache_key =
       dashboard_cache_key
-        state.Mcp_server.workspace_config
+        (Mcp_server.workspace_config state)
         "mission_briefing"
         (Option.value ~default:"" actor)
     in

@@ -194,7 +194,7 @@ let paused_keepers_health_json () =
   let running_names = running_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
-    | Some state -> durable_paused_keeper_scan state.Mcp_server.workspace_config
+    | Some state -> durable_paused_keeper_scan (Mcp_server.workspace_config state)
     | None -> empty_paused_keeper_scan
   in
   paused_keepers_health_json_of_scan ~running_names durable_scan
@@ -619,8 +619,8 @@ let keeper_fleet_safety_health_json
       match current_server_state_opt () with
       | Some state ->
         (try
-           ( Keeper_runtime.bootable_keeper_names state.Mcp_server.workspace_config
-           , autoboot_enabled_keeper_scan state.Mcp_server.workspace_config )
+           ( Keeper_runtime.bootable_keeper_names (Mcp_server.workspace_config state)
+           , autoboot_enabled_keeper_scan (Mcp_server.workspace_config state) )
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -637,7 +637,7 @@ let keeper_fleet_safety_health_json
     | Some _ as value -> value
     | None ->
       current_server_state_opt ()
-      |> Option.map (fun state -> state.Mcp_server.workspace_config.base_path)
+      |> Option.map (fun state -> (Mcp_server.workspace_config state).base_path)
   in
   let fallback_running_names =
     match reaction_capacity_names with

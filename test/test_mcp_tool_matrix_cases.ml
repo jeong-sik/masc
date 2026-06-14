@@ -1,6 +1,7 @@
 module Types = Masc_domain
 
 module Mcp_eio = Masc.Mcp_server_eio
+module Mcp_server = Masc.Mcp_server
 module Config = Masc.Config
 module Goal_store = Goal_store
 
@@ -300,7 +301,7 @@ let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the workspace state directly so
      downstream tools can work. *)
   ignore
-    (Masc.Workspace.init fixture.state.workspace_config
+    (Masc.Workspace.init (Mcp_server.workspace_config fixture.state)
        ~agent_name:(Some fixture.agent_name))
 
 let ensure_bound fixture =
@@ -379,7 +380,7 @@ let ensure_goal fixture =
   | None ->
       let goal =
         match
-          Goal_store.upsert_goal fixture.state.workspace_config
+          Goal_store.upsert_goal (Mcp_server.workspace_config fixture.state)
             ~title:"Tool Matrix Goal" ()
         with
         | Ok (goal, _status) -> goal
@@ -456,7 +457,7 @@ let ensure_verification_request fixture =
   | Some req_id -> req_id
   | None ->
       let base_path =
-        Masc.Workspace.masc_dir fixture.state.workspace_config
+        Masc.Workspace.masc_dir (Mcp_server.workspace_config fixture.state)
       in
       let req =
         match

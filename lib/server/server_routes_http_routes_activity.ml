@@ -206,7 +206,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/governance/params/audit" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let base_path = state.Mcp_server.workspace_config.base_path in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let entries = Runtime_params.recent_audit ~base_path limit in
          let json = `Assoc [
@@ -218,7 +218,7 @@ let add_routes ~sw ~clock router =
 
   |> Http.Router.get "/api/v1/audit" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
          let actor_filter    = query_param req "actor" in
          let kind_filter     = query_param req "kind" in
@@ -266,7 +266,7 @@ let add_routes ~sw ~clock router =
          let blind_votes = bool_query_param req "blind_votes" ~default:false in
          let include_moderation =
            include_moderation_projection
-             ~base_path:state.Mcp_server.workspace_config.base_path
+             ~base_path:(Mcp_server.workspace_config state).base_path
              req
          in
          let posts =
@@ -290,7 +290,7 @@ let add_routes ~sw ~clock router =
          let reactions_for = board_reactions_lookup reaction_rows in
          let contributor_quality_for =
            board_contributor_quality_lookup
-             ~config:state.Mcp_server.workspace_config ()
+             ~config:(Mcp_server.workspace_config state) ()
          in
          let posts_json =
            List.map
@@ -476,12 +476,12 @@ let add_routes ~sw ~clock router =
               in
               let include_moderation =
                 include_moderation_projection
-                  ~base_path:state.Mcp_server.workspace_config.base_path
+                  ~base_path:(Mcp_server.workspace_config state).base_path
                   req
               in
               let (status, body) =
                 board_post_detail_json ~include_moderation ~blind_votes ~voter
-                  ~config:(Some state.Mcp_server.workspace_config)
+                  ~config:(Some (Mcp_server.workspace_config state))
                   ~response_format:format ~post_id
               in
               respond_json_with_cors ~status request reqd body)
@@ -631,11 +631,11 @@ let add_routes ~sw ~clock router =
           | Some agent_name ->
               let limit = standard_limit request in
               let mentions =
-                Mention_inbox.read_mentions state.Mcp_server.workspace_config
+                Mention_inbox.read_mentions (Mcp_server.workspace_config state)
                   ~target_agent:agent_name ~limit
               in
               let unread =
-                Mention_inbox.unread_count state.Mcp_server.workspace_config
+                Mention_inbox.unread_count (Mcp_server.workspace_config state)
                   ~target_agent:agent_name
               in
               let json = `Assoc [
@@ -658,7 +658,7 @@ let add_routes ~sw ~clock router =
           | Some agent_name ->
               let rep =
                 Reputation.compute_reputation
-                  state.Mcp_server.workspace_config ~agent_name
+                  (Mcp_server.workspace_config state) ~agent_name
               in
               Http.Response.json_value
                 (Reputation.reputation_to_json rep) reqd)
@@ -670,7 +670,7 @@ let add_routes ~sw ~clock router =
          let agent_name = query_param req "agent" in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
          let items =
-           Activity_feed.recent_activity state.Mcp_server.workspace_config
+           Activity_feed.recent_activity (Mcp_server.workspace_config state)
              ?agent_name ~limit ()
          in
          let json = `Assoc [
@@ -706,7 +706,7 @@ let add_routes ~sw ~clock router =
                  | "clear" ->
                    Prompt_registry.clear_prompt_override key;
                    (try Prompt_registry.persist_overrides
-                          state.Mcp_server.workspace_config.base_path
+                          (Mcp_server.workspace_config state).base_path
                     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                       Log.Pages.warn "prompt override persist (clear) failed: %s"
                         (Printexc.to_string exn));
@@ -717,7 +717,7 @@ let add_routes ~sw ~clock router =
                    match Prompt_registry.set_override key value with
                    | Ok () ->
                      (try Prompt_registry.persist_overrides
-                            state.Mcp_server.workspace_config.base_path
+                            (Mcp_server.workspace_config state).base_path
                       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
                         Log.Pages.warn "prompt override persist (set) failed: %s"
                           (Printexc.to_string exn));
@@ -756,7 +756,7 @@ let add_routes ~sw ~clock router =
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let args = Yojson.Safe.from_string body_str in
-             let base_path = state.Mcp_server.workspace_config.base_path in
+             let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
@@ -833,7 +833,7 @@ let add_routes ~sw ~clock router =
              let args = Yojson.Safe.from_string body_str in
              let param_key = Json_util.get_string args "param_key"
                |> Option.value ~default:"" in
-             let base_path = state.Mcp_server.workspace_config.base_path in
+             let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"

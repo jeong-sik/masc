@@ -52,7 +52,7 @@ let add_routes router =
            | Some s -> int_of_string_opt s
            | None -> None
          in
-         let base_path = state.Mcp_server.workspace_config.base_path in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
            Dashboard_verification.requests_json ~base_path ?task_id ?limit ()
          in
@@ -65,7 +65,7 @@ let add_routes router =
            | Some s -> int_of_string_opt s
            | None -> None
          in
-         let base_path = state.Mcp_server.workspace_config.base_path in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let json = Dashboard_verification.summary_json ~base_path ?recent () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
@@ -85,7 +85,7 @@ let add_routes router =
            Http.Request.read_body_async reqd (fun body_str ->
              try
                let args = Yojson.Safe.from_string body_str in
-               let config = state.Mcp_server.workspace_config in
+               let config = (Mcp_server.workspace_config state) in
                let verifier = verifier_of_request ~base_path:config.base_path req in
                match
                  Server_dashboard_http.dashboard_verification_resolve_http_json

@@ -137,7 +137,7 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:30 in
          let bucket_min = int_query_param req "bucket_min" ~default:0 in
-         let base_path = state.Mcp_server.workspace_config.base_path in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let key =
            cache_key
              [ base_path; string_of_int window; string_of_int bucket_min ]
@@ -161,7 +161,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
@@ -179,7 +179,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
-         let base_path = state.Mcp_server.workspace_config.base_path in
+         let base_path = (Mcp_server.workspace_config state).base_path in
          let json =
            cached_dashboard_json ~sw ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
@@ -193,7 +193,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
@@ -211,7 +211,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
@@ -229,7 +229,7 @@ let add_routes ~sw router =
   |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = dashboard_feed_limit req in
-         let config = state.Mcp_server.workspace_config in
+         let config = (Mcp_server.workspace_config state) in
          let keeper_names = Keeper_meta_store.keeper_names config in
          let keepers =
            List.filter_map (fun name ->

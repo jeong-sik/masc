@@ -71,7 +71,7 @@ let handle_keeper_chat_request_result state request reqd =
   | Ok request_id -> (
       match
         Keeper_msg_async.poll
-          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path request_id
       with
       | Keeper_msg_async.Absent ->
           respond_json_value_with_cors ~status:`Not_found request reqd
@@ -96,7 +96,7 @@ let handle_keeper_chat_request_cancel state request reqd =
   | Ok request_id ->
       let cancelled =
         Keeper_msg_async.cancel
-          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path request_id
       in
       if cancelled then
         respond_json_value_with_cors ~status:`OK request reqd
@@ -122,7 +122,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.workspace_config;
+          config = (Mcp_server.workspace_config state);
           agent_name;
           sw;
           clock;
@@ -148,7 +148,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.workspace_config
+  Audit_log.log_tool_call (Mcp_server.workspace_config state)
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.Keeper.emit Log.Error
@@ -171,7 +171,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -380,7 +380,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.workspace_config;
+          config = (Mcp_server.workspace_config state);
           agent_name;
           sw;
           clock;
@@ -409,7 +409,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.workspace_config ~agent_id:agent_name
+  Audit_log.log_tool_call (Mcp_server.workspace_config state) ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.Keeper.emit Log.Error
@@ -432,7 +432,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -515,7 +515,7 @@ type keeper_stream_worker_event =
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
@@ -864,7 +864,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let redaction =
     Keeper_secret_redaction.snapshot
-      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~base_path:(Mcp_server.workspace_config state).base_path
       ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in

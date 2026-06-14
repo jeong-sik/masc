@@ -173,6 +173,57 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  let release_owner_mismatch_rejection =
+    match action, task_opt with
+    | Masc_domain.Release, Some task ->
+      (match Workspace.task_assignee_of_status task.task_status with
+       | Some assignee when not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
+         let status = Masc_domain.task_status_to_string task.task_status in
+         let message =
+           Printf.sprintf
+             "Task %s is %s and owned by %s; %s cannot release it. Use \
+              keeper_board_post or masc_board_post to ask the current assignee \
+              for handoff/release, or claim different unowned work."
+             task_id
+             status
+             assignee
+             ctx.agent_name
+         in
+         Some
+           (Tool_result.error
+              ~failure_class:(Some Tool_result.Workflow_rejection)
+              ~tool_name
+              ~start_time
+              (workflow_rejection_payload_json
+                 ~rule_id:"task_release_requires_current_owner"
+                 ~tool_suggestion:"keeper_board_post"
+                 ~hint:
+                   "Do not retry masc_transition(action=release) for a task owned \
+                    by another keeper. Ask the current assignee for handoff/release \
+                    on the board, or inspect and claim different unowned work."
+                 ~scope_policy:"observe"
+                 ~alternatives:
+                   [ "keeper_board_post"; "masc_board_post"; "keeper_tasks_list"; "keeper_task_claim" ]
+                 ~extra_fields:
+                   [ "task_id", `String task_id
+                   ; "task_status", `String status
+                   ; "current_assignee", `String assignee
+                   ; "requested_agent", `String ctx.agent_name
+                   ]
+                 message))
+       | Some _ | None -> None)
+    | Masc_domain.Release, None -> None
+    | ( Masc_domain.Claim
+      | Masc_domain.Start
+      | Masc_domain.Done_action
+      | Masc_domain.Cancel
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Approve_verification
+      | Masc_domain.Reject_verification ), _ -> None
+  in
+  match release_owner_mismatch_rejection with
+  | Some result -> result
+  | None ->
   let terminal_verdict_noop =
     if transition_action_policy_applies transition_action_denylist
        && is_verdict_transition_action action

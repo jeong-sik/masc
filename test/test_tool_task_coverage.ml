@@ -689,9 +689,22 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Invalid transition");
-  assert (str_contains (Tool_result.message result) "Remediation");
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "Task task-001 is claimed");
+  assert (str_contains (Tool_result.message result) "owner-agent");
   assert (str_contains (Tool_result.message result) "masc_board_post")
+  ;
+  let data = Tool_result.data result in
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "current_assignee" = Some "owner-agent");
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id"
+      = Some "task_release_requires_current_owner"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "keeper_board_post"
+    | None -> false)
 )
 
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->

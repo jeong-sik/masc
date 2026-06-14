@@ -127,8 +127,18 @@ type record_result =
   | `Error of string
   ]
 
+val dedup_window_bytes : int
+(** Size of the recent-tail window [record] scans for duplicate
+    [event_id]s. The store is append-only and unbounded; scanning only
+    this tail keeps [record] O(1) in file size. Exposed for tests that
+    need to size input past the window. *)
+
 val record : base_path:string -> item -> record_result
-(** Appends [Recorded item] unless [event_id] already exists in the log. *)
+(** Appends [Recorded item] unless [event_id] already appears within the
+    last {!dedup_window_bytes} of the log. The dedup scan is bounded to
+    that recent tail (gateway redelivery is always recent), so a
+    duplicate older than the window is re-appended rather than
+    suppressed — a rare, harmless duplicate, never data loss. *)
 
 val claim_for_turn :
   base_path:string ->

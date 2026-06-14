@@ -47,6 +47,7 @@ let run_named
     ?(system_prompt = "")
     ?(tools = [])
     ?(initial_messages = [])
+    ?(max_turns = Agent_sdk.Types.default_config.max_turns)
     ~max_idle_turns
     ?stream_idle_timeout_s
     ?body_timeout_s
@@ -155,6 +156,7 @@ let run_named
     system_prompt;
     tools;
     initial_messages;
+    max_turns;
     max_idle_turns;
     stream_idle_timeout_s;
     execution_idle_timeout_s;

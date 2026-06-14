@@ -36,6 +36,7 @@ type config = {
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
+  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -103,7 +104,7 @@ type config = {
   tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
-(** Per-worker configuration.  55 fields — concrete record because
+(** Per-worker configuration.  56 fields — concrete record because
     callers ({!Runtime_agent}, keeper workers) construct + tweak
     fields field-by-field at the dispatch site. *)
 
@@ -143,7 +144,8 @@ type prepared_resume = {
   options : Agent_sdk.Agent.options;
 }
 (** Output of {!prepare_resume}.  [patched_checkpoint] has
-    [turn_count] and budget fields adjusted so that resume picks
+    runtime identity fields adjusted, and [agent_config.max_turns]
+    is extended past the checkpoint [turn_count] so resume picks
     up where the previous run left off without re-counting
     consumed turns. *)
 
@@ -157,6 +159,6 @@ val prepare_resume :
 (** [prepare_resume ~config ~checkpoint] computes the patched
     checkpoint + agent_config + options for an
     [Agent.resume] call.  Pure — no side effects.  The patched
-    checkpoint extends [config.max_turns] beyond the consumed
+    agent config extends [config.max_turns] beyond the consumed
     [checkpoint.turn_count] so the resumed run gets a fresh
     turn budget instead of inheriting the exhausted one. *)

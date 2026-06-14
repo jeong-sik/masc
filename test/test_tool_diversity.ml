@@ -39,7 +39,7 @@ let test_stats_of_registry () =
   check string "first name" "tool_a" first.name;
   check int "first count" 50 first.count
 
-let test_underused_tool_metrics_flag_unused_web_search () =
+let test_underused_tool_metrics_record_aggregate_count () =
   let keeper_name = "test-underused-tool-metrics" in
   let available_tools = [ "keeper_board_post"; "masc_web_search" ] in
   let stats =
@@ -56,21 +56,14 @@ let test_underused_tool_metrics_flag_unused_web_search () =
     Masc.Keeper_tool_diversity.compute_diversity
       ~available_tools stats
   in
+  check int "summary underused count" 1
+    (List.length summary.underused_tools);
   Masc.Keeper_tool_diversity.record_underused_tool_metrics
     ~keeper_name ~available_tools summary;
   check (float 0.001) "one underused allowed tool" 1.0
     (Masc.Otel_metric_store.metric_value_or_zero
        Keeper_metrics.(to_string ToolUnderusedAllowedCount)
-       ~labels:[ ("keeper", keeper_name) ] ());
-  check (float 0.001) "web search flagged underused" 1.0
-    (Masc.Otel_metric_store.metric_value_or_zero
-       Keeper_metrics.(to_string ToolUnderusedAllowed)
-       ~labels:[ ("keeper", keeper_name); ("tool", "masc_web_search") ]
-       ());
-  check (float 0.001) "used board post cleared" 0.0
-    (Masc.Otel_metric_store.metric_value_or_zero
-       Keeper_metrics.(to_string ToolUnderusedAllowed)
-       ~labels:[ ("keeper", keeper_name); ("tool", "keeper_board_post") ]
+       ~labels:[ ("keeper", keeper_name) ]
        ())
 
 (* ── QCheck properties ───────────────────────────────────── *)
@@ -118,8 +111,8 @@ let () =
           test_case "shannon_entropy empty" `Quick test_shannon_entropy_empty;
           test_case "normalized uniform" `Quick test_normalized_uniform;
           test_case "stats_of_registry" `Quick test_stats_of_registry;
-          test_case "underused tool metrics flag unused web search" `Quick
-            test_underused_tool_metrics_flag_unused_web_search;
+          test_case "underused tool metrics record aggregate count" `Quick
+            test_underused_tool_metrics_record_aggregate_count;
         ] );
       ( "qcheck",
         List.map QCheck_alcotest.to_alcotest

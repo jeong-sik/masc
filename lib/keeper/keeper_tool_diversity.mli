@@ -32,5 +32,7 @@ val record_underused_tool_metrics :
   available_tools:string list ->
   diversity_summary ->
   unit
+(** Emit the aggregate underused-tool count. Per-tool heartbeat gauges are
+    intentionally avoided to keep OTel series cardinality bounded by keeper. *)
 val default_entropy_threshold : float
 val stats_of_registry_entries : (string * Keeper_types.tool_call_entry) list -> tool_stat list

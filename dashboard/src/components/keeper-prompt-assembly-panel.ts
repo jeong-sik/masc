@@ -468,7 +468,7 @@ function SupportStep({
   summary: string
 }) {
   return html`
-    <section class="min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5">
+    <section class="min-w-0 border-l border-[var(--color-border-default)] py-1 pl-3">
       <div class="mb-2 flex min-w-0 items-center gap-2">
         <${Icon} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
         <div class="min-w-0">
@@ -488,7 +488,7 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
 
   return html`
     <section data-prompt-route-default class="grid gap-3 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]">
-      <div class="order-2 grid content-start gap-3 lg:order-1">
+      <div class="order-2 grid content-start gap-4 lg:order-1">
         <${SupportStep}
           icon=${FileText}
           eyebrow="before send"
@@ -503,7 +503,7 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
         />
       </div>
 
-      <section class="order-1 min-w-0 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3 lg:order-2">
+      <section class="order-1 min-w-0 border-l border-[var(--accent-22)] py-1 pl-3 lg:order-2">
         <div class="mb-2 grid gap-1 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3">
           <div class="flex min-w-0 items-center gap-2">
             <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
@@ -691,7 +691,7 @@ export function KeeperPromptAssemblyPanel({
   const report = buildKeeperPromptAssemblyReport(providedPrompts ?? loadedPrompts)
 
   return html`
-    <div class="mb-5 pb-24 lg:pb-0" data-keeper-prompt-assembly-panel>
+    <div class="mb-5" data-keeper-prompt-assembly-panel>
       <div class="mb-2 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Prompt Recipe</span>

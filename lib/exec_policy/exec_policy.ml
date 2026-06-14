@@ -254,6 +254,56 @@ let path_is_existing_dir ?workdir path =
   | Sys_error _ -> false
 ;;
 
+(* Largest number of sibling directory names surfaced in a
+   [Cwd_not_directory] hint. Bounds the operator-facing message when the
+   nearest existing ancestor holds many entries. *)
+let max_cwd_hint_siblings = 12
+
+let existing_sibling_dirs_hint ?workdir path =
+  let resolved = resolve_path ?base_dir:workdir path in
+  let is_dir p = try Sys.is_directory p with Sys_error _ -> false in
+  let rec nearest_existing_ancestor p =
+    let parent = Filename.dirname p in
+    if String.equal parent p
+    then None (* reached the filesystem root without an existing directory *)
+    else if is_dir parent
+    then Some parent
+    else nearest_existing_ancestor parent
+  in
+  match nearest_existing_ancestor resolved with
+  | None -> None
+  | Some ancestor ->
+    (match Sys.readdir ancestor with
+     | exception Sys_error _ -> None
+     | entries ->
+       let dirs =
+         entries
+         |> Array.to_list
+         |> List.filter (fun e -> is_dir (Filename.concat ancestor e))
+         |> List.sort String.compare
+       in
+       (match dirs with
+        | [] -> None
+        | _ ->
+          let total = List.length dirs in
+          let shown, omitted =
+            if total > max_cwd_hint_siblings
+            then
+              ( List.filteri (fun i _ -> i < max_cwd_hint_siblings) dirs
+              , total - max_cwd_hint_siblings )
+            else dirs, 0
+          in
+          let suffix =
+            if omitted > 0 then Printf.sprintf ", +%d more" omitted else ""
+          in
+          Some
+            (Printf.sprintf
+               "(existing directories under %s/: %s%s)"
+               (Filename.basename ancestor)
+               (String.concat ", " shown)
+               suffix)))
+;;
+
 (** Classification of path-like token prefixes.
     Replaces ad-hoc [String.starts_with] prefix matching with a typed
     variant so the compiler enforces exhaustive handling. *)
@@ -573,7 +623,11 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
         then
           Error
             (Keeper_path_check_error.(
-               to_message (Cwd_not_directory { path = value; hint = None })))
+               to_message
+                 (Cwd_not_directory
+                    { path = value
+                    ; hint = existing_sibling_dirs_hint ?workdir value
+                    })))
         else Ok ()
       in
       let rec validate_path_values ~command_name expect_existing_dir = function

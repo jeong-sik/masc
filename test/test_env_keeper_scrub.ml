@@ -8,7 +8,6 @@ let allowed_basic_envs () =
     ; "XDG_CONFIG_HOME"; "XDG_CACHE_HOME"; "XDG_DATA_HOME"
     ; "DOCKER_HOST"; "DOCKER_TLS_VERIFY"; "DOCKER_CERT_PATH"
     ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"; "SSL_CERT_FILE"
-    ; "GITHUB_TOKEN"; "GH_TOKEN"
     ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"
     ; "GIT_COMMITTER_NAME"; "GIT_COMMITTER_EMAIL"
     ; "MASC_BASE_PATH"; "MASC_CONFIG_DIR"; "MASC_STORAGE_TYPE"
@@ -29,6 +28,11 @@ let denied_secret_suffixes () =
     ; "AWS_ACCESS_KEY_ID"; "AWS_SECRET_ACCESS_KEY"
     ; "MY_CUSTOM_SECRET"; "FOO_PASSWORD"; "BAR_CREDENTIALS"
     ; "MASC_ADMIN_TOKEN"; "MASC_INTERNAL_MCP_TOKEN"
+      (* Operator ambient GitHub tokens must never cross into a keeper; the
+         [_TOKEN] deny suffix enforces this. The keeper's own token is supplied
+         out-of-band by [Keeper_secret_projection], not via this allowlist.
+         See RFC-0236 §6 / RFC-0007. *)
+    ; "GITHUB_TOKEN"; "GH_TOKEN"
     ]
   in
   List.iter

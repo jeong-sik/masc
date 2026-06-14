@@ -30,9 +30,12 @@ let allow_exact : string list =
   ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"
   ; "SSL_CERT_FILE"
 
-    (* GitHub token for gh CLI / API access — explicitly projected by
-       operator into keeper secret dir, not ambient host token. *)
-  ; "GITHUB_TOKEN"; "GH_TOKEN"
+    (* GitHub tokens (GITHUB_TOKEN / GH_TOKEN) are intentionally NOT listed
+       here. They end with the [_TOKEN] deny suffix, so even if listed they
+       would be denied — the operator's ambient host token must never cross
+       into a keeper. The keeper's own GitHub token is supplied out-of-band by
+       [Keeper_secret_projection] (Docker [--env-file] / Local overlay), which
+       bypasses this allowlist. See RFC-0236 §6 and RFC-0007. *)
 
     (* Git user identity — not credentials by themselves. *)
   ; "GIT_AUTHOR_NAME"; "GIT_AUTHOR_EMAIL"

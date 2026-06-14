@@ -142,11 +142,37 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).not.toContain('keeper.world')
     expect(defaultRoute?.textContent).not.toContain('fingerprint')
     expect(defaultRoute?.textContent).not.toContain('tok est')
+    expect(defaultRoute?.textContent).not.toMatch(/runtime override/i)
+    expect(defaultRoute?.textContent).not.toMatch(/resolved block/i)
+    expect(defaultRoute?.textContent).not.toMatch(/context_injected/i)
+    expect(defaultRoute?.textContent).not.toMatch(/customized/i)
+    expect(defaultRoute?.textContent).not.toMatch(/\bcustom\b/i)
+    expect(defaultRoute?.textContent).not.toMatch(/\boverride\b/i)
 
     const evidence = container.querySelector('[data-developer-evidence]')
     expect(evidence).not.toBeNull()
     expect(evidence?.hasAttribute('open')).toBe(false)
     expect(evidence?.textContent).toContain('keeper.world')
     expect(evidence?.textContent).toContain('fingerprint')
+  })
+
+  it('labels default quality checks without maintenance wording', () => {
+    const { container } = render(html`
+      <${KeeperPromptAssemblyPanel}
+        prompts=${[
+          prompt({
+            key: 'keeper.world',
+            effective: 'Do not pass .masc/playground/name/repos/foo as a tool path.',
+          }),
+        ]}
+      />
+    `)
+
+    const summary = container.querySelector('[data-prompt-quality-checks] summary')
+    expect(summary).not.toBeNull()
+    expect(summary?.textContent).toContain('Prompt quality checks')
+    expect(summary?.textContent).toContain('finding')
+    expect(summary?.textContent).not.toMatch(/maintenance/i)
+    expect(summary?.textContent).not.toMatch(/\bnotes?\b/i)
   })
 })

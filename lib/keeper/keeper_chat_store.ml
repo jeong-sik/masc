@@ -129,6 +129,13 @@ let authority_of_label = function
   | "external" -> Some External
   | _ -> None
 
+type audio_clip = {
+  token : string;
+  mime : string;
+  duration_sec : float option;
+  message_text : string;
+}
+
 type speaker = {
   speaker_id : string option;
   speaker_name : string option;
@@ -152,6 +159,7 @@ type chat_message = {
   conversation_id : string option;
   external_message_id : string option;
   speaker : speaker option;
+  audio : audio_clip option;
   mentions : Keeper_identity.Keeper_id.t list;
       (* RFC-0232 §3.3: parsed once at append from the persisted content
          (plus connector-provided explicit mentions); [] = none.  Rows
@@ -194,9 +202,27 @@ let speaker_fields = function
       @ opt_string_field "speaker_name" sp.speaker_name
       @ [ ("speaker_authority", `String (authority_label sp.speaker_authority)) ]
 
+(* RFC-0235 P1: nested ["audio"] assoc so the clip stays one unit on the
+   JSONL row. Absent on rows written before voice transport; reads as
+   [None] (the dashboard renders text-only, matching any non-voice turn). *)
+let audio_to_json a =
+  let base =
+    [ ("token", `String a.token)
+    ; ("mime", `String a.mime)
+    ; ("message_text", `String a.message_text)
+    ]
+  in
+  match a.duration_sec with
+  | None -> base
+  | Some d -> base @ [ ("duration_sec", `Float d) ]
+
+let audio_fields = function
+  | None -> []
+  | Some a -> [ ("audio", `Assoc (audio_to_json a)) ]
+
 let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
-    ?(mentions = []) ?(kind = Row_kind.Utterance) ()
+    ?audio ?(mentions = []) ?(kind = Row_kind.Utterance) ()
     : string =
   (* RFC-0232 P5: the label is a derivation of the typed surface — the
      single site that turns a [Surface_ref.t] into the legacy [source]
@@ -260,6 +286,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?attachments ?tool_call_id
     @ opt_string_field "conversation_id" conversation_id
     @ opt_string_field "external_message_id" external_message_id
     @ speaker_fields speaker
+    @ audio_fields audio
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
@@ -341,7 +368,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with. *)
 let append_assistant_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id () =
+    ?surface ?conversation_id ?audio () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
@@ -349,7 +376,7 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
-      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ()
+      encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id ?audio ()
     in
     Fs_compat.append_file path (line ^ "\n")
   with
@@ -453,6 +480,33 @@ let parse_line ~file_path (line : string) : chat_message option =
                  ~path:file_path
                  ~detail:"speaker_id/speaker_name without speaker_authority");
           None
+    in
+    let audio =
+      match Json_util.assoc_member_opt "audio" json with
+      | Some (`Assoc fields) ->
+          let get k =
+            match List.assoc_opt k fields with
+            | Some (`String s) -> Some s
+            | _ -> None
+          in
+          (match get "token", get "mime" with
+           | Some token, Some mime ->
+               let duration_sec =
+                 match List.assoc_opt "duration_sec" fields with
+                 | Some (`Float f) -> Some f
+                 | _ -> None
+               in
+               let message_text = Option.value (get "message_text") ~default:"" in
+               Some { token; mime; duration_sec; message_text }
+           | _ ->
+               (* audio without token+mime is malformed; drop the field but
+                  keep the row (text-only render). *)
+               report_persistence_read_drop
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~path:file_path
+                 ~detail:"audio field missing token/mime";
+               None)
+      | _ -> None
     in
     let attachments =
       match Json_util.assoc_member_opt "attachments" json with
@@ -558,7 +612,7 @@ let parse_line ~file_path (line : string) : chat_message option =
           Some
             { role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id; speaker;
-              mentions; kind }
+              audio; mentions; kind }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error

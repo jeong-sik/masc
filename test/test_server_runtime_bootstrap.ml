@@ -1308,6 +1308,19 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
              |> List.map (fun row ->
                   ( row |> member "keeper" |> to_string
                   , row |> member "reason" |> to_string )));
+          let blocked_detail name =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+          in
+          Alcotest.(check string) "health keeps typed row name alias"
+            "capacity-paused"
+            (blocked_detail "capacity-paused" |> member "name" |> to_string);
+          Alcotest.(check string) "health suggests paused action"
+            "resume_or_leave_paused"
+            (blocked_detail "capacity-paused" |> member "action" |> to_string);
+          Alcotest.(check string) "health suggests unregistered action"
+            "start_or_recover_keeper"
+            (blocked_detail "example" |> member "action" |> to_string);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks target-capacity blocker"

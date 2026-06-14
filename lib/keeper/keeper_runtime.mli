@@ -41,6 +41,39 @@ type boot_meta_resolution = {
 }
 (** Result of [load_or_materialize_boot_meta]. *)
 
+type boot_meta_failure_cause =
+  | Missing_meta
+  | Meta_read_error
+  | Config_parse_failed
+  | Invalid_profile
+  | Sandbox_profile_required
+  | Goal_required
+  | Materialization_failed
+(** Structured cause for the last boot/materialization failure.  Labels are
+    rendered only at JSON/log boundaries; fleet recovery policy should pattern
+    match this type, not parse the human-facing [error] text. *)
+
+val boot_meta_failure_cause_label : boot_meta_failure_cause -> string
+(** Stable JSON label for {!boot_meta_failure_cause}. *)
+
+type boot_meta_failure = {
+  keeper_name : string;
+  base_path : string;
+  cause : boot_meta_failure_cause;
+  error : string;
+  recorded_at : string;
+  recorded_at_unix : float;
+}
+(** Last boot/materialization failure observed for one keeper in one
+    workspace.  Kept in memory so health surfaces the current supervisor
+    blocker without scraping logs. *)
+
+val boot_meta_failure_for :
+  base_path:string -> name:string -> boot_meta_failure option
+(** Lookup the last boot/materialization failure for [name] in [base_path], if
+    the current process has observed one.  Cleared when the keeper loads or
+    materializes successfully. *)
+
 type autoboot_exclusion = {
   keeper_name : string;
   reason : string;

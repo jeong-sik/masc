@@ -292,6 +292,10 @@ and handle_transition ~tool_name ~start_time ctx args =
          ?rule_id
          ?tool_suggestion
          ?hint
+         ?recoverable:
+           (match rule_id with
+            | Some "task_done_requires_claimed_or_started" -> Some true
+            | _ -> None)
          ~scope_policy:"observe"
          ~alternatives
          message)

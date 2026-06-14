@@ -1842,7 +1842,24 @@ let () = test "handle_done_todo_guidance" (fun () ->
     Task.Tool.handle_done ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [("task_id", `String "task-001"); ("notes", `String "")])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Claim/start it first")
+  assert (str_contains (Tool_result.message result) "Claim/start it first");
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "recoverable" = Some true);
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id"
+      = Some "task_done_requires_claimed_or_started"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "masc_transition"
+    | None -> false);
+  assert (
+    match Json_util.assoc_member_opt "alternatives" data with
+    | Some (`List alternatives) ->
+      List.exists (( = ) (`String "masc_transition")) alternatives
+      && List.exists (( = ) (`String "keeper_task_claim")) alternatives
+    | _ -> false)
 )
 
 (* Test handle_done reports already-done guidance instead of generic not-claimed *)

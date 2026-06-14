@@ -9,6 +9,7 @@ open Keeper_memory_os_types
 
 let default_lambda = 1.0 /. (86400.0 *. 7.0) (* half-life ~7 days *)
 let default_alpha = 0.5
+let default_recency_bonus = 0.1
 
 (** Forgetting curve: recency decays exponentially with a half-life
     controlled by [lambda]. *)
@@ -23,8 +24,23 @@ let access_factor ~alpha access_count =
   (1.0 +. float access_count) ** alpha
 ;;
 
+(** Inverse recency bonus: facts with lower confidence get a larger
+    additive boost, preventing high-confidence stale facts from
+    permanently dominating the ranking.
+
+    conf=1.00 -> bonus=0.0 (no boost for max-confidence facts)
+    conf=0.90 -> bonus=0.01 (small boost for typical facts)
+    conf=0.50 -> bonus=0.05 (larger boost for low-confidence facts)
+
+    This is additive, so it works orthogonally to the multiplicative
+    decay in [score_fact]. *)
+let recency_bonus confidence =
+  default_recency_bonus *. (1.0 -. confidence)
+;;
+
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
+  let base = fact.confidence *. recency_factor ~lambda ~now fact.last_accessed in
+  (base +. recency_bonus fact.confidence) *. access_factor ~alpha fact.access_count
 ;;
 
 let score_tool_result
@@ -37,7 +53,7 @@ let score_tool_result
       ()
   =
   let base_confidence = if was_successful then 0.9 else 0.5 in
-  base_confidence *. recency_factor ~lambda ~now created_at *. access_factor ~alpha access_count
+  (base_confidence *. recency_factor ~lambda ~now created_at +. recency_bonus base_confidence) *. access_factor ~alpha access_count
 ;;
 
 let string_contains substring str =

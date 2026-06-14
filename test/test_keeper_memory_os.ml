@@ -550,6 +550,29 @@ let test_bump_access () =
   match not_bumped with
   | [ got ] -> Alcotest.(check int) "access unchanged" 2 got.Types.access_count
   | _ -> Alcotest.fail "expected one unchanged fact"
+
+let test_inverse_recency_factor () =
+  let now = 1_000_000.0 in
+  let base = fact_fixture ~now () in
+  (* Fresh fact: first_seen == now, age = 0 -> factor = 1.0 *)
+  let fresh = { base with Types.first_seen = now } in
+  let fresh_ir = Policy.inverse_recency_factor ~now fresh in
+  Alcotest.(check (float 0.001)) "fresh: inverse_recency = 1.0" 1.0 fresh_ir;
+  (* Aged fact: first_seen 100k ago -> factor < 1.0 *)
+  let aged = { base with Types.first_seen = now -. 100_000.0 } in
+  let aged_ir = Policy.inverse_recency_factor ~now aged in
+  Alcotest.(check bool) "aged: inverse_recency < 1.0" true (aged_ir < fresh_ir);
+  Alcotest.(check bool) "aged: inverse_recency > 0.0" true (aged_ir > 0.0);
+  (* Very old fact: first_seen 1M ago -> factor approaches 0 *)
+  let ancient = { base with Types.first_seen = now -. 1_000_000.0 } in
+  let ancient_ir = Policy.inverse_recency_factor ~now ancient in
+  Alcotest.(check bool) "ancient: inverse_recency ~ 0" true (ancient_ir < 0.01);
+  (* score_fact penalizes old first_seen via inverse_recency *)
+  let fresh_score = Policy.score_fact ~now fresh in
+  let aged_score = Policy.score_fact ~now aged in
+  Alcotest.(check bool) "score penalizes old first_seen" true
+    (aged_score < fresh_score)
+;;
 ;;
 
 let test_episode_files_do_not_overwrite_generation () =
@@ -822,6 +845,8 @@ let () =
     ; ( "policy"
       , [ Alcotest.test_case "score and retention" `Quick test_policy_score_and_retention
         ; Alcotest.test_case "bump access" `Quick test_bump_access
+        ; Alcotest.test_case "inverse recency factor" `Quick
+            test_inverse_recency_factor
         ] )
     ; ( "io"
       , [ Alcotest.test_case

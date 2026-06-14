@@ -30,6 +30,7 @@ import {
   submitQueuedKeeperMessage,
   wakeKeeper,
 } from './keeper'
+import { resetDevTokenBootstrap } from './dev-token'
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -39,6 +40,12 @@ afterEach(() => {
   } catch {
     // Ignore storage cleanup failures in the test environment.
   }
+  try {
+    window.sessionStorage?.clear?.()
+  } catch {
+    // Ignore storage cleanup failures in the test environment.
+  }
+  resetDevTokenBootstrap()
 })
 
 describe('sendKeeperMessageDetailed', () => {
@@ -158,6 +165,57 @@ describe('streamKeeperMessage', () => {
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
     expect(actorHeader).toBe('dashboard-eager-manta')
     expect(actorHeader).not.toContain('%')
+    expect(events).toEqual(['RUN_FINISHED'])
+  })
+
+  it('refreshes a stale loopback dev token once and retries direct chat', async () => {
+    window.sessionStorage.setItem('masc_bearer_token', 'stale-token')
+    window.sessionStorage.setItem(
+      'masc_bearer_token_meta',
+      JSON.stringify({ source: 'dev', actor: 'dashboard', scope: 'worker' }),
+    )
+
+    let chatAttempts = 0
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
+      if (url === '/api/v1/keepers/chat/stream') {
+        chatAttempts += 1
+        if (chatAttempts === 1) {
+          return Promise.resolve(new Response(
+            JSON.stringify({ error: '[AuthError] Invalid token: Token mismatch' }),
+            { status: 401, headers: { 'Content-Type': 'application/json' } },
+          ))
+        }
+        return Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' },
+        }))
+      }
+      if (url === '/api/v1/dashboard/dev-token') {
+        return Promise.resolve(new Response(
+          JSON.stringify({ token: 'fresh-token', actor: 'dashboard', scope: 'worker' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ))
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const events: string[] = []
+    await streamKeeperMessage('sangsu', 'ping', {
+      onEvent: event => {
+        events.push(event.type)
+      },
+    })
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/keepers/chat/stream',
+      '/api/v1/dashboard/dev-token',
+      '/api/v1/keepers/chat/stream',
+    ])
+    const firstHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
+    const retryHeaders = fetchMock.mock.calls[2]?.[1]?.headers as Record<string, string>
+    expect(firstHeaders.Authorization).toBe('Bearer stale-token')
+    expect(retryHeaders.Authorization).toBe('Bearer fresh-token')
     expect(events).toEqual(['RUN_FINISHED'])
   })
 })

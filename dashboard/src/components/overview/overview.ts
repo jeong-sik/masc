@@ -277,7 +277,7 @@ function FleetTicker({ events }: { events: FleetTickerEvent[] }) {
           <div
             key=${event.id}
             role="listitem"
-            class="grid min-w-[15rem] max-w-[22rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
+            class="grid min-w-[15rem] max-w-[22rem] max-[768px]:min-w-[12rem] flex-[0_0_auto] gap-1 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2"
           >
             <div class="flex min-w-0 items-center gap-2 font-mono text-3xs uppercase tracking-wider">
               <span class=${tickerToneClass(event.tone)}>${event.kind}</span>

@@ -41,10 +41,23 @@ type boot_meta_resolution = {
 }
 (** Result of [load_or_materialize_boot_meta]. *)
 
+type boot_meta_failure_reason =
+  | Goal_required
+  | Sandbox_profile_required
+  | Config_parse_failed
+  | Invalid_profile
+  | Missing_meta
+  | Meta_read_error
+  | Bootstrap_failed
+(** Stable, structured reason for a keeper boot/materialization failure. *)
+
+val boot_meta_failure_reason_to_string : boot_meta_failure_reason -> string
+(** Operator/API label for {!boot_meta_failure_reason}. *)
+
 type boot_meta_failure = {
   keeper_name : string;
   base_path : string;
-  reason : string;
+  reason : boot_meta_failure_reason;
   error : string;
   recorded_at : string;
   recorded_at_unix : float;
@@ -52,9 +65,6 @@ type boot_meta_failure = {
 (** Last boot/materialization failure observed for one keeper in one
     workspace.  Kept in memory so health surfaces the current supervisor
     blocker without scraping logs. *)
-
-val boot_meta_failure_reason : string -> string
-(** Classify a raw boot/materialization error into a stable reason label. *)
 
 val boot_meta_failure_for :
   base_path:string -> name:string -> boot_meta_failure option

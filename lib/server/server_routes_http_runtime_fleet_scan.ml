@@ -504,7 +504,9 @@ let blocked_keeper_detail_json
     else if has_read_error then "meta_read_error"
     else
       match last_failure with
-      | Some failure -> failure.Keeper_runtime.reason
+      | Some failure ->
+          Keeper_runtime.boot_meta_failure_reason_to_string
+            failure.Keeper_runtime.reason
       | None ->
           if not is_bootable then "not_bootable"
           else if not is_capacity then "not_running"
@@ -520,7 +522,10 @@ let blocked_keeper_detail_json
         ]
     | Some failure ->
         [
-          ("last_bootstrap_reason", `String failure.Keeper_runtime.reason);
+          ( "last_bootstrap_reason"
+          , `String
+              (Keeper_runtime.boot_meta_failure_reason_to_string
+                 failure.Keeper_runtime.reason) );
           ("last_bootstrap_error", `String failure.Keeper_runtime.error);
           ("last_bootstrap_recorded_at", `String failure.Keeper_runtime.recorded_at);
         ]

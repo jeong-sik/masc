@@ -174,12 +174,13 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let config_resolution =
     startup_config_resolution ~base_path |> Config_dir_resolver.to_json
   in
+  let config = Mcp_server.workspace_config state in
   let path_diagnostics =
     Server_base_path_diagnostics.detect
       ?input_base_path
       ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-      ~effective_base_path:(Mcp_server.workspace_config state).base_path
-      ~effective_masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
+      ~effective_base_path:config.base_path
+      ~effective_masc_root:(Workspace.masc_root_dir config)
       ()
     |> Server_base_path_diagnostics.to_yojson
   in
@@ -194,11 +195,12 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   state
 
 let runtime_path_diagnostics ?input_base_path (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Server_base_path_diagnostics.detect
     ?input_base_path
     ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-    ~effective_base_path:(Mcp_server.workspace_config state).base_path
-    ~effective_masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
+    ~effective_base_path:config.base_path
+    ~effective_masc_root:(Workspace.masc_root_dir config)
     ()
 
 let restore_persisted_sessions (state : Mcp_server.server_state) =
@@ -306,6 +308,7 @@ let sync_prompt_assets_from_binary () =
     sync.Prompt_defaults.failed
 
 let bootstrap_prompt_state (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
   Config_dir_resolver.log_warnings ~context:"ServerBootstrap" ();
   Config_dir_resolver.log_resolution ~context:"ServerBootstrap" ();
   (* Converge runtime prompt markdown onto the binary-embedded assets
@@ -315,8 +318,8 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
   (* Initialize prompt registry with defaults and restore saved overrides *)
   let prompt_markdown_dir =
     Prompt_defaults.bootstrap_runtime
-      ~workspace_path:(Mcp_server.workspace_config state).workspace_path
-      ~base_path:(Mcp_server.workspace_config state).base_path
+      ~workspace_path:config.workspace_path
+      ~base_path:config.base_path
   in
   let expected_prompt_dir = Config_dir_resolver.prompts_dir () in
   if prompt_markdown_dir <> expected_prompt_dir then

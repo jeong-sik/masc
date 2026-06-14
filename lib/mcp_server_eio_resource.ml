@@ -126,8 +126,23 @@ let handle_read_resource_eio state id params =
           | "who.json" ->
               let statuses = Session.get_agent_statuses registry in
               ("application/json", Some (Yojson.Safe.pretty_to_string (`List statuses)))
-          (* `agents` / `agents.json` resource removed (2026-06-09): backed by
-             the dead .masc/agents/ registry. Live agent status = `who`. *)
+          | "agents" ->
+              let statuses = Session.get_agent_statuses registry in
+              let body =
+                if statuses = [] then "No active agents."
+                else Session.status_string registry
+              in
+              ("text/markdown", Some body)
+          | "agents.json" ->
+              let statuses = Session.get_agent_statuses registry in
+              let json =
+                `Assoc
+                  [
+                    ("replacement", `String "masc://who.json");
+                    ("agents", `List statuses);
+                  ]
+              in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "messages" | "messages/recent" ->
               let since_seq = Mcp_server.int_query_param uri "since_seq" ~default:0 in
               let limit = Mcp_server.int_query_param uri "limit" ~default:10 in

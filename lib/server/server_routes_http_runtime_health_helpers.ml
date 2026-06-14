@@ -28,11 +28,12 @@ let server_start_time = Unix.gettimeofday ()
 let health_path_diagnostics () =
   match current_server_state_opt () with
   | Some state ->
+      let config = Mcp_server.workspace_config state in
       Server_base_path_diagnostics.detect
         ?input_base_path:((Host_config.from_env ()).base_path_raw)
         ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
-        ~effective_base_path:(Mcp_server.workspace_config state).base_path
-        ~effective_masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
+        ~effective_base_path:config.base_path
+        ~effective_masc_root:(Workspace.masc_root_dir config)
         ()
   | None ->
       let effective_base_path = default_base_path () in

@@ -31,6 +31,7 @@ let payload_json
       ?tool_suggestion
       ?hint
       ?scope_policy
+      ?(recoverable = false)
       ?(alternatives = [])
       ?(extra_fields = [])
       message
@@ -58,7 +59,7 @@ let payload_json
     ; "error", `String message
     ; "failure_class", `String "workflow_rejection"
     ; "error_class", `String "deterministic"
-    ; "recoverable", `Bool false
+    ; "recoverable", `Bool recoverable
     ]
     @ optional_string_field "hint" hint
     @ alternatives_field

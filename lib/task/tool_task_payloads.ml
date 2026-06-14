@@ -68,6 +68,7 @@ let workflow_rejection_payload_json
       ?tool_suggestion
       ?hint
       ?scope_policy
+      ?recoverable
       ?(alternatives = [])
       ?extra_fields
       message
@@ -77,6 +78,7 @@ let workflow_rejection_payload_json
     ?tool_suggestion
     ?hint
     ?scope_policy
+    ?recoverable
     ~alternatives
     ?extra_fields
     message

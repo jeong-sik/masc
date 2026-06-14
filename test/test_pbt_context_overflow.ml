@@ -667,6 +667,48 @@ let test_checkpoint_sanitize_preserves_pair_repair_stats () =
     false
     (text_contains "unpaired tool use elided" texts)
 
+let test_checkpoint_save_repair_drops_unpaired_tool_blocks () =
+  let raw_messages =
+    [ user_text "q"
+    ; assistant_text_and_tool_use "assistant kept text" "dangling" "calc"
+    ; user_text "interrupt"
+    ; user_text_and_tool_result "result wrapper kept text" "orphan" "late"
+    ]
+  in
+  let repaired_messages, stats =
+    KC.repair_broken_tool_call_pairs_with_stats raw_messages
+  in
+  Alcotest.(check int)
+    "save repair drops dangling tool-use"
+    1
+    stats.dropped_tool_uses;
+  Alcotest.(check int)
+    "save repair drops orphan tool-result"
+    1
+    stats.dropped_tool_results;
+  let save_ctx =
+    KC.create ~system_prompt:"system" ~max_tokens:4096
+    |> fun ctx -> KC.append_many ctx repaired_messages
+  in
+  let checkpoint = KC.checkpoint_of_context save_ctx in
+  Alcotest.(check (pair int int))
+    "checkpoint save payload has no unpaired tool blocks"
+    (0, 0)
+    (count_tool_blocks checkpoint.Agent_sdk.Checkpoint.messages);
+  let texts = text_blocks checkpoint.Agent_sdk.Checkpoint.messages in
+  Alcotest.(check bool)
+    "checkpoint save keeps assistant text"
+    true
+    (text_contains "assistant kept text" texts);
+  Alcotest.(check bool)
+    "checkpoint save keeps wrapper text"
+    true
+    (text_contains "result wrapper kept text" texts);
+  Alcotest.(check bool)
+    "checkpoint save does not create visible repair marker"
+    false
+    (text_contains "unpaired tool use elided" texts)
+
 let test_pair_repair_drops_empty_structural_messages_with_stats () =
   let messages =
     [ user_text "q"
@@ -794,6 +836,8 @@ let () =
         test_pair_repair_metadata_samples_bounded;
       Alcotest.test_case "checkpoint sanitize preserves pair repair stats" `Quick
         test_checkpoint_sanitize_preserves_pair_repair_stats;
+      Alcotest.test_case "checkpoint save repair drops unpaired tool blocks" `Quick
+        test_checkpoint_save_repair_drops_unpaired_tool_blocks;
       Alcotest.test_case "pair repair drops empty structural messages with stats" `Quick
         test_pair_repair_drops_empty_structural_messages_with_stats;
       Alcotest.test_case "pair repair caps diagnostic sample strings" `Quick

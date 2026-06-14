@@ -31,8 +31,24 @@ let access_factor ~alpha access_count =
   (1.0 +. float access_count) ** alpha
 ;;
 
+(** Inverse recency bonus: penalize facts based on age since creation,
+    not resettable by recall. Prevents stale facts from maintaining
+    high scores through frequent access.
+
+    Uses [first_seen] as the decay anchor so that no amount of recall
+    can reset the age penalty. The decay rate is 2× the access-recency
+    lambda, ensuring that age dominates over recall frequency for
+    long-lived facts. *)
+let inverse_recency_factor ~lambda ~now fact =
+  let age = now -. fact.first_seen in
+  if age <= 0.0 then 1.0
+  else exp (-. (lambda *. 2.0) *. age)
+
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count
+  fact.confidence
+  *. recency_factor ~lambda ~now fact.last_accessed
+  *. inverse_recency_factor ~lambda ~now fact
+  *. access_factor ~alpha fact.access_count
 ;;
 
 let score_tool_result

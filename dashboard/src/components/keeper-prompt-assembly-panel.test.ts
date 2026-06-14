@@ -134,11 +134,12 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
     const defaultRoute = container.querySelector('[data-prompt-route-default]')
     expect(defaultRoute).not.toBeNull()
-    expect(defaultRoute?.textContent).toContain('Source text')
+    expect(defaultRoute?.textContent).toContain('Choose source text')
     expect(defaultRoute?.textContent).toContain('Model request')
-    expect(defaultRoute?.textContent).toContain('Audit record')
+    expect(defaultRoute?.textContent).toContain('Save audit trail')
     expect(defaultRoute?.textContent).toContain('system')
     expect(defaultRoute?.textContent).toContain('user')
+    expect(defaultRoute?.textContent).toContain('model-visible')
     expect(defaultRoute?.textContent).not.toContain('keeper.world')
     expect(defaultRoute?.textContent).not.toContain('fingerprint')
     expect(defaultRoute?.textContent).not.toContain('tok est')
@@ -148,15 +149,23 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(defaultRoute?.textContent).not.toMatch(/customized/i)
     expect(defaultRoute?.textContent).not.toMatch(/\bcustom\b/i)
     expect(defaultRoute?.textContent).not.toMatch(/\boverride\b/i)
+    expect(defaultRoute?.textContent).not.toMatch(/source rows/i)
+    expect(defaultRoute?.textContent).not.toMatch(/sources? selected/i)
+    expect(defaultRoute?.textContent).not.toMatch(/messages? to model/i)
+    expect(defaultRoute?.textContent).not.toMatch(/\bready\b/i)
+    expect(defaultRoute?.textContent).not.toMatch(/not sent/i)
 
     const evidence = container.querySelector('[data-developer-evidence]')
     expect(evidence).not.toBeNull()
     expect(evidence?.hasAttribute('open')).toBe(false)
+    expect(evidence?.querySelector('summary')?.textContent).toContain('Technical trace')
+    expect(evidence?.querySelector('summary')?.textContent).toContain('hidden by default')
+    expect(evidence?.querySelector('summary')?.textContent).not.toMatch(/source rows/i)
     expect(evidence?.textContent).toContain('keeper.world')
     expect(evidence?.textContent).toContain('fingerprint')
   })
 
-  it('labels default quality checks without maintenance wording', () => {
+  it('labels default cleanup suggestions without maintenance wording', () => {
     const { container } = render(html`
       <${KeeperPromptAssemblyPanel}
         prompts=${[
@@ -170,9 +179,14 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
     const summary = container.querySelector('[data-prompt-quality-checks] summary')
     expect(summary).not.toBeNull()
-    expect(summary?.textContent).toContain('Prompt quality checks')
-    expect(summary?.textContent).toContain('finding')
+    expect(summary?.textContent).toContain('Prompt cleanup')
+    expect(summary?.textContent).toContain('suggestion')
+    expect(summary?.textContent).not.toMatch(/quality checks/i)
+    expect(summary?.textContent).not.toMatch(/finding/i)
     expect(summary?.textContent).not.toMatch(/maintenance/i)
     expect(summary?.textContent).not.toMatch(/\bnotes?\b/i)
+
+    const affectedPrompts = container.querySelector('[data-prompt-quality-checks] details summary')
+    expect(affectedPrompts?.textContent).toContain('Affected prompts')
   })
 })

@@ -1,5 +1,4 @@
 import { html } from 'htm/preact'
-import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   AlertTriangle,
@@ -102,7 +101,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'registry',
     role: 'source_prep',
     messageSlot: 'not sent',
-    summary: 'Pick the prompt text that will be used for this turn.',
+    summary: 'MASC picks the active text from defaults, files, or saved edits.',
     promptKeys: ['keeper.world', 'keeper.capabilities', 'keeper.unified.system'],
   },
   {
@@ -112,7 +111,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'system_prompt',
     role: 'model_input',
     messageSlot: 'system',
-    summary: 'Keeper identity and operating rules.',
+    summary: 'Identity, rules, and safety boundaries.',
     promptKeys: [
       'keeper.constitution',
       'keeper.world',
@@ -127,7 +126,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'user_message',
     role: 'model_input',
     messageSlot: 'user',
-    summary: 'Current situation and turn intent.',
+    summary: 'Current task, workspace state, and turn intent.',
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
@@ -147,7 +146,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'extra_system_context',
     role: 'model_input',
     messageSlot: 'context',
-    summary: 'Recent continuity, memory, and task hints.',
+    summary: 'Recent continuity and memory hints.',
     promptKeys: ['keeper.reply_guidelines'],
   },
   {
@@ -157,7 +156,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'oas_hook',
     role: 'model_input',
     messageSlot: 'provider',
-    summary: 'Recall and tool guidance added just before send.',
+    summary: 'Provider-specific recall and tool hints before send.',
     promptKeys: [
       'keeper.memory_os_recall.context',
       'keeper.memory_os_recall.facts_section',
@@ -174,7 +173,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'manifest',
     role: 'evidence',
     messageSlot: 'not sent',
-    summary: 'Save the assembled request for later inspection.',
+    summary: 'Stored after the request is assembled for inspection.',
     promptKeys: [],
   },
 ]
@@ -410,21 +409,6 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KiB`
 }
 
-function stageTone(stage: KeeperPromptAssemblyStage): StatusChipTone {
-  if (stage.missingCount > 0) return 'bad'
-  if (stage.overrideCount > 0) return 'warn'
-  if (stage.lane === 'registry' || stage.lane === 'manifest') return 'neutral'
-  return 'ok'
-}
-
-function stageStatusLabel(stage: KeeperPromptAssemblyStage): string {
-  if (stage.missingCount > 0) return 'missing'
-  if (stage.overrideCount > 0) return 'edited'
-  if (stage.role === 'evidence') return 'saved'
-  if (stage.role === 'source_prep') return 'ready'
-  return 'sent'
-}
-
 function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
   if (row.missing) return 'bad'
   if (row.hasOverride) return 'warn'
@@ -433,19 +417,18 @@ function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
   return 'info'
 }
 
-function resolvedBlockLabel(count: number): string {
-  if (count <= 0) return 'built automatically'
-  return `${count} source${count === 1 ? '' : 's'} selected`
-}
-
-function stageMicrocopy(stage: KeeperPromptAssemblyStage): string {
-  if (stage.missingCount > 0) return `${stage.missingCount} need${stage.missingCount === 1 ? 's' : ''} setup`
-  if (stage.overrideCount > 0) return `${stage.overrideCount} saved edit${stage.overrideCount === 1 ? '' : 's'}`
-  return resolvedBlockLabel(stage.promptCount)
+function stageAttention(stage: KeeperPromptAssemblyStage): { tone: StatusChipTone; label: string; note: string } | null {
+  if (stage.missingCount > 0) {
+    return { tone: 'bad', label: 'needs setup', note: 'Needs setup before it can be sent.' }
+  }
+  if (stage.overrideCount > 0) {
+    return { tone: 'warn', label: 'edited', note: 'Saved edits are included.' }
+  }
+  return null
 }
 
 function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
-  return `${stages.length} message${stages.length === 1 ? '' : 's'} to model`
+  return `${stages.length} model-visible part${stages.length === 1 ? '' : 's'}`
 }
 
 function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
@@ -455,40 +438,37 @@ function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
 
 function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; index: number }) {
   const messageTone: StatusChipTone = index === 0 ? 'info' : index === 1 ? 'ok' : 'warn'
+  const attention = stageAttention(stage)
 
   return html`
     <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0">
       <div class="mb-1 flex flex-wrap items-center gap-2">
-        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${index + 1}</span>
+        <span class="text-3xs font-semibold text-[var(--color-fg-disabled)]">${index + 1}</span>
         <${StatusChip} tone=${messageTone} uppercase=${false}>${stage.messageSlot}<//>
         <div class="text-xs font-semibold leading-tight text-[var(--color-fg-primary)]">${stage.title}</div>
-        <${StatusChip} tone=${stageTone(stage)}>${stageStatusLabel(stage)}<//>
+        ${attention ? html`<${StatusChip} tone=${attention.tone}>${attention.label}<//>` : null}
       </div>
       <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         ${stage.summary}
-        <span class="text-[var(--color-fg-disabled)]"> ${stageMicrocopy(stage)}</span>
+        ${attention ? html`<span class="text-[var(--color-fg-disabled)]"> ${attention.note}</span>` : null}
       </div>
     </li>
   `
 }
 
-function PromptFlowPhase({
+function SupportStep({
   icon: Icon,
   eyebrow,
   title,
   summary,
-  meta,
-  children,
 }: {
   icon: typeof FileText
   eyebrow: string
   title: string
   summary: string
-  meta: string
-  children?: ComponentChildren
 }) {
   return html`
-    <section class="min-w-0 border-l border-[var(--color-border-default)] pl-3">
+    <section class="min-w-0 border-l border-[var(--color-border-default)] py-1 pl-3">
       <div class="mb-2 flex min-w-0 items-center gap-2">
         <${Icon} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
         <div class="min-w-0">
@@ -497,8 +477,6 @@ function PromptFlowPhase({
         </div>
       </div>
       <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${summary}</p>
-      <div class="mt-2 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${meta}</div>
-      ${children}
     </section>
   `
 }
@@ -509,36 +487,42 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
   const auditStage = stages.find(stage => stage.role === 'evidence')
 
   return html`
-    <section data-prompt-route-default class="grid gap-4 lg:grid-cols-[minmax(0,0.75fr)_minmax(0,1.5fr)_minmax(0,0.75fr)]">
-      <${PromptFlowPhase}
-        icon=${FileText}
-        eyebrow="not sent"
-        title="Source text"
-        summary=${sourceStage?.summary ?? 'Choose the effective prompt text for this turn.'}
-        meta=${sourceStage ? resolvedBlockLabel(sourceStage.promptCount) : 'no source blocks'}
-      />
+    <section data-prompt-route-default class="grid gap-3 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]">
+      <div class="order-2 grid content-start gap-4 lg:order-1">
+        <${SupportStep}
+          icon=${FileText}
+          eyebrow="before send"
+          title="Choose source text"
+          summary=${sourceStage?.summary ?? 'MASC chooses the active text for this turn.'}
+        />
+        <${SupportStep}
+          icon=${ClipboardCheck}
+          eyebrow="after send"
+          title="Save audit trail"
+          summary=${auditStage?.summary ?? 'The assembled request is stored for inspection.'}
+        />
+      </div>
 
-      <${PromptFlowPhase}
-        icon=${Send}
-        eyebrow="model sees"
-        title="Model request"
-        summary="These are the only message slots that leave MASC for the model."
-        meta=${modelInputMicrocopy(modelStages)}
-      >
+      <section class="order-1 min-w-0 border-l border-[var(--accent-22)] py-1 pl-3 lg:order-2">
+        <div class="mb-2 grid gap-1 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3">
+          <div class="flex min-w-0 items-center gap-2">
+            <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
+            <div class="min-w-0">
+              <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">model sees</div>
+              <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">Model request</div>
+            </div>
+          </div>
+          <span class="pl-7 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)] sm:shrink-0 sm:pl-0">${modelInputMicrocopy(modelStages)}</span>
+        </div>
+        <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+          Only these ordered parts leave MASC for the model.
+        </p>
         <ol class="mt-3">
           ${modelStages.map((stage, index) => html`
             <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
           `)}
         </ol>
-      <//>
-
-      <${PromptFlowPhase}
-        icon=${ClipboardCheck}
-        eyebrow="not sent"
-        title="Audit record"
-        summary=${auditStage?.summary ?? 'Record the final assembly for inspection.'}
-        meta="details stay collapsed"
-      />
+      </section>
     </section>
   `
 }
@@ -547,17 +531,18 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   if (warnings.length === 0) return null
 
   const hasCritical = warnings.some(warning => warning.severity === 'critical')
+  const label = `${warnings.length} suggestion${warnings.length === 1 ? '' : 's'}`
 
   return html`
     <details data-prompt-quality-checks class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           ${hasCritical ? html`<${AlertTriangle} size=${14} />` : null}
-          Prompt quality checks
+          Prompt cleanup
         </span>
         <span class="flex items-center gap-2">
           <${StatusChip} tone=${hasCritical ? 'bad' : 'neutral'}>
-            ${warnings.length} finding${warnings.length === 1 ? '' : 's'}
+            ${label}
           <//>
         </span>
       </summary>
@@ -569,11 +554,16 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
               <${StatusChip} tone=${severityTone(warning.severity)}>${warning.severity}<//>
             </div>
             <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${warning.detail} ${warning.expected}</div>
-            <div class="mt-2 flex flex-wrap gap-1">
-              ${warning.promptKeys.map(key => html`
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
-              `)}
-            </div>
+            <details class="mt-2">
+              <summary class="cursor-pointer list-none text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+                Affected prompts
+              </summary>
+              <div class="mt-2 flex flex-wrap gap-1">
+                ${warning.promptKeys.map(key => html`
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
+                `)}
+              </div>
+            </details>
           </div>
         `)}
       </div>
@@ -589,9 +579,9 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           <${GitCompareArrows} size=${14} />
-          Developer evidence
+          Technical trace
         </span>
-        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${report.stats.totalRows} source rows</span>
+        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">hidden by default</span>
       </summary>
       <div class="border-t border-[var(--color-border-default)] p-3">
         ${report.activePromptRoots.length > 0 ? html`
@@ -662,8 +652,7 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
             <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
           <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            Read left to right: choose source text, send the model-visible messages, then save the audit trail.
-            Raw source rows stay in Developer evidence.
+            Default view shows the model-visible order. File paths, hashes, and token estimates stay in Technical trace.
           </p>
         </div>
       </div>
@@ -711,7 +700,7 @@ export function KeeperPromptAssemblyPanel({
     <div class="mb-5" data-keeper-prompt-assembly-panel>
       <div class="mb-2 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2">
-          <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Prompt Assembly</span>
+          <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Prompt Recipe</span>
           ${loading ? html`<${StatusChip} tone="info">loading<//>` : null}
         </div>
         ${ownsFetch ? html`

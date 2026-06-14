@@ -12,39 +12,15 @@ let check_string label expected actual =
 let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
-let read_file path =
-  let ic = open_in path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
-let repo_root () =
-  let marker path = Filename.concat path "lib/keeper/keeper_compact_policy.ml" in
-  let has_marker path = Sys.file_exists (marker path) in
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when has_marker root -> root
-  | _ ->
-    let rec ascend path =
-      if has_marker path
-      then path
-      else (
-        let parent = Filename.dirname path in
-        if String.equal parent path then path else ascend parent)
-    in
-    ascend (Sys.getcwd ())
-
 let test_checkpoint_compaction_uses_summarize_old () =
-  let root = repo_root () in
-  let source =
-    read_file (Filename.concat root "lib/keeper/keeper_compact_policy.ml")
+  let strategies =
+    KCP.checkpoint_compaction_strategies ()
+    |> List.map Context_compact_oas.strategy_name
   in
-  let required =
-    "[ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]"
-  in
-  Alcotest.(check bool)
+  Alcotest.(check (list string))
     "checkpoint compaction summarizes old context before importance pruning"
-    true
-    (Astring.String.is_infix ~affix:required source)
+    [ "PruneToolOutputs"; "MergeContiguous"; "SummarizeOld"; "DropLowImportance" ]
+    strategies
 
 (* ── compaction_decision_to_string ───────────────────────────────────── *)
 

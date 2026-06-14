@@ -82,3 +82,20 @@ let bump_access_for_turn ~now (facts : fact list) ~(turn_text : string) : fact l
        else f)
     facts
 ;;
+
+(** Retention verdict for scored facts. *)
+type retention_verdict = KeepVerbatim | Summarize | ReferenceOnly | Discard
+[@@deriving yojson, show]
+
+(** Map a composite score to a retention decision.
+
+    Thresholds:
+    - > 0.8 → KeepVerbatim (high-confidence, recently accessed)
+    - > 0.5 → Summarize  (moderate importance, can be compressed)
+    - > 0.3 → ReferenceOnly (low importance, keep reference only)
+    - ≤ 0.3 → Discard     (negligible, safe to remove) *)
+let decide_retention score =
+  if score > 0.8 then KeepVerbatim
+  else if score > 0.5 then Summarize
+  else if score > 0.3 then ReferenceOnly
+  else Discard

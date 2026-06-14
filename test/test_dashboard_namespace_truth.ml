@@ -30,6 +30,46 @@ let cleanup_dir dir =
   in
   rm dir
 
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_config_dir dir f =
+  let config_dir = Filename.concat (Filename.concat dir ".masc") "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      f ~config_dir ~keepers_dir)
+
+let write_keeper_toml ~keepers_dir ~name =
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "local"
+goal = "Dashboard keeper fixture"
+|}
+
 let save_jsonl path entries =
   let body =
     entries
@@ -255,6 +295,8 @@ let test_dashboard_namespace_truth_keeper_only_workspace_not_reported_empty () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
+      write_keeper_toml ~keepers_dir ~name:"sangsu";
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in
@@ -297,6 +339,8 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+      with_config_dir dir @@ fun ~config_dir:_ ~keepers_dir ->
+      write_keeper_toml ~keepers_dir ~name:"sangsu";
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
       let module Mcp_server = Lib.Mcp_server in

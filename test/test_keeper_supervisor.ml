@@ -604,8 +604,10 @@ let test_declarative_boot_materializes_goal_from_will () =
       | Ok resolution ->
       check bool "materialized from declarative TOML" true resolution.materialized;
       check string "goal derived from will" will resolution.meta.goal;
-      check bool "boot failure cleared" true
-        (Option.is_none
+      check (option string) "boot failure cleared" None
+        (Option.map
+           (fun (failure : KR.boot_meta_failure) ->
+             KR.boot_meta_failure_reason_to_string failure.reason)
            (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
 let test_declarative_boot_records_goal_required_failure () =
@@ -632,8 +634,8 @@ let test_declarative_boot_records_goal_required_failure () =
   | None -> fail "expected boot meta failure to be recorded"
   | Some failure ->
       check string "failure keeper name" name failure.keeper_name;
-      check bool "recorded failure keeps raw error" true
-        (String_util.contains_substring failure.error "goal is required")
+      check string "failure reason" "goal_required"
+        (KR.boot_meta_failure_reason_to_string failure.reason)
 
 let registered_entries names =
   Reg.clear ();

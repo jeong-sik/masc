@@ -531,17 +531,18 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   if (warnings.length === 0) return null
 
   const hasCritical = warnings.some(warning => warning.severity === 'critical')
+  const label = `${warnings.length} suggestion${warnings.length === 1 ? '' : 's'}`
 
   return html`
     <details data-prompt-quality-checks class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           ${hasCritical ? html`<${AlertTriangle} size=${14} />` : null}
-          Prompt quality checks
+          Prompt cleanup
         </span>
         <span class="flex items-center gap-2">
           <${StatusChip} tone=${hasCritical ? 'bad' : 'neutral'}>
-            ${warnings.length} finding${warnings.length === 1 ? '' : 's'}
+            ${label}
           <//>
         </span>
       </summary>
@@ -553,11 +554,16 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
               <${StatusChip} tone=${severityTone(warning.severity)}>${warning.severity}<//>
             </div>
             <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${warning.detail} ${warning.expected}</div>
-            <div class="mt-2 flex flex-wrap gap-1">
-              ${warning.promptKeys.map(key => html`
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
-              `)}
-            </div>
+            <details class="mt-2">
+              <summary class="cursor-pointer list-none text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">
+                Affected prompts
+              </summary>
+              <div class="mt-2 flex flex-wrap gap-1">
+                ${warning.promptKeys.map(key => html`
+                  <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-fg-secondary)]">${key}</span>
+                `)}
+              </div>
+            </details>
           </div>
         `)}
       </div>

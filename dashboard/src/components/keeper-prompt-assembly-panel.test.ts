@@ -165,7 +165,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     expect(evidence?.textContent).toContain('fingerprint')
   })
 
-  it('labels default quality checks without maintenance wording', () => {
+  it('labels default cleanup suggestions without maintenance wording', () => {
     const { container } = render(html`
       <${KeeperPromptAssemblyPanel}
         prompts=${[
@@ -179,9 +179,14 @@ describe('buildKeeperPromptAssemblyReport', () => {
 
     const summary = container.querySelector('[data-prompt-quality-checks] summary')
     expect(summary).not.toBeNull()
-    expect(summary?.textContent).toContain('Prompt quality checks')
-    expect(summary?.textContent).toContain('finding')
+    expect(summary?.textContent).toContain('Prompt cleanup')
+    expect(summary?.textContent).toContain('suggestion')
+    expect(summary?.textContent).not.toMatch(/quality checks/i)
+    expect(summary?.textContent).not.toMatch(/finding/i)
     expect(summary?.textContent).not.toMatch(/maintenance/i)
     expect(summary?.textContent).not.toMatch(/\bnotes?\b/i)
+
+    const affectedPrompts = container.querySelector('[data-prompt-quality-checks] details summary')
+    expect(affectedPrompts?.textContent).toContain('Affected prompts')
   })
 })

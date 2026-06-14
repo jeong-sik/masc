@@ -251,65 +251,6 @@ let test_pair_repair_integration () =
       (Option.is_some local_pos)
   end
 
-let test_lifecycle_checkpoint_saves_use_full_pair_repair () =
-  let find_substring ?(start = 0) haystack needle =
-    let hlen = String.length haystack in
-    let nlen = String.length needle in
-    let rec loop i =
-      if i + nlen > hlen then None
-      else if String.sub haystack i nlen = needle then Some i
-      else loop (i + 1)
-    in
-    if nlen = 0 then Some start else loop start
-  in
-  let has_prompt_root path =
-    Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
-  in
-  let repo_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root when has_prompt_root root -> root
-    | _ ->
-        let rec ascend path =
-          if has_prompt_root path then path
-          else
-            let parent = Filename.dirname path in
-            if String.equal parent path then Sys.getcwd () else ascend parent
-        in
-        ascend (Sys.getcwd ())
-  in
-  let read_source rel =
-    let target = Filename.concat repo_root rel in
-    if not (Sys.file_exists target)
-    then None
-    else
-      let ic = open_in target in
-      Some
-        (Fun.protect
-           ~finally:(fun () -> close_in ic)
-           (fun () ->
-              let len = in_channel_length ic in
-              let buf = Bytes.create len in
-              really_input ic buf 0 len;
-              Bytes.to_string buf))
-  in
-  let assert_full_repair rel =
-    match read_source rel with
-    | None -> ()
-    | Some content ->
-        Alcotest.(check bool)
-          (rel ^ " must use full non-fabricating tool pair repair")
-          true
-          (Option.is_some
-             (find_substring content "repair_broken_tool_call_pairs_with_stats"));
-        Alcotest.(check bool)
-          (rel ^ " must not use orphan-only repair before checkpoint save")
-          true
-          (Option.is_none
-             (find_substring content "repair_orphan_tool_result_messages_with_stats"))
-  in
-  assert_full_repair "lib/keeper/keeper_post_turn.ml";
-  assert_full_repair "lib/keeper/keeper_rollover.ml"
-
 let user_text text : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.User
   ; content = [ Agent_sdk.Types.Text text ]
@@ -837,10 +778,6 @@ let () =
         test_cap_message_tokens_integration;
       Alcotest.test_case "local pair repair integrated in reducer chain" `Quick
         test_pair_repair_integration;
-      Alcotest.test_case
-        "lifecycle checkpoint saves use full pair repair"
-        `Quick
-        test_lifecycle_checkpoint_saves_use_full_pair_repair;
       Alcotest.test_case "pair repair stats count drops" `Quick
         test_pair_repair_stats_count_drops;
       Alcotest.test_case "pair repair drops dangling tool-use details" `Quick

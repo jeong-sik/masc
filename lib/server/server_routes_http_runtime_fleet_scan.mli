@@ -78,6 +78,8 @@ val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
   ?phase_snapshot:keeper_phase_snapshot ->
+  ?base_path:string ->
+  ?reaction_capacity_names:string list ->
   phase_counts:keeper_phase_counts ->
   paused_keepers_json:Yojson.Safe.t ->
   unit ->

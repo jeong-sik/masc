@@ -94,12 +94,14 @@ let keeper_fleet_runtime_resolution_base_fields
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
         ~phase_snapshot
+        ?base_path
         ~phase_counts
         ~paused_keepers_json
         ()
   | None ->
     keeper_fleet_safety_health_json
       ~phase_snapshot
+      ?base_path
       ~phase_counts
       ~paused_keepers_json
       ()

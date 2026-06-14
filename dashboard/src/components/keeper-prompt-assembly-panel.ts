@@ -102,7 +102,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'registry',
     role: 'source_prep',
     messageSlot: 'not sent',
-    summary: '파일, default, runtime override 중 이 턴에 쓸 본문을 고릅니다.',
+    summary: 'Pick the prompt text that will be used for this turn.',
     promptKeys: ['keeper.world', 'keeper.capabilities', 'keeper.unified.system'],
   },
   {
@@ -112,7 +112,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'system_prompt',
     role: 'model_input',
     messageSlot: 'system',
-    summary: '정체성, 행동 규칙, world, capabilities가 기본 system prompt가 됩니다.',
+    summary: 'Keeper identity and operating rules.',
     promptKeys: [
       'keeper.constitution',
       'keeper.world',
@@ -127,7 +127,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'user_message',
     role: 'model_input',
     messageSlot: 'user',
-    summary: '턴 의도와 현재 world state가 user-facing context로 붙습니다.',
+    summary: 'Current situation and turn intent.',
     promptKeys: [
       'keeper.unified.system',
       'keeper.turn_intent',
@@ -147,7 +147,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'extra_system_context',
     role: 'model_input',
     messageSlot: 'context',
-    summary: 'continuity, memory, repo/task hint, turn instruction이 추가됩니다.',
+    summary: 'Recent continuity, memory, and task hints.',
     promptKeys: ['keeper.reply_guidelines'],
   },
   {
@@ -157,7 +157,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'oas_hook',
     role: 'model_input',
     messageSlot: 'provider',
-    summary: 'Memory recall, tool preference, retry hint, tool filter가 provider 요청 직전에 확정됩니다.',
+    summary: 'Recall and tool guidance added just before send.',
     promptKeys: [
       'keeper.memory_os_recall.context',
       'keeper.memory_os_recall.facts_section',
@@ -174,7 +174,7 @@ const STAGES: AssemblyStageSpec[] = [
     lane: 'manifest',
     role: 'evidence',
     messageSlot: 'not sent',
-    summary: '최종 조립 후 감사 record와 context_injected edge를 기록합니다.',
+    summary: 'Save the assembled request for later inspection.',
     promptKeys: [],
   },
 ]
@@ -419,9 +419,9 @@ function stageTone(stage: KeeperPromptAssemblyStage): StatusChipTone {
 
 function stageStatusLabel(stage: KeeperPromptAssemblyStage): string {
   if (stage.missingCount > 0) return 'missing'
-  if (stage.overrideCount > 0) return 'override'
-  if (stage.role === 'evidence') return 'recorded'
-  if (stage.role === 'source_prep') return 'resolved'
+  if (stage.overrideCount > 0) return 'edited'
+  if (stage.role === 'evidence') return 'saved'
+  if (stage.role === 'source_prep') return 'ready'
   return 'sent'
 }
 
@@ -434,18 +434,18 @@ function sourceTone(row: KeeperPromptAssemblyRow): StatusChipTone {
 }
 
 function resolvedBlockLabel(count: number): string {
-  if (count <= 0) return 'runtime computed'
-  return `${count} resolved block${count === 1 ? '' : 's'}`
+  if (count <= 0) return 'built automatically'
+  return `${count} source${count === 1 ? '' : 's'} selected`
 }
 
 function stageMicrocopy(stage: KeeperPromptAssemblyStage): string {
-  if (stage.missingCount > 0) return `${stage.missingCount} missing`
-  if (stage.overrideCount > 0) return `${stage.overrideCount} customized`
+  if (stage.missingCount > 0) return `${stage.missingCount} need${stage.missingCount === 1 ? 's' : ''} setup`
+  if (stage.overrideCount > 0) return `${stage.overrideCount} saved edit${stage.overrideCount === 1 ? '' : 's'}`
   return resolvedBlockLabel(stage.promptCount)
 }
 
 function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
-  return `${stages.length} model message${stages.length === 1 ? '' : 's'}`
+  return `${stages.length} message${stages.length === 1 ? '' : 's'} to model`
 }
 
 function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
@@ -522,7 +522,7 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
         icon=${Send}
         eyebrow="model sees"
         title="Model request"
-        summary="These message slots are the only default view because this is what the provider receives for the turn."
+        summary="These are the only message slots that leave MASC for the model."
         meta=${modelInputMicrocopy(modelStages)}
       >
         <ol class="mt-3">
@@ -537,7 +537,7 @@ function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
         eyebrow="not sent"
         title="Audit record"
         summary=${auditStage?.summary ?? 'Record the final assembly for inspection.'}
-        meta="source evidence stays collapsed"
+        meta="details stay collapsed"
       />
     </section>
   `
@@ -549,15 +549,15 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   const hasCritical = warnings.some(warning => warning.severity === 'critical')
 
   return html`
-    <details class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
+    <details data-prompt-quality-checks class="mt-3 rounded-[var(--r-1)] border ${hasCritical ? 'border-[var(--bad-20)] bg-[var(--bad-8)]' : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'}">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           ${hasCritical ? html`<${AlertTriangle} size=${14} />` : null}
-          Prompt maintenance notes
+          Prompt quality checks
         </span>
         <span class="flex items-center gap-2">
           <${StatusChip} tone=${hasCritical ? 'bad' : 'neutral'}>
-            ${warnings.length} note${warnings.length === 1 ? '' : 's'}
+            ${warnings.length} finding${warnings.length === 1 ? '' : 's'}
           <//>
         </span>
       </summary>
@@ -659,11 +659,11 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <${Route} size=${16} class="text-[var(--color-accent-fg)]" />
             <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Turn prompt recipe</h3>
-            <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
+            <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
           <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            Read left to right: choose source text, send the model-visible messages, then record the audit trail.
-            Raw prompt keys, file paths, and source rows stay in Developer evidence.
+            Read left to right: choose source text, send the model-visible messages, then save the audit trail.
+            Raw source rows stay in Developer evidence.
           </p>
         </div>
       </div>

@@ -62,11 +62,6 @@ let partition_results
 (* --- Protocol string -> Runtime_schema.api_format --- *)
 
 let canonical_protocol_of_protocol = function
-  | "provider_a-cli" -> Some "messages-cli"
-  | "provider_a-http" -> Some "messages-http"
-  | "provider_d-cli" | "provider_f-cli" | "provider_c-cli" ->
-    Some "openai-compatible-cli"
-  | "provider_d-http" -> Some "openai-compatible-http"
   | "messages-cli" | "messages-http" | "openai-compatible-cli"
   | "openai-compatible-http" | "ollama-http" as protocol -> Some protocol
   | _ -> None
@@ -85,9 +80,6 @@ let api_format_of_protocol (s : string)
   match s with
   | "messages-cli" | "messages-http" -> Ok Runtime_schema.Messages_api
   | "openai-compatible-cli" | "openai-compatible-http" ->
-    Ok Runtime_schema.Chat_completions_api
-  | "provider_a-cli" | "provider_a-http" -> Ok Runtime_schema.Messages_api
-  | "provider_d-cli" | "provider_d-http" | "provider_f-cli" | "provider_c-cli" ->
     Ok Runtime_schema.Chat_completions_api
   | "ollama-http" -> Ok Runtime_schema.Ollama_api
   | _ -> Error (unknown_protocol_error s)
@@ -192,7 +184,7 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
   ; identity_runtime_mcp_header_keys =
       string_list_field "identity-runtime-mcp-header-keys"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
-  ; uses_anthropic_caching = b "uses-provider_a-caching"
+  ; uses_anthropic_caching = b "uses-messages-caching"
   ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
   ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }

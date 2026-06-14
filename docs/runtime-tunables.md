@@ -70,7 +70,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_DASHBOARD_GOVERNANCE_JUDGE_INTERVAL_SEC` | typed:int | unclassified | unclassified | 151 | Governance judge interval, clamped to >= 15s. Default: 60. |
 | `MASC_DEFAULT_MODEL` | string_literal | n/a | n/a | 170 | Default model id. |
 | `MASC_DEFAULT_PROVIDER` | string_literal | n/a | n/a | 166 | Default provider name. |
-| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 162 | Default runtime label (e.g. "provider_f:pro,agent_llm_a:sonnet"). |
+| `MASC_DEFAULT_RUNTIME` | string_literal | n/a | n/a | 162 | Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). |
 | `MASC_EVENT_BUFFER_SIZE` | typed:int | unclassified | unclassified | 113 | A2A event buffer size per subscription. Caps the in-memory event list to prevent unbounded growth. |
 | `MASC_GOAL_DISPATCH_RUNTIME` | typed:string | unclassified | unclassified | 186 | Goal dispatch runtime. Default: "task". |
 | `MASC_GOAL_MODELS` | string_literal | n/a | n/a | 182 | Goal models (comma-separated). |

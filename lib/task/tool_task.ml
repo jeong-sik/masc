@@ -177,7 +177,9 @@ and handle_transition ~tool_name ~start_time ctx args =
     match action, task_opt with
     | Masc_domain.Release, Some task ->
       (match Workspace.task_assignee_of_status task.task_status with
-       | Some assignee when not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
+       | Some assignee
+         when (not force)
+              && not (Workspace.same_task_actor ctx.config assignee ctx.agent_name) ->
          let status = Masc_domain.task_status_to_string task.task_status in
          let message =
            Printf.sprintf
@@ -541,7 +543,7 @@ and handle_transition ~tool_name ~start_time ctx args =
       let ev = if attempt = 0 then expected_version else None in
       let r = Workspace.transition_task_r ctx.config ~agent_name:ctx.agent_name
                 ~task_id ~action ?expected_version:ev ~notes ~reason
-                ?handoff_context ?prepare_verification_request
+                ~force ?handoff_context ?prepare_verification_request
                 ?compensate_verification_request
                 ?prepare_verification_verdict () in
       if is_version_mismatch r && attempt < max_cas_retries then begin

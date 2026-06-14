@@ -345,7 +345,39 @@ let test_resolve_keeper_exact_binding_wins_over_parent () =
         check string "bound" "thread-1" resolution.bound_channel_id;
         check bool "not via parent" false resolution.via_parent)
 
+let test_thread_registry_round_trip () =
+  let suffix = Printf.sprintf "%d-%06d" (Unix.getpid ()) !temp_dir_counter in
+  let thread_id = "thread-registry-" ^ suffix in
+  let parent_id = "parent-registry-" ^ suffix in
+  let parent_id_2 = parent_id ^ "-updated" in
+  Discord_state.unregister_thread ~thread_id;
+  let before = Discord_state.registered_thread_count () in
+  Discord_state.register_thread
+    ~thread_id:("  " ^ thread_id ^ "  ")
+    ~parent_channel_id:("  " ^ parent_id ^ "  ");
+  check int "count increments" (before + 1)
+    (Discord_state.registered_thread_count ());
+  check (option string) "parent lookup trims channel" (Some parent_id)
+    (Discord_state.parent_channel_of_thread ~channel_id:(" " ^ thread_id));
+  check bool "known thread" true
+    (Discord_state.is_known_thread ~channel_id:thread_id);
+  Discord_state.register_thread ~thread_id ~parent_channel_id:parent_id_2;
+  check int "duplicate update keeps count" (before + 1)
+    (Discord_state.registered_thread_count ());
+  check (option string) "duplicate update replaces parent" (Some parent_id_2)
+    (Discord_state.parent_channel_of_thread ~channel_id:thread_id);
+  Discord_state.register_thread ~thread_id:"  " ~parent_channel_id:"ignored";
+  check int "blank thread id ignored" (before + 1)
+    (Discord_state.registered_thread_count ());
+  Discord_state.unregister_thread ~thread_id:(" " ^ thread_id ^ " ");
+  check (option string) "parent removed" None
+    (Discord_state.parent_channel_of_thread ~channel_id:thread_id);
+  check bool "known removed" false
+    (Discord_state.is_known_thread ~channel_id:thread_id);
+  check int "count restored" before (Discord_state.registered_thread_count ())
+
 let () =
+  Eio_main.run @@ fun _env ->
   run "channel_gate_discord_state"
     [
       ( "status",
@@ -378,5 +410,10 @@ let () =
             test_resolve_keeper_for_thread_parent_binding;
           test_case "exact binding wins over parent" `Quick
             test_resolve_keeper_exact_binding_wins_over_parent;
+        ] );
+      ( "thread_registry",
+        [
+          test_case "register lookup update unregister" `Quick
+            test_thread_registry_round_trip;
         ] );
     ]

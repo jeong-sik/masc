@@ -28,7 +28,12 @@ let stale_penalty fact =
   1.0 -. Float.min 1.0 (Float.max 0.0 fact.stale_factor)
 ;;
 let score_fact ?(lambda = default_lambda) ?(alpha = default_alpha) ~now fact =
-  fact.confidence *. recency_factor ~lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count *. stale_penalty fact
+  let effective_lambda =
+    match fact.expected_lifetime_cycles with
+    | None -> lambda
+    | Some n -> lambda *. (1.0 +. 1.0 /. float (max 1 n))
+  in
+  fact.confidence *. recency_factor ~lambda:effective_lambda ~now fact.last_accessed *. access_factor ~alpha fact.access_count *. stale_penalty fact
 ;;
 
 let score_tool_result

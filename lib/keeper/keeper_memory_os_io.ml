@@ -321,10 +321,22 @@ let read_episodes_tail ~keeper_id ~n =
 let decay_stale_facts ~keeper_id ~now ?(n = 50) () =
   read_facts_tail ~keeper_id ~n
   |> List.map (fun fact ->
+    let default_lifetime_sec = 3600.0 in
+    let default_decay = 0.1 in
+    let lifetime_sec =
+      match fact.expected_lifetime_cycles with
+      | None -> default_lifetime_sec
+      | Some cycles -> float (max 1 cycles) *. 60.0
+    in
+    let decay_rate =
+      match fact.expected_lifetime_cycles with
+      | None -> default_decay
+      | Some cycles -> default_decay /. float (max 1 cycles)
+    in
     let stale_factor =
       match fact.last_verified_at with
-      | None -> Float.min 1.0 (fact.stale_factor +. 0.1)
-      | Some ts when now -. ts > 3600.0 -> Float.min 1.0 (fact.stale_factor +. 0.1)
+      | None -> Float.min 1.0 (fact.stale_factor +. decay_rate)
+      | Some ts when now -. ts > lifetime_sec -> Float.min 1.0 (fact.stale_factor +. decay_rate)
       | _ -> fact.stale_factor
     in
     { fact with stale_factor })

@@ -26,6 +26,7 @@ type fact =
   ; valid_until : float option
   ; stale_factor : float
   ; last_verified_at : float option
+  ; expected_lifetime_cycles : int option
   ; schema_version : string
   }
 

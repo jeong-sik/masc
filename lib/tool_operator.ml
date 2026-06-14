@@ -10,22 +10,34 @@ type 'a context = {
 
 type tool_result = Tool_result.result
 
-let operator_dispatcher = ref (fun _ctx ~name:_ ~args:_ -> None)
-let schemas_val = ref []
-let remote_schemas_val = ref []
-let remote_tool_names_val = ref []
+type 'a registry = {
+  dispatch : 'a context -> name:string -> args:Yojson.Safe.t -> tool_result option;
+  schemas : Masc_domain.tool_schema list;
+  remote_schemas : Masc_domain.tool_schema list;
+  remote_tool_names : string list;
+}
 
-let schemas () = !schemas_val
-let remote_schemas () = !remote_schemas_val
-let remote_tool_names () = !remote_tool_names_val
+let registry : 'a registry Atomic.t =
+  Atomic.make {
+    dispatch = (fun _ctx ~name:_ ~args:_ -> None);
+    schemas = [];
+    remote_schemas = [];
+    remote_tool_names = [];
+  }
 
 let register_operator_tools ~dispatch ~schemas ~remote_schemas =
-  operator_dispatcher := dispatch;
-  schemas_val := schemas;
-  remote_schemas_val := remote_schemas;
-  remote_tool_names_val := List.map (fun (s : Masc_domain.tool_schema) -> s.name) remote_schemas
+  Atomic.set registry {
+    dispatch;
+    schemas;
+    remote_schemas;
+    remote_tool_names = List.map (fun (s : Masc_domain.tool_schema) -> s.name) remote_schemas;
+  }
 ;;
 
 let dispatch ctx ~name ~args =
-  !operator_dispatcher ctx ~name ~args
+  (Atomic.get registry).dispatch ctx ~name ~args
 ;;
+
+let schemas () = (Atomic.get registry).schemas
+let remote_schemas () = (Atomic.get registry).remote_schemas
+let remote_tool_names () = (Atomic.get registry).remote_tool_names

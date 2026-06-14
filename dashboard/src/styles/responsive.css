@@ -29,6 +29,16 @@
     --font-size-2xs: 10px;
   }
 
+  /* Tailwind text-* utilities default to their own scale (text-sm=0.875rem)
+     and bypass the --font-size-* tokens above — so pre-this-change only legacy
+     --fs-* shrank on mobile. Re-point the common text utilities at the scaled
+     tokens so the whole dashboard shrinks consistently. Unlayered rules beat
+     Tailwind @layer utilities (see base.css header note), so no !important. */
+  .text-2xs { font-size: var(--font-size-2xs); }
+  .text-xs { font-size: var(--font-size-xs); }
+  .text-sm { font-size: var(--font-size-sm); }
+  .text-base { font-size: var(--font-size-base); }
+
   .header-title-wrap h1 {
     font-size: var(--fs-22);
   }

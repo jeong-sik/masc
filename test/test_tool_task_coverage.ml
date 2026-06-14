@@ -689,9 +689,71 @@ let () = test "handle_transition_release_by_nonowner_redirects_to_board_post"
         ])
   in
   assert (not (Tool_result.is_success result));
-  assert (str_contains (Tool_result.message result) "Invalid transition");
-  assert (str_contains (Tool_result.message result) "Remediation");
+  assert ((Tool_result.failure_class result) = Some Tool_result.Workflow_rejection);
+  assert (str_contains (Tool_result.message result) "Task task-001 is claimed");
+  assert (str_contains (Tool_result.message result) "owner-agent");
   assert (str_contains (Tool_result.message result) "masc_board_post")
+  ;
+  let data = Tool_result.data result in
+  assert (Json_util.get_string data "task_id" = Some "task-001");
+  assert (Json_util.get_string data "current_assignee" = Some "owner-agent");
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id"
+      = Some "task_release_requires_current_owner"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "keeper_board_post"
+    | None -> false)
+)
+
+let () = test "handle_transition_force_release_by_admin_bypasses_nonowner_redirect"
+    (fun () ->
+  let ctx_owner = make_test_ctx_with_agent "owner-agent" in
+  let _ =
+    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+      (`Assoc [ ("title", `String "Force-release owned task") ])
+  in
+  let _ =
+    Task.Tool.handle_claim ~tool_name:"test_tool" ~start_time:0.0 ctx_owner
+      (`Assoc [ ("task_id", `String "task-001") ])
+  in
+  let ctx_admin =
+    { ctx_owner with Task.Tool.agent_name = "admin-agent" }
+  in
+  let previous_is_admin = Atomic.get Workspace_hooks.is_admin_agent_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.is_admin_agent_fn previous_is_admin)
+    (fun () ->
+       Atomic.set Workspace_hooks.is_admin_agent_fn
+         (fun ~base_path:_ ~agent_name ->
+            String.equal agent_name "admin-agent");
+       let result =
+         Task.Tool.handle_transition
+           ~tool_name:"test_tool"
+           ~start_time:0.0
+           ctx_admin
+           (`Assoc
+              [
+                ("task_id", `String "task-001");
+                ("action", `String "release");
+                ("force", `Bool true);
+              ])
+       in
+       assert (Tool_result.is_success result);
+       match
+         Workspace.get_tasks_raw ctx_owner.Task.Tool.config
+         |> List.find_opt (fun (task : Masc_domain.task) ->
+              String.equal task.id "task-001")
+       with
+       | Some { task_status = Masc_domain.Todo; _ } -> ()
+       | Some task ->
+         failwith
+           (Printf.sprintf
+              "expected forced release to return task-001 to todo, got %s"
+              (Masc_domain.task_status_to_string task.task_status))
+       | None -> failwith "missing task-001 after forced release")
 )
 
 let () = test "handle_transition_release_synthesizes_summary_from_notes" (fun () ->

@@ -445,7 +445,6 @@ type registry_entry = {
   last_error : string option;
   last_failure_reason : failure_reason option;
   turn_consecutive_failures : int;
-  last_agent_count : int;
   board_wakeups : float StringMap.t;
   board_cursor_ts : float;
   board_cursor_post_id : string option;

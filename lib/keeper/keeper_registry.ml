@@ -399,16 +399,6 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
     ~update_entry
 ;;
 
-let get_last_agent_count ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> entry.last_agent_count
-  | None -> 0
-;;
-
-let set_last_agent_count ~base_path name count =
-  update_entry ~base_path name (fun e -> { e with last_agent_count = count })
-;;
-
 let board_wakeup_allowed ~base_path name ~post_id ~debounce_sec =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> true
@@ -435,7 +425,6 @@ let cleanup_tracking ~base_path name =
       { entry with
         board_wakeups = StringMap.empty
       ; tool_usage = StringMap.empty
-      ; last_agent_count = 0
       ; board_cursor_ts = 0.0
       ; board_cursor_post_id = None
       }

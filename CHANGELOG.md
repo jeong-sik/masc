@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.19.44] - 2026-06-14
+
+### Changed
+- Bumped OAS `agent_sdk` pin to `v0.206.9` at
+  `8a619adbe2cb10025ceaac5338bef93791c9be9c` and raised the `agent_sdk`
+  dependency floor to `0.206.9`.
+
+### Removed
+- `runtime`: legacy cleanup — dead code, Boundary_redaction SSOT,
+  provider-letter purge (#21122).
+
+
 ## [0.19.43] - 2026-06-12
 
 ### Added

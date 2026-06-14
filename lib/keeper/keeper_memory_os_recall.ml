@@ -89,6 +89,12 @@ let fact_is_current ~now fact =
   | Some ts -> ts >= now
 ;;
 
+let episode_is_current ~now episode =
+  match episode.valid_until with
+  | None -> true
+  | Some ts -> ts >= now
+;;
+
 let render_fact ~now fact =
   let score = Keeper_memory_os_policy.score_fact ~now fact in
   let source = fact.source in
@@ -102,10 +108,16 @@ let render_fact ~now fact =
 ;;
 
 let render_episode episode =
+  let terminal_suffix =
+    match episode.terminal_marker with
+    | None -> ""
+    | Some m -> Printf.sprintf " [TERMINAL: %s]" m
+  in
   Printf.sprintf
-    "- [%s g%04d] %s"
+    "- [%s g%04d]%s %s"
     (sanitize_atom episode.trace_id)
     episode.generation
+    terminal_suffix
     (sanitize_text ~max_len:max_episode_text_len episode.episode_summary)
 ;;
 

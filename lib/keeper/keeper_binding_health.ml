@@ -79,6 +79,7 @@ type provider_state = {
   mutable events: event list;  (* newest first *)
   mutable consecutive_failures: int;
   mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
+  mutable consecutive_empty_obs: int;  (* idle loop circuit breaker: consecutive empty observation cycles *)
   fingerprint_counts: (string, int) Hashtbl.t;
   (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
      Phase 0 observability anchor for "which error keeps recurring".
@@ -171,6 +172,7 @@ let get_or_create_state t key =
       consecutive_failures = 0;
       cooldown_until = 0.0;
       fingerprint_counts = Hashtbl.create 4;
+      consecutive_empty_obs = 0;
       last_failure_at = 0.0;
       latency_ring = None;
       latency_count = 0;
@@ -586,6 +588,78 @@ let check_circuit_breaker t ~provider_key =
           state.cooldown_until <- 0.0;
         Ok ()
       end)
+
+(** ── Idle Loop Circuit Breaker ─────────────────────────────
+
+    Prevents keepers from entering infinite idle observation loops where
+    consecutive autonomous turns observe zero actionable signals (no new
+    tasks, mentions, repo changes, or board activity).
+
+    The circuit breaker uses the same {!cooldown_until} field as the
+    failure-based circuit breaker in {!check_circuit_breaker}, so
+    {!provider_cooldown_remaining_sec_for_runtime} in
+    {!Keeper_world_observation_provider_cooldown} automatically detects
+    the cooldown without additional wiring.
+
+    Threshold: {!idle_empty_obs_threshold} consecutive empties (default 3).
+    Cooldown: {!idle_cooldown_sec} seconds (default 300s = 5 minutes). *)
+
+(** [idle_empty_obs_threshold] — consecutive empty observations before
+    triggering cooldown.  Set to 3 to allow brief scan passes but break
+    loops where a keeper observes no actionable state for multiple
+    consecutive autonomous turns. *)
+let idle_empty_obs_threshold = 3
+
+(** [idle_cooldown_sec] — cooldown duration (seconds) after the idle
+    circuit breaker trips.  300s = 5 minutes of silence. *)
+let idle_cooldown_sec = 300.0
+
+(** [report_empty_observation t ~provider_key] increments the consecutive
+    empty-observation counter for the given provider.  When the counter
+    reaches {!idle_empty_obs_threshold}, a cooldown is applied immediately
+    (mirroring the existing failure-based cooldown logic in
+    {!check_circuit_breaker}).
+
+    Call this from the world-observation layer when an observation cycle
+    yields zero actionable signals (no new tasks, no mentions, no repo
+    changes, no board activity). *)
+let report_empty_observation t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> ()
+    | Some state ->
+      state.consecutive_empty_obs <- state.consecutive_empty_obs + 1;
+      if state.consecutive_empty_obs >= idle_empty_obs_threshold then
+        state.cooldown_until <-
+          Unix.gettimeofday () +. idle_cooldown_sec)
+
+(** [report_actionable_observation t ~provider_key] resets the
+    consecutive empty-observation counter.  Call this when an observation
+    cycle finds at least one actionable signal (new task, mention, repo
+    change, board activity). *)
+let report_actionable_observation t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> ()
+    | Some state ->
+      state.consecutive_empty_obs <- 0)
+
+(** [check_idle_circuit_breaker t ~provider_key] returns [Error] when
+    the idle loop circuit breaker has tripped (consecutive empty
+    observations ≥ threshold).  The {!check_circuit_breaker} function
+    already handles the cooldown timing; this is a complementary check
+    that callers can use to short-circuit an observation cycle before
+    it even queries the world state. *)
+let check_idle_circuit_breaker t ~provider_key =
+  with_lock t (fun () ->
+    match Hashtbl.find_opt t.providers provider_key with
+    | None -> Ok ()
+    | Some state ->
+      if state.consecutive_empty_obs >= idle_empty_obs_threshold
+      then Error (Printf.sprintf
+          "idle_loop_circuit_breaker: %d consecutive empty observations for %s (threshold %d)"
+          state.consecutive_empty_obs provider_key idle_empty_obs_threshold)
+      else Ok ())
 
 (** Compute effective weight for a provider.
 

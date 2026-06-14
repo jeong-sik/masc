@@ -3,7 +3,18 @@
 
     Extracted from [keeper_world_observation.ml] during godfile decomposition.
 
-    @since God file decomposition *)
+    Idle loop circuit breaker integration (task-1088):
+    The {!check_idle_circuit_breaker} in [Keeper_binding_health] uses the same
+    [cooldown_until] field that this module already checks via
+    {!provider_cooldown_remaining_sec_for_runtime}.  When an observation cycle
+    yields zero actionable signals, call
+    [Keeper_binding_health.report_empty_observation] to increment the counter;
+    when the counter reaches {!Keeper_binding_health.idle_empty_obs_threshold}
+    (default 3), a cooldown is applied automatically and this module's existing
+    cooldown detection will block the next autonomous turn.
+
+    @since God file decomposition
+    @since task-1088 idle loop circuit breaker *)
 
 open Keeper_types
 open Keeper_meta_contract

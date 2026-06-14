@@ -431,3 +431,23 @@ val global : t
 
 val check_circuit_breaker : t -> provider_key:string -> (unit, string) result
 (** Check whether the provider cooldown gate allows a request. *)
+
+(** ── Idle Loop Circuit Breaker ───────────────────────────── *)
+
+val idle_empty_obs_threshold : int
+(** Consecutive empty observations before triggering cooldown (default 3). *)
+
+val idle_cooldown_sec : float
+(** Cooldown duration after idle circuit breaker trips (default 300s). *)
+
+val report_empty_observation : t -> provider_key:string -> unit
+(** Increment empty-observation counter; trigger cooldown at threshold.
+    Call when observation yields zero actionable signals. *)
+
+val report_actionable_observation : t -> provider_key:string -> unit
+(** Reset empty-observation counter.  Call when observation finds
+    at least one actionable signal. *)
+
+val check_idle_circuit_breaker : t -> provider_key:string -> (unit, string) result
+(** Returns [Error] when idle circuit breaker has tripped.  Use to
+    short-circuit observation cycles before querying world state. *)

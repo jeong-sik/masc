@@ -644,9 +644,12 @@ let enqueue_partial_commit_continue_gate
    per (keeper_name, primary_budget, runtime_budget) because runtime config
    is static at startup.  Logging per turn produces 15-20 duplicates per
    keeper per minute under load. Track the same tuple we've already
-   announced and skip subsequent identical log lines. *)
+   announced and skip subsequent identical log lines. Keeper turns run on
+   concurrent Eio fibers, so the Hashtbl is protected by an [Eio.Mutex.t]. *)
 let runtime_budget_logged : (string * int * int, unit) Hashtbl.t =
   Hashtbl.create 16
+
+let runtime_budget_logged_mu = Eio.Mutex.create ()
 
 let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
   let resolution =
@@ -654,12 +657,13 @@ let resolved_max_context_for_turn ~(meta : keeper_meta) : int =
   in
   if resolution.primary_budget < resolution.runtime_budget then begin
     let key = (meta.name, resolution.primary_budget, resolution.runtime_budget) in
-    if not (Hashtbl.mem runtime_budget_logged key) then begin
-      Hashtbl.add runtime_budget_logged key ();
-      Log.Keeper.info
-        "%s: mixed runtime context budget primary=%d runtime_max=%d; using primary for initial turn budget"
-        meta.name resolution.primary_budget resolution.runtime_budget
-    end
+    Eio.Mutex.use_rw ~protect:true runtime_budget_logged_mu (fun () ->
+      if not (Hashtbl.mem runtime_budget_logged key) then begin
+        Hashtbl.add runtime_budget_logged key ();
+        Log.Keeper.info
+          "%s: mixed runtime context budget primary=%d runtime_max=%d; using primary for initial turn budget"
+          meta.name resolution.primary_budget resolution.runtime_budget
+      end)
   end;
    (match resolution.requested_override with
     | Some requested ->

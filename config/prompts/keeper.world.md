@@ -31,7 +31,7 @@ WRONG paths (these do not exist or cause doubling errors):
 
 Tools automatically resolve paths relative to your sandbox root.
 When passing `path` or `cwd` to keeper tools:
-- Use: `repos/REPO_NAME/.worktrees/TASK_NAME/lib/foo.ml` for assigned code work, or `repos/REPO_NAME/lib/foo.ml` only for explicit read-only repo-root inspection.
+- Use: `repos/REPO_NAME/lib/foo.ml` for code work — your clone is your workspace; create a task branch there (see Paths and Identity above).
 - Use: `mind/notes.md`
 - NOT: a copied host storage prefix plus `/repos/REPO_NAME/lib/foo.ml`
 - NOT: a guessed host absolute path outside the sandbox path returned by your tools

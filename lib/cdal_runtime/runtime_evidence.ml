@@ -157,7 +157,13 @@ let participant_and_detail_of_event = function
   | Finalize_requested detail -> None, detail.reason
   | Input_required detail -> detail.participant_name, Some detail.question
   | Input_provided detail -> detail.participant_name, Some detail.request_id
-  | Pending_input_updated _ -> None, Some "pending_input_updated"
+  | Pending_input_updated detail ->
+    let text =
+      match detail.message with
+      | Some message -> detail.status ^ ":" ^ message
+      | None -> detail.status
+    in
+    detail.participant_name, Some text
   | Session_completed detail -> None, detail.outcome
   | Session_failed detail -> None, detail.outcome
 ;;
@@ -286,8 +292,8 @@ let structured_fields_of_event = function
     None, None, None, None, None, None, None, None, None, None, None
   | Input_provided _ ->
     None, None, None, None, None, None, None, None, None, None, None
-  | Pending_input_updated _ ->
-    None, None, None, None, None, None, None, None, None, None, None
+  | Pending_input_updated detail ->
+    detail.participant_name, None, None, None, None, None, None, None, None, None, None
   | Session_completed detail ->
     None, None, None, None, None, None, None, None, None, None, detail.outcome
   | Session_failed detail ->

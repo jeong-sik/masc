@@ -318,7 +318,9 @@ let target_summary ~target_kind ~target_id =
   with_lock s (fun () ->
     let target_key = target_key target_kind target_id in
     let report_count =
-      Hashtbl.find_opt s.report_count_by_target target_key |> Option.value ~default:0
+      match Hashtbl.find_opt s.report_count_by_target target_key with
+      | None -> 0
+      | Some n -> n
     in
     let has_unresolved =
       match Hashtbl.find_opt s.unresolved_by_target target_key with

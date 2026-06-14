@@ -22,6 +22,7 @@ type fact =
   ; last_accessed : float
   ; valid_until : float option
   ; stale_factor : float
+  ; expected_lifetime_cycles : int option
   ; last_verified_at : float option
   ; schema_version : string
   }
@@ -128,6 +129,9 @@ let fact_to_json f =
      @ (match f.last_verified_at with
      | Some ts -> [ "last_verified_at", `Float ts ]
      | None -> [])
+     @ (match f.expected_lifetime_cycles with
+     | Some cycles -> [ "expected_lifetime_cycles", `Int cycles ]
+     | None -> [])
 ;;
 
 let fact_of_json (json : Yojson.Safe.t) =
@@ -151,6 +155,7 @@ let fact_of_json (json : Yojson.Safe.t) =
           let valid_until = json_float_field "valid_until" fields in
           let stale_factor = Option.value (json_float_field "stale_factor" fields) ~default:0.0 in
           let last_verified_at = json_float_field "last_verified_at" fields in
+          let expected_lifetime_cycles = json_int_field "expected_lifetime_cycles" fields in
           Some
             { claim
             ; confidence = Float.max 0.0 (Float.min 1.0 confidence)
@@ -162,6 +167,7 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; valid_until
             ; stale_factor
             ; last_verified_at
+            ; expected_lifetime_cycles
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
                 Option.value (json_string_field "schema_version" fields) ~default:schema_version

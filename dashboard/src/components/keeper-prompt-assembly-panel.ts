@@ -501,46 +501,27 @@ function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; i
   `
 }
 
-function SideStage({ stage, label }: { stage: KeeperPromptAssemblyStage; label: string }) {
-  return html`
-    <div class="border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0">
-      <div class="mb-1 flex flex-wrap items-center gap-2">
-        <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</span>
-        <${StatusChip} tone=${stageTone(stage)}>${stageStatusLabel(stage)}<//>
-      </div>
-      <div class="text-xs font-semibold text-[var(--color-fg-primary)]">${stage.title}</div>
-      <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${stage.summary}</div>
-      <div class="mt-2 font-mono text-3xs text-[var(--color-fg-disabled)]">${stageMicrocopy(stage)}</div>
-    </div>
-  `
-}
-
 function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
-  const sourceStage = stages.find(stage => stage.role === 'source_prep')
   const modelStages = stages.filter(stage => stage.role === 'model_input')
-  const evidenceStage = stages.find(stage => stage.role === 'evidence')
 
   return html`
-    <div class="grid gap-3 xl:grid-cols-[minmax(0,2.4fr)_minmax(220px,0.8fr)]">
-      <section class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-3">
-        <div class="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] pb-2">
-          <div class="flex items-center gap-2">
-            <${StatusChip} tone="info">Model sees<//>
-            <span class="text-xs font-semibold text-[var(--color-fg-primary)]">turn input recipe</span>
-          </div>
-          <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${modelInputMicrocopy(modelStages)}</span>
+    <section class="rounded-[var(--r-1)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-3">
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border-default)] pb-2">
+        <div class="flex items-center gap-2">
+          <${StatusChip} tone="info">Model sees<//>
+          <span class="text-xs font-semibold text-[var(--color-fg-primary)]">turn input recipe</span>
         </div>
-        <ol>
-          ${modelStages.map((stage, index) => html`
-            <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
-          `)}
-        </ol>
-      </section>
-      <aside class="rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-3">
-        ${sourceStage ? html`<${SideStage} stage=${sourceStage} label="before model" />` : null}
-        ${evidenceStage ? html`<${SideStage} stage=${evidenceStage} label="after model" />` : null}
-      </aside>
-    </div>
+        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${modelInputMicrocopy(modelStages)}</span>
+      </div>
+      <div class="mb-2 text-3xs leading-relaxed text-[var(--color-fg-muted)]">
+        Prompt sources are resolved before slot 1; fingerprints and context edges are recorded after slot 4.
+      </div>
+      <ol>
+        ${modelStages.map((stage, index) => html`
+          <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
+        `)}
+      </ol>
+    </section>
   `
 }
 

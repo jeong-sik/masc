@@ -81,11 +81,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      failures are caught so a corrupt store cannot cancel sibling fibers. The
      kill switch mirrors the recall gate ([MASC_KEEPER_MEMORY_OS_RECALL]); when
      disabled the shared store simply stops being refreshed (recall still reads
-     whatever is there). *)
+     whatever is there).
+
+     Default OFF until #21241: a read-only dry-run over the live fleet found the
+     only >=2-keeper-corroborated [fact]/[constraint] claims are ephemeral
+     lifecycle/coordination boilerplate ("checkpoint saved", "no tasks") that the
+     librarian mislabels as [category=fact]. Promoting them would inject prompt
+     noise via recall's [shared via] line, with no durable knowledge. Re-enable
+     (flip the default, or set the env true) once the librarian taxonomy emits
+     ephemeral events as a non-promotable category (#21241, RFC-0244 §2.3). *)
   if
     Keeper_memory_bank_env.memory_env_bool_logged
       "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-      ~default:true
+      ~default:false
   then
     fork_logged_fiber
       ~sw

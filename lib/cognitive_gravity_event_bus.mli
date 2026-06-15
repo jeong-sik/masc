@@ -24,7 +24,9 @@ val source_tasks : ?since_ids:string list -> unit -> Cognitive_gravity.decay_tri
     [since_ref]. Default: last 5 commits. *)
 val source_git : ?since_ref:string -> unit -> Cognitive_gravity.decay_trigger list
 
-(** [poll_all ()] calls all three source functions and concatenates
-    the results. Use as the main entry point for a periodic decay
-    sweep. *)
-val poll_all : unit -> Cognitive_gravity.decay_trigger list
+(** [poll_all ()] calls all three source functions and feeds the
+    resulting triggers through [Cognitive_gravity.apply_decay].
+
+    Returns (fact_id, decay_factor) pairs from the cognitive gravity
+    engine. Use as the main entry point for a periodic decay sweep. *)
+val poll_all : unit -> (string * float) list

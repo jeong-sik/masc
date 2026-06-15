@@ -16,10 +16,31 @@ type retention_verdict =
 (** Composite importance score for a fact.
 
     Score = confidence × access_recency × truth_recency ×
-    stale_penalty × access_boost.  [access_recency] uses
+    stale_penalty × access_boost × lexical_relevance.  [access_recency] uses
     [last_accessed], while [truth_recency] uses [last_verified_at] or
-    [first_seen] so recall cannot make an unverified claim fresh again. *)
-val score_fact : ?lambda:float -> ?alpha:float -> now:float -> fact -> float
+    [first_seen] so recall cannot make an unverified claim fresh again.
+
+    [seed_tokens] (RFC-0244) is the current turn's token set; when omitted (or
+    empty) [lexical_relevance] is [1.0] and the score is byte-identical to the
+    pre-RFC-0244 formula. *)
+val score_fact
+  :  ?lambda:float
+  -> ?alpha:float
+  -> ?seed_tokens:string list
+  -> now:float
+  -> fact
+  -> float
+
+(** RFC-0244: deduped set of lowercased word tokens (length > 2). The shared SSOT
+    tokenizer for turn-seeded recall and the keyword access bump. *)
+val tokenize : string -> string list
+
+(** RFC-0244: deterministic lexical relevance multiplier in [[1.0, 1.0 +. gain]].
+    [seed_tokens = []] yields [1.0] (multiplicative identity). With a seed, a fact
+    is boosted by the fraction of the turn's distinct tokens its claim covers
+    (token-set intersection). Pure function of [(seed_tokens, fact.claim)] — offline,
+    no embedding. *)
+val lexical_relevance : ?gain:float -> seed_tokens:string list -> fact -> float
 
 val truth_recency_factor : ?lambda:float -> now:float -> fact -> float
 val stale_penalty : fact -> float

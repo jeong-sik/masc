@@ -89,8 +89,8 @@ let fact_is_current ~now fact =
   | Some ts -> ts >= now
 ;;
 
-let render_fact ~now fact =
-  let score = Keeper_memory_os_policy.score_fact ~now fact in
+let render_fact ~now ?(seed_tokens = []) fact =
+  let score = Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact in
   let source = fact.source in
   Printf.sprintf
     "- [category=%s confidence=%.2f stale=%.2f score=%.3f turn=%d] %s"
@@ -159,33 +159,35 @@ let dedup_by_claim scored =
     scored
 ;;
 
-let scored_facts ~now facts =
+let scored_facts ~now ?(seed_tokens = []) facts =
   facts
   |> List.filter (fact_is_current ~now)
-  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~now fact, fact)
+  |> List.map (fun fact -> Keeper_memory_os_policy.score_fact ~seed_tokens ~now fact, fact)
   |> List.sort (fun (a, _) (b, _) -> compare b a)
   |> dedup_by_claim
   |> List.map snd
 ;;
 
-let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
+let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ?(seed_tokens = []) () =
   let max_facts = max 0 max_facts in
   let max_episodes = max 0 max_episodes in
   let facts =
     (* RFC-0239 Q4: read up to the bounded recall window (the retention sweep
        caps the store to this many facts), so score ranking selects the
-       globally best facts rather than only the most recent [fact_tail_scan]. *)
+       globally best facts rather than only the most recent [fact_tail_scan].
+       RFC-0244: [seed_tokens] (current turn) reranks via lexical relevance; an
+       empty seed leaves the ranking unchanged. *)
     Keeper_memory_os_io.read_facts_tail
       ~keeper_id
       ~n:(max fact_tail_scan Keeper_memory_os_io.fact_recall_window)
-    |> scored_facts ~now
+    |> scored_facts ~now ~seed_tokens
     |> take max_facts
   in
   let episodes = Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n:max_episodes in
   match facts, episodes with
   | [], [] -> ""
   | _ ->
-    let fact_lines = List.map (render_fact ~now) facts in
+    let fact_lines = List.map (render_fact ~now ~seed_tokens) facts in
     let episode_lines = List.map render_episode episodes in
     (match render_recall_context ~fact_lines ~episode_lines with
      | Ok context -> context
@@ -199,9 +201,15 @@ let render_context
       ~now
       ?(max_facts = default_max_facts)
       ?(max_episodes = default_max_episodes)
+      ?seed
       ()
   =
-  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () with
+  let seed_tokens =
+    match seed with
+    | None -> []
+    | Some s -> Keeper_memory_os_policy.tokenize s
+  in
+  try render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ~seed_tokens () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -219,11 +227,11 @@ let enabled () =
     ~default:true
 ;;
 
-let render_if_enabled ~keeper_id ~now () =
+let render_if_enabled ~keeper_id ~now ?seed () =
   if not (enabled ())
   then None
   else (
-    match String.trim (render_context ~keeper_id ~now ()) with
+    match String.trim (render_context ~keeper_id ~now ?seed ()) with
     | "" -> None
     | block -> Some block)
 ;;

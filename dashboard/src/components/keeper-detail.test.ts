@@ -330,7 +330,7 @@ describe('KeeperDetailPage', () => {
     keepers.value = [analyst]
 
     const { container } = render(html`<${KeeperDetailPage} />`)
-    expect(screen.getByText('analyst')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 2, name: 'analyst' })).toBeTruthy()
     expect(screen.getByText('direct chat analyst')).toBeTruthy()
     expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
     const pageText = container.textContent ?? ''

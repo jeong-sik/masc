@@ -184,9 +184,9 @@ let websocket_discovery_json (ctx : http_context) =
     @ [ "listening", `Bool listening
       ; "reachable", `Bool reachable
       ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
-      ; "mode", `String "same_origin_upgrade"
+      ; "mode", `String "standalone"
       ; "discovery_path", `String "/ws"
-      ; "upgrade_path", `String "/ws"
+      ; "upgrade_path", `String "/"
       ; "standalone_listening", `Bool standalone_listening
       ; "session_count", `Int (get_ws_session_count ())
       ]
@@ -196,9 +196,11 @@ let websocket_discovery_json (ctx : http_context) =
     then
       base_fields
       @ [ "ws_port", `Int port
-        ; "ws_url", `String (websocket_url_from_base_url ctx.base_url)
+        ; "ws_url", `String standalone_ws_url
         ; "standalone_ws_port", `Int port
         ; "standalone_ws_url", `String standalone_ws_url
+        ; "same_origin_upgrade_path", `String "/ws"
+        ; "same_origin_ws_url", `String (websocket_url_from_base_url ctx.base_url)
         ]
     else base_fields
   in

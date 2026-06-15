@@ -28,6 +28,10 @@ val to_yojson : t -> Yojson.Safe.t
 
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
+val all : t list
+(** Every phase in declaration order. SSOT for callers that need the full
+    string set (MCP schema enum, validator) via [List.map to_string all]. *)
+
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete
@@ -43,6 +47,10 @@ type action =
 val action_to_string : action -> string
 val action_of_string : string -> action option
 val parse_action : string -> action option
+
+val all_actions : action list
+(** Every action in declaration order. SSOT for the schema/validator action
+    enum via [List.map action_to_string all_actions]. *)
 
 (** Outcome of {!decide_transition}. [Move_to] is a direct phase
     change; [Open_verification] / [Open_approval] gate completion

@@ -1411,6 +1411,8 @@
 
 (include stanzas/test_git_fetch_retry_script.inc)
 
+(include stanzas/test_goal_phase_all.inc)
+
 (include stanzas/test_goal_phase_awaiting_verification_10411.inc)
 
 (include stanzas/test_governance_cases_snapshot.inc)

@@ -179,28 +179,34 @@ let extract_and_append_with_provider
   match extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg inp with
   | Error _ as e -> e
   | Ok episode ->
-    Keeper_memory_os_io.append_episode_bundle ~keeper_id episode;
-    (* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
-       fact store after each librarian write. cap_facts' hysteresis keeps this
-       off the hot path (a rewrite only fires once the store overflows the
-       trigger). A retention failure must not fail the already-succeeded
-       append, so it is logged and swallowed. *)
+    let now = episode.Keeper_memory_os_types.created_at in
+    (* RFC-0243: persist the episode log (unique episode file + event), then
+       UPSERT its claims into the fact store instead of blind-appending. A claim
+       re-extracted across turns is folded into the existing row
+       (Keeper_memory_os_policy.reobserve_fact: confidence blends, access_count
+       and last_verified_at refresh) rather than accumulating as an immortal
+       frozen-confidence duplicate — the accuracy-inversion root fix. The same
+       call applies the RFC-0239 Q4 retention cap in one atomic rewrite. The
+       episode log already retains the raw claims, so a fact-merge failure
+       (logged and swallowed) does not lose them. *)
+    Keeper_memory_os_io.append_episode ~keeper_id episode;
+    Keeper_memory_os_io.append_event ~keeper_id episode;
     (try
        let window = Keeper_memory_os_io.fact_recall_window in
        ignore
-         (Keeper_memory_os_io.cap_facts
+         (Keeper_memory_os_io.merge_and_cap_facts
             ~keeper_id
+            ~merge:(Keeper_memory_os_policy.reobserve_fact ~now)
+            ~incoming:episode.Keeper_memory_os_types.claims
             ~keep:window
             ~trigger:(window + (window / 2))
-            ~rank:
-              (Keeper_memory_os_policy.score_fact
-                 ~now:episode.Keeper_memory_os_types.created_at)
-          : int)
+            ~rank:(Keeper_memory_os_policy.score_fact ~now)
+          : Keeper_memory_os_io.fact_merge_stats)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.warn
-         "memory os retention sweep failed keeper=%s: %s"
+         "memory os fact upsert failed keeper=%s: %s"
          keeper_id
          (Printexc.to_string exn));
     Ok episode

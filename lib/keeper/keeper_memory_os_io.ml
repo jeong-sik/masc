@@ -352,6 +352,80 @@ let cap_facts ~keeper_id ~keep ~trigger ~rank =
     total - List.length kept)
 ;;
 
+type fact_merge_stats =
+  { merged : int
+  ; appended : int
+  ; dropped : int
+  }
+
+(* RFC-0243: fold a batch of newly extracted [incoming] facts into [existing] by
+   normalized claim identity. An incoming fact whose normalized claim matches an
+   existing row (or an earlier incoming in the same batch) is merged in place via
+   [merge] (a re-observation); an incoming fact with a new identity is appended.
+   Pre-existing duplicate rows in [existing] are preserved as-is — only the first
+   row of each identity is a merge target, so collapsing legacy duplicates does
+   not spuriously inflate a re-observation count. Existing rows keep their file
+   order; genuinely new facts are appended at the end. Returns the rebuilt list
+   plus (merged, appended) counts. *)
+let merge_episode_facts ~merge ~existing ~incoming =
+  let tbl : (string, fact ref) Hashtbl.t = Hashtbl.create 64 in
+  let order = ref [] in
+  List.iter
+    (fun f ->
+       let cell = ref f in
+       order := cell :: !order;
+       let key = normalize_claim f.claim in
+       if not (Hashtbl.mem tbl key) then Hashtbl.add tbl key cell)
+    existing;
+  let merged = ref 0 in
+  let appended = ref 0 in
+  List.iter
+    (fun inc ->
+       let key = normalize_claim inc.claim in
+       match Hashtbl.find_opt tbl key with
+       | Some cell ->
+         cell := merge ~existing:!cell ~incoming:inc;
+         incr merged
+       | None ->
+         let cell = ref inc in
+         order := cell :: !order;
+         Hashtbl.add tbl key cell;
+         incr appended)
+    incoming;
+  List.rev_map ( ! ) !order, !merged, !appended
+;;
+
+(* RFC-0243: the librarian write path. Read the store, upsert the episode's
+   claims (re-observations merge in place instead of appending immortal
+   duplicates — the accuracy-inversion root fix), then apply the same retention
+   cap as [cap_facts] in the same read-modify-rewrite so the file is rebuilt
+   once. Because the merge mutates existing rows, this rewrites on every write
+   that carries claims; the librarian runs at most once per turn after an LLM
+   call, so a full rewrite of at most [trigger] facts is off the hot path. An
+   empty [incoming] with the store already under [trigger] is a no-op. *)
+let merge_and_cap_facts ~keeper_id ~merge ~incoming ~keep ~trigger ~rank =
+  let existing = read_all_facts ~keeper_id in
+  let merged_list, merged, appended = merge_episode_facts ~merge ~existing ~incoming in
+  let total = List.length merged_list in
+  let no_incoming = match incoming with [] -> true | _ :: _ -> false in
+  if no_incoming && total <= trigger
+  then { merged; appended; dropped = 0 }
+  else (
+    let kept, dropped =
+      if total <= trigger
+      then merged_list, 0
+      else (
+        let kept =
+          merged_list
+          |> List.stable_sort (fun a b -> Float.compare (rank b) (rank a))
+          |> take_first keep
+        in
+        kept, total - List.length kept)
+    in
+    rewrite_facts_atomically ~keeper_id kept;
+    { merged; appended; dropped })
+;;
+
 let read_events_tail ~keeper_id ~n =
   read_lines_tail (events_path ~keeper_id) ~n
   |> List.filter_map (parse_json_line episode_of_json)

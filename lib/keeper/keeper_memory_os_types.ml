@@ -114,6 +114,31 @@ let clamp01 value =
   Float.max 0.0 (Float.min 1.0 value)
 ;;
 
+(* Claim identity SSOT: collapse a claim to a normalized fingerprint (lowercase +
+   internal-whitespace-collapsed + trailing-space-trimmed) so trivially reworded
+   re-confirmations of the same conclusion ("...would end the session" vs "...will
+   end the session", or differing case/spacing) share a key. The recall-time dedup
+   (Keeper_memory_os_recall.dedup_by_claim) and the write-time upsert
+   (Keeper_memory_os_io.merge_and_cap_facts) MUST key on the same function, so it
+   lives here in the shared base module rather than in either consumer. *)
+let normalize_claim s =
+  let b = Buffer.create (String.length s) in
+  let prev_space = ref true in
+  String.iter
+    (fun c ->
+      match Char.lowercase_ascii c with
+      | ' ' | '\t' | '\r' | '\n' ->
+        if not !prev_space then Buffer.add_char b ' ';
+        prev_space := true
+      | c ->
+        Buffer.add_char b c;
+        prev_space := false)
+    s;
+  let r = Buffer.contents b in
+  let n = String.length r in
+  if n > 0 && r.[n - 1] = ' ' then String.sub r 0 (n - 1) else r
+;;
+
 let optional_float_field key = function
   | Some value -> [ key, `Float value ]
   | None -> []

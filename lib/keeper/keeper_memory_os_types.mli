@@ -44,6 +44,12 @@ type episode =
   ; schema_version : string
   }
 
+(** Claim identity SSOT. Normalizes a claim to a fingerprint (lowercase +
+    internal-whitespace-collapsed + trailing-space-trimmed) so re-confirmations of
+    the same conclusion share a key. Used by both the recall-time dedup and the
+    write-time upsert so the two key identically. *)
+val normalize_claim : string -> string
+
 (** {1 JSON codecs} *)
 
 val provenance_event_to_json : provenance_event -> Yojson.Safe.t

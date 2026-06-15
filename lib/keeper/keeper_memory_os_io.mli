@@ -49,6 +49,30 @@ val read_all_facts : keeper_id:string -> fact list
 val cap_facts :
   keeper_id:string -> keep:int -> trigger:int -> rank:(fact -> float) -> int
 
+(** Outcome of a [merge_and_cap_facts] write: how many incoming claims were
+    folded into an existing fact ([merged]), persisted as new facts
+    ([appended]), and removed by the retention cap ([dropped]). *)
+type fact_merge_stats =
+  { merged : int
+  ; appended : int
+  ; dropped : int
+  }
+
+(** RFC-0243: the librarian write path. Upsert [incoming] facts into the store by
+    normalized claim identity — a re-observation of an existing claim is folded
+    in via [merge] (so confidence/access/verification evolve) instead of
+    appending an immortal duplicate — then apply the [keep]/[trigger]/[rank]
+    retention cap, all in a single atomic rewrite. Replaces the blind append +
+    [cap_facts] pair, giving the store write-time dedup. *)
+val merge_and_cap_facts :
+  keeper_id:string
+  -> merge:(existing:fact -> incoming:fact -> fact)
+  -> incoming:fact list
+  -> keep:int
+  -> trigger:int
+  -> rank:(fact -> float)
+  -> fact_merge_stats
+
 module For_testing : sig
   val with_keepers_dir : string -> (unit -> 'a) -> 'a
 end

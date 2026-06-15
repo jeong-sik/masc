@@ -1302,6 +1302,162 @@ let test_recall_context_preserves_admission_memory () =
         (contains "Memory OS stale goal_cap blocker was diagnosed" ctx)))
 ;;
 
+(* RFC-0243: blend_confidence is a bounded convex EMA — it stays within the
+   prior/observed band (so inside [0,1]), is stable when re-affirmed at the same
+   value, and is monotone in the observed value. *)
+let test_blend_confidence_is_bounded_convex () =
+  let w = Policy.reaffirm_weight in
+  let blended = Policy.blend_confidence ~prior:0.9 ~observed:0.4 in
+  Alcotest.(check (float 1e-9))
+    "EMA toward observed"
+    ((0.9 *. (1.0 -. w)) +. (0.4 *. w))
+    blended;
+  Alcotest.(check bool) "within prior/observed band" true (blended <= 0.9 && blended >= 0.4);
+  Alcotest.(check (float 1e-9))
+    "stable when re-affirmed at same confidence"
+    0.8
+    (Policy.blend_confidence ~prior:0.8 ~observed:0.8);
+  let lo = Policy.blend_confidence ~prior:0.5 ~observed:0.2 in
+  let hi = Policy.blend_confidence ~prior:0.5 ~observed:0.9 in
+  Alcotest.(check bool) "monotone in observed" true (hi > lo);
+  Alcotest.(check bool) "stays within [0,1]" true (Policy.blend_confidence ~prior:1.0 ~observed:1.0 <= 1.0)
+;;
+
+(* RFC-0243: reobserve_fact moves the re-observation signals (confidence blends,
+   access_count bumps, last_accessed/last_verified_at refresh) while preserving
+   the fact's identity and first-seen provenance. *)
+let test_reobserve_fact_updates_signals () =
+  let now = 1_000_000.0 in
+  let existing =
+    { (fact_fixture ~now ()) with
+      Types.confidence = 0.9
+    ; Types.access_count = 2
+    ; Types.first_seen = now -. 86400.0
+    ; Types.last_accessed = now -. 3600.0
+    ; Types.last_verified_at = Some (now -. 7200.0)
+    }
+  in
+  let incoming =
+    { existing with
+      Types.confidence = 0.4
+    ; Types.access_count = 0
+    ; Types.first_seen = now
+    ; Types.last_accessed = now
+    ; Types.last_verified_at = Some now
+    }
+  in
+  let merged = Policy.reobserve_fact ~now ~existing ~incoming in
+  Alcotest.(check int) "access_count bumped" 3 merged.Types.access_count;
+  Alcotest.(check (float 1e-9))
+    "confidence blended toward incoming"
+    (Policy.blend_confidence ~prior:0.9 ~observed:0.4)
+    merged.Types.confidence;
+  Alcotest.(check (float 1e-9)) "last_accessed refreshed" now merged.Types.last_accessed;
+  Alcotest.(check (option (float 1e-9)))
+    "last_verified_at refreshed"
+    (Some now)
+    merged.Types.last_verified_at;
+  Alcotest.(check (float 1e-9))
+    "first_seen preserved"
+    (now -. 86400.0)
+    merged.Types.first_seen;
+  Alcotest.(check string) "claim identity preserved" existing.Types.claim merged.Types.claim
+;;
+
+(* RFC-0243: a re-observed claim (even reworded by case/whitespace) is folded into
+   the single existing row instead of appending an immortal duplicate — the
+   accuracy-inversion root fix. The merged row keeps the first observation's
+   claim/provenance but its live signals (access_count, confidence,
+   last_verified_at) move. *)
+let test_merge_and_cap_upserts_reobserved_claim () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let claim = "User deploys via blue-green" in
+    let first =
+      { base with
+        Types.claim
+      ; Types.confidence = 0.6
+      ; Types.access_count = 0
+      ; Types.last_verified_at = Some (now -. 86400.0)
+      }
+    in
+    Memory_io.append_fact ~keeper_id first;
+    let reobserved =
+      { base with
+        Types.claim = "user  deploys via BLUE-GREEN"
+      ; Types.confidence = 0.9
+      ; Types.access_count = 0
+      ; Types.last_accessed = now
+      ; Types.last_verified_at = Some now
+      }
+    in
+    let stats =
+      Memory_io.merge_and_cap_facts
+        ~keeper_id
+        ~merge:(Policy.reobserve_fact ~now)
+        ~incoming:[ reobserved ]
+        ~keep:256
+        ~trigger:384
+        ~rank:(Policy.score_fact ~now)
+    in
+    Alcotest.(check int) "one claim merged" 1 stats.Memory_io.merged;
+    Alcotest.(check int) "none appended" 0 stats.Memory_io.appended;
+    let rows = Memory_io.read_all_facts ~keeper_id in
+    Alcotest.(check int) "single row after upsert" 1 (List.length rows);
+    let row = List.hd rows in
+    Alcotest.(check int) "access_count bumped to 1" 1 row.Types.access_count;
+    Alcotest.(check bool)
+      "confidence moved up toward re-observed 0.9"
+      true
+      (row.Types.confidence > 0.6 && row.Types.confidence < 0.9);
+    Alcotest.(check (option (float 1e-9)))
+      "last_verified_at refreshed to now"
+      (Some now)
+      row.Types.last_verified_at;
+    Alcotest.(check string) "first observation's claim text kept" claim row.Types.claim)
+;;
+
+(* RFC-0243: distinct claims are appended (not merged), and the retention cap
+   still drops the lowest-ranked rows once the store exceeds the trigger, in the
+   same write. *)
+let test_merge_and_cap_appends_distinct_and_caps () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    let mk i conf =
+      { base with
+        Types.claim = Printf.sprintf "distinct fact %d" i
+      ; Types.confidence = conf
+      ; Types.access_count = 0
+      ; Types.source = { base.Types.source with Types.turn = i }
+      }
+    in
+    let stats =
+      Memory_io.merge_and_cap_facts
+        ~keeper_id
+        ~merge:(Policy.reobserve_fact ~now)
+        ~incoming:[ mk 1 0.1; mk 2 0.2; mk 3 0.3 ]
+        ~keep:2
+        ~trigger:2
+        ~rank:(fun f -> f.Types.confidence)
+    in
+    Alcotest.(check int) "three distinct appended" 3 stats.Memory_io.appended;
+    Alcotest.(check int) "none merged" 0 stats.Memory_io.merged;
+    Alcotest.(check int) "one dropped by cap" 1 stats.Memory_io.dropped;
+    let rows = Memory_io.read_all_facts ~keeper_id in
+    Alcotest.(check int) "kept two highest-ranked" 2 (List.length rows);
+    List.iter
+      (fun f ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s is a top-2 claim" f.Types.claim)
+          true
+          (List.mem f.Types.claim [ "distinct fact 2"; "distinct fact 3" ]))
+      rows)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os"
@@ -1356,6 +1512,14 @@ let () =
             `Quick
             test_policy_truth_age_not_reset_by_access
         ; Alcotest.test_case "bump access" `Quick test_bump_access
+        ; Alcotest.test_case
+            "blend_confidence bounded convex (RFC-0243)"
+            `Quick
+            test_blend_confidence_is_bounded_convex
+        ; Alcotest.test_case
+            "reobserve_fact updates signals (RFC-0243)"
+            `Quick
+            test_reobserve_fact_updates_signals
         ] )
     ; ( "io"
       , [ Alcotest.test_case
@@ -1414,6 +1578,14 @@ let () =
             "cap_facts keeps top-ranked (RFC-0239 Q4)"
             `Quick
             test_cap_facts_keeps_top_ranked
+        ; Alcotest.test_case
+            "merge_and_cap upserts re-observed claim (RFC-0243)"
+            `Quick
+            test_merge_and_cap_upserts_reobserved_claim
+        ; Alcotest.test_case
+            "merge_and_cap appends distinct and caps (RFC-0243)"
+            `Quick
+            test_merge_and_cap_appends_distinct_and_caps
         ] )
     ]
 ;;

@@ -47,3 +47,18 @@ val bump_access_for_turn
   -> fact list
   -> turn_text:string
   -> fact list
+
+(** RFC-0243: bounded EMA weight for a single re-observation (see [blend_confidence]). *)
+val reaffirm_weight : float
+
+(** Blend a prior confidence with a re-observed confidence (bounded EMA). The
+    result is a convex combination of the two, so it stays in [0, 1] and moves a
+    fixed fraction toward [observed]. *)
+val blend_confidence : prior:float -> observed:float -> float
+
+(** Fold a re-observation into an existing fact: blends confidence toward the
+    re-observed value, increments [access_count], and refreshes [last_accessed]
+    and [last_verified_at]. Identity and first-seen provenance are preserved.
+    This is the write-time merge law that makes the score's re-observation
+    signals live (RFC-0243). *)
+val reobserve_fact : now:float -> existing:fact -> incoming:fact -> fact

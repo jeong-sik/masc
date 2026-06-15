@@ -124,3 +124,38 @@ let bump_access_for_turn ~now (facts : fact list) ~(turn_text : string) : fact l
        else f)
     facts
 ;;
+
+(* RFC-0243: weight of a single re-observation when blending confidence. The
+   librarian re-extracting the same claim is one new observation, so confidence
+   moves a bounded fraction toward the re-observed value rather than jumping to
+   it — repeated agreement at the same confidence is stable (no runaway
+   inflation), while a contradiction (lower re-observed confidence) pulls it
+   down. 0.3 gives meaningful movement over a handful of re-observations without
+   one outlier dominating. *)
+let reaffirm_weight = 0.3
+
+(** Blend a prior confidence with a freshly re-observed confidence via a bounded
+    EMA. Result is a convex combination, so it stays within [min prior observed,
+    max prior observed] which is a subset of [0, 1], and is monotone in
+    [observed]. *)
+let blend_confidence ~prior ~observed =
+  clamp01 ((prior *. (1.0 -. reaffirm_weight)) +. (observed *. reaffirm_weight))
+;;
+
+(** Fold a re-observation of an existing fact into that fact. [existing] is the
+    persisted row; [incoming] is the newly extracted claim with the same
+    normalized identity. The fact's identity and first-seen provenance
+    ([claim]/[category]/[source]/[first_seen]) are preserved; only the
+    re-observation signals move: confidence blends toward the new observation,
+    [access_count] rises (feeds [access_factor]), and [last_accessed] /
+    [last_verified_at] refresh (feed [recency_factor] / [truth_recency_factor]).
+    This is what makes those score inputs respond to evidence instead of being
+    frozen at creation. *)
+let reobserve_fact ~now ~existing ~incoming =
+  { existing with
+    confidence = blend_confidence ~prior:existing.confidence ~observed:incoming.confidence
+  ; access_count = existing.access_count + 1
+  ; last_accessed = now
+  ; last_verified_at = Some now
+  }
+;;

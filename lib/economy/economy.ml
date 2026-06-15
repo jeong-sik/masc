@@ -33,8 +33,10 @@ type transaction_kind =
   | Earn_board_post
   | Earn_upvote
   | Earn_mention_response
+  | Earn_fact_verification
   | Spend_model_call
   | Spend_deliberation
+  | Spend_stale_fact_penalty
   | Adjustment
 
 type transaction = {
@@ -69,6 +71,12 @@ let reward_upvote () =
 let reward_mention_response () =
   Env_config_core.get_float ~default:0.5 "MASC_ECONOMY_REWARD_MENTION_RESPONSE"
 
+let reward_fact_verification () =
+  Env_config_core.get_float ~default:2.0 "MASC_ECONOMY_REWARD_FACT_VERIFICATION"
+
+let penalty_stale_fact () =
+  Env_config_core.get_float ~default:( -1.0) "MASC_ECONOMY_PENALTY_STALE_FACT"
+
 let frugal_threshold () =
   Env_config_core.get_float ~default:5.0 "MASC_ECONOMY_FRUGAL_THRESHOLD"
 
@@ -85,8 +93,10 @@ let transaction_kind_to_string = function
   | Earn_board_post -> "earn_board_post"
   | Earn_upvote -> "earn_upvote"
   | Earn_mention_response -> "earn_mention_response"
+  | Earn_fact_verification -> "earn_fact_verification"
   | Spend_model_call -> "spend_model_call"
   | Spend_deliberation -> "spend_deliberation"
+  | Spend_stale_fact_penalty -> "spend_stale_fact_penalty"
   | Adjustment -> "adjustment"
 
 let transaction_kind_of_string = function
@@ -94,8 +104,10 @@ let transaction_kind_of_string = function
   | "earn_board_post" -> Some Earn_board_post
   | "earn_upvote" -> Some Earn_upvote
   | "earn_mention_response" -> Some Earn_mention_response
+  | "earn_fact_verification" -> Some Earn_fact_verification
   | "spend_model_call" -> Some Spend_model_call
   | "spend_deliberation" -> Some Spend_deliberation
+  | "spend_stale_fact_penalty" -> Some Spend_stale_fact_penalty
   | "adjustment" -> Some Adjustment
   | _ -> None
 
@@ -260,7 +272,8 @@ let base_reward_for_kind = function
   | Earn_board_post -> reward_board_post ()
   | Earn_upvote -> reward_upvote ()
   | Earn_mention_response -> reward_mention_response ()
-  | Spend_model_call | Spend_deliberation | Adjustment -> 0.0
+  | Earn_fact_verification -> reward_fact_verification ()
+  | Spend_model_call | Spend_deliberation | Spend_stale_fact_penalty | Adjustment -> 0.0
 
 (** {1 Core Operations} *)
 

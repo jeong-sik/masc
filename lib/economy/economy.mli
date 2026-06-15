@@ -45,8 +45,10 @@ type transaction_kind =
   | Earn_board_post
   | Earn_upvote
   | Earn_mention_response
+  | Earn_fact_verification
   | Spend_model_call
   | Spend_deliberation
+  | Spend_stale_fact_penalty
   | Adjustment
 
 type transaction = {

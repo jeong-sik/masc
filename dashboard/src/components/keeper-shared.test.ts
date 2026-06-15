@@ -30,6 +30,7 @@ vi.mock('../keeper-runtime', async () => {
     keeperThreads: signal({}),
     probeKeeperRuntime: vi.fn(),
     recoverKeeperRuntime: vi.fn(),
+    resumePendingKeeperChatRequests: vi.fn(async () => undefined),
     sendKeeperThreadMessage: vi.fn(async () => null),
   }
 })

@@ -71,7 +71,7 @@
       <tr>
         <td>No repeated silence</td>
         <td>Repeated <code>stay_silent</code> crosses from observation into blocker + recovery stimulus + operator visibility.</td>
-        <td><span class="pill ok">wired</span> Detector now returns typed outcomes and the turn path enqueues <code>stay_silent_recovery</code>.</td>
+        <td><span class="pill ok">wired</span> Detector now returns typed outcomes and the turn path enqueues <code>no_progress_recovery</code>.</td>
       </tr>
       <tr>
         <td>No ledger blind spots</td>
@@ -98,14 +98,14 @@
   <h3>Repeated stay_silent</h3>
   <pre>Turn result
   -> speech_act
-     -> non-silent: reset streak; clear stay_silent_loop blocker when it was latched
+     -> progress: reset streak; clear no_progress_loop blocker when it was latched
      -> stay_silent: increment streak + gauge
         -> below threshold: observe only
         -> threshold crossed:
            -> metric + warning
-           -> registry failure_reason = Tool_required_unsatisfied(stay_silent_loop)
-           -> meta blocker_class = stay_silent_loop
-           -> enqueue + wake stay_silent_recovery stimulus
+           -> registry failure_reason = Tool_required_unsatisfied(no_progress_loop)
+           -> meta blocker_class = no_progress_loop
+           -> enqueue + wake no_progress_recovery stimulus
            -> KRL records typed stimulus</pre>
 
   <h3>KRL degraded summary</h3>
@@ -124,18 +124,18 @@
     </thead>
     <tbody>
       <tr>
-        <td><code>Keeper_stay_silent_loop_detector.record_turn</code></td>
+        <td><code>Keeper_no_progress_loop_detector.record_turn</code></td>
         <td>Returns <code>Normal</code>, <code>Loop_detected</code>, or <code>Loop_reset</code>.</td>
         <td>Callers can take durable recovery action once per loop episode.</td>
       </tr>
       <tr>
         <td><code>blocker_class</code></td>
-        <td>Adds <code>stay_silent_loop</code>.</td>
+        <td>Adds <code>no_progress_loop</code>.</td>
         <td>Dashboard/runtime surfaces can distinguish silence loops from generic contract failure.</td>
       </tr>
       <tr>
         <td><code>Keeper_event_queue.classify</code></td>
-        <td>Adds <code>Stay_silent_recovery</code> for <code>{"source":"stay_silent_recovery"}</code>.</td>
+        <td>Adds <code>No_progress_recovery</code> for <code>{"source":"no_progress_recovery"}</code>.</td>
         <td>Recovery wakeups are typed, not unsupported queue noise.</td>
       </tr>
       <tr>
@@ -148,12 +148,12 @@
 
   <h2>Verification Commands</h2>
   <pre>scripts/dune-local.sh build \
-  test/test_stay_silent_loop_detector.exe \
+  test/test_no_progress_loop_detector.exe \
   test/test_keeper_reaction_ledger.exe \
   test/test_keeper_event_queue.exe \
   test/keeper_event_queue/test_keeper_event_queue.exe
 
-./_build/default/test/test_stay_silent_loop_detector.exe
+./_build/default/test/test_no_progress_loop_detector.exe
 ./_build/default/test/test_keeper_reaction_ledger.exe
 ./_build/default/test/test_keeper_event_queue.exe
 ./_build/default/test/keeper_event_queue/test_keeper_event_queue.exe

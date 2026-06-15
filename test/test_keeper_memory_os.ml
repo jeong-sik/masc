@@ -461,6 +461,29 @@ let test_librarian_runtime_override_env () =
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
 ;;
 
+let test_librarian_timeout_override_env () =
+  let env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv env "")
+    (fun () ->
+       Unix.putenv env "";
+       let default = Librarian_runtime.default_timeout_sec () in
+       Alcotest.(check (float 0.001))
+         "empty timeout override falls back"
+         default
+         (Librarian_runtime.default_timeout_sec ());
+       Unix.putenv env "180.5";
+       Alcotest.(check (float 0.001))
+         "positive timeout override parses"
+         180.5
+         (Librarian_runtime.default_timeout_sec ());
+       Unix.putenv env "-1";
+       Alcotest.(check (float 0.001))
+         "invalid timeout override falls back"
+         default
+         (Librarian_runtime.default_timeout_sec ()))
+;;
+
 let test_librarian_preserves_admission_memory_text () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-filter-transient-cap"
@@ -1332,6 +1355,10 @@ let () =
             "librarian runtime override env"
             `Quick
             test_librarian_runtime_override_env
+        ; Alcotest.test_case
+            "librarian timeout override env"
+            `Quick
+            test_librarian_timeout_override_env
         ; Alcotest.test_case
             "librarian preserves admission memory text"
             `Quick

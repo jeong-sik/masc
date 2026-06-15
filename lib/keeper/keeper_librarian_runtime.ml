@@ -31,6 +31,12 @@ let max_messages () =
   |> max 1
 ;;
 
+let default_timeout_sec () =
+  Keeper_memory_bank_env.memory_env_float_logged
+    "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+    ~default:Env_config_governance.Inference.timeout_seconds
+;;
+
 let runtime_id_for_librarian ~runtime_id =
   match Sys.getenv_opt "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" with
   | Some value ->
@@ -237,11 +243,14 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id inp =
                provider_cfg.Llm_provider.Provider_config.model_id
            else (
              let clock = Eio_context.get_clock_opt () in
+             let timeout_sec =
+               Option.value timeout_sec ~default:(default_timeout_sec ())
+             in
              match
                extract_and_append_with_provider
                  ?complete
                  ?clock
-                 ?timeout_sec
+                 ~timeout_sec
                  ~sw
                  ~net
                  ~keeper_id

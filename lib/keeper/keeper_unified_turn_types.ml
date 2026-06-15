@@ -304,7 +304,7 @@ let record_turn_tool_events
 
 (** Record the observation for a streaming turn that was cancelled.
     [cancel_reason] distinguishes the source:
-      - ["attempt_watchdog_safety_deadline"] — wall-clock watchdog timeout
+      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
       - ["supervisor_stop"] — supervisor requested stop
       - ["external_cancel"] — external fiber cancellation *)
 let record_streaming_cancelled_observation
@@ -351,8 +351,9 @@ let record_streaming_cancelled_observation
   let cancelled_variant =
     match terminal_reason_code with
     | "attempt_watchdog_safety_deadline" ->
-      (* The attempt watchdog firing is an environmental terminal (the
-         provider stalled mid-stream), not a same-turn re-dispatch storm.
+      (* Legacy receipts from the removed whole-run attempt watchdog were
+         environmental terminals (provider stalled mid-stream), not same-turn
+         re-dispatch storms.
          [Keeper_turn_livelock.classify_and_decide] keys [Stuck_age_exceeded]
          off [first_started_at], i.e. the FIRST dispatch of this turn_id; a
          retry after the watchdog cancel inherits that ~watchdog-budget-old
@@ -361,11 +362,9 @@ let record_streaming_cancelled_observation
          pause on a transport stall contradicts the invariant that a keeper
          keeps acting autonomously. Reset the livelock entry so the retry is
          classified Fresh. Rapid re-dispatch storm detection is unaffected:
-         only the watchdog/provider_timeout terminal clears the counter, and
-         only for the keeper whose turn just timed out. The underlying
-         mid-stream stall (dropped OAS stream-idle deadline) is addressed
-         separately; this prevents the symptom from escalating to a
-         fleet-wide pause. *)
+         only legacy watchdog/provider_timeout receipts clear the counter, and
+         only for the affected keeper. Current runtime code must not emit this
+         reason from a MASC-created wall-clock timeout around tool execution. *)
       Keeper_turn_livelock.reset_keeper_livelock ~keeper:run_meta.name;
       Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
     | _ ->

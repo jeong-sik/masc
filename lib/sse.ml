@@ -116,8 +116,28 @@ let session_kind_to_string = function
 
 let take = List.take
 
+(** Minimum interval between full transport snapshot computations (seconds).
+    The snapshot iterates all SSE clients and builds per-session records;
+    at ~9 broadcasts/sec this path accounts for most allocation on the
+    broadcast hot path.  Throttling to ~0.2/sec cuts allocation by ~97%
+    while keeping dashboard metrics within 5 seconds of reality.
+    Configurable via [MASC_SNAPSHOT_INTERVAL_SEC] env var (default 5.0). *)
+let snapshot_min_interval_sec =
+  try float_of_string (Sys.getenv "MASC_SNAPSHOT_INTERVAL_SEC")
+  with Not_found -> 5.0
+
+(** Timestamp of the last completed snapshot.  CAS-guarded so that
+    concurrent [broadcast_impl] fibers racing to snapshot after the
+    interval expires do not duplicate work — only one fiber wins the
+    compare-and-set and runs the full iteration. *)
+let last_snapshot_time : float Atomic.t = Atomic.make 0.0
+
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
+  let last = Atomic.get last_snapshot_time in
+  if now -. last < snapshot_min_interval_sec then ()
+  else if not (Atomic.compare_and_set last_snapshot_time last now) then ()
+  else begin
   (* Single-pass aggregation: previously [SMap.fold] built a
      [(sid, client)] tuple list, then [List.map] re-walked it to
      produce [session_snapshot] records.  [SMap.iter] over the
@@ -182,6 +202,7 @@ let sync_transport_snapshot () =
   Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
+  end
 
 let mark_seen (client : client) =
   Atomic.set client.last_seen_at (Time_compat.now ())
@@ -319,6 +340,31 @@ let format_event ?id ?event_type data =
    | None -> ());
   Buffer.add_string buf "data: ";
   Buffer.add_string buf data;
+  Buffer.add_string buf "\n\n";
+  Buffer.contents buf
+
+(** Format SSE event from a [Yojson.Safe.t] value without the intermediate
+    [to_string] allocation.  Writes JSON bytes directly into the SSE event
+    buffer via [Yojson.Safe.to_buffer], cutting one string allocation per
+    broadcast (~9/sec → ~9 fewer short-lived strings/sec for GC to collect). *)
+let format_event_yojson ?id ?event_type json =
+  let effective_id =
+    match id with
+    | Some i -> i
+    | None -> Atomic.fetch_and_add event_counter 1 + 1
+  in
+  let buf = Buffer.create 128 in
+  Buffer.add_string buf "id: ";
+  Buffer.add_string buf (string_of_int effective_id);
+  Buffer.add_char buf '\n';
+  (match event_type with
+   | Some e ->
+       Buffer.add_string buf "event: ";
+       Buffer.add_string buf e;
+       Buffer.add_char buf '\n'
+   | None -> ());
+  Buffer.add_string buf "data: ";
+  Yojson.Safe.to_buffer buf json;
   Buffer.add_string buf "\n\n";
   Buffer.contents buf
 
@@ -761,14 +807,16 @@ let reap_dead_external_subscribers () =
 let broadcast_impl ?(buffer = true) ?(notify_external = true)
     ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
-  let data = Yojson.Safe.to_string json in
   let jsonrpc_payload =
     Sse_jsonrpc_filter.jsonrpc_message_for_agent_stream json
   in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type data in
+  (* Write JSON directly into the SSE event buffer, avoiding the
+     intermediate [Yojson.Safe.to_string] allocation.  The output
+     is byte-for-byte identical to the previous two-step approach. *)
+  let event = format_event_yojson ~id:current_event_id ~event_type json in
   if buffer then
     buffer_event current_event_id event;
   (* The [SMap.t] returned by [Atomic.get] is immutable
@@ -865,10 +913,8 @@ let send_to session_id json =
       "Dropping non-JSON-RPC payload sent via Sse.send_to for session %s"
       session_id
   else
-  let data = Yojson.Safe.to_string json in
-  (* Atomic allocation — see [broadcast_impl] for rationale. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type:"message" data in
+  let event = format_event_yojson ~id:current_event_id ~event_type:"message" json in
   buffer_event current_event_id event;
   let client_opt = SMap.find_opt session_id (Atomic.get clients).entries in
   match client_opt with

@@ -59,8 +59,14 @@ let status_to_yojson = function
         ]
   | Timeout -> `Assoc [ ("kind", `String "timeout") ]
 
-let public_runtime_provider_label = "runtime"
-let public_runtime_model_label = "runtime"
+let public_runtime_provider_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
+;;
+
+let public_runtime_model_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+;;
+
 let source_label = "oas_runtime_bridge"
 let durable_replay_surface = "/api/v1/dashboard/telemetry?source=oas_event"
 

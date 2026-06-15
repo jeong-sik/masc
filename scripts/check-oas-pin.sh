@@ -240,6 +240,8 @@ verify_agent_sdk_switch_artifacts() {
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmi"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.cmxa"
   verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider.a"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider__Provider_config.cmi"
+  verify_agent_sdk_artifact "agent_sdk.llm_provider" "${llm_provider_dir}" "llm_provider__Provider_kind.cmi"
 }
 
 if command -v opam >/dev/null 2>&1; then

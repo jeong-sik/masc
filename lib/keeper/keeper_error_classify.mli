@@ -35,6 +35,10 @@ val is_model_rejected_parse_error : Agent_sdk.Error.sdk_error -> bool
     failure counting, even if same-turn retry is still disabled. *)
 val is_auto_recoverable_turn_error : Agent_sdk.Error.sdk_error -> bool
 
+(** [true] for accept-rejected responses tagged by the built-in keeper
+    progress contract as no usable text/tool/non-terminal progress. *)
+val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
+
 (** [true] when the turn runner should record the immediate
     ["keeper cycle FAILED"] line as WARN instead of ERROR because the
     heartbeat policy layer will handle the failure as a provider/OAS budget
@@ -84,8 +88,7 @@ val extract_input_required
   :  Agent_sdk.Error.sdk_error
   -> Agent_sdk.Error.input_required option
 
-(** [true] when an error represents terminal runtime exhaustion or a
-    final accept-rejected result from the MASC OAS boundary. *)
+(** [true] when an error represents terminal runtime exhaustion. *)
 val is_runtime_exhausted_error : Agent_sdk.Error.sdk_error -> bool
 
 (** Classification of why a degraded retry is being attempted. Closed

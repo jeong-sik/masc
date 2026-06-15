@@ -60,7 +60,7 @@ let test_base_path_raw_opt_callers_zero () =
 let test_host_config_base_path_used () =
   let n =
     Ast_grep.count_calls
-      ~module_path:"lib/voice/voice_config.ml"
+      ~module_path:"lib/voice_config/voice_config.ml"
       ~callee:"Host_config.from_env"
   in
   if n < 1

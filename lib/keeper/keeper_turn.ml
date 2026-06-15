@@ -90,6 +90,25 @@ let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     ~config
     ~meta
 
+let direct_owner_conversation_context
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(direct_reply : bool)
+      ~(channel_session_key : string option)
+      ~(channel : string)
+  : string
+  =
+  if (not direct_reply) || Option.is_some channel_session_key || String.trim channel <> ""
+  then ""
+  else
+    Keeper_world_observation_message_scope.collect_recent_direct_conversation
+      ~limit:8 ~config ~meta ()
+    |> Keeper_world_observation_message_scope.render_recent_direct_conversation_context
+
+module For_testing = struct
+  let direct_owner_conversation_context = direct_owner_conversation_context
+end
+
 let resolve_turn_runtime_id (meta : keeper_meta) =
   let runtime_id = String.trim (Keeper_meta_contract.runtime_id_of_meta meta) in
   if runtime_id = "" then
@@ -196,6 +215,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
     let no_state_block = get_bool args "no_state_block" false in
     let direct_reply = get_bool args "direct_reply" false in
     let channel_session_key = get_string_opt args "channel_session_key" in
+    let channel = get_string args "channel" "" in
     (match keeper_msg_timeout_override args with
     | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
@@ -371,6 +391,11 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                       recovery_source
                       (String.concat "\n\n" blocks)
               in
+              let recent_direct_conversation_text =
+                direct_owner_conversation_context
+                  ~config:ctx.config ~meta ~direct_reply ~channel_session_key
+                  ~channel
+              in
               (* 2. Skill route *)
               let skill_route_text =
                 if effective_no_skill_route then ""
@@ -416,6 +441,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
               let soft_parts = List.filter
                 (fun s -> String.trim s <> "")
                 [ continuity_text;
+                  recent_direct_conversation_text;
                   skill_route_text;
                   worktree_text;
                   telemetry_feedback_text;
@@ -480,8 +506,13 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                       (                         (turn_runtime_id))
                     ~world_observation
                     ~turn_affordances
+                    (* A kmsg turn is user-triggered, i.e. reactive: it must
+                       use the reactive idle budget so the graduated idle hook
+                       (nudge -> final warning -> graceful Skip) can run its
+                       course before the OAS loop guard aborts the run. *)
+                    ~max_idle_turns:
+                      (Keeper_runtime_resolved.reactive_max_idle_turns ())
                     ?oas_timeout_s:keeper_msg_oas_timeout_s
-                    ?provider_filter:(Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event
                     ~trajectory_acc
@@ -686,6 +717,11 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                 in
                 `Assoc [
                   ("reply", `String result.response_text);
+                  ( Keeper_turn_outcome.wire_key,
+                    `String
+                      (Keeper_turn_outcome.to_label
+                         (Keeper_turn_outcome.of_stop_reason
+                            result.stop_reason)) );
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String surface_model_used);
                   ("turns", `Int result.turn_count);

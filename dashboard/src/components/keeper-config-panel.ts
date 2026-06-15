@@ -19,7 +19,7 @@ import { MISSING_DATA_DASH } from '../lib/format-string'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
-import { FIELD_STYLE_BASE } from './common/field-style-base'
+import { ExpandableTextarea } from './common/expandable-textarea'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
@@ -58,6 +58,8 @@ type EditDraft = {
 
 const editDraft = signal<EditDraft | null>(null)
 const hookFilterQuery = signal<string>('')
+const lastSavedAt = signal<string | null>(null)
+const promptPreviewTab = signal<'blocks' | 'system' | 'world'>('blocks')
 
 // ── Hook slot filter ─────────────────────────────────────
 
@@ -107,15 +109,33 @@ function initDraftFromConfig(c: KeeperConfig): EditDraft {
 
 function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
   const payload: KeeperConfigUpdatePayload = {}
-  if (draft.goal !== orig.prompt.goal) payload.goal = draft.goal
-  if (draft.short_goal !== orig.prompt.short_goal) payload.short_goal = draft.short_goal
-  if (draft.mid_goal !== orig.prompt.mid_goal) payload.mid_goal = draft.mid_goal
-  if (draft.long_goal !== orig.prompt.long_goal) payload.long_goal = draft.long_goal
-  if (draft.will !== orig.prompt.will) payload.will = draft.will
-  if (draft.needs !== orig.prompt.needs) payload.needs = draft.needs
-  if (draft.desires !== orig.prompt.desires) payload.desires = draft.desires
-  if (draft.instructions !== orig.prompt.instructions) payload.instructions = draft.instructions
+  const setIfChanged = (key: keyof EditDraft) => {
+    const next = draft[key].trim()
+    const prev = orig.prompt[key].trim()
+    if (next !== prev) {
+      // Preserve the user's exact whitespace when persisting; trim only for comparison.
+      payload[key] = draft[key]
+    }
+  }
+  setIfChanged('goal')
+  setIfChanged('short_goal')
+  setIfChanged('mid_goal')
+  setIfChanged('long_goal')
+  setIfChanged('will')
+  setIfChanged('needs')
+  setIfChanged('desires')
+  setIfChanged('instructions')
   return payload
+}
+
+function formatRelativeTime(date: Date): string {
+  const sec = Math.round((Date.now() - date.getTime()) / 1000)
+  if (sec < 60) return `${sec}초 전`
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}분 전`
+  const hour = Math.round(min / 60)
+  if (hour < 24) return `${hour}시간 전`
+  return date.toLocaleString('ko-KR')
 }
 
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
@@ -286,6 +306,8 @@ export function resetKeeperConfig(): void {
   editMode.value = false
   editDraft.value = null
   saveError.value = null
+  lastSavedAt.value = null
+  promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
   runtimeSaving.value = false
   hookFilterQuery.value = ''
@@ -558,19 +580,24 @@ function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
   editDraft.value = { ...d, [field]: value }
 }
 
-function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; label: string; rows?: number }) {
+function EditTextarea({ field, label, rows = 6 }: { field: keyof EditDraft; label: string; rows?: number }) {
   const d = editDraft.value
   if (!d) return null
   const val = d[field] as string
+  const orig = configState.value.status === 'loaded' ? configState.value.data.prompt[field] : val
+  const dirty = val.trim() !== (orig as string).trim()
   return html`
     <div class="mt-3">
-      <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
-      <textarea
-        aria-label=${label}
-        class="${FIELD_STYLE_BASE} resize-y custom-scrollbar"
-        rows=${rows}
+      <div class="flex items-center gap-2 mb-1.5">
+        <span class="text-2xs font-semibold uppercase tracking-wider text-text-muted">${label}</span>
+        ${dirty ? html`<span class="text-2xs text-[var(--color-accent-fg)] font-semibold">● 수정됨</span>` : null}
+      </div>
+      <${ExpandableTextarea}
+        label=${label}
         value=${val}
-        onInput=${(e: Event) => updateDraft(field, (e.target as HTMLTextAreaElement).value)}
+        rows=${rows}
+        dirty=${dirty}
+        onChange=${(value: string) => updateDraft(field, value)}
       />
     </div>
   `
@@ -671,6 +698,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     if (!draft) return
     const payload = buildPayload(draft, c)
     if (Object.keys(payload).length === 0) {
+      showToast('변경사항이 없습니다', 'warning')
       cancelEdit()
       return
     }
@@ -681,6 +709,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       configState.value = loaded(updated)
       editMode.value = false
       editDraft.value = null
+      lastSavedAt.value = new Date().toISOString()
       showToast('프롬프트 저장 완료', 'success')
     } catch (err) {
       saveError.value = err instanceof Error ? err.message : '저장 실패'
@@ -690,8 +719,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   }
 
   // --- Toolbar ---
+  const lastSavedText = lastSavedAt.value
+    ? `마지막 저장: ${formatRelativeTime(new Date(lastSavedAt.value))}`
+    : null
   const toolbar = html`
-    <div class="flex gap-2 items-center mb-3">
+    <div class="flex flex-wrap gap-2 items-center mb-3">
       ${isEditing ? html`
         <button type="button"
           class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
@@ -710,6 +742,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onClick=${enterEditMode}
         >편집하기</button>
       `}
+      ${lastSavedText && !isEditing
+        ? html`<span class="text-2xs text-[var(--color-fg-muted)]">${lastSavedText}</span>`
+        : null}
       ${saveError.value ? html`<span class="text-xs text-[var(--color-status-err)]" role="alert">${saveError.value}</span>` : null}
     </div>
   `
@@ -717,14 +752,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
-    <${EditTextarea} field="goal" label="목표" rows=${3} />
-    <${EditTextarea} field="short_goal" label="단기 목표" rows=${2} />
-    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${2} />
-    <${EditTextarea} field="long_goal" label="장기 목표" rows=${2} />
-    <${EditTextarea} field="will" label="의지" rows=${2} />
-    <${EditTextarea} field="needs" label="필요" rows=${2} />
-    <${EditTextarea} field="desires" label="욕구" rows=${2} />
-    <${EditTextarea} field="instructions" label="지시사항" rows=${4} />
+    <${EditTextarea} field="goal" label="목표" rows=${8} />
+    <${EditTextarea} field="short_goal" label="단기 목표" rows=${5} />
+    <${EditTextarea} field="mid_goal" label="중기 목표" rows=${5} />
+    <${EditTextarea} field="long_goal" label="장기 목표" rows=${5} />
+    <${EditTextarea} field="will" label="의지" rows=${4} />
+    <${EditTextarea} field="needs" label="필요" rows=${4} />
+    <${EditTextarea} field="desires" label="욕구" rows=${4} />
+    <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />
     <${SectionHeader} size="xs" class="mb-0.5">목표</${SectionHeader}>
@@ -745,14 +780,33 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <${SectionHeader} size="xs" class="mt-3 mb-0.5">시스템 프롬프트 블록</${SectionHeader}>
-    <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
-    <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
-    <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
-    <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded-[var(--r-1)] hover:bg-[var(--color-bg-surface)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
-      <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
-    </details>
+    <${SectionHeader} size="xs" class="mt-3 mb-0.5">시스템 프롬프트</${SectionHeader}>
+    <div class="flex gap-2 mb-2">
+      <button
+        type="button"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'blocks' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        onClick=${() => { promptPreviewTab.value = 'blocks' }}
+      >블록</button>
+      <button
+        type="button"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'system' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        onClick=${() => { promptPreviewTab.value = 'system' }}
+      >통합 시스템</button>
+      <button
+        type="button"
+        class="text-2xs px-2 py-1 rounded-[var(--r-1)] border transition-colors ${promptPreviewTab.value === 'world' ? 'bg-[var(--accent-10)] border-[var(--accent-20)] text-accent-fg' : 'border-card-border text-[var(--color-fg-muted)] hover:bg-[var(--color-bg-surface)]'}"
+        onClick=${() => { promptPreviewTab.value = 'world' }}
+      >월드 상태</button>
+    </div>
+    ${promptPreviewTab.value === 'blocks'
+      ? html`
+          <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
+          <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
+          <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
+        `
+      : promptPreviewTab.value === 'system'
+        ? html`<${LongText} text=${c.prompt.unified_system_prompt || c.prompt.effective_system_prompt} truncateAt=${null} />`
+        : html`<${LongText} text=${c.prompt.unified_user_message_preview} truncateAt=${null} />`}
   `
 
   const goalState = goalOptionsState.value

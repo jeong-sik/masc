@@ -22,6 +22,39 @@ val resolve_prompt_markdown_dir :
     candidate list, falling back to {!Config_dir_resolver.prompts_dir}
     when none exist yet. *)
 
+type sync_result = {
+  copied : string list;
+  overwritten : string list;
+  failed : (string * string) list;
+}
+(** Outcome of one prompt asset sync pass. Entries are embedded asset
+    paths (e.g. [prompts/keeper.world.md]); [failed] pairs the path with
+    the error message. *)
+
+val sync_prompt_assets :
+  read:(string -> string option) ->
+  files:string list ->
+  prompts_dir:string ->
+  unit ->
+  sync_result
+(** Converge the runtime prompt markdown dir onto the binary-embedded
+    assets (#20929). Only entries under [prompts/] in [files] are
+    considered; each is written into [prompts_dir] when missing or when
+    its content differs from the embedded copy. Identical files are left
+    untouched; files present only in [prompts_dir] are never deleted.
+
+    Overwrite-on-differ is safe by design: operator prompt customization
+    lives in prompt_overrides.json (replayed after directory load), so a
+    divergent markdown file is a stale distribution copy, not an edit.
+    The rest of .masc/config is operator-edited in place and is out of
+    scope here.
+
+    [read]/[files] are typically [Embedded_config.read] /
+    [Embedded_config.file_list], passed in by the server bootstrap so
+    this module stays asset-source agnostic (and unit-testable).
+    [Eio.Cancel.Cancelled] propagates; per-file [Sys_error] is recorded
+    in [failed] without aborting the pass. *)
+
 val init : unit -> unit
 (** Initialise prompt defaults from the environment.
     Idempotent — safe to call multiple times. *)

@@ -113,6 +113,15 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
   | Ok { Pool.status; body; _ } -> Ok (status, body)
   | Error e -> Error e
 
+(** PATCH with structured error handling. *)
+let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
+  with_optional_timeout ?clock ?timeout_sec @@ fun () ->
+  with_pool @@ fun pool ->
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+          ~method_:`PATCH ~url ~headers ~body () with
+  | Ok { Pool.status; body; _ } -> Ok (status, body)
+  | Error e -> Error e
+
 (** GET with structured error handling. *)
 let get_response_sync ?clock ?timeout_sec ~url ~headers () =
   with_optional_timeout ?clock ?timeout_sec @@ fun () ->

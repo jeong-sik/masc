@@ -102,6 +102,47 @@ let descriptor_and_input_for_tool_call ~tool_name ~input =
         | [] -> None))
 ;;
 
+let public_descriptor_and_name_for_tool_call tool_name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match Keeper_tool_descriptor.find_public stripped with
+  | Some descriptor -> Some (stripped, descriptor)
+  | None -> None
+;;
+
+let validate_public_input_for_tool_call ~tool_name ~input =
+  match public_descriptor_and_name_for_tool_call tool_name with
+  | Some (public_name, descriptor) ->
+    Some
+      (Tool_input_validation.validate_args
+         ~schema:descriptor.Keeper_tool_descriptor.input_schema
+         ~name:public_name
+         ~args:input
+         ())
+  | None -> None
+;;
+
+let validated_descriptor_and_input_for_tool_call ~tool_name ~input =
+  match public_descriptor_and_name_for_tool_call tool_name with
+  | Some (public_name, descriptor) ->
+    (match
+       Tool_input_validation.validate_args
+         ~schema:descriptor.Keeper_tool_descriptor.input_schema
+         ~name:public_name
+         ~args:input
+         ()
+     with
+     | Ok validated_input ->
+       Some
+         (Ok
+            ( descriptor
+            , descriptor.Keeper_tool_descriptor.translate validated_input ))
+     | Error validation_result -> Some (Error validation_result))
+  | None ->
+    Option.map
+      (fun descriptor_and_input -> Ok descriptor_and_input)
+      (descriptor_and_input_for_tool_call ~tool_name ~input)
+;;
+
 let readonly_for_tool_name tool_name =
   match descriptor_for_tool_name tool_name with
   | Some descriptor -> Keeper_tool_descriptor.readonly_static_hint descriptor

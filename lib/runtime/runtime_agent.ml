@@ -30,6 +30,7 @@ type config =
   tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
+  max_turns : int;
   max_idle_turns : int;
   stream_idle_timeout_s : float option;
   max_execution_time_s : float option;
@@ -49,6 +50,7 @@ type config =
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
+  preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
@@ -192,6 +194,7 @@ let request_runtime_fields_on_base_config
     min_p = req_config.min_p;
     system_prompt = req_config.system_prompt;
     enable_thinking = req_config.enable_thinking;
+    preserve_thinking = req_config.preserve_thinking;
     thinking_budget = req_config.thinking_budget;
     clear_thinking = req_config.clear_thinking;
     tool_stream = req_config.tool_stream;
@@ -699,6 +702,9 @@ let run
       let partial_response =
         partial_response_of_stop
           ~session_id
+          (* Display text only.  Checkpoint classification flows through
+             [stop_reason] → [Keeper_turn_outcome] (RFC-0232 P2); no
+             consumer may sniff this string. *)
           ~text:
             "Continuation checkpoint saved; keeper remains scheduled for the \
              next cycle."
@@ -783,11 +789,10 @@ let run
     | Error
         (Agent_sdk.Error.Agent
            (Agent_sdk.Error.AgentExecutionIdleTimeout r as agent_err)) ->
-      (* No-progress (idle) timeout. masc does not currently set
-         [execution_idle_timeout_s] (liveness is the keeper stale watchdog
-         + stream_idle), so this arm is here for type exhaustiveness and
-         future opt-in; treated like a timeout for the dashboard but with
-         the idle-specific fields/text. *)
+      (* No-progress (idle) timeout. Keeper runtime config may set
+         [execution_idle_timeout_s] to catch Agent-level stalls while leaving
+         healthy streaming runs alive. Treat it like a timeout for the
+         dashboard, preserving idle-specific fields/text. *)
       let partial_response =
         partial_response_of_stop
           ~session_id

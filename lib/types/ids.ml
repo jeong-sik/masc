@@ -61,6 +61,40 @@ end = struct
              (Json_util.kind_name other))
 end
 
+(** Tool execution identifier — RFC-0233 canonical join key. One mint
+    per tool execution at the dispatch boundary; every store that
+    records the execution carries the same value. *)
+module Execution_id : sig
+  type t
+  val of_string : string -> t
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val pp : Format.formatter -> t -> unit
+  val generate : unit -> t
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+end = struct
+  type t = string
+  let of_string s = s
+  let to_string t = t
+  let equal = String.equal
+  let pp fmt t = Format.fprintf fmt "%s" t
+  let _id_counter = Atomic.make 0
+  let generate () =
+    let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
+    (* Same fetch_and_add discipline as [Task_id.generate]: two fibers in
+       the same millisecond still get distinct sequence numbers. *)
+    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
+    Printf.sprintf "exec-%d-%04x" timestamp seq
+  let to_yojson t = `String t
+  let of_yojson = function
+    | `String s -> Ok s
+    | other ->
+        Error
+          (Printf.sprintf "Expected string for Execution_id (received %s)"
+             (Json_util.kind_name other))
+end
+
 (** Thread identifier - conversation thread ID *)
 module Thread_id : sig
   type t

@@ -50,7 +50,6 @@ val run_named_with_masc_tools :
   ?max_tokens:int ->
   ?max_input_tokens:int ->
   ?max_cost_usd:float ->
-  ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -62,6 +61,7 @@ val run_named_with_masc_tools :
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?approval:Agent_sdk.Hooks.approval_callback ->
+  ?max_idle_turns:int ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->

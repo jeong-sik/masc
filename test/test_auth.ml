@@ -1149,6 +1149,10 @@ let test_worker_permissions () =
     (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanReadState);
   check bool "worker can claim" true
     (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanClaimTask);
+  check bool "worker can broadcast" true
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanBroadcast);
+  check bool "worker cannot admin" false
+    (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanAdmin);
   check bool "worker cannot init" false
     (Masc_domain.has_permission Masc_domain.Worker Masc_domain.CanInit)
 

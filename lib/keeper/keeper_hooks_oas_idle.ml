@@ -24,10 +24,54 @@ let suggest_alternatives ~(allowed_tools : string list)
 
 let includes_tool name tools = List.exists (String.equal name) tools
 
-let board_get_recovery_hint ~allowed_tools ~tool_names =
-  if not (includes_tool "keeper_board_post_get" tool_names) then
-    None
-  else
+let schema_visible_name name =
+  match Keeper_tool_visibility_projection.public_alias_for_internal name with
+  | Some public_name -> public_name
+  | None -> name
+
+let schema_visible_keep_order names =
+  names
+  |> List.map schema_visible_name
+  |> Keeper_types_profile_toml_normalizers.dedupe_keep_order
+
+let allowed_visible_candidates candidates ~allowed_tools =
+  candidates
+  |> List.filter (fun name -> includes_tool name allowed_tools)
+  |> schema_visible_keep_order
+
+let recovery_hint ~allowed_tools ~tool_names =
+  if includes_tool "keeper_tool_search" tool_names then
+    Some
+      (let code_search =
+         allowed_visible_candidates
+           [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute" ]
+           ~allowed_tools
+       in
+       let next =
+         match code_search with
+         | [] -> "Use a visible file/content search tool if one is active."
+         | names ->
+           Printf.sprintf
+             "For source files, functions, types, or symbols, switch to %s."
+             (String.concat " then " names)
+       in
+       "keeper_tool_search discovers active tool schemas only; it does not search \
+        repository files, definitions, functions, types, or symbols. " ^ next)
+  else if includes_tool "keeper_tools_list" tool_names then
+    Some
+      (if includes_tool "keeper_surface_read" allowed_tools then
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; for current lane context use keeper_surface_read with a \
+          surface label from Connected Surfaces or chat history. If the user asks \
+          for a connector-wide channel registry outside those connected lanes, \
+          state that it is unavailable."
+       else
+         "keeper_tools_list lists capabilities, not connected-surface or lane \
+          contents; do not repeat it to answer user content questions.")
+  else if
+    includes_tool "keeper_board_get" tool_names
+    || includes_tool "keeper_board_post_get" tool_names
+  then
     let discovery_tools =
       [ "keeper_board_list"; "keeper_board_search" ]
       |> List.filter (fun name -> includes_tool name allowed_tools)
@@ -38,11 +82,16 @@ let board_get_recovery_hint ~allowed_tools ~tool_names =
       | [ one ] -> one
       | many -> String.concat " or " many
     in
+    (* The routable tool is keeper_board_post_get; "keeper_board_get" has no
+       dispatch route (models hallucinate it, which is why both names trigger
+       this hint above) — the nudge must name the tool that actually exists. *)
     Some
       (Printf.sprintf
          "keeper_board_post_get requires post_id; if no post_id is visible, use %s first. \
           Do not call keeper_board_post_get with {}."
          discovery)
+  else
+    None
 
 (** Pure decision logic for the on_idle hook.  Testable without Workspace.config.
 
@@ -70,18 +119,34 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | names -> String.concat ", " names
   in
   let alternatives =
-    suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
-      ~max_suggestions:5
+    let base =
+      suggest_alternatives ~allowed_tools ~repeated_tools:tool_names
+        ~max_suggestions:5
+    in
+    let preferred =
+      if includes_tool "keeper_tool_search" tool_names then
+        allowed_visible_candidates
+          [ "Grep"; "tool_search_files"; "Read"; "tool_read_file"; "Execute"; "tool_execute"; "keeper_stay_silent" ]
+          ~allowed_tools
+      else if includes_tool "keeper_tools_list" tool_names
+              && includes_tool "keeper_surface_read" allowed_tools
+      then
+        [ "keeper_surface_read" ]
+      else
+        []
+    in
+    Keeper_types_profile_toml_normalizers.dedupe_keep_order
+      (preferred @ base)
+    |> schema_visible_keep_order
+    |> List.filteri (fun i _ -> i < 5)
   in
   let alt_str = match alternatives with
     | [] -> "keeper_tool_search or keeper_stay_silent"
     | alts -> String.concat ", " alts
   in
-  let recovery_hint =
-    board_get_recovery_hint ~allowed_tools ~tool_names
-  in
+  let hint = recovery_hint ~allowed_tools ~tool_names in
   let append_hint msg =
-    match recovery_hint with
+    match hint with
     | None -> msg
     | Some hint -> msg ^ " " ^ hint
   in

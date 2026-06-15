@@ -106,6 +106,22 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
       ("detail", e.detail);
     ]
 
+let keeper_actor_id agent_name = "keeper-" ^ agent_name ^ "-agent"
+
+let activity_event_matches_agent ~(agent_name : string) (e : Activity_graph.event) =
+  let actor_matches =
+    match e.actor with
+    | Some a ->
+        String.equal a.id agent_name
+        || String.equal a.id (keeper_actor_id agent_name)
+        || String.equal a.id ("keeper:" ^ agent_name)
+    | None -> false
+  in
+  actor_matches
+  || Safe_ops.json_string_opt "keeper_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "agent_name" e.payload = Some agent_name
+  || Safe_ops.json_string_opt "name" e.payload = Some agent_name
+
 (* Collect agent session/status events *)
 let agent_events (config : Workspace.config) ~agent_name :
     timeline_event list =
@@ -261,10 +277,7 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
       ~kinds:["tool.called"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        let tool_name =
@@ -311,10 +324,7 @@ let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
       ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.map (fun (e : Activity_graph.event) ->
        {
          ts = Float.of_int e.ts_ms /. 1000.0;
@@ -342,10 +352,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
       ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit:scan_limit ()
   in
   all_events
-  |> List.filter (fun (e : Activity_graph.event) ->
-       match e.actor with
-       | Some a -> String.equal a.id agent_name
-       | None -> false)
+  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no

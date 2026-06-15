@@ -44,10 +44,11 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
     [initialize] response.  Operator-visible — drift in these
     strings changes how clients describe / discover the server. *)
 
-val default_instructions : string
-(** [Full] profile instructions.  Describes MASC project /
+val default_instructions : unit -> string
+(** [default_instructions ()] returns [Full] profile instructions. Describes MASC project /
     cluster / read / write conventions and points clients at
-    [masc_tool_help]. *)
+    [masc_tool_help]. Tool lifecycle prose is loaded from
+    [config/prompts/tool_contract.task_lifecycle_workflow.md]. *)
 
 val managed_agent_instructions : string
 (** [Managed_agent] profile instructions.  Names the canonical

@@ -23,7 +23,7 @@ Apply hyphen-free underscore mapping (no `-` in any replacement, so OCaml identi
 | `openai` (word) | `provider_d` |
 | `xai` (word) | `provider_e` |
 | `gemini` | `provider_f` |
-| `deepseek` | `provider_g` |
+| `deepseek` | `deepseek` |
 | `qwen` (word) | `provider_h` |
 | `groq` (word) | `provider_i` |
 | `mistral` (word) | `provider_j` |

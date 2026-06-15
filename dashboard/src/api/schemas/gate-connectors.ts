@@ -389,6 +389,7 @@ const GateConnectorsOuterSchema = object({
   connectors: optional(unknown()),
   total: fallback(number(), 0),
   active_count: fallback(number(), 0),
+  discord_trigger_policy: fallback(string(), 'unknown'),
   // Empty string is treated as drift — matches prior decoder's
   // `if (!generatedAt) return null` guard. A connectors payload
   // without a timestamp is not a useful one; the null-returning
@@ -400,6 +401,7 @@ export interface GateConnectorsData {
   connectors: GateConnectorInfo[]
   total: number
   active_count: number
+  discord_trigger_policy: string
   generated_at: string
 }
 
@@ -425,6 +427,7 @@ export function parseGateConnectorsData(data: unknown): GateConnectorsData {
     connectors,
     total: outer.total,
     active_count: outer.active_count,
+    discord_trigger_policy: outer.discord_trigger_policy,
     generated_at: outer.generated_at,
   }
 }

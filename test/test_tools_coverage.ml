@@ -202,6 +202,9 @@ let test_masc_transition_schema () =
       Alcotest.(check bool) "description omits requires tools routing"
         false
         (contains_substring ~needle:"requires tools" schema.description);
+      Alcotest.(check bool) "description pins start before done"
+        true
+        (contains_substring ~needle:"action='start' before action='done'" schema.description);
       (match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has completion_contract" true

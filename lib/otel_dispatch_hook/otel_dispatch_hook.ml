@@ -31,7 +31,7 @@ let request_context_key : request_context Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
-let enabled_override : bool option ref = ref None
+let enabled_override : bool option Atomic.t = Atomic.make None
 
 let span_emitter_override
       : (name:string ->
@@ -40,13 +40,13 @@ let span_emitter_override
          status:OT.Span_status.t option ->
          unit)
           option
-          ref
+          Atomic.t
   =
-  ref None
+  Atomic.make None
 ;;
 
 let enabled () =
-  match !enabled_override with
+  match Atomic.get enabled_override with
   | Some value -> value
   | None -> Otel_config.enabled
 ;;
@@ -80,7 +80,7 @@ let tool_call_span_kind () =
 
 let emit_span ~name ~attrs ?status () =
   let kind = tool_call_span_kind () in
-  match !span_emitter_override with
+  match Atomic.get span_emitter_override with
   | Some emit -> emit ~name ~attrs ~kind ~status
   | None ->
     ignore
@@ -93,14 +93,14 @@ let emit_span ~name ~attrs ?status () =
 ;;
 
 let with_test_span_emitter ~enabled:enabled_value ~emit_span:emit f =
-  let prev_enabled = !enabled_override in
-  let prev_emitter = !span_emitter_override in
-  enabled_override := Some enabled_value;
-  span_emitter_override := Some emit;
+  let prev_enabled = Atomic.get enabled_override in
+  let prev_emitter = Atomic.get span_emitter_override in
+  Atomic.set enabled_override (Some enabled_value);
+  Atomic.set span_emitter_override (Some emit);
   Eio_guard.protect
     ~finally:(fun () ->
-      enabled_override := prev_enabled;
-      span_emitter_override := prev_emitter)
+      Atomic.set enabled_override prev_enabled;
+      Atomic.set span_emitter_override prev_emitter)
     f
 ;;
 

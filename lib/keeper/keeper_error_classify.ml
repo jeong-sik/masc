@@ -244,6 +244,30 @@ let is_auto_recoverable_runtime_fail_open_error
   || is_resumable_cli_session_error err
   || is_auto_recoverable_runtime_exhausted_error err
 
+let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some
+      (Keeper_turn_driver.Accept_rejected
+         { reason_kind = Some Keeper_turn_driver.Accept_no_usable_progress; _ }) ->
+    true
+  | Some (Keeper_turn_driver.Accept_rejected _) ->
+    false
+  | Some
+      ( Keeper_turn_driver.Runtime_exhausted _
+      | Keeper_turn_driver.Capacity_backpressure _
+      | Keeper_turn_driver.Resumable_cli_session _
+      | Keeper_turn_driver.Admission_queue_rejected _
+      | Keeper_turn_driver.Admission_queue_timeout _
+      | Keeper_turn_driver.Turn_timeout _
+      | Keeper_turn_driver.Provider_timeout _
+      | Keeper_turn_driver.Max_tokens_ceiling_violation _
+      | Keeper_turn_driver.Ambiguous_post_commit _
+      | Keeper_turn_driver.Internal_unhandled_exception _
+      | Keeper_turn_driver.Internal_bridge_exception _
+      | Keeper_turn_driver.Internal_contract_rejected _ )
+  | None ->
+    false
+
 (* Classification of why a degraded retry is being attempted.  Closed set
    covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
    and [recoverable_runtime_failure_reason] (broader set including raw
@@ -723,14 +747,15 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 
-(** [true] when an error represents terminal runtime exhaustion or a
-    final accept-rejected result from the MASC OAS boundary. *)
+(** [true] when an error represents terminal runtime exhaustion. Accept
+    rejection is an accept-contract result; no-progress accept rejection is
+    classified separately so it does not masquerade as all-runtimes-exhausted. *)
 let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some (Keeper_turn_driver.Runtime_exhausted _)
-  | Some (Keeper_turn_driver.Resumable_cli_session _)
-  | Some (Keeper_turn_driver.Accept_rejected _) -> true
+  | Some (Keeper_turn_driver.Resumable_cli_session _) -> true
   | Some (Keeper_turn_driver.Capacity_backpressure _)
+  | Some (Keeper_turn_driver.Accept_rejected _)
   | Some (Keeper_turn_driver.Admission_queue_timeout _)
   | Some (Keeper_turn_driver.Admission_queue_rejected _)
   | Some (Keeper_turn_driver.Provider_timeout _)

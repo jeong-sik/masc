@@ -139,6 +139,17 @@
  (package masc)
  (libraries masc masc_core unix eio eio_main))
 
+;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
+;; Stamps the [mentions] field onto pre-P4 user rows; run with the
+;; server stopped.
+
+(executable
+ (name keeper_chat_backfill_mentions)
+ (modules keeper_chat_backfill_mentions)
+ (public_name masc-keeper-chat-backfill-mentions)
+ (package masc)
+ (libraries masc))
+
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
 

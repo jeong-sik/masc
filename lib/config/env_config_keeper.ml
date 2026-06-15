@@ -374,12 +374,12 @@ module KeeperKeepalive = struct
     | None -> turn_timeout_sec
   ;;
 
-  (** Per-attempt wall-clock safety cap for the streaming watchdog.
+  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
 
-      Prevents a single provider attempt from locking a keeper in
-      [Streaming] state forever (network hang, silent provider crash).
-      The cap is intentionally generous — any attempt making zero
-      progress for this duration is definitively stuck.
+      The keeper runtime must not apply this as a wall-clock timeout around
+      active provider/tool execution. Real liveness policy must live at a
+      narrower boundary: admission/queue wait, provider connect/stream progress,
+      or tool-local policy owned by the tool substrate.
 
       Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
       Default: 1800 (30 min). Range: [300, 7200]. *)
@@ -399,6 +399,33 @@ module KeeperKeepalive = struct
     Float.max
       5.0
       (Float.min 600.0 (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+  ;;
+
+  (** OAS Agent.run inactivity deadline.
+
+      This is progress-based rather than cumulative wall-clock: OAS resets the
+      timer when the run emits progress. It complements
+      [stream_idle_timeout_sec], which watches transport line gaps; this knob
+      catches Agent-level no-progress stalls that still keep a transport
+      connection superficially alive.
+
+      The keeper path parses this knob but does not forward it until OAS proves
+      active tool execution is excluded from idle accounting.
+
+      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
+      Range when enabled: [5, 600]. Unset, invalid, [0], or a negative
+      value disables it. This stays opt-in because it is an Agent.run-level
+      stall detector, not provider transport policy or tool timeout policy.
+      @category Timeouts
+      @ops_class operator *)
+  let execution_idle_timeout_sec =
+    match Env_config_core.raw_value_opt "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" with
+    | None -> None
+    | Some _ ->
+      let value = get_float ~default:0.0 "MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC" in
+      if (not (Float.is_finite value)) || value <= 0.0
+      then None
+      else Some (Float.max 5.0 (Float.min 600.0 value))
   ;;
 
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
@@ -576,47 +603,12 @@ module RuntimeSaturationSignal = struct
     get_bool ~default:false "MASC_RUNTIME_SATURATION_SIGNAL_ENABLED"
 end
 
-(** {1 Runtime Runtime Overrides}
-
-    Runtime-only narrowing of the MASC runtime provider set. The underlying
-    runtime profile (loaded from [runtime.toml]) is unchanged; this filter is
-    applied by the named-runtime execution path via [~provider_filter] on every
-    keeper turn, so switching between full runtime and a single-provider
-    fallback is a pure env-var change with no file or code edit.
-
-    Use case: GLM endpoint outage (e.g. z.ai quota exhausted), Ollama-only
-    hard mode, or A/B testing a single provider. *)
-module KeeperRuntimeProviderFilter = struct
-  (** Comma-separated provider kind allowlist for every keeper runtime call.
-      Values are OAS [Provider_config.string_of_provider_kind]:
-      [ollama], [provider_k], [provider_a], [provider_f], [openai_compat], [cli_tool_d],
-      [provider_c], [cli_tool_c], [cli_tool_b], [cli_tool_a].
-      Matching is case-insensitive; empty entries are dropped.
-
-      Semantics: when set, keeper turns pass this list as [provider_filter]
-      into [Keeper_turn_driver.run_named], which applies it during MASC runtime
-      provider resolution. The runtime keeps only matching providers from
-      the resolved profile; if the filter leaves zero providers, OAS falls back
-      to the unfiltered profile (see [apply_provider_filter] safety net).
-
-      [None] (env var unset or blank) = full runtime, unfiltered.
-
-      Env: [MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST]. Default: unset. *)
-  let provider_allowlist () : string list option =
-    match Env_config_core.raw_value_opt "MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST" with
-    | None -> None
-    | Some raw ->
-      let parts =
-        raw
-        |> String.split_on_char ','
-        |> List.map String.trim
-        |> List.filter (fun s -> s <> "")
-      in
-      (match parts with
-       | [] -> None
-       | _ -> Some parts)
-  ;;
-end
+(* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
+   deleted (audit F8): its value was threaded as [?provider_filter] into
+   [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
+   which silently ignored it after the RFC-0206 single-runtime purge. The knob
+   was dead while its docs were live; deletion documents reality. Provider
+   selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
 
 (** {1 Transient Retry Backoff}
 

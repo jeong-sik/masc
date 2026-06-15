@@ -20,11 +20,18 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; mention_user_ids : string list
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; author_is_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -32,10 +39,21 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
+  | Thread_removed of
+      { thread_id : string
+      }
   | Ignored of string
 
 type trigger_policy = Discord_gateway_state.trigger_policy =
   | Mention_only
+  | Mention_or_thread
   | User_only of string
   | All
 
@@ -94,6 +112,23 @@ let published_connection_state : Discord_gateway_state.connection_state Atomic.t
 
 let connection_state () = Atomic.get published_connection_state
 
+(* Module-level cell for the gateway's input mailbox, set by [run].
+   Allows external callers to push [Status_change] inputs without
+   a direct handle on the mailbox. One gateway is expected per process,
+   but the release hook avoids leaving a stale stream after shutdown. *)
+let input_mailbox_cell :
+  Discord_gateway_state.input Eio.Stream.t option Atomic.t =
+  Atomic.make None
+
+let set_presence (status : Discord_gateway_state.presence_status) =
+  match Atomic.get input_mailbox_cell with
+  | None ->
+    Log.Discord.debug
+      "set_presence ignored: gateway not running (status=%s)"
+      (Discord_gateway_state.presence_status_to_string status)
+  | Some mb ->
+    Eio.Stream.add mb (Discord_gateway_state.Status_change status)
+
 let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let config : Discord_gateway_state.config = {
     token; intents; bot_user_id = None; trigger_policy;
@@ -101,7 +136,26 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
   let state = ref (Discord_gateway_state.create ~config) in
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
   let input_mailbox = Eio.Stream.create 64 in
+  let published_mailbox = Some input_mailbox in
+  Atomic.set input_mailbox_cell published_mailbox;
+  Eio.Switch.on_release sw (fun () ->
+    (* Best-effort: a newer run may have already replaced the published mailbox. *)
+    let (_ : bool) =
+      Atomic.compare_and_set input_mailbox_cell published_mailbox None
+    in
+    ());
   let heartbeat_ms = ref None in
+  (* Heartbeat ACK tracking. The heartbeat fiber clears on tick; the
+     reader sets on Op_heartbeat_ack.  Starts [true] so the first tick
+     after HELLO does not false-trigger a timeout.  Reset to [true] in
+     Schedule_heartbeat (new session after reconnect) so a fresh
+     heartbeat cycle starts with a clean slate. *)
+  let heartbeat_ack_ok = Atomic.make true in
+  (* Reconnect observability: tracks whether this is the first connection
+     or a reconnection, and which method (resume vs fresh identify) was
+     used for the last reconnect attempt. *)
+  let has_connected_before = ref false in
+  let last_reconnect_was_resume = ref false in
 
   let clock = Eio.Stdenv.clock env in
   Eio.Fiber.fork ~sw (fun () ->
@@ -111,7 +165,21 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          Eio.Time.sleep clock 0.5
        | Some ms ->
          Eio.Time.sleep clock (float_of_int ms /. 1000.0);
-         Eio.Stream.add input_mailbox Discord_gateway_state.Heartbeat_tick);
+         if Atomic.get heartbeat_ack_ok then begin
+           (* Previous heartbeat was ACK'd (or first tick after HELLO) —
+              send the next heartbeat and start waiting for its ACK. *)
+           Atomic.set heartbeat_ack_ok false;
+           Eio.Stream.add input_mailbox Discord_gateway_state.Heartbeat_tick
+        end else
+          (* Discord docs: "If a client does not receive a heartbeat
+             ack between its attempts at sending heartbeats, it should
+             immediately terminate the connection with a non-1000
+             close code and reconnect." *)
+          begin
+            Discord_observability.record_gateway_ack_timeout ();
+            Eio.Stream.add input_mailbox
+              Discord_gateway_state.Heartbeat_ack_timeout
+          end);
       loop ()
     in
     loop ());
@@ -128,7 +196,24 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
              { code = 1011; reason = Printexc.to_string e })
       | frame ->
         (match frame_to_input frame with
-         | Some inp -> Eio.Stream.add input_mailbox inp
+         | Some inp ->
+           (* Side-channel: track heartbeat ACK arrival for I/O-layer
+              liveness detection.  The [when] guard avoids a fragile
+              catch-all on the [input] type — the state machine still
+              receives every input unchanged. *)
+           (match inp with
+            | Discord_gateway_state.Frame_received f
+              when f.op = Discord_gateway_state.Op_heartbeat_ack ->
+              Atomic.set heartbeat_ack_ok true
+            | Discord_gateway_state.Frame_received _
+            | Discord_gateway_state.Connect_requested
+            | Discord_gateway_state.Frame_parse_error _
+            | Discord_gateway_state.Wss_closed _
+            | Discord_gateway_state.Heartbeat_tick
+            | Discord_gateway_state.Heartbeat_ack_timeout
+            | Discord_gateway_state.Backoff_elapsed
+            | Discord_gateway_state.Status_change _ -> ());
+           Eio.Stream.add input_mailbox inp
          | None -> ());
         loop ()
     in
@@ -139,16 +224,28 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
     let open Discord_gateway_state in
     match eff with
     | Open_wss { url } ->
+      Discord_observability.record_gateway_event
+        ~route:Discord_observability.Control
+        Discord_observability.Open_wss;
       (match !conn_ref with
-       | Some _ ->
+       | Some old_conn ->
+         (* Defensive cleanup: the state machine may not have emitted
+            Close_wss before this Open_wss (e.g. Wss_closed from a server
+            Close frame that didn't go through our explicit Close_wss path).
+            Discord_wss_connection.close is idempotent (peek-resolve
+            pattern), so calling it on an already-closed connection is
+            safe. Without this, the stale conn_ref blocks reconnection
+            permanently — the FSM transitions to Awaiting_hello but no
+            socket is opened, and no timeout escapes that state. *)
          log_effect `Warn
-           "Open_wss while conn_ref still Some; expected Close_wss \
-            first — dropping new connect"
-       | None ->
-         let conn = Discord_wss_connection.connect ~sw ~env ~url in
-         conn_ref := Some conn;
-         Eio.Fiber.fork ~sw (fun () -> reader_loop conn))
-    | Close_wss _ ->
+           "Open_wss while conn_ref still Some; force-closing stale connection";
+         Discord_wss_connection.close old_conn;
+         conn_ref := None
+       | None -> ());
+      let conn = Discord_wss_connection.connect ~sw ~env ~url in
+      conn_ref := Some conn;
+      Eio.Fiber.fork ~sw (fun () -> reader_loop conn)
+    | Close_wss { code; reason = _ } ->
       (* Phase 1.4b: explicit close. Discord_wss_connection.close
          resolves the inner session switch's close-signal promise,
          which lets that switch return, which cancels reader/writer
@@ -156,6 +253,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          pending read raises Cancelled; our reader_loop exception
          arm pushes a redundant Wss_closed input that the state
          machine no-ops because it is already in Reconnect_pending. *)
+      Discord_observability.record_gateway_close ~code;
       (match !conn_ref with
        | Some c -> Discord_wss_connection.close c
        | None -> ());
@@ -177,18 +275,86 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient () =
          in
          Discord_wss_connection.write conn ws)
     | Schedule_heartbeat { interval_ms } ->
-      heartbeat_ms := Some interval_ms
+      heartbeat_ms := Some interval_ms;
+      (* New HELLO received (fresh connect or reconnect) — reset the
+         ACK flag so the first tick in the new session sends a heartbeat
+         rather than immediately triggering a timeout. *)
+      Atomic.set heartbeat_ack_ok true
     | Schedule_backoff { delay_ms } ->
+      Discord_observability.record_gateway_reconnect_scheduled ();
       Eio.Fiber.fork ~sw (fun () ->
-        Eio.Time.sleep clock (float_of_int delay_ms /. 1000.0);
+        (* Add ±25% jitter to the backoff delay. The state machine's
+           backoff_ms remains deterministic for testability; jitter
+           belongs in the I/O layer per RFC-0203. Prevents thundering
+           herd when multiple instances restart simultaneously. *)
+        let jitter_factor =
+          let raw = Mirage_crypto_rng.generate 1 in
+          let byte = Char.code raw.[0] in
+          0.75 +. 0.5 *. (float_of_int byte /. 255.0)
+        in
+        let jittered_ms =
+          int_of_float (float_of_int delay_ms *. jitter_factor)
+        in
+        Eio.Time.sleep clock (float_of_int jittered_ms /. 1000.0);
         Eio.Stream.add input_mailbox Discord_gateway_state.Backoff_elapsed)
-    | Emit_event ev -> on_event ev
-    | Emit_ambient ev -> on_ambient ev
+    | Emit_event ev ->
+      let event, route =
+        match ev with
+        | Ready _ ->
+          (* Track reconnect outcomes: first Ready is initial connect,
+             subsequent ones are reconnect successes. *)
+          if !has_connected_before then begin
+            let method_ =
+              if !last_reconnect_was_resume
+              then Discord_observability.Resume
+              else Discord_observability.Fresh_identify
+            in
+            Discord_observability.record_gateway_reconnect_outcome
+              ~method_ ~outcome:Discord_observability.Reconnect_succeeded
+          end;
+          has_connected_before := true;
+          Discord_observability.Ready, Discord_observability.Control
+        | Message_create _ ->
+          Discord_observability.Message_create, Discord_observability.Triggered
+        | Reaction_add _ ->
+          Discord_observability.Reaction_add, Discord_observability.Triggered
+        | Thread_tracked _ | Threads_bulk_tracked _ | Thread_removed _ ->
+          Discord_observability.Ignored, Discord_observability.Control
+        | Ignored _ -> Discord_observability.Ignored, Discord_observability.Control
+      in
+      Discord_observability.record_gateway_event ~route event;
+      on_event ev
+    | Emit_ambient ev ->
+      let event =
+        match ev with
+        | Ready _ -> Discord_observability.Ready
+        | Message_create _ -> Discord_observability.Message_create
+        | Reaction_add _ -> Discord_observability.Reaction_add
+        | Thread_tracked _ | Threads_bulk_tracked _ | Thread_removed _ -> Discord_observability.Ignored
+        | Ignored _ -> Discord_observability.Ignored
+      in
+      Discord_observability.record_gateway_event
+        ~route:Discord_observability.Ambient event;
+      on_ambient ev
     | Log { level; message } -> log_effect level message
   in
 
   let step_now input =
     let now = now_mono env in
+    (* Track reconnect method for observability: check resume_context
+       before stepping so we know whether this Backoff_elapsed leads
+       to a resume or fresh identify path. *)
+    (match input with
+     | Discord_gateway_state.Backoff_elapsed ->
+         last_reconnect_was_resume :=
+           Option.is_some (Discord_gateway_state.resume_context !state)
+     | Discord_gateway_state.Connect_requested
+     | Discord_gateway_state.Frame_received _
+     | Discord_gateway_state.Frame_parse_error _
+     | Discord_gateway_state.Wss_closed _
+     | Discord_gateway_state.Heartbeat_tick
+     | Discord_gateway_state.Heartbeat_ack_timeout
+     | Discord_gateway_state.Status_change _ -> ());
     let (s', effects) = Discord_gateway_state.step !state ~now_mono:now input in
     state := s';
     Atomic.set published_connection_state (Discord_gateway_state.state s');

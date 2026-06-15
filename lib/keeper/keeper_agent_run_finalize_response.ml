@@ -31,7 +31,6 @@ let finalize
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
-    ?provider_filter
     ~runtime_id_string
     ~prompt_metrics
     ~ctx_composition
@@ -121,11 +120,11 @@ let finalize
           ~snapshot:state_snapshot
       in
       (match
-         Keeper_checkpoint_store.save_oas
+         Keeper_checkpoint_store.save_oas_classified
            ~session_dir:session.session_dir
            patched
        with
-       | Ok () ->
+       | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
            ~oas_turn_count:result.turns
@@ -142,6 +141,17 @@ let finalize
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
+       | Ok (Keeper_checkpoint_store.Stale_noop
+                { incoming_turn_count; known_turn_count }) ->
+         Log.Keeper.warn ~keeper_name:meta.name
+           "runtime=%s OAS checkpoint stale no-op: incoming turn_count=%d, last saved=%d"
+           (Keeper_meta_contract.runtime_id_of_meta meta)
+           incoming_turn_count known_turn_count;
+         Otel_metric_store.inc_counter
+           "masc_keeper_checkpoint_stale_noop_total"
+           ~labels:[ "keeper", meta.name; "site", "finalize" ]
+           ();
+         Ok None
        | Error e ->
          Log.Keeper.error ~keeper_name:meta.name
            "runtime=%s OAS checkpoint save failed: %s"
@@ -174,17 +184,23 @@ let finalize
     (* CDAL proof evaluation / verdict-ledger persistence removed: task/goal
        completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
+    let librarian_messages =
+      match saved_checkpoint with
+      | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
+      | None -> [ assistant_msg ]
+    in
     Keeper_agent_run_post_turn_memory.run
       ~config
       ~meta
+      ~generation
       ~turn:manifest_keeper_turn_id
       ~oas_turn_count:result.turns
       ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~state_snapshot
       ~state_snapshot_source
+      ~librarian_messages
       ~post_turn_t0
-      ?provider_filter
       ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry
       ();

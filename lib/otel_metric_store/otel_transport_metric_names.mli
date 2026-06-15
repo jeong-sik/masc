@@ -49,6 +49,41 @@ val metric_sidecar_schema_field_types_json_parse_failures : string
     Labels: [outcome = success | error]. *)
 val metric_ws_dashboard_hello_latency_seconds : string
 
+(** Discord gateway events emitted from the in-process WSS client.
+    Labels: [event], [route]. *)
+val metric_discord_gateway_events : string
+
+(** Discord gateway close effects interpreted by the WSS client.
+    Labels: [code]. *)
+val metric_discord_gateway_closes : string
+
+(** Discord gateway reconnect backoffs scheduled by the state machine. *)
+val metric_discord_gateway_reconnect_scheduled : string
+
+(** Discord gateway heartbeat ACK liveness failures detected by the WSS I/O
+    loop before forcing a reconnect. *)
+val metric_discord_gateway_ack_timeouts : string
+
+(** Discord gateway reconnect attempt outcomes.
+    Labels: [method] = [resume | fresh_identify],
+    [outcome] = [succeeded | failed]. *)
+val metric_discord_gateway_reconnect_outcomes : string
+
+(** Triggered Discord inbound messages after keeper binding lookup.
+    Labels: [outcome] =
+    [dropped_unbound | dispatch_unavailable | gate_error | empty_reply |
+     reply_sent | reply_send_error]. *)
+val metric_discord_inbound_dispatch : string
+
+(** Ambient Discord messages that did not trigger a turn.
+    Labels: [outcome] =
+    [recorded | dropped_unbound | dropped_empty | dropped_too_long]. *)
+val metric_discord_ambient_record : string
+
+(** Discord REST replies attempted by the gateway reply path.
+    Labels: [outcome] = [sent | send_error | empty]. *)
+val metric_discord_outbound_replies : string
+
 (** Dashboard execution render phase latency histogram. Labels:
     [phase] = total | snapshot | operations | enrich | enrich_per_keeper
             | data_load | assemble.

@@ -51,6 +51,7 @@ type dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
 
@@ -58,7 +59,10 @@ type dispatch_fn =
 
 let max_content_length () = 4000
 
-let dedup_ttl_sec () = 300.0
+let dedup_ttl_sec () =
+  Env_config_core.get_int ~default:3600 "MASC_CHANNEL_GATE_DEDUP_TTL_SEC"
+  |> max 1
+  |> float_of_int
 
 (* ── Deduplication (TTL hashtable, Eio-guarded mutex) ───────── *)
 
@@ -183,6 +187,7 @@ let handle_inbound ~dispatch (msg : inbound_message) =
           ~channel_user_name:msg.channel_user_name
           ~channel_workspace_id:msg.channel_workspace_id
           ~keeper_name:keeper
+          ~metadata:msg.metadata
           ~content:(String.trim msg.content)
       in
       (match result with

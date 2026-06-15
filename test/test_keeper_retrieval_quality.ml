@@ -61,6 +61,28 @@ let assert_retrieves ~label index query expected_tool =
       label expected_tool query (String.concat ", " top5));
   rank
 
+let assert_ranks_before ~label index query ~preferred ~discouraged =
+  let retrieved = Agent_sdk.Tool_index.retrieve index query in
+  let names = List.map fst retrieved in
+  let rank name =
+    List.find_index (String.equal name) names |> Option.map (( + ) 1)
+  in
+  match rank preferred, rank discouraged with
+  | Some p, Some d ->
+    Alcotest.(check bool)
+      (Printf.sprintf "%s: %s rank %d before %s rank %d" label preferred p discouraged d)
+      true
+      (p < d)
+  | Some _, None ->
+    Alcotest.(check bool)
+      (Printf.sprintf "%s: %s present and %s absent" label preferred discouraged)
+      true
+      true
+  | None, _ ->
+    let top5 = List.filteri (fun i _ -> i < 5) names in
+    Alcotest.failf "%s: %s NOT in top-20 for query '%s'. Top 5: [%s]"
+      label preferred query (String.concat ", " top5)
+
 (* ================================================================ *)
 (* Scenarios: file operations                                       *)
 (* ================================================================ *)
@@ -228,6 +250,28 @@ let test_tool_execute_worktree_kr () =
     "워크트리 생성 브랜치" "tool_execute")
 
 (* ================================================================ *)
+(* Scenarios: connected surface lanes                               *)
+(* ================================================================ *)
+
+let test_connected_lane_question_kr_prefers_surface_read () =
+  let idx = build_keeper_index () in
+  assert_ranks_before
+    ~label:"connected_lane_question_kr"
+    idx
+    "다른 디스코드 채널 목록 뭐 있음"
+    ~preferred:"keeper_surface_read"
+    ~discouraged:"keeper_tools_list"
+
+let test_connected_lane_question_en_prefers_surface_read () =
+  let idx = build_keeper_index () in
+  assert_ranks_before
+    ~label:"connected_lane_question_en"
+    idx
+    "what other discord channels or connected surface lanes are available"
+    ~preferred:"keeper_surface_read"
+    ~discouraged:"keeper_tools_list"
+
+(* ================================================================ *)
 (* Discrimination: fs_edit vs bash for file writes                  *)
 (* ================================================================ *)
 
@@ -347,6 +391,13 @@ let () =
           Alcotest.test_case "tool search files (kr)" `Quick test_tool_search_files_kr;
           Alcotest.test_case "tool search files (en)" `Quick test_tool_search_files_en;
           Alcotest.test_case "tool execute worktree (kr)" `Quick test_tool_execute_worktree_kr;
+        ] );
+      ( "surfaces",
+        [
+          Alcotest.test_case "connected lane question prefers surface read (kr)" `Quick
+            test_connected_lane_question_kr_prefers_surface_read;
+          Alcotest.test_case "connected lane question prefers surface read (en)" `Quick
+            test_connected_lane_question_en_prefers_surface_read;
         ] );
       ( "discrimination",
         [

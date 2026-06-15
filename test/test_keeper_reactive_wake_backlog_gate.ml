@@ -35,7 +35,7 @@ default = "test_provider.test_model"
 
 [providers.test_provider]
 display-name = "Test Provider"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
 [models.test_model]
@@ -110,7 +110,7 @@ let global_backlog_obs : WO.world_observation =
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = true
-  ; active_agent_count = 1
+  ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
   }
 
@@ -149,6 +149,29 @@ let test_gate_keeps_scheduled_channel () =
      | WO.Scheduled_autonomous -> true
      | WO.Reactive -> false)
 
+let test_live_keeper_count_ignores_empty_agent_registry () =
+  let base_path = Filename.temp_file "keeper-live-count-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o755;
+  let masc_dir = Filename.concat base_path ".masc" in
+  let agents_dir = Filename.concat masc_dir "agents" in
+  Unix.mkdir masc_dir 0o755;
+  Unix.mkdir agents_dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      Unix.rmdir agents_dir;
+      Unix.rmdir masc_dir;
+      Unix.rmdir base_path)
+    (fun () ->
+      Masc.Keeper_registry.clear ();
+      let config = Masc.Workspace.default_config base_path in
+      let meta = make_meta "live-count" in
+      ignore
+        (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      check int "counts running keepers, not .masc/agents" 1
+        (Masc.Keeper_world_observation_inputs.count_running_keeper_fibers ~config))
+
 let () = init_runtime_default_for_tests ()
 
 let () =
@@ -167,6 +190,10 @@ let () =
             "gate keeps scheduled-autonomous channel"
             `Quick
             test_gate_keeps_scheduled_channel
+        ; test_case
+            "live keeper count ignores empty agent registry"
+            `Quick
+            test_live_keeper_count_ignores_empty_agent_registry
         ] )
     ]
 ;;

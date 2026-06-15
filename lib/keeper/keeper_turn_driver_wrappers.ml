@@ -124,6 +124,19 @@ let run_model_by_label
                 match Runtime_agent.run ~sw ~net ~config ?on_event  goal with
                 | Ok result when accept result.response -> Ok result
                 | Ok result ->
+                    let rejection =
+                      Keeper_tool_response.accept_rejection_of_response
+                        (* RFC-0132-EXEMPT: internal observability *)
+                        ~runtime_id:"runtime"
+                        result.response
+                    in
+                    let reason_kind =
+                      match rejection.kind with
+                      | Keeper_tool_response.No_usable_progress ->
+                        Some Accept_no_usable_progress
+                      | Keeper_tool_response.Predicate_rejected ->
+                        Some Accept_predicate_rejected
+                    in
                     Error
                       (sdk_error_of_masc_internal_error
                          (Accept_rejected
@@ -136,11 +149,8 @@ let run_model_by_label
                                 Some
                                   (Boundary_redaction.to_string
                                      Boundary_redaction.runtime_model_label);
-                              reason =
-                                Printf.sprintf
-                                  "response rejected by accept (runtime=%s)"
-                                  (* RFC-0132-EXEMPT: internal observability — rejection reason label, not a redacted public surface *)
-                                  "runtime";
+                              reason_kind;
+                              reason = rejection.reason;
                             }))
                 | Error e -> Error e))
       with
@@ -162,7 +172,6 @@ let run_named_with_masc_tools
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
     ?max_input_tokens
     ?max_cost_usd
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -174,6 +183,7 @@ let run_named_with_masc_tools
     ?(yield_on_tool = false)
     ?compact_ratio
     ?approval
+    ?(max_idle_turns = 3)
     ?sw
     ?net
     ()
@@ -185,8 +195,9 @@ let run_named_with_masc_tools
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
   Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
+    ~max_idle_turns
     ~temperature ~max_tokens ?max_input_tokens ?max_cost_usd
-    ?stream_idle_timeout_s ?wait_timeout_sec ?guardrails ?hooks
+    ?stream_idle_timeout_s ?guardrails ?hooks
     ~accept
     ?compact_ratio
     ?approval

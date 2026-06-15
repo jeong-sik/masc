@@ -305,12 +305,6 @@ val restore_supervisor_state :
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Last known agent count for roster-change detection. Returns 0 if not found. *)
-val get_last_agent_count : base_path:string -> string -> int
-
-(** Update last agent count for a keeper. No-op if not found. *)
-val set_last_agent_count : base_path:string -> string -> int -> unit
-
 (** Check if a board-reactive wakeup is allowed (debounce).
     Records timestamp if allowed. Returns true for unregistered keepers. *)
 val board_wakeup_allowed :

@@ -118,10 +118,20 @@ let finalize
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
-  let ( extra_system_context_digest
-      , extra_system_context_computed_size
-      , extra_system_context_injected_size ) =
-    None, None, None
+  (* #20936: the before_turn_params hook snapshots the final injected
+     extra_system_context (digest + byte size) into the accumulator each
+     SDK turn; the receipt reports the last SDK turn's values. The SDK
+     injects the assembled string verbatim, so computed and injected
+     sizes coincide — they diverge only if an injection-side truncation
+     layer ever appears. *)
+  let extra_system_context_digest =
+    acc.Keeper_run_tools.extra_system_context_digest
+  in
+  let extra_system_context_computed_size =
+    acc.Keeper_run_tools.extra_system_context_size
+  in
+  let extra_system_context_injected_size =
+    acc.Keeper_run_tools.extra_system_context_size
   in
   let receipt =
     { Keeper_execution_receipt.keeper_name = meta.name

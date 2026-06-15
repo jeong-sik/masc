@@ -31,6 +31,8 @@
    [runner]. *)
 
 type runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stdin_content:string option ->
   argv:string list ->
   env:string array ->
@@ -44,6 +46,8 @@ type pipeline_stage = {
 }
 
 type pipeline_runner =
+  on_stdout_chunk:(string -> unit) option ->
+  on_stderr_chunk:(string -> unit) option ->
   stages:pipeline_stage list ->
   Unix.process_status * string * string
 

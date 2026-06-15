@@ -102,6 +102,81 @@ describe('ChatTranscript', () => {
     expect(container.querySelector('[data-chat-delivery="live"]')).not.toBeNull()
   })
 
+  it('renders a thinking placeholder when the model is reasoning', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '',
+            delivery: 'streaming',
+            streamState: 'thinking',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const placeholder = container.querySelector('[data-chat-stream-placeholder]')
+    expect(placeholder).not.toBeNull()
+    expect(placeholder?.textContent).toContain('생각 중...')
+    expect(container.querySelector('[data-chat-delivery="thinking"]')).not.toBeNull()
+  })
+
+  it('shows a streaming cursor while content is streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({ id: 'u1', text: 'ping' }),
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '안녕하세요',
+            delivery: 'streaming',
+            streamState: 'streaming',
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    expect(container.textContent).toContain('안녕하세요')
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).not.toBeNull()
+  })
+
+  it('hides the streaming cursor when delivery is not streaming', () => {
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a1',
+            role: 'assistant',
+            source: 'direct_assistant',
+            label: 'sangsu',
+            text: '완료된 응답',
+            delivery: 'delivered',
+          }),
+        ]}
+        emptyText="empty"
+      />`,
+      container,
+    )
+
+    const cursor = container.querySelector('.animate-pulse')
+    expect(cursor).toBeNull()
+  })
+
   it('uses a parent-bounded flexible transcript in primary mode', () => {
     render(
       html`<${ChatTranscript}
@@ -269,5 +344,62 @@ describe('ChatComposer queue & stall', () => {
     )
 
     expect(container.querySelector('[data-chat-stall-hint]')).toBeNull()
+  })
+})
+
+describe('ChatComposer IME composition guard', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  function renderComposer(onSend: () => void) {
+    render(
+      html`<${ChatComposer}
+        draft="소주에 갑오징어 먹었닭"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${onSend}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    return textarea as HTMLTextAreaElement
+  }
+
+  it('ignores Enter fired while the last Hangul syllable is composing', () => {
+    // Regression: the composition-commit Enter used to send the message,
+    // the IME flushed the trailing syllable back into the cleared input,
+    // and the queue re-sent that single character after the reply arrived.
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
+
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(sent).toBe(1)
+  })
+
+  it('keeps Shift+Enter as newline (no send)', () => {
+    let sent = 0
+    const textarea = renderComposer(() => { sent += 1 })
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }),
+    )
+    expect(sent).toBe(0)
   })
 })

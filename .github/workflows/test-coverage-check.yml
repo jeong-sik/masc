@@ -3,6 +3,13 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      - 'dashboard/**'
+      - 'config/**'
+      # Editing the checker (or its self-test) must trigger this
+      # workflow so the self-test runs against the change. Without
+      # these the checker could regress with nothing to catch it.
+      - 'scripts/check_test_coverage.py'
+      - 'scripts/test_check_test_coverage.py'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,6 +28,12 @@ jobs:
           # shallow clone has neither the base ref nor the merge history,
           # so the diff fails and the check silently no-ops.
           fetch-depth: 0
+      - name: Self-test the coverage checker
+        # Runs unconditionally (independent of the per-PR coverage
+        # opt-out): this validates the checker tool itself, not whether
+        # this PR adds tests. A broken checker is caught here before it
+        # can mis-gate any PR.
+        run: python3 scripts/test_check_test_coverage.py
       - name: Check PR body for opt-out
         id: skip_check
         env:

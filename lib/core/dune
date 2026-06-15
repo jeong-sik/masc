@@ -30,7 +30,8 @@
   read_drop_reason
   actor_types
   actor_mailbox
-  tool_name_alias_axis)
+  tool_name_alias_axis
+  eval_tool_selector)
  (libraries
   yojson
   unix

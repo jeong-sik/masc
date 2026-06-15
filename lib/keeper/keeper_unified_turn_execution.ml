@@ -161,11 +161,10 @@ let run (ctx : ctx)
                ~keeper_turn_id
                ())
            ~run:(fun () ->
-             (* Emit INSIDE the watchdog window: the 2026-06-10 freeze showed
-                this transition's forensics append can park, and any park
-                before [dispatch] arms its [Eio.Time.with_timeout_exn] is
-                unrescuable by design — the safety cap must cover everything
-                that happens once the keeper claims to be Streaming. *)
+             (* Emit before the provider/tool run so operator forensics can see
+                that the keeper entered Streaming. [dispatch] observes external
+                cancellation only; it must not impose a MASC wall-clock timeout
+                around active tool execution. *)
              Keeper_turn_fsm.emit_transition
                ~keeper_name:meta.name
                ~turn_id:keeper_turn_id
@@ -182,8 +181,6 @@ let run (ctx : ctx)
                ~runtime_id:execution.runtime_id
                ~world_observation:observation
                ~turn_affordances
-               ?provider_filter:
-                 (Env_config_keeper.KeeperRuntimeProviderFilter.provider_allowlist ())
                ~generation:run_generation
                ~max_turns
                ~max_idle_turns

@@ -1,5 +1,5 @@
 import { asNumber, asString, isRecord } from './components/common/normalize'
-import type { KeeperConversationDetails } from './types'
+import type { KeeperConversationDetails, KeeperTurnOutcome } from './types'
 
 const STATE_START = '[STATE]'
 const STATE_END = '[/STATE]'
@@ -41,6 +41,21 @@ export function formatKeeperVisibleReply(reply: string): string {
   return withoutState.replace(/\n{3,}/g, '\n\n').trim()
 }
 
+// RFC-0232 P2: closed decode of the producer-typed `turn_outcome` label.
+// Missing field (older server) or unknown label decodes to null, which
+// consumers treat as a visible reply — the bitten failure mode (#20870)
+// was a reply silently dropped, so decode failure fails toward showing.
+function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
+  switch (asString(value, '').trim()) {
+    case 'visible_reply':
+      return 'visible_reply'
+    case 'continuation_checkpoint':
+      return 'continuation_checkpoint'
+    default:
+      return null
+  }
+}
+
 export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversationDetails | null {
   const payload = (() => {
     if (!isRecord(raw)) return null
@@ -70,6 +85,7 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
     skillReason: asString(payload.skill_reason) ?? null,
     stateBlock,
     replyText: reply || null,
+    turnOutcome: normalizeKeeperTurnOutcome(payload.turn_outcome),
     rawPayload: payload,
   }
 }

@@ -113,7 +113,7 @@ let events_http_json ~deps ~state request =
        Offload via Domain_pool_ref still protects the HTTP main
        domain from JSONL-scan stall. *)
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Activity_graph.json_response state.Mcp_server.workspace_config ~kinds
+      Activity_graph.json_response (Mcp_server.workspace_config state) ~kinds
         ~after_seq ~limit ())
 
 let parse_since_ms (raw : string) : int option =
@@ -172,7 +172,7 @@ let graph_http_json ~deps ~state request =
             Some (now_ms - delta_ms)
         | None -> None
       in
-      Activity_graph.graph_json state.Mcp_server.workspace_config ~kinds ~limit
+      Activity_graph.graph_json (Mcp_server.workspace_config state) ~kinds ~limit
         ~timeline_limit ?since_ms ())
 
 let swimlane_http_json ~deps ~state request =
@@ -207,7 +207,7 @@ let swimlane_http_json ~deps ~state request =
             Some (now_ms - delta_ms)
         | None -> None
       in
-      Activity_graph.agent_spans_json state.Mcp_server.workspace_config ~limit
+      Activity_graph.agent_spans_json (Mcp_server.workspace_config state) ~limit
         ?since_ms ())
 
 let stream_headers ~deps origin =
@@ -300,7 +300,7 @@ let handle_stream ~deps ~state request reqd =
        (Printf.sprintf ": activity-stream after=%d\nretry: 3000\n\n"
           after_seq));
   let replay =
-    Activity_graph.list_events state.Mcp_server.workspace_config ~kinds
+    Activity_graph.list_events (Mcp_server.workspace_config state) ~kinds
       ~after_seq ~limit:replay_limit ()
   in
   List.iter (fun value -> ignore (send_raw info (Activity_graph.format_sse_event value))) replay;

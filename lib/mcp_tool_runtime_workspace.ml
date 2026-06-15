@@ -76,7 +76,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
   (* Step 1: set project root *)
   let workspace_result =
     if String.equal path "" then begin
-      if Workspace.is_initialized state.Mcp_server.workspace_config then
+      if Workspace.is_initialized (Mcp_server.workspace_config state) then
         Ok config
       else
         Error "path is required when no project scope is set. Provide the project directory path."
@@ -97,11 +97,11 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       else begin
         let cfg = Workspace.default_config expanded in
         if Workspace.is_initialized cfg then begin
-          state.Mcp_server.workspace_config <- cfg;
+          Mcp_server.set_workspace_config state cfg;
           Ok cfg
         end else begin
           let _msg = Workspace.init cfg ~agent_name:None in
-          state.Mcp_server.workspace_config <- cfg;
+          Mcp_server.set_workspace_config state cfg;
           Ok cfg
         end
       end

@@ -46,7 +46,8 @@ type grader =
 (* ================================================================ *)
 
 type tool_expectation = {
-  tool_name : string;            (** Expected tool to be called *)
+  tool_name : string;            (** Legacy diagnostic label / exact tool fallback *)
+  selector : Eval_tool_selector.t;    (** Descriptor-aware selector to match *)
   required : bool;               (** Must this tool be called? *)
   max_calls : int option;        (** Max times this tool should be called *)
   args_contain : string option;  (** Args should contain this substring *)
@@ -162,12 +163,17 @@ let apply_deterministic_grader (g : deterministic_grader) (value : string) : gra
   }
 
 (** Check tool expectations against actual tool calls made. *)
-let check_tool_expectations
+let check_tool_expectations_with_evidence
     (expectations : tool_expectation list)
-    (actual_calls : string list)
+    (actual_calls : Eval_tool_selector.call list)
     : grader_result list =
   List.map (fun (exp : tool_expectation) ->
-    let call_count = List_util.count_if (fun c -> c = exp.tool_name) actual_calls in
+    let selector_label = Eval_tool_selector.label exp.selector in
+    let call_count =
+      List_util.count_if
+        (fun call -> Eval_tool_selector.matches exp.selector call)
+        actual_calls
+    in
     let required_ok = if exp.required then call_count > 0 else true in
     let max_ok = match exp.max_calls with
       | None -> true
@@ -176,20 +182,34 @@ let check_tool_expectations
     let passed = required_ok && max_ok in
     let detail =
       if not required_ok then
-        Printf.sprintf "required tool '%s' was not called" exp.tool_name
-      else if not max_ok then
-        Printf.sprintf "tool '%s' called %d times (max: %d)"
-          exp.tool_name call_count (Option.value ~default:0 exp.max_calls)
-      else
-        Printf.sprintf "tool '%s' called %d times — OK" exp.tool_name call_count
+        Printf.sprintf "required tool selector '%s' was not called" selector_label
+      else (
+        match exp.max_calls with
+        | Some max when call_count > max ->
+          Printf.sprintf
+            "tool selector '%s' called %d times (max: %d)"
+            selector_label
+            call_count
+            max
+        | _ ->
+        Printf.sprintf "tool selector '%s' called %d times — OK"
+          selector_label call_count)
     in
-    { grader_desc = Printf.sprintf "tool_expectation: %s" exp.tool_name;
+    { grader_desc = Printf.sprintf "tool_expectation: %s" selector_label;
       score = if passed then 1.0 else 0.0;
       weight = 0.5;  (* tool expectations are secondary to content graders *)
       passed;
       detail;
     }
   ) expectations
+
+let check_tool_expectations expectations actual_calls =
+  let calls =
+    actual_calls
+    |> List.map (fun tool_name ->
+           ({ tool_name; route_evidence = None } : Eval_tool_selector.call))
+  in
+  check_tool_expectations_with_evidence expectations calls
 
 (* ================================================================ *)
 (* Score computation                                                 *)
@@ -467,15 +487,38 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       match Json_util.assoc_member_opt "tool_expectations" json with
       | Some (`List items) ->
           List.filter_map (fun te ->
-            try Some {
-              tool_name = Json_util.get_string te "tool" |> Option.value ~default:"";
-              required = (match Json_util.assoc_member_opt "required" te with
-                | Some (`Bool b) -> b | _ -> false);
-              max_calls = (match Json_util.assoc_member_opt "max_calls" te with
-                | Some (`Int i) -> Some i | _ -> None);
-              args_contain = (match Json_util.assoc_member_opt "args_contain" te with
-                | Some (`String s) -> Some s | _ -> None);
-            }
+            try
+              let legacy_tool =
+                match Json_util.get_string te "tool" with
+                | Some tool -> tool
+                | None -> (
+                  match Json_util.get_string te "tool_name" with
+                  | Some tool_name -> tool_name
+                  | None -> "")
+              in
+              let selector =
+                match Json_util.assoc_member_opt "selector" te with
+                | Some selector_json -> (
+                    match Eval_tool_selector.of_yojson selector_json with
+                    | Ok selector -> selector
+                    | Error _ -> Eval_tool_selector.Tool_name legacy_tool)
+                | None -> Eval_tool_selector.Tool_name legacy_tool
+              in
+              let tool_name =
+                if String.trim legacy_tool = ""
+                then Eval_tool_selector.label selector
+                else legacy_tool
+              in
+              Some {
+                tool_name;
+                selector;
+                required = (match Json_util.assoc_member_opt "required" te with
+                  | Some (`Bool b) -> b | _ -> false);
+                max_calls = (match Json_util.assoc_member_opt "max_calls" te with
+                  | Some (`Int i) -> Some i | _ -> None);
+                args_contain = (match Json_util.assoc_member_opt "args_contain" te with
+                  | Some (`String s) -> Some s | _ -> None);
+              }
             with Yojson.Safe.Util.Type_error _ -> None
           ) items
       | _ -> []

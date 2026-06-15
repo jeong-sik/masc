@@ -3,21 +3,50 @@
     Mirrors [Keeper_registry_broadcast]: a pure side-effect wrapper
     around [Sse.broadcast] with a failure counter + WARN log. *)
 
-let chat_appended ~keeper_name ~source =
+(** Audio clip descriptor attached to a [keeper_chat_appended] event when
+    the utterance was synthesized (RFC-0235 P1). [token] is the capability
+    in the URL path [/api/v1/voice/audio/<token>]; the dashboard assembles
+    the full URL from its own base. [message_text] doubles as the
+    accessible caption/fallback. *)
+type audio_clip = {
+  token : string;
+  mime : string;
+  duration_sec : float option;
+  message_text : string;
+}
+
+let audio_clip_to_json (clip : audio_clip) =
+  let base =
+    [ ("token", `String clip.token)
+    ; ("mime", `String clip.mime)
+    ; ("message_text", `String clip.message_text)
+    ]
+  in
+  match clip.duration_sec with
+  | None -> base
+  | Some d -> base @ [ ("duration_sec", `Float d) ]
+
+let do_broadcast ~keeper_name ~source ~audio =
   try
     (* Field is named [connector], not [source]: the dashboard SSE
        vocabulary already reserves [source] for the journal origin
        (JournalSource), and the chat JSONL's own [source] column is a
-       different boundary. *)
-    let json =
-      `Assoc
-        [ ("type", `String "keeper_chat_appended");
-          ("name", `String keeper_name);
-          ("connector", `String source);
-          ("ts_unix", `Float (Time_compat.now ()));
-        ]
+       different boundary. [audio] is a separate boundary (RFC-0235): only
+       present when this turn synthesized a clip, and the dashboard decodes
+       it into a typed record at the SSE edge. *)
+    let base_fields =
+      [ ("type", `String "keeper_chat_appended");
+        ("name", `String keeper_name);
+        ("connector", `String source);
+        ("ts_unix", `Float (Time_compat.now ()));
+      ]
     in
-    Sse.broadcast json
+    let fields =
+      match audio with
+      | None -> base_fields
+      | Some clip -> base_fields @ [ ("audio", `Assoc (audio_clip_to_json clip)) ]
+    in
+    Sse.broadcast (`Assoc fields)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -29,3 +58,16 @@ let chat_appended ~keeper_name ~source =
       "keeper_chat_broadcast: chat_appended name=%s failed: %s"
       keeper_name
       (Printexc.to_string exn)
+
+(** Broadcast with no audio clip — the existing surface, unchanged signature
+    so all current callers stay as-is. *)
+let chat_appended ~keeper_name ~source = do_broadcast ~keeper_name ~source ~audio:None
+
+(** Broadcast with a synthesized audio clip attached (RFC-0235 P1). Used by
+    a turn that owns a voice clip ([Voice_bridge_transport.make_audio_file]
+    token); the dashboard decodes the [audio] field into a typed record and
+    renders a play button. Separate from {!chat_appended} so the rare
+    audio-bearing case does not force every caller to thread an option. *)
+let chat_appended_with_audio ~keeper_name ~source ~audio =
+  do_broadcast ~keeper_name ~source ~audio:(Some audio)
+

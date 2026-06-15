@@ -39,3 +39,15 @@ val close : conn -> unit
 (** Tear down this connection: cancels the writer fiber, closes the
     TLS flow and the underlying socket. Idempotent — subsequent calls
     are no-ops. After [close], [read] / [write] raise. *)
+
+val writer_loop :
+  take:(unit -> Websocket.Frame.t) ->
+  write_string:(string -> unit) ->
+  unit
+(** Writer fiber body: encodes frames obtained from [take] and pushes
+    the bytes via [write_string] until either raises.  [Eio.Io] is
+    contained — the cause is logged at warn level — because the writer
+    runs on the per-session switch and an escaping exception would tear
+    down the whole gateway client.  Every other exception (including
+    cancellation) propagates.  Exposed for unit tests; [connect] wires
+    it to the write queue and the TLS flow. *)

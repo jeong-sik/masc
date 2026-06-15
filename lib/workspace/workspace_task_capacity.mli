@@ -30,6 +30,14 @@ val default_goal_open_limit : int
     tasks bypass the per-goal cap. *)
 val check : ?goal_id:string -> ?goal_task_links:(string * string list) list -> Masc_domain.backlog -> capacity_error option
 
+(** Same as [check], reading the persistent goal-task link registry from
+    [config]. *)
+val check_for_config :
+  Workspace_utils_backend_setup.config ->
+  ?goal_id:string ->
+  Masc_domain.backlog ->
+  capacity_error option
+
 (** [error_to_json_string err] serializes to the same JSON-string shape
     that the pre-RFC-0034.v2 keeper task runtime helper produced
     (key order: ok, error_kind, goal_id,
@@ -41,3 +49,11 @@ val error_to_json_string : capacity_error -> string
     callback passed to [Workspace_task.add_task]: returns [None] on success
     or [Some message] when the cap would be exceeded. *)
 val rejection_for_add_task : ?goal_id:string -> Masc_domain.backlog -> string option
+
+(** Same as [rejection_for_add_task], reading the persistent goal-task link
+    registry from [config]. *)
+val rejection_for_add_task_for_config :
+  Workspace_utils_backend_setup.config ->
+  ?goal_id:string ->
+  Masc_domain.backlog ->
+  string option

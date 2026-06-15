@@ -19,7 +19,13 @@ let msg ?ts ?source ?speaker ~role content : Store.chat_message =
     tool_call_id = None;
     tool_call_name = None;
     source;
+    surface = None;
+    conversation_id = None;
+    external_message_id = None;
     speaker;
+    mentions = [];
+    kind = Store.Row_kind.Utterance;
+    audio = None;
   }
 
 let external_speaker ?name id : Store.speaker =
@@ -37,18 +43,18 @@ let to_string_j json = Yojson.Safe.Util.to_string json
 
 let discord_fixture : Store.chat_message list =
   [
-    msg ~ts:1.0 ~source:"dashboard" ~role:"user" "hello from owner";
+    msg ~ts:1.0 ~source:"dashboard" ~role:Store.Role.User "hello from owner";
     msg ~ts:2.0 ~source:"discord"
       ~speaker:(external_speaker ~name:"minsu_old" "98791450001")
-      ~role:"user" "first discord message";
-    msg ~ts:2.5 ~source:"discord" ~role:"assistant" "keeper reply";
+      ~role:Store.Role.User "first discord message";
+    msg ~ts:2.5 ~source:"discord" ~role:Store.Role.Assistant "keeper reply";
     msg ~ts:3.0 ~source:"discord"
       ~speaker:(external_speaker ~name:"Minsu" "98791450001")
-      ~role:"user" "second discord message";
+      ~role:Store.Role.User "second discord message";
     msg ~ts:4.0 ~source:"discord"
       ~speaker:(external_speaker "55500001111")
-      ~role:"user" "drive-by, no display name";
-    msg ~role:"user" "legacy row without source";
+      ~role:Store.Role.User "drive-by, no display name";
+    msg ~role:Store.Role.User "legacy row without source";
   ]
 
 let test_lane_filter_excludes_other_sources_and_legacy () =
@@ -166,7 +172,7 @@ let test_oldest_ts_absent_when_page_unstamped () =
   let json =
     parse
       (SR.respond ~surface:"discord" ~limit:10 ~has_more:false ~notes:[]
-         [ msg ~source:"discord" ~role:"user" "no ts row" ])
+         [ msg ~source:"discord" ~role:Store.Role.User "no ts row" ])
   in
   check bool "oldest_ts omitted" true (member "oldest_ts" json = `Null)
 

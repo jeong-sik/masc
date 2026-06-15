@@ -4,17 +4,18 @@ Status: Phase 1 — observability + module stub. Migration of call sites is trac
 
 ## Layer model
 
-MASC timeout policy is progress-first. Tool calls and streaming gaps have
-bounded idle or invocation timeouts, but a keeper turn that is still producing
-stream or tool progress must not be killed only because cumulative wall-clock
-elapsed. `MASC_KEEPER_TURN_TIMEOUT_SEC` is now a retry/admission budget between
-provider attempts, not the hard execution deadline for an active turn.
+MASC timeout policy is progress-first. Provider streams and tool invocations are
+separate timeout domains: `stream_idle_timeout_sec` watches provider transport
+silence, while tool deadlines stay in the tool layer. No OAS/keeper stream
+timeout knob should be read as tool timeout policy. `MASC_KEEPER_TURN_TIMEOUT_SEC`
+is now a retry/admission budget between provider attempts, not the hard
+execution deadline for an active turn.
 
 | Layer | Role | Typical cap | Source of truth |
 |-------|------|-------------|-----------------|
 | `Tool` | per-tool HTTP / shell invocation | 10–60 s | `Env_config_runtime.*`, `lib/tool_local_runtime_http.ml` |
 | `MCP tools/call` | outer per-tool dispatcher cap | 60 s default; board writes 90 s default | `MASC_TOOL_TIMEOUT_DEFAULT_SEC`, `MASC_TOOL_TIMEOUT_BOARD_SEC`, `Mcp_server_eio_call_tool.tool_timeout_sec_opt` |
-| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | no cumulative cap on the keeper `run_named` path; stream idle / liveness caps apply | `Env_config_keeper.stream_idle_timeout_sec`, `Keeper_attempt_liveness` |
+| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | no cumulative cap on the keeper `run_named` path; provider stream idle and attempt liveness apply; Agent-level no-progress idle is opt-in only; tool timeouts are outside this layer | `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC`, `MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC`, `Keeper_attempt_liveness` |
 | `Keeper_turn` | one keeper turn (may issue many OAS calls) | 600 s default retry/admission budget; not a hard execution kill | `MASC_KEEPER_TURN_TIMEOUT_SEC`, `Keeper_turn_runtime_budget*` |
 | `Keeper_cycle` | full keeper lifecycle | N×turn | cycle supervisor |
 | `Shutdown` | graceful shutdown board flush | 2 s | `bin/main_eio.ml` |
@@ -45,13 +46,14 @@ warning preserves the same fields (`layer`, `origin`, `budget`, `actual`,
 
 Provider timeout failures are not global shutdown signals. A single
 `provider_timeout` is scoped to the provider attempt whose stream idle or
-attempt-liveness budget was exceeded. The turn ledger and runtime-trust
-snapshot must surface provider-owned timeout evidence as provider timeout
-detail. Turn-owned retry/admission budget exhaustion may still surface as
-`turn_timeout`, but active stream/tool progress must not become
+attempt-liveness budget was exceeded. Tool invocation timeouts are reported by
+the tool layer instead. The turn ledger and runtime-trust snapshot must surface
+provider-owned timeout evidence as provider timeout detail. Turn-owned
+retry/admission budget exhaustion may still surface as `turn_timeout`, but
+active provider-stream progress must not become
 `terminal_reason.code = "turn_wall_clock_timeout"` merely because cumulative
-wall time crossed 600 s. The runtime-trust snapshot mirrors the latest
-action, and the runtime surface marks the keeper as needing attention with
+wall time crossed 600 s. The runtime-trust snapshot mirrors the latest action,
+and the runtime surface marks the keeper as needing attention with
 `next_human_action = "inspect_runtime_blocker"` when the keeper is not paused.
 Paused provider-timeout cases keep the paused workflow
 (`attention_reason = "paused"`,

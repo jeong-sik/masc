@@ -124,11 +124,22 @@ module KeeperKeepalive : sig
   (** Resolved OAS-call timeout: [oas_timeout_sec_override] when set, otherwise
       [turn_timeout_sec]. RFC-0156: no token- or turn-budget dependence. *)
   val attempt_watchdog_safety_cap_sec : float
-  (** Per-attempt wall-clock safety cap for stuck Streaming fibers.
-      Prevents a provider attempt from locking a keeper in [Streaming] state
-      forever. Env: [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC].
-      Default: 1800 (30 min). Clamp range: [300, 7200] s. *)
+  (** Deprecated compatibility knob for the removed whole-run attempt watchdog.
+      The keeper runtime must not apply this as a wall-clock timeout around
+      active provider/tool execution. Env:
+      [MASC_KEEPER_ATTEMPT_WATCHDOG_SAFETY_CAP_SEC]. *)
   val stream_idle_timeout_sec : float
+
+  val execution_idle_timeout_sec : float option
+  (** OAS Agent.run inactivity deadline. [Some s] forwards to
+      [Builder.with_execution_idle_timeout] through the keeper runtime
+      resolver only for paths that can prove active tool execution is excluded.
+      The keeper path currently parses this knob but does not forward it.
+
+      Env: [MASC_KEEPER_EXECUTION_IDLE_TIMEOUT_SEC]. Default: disabled.
+      Clamp range when enabled: [5, 600] s. Unset, invalid, [0], or a
+      negative value disables it. Kept opt-in because this is an Agent.run-level
+      stall detector, not provider transport policy or tool timeout policy. *)
 
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for non-streaming OAS completion
@@ -223,12 +234,6 @@ module RuntimeSaturationSignal : sig
       string label, or control-flow path. *)
 end
 
-
-(** {1 Runtime runtime overrides} *)
-
-module KeeperRuntimeProviderFilter : sig
-  val provider_allowlist : unit -> string list option
-end
 
 (** {1 Transient retry backoff} *)
 

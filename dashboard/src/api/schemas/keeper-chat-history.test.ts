@@ -65,6 +65,40 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.speaker_authority).toBe('external')
   })
 
+  it('passes connector conversation coordinates through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        source: 'discord',
+        conversation_id: 'discord:guild-1:channel:1514586257706061834',
+        external_message_id: '1498985300729172039',
+      }),
+    )
+    expect(out?.conversation_id).toBe(
+      'discord:guild-1:channel:1514586257706061834',
+    )
+    expect(out?.external_message_id).toBe('1498985300729172039')
+  })
+
+  it('passes surface ref fields through when present', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        source: 'discord',
+        surface: {
+          kind: 'discord',
+          guild_id: 'guild-1',
+          channel_id: 'channel-1',
+          thread_id: 'thread-1',
+        },
+      }),
+    )
+    expect(out?.surface).toEqual({
+      kind: 'discord',
+      guild_id: 'guild-1',
+      channel_id: 'channel-1',
+      thread_id: 'thread-1',
+    })
+  })
+
   it('accepts rows without speaker fields (legacy and non-user lines)', () => {
     const out = safeParseKeeperChatHistoryMessage(validMessage())
     expect(out).not.toBeNull()

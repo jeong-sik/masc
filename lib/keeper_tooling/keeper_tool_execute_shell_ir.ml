@@ -97,6 +97,7 @@ let dispatch_classified
       ?base_path
       ~workdir
       ~sandbox
+      ?base_host_env
       ?on_output_chunk
       envelope
   =
@@ -117,7 +118,7 @@ let dispatch_classified
     ~f_allow:(fun _context ->
       match validate_paths ?keeper_id ?base_path ~workdir ir with
       | Error e -> Error (Path_reject e)
-      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?on_output_chunk envelope))
+      | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?base_host_env ?on_output_chunk envelope))
 ;;
 
 (* TEL-OK: wrapper only classifies before delegating to dispatch_classified. *)
@@ -128,6 +129,7 @@ let dispatch
       ?base_path
       ~workdir
       ~sandbox
+      ?base_host_env
       ?on_output_chunk
       ir
   =
@@ -138,6 +140,7 @@ let dispatch
     ?base_path
     ~workdir
     ~sandbox
+    ?base_host_env
     ?on_output_chunk
     (classify ir)
 ;;

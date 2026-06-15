@@ -506,7 +506,7 @@ export function DashboardStatusTray({ sideRailCollapsed = false }: DashboardStat
   return html`
     <aside
       ref=${trayRef}
-      class=${`fixed z-40 max-w-[calc(100vw-1.5rem)] ${sideRailOffset} max-[1100px]:left-2 max-[1100px]:right-2 max-[1100px]:max-w-none ${codeOffset}`}
+      class=${`dashboard-status-tray fixed z-40 max-w-[calc(100vw-1.5rem)] ${sideRailOffset} max-[1100px]:left-2 max-[1100px]:right-2 max-[1100px]:max-w-none ${codeOffset}`}
       aria-label="Dashboard status tray"
       data-testid="dashboard-status-tray"
     >

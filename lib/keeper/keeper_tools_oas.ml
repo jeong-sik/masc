@@ -332,8 +332,8 @@ let transient_mutex_contention_tool_error
     public name (Execute/Read/...) only appears as the [Tool.schema.name]
     set by [Tool_bridge.oas_tool_of_masc] above this helper.
 
-    [?translate_input] reshapes the incoming JSON from the public schema
-    to the internal tool's expected payload. Identity by default. *)
+    Public aliases validate the LLM-facing payload before translation to the
+    internal tool's expected payload. Identity by default. *)
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

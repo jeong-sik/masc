@@ -1,40 +1,52 @@
-(** Tests for IDE Bridge — event collection and pull request URL parsing. *)
+(** Tests for IDE Bridge — event collection and pull request result parsing. *)
 
 open Alcotest
 
-let test_parse_pull_request_url_simple () =
-  match Ide_bridge.parse_pull_request_link_from_output "https://github.com/jeong-sik/masc/pull/19872" with
+let test_parse_pull_request_result_direct_json () =
+  match
+    Ide_bridge.parse_pull_request_result_from_output
+      {|{"number":19872,"url":"https://github.com/jeong-sik/masc/pull/19872"}|}
+  with
   | Some (number, url) ->
     check int "pr number" 19872 number;
     check string "pull request url" "https://github.com/jeong-sik/masc/pull/19872" url
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pull_request_url_with_files () =
-  match Ide_bridge.parse_pull_request_link_from_output "https://github.com/jeong-sik/masc/pull/19872/files" with
+let test_parse_pull_request_result_wrapped_json () =
+  let output =
+    {|{"ok":true,"output":"{\"number\":123,\"url\":\"https://github.com/jeong-sik/masc/pull/123\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat","base":"main","draft":false}}|}
+  in
+  match Ide_bridge.parse_pull_request_result_from_output output with
   | Some (number, url) ->
-    check int "pr number" 19872 number;
-    check string "pull request url" "https://github.com/jeong-sik/masc/pull/19872" url
+    check int "pr number" 123 number;
+    check string "pull request url" "https://github.com/jeong-sik/masc/pull/123" url
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pull_request_url_in_output () =
-  let output = "remote: Create a pull request for 'feat/branch' on GitHub by visiting:\nremote:      https://github.com/jeong-sik/masc/pull/123\n" in
-  match Ide_bridge.parse_pull_request_link_from_output output with
-  | Some (number, _) -> check int "pr number" 123 number
+let test_parse_pull_request_result_prefers_html_url () =
+  match
+    Ide_bridge.parse_pull_request_result_from_output
+      {|{"number":44,"url":"https://api.github.com/repos/owner/repo/pulls/44","html_url":"https://github.com/owner/repo/pull/44"}|}
+  with
+  | Some (number, url) ->
+    check int "pr number" 44 number;
+    check string "pull request url" "https://github.com/owner/repo/pull/44" url
   | None -> fail "expected Some"
 ;;
 
-let test_parse_pull_request_url_no_match () =
-  check (option (pair int string)) "no pull request url"
+let test_parse_pull_request_result_ignores_raw_url () =
+  check (option (pair int string)) "raw url ignored"
     None
-    (Ide_bridge.parse_pull_request_link_from_output "nothing here")
+    (Ide_bridge.parse_pull_request_result_from_output
+       "https://github.com/jeong-sik/masc/pull/19872")
 ;;
 
-let test_parse_pull_request_url_no_number () =
+let test_parse_pull_request_result_no_number () =
   check (option (pair int string)) "no number"
     None
-    (Ide_bridge.parse_pull_request_link_from_output "https://github.com/owner/repo/pull/abc")
+    (Ide_bridge.parse_pull_request_result_from_output
+       {|{"url":"https://github.com/owner/repo/pull/123"}|})
 ;;
 
 let with_temp_dir f =
@@ -437,9 +449,11 @@ let test_pr_event_ingest () =
     check string "pull_request_url" "https://github.com/jeong-sik/masc/pull/19872" pull_request_url)
 ;;
 
-let test_pr_event_from_hook_detects_url () =
+let test_pr_event_from_hook_uses_structured_descriptor_output () =
   with_temp_dir (fun base_dir ->
-    let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
+    let output =
+      {|{"ok":true,"output":"{\"number\":123,\"url\":\"https://github.com/jeong-sik/masc/pull/123\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat","base":"main","draft":true}}|}
+    in
     Ide_bridge.ingest_pr_event_from_hook
       ~base_path:base_dir
       ~keeper_id:"k1"
@@ -454,7 +468,38 @@ let test_pr_event_from_hook_detects_url () =
     close_in ic;
     let json = Yojson.Safe.from_string line in
     let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    check int "pr_number" 123 pr_number)
+    let pr_title = Yojson.Safe.Util.member "pr_title" json |> Yojson.Safe.Util.to_string in
+    check int "pr_number" 123 pr_number;
+    check string "pr_title" "feat" pr_title)
+;;
+
+let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
+  with_temp_dir (fun base_dir ->
+    let output =
+      {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat cli","base":"main","draft":false}}|}
+    in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file exists" true (Sys.file_exists path);
+    let ic = open_in path in
+    let line = input_line ic in
+    close_in ic;
+    let json = Yojson.Safe.from_string line in
+    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
+    let pull_request_url =
+      Yojson.Safe.Util.member "pull_request_url" json |> Yojson.Safe.Util.to_string
+    in
+    check int "pr_number" 456 pr_number;
+    check string
+      "pull_request_url"
+      "https://github.com/jeong-sik/masc/pull/456"
+      pull_request_url)
 ;;
 
 let test_pr_event_from_hook_ignores_non_execute () =
@@ -485,6 +530,20 @@ let test_pr_event_from_hook_ignores_no_url () =
     check bool "file not created" false (Sys.file_exists path))
 ;;
 
+let test_pr_event_from_hook_ignores_raw_url () =
+  with_temp_dir (fun base_dir ->
+    let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created for raw url" false (Sys.file_exists path))
+;;
+
 let test_descriptor_gated_on_success () =
   with_temp_dir (fun base_dir ->
     (* Failed gh pr create with command_descriptor in output should NOT produce PR event *)
@@ -499,6 +558,22 @@ let test_descriptor_gated_on_success () =
     let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
     let path = Filename.concat dir "pr_events.jsonl" in
     check bool "file not created on failure" false (Sys.file_exists path))
+;;
+
+let test_legacy_hook_uses_explicit_success_flag () =
+  with_temp_dir (fun base_dir ->
+    let failed_output =
+      {|{"ok":false,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat failed","base":"main","draft":false},"error":"authentication failed"}|}
+    in
+    Ide_bridge.ingest_pr_event_from_hook
+      ~base_path:base_dir
+      ~keeper_id:"k1"
+      ~turn_id:"t1"
+      ~output_text:failed_output
+      ~tool_name:"execute";
+    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "pr_events.jsonl" in
+    check bool "file not created on failed wrapper result" false (Sys.file_exists path))
 ;;
 
 let test_descriptor_ingested_on_success () =
@@ -559,12 +634,12 @@ let test_concurrent_ingest () =
 let () =
   run
     "ide_bridge"
-    [ ( "parse_pull_request_url"
-      , [ test_case "simple url" `Quick test_parse_pull_request_url_simple
-        ; test_case "url with /files" `Quick test_parse_pull_request_url_with_files
-        ; test_case "url in output" `Quick test_parse_pull_request_url_in_output
-        ; test_case "no match" `Quick test_parse_pull_request_url_no_match
-        ; test_case "no number" `Quick test_parse_pull_request_url_no_number
+    [ ( "parse_pull_request_result"
+      , [ test_case "direct json" `Quick test_parse_pull_request_result_direct_json
+        ; test_case "wrapped json" `Quick test_parse_pull_request_result_wrapped_json
+        ; test_case "html_url preferred" `Quick test_parse_pull_request_result_prefers_html_url
+        ; test_case "raw url ignored" `Quick test_parse_pull_request_result_ignores_raw_url
+        ; test_case "no number" `Quick test_parse_pull_request_result_no_number
         ] )
     ; ( "ingest"
       , [ test_case "tool event" `Quick test_ingest_tool_event
@@ -588,10 +663,13 @@ let () =
         ] )
     ; ( "pr_event"
       , [ test_case "pr event ingest" `Quick test_pr_event_ingest
-        ; test_case "from hook detects url" `Quick test_pr_event_from_hook_detects_url
+        ; test_case "from hook uses structured descriptor output" `Quick test_pr_event_from_hook_uses_structured_descriptor_output
+        ; test_case "from hook uses descriptor-confirmed CLI URL" `Quick test_pr_event_from_hook_uses_descriptor_confirmed_cli_url
         ; test_case "from hook ignores non-execute" `Quick test_pr_event_from_hook_ignores_non_execute
         ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
+        ; test_case "from hook ignores raw url" `Quick test_pr_event_from_hook_ignores_raw_url
         ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success
+        ; test_case "legacy hook uses explicit success flag" `Quick test_legacy_hook_uses_explicit_success_flag
         ; test_case "descriptor ingested on success" `Quick test_descriptor_ingested_on_success
         ] )
     ; ( "concurrency"

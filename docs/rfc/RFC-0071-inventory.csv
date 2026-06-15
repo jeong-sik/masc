@@ -652,7 +652,6 @@ lib/operator/operator_digest_types.ml,17,None,unclassified
 lib/operator/operator_judgment.ml,35,None,unclassified
 lib/otel/otel_config.ml,9,false,unclassified
 lib/otel/otel_trace_context.ml,103,None,unclassified
-lib/tool_call_quality_benchmark/post_verifier.ml,57,false,unclassified
 lib/procedural_memory.ml,86,None,unclassified
 lib/process/bg_task.ml,430,false,unclassified
 lib/process/exec_tap.ml,171,false,unclassified
@@ -667,9 +666,6 @@ lib/resilience/audit.ml,52,None,unclassified
 lib/resilience/degradation.ml,64,None,unclassified
 lib/resilience/keeper_bridge.ml,14,false,unclassified
 lib/resilience/keeper_bridge.ml,182,None,unclassified
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml,50,None,unclassified
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml,63,None,unclassified
-lib/tool_call_quality_benchmark/reward_advice_artifact.ml,136,None,unclassified
 lib/sdk_tool_contract.ml,261,None,unclassified
 lib/sdk_tool_contract.ml,266,None,unclassified
 lib/sdk_tool_contract.ml,271,None,unclassified

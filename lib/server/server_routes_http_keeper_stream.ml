@@ -71,12 +71,20 @@ let handle_keeper_chat_request_result state request reqd =
   | Ok request_id -> (
       match
         Keeper_msg_async.poll
-          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path request_id
       with
-      | None ->
+      | Keeper_msg_async.Absent ->
           respond_json_value_with_cors ~status:`Not_found request reqd
             (keeper_chat_stream_error_json "request_id not found")
-      | Some entry ->
+      | Keeper_msg_async.Unreadable reason ->
+          respond_json_value_with_cors ~status:`Internal_server_error request
+            reqd
+            (keeper_chat_stream_error_json
+               (Printf.sprintf
+                  "request record unreadable: %s — request was accepted but \
+                   its result is lost"
+                  reason))
+      | Keeper_msg_async.Found entry ->
           respond_json_value_with_cors ~status:`OK request reqd
             (Keeper_msg_async.entry_to_json entry) )
 
@@ -88,7 +96,7 @@ let handle_keeper_chat_request_cancel state request reqd =
   | Ok request_id ->
       let cancelled =
         Keeper_msg_async.cancel
-          ~base_path:state.Mcp_server.workspace_config.base_path request_id
+          ~base_path:(Mcp_server.workspace_config state).base_path request_id
       in
       if cancelled then
         respond_json_value_with_cors ~status:`OK request reqd
@@ -114,7 +122,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.workspace_config;
+          config = (Mcp_server.workspace_config state);
           agent_name;
           sw;
           clock;
@@ -140,7 +148,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.workspace_config
+  Audit_log.log_tool_call (Mcp_server.workspace_config state)
     ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.Keeper.emit Log.Error
@@ -163,7 +171,7 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -293,11 +301,6 @@ let strip_keeper_visible_reply (reply : string) =
   |> Keeper_execution.strip_state_blocks_text
   |> String.trim
 
-let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
-
-let is_continuation_checkpoint_reply text =
-  has_prefix ~prefix:continuation_checkpoint_prefix (String.trim text)
-
 let split_keeper_reply_chunks (text : string) : string list =
   let len = String.length text in
   if len = 0 then
@@ -377,7 +380,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
-          config = state.Mcp_server.workspace_config;
+          config = (Mcp_server.workspace_config state);
           agent_name;
           sw;
           clock;
@@ -406,7 +409,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
     if success then None
     else Some (Printf.sprintf "duration_ms=%d" duration_ms)
   in
-  Audit_log.log_tool_call state.Mcp_server.workspace_config ~agent_id:agent_name
+  Audit_log.log_tool_call (Mcp_server.workspace_config state) ~agent_id:agent_name
     ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
   if not success then
     Log.Keeper.emit Log.Error
@@ -429,7 +432,7 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
-           Telemetry_eio.track_tool_called ~fs state.Mcp_server.workspace_config
+           Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
              ?error_kind:telemetry_error_kind ?error_message:error_msg ()
@@ -512,7 +515,7 @@ type keeper_stream_worker_event =
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
-  let base_path = state.Mcp_server.workspace_config.base_path in
+  let base_path = (Mcp_server.workspace_config state).base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
   in
@@ -532,6 +535,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
          ~channel_user_id:payload.channel_user_id
          ~channel_user_name:payload.channel_user_name
          ~channel_workspace_id:payload.channel_workspace_id
+         ~metadata:[]
          ~content:payload.message
     else
       payload.message
@@ -555,14 +559,27 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
        | Some timeout_sec -> [ ("timeout_sec", `Int timeout_sec) ]
        | None -> [])
     in
+    let connector_fields =
+      if has_connector_context then
+        [ ("channel", `String payload.channel);
+          ("channel_user_id", `String payload.channel_user_id);
+          ("channel_user_name", `String payload.channel_user_name);
+          ("channel_workspace_id", `String payload.channel_workspace_id) ]
+      else
+        []
+    in
+    let fields = base_fields @ connector_fields in
     `Assoc
-      (if payload.attachments = [] then base_fields
-       else ("attachments", `List (List.map attachment_json payload.attachments)) :: base_fields)
+      (if payload.attachments = [] then fields
+       else ("attachments", `List (List.map attachment_json payload.attachments)) :: fields)
   in
-  (* Buffer model text deltas until the terminal payload arrives. This
-     avoids sending raw partial output before the full reply can pass
-     through keeper-scoped redaction. *)
-  let streamed_text = Buffer.create 256 in
+  (* Stream model text deltas live with per-delta redaction — the same
+     treatment ThinkingDelta and Tool_call_args already get in
+     [consume_worker_events]. The once-only invariant (live emit + terminal
+     re-send suppression + raw fallback) is owned by
+     [Keeper_stream_text_accum]; see its interface for the #20825/#20854/
+     #20869 history this guards against. *)
+  let text_accum = Keeper_stream_text_accum.create () in
   let worker_events = Eio.Stream.create 512 in
   let push_worker_event event =
     if not !closed then
@@ -601,9 +618,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         { Keeper_chat_store.call_id; call_name; args = Buffer.contents buf })
       !tool_calls_rev
   in
-  let chat_source =
-    if has_connector_context then payload.channel else "dashboard"
+  (* RFC-0232 P5: the typed surface is the write-side truth; the label
+     [chat_source] is its derivation, used for broadcast metadata. *)
+  let chat_surface =
+    if has_connector_context then
+      Surface_ref.Gate { label = payload.channel; address = [] }
+    else Surface_ref.Dashboard { session_id = None }
   in
+  let chat_source = Surface_ref.lane_label chat_surface in
   (* RFC-0223 P1: authority derives from the arrival route. Connector
      context means an arbitrary external person on that channel; its
      absence means the authenticated dashboard operator (the route is
@@ -625,14 +647,23 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     push_worker_event (Stream_event evt)
   in
   let persist_failure_reply err =
+    (* The failure marker is typed, not an utterance: it renders for the
+       operator but does not advance the lane watermark, so the user
+       message it failed to answer stays pending for the keeper's next
+       turn — and the keeper never reads the error as its own words. *)
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ChatTransportFailures)
+      ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
+      ();
     Keeper_chat_store.append_turn
       ~base_dir:base_path
       ~keeper_name:payload.name
       ~user_content:payload.message
       ~user_attachments:payload.attachments
       ~tool_calls:(collected_tool_calls ())
-      ~source:chat_source
+      ~surface:chat_surface
       ~speaker:chat_speaker
+      ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
       ~assistant_content:(persisted_error_reply err)
       ();
     Keeper_chat_broadcast.chat_appended
@@ -668,21 +699,22 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         in
         match dispatch_result with
         | Ok (true, body) ->
-            let _payload_json_opt, visible_reply = extract_visible_reply body in
-            if not (is_continuation_checkpoint_reply visible_reply) then begin
+            let payload_json_opt, visible_reply = extract_visible_reply body in
+            (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> ()
+            | Keeper_turn_outcome.Visible_reply ->
               Keeper_chat_store.append_turn
                 ~base_dir:base_path
                 ~keeper_name:payload.name
                 ~user_content:payload.message
                 ~user_attachments:payload.attachments
                 ~tool_calls:(collected_tool_calls ())
-                ~source:chat_source
+                ~surface:chat_surface
                 ~speaker:chat_speaker
                 ~assistant_content:visible_reply
                 ();
               Keeper_chat_broadcast.chat_appended
-                ~keeper_name:payload.name ~source:chat_source
-            end;
+                ~keeper_name:payload.name ~source:chat_source);
             push_worker_event (Stream_terminal (true, body));
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
@@ -749,7 +781,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
              Keeper_chat_events.publish events
                (Event_error { message = redact_text ("Timeout: " ^ reason) })
          | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } ->
-             Buffer.add_string streamed_text text
+             Keeper_chat_events.publish events
+               (Text_delta
+                  (Keeper_stream_text_accum.on_delta text_accum
+                     ~redact:redact_text text))
          | Agent_sdk.Types.ContentBlockDelta { delta = ThinkingDelta text; _ } ->
              Keeper_chat_events.publish events
                (Custom
@@ -777,15 +812,22 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
           let visible_reply =
             match String.trim visible_reply with
             | "" ->
-                let streamed = Buffer.contents streamed_text |> String.trim in
+                let streamed =
+                  Keeper_stream_text_accum.streamed_text text_accum |> String.trim
+                in
                 if streamed = "" then visible_reply else streamed
             | _ -> visible_reply
           in
           let visible_reply = redact_text visible_reply in
           let is_checkpoint =
-            is_continuation_checkpoint_reply visible_reply
+            match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+            | Keeper_turn_outcome.Continuation_checkpoint -> true
+            | Keeper_turn_outcome.Visible_reply -> false
           in
-          if not is_checkpoint then
+          if
+            (not is_checkpoint)
+            && not (Keeper_stream_text_accum.suppress_terminal_resend text_accum)
+          then
             split_keeper_reply_chunks visible_reply
             |> List.iter (fun chunk ->
                    Keeper_chat_events.publish events (Text_delta chunk));
@@ -822,7 +864,7 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
 let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
   let redaction =
     Keeper_secret_redaction.snapshot
-      ~base_path:state.Mcp_server.workspace_config.base_path
+      ~base_path:(Mcp_server.workspace_config state).base_path
       ~keeper_name:payload.name
   in
   let redact_text = Keeper_secret_redaction.redact_text redaction in

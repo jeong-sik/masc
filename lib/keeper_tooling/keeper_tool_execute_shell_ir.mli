@@ -62,6 +62,7 @@ val dispatch_classified :
   ?base_path:string ->
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
+  ?base_host_env:string array ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
@@ -78,6 +79,7 @@ val dispatch :
   ?base_path:string ->
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
+  ?base_host_env:string array ->
   ?on_output_chunk:([ `Stdout of string | `Stderr of string ] -> unit) ->
   Masc_exec.Shell_ir.t ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result

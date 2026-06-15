@@ -5,11 +5,7 @@
     [Runtime_agent] remains the public facade and still performs the
     approval wiring and final [build_safe] / [Agent.resume] calls. *)
 
-(** Turn count is no longer the primary execution budget.
-    timeout_sec and stream_idle_timeout_sec govern keeper runs.
-    Agent_sdk requires a positive int for max_turns; we pass the
-    largest possible value to effectively disable the turn ceiling. *)
-let max_turns_disabled = Int.max_int
+let default_max_turns = Agent_sdk.Types.default_config.max_turns
 
 type stop_reason =
   | Completed
@@ -31,6 +27,7 @@ type config =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
+  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
   ; max_execution_time_s : float option
@@ -64,6 +61,7 @@ type config =
   ; raw_trace : Agent_sdk.Raw_trace.t option
   ; trace_link : (string * string) option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; transport : Masc_grpc_transport.t
   ; allowed_paths : string list
   ; checkpoint_sidecar : Yojson.Safe.t option
@@ -142,6 +140,7 @@ let default_config
   ; system_prompt
   ; tools
   ; runtime_mcp_policy = None
+  ; max_turns = default_max_turns
   ; max_idle_turns = 3
   ; stream_idle_timeout_s = None
   ; max_execution_time_s = None
@@ -161,6 +160,7 @@ let default_config
   ; raw_trace = None
   ; trace_link = None
   ; enable_thinking = None
+  ; preserve_thinking = None
   ; transport = Masc_grpc_transport.from_env ()
   ; allowed_paths = []
   ; checkpoint_sidecar = None
@@ -214,7 +214,7 @@ let builder_without_approval
     |> Agent_sdk.Builder.with_name config.name
     |> Agent_sdk.Builder.with_system_prompt config.system_prompt
     |> Agent_sdk.Builder.with_max_tokens config.max_tokens
-    |> Agent_sdk.Builder.with_max_turns max_turns_disabled
+    |> Agent_sdk.Builder.with_max_turns config.max_turns
     |> Agent_sdk.Builder.with_max_idle_turns config.max_idle_turns
     |> Agent_sdk.Builder.with_temperature config.temperature
     |> Agent_sdk.Builder.with_provider config.provider
@@ -266,6 +266,11 @@ let builder_without_approval
   let builder =
     match config.enable_thinking with
     | Some enabled -> Agent_sdk.Builder.with_enable_thinking enabled builder
+    | None -> builder
+  in
+  let builder =
+    match config.preserve_thinking with
+    | Some preserve -> Agent_sdk.Builder.with_preserve_thinking preserve builder
     | None -> builder
   in
   let builder =
@@ -406,12 +411,14 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     | Some budget -> Some (checkpoint.usage.estimated_cost_usd +. budget)
     | None -> None
   in
+  let max_turns_for_resume = checkpoint.turn_count + config.max_turns in
   let patched_checkpoint =
     { checkpoint with
       Agent_sdk.Checkpoint.model = config.model_id
     ; system_prompt = Some config.system_prompt
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens
@@ -424,9 +431,10 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; model = config.model_id
     ; system_prompt = Some config.system_prompt
     ; max_tokens = Some config.max_tokens
-    ; max_turns = max_turns_disabled
+    ; max_turns = max_turns_for_resume
     ; temperature = Some config.temperature
     ; enable_thinking = config.enable_thinking
+    ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
     ; max_input_tokens = config.max_input_tokens

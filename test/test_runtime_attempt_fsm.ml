@@ -26,6 +26,16 @@ let mk_provider_terminal ?(message = "terminal") () =
 let mk_accept_rejected ?(reason = "quality") () =
   Llm_provider.Http_client.AcceptRejected { reason }
 
+let mk_response () : Llm_provider.Types.api_response =
+  {
+    Llm_provider.Types.id = "resp-test";
+    model = "model-test";
+    stop_reason = Llm_provider.Types.EndTurn;
+    content = [];
+    usage = None;
+    telemetry = None;
+  }
+
 (* --- should_try_next (live: keeper_turn_driver_try_runtime) --- *)
 
 let check_retry name expected err =
@@ -64,6 +74,16 @@ let test_decide_call_err_retryable_last () =
   | Exhausted { last_err = Some _ } -> ()
   | _ -> Alcotest.fail "retryable + last should yield Exhausted with last_err"
 
+let test_decide_call_err_accept_on_exhaustion_preserves_last_err () =
+  match
+    decide ~accept_on_exhaustion:true ~is_last:true
+      (Call_err (mk_http_err ~code:429 ()))
+  with
+  | Exhausted { last_err = Some _ } -> ()
+  | _ ->
+    Alcotest.fail
+      "accept_on_exhaustion should not discard the final Call_err"
+
 let test_decide_call_err_terminal_not_last () =
   match
     decide ~accept_on_exhaustion:false ~is_last:false
@@ -73,14 +93,23 @@ let test_decide_call_err_terminal_not_last () =
   | _ -> Alcotest.fail "non-retryable error should yield Exhausted even when not last"
 
 let test_decide_accept_rejected_not_last () =
-  (* Accept_rejected carries a response we cannot construct; route the same
-     error shape through Call_err to pin the retry classification instead. *)
+  (* Production maps typed accept rejection through the HTTP-error shape before
+     candidate retry classification. Pin that boundary explicitly. *)
   match
     decide ~accept_on_exhaustion:false ~is_last:false
       (Call_err (mk_accept_rejected ()))
   with
   | Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected _) } -> ()
   | _ -> Alcotest.fail "AcceptRejected via Call_err is non-retryable → Exhausted"
+
+let test_decide_accept_rejected_outcome_not_last () =
+  match
+    decide ~accept_on_exhaustion:false ~is_last:false
+      (Accept_rejected { response = mk_response (); reason = "no visible answer" })
+  with
+  | Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) } ->
+    Alcotest.(check string) "reason preserved" "no visible answer" reason
+  | _ -> Alcotest.fail "AcceptRejected outcome is terminal even before last provider"
 
 let test_decide_and_record_delegates () =
   let outcome = Call_err (mk_http_err ~code:500 ()) in
@@ -145,10 +174,14 @@ let () =
             test_decide_call_err_retryable_not_last
         ; Alcotest.test_case "retryable last" `Quick
             test_decide_call_err_retryable_last
+        ; Alcotest.test_case "accept_on_exhaustion preserves Call_err" `Quick
+            test_decide_call_err_accept_on_exhaustion_preserves_last_err
         ; Alcotest.test_case "terminal not-last" `Quick
             test_decide_call_err_terminal_not_last
         ; Alcotest.test_case "accept-rejected via Call_err" `Quick
             test_decide_accept_rejected_not_last
+        ; Alcotest.test_case "accept-rejected outcome terminal" `Quick
+            test_decide_accept_rejected_outcome_not_last
         ; Alcotest.test_case "decide_and_record delegates" `Quick
             test_decide_and_record_delegates
         ] )

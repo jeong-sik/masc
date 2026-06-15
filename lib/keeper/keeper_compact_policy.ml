@@ -189,6 +189,11 @@ let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate
 ;;
 
+let checkpoint_compaction_strategies () =
+  Context_compact_oas.
+    [ PruneToolOutputs; MergeContiguous; SummarizeOld; DropLowImportance ]
+;;
+
 let compact_if_needed_typed
       ~(meta : keeper_meta)
       ~(now_ts : float)
@@ -220,9 +225,7 @@ let compact_if_needed_typed
     ctx, None, decision
   | Applied trigger ->
     (* PreCompact observability: log strategy and context state (#3165) *)
-    let strategies =
-      Context_compact_oas.[ PruneToolOutputs; MergeContiguous; DropLowImportance ]
-    in
+    let strategies = checkpoint_compaction_strategies () in
     (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)
     (* V12: per-keeper config replaces the prior hardcoded
@@ -363,25 +366,38 @@ let compact_if_needed_typed
       ~delta:(float_of_int saved_tokens)
       ();
     (* C1 (CRIT) from oas-internal-audit.html §6: surface pair-repair
-       fabrication counts via telemetry export so operators can alert on rising
-       fabrication rate without grepping the JSONL [tool_pair_repair]
-       structured log block emitted below. Increment by *count*, not by 1,
-       so the counter reflects fabrication volume rather than call
-       frequency. Kind label is a closed 2-value vocabulary (no Printexc-
-       style unbounded label) — see iter 21 / PR #15788 for the same
-       pattern. The repaired messages also carry [was_fabricated=true] plus
+       counts via telemetry export so operators can alert on rising repair
+       rate without grepping the JSONL [tool_pair_repair] structured log block
+       emitted below. Increment by *count*, not by 1, so the counter reflects
+       repair volume rather than call frequency. Kind label is a closed
+       2-value vocabulary (no Printexc-style unbounded label) — see iter 21 /
+       PR #15788 for the same pattern. The repaired messages also carry
        bounded provenance under [Keeper_context_core.pair_repair_metadata_key]. *)
     let bump_pair_repair kind count =
       if count > 0
       then
         Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string CompactionPairRepairFabrications)
+          Keeper_metrics.(to_string CompactionPairRepairDrops)
           ~labels:[ "keeper", meta.name; "kind", kind ]
           ~delta:(float_of_int count)
           ()
     in
-    bump_pair_repair "downgraded_tool_use" pair_repair_stats.downgraded_tool_uses;
-    bump_pair_repair "downgraded_tool_result" pair_repair_stats.downgraded_tool_results;
+    bump_pair_repair "dropped_tool_use" pair_repair_stats.dropped_tool_uses;
+    bump_pair_repair "dropped_tool_result" pair_repair_stats.dropped_tool_results;
+    let tool_use_sample_json =
+      List.map
+        (fun (tool_use_id, tool_name) ->
+           `Assoc
+             [ "tool_use_id", `String tool_use_id
+             ; "tool_name", `String tool_name
+             ])
+        pair_repair_stats.dropped_tool_use_samples
+    in
+    let tool_result_id_json =
+      List.map
+        (fun tool_use_id -> `String tool_use_id)
+        pair_repair_stats.dropped_tool_result_ids
+    in
     Log.Harness.emit
       Log.Info
       ~details:
@@ -407,20 +423,22 @@ let compact_if_needed_typed
                 | None -> `Null )
             ; ( "tool_pair_repair"
               , `Assoc
-                  [ ( "downgraded_tool_uses"
-                    , `Int pair_repair_stats.downgraded_tool_uses )
-                  ; ( "downgraded_tool_results"
-                    , `Int pair_repair_stats.downgraded_tool_results )
+                  [ ( "dropped_tool_uses"
+                    , `Int pair_repair_stats.dropped_tool_uses )
+                  ; ( "dropped_tool_results"
+                    , `Int pair_repair_stats.dropped_tool_results )
+                  ; "dropped_tool_use_samples", `List tool_use_sample_json
+                  ; "dropped_tool_result_ids", `List tool_result_id_json
                   ] )
             ])
       (Printf.sprintf
-         "post_compact keeper=%s trigger=%s saved_tokens=%d pair_repair_tool_uses=%d \
-          pair_repair_tool_results=%d"
+         "post_compact keeper=%s trigger=%s saved_tokens=%d pair_repair_dropped_tool_uses=%d \
+          pair_repair_dropped_tool_results=%d"
          meta.name
          trigger_human
          saved_tokens
-         pair_repair_stats.downgraded_tool_uses
-         pair_repair_stats.downgraded_tool_results);
+         pair_repair_stats.dropped_tool_uses
+         pair_repair_stats.dropped_tool_results);
     compacted_ctx, Some trigger, decision
 ;;
 

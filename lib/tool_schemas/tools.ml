@@ -26,6 +26,7 @@ let raw_schemas : tool_schema list =
   @ Tool_schemas_inline.schemas
   @ Tool_schemas_agent.schemas
   @ Tool_schemas_run.schemas
+  @ Tool_schemas_schedule.schemas
   @ Masc_task_handlers.Tool_task_schemas.schemas
   @ Tool_schemas_library.schemas
 

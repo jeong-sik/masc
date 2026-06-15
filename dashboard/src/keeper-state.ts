@@ -11,6 +11,7 @@ import type {
   KeeperProbeResult,
   KeeperRecoverResult,
   KeeperStatusDetail,
+  SurfaceRef,
 } from './types'
 
 // --- Signals ---
@@ -230,6 +231,7 @@ function normalizeHistoryEntry(
   if (!text) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
+  const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
   return {
     id: `${role}-${timestamp ?? 'entry'}-${index}`,
     role,
@@ -241,6 +243,7 @@ function normalizeHistoryEntry(
     delivery: 'history',
     streamState: null,
     details: null,
+    surface,
   }
 }
 
@@ -394,6 +397,7 @@ interface RestChatHistoryMessage {
   tool_call_id?: string
   tool_call_name?: string
   source?: string
+  surface?: SurfaceRef
 }
 
 /** Convert a persisted tool-call row into the same entry shape the live
@@ -416,6 +420,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     delivery: 'history',
     streamState: null,
     details: null,
+    surface: message.surface ?? null,
   }
 }
 

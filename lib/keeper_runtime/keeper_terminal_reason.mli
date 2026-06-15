@@ -62,12 +62,13 @@ type t =
           branch which was checked before the provider prefixes. Payload is
           the original string. *)
   | Provider_runtime_failure of string
-  (** Wire [String.starts_with ~prefix:"api_error_"] OR exact
-          ["provider_error"]. The parametrised [provider_error_*] codes
-          (server/hard_quota/capacity/missing_api_key/…) do NOT match the
-          exact test and, absent a config/auth substring, fall to [Other] —
-          preserving the pre-typing behaviour. Payload is the original
-          string. *)
+  (** Wire [String.starts_with ~prefix:"api_error_"], exact
+          ["provider_error"], or the provider timeout markers
+          ["provider_error_timeout:*"] / ["provider_error_network:timeout:*"].
+          Other parametrised [provider_error_*] codes
+          (server/hard_quota/capacity/missing_api_key/…) do NOT match and,
+          absent a config/auth substring, fall to [Other]. Payload is the
+          original string. *)
   | Completion_contract_violation of string
   (** Wire [String.starts_with ~prefix:"completion_contract_violation:"],
           including the extended [:called[..]:satisfying[..]] form. Payload
@@ -124,10 +125,11 @@ val terminal_prefix_idle_timeout : string
 
 (** {1 Transient provider-runtime wire codes (SSOT)}
 
-    The two retry-recoverable transient wire codes inside the
-    [Provider_runtime_failure] / [api_error_*] family: a plain
-    (non-structural) [Api.Timeout] and an [Api.NetworkError]. These mirror
-    exactly the [Agent_sdk.Error] variants
+    Retry-recoverable transient wire codes inside the
+    [Provider_runtime_failure] family: a plain (non-structural)
+    [Api.Timeout], [Api.NetworkError], and provider-level timeout markers
+    such as ["provider_error_timeout:http_operation"]. These mirror the
+    [Agent_sdk.Error] variants
     [Keeper_error_classify.is_transient_network_error] reports as transient.
     The encoder [Keeper_agent_error.api_error_terminal_reason_code]
     references these so producer and consumer cannot drift.
@@ -141,12 +143,11 @@ val wire_api_error_network : string
 
 (** [true] when [t] is a [Provider_runtime_failure] carrying one of the
     transient wire codes ([wire_api_error_timeout] / [wire_api_error_network])
-    — a retry-recoverable transient the in-turn retry self-heals. EXACT (not
-    prefix) match on the wire payload, so [api_error_oas_agent_execution_timeout]
-    and every other [api_error_*] code return [false]. Every non-
-    [Provider_runtime_failure] variant is [false]. The disposition classifier
-    routes a [true] result to a runtime-advance disposition instead of
-    [Disp_pause_human]. *)
+    or a provider timeout marker. The API timeout matches remain exact, so
+    [api_error_oas_agent_execution_timeout] and every other [api_error_*] code
+    return [false]. Every non-[Provider_runtime_failure] variant is [false].
+    The disposition classifier routes a [true] result to a runtime-advance
+    disposition instead of [Disp_pause_human]. *)
 val is_transient_provider_runtime_failure : t -> bool
 
 (** [true] when [terminal_reason] (assumed already lowercased by the

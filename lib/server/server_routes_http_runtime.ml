@@ -369,7 +369,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let fleet_meta_scan =
     match current_server_state_opt () with
     | Some state ->
-      Some (keeper_fleet_meta_scan state.Mcp_server.workspace_config)
+      Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
     | None -> None
   in
   let paused_keepers_json =
@@ -397,11 +397,15 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
           keeper_fleet_safety_health_json
             ~bootable_names:scan.bootable_names
             ~autoboot_scan:scan.autoboot_scan
+            ~phase_snapshot
+            ?base_path
             ~phase_counts
             ~paused_keepers_json
             ()
         | None ->
           keeper_fleet_safety_health_json
+            ~phase_snapshot
+            ?base_path
             ~phase_counts
             ~paused_keepers_json
             ())

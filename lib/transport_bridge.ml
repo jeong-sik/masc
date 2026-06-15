@@ -14,12 +14,12 @@ end
 
 (* ── Registry ─────────────────────────────────────────── *)
 
-(* Providers stored in registration order.
-   The registry is mutable only during bootstrap (single fiber).
-   After [seal] is called, further registration raises [Invalid_argument].
-   Reads from multiple fibers are safe because OCaml ref reads are
-   atomic at the word level, and the list is never mutated post-seal. *)
-let registry : (module PROVIDER) list ref = ref []
+(* Providers stored in registration order. The registry is mutable only during
+   bootstrap, but concurrent registration/read is possible, so the list is kept
+   in an [Atomic.t]. [register_provider] uses compare-and-swap retry to keep
+   updates race-free; after [seal] is called, further registration raises
+   [Invalid_argument]. *)
+let registry : (module PROVIDER) list Atomic.t = Atomic.make []
 let sealed = Atomic.make false
 
 let seal () = Atomic.set sealed true
@@ -29,69 +29,89 @@ let register_provider (p : (module PROVIDER)) =
     invalid_arg "Transport_bridge.register_provider: registry sealed after bootstrap"
   else begin
     let module P = (val p : PROVIDER) in
-    (* Replace existing with same name *)
-    registry := List.filter (fun m ->
-      let module M = (val m : PROVIDER) in
-      M.name <> P.name
-    ) !registry;
-    registry := !registry @ [ p ]
+    let rec update () =
+      let cur = Atomic.get registry in
+      (* Replace existing with same name *)
+      let filtered =
+        List.filter
+          (fun m ->
+             let module M = (val m : PROVIDER) in
+             M.name <> P.name)
+          cur
+      in
+      let next = filtered @ [ p ] in
+      if not (Atomic.compare_and_set registry cur next) then update ()
+    in
+    update ()
   end
 
-let providers () = !registry
+let providers () = Atomic.get registry
 
 let provider_by_name name =
-  List.find_opt (fun m ->
-    let module M = (val m : PROVIDER) in
-    M.name = name
-  ) !registry
+  List.find_opt
+    (fun m ->
+       let module M = (val m : PROVIDER) in
+       M.name = name)
+    (Atomic.get registry)
 
 (* ── Aggregate Operations ─────────────────────────────── *)
 
 let total_session_count () =
-  List.fold_left (fun acc m ->
-    let module M = (val m : PROVIDER) in
-    if M.is_enabled () then acc + M.session_count ()
-    else acc
-  ) 0 !registry
+  List.fold_left
+    (fun acc m ->
+       let module M = (val m : PROVIDER) in
+       if M.is_enabled () then acc + M.session_count () else acc)
+    0
+    (Atomic.get registry)
 
 let status_all_json () =
-  `Assoc (List.map (fun m ->
-    let module M = (val m : PROVIDER) in
-    (M.name, `Assoc [
-      "enabled", `Bool (M.is_enabled ());
-      "protocol", `String (Transport.protocol_to_string M.protocol);
-      "sessions", `Int (M.session_count ());
-      "detail", M.status_json ();
-    ])
-  ) !registry)
+  `Assoc
+    (List.map
+       (fun m ->
+          let module M = (val m : PROVIDER) in
+          ( M.name,
+            `Assoc
+              [
+                "enabled", `Bool (M.is_enabled ());
+                "protocol", `String (Transport.protocol_to_string M.protocol);
+                "sessions", `Int (M.session_count ());
+                "detail", M.status_json ();
+              ] ))
+       (Atomic.get registry))
 
 let reap_all_stale () =
-  List.fold_left (fun acc m ->
-    let module M = (val m : PROVIDER) in
-    if M.is_enabled () then acc + M.reap_stale ()
-    else acc
-  ) 0 !registry
+  List.fold_left
+    (fun acc m ->
+       let module M = (val m : PROVIDER) in
+       if M.is_enabled () then acc + M.reap_stale () else acc)
+    0
+    (Atomic.get registry)
 
 let enabled_protocols () =
-  List.filter_map (fun m ->
-    let module M = (val m : PROVIDER) in
-    if M.is_enabled () then Some M.protocol
-    else None
-  ) !registry
+  List.filter_map
+    (fun m ->
+       let module M = (val m : PROVIDER) in
+       if M.is_enabled () then Some M.protocol else None)
+    (Atomic.get registry)
 
 (* ── Agent Card ───────────────────────────────────────── *)
 
 let agent_card_transports_json ~host ~port =
-  let entries = List.filter_map (fun m ->
-    let module M = (val m : PROVIDER) in
-    if M.is_enabled () then
-      Some (`Assoc [
-        "protocol", `String (Transport.protocol_to_string M.protocol);
-        "name", `String M.name;
-        "sessions", `Int (M.session_count ());
-      ])
-    else None
-  ) !registry in
+  let entries =
+    List.filter_map
+      (fun m ->
+         let module M = (val m : PROVIDER) in
+         if M.is_enabled () then
+           Some
+             (`Assoc
+                [
+                  "protocol", `String (Transport.protocol_to_string M.protocol);
+                  "name", `String M.name;
+                  "sessions", `Int (M.session_count ());
+                ])
+         else None)
+      (Atomic.get registry)
+  in
   `Assoc [
     "host", `String host;
     "port", `Int port;

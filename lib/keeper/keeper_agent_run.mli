@@ -58,7 +58,6 @@ val per_provider_timeout_for_turn
      @param world_observation Structured keeper world snapshot used by
             advisory execution-progress checks. When omitted, the progress check
             does not infer world state from prompt text.
-    @param provider_filter Optional provider restriction
     @param generation Current generation counter
     @param max_turns Maximum agent turns (default from env config)
     @param max_idle_turns Maximum consecutive idle turns before stop
@@ -87,10 +86,15 @@ val run_turn
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
-  -> ?provider_filter:string list
   -> generation:int
   -> ?max_turns:int
-  -> ?max_idle_turns:int
+  -> max_idle_turns:int
+       (* Required, no default: the OAS loop guard kills the run at this
+          count, so every caller must pick the channel-appropriate threshold
+          ([Keeper_runtime_resolved.reactive_max_idle_turns] /
+          [autonomous_max_idle_turns]). A silent default of 3 sat below the
+          graduated idle hook's skip threshold (4), making graceful Skip
+          unreachable — user chat turns died as IdleDetected errors. *)
   -> ?history_user_source:string
   -> ?history_assistant_source:string
   -> ?guardrails:Agent_sdk.Guardrails.t

@@ -116,7 +116,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
         with_initialized_state (fun state ->
           match
             authorize_read_request
-              ~base_path:state.Mcp_server.workspace_config.base_path
+              ~base_path:(Mcp_server.workspace_config state).base_path
               httpun_request
           with
           | Ok () ->
@@ -130,7 +130,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       with_server_state h2_reqd (fun state ->
         match
           authorize_token_bound_permission_request
-            ~base_path:state.Mcp_server.workspace_config.base_path
+            ~base_path:(Mcp_server.workspace_config state).base_path
             ~permission
             httpun_request
         with
@@ -164,7 +164,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
     let _h2_authorize_tool state ~tool_name =
       authorize_tool_request
-        ~base_path:state.Mcp_server.workspace_config.base_path
+        ~base_path:(Mcp_server.workspace_config state).base_path
         ~tool_name httpun_request
     in
 
@@ -228,7 +228,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             with_server_state h2_reqd (fun state ->
               match
                 authorize_permission_request
-                  ~base_path:state.Mcp_server.workspace_config.base_path
+                  ~base_path:(Mcp_server.workspace_config state).base_path
                   ~permission:Masc_domain.CanBroadcast
                   httpun_request
               with
@@ -258,7 +258,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             with_server_state h2_reqd (fun state ->
               match
                 authorize_permission_request
-                  ~base_path:state.Mcp_server.workspace_config.base_path
+                  ~base_path:(Mcp_server.workspace_config state).base_path
                   ~permission:Masc_domain.CanBroadcast
                   httpun_request
               with
@@ -315,7 +315,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           in
           (* HTTP-level auth check for MCP endpoints *)
           let base_path = match !server_state with
-            | Some s -> s.Mcp_server.workspace_config.base_path
+            | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
           let context =
@@ -470,7 +470,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             else Server_mcp_transport_http.Full
           in
           let base_path = match !server_state with
-            | Some s -> s.Mcp_server.workspace_config.base_path
+            | Some s -> (Mcp_server.workspace_config s).base_path
             | None -> default_base_path ()
           in
           let auth_result =
@@ -549,7 +549,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       | `POST, "/graphql" ->
           h2_read_body h2_reqd (fun body_str ->
             with_server_state h2_reqd (fun state ->
-              let response = Graphql_api.handle_request ~config:state.workspace_config body_str in
+              let response = Graphql_api.handle_request ~config:(Mcp_server.workspace_config state) body_str in
               let status = match response.status with `OK -> `OK | `Bad_request -> `Bad_request in
               h2_respond_json h2_reqd response.body ~status ~extra_headers:cors))
 
@@ -576,14 +576,14 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             let json =
               dashboard_shell_http_json ?clock:state.Mcp_server.clock
                 ~request:httpun_request ~light
-                state.Mcp_server.workspace_config
+                (Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/branches" ->
           with_server_state h2_reqd (fun state ->
             let json =
-              Dashboard_branches.json ~config:state.Mcp_server.workspace_config
+              Dashboard_branches.json ~config:(Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -595,7 +595,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             in
             let json =
               Dashboard_operator_nudges.json
-                ~config:state.Mcp_server.workspace_config ~limit ()
+                ~config:(Mcp_server.workspace_config state) ~limit ()
             in
             h2_respond_json_value h2_reqd json
               ~extra_headers:cors)
@@ -612,7 +612,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
               | None -> trimmed_query_param httpun_request "agent"
             in
             let json =
-              Dashboard_workspace.json ~config:state.Mcp_server.workspace_config ?me
+              Dashboard_workspace.json ~config:(Mcp_server.workspace_config state) ?me
                 ~limit ()
             in
             h2_respond_json_value h2_reqd json
@@ -705,7 +705,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_governance_http_json httpun_request
-                ~base_path:state.Mcp_server.workspace_config.base_path
+                ~base_path:(Mcp_server.workspace_config state).base_path
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -713,7 +713,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_proof_http_json
-                ~config:state.Mcp_server.workspace_config httpun_request
+                ~config:(Mcp_server.workspace_config state) httpun_request
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -721,7 +721,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_planning_http_json
-                ~config:state.Mcp_server.workspace_config
+                ~config:(Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -739,7 +739,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_h2_public_read h2_reqd (fun state ->
             let json =
               dashboard_goals_tree_http_json
-                ~config:state.Mcp_server.workspace_config
+                ~config:(Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
@@ -761,7 +761,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
             else
               let json =
                 dashboard_goal_detail_http_json
-                  ~config:state.Mcp_server.workspace_config ~goal_id
+                  ~config:(Mcp_server.workspace_config state) ~goal_id
               in
               h2_respond_json_value h2_reqd json
                 ~extra_headers:cors)
@@ -783,7 +783,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                 |> Server_utils.clamp ~min_v:1 ~max_v:200
               in
               let json =
-                Task.Tool.task_history_events_json state.Mcp_server.workspace_config
+                Task.Tool.task_history_events_json (Mcp_server.workspace_config state)
                   ~task_id ~limit
               in
               h2_respond_json_value h2_reqd json
@@ -814,7 +814,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/perf" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_perf_http_json state.Mcp_server.workspace_config in
+            let json = dashboard_perf_http_json (Mcp_server.workspace_config state) in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
@@ -838,7 +838,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/status" ->
           with_server_state h2_reqd (fun state ->
-            let config = state.Mcp_server.workspace_config in
+            let config = (Mcp_server.workspace_config state) in
             let workspace_state = Workspace.read_state config in
             let tempo = Tempo.get_tempo config in
             let json = `Assoc [
@@ -879,7 +879,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                ~cors ~path
                ~config:
                  (Option.map
-                    (fun state -> state.Mcp_server.workspace_config)
+                    (fun state -> (Mcp_server.workspace_config state))
                     !server_state)
                httpun_meth ->
           ()

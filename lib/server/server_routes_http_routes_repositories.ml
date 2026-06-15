@@ -3,7 +3,7 @@ open Server_utils
 
 module Http = Http_server_eio
 
-let base_path_of_state state = state.Mcp_server.workspace_config.base_path
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
 let json_error message =
   `Assoc [("ok", `Bool false); ("error", `String message)]

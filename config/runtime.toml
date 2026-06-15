@@ -1,0 +1,180 @@
+# MASC runtime seed.
+#
+# This file is copied into <base-path>/.masc/config/runtime.toml for new
+# workspaces. Existing live config roots are preserved and must be edited
+# explicitly through the dashboard/runtime config path.
+#
+# Local Gemma 4 QAT is a canary runtime, not the fleet default. Keep the
+# default on the cloud runtime and pin only one keeper to local Ollama until
+# sustained turns prove the local box can absorb more load. OAS handles Gemma 4
+# thinking through the chat-template control token path, not Ollama think:true.
+
+[runtime]
+default = "ollama_cloud.deepseek-v4-flash"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.com/v1"
+
+[providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[providers.ollama_cloud.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[providers.deepseek.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_API_KEY_SB"
+
+[providers.glm-coding.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[models.deepseek-v4-flash]
+api-name = "deepseek-v4-flash"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+# GLM Coding Plan uses Z.AI's preserved-thinking path. OAS maps this runtime
+# seed to thinking.clear_thinking=false when preserve-thinking is enabled.
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[models.gemma4-26b-a4b-qat]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+# OAS maps this to Gemma 4's <|think|> chat-template token and omits the
+# generic Ollama top-level think field for this model family.
+thinking-support = true
+preserve-thinking = false
+streaming = true
+
+[models.gemma4-26b-a4b-qat.capabilities]
+# This runtime rides OAS native Ollama /api/chat, which does not serialize
+# tool_choice (oas backend_ollama.ml:24). Declaring true here would override
+# oas models.toml's supports_tool_choice=false (provider_runtime_binding.ml
+# applies this override last) while the transport silently drops forced tool
+# choice. Do not re-enable without a serializer path + model-side proof.
+supports-tool-choice = false
+thinking-control-format = "chat_template_token"
+supports-native-streaming = true
+supports-top-k = true
+supports-seed = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud.deepseek-v4-flash]
+max-concurrent = 4
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+
+[deepseek.deepseek-v4-flash]
+max-concurrent = 4
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
+
+[models.glm-5-turbo]
+api-name = "GLM-5-Turbo"
+max-context = 203000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-5-turbo.capabilities]
+max-output-tokens = 131072
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-5-turbo]
+max-concurrent = 3
+
+[ollama.gemma4-26b-a4b-qat]
+max-concurrent = 1
+
+# ── Keeper assignments ──────────────────────────────────────────────
+# Keepers are assigned to a model by provider.model key. Unassigned
+# keepers fall back to [runtime].default. Per-keeper overrides in the
+# live config (<base>/.masc/config/runtime.toml) take precedence.
+#
+# Seed only nick0cave to the local Gemma 4 canary. Other keepers use the
+# fleet default unless their live config overrides this seed.
+[runtime.assignments]
+nick0cave = "ollama.gemma4-26b-a4b-qat"
+
+# ── Discord ──────────────────────────────────────────────────────────
+# Trigger policy controls which inbound Discord events the bot responds to.
+#   mention_or_thread  — 스레드에서 자동 응답, 일반 채널은 멘션 필요 (기본값)
+#   mention_only       — @멘션된 메시지만 응답
+#   all                — 모든 메시지에 응답
+#   user_only:<snowflake> — 특정 사용자만
+# Env var MASC_DISCORD_TRIGGER_POLICY overrides this value.
+[discord]
+trigger_policy = "mention_or_thread"

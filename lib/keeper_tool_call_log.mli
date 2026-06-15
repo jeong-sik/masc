@@ -97,9 +97,10 @@ val route_evidence_json_of_tool_io :
 (** [route_evidence_json_of_tool_io] extracts first-class route proof from a
     keeper tool call. Descriptor-backed calls always include descriptor route
     fields such as [descriptor_id], [public_name], [canonical_name], [executor],
-    [backend], [sandbox], and policy labels. Runtime route/status fields such
-    as [via], [sandbox_profile], [network_mode], [status], and redacted
-    command/cwd/path are added when present. *)
+    [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
+    Runtime route/status fields such as [via], [sandbox_profile],
+    [network_mode], [status], and redacted command/cwd/path are added when
+    present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl
@@ -143,6 +144,8 @@ val log_call :
   ?thinking_enabled:bool ->
   ?thinking_budget:int ->
   ?prompt_fingerprint:string ->
+  ?execution_id:Ids.Execution_id.t ->
+  ?tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -161,6 +164,11 @@ val log_call :
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
+    [execution_id] is the RFC-0233 canonical join key minted once at the
+    dispatch boundary; the trajectory row for the same execution carries
+    the identical value. [tool_use_id] is the provider call id for the
+    same execution (when the dispatch lane has one) — the key that the
+    oas:tool_called/oas:tool_completed event rows also carry.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],

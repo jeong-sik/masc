@@ -173,7 +173,7 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
           ~base_dir:config.Workspace.base_path
           ~keeper_name:meta.name
           ~content:safe_content
-          ~source:"dashboard"
+          ~surface:(Surface_ref.Dashboard { session_id = None })
           ();
         Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
           ~source:"dashboard";
@@ -189,7 +189,14 @@ let handle_surface_post ~config ~(meta : keeper_meta) ~args =
               ~base_dir:config.Workspace.base_path
               ~keeper_name:meta.name
               ~content:safe_content
-              ~source:"discord"
+              ~surface:
+                (Surface_ref.Discord
+                   {
+                     guild_id = None;
+                     channel_id;
+                     parent_channel_id = None;
+                     thread_id = None;
+                   })
               ();
             Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
               ~source:"discord";
@@ -308,6 +315,11 @@ let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name
 let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
   Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+;;
+
+let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_schedule.context = { config; agent_name = meta.name } in
+  Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]

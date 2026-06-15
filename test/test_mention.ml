@@ -18,7 +18,7 @@ let test_stateless_basic () =
     ("@agent_llm_a", Mention.Stateless "agent_llm_a");
     ("@agent_code", Mention.Stateless "agent_code");
     ("Hello @ollama what is 2+2?", Mention.Stateless "ollama");
-    ("@provider_k 안녕하세요", Mention.Stateless "provider_k");
+    ("@glm 안녕하세요", Mention.Stateless "glm");
   ] in
   List.iter (fun (content, expected) ->
     let result = Mention.parse content in

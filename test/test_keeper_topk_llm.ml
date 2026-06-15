@@ -436,6 +436,47 @@ let test_deterministic_prefilter_surfaces_execute_for_shell_request () =
   Alcotest.(check bool) "retired repo helper surface stays out of visible surface"
     false (List.exists (String.starts_with ~prefix:retired_repo_prefix) visible)
 
+let test_deterministic_prefilter_surfaces_connected_lane_context () =
+  let surface_tools =
+    [ make_tool "keeper_surface_read"
+        "Read recent conversation from one connected surface lane: connector lane, channel conversation, participants roster"
+    ; make_tool "keeper_tools_list"
+        "List available tools and keeper capabilities"
+    ; make_tool "keeper_tool_search"
+        "Search for tools by keyword"
+    ; make_tool "keeper_context_status"
+        "Check context window usage"
+    ]
+  in
+  let selected =
+    deterministic_prefilter_for_tools
+      ~tools:surface_tools
+      ~query_text:"내가 빈센이고 다른 디스코드 채널 뭐있음"
+      ~selection_limit:10
+  in
+  let visible =
+    Keeper_tool_selection.merge_tool_selection_boundary
+      ~core:(Keeper_tool_dispatch_runtime.effective_core_tools ())
+      ~deterministic_prefilter:selected
+      ~llm_selected:[]
+      ~discovered:[]
+  in
+  let index_of name =
+    let rec loop i = function
+      | [] -> None
+      | x :: xs -> if String.equal x name then Some i else loop (i + 1) xs
+    in
+    loop 0 visible
+  in
+  Alcotest.(check bool) "surface_read appears in visible surface"
+    true (List.mem "keeper_surface_read" visible);
+  Alcotest.(check bool) "surface_read appears before generic tools_list"
+    true
+    (match index_of "keeper_surface_read", index_of "keeper_tools_list" with
+     | Some s, Some t -> s < t
+     | Some _, None -> true
+     | _ -> false)
+
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
@@ -558,6 +599,8 @@ let () =
         test_public_aliases_reuse_internal_search_aliases;
       Alcotest.test_case "visible Execute covers shell request" `Quick
         test_deterministic_prefilter_surfaces_execute_for_shell_request;
+      Alcotest.test_case "visible surface_read covers connected lane request" `Quick
+        test_deterministic_prefilter_surfaces_connected_lane_context;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search projects allowed internals to public aliases" `Quick

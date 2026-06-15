@@ -21,6 +21,10 @@ type tool_call_entry = {
   duration_ms : int;
   error : string option;
   cost_usd : float;
+  execution_id : string option;
+      (** RFC-0233 canonical join key shared with the tool_calls JSONL row
+          for the same execution. [None] only for rows written by paths
+          that have not adopted the id yet (and historical rows). *)
 }
 
 type gate_decode_summary = {
@@ -92,6 +96,14 @@ val entry_to_json :
   ?action_radius:Yojson.Safe.t ->
   tool_call_entry ->
   Yojson.Safe.t
+
+val tool_call_entry_of_json :
+  Yojson.Safe.t -> (tool_call_entry * bool) option
+(** Decode one persisted JSONL row back into a [tool_call_entry].
+    Returns [None] for non-entry rows (summary/thinking) and malformed
+    JSON. The [bool] is true when the gate field parsed from a
+    persisted value rather than the legacy default. Exposed for
+    RFC-0233 consumers that join rows on [execution_id]. *)
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t

@@ -20,7 +20,7 @@ let add_agent_api_routes router =
          in
          let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
          let activities =
-           Telemetry_eio.summarize_agent_activity state.Mcp_server.workspace_config ~since
+           Telemetry_eio.summarize_agent_activity (Mcp_server.workspace_config state) ~since
          in
          let json = `Assoc [
            ("hours", `Float hours);
@@ -79,7 +79,7 @@ let add_agent_api_routes router =
            in
            let json =
              Tool_agent_timeline.build_timeline
-               state.Mcp_server.workspace_config
+               (Mcp_server.workspace_config state)
                ~agent_name ~since_hours ~limit
                ~include_tasks:true ~include_board:false
                ~include_tool_calls:true

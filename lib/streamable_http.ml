@@ -13,7 +13,7 @@ type transport = Streamable_HTTP
 type session = {
   id: string;
   created_at: float;
-  mutable last_seen: float [@atomic];
+  last_seen: float Atomic.t;
   transport: transport;
   subscriptions: string list;
 }
@@ -51,7 +51,7 @@ module Session = struct
       let session = {
         id = generate_id ();
         created_at = Time_compat.now ();
-        last_seen = Time_compat.now ();
+        last_seen = Atomic.make (Time_compat.now ());
         transport;
         subscriptions = [];
       } in
@@ -62,7 +62,7 @@ module Session = struct
     with_lock (fun () -> StringMap.find_opt id !sessions)
 
   let touch session =
-    session.last_seen <- Time_compat.now ()
+    Atomic.set session.last_seen (Time_compat.now ())
 
   let remove id =
     with_lock (fun () -> sessions := StringMap.remove id !sessions)
@@ -79,7 +79,7 @@ module Session = struct
     let cutoff = now -. ttl_seconds in
     with_lock (fun () ->
       let to_remove = StringMap.fold (fun id session acc ->
-        if session.last_seen < cutoff then id :: acc else acc
+        if Atomic.get session.last_seen < cutoff then id :: acc else acc
       ) !sessions [] in
       List.iter (fun id -> sessions := StringMap.remove id !sessions) to_remove;
       List.length to_remove)

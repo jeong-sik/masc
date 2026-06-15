@@ -30,6 +30,16 @@ val keeper_msg_timeout_override : Yojson.Safe.t -> (float option, string) result
     value bounds the OAS turn and, for async dispatch, the request result
     lifecycle exposed via [masc_keeper_msg_result]. *)
 
+module For_testing : sig
+  val direct_owner_conversation_context :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    direct_reply:bool ->
+    channel_session_key:string option ->
+    channel:string ->
+    string
+end
+
 val handle_keeper_msg :
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->

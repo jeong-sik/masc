@@ -1,5 +1,7 @@
 module K = Masc.Keeper_chat_store
+module MS = Masc.Keeper_world_observation_message_scope
 module P = Masc.Otel_metric_store
+module KT = Masc.Keeper_turn
 
 let rec remove_tree path =
   if Sys.file_exists path then
@@ -67,6 +69,18 @@ let chat_path ~base_dir ~keeper_name =
        "keeper_chat")
     (Workspace_utils_backend_setup.sanitize_namespace_segment keeper_name ^ ".jsonl")
 
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ ("name", `String name)
+         ; ("trace_id", `String ("test-trace-" ^ name))
+         ; ("goal", `String "test goal")
+         ])
+  with
+  | Ok meta -> meta
+  | Error err -> failwith ("meta_of_json failed: " ^ err)
+
 let test_load_records_malformed_row_drops () =
   let base_dir = temp_base_path "keeper-chat-store-drops" in
   Fun.protect
@@ -111,7 +125,11 @@ let test_load_records_malformed_row_drops () =
         1.0
         (drop_value invalid_payload -. before_invalid_payload))
 
-let roles messages = List.map (fun (m : K.chat_message) -> m.role) messages
+let roles messages =
+  List.map (fun (m : K.chat_message) -> K.Role.to_label m.role) messages
+
+let recent_roles lines =
+  List.map (fun (line : MS.recent_direct_line) -> line.role_label) lines
 
 let test_append_turn_roundtrip () =
   let base_dir = temp_base_path "keeper-chat-store-turn" in
@@ -128,7 +146,7 @@ let test_append_turn_roundtrip () =
             (* Empty args normalise to "{}", empty id to a positional one. *)
             { K.call_id = ""; call_name = "masc_status"; args = "  " };
           ]
-        ~source:"dashboard"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"all green"
         ();
       let messages = K.load ~base_dir ~keeper_name in
@@ -168,6 +186,98 @@ let test_legacy_lines_parse_without_new_fields () =
             None assistant.tool_call_id
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
+
+let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
+  let base_dir = temp_base_path "keeper-chat-recent-context" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-context" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what were you doing"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"I was reading the board."
+        ();
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what did you actually check"
+        ~user_attachments:[]
+        ~tool_calls:
+          [ { K.call_id = "toolu_board";
+              call_name = "keeper_board_list";
+              args = {|{"limit":20}|} } ]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"This time I checked the board list."
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages ~limit:4
+      in
+      Alcotest.(check (list string)) "bounded tail keeps prior reply and tool"
+        [ "assistant"; "user"; "tool_call"; "assistant" ]
+        (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "previous assistant utterance is visible" true
+        (contains_substring rendered "I was reading the board.");
+      Alcotest.(check bool) "tool evidence keeps only call name" true
+        (contains_substring rendered "tool_call: keeper_board_list");
+      Alcotest.(check bool) "tool args are not prompt evidence" false
+        (contains_substring rendered {|{"limit":20}|});
+      Alcotest.(check bool) "grounding guard present" true
+        (contains_substring rendered "without tool evidence"))
+
+let test_recent_direct_context_omits_transport_failure_as_self_reply () =
+  let base_dir = temp_base_path "keeper-chat-recent-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-recent-failure" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"please answer this"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Transport_failure
+        ~assistant_content:"Keeper request failed: timeout"
+        ();
+      let lines =
+        K.load ~base_dir ~keeper_name
+        |> MS.recent_direct_conversation_of_messages
+      in
+      Alcotest.(check (list string)) "failed request keeps user only"
+        [ "user" ] (recent_roles lines);
+      let rendered = MS.render_recent_direct_conversation_context lines in
+      Alcotest.(check bool) "failure text is not a self utterance" false
+        (contains_substring rendered "Keeper request failed"))
+
+let test_direct_owner_context_excludes_connector_turns () =
+  let base_dir = temp_base_path "keeper-chat-direct-owner-gate" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-direct-owner-gate" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"what did you just say"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"I just answered from direct chat."
+        ();
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_meta keeper_name in
+      let context ?channel_session_key ~direct_reply ~channel () =
+        KT.For_testing.direct_owner_conversation_context
+          ~config ~meta ~direct_reply ~channel_session_key ~channel
+      in
+      Alcotest.(check bool) "owner direct receives recent transcript" true
+        (contains_substring
+           (context ~direct_reply:true ~channel:"" ())
+           "I just answered from direct chat.");
+      Alcotest.(check string) "connector channel suppresses transcript" ""
+        (context ~direct_reply:true ~channel:"discord" ());
+      Alcotest.(check string) "connector session suppresses transcript" ""
+        (context ~direct_reply:true ~channel:""
+           ~channel_session_key:"discord_workspace" ());
+      Alcotest.(check string) "non-direct turn suppresses transcript" ""
+        (context ~direct_reply:false ~channel:"" ()))
 
 let test_append_turn_redacts_projected_secrets () =
   let base_dir = temp_base_path "keeper-chat-store-redact" in
@@ -254,7 +364,7 @@ let test_speaker_external_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"hello from discord"
         ~user_attachments:[]
-        ~source:"discord"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
         ~speaker:
           { K.speaker_id = Some "98791450001";
             speaker_name = Some "minsu";
@@ -288,21 +398,29 @@ let test_append_user_message_roundtrip () =
       let keeper_name = "keeper-chat-ambient" in
       K.append_user_message ~base_dir ~keeper_name
         ~content:"two humans chatting, no mention"
-        ~source:"discord"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~conversation_id:"discord:guild-1:channel:chan-7"
+        ~external_message_id:"msg-7"
         ~speaker:
           { K.speaker_id = Some "55501";
             speaker_name = Some "jane";
             speaker_authority = K.External }
         ();
       K.append_assistant_message ~base_dir ~keeper_name
-        ~content:"reply recorded separately" ~source:"discord" ();
+        ~content:"reply recorded separately"
+        ~surface:(Masc.Surface_ref.Gate { label = "discord"; address = [] })
+        ~conversation_id:"discord:guild-1:channel:chan-7" ();
       match K.load ~base_dir ~keeper_name with
       | [ user; assistant ] ->
-          Alcotest.(check string) "lone user line first" "user" user.K.role;
+          Alcotest.(check string) "lone user line first" "user" (K.Role.to_label user.K.role);
           Alcotest.(check string) "content"
             "two humans chatting, no mention" user.K.content;
           Alcotest.(check (option string)) "source"
             (Some "discord") user.K.source;
+          Alcotest.(check (option string)) "conversation id"
+            (Some "discord:guild-1:channel:chan-7") user.K.conversation_id;
+          Alcotest.(check (option string)) "external message id"
+            (Some "msg-7") user.K.external_message_id;
           (match user.speaker with
            | Some sp ->
                Alcotest.(check (option string)) "speaker id"
@@ -313,9 +431,33 @@ let test_append_user_message_roundtrip () =
                  "external" (K.authority_label sp.K.speaker_authority)
            | None -> Alcotest.fail "ambient user line lost its speaker");
           Alcotest.(check string) "assistant joins the lane"
-            "assistant" assistant.K.role;
+            "assistant" (K.Role.to_label assistant.K.role);
+          Alcotest.(check (option string)) "assistant conversation id"
+            (Some "discord:guild-1:channel:chan-7") assistant.K.conversation_id;
+          Alcotest.(check (option string)) "assistant has no inbound message id"
+            None assistant.K.external_message_id;
           Alcotest.(check string) "no duplicated user line"
-            "reply recorded separately" assistant.K.content
+            "reply recorded separately" assistant.K.content;
+          let json_rows = K.to_json_array [ user; assistant ] in
+          (match Yojson.Safe.Util.to_list json_rows with
+          | user_json :: assistant_json :: _ ->
+              Alcotest.(check string) "json conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "conversation_id" |> to_string);
+              Alcotest.(check string) "json external message id" "msg-7"
+                Yojson.Safe.Util.(
+                  user_json |> member "external_message_id" |> to_string);
+              Alcotest.(check string) "json assistant conversation id"
+                "discord:guild-1:channel:chan-7"
+                Yojson.Safe.Util.(
+                  assistant_json |> member "conversation_id" |> to_string);
+              Alcotest.(check bool) "json assistant omits inbound message id" true
+                Yojson.Safe.Util.(
+                  assistant_json |> member "external_message_id" = `Null)
+          | rows ->
+              Alcotest.failf "expected 2 json rows, got %d"
+                (List.length rows))
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
@@ -328,7 +470,7 @@ let test_speaker_owner_roundtrip () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"deploy it"
         ~user_attachments:[]
-        ~source:"dashboard"
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~speaker:
           { K.speaker_id = None;
             speaker_name = None;
@@ -367,6 +509,28 @@ let test_unknown_speaker_authority_reported_not_guessed () =
        | messages ->
            Alcotest.failf "expected 1 message, got %d" (List.length messages));
       Alcotest.(check (float 0.001)) "unknown authority counted as drop"
+        1.0
+        (drop_value invalid_payload -. before))
+
+let test_unknown_role_row_dropped () =
+  (* RFC-0232 P1: a role label outside the closed sum cannot participate
+     in lane semantics; the row is dropped and reported, never defaulted. *)
+  let base_dir = temp_base_path "keeper-chat-store-role-bad" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-role-bad" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        ({|{"role":"user","content":"hi","ts":1.0}|} ^ "\n"
+        ^ {|{"role":"system","content":"injected","ts":2.0}|} ^ "\n"
+        ^ {|{"role":"assistant","content":"done","ts":3.0}|} ^ "\n");
+      let messages = K.load ~base_dir ~keeper_name in
+      Alcotest.(check (list string)) "unknown role row dropped"
+        [ "user"; "assistant" ] (roles messages);
+      Alcotest.(check (float 0.001)) "drop counted as invalid payload"
         1.0
         (drop_value invalid_payload -. before))
 
@@ -411,13 +575,13 @@ let test_window_keeps_tool_lines_of_retained_turns () =
       let messages = K.load ~base_dir ~keeper_name in
       Alcotest.(check int) "50 full turns survive" 150 (List.length messages);
       let primaries =
-        List.filter (fun (m : K.chat_message) -> m.role <> "tool") messages
+        List.filter (fun (m : K.chat_message) -> not (K.Role.equal m.role K.Role.Tool)) messages
       in
       Alcotest.(check int) "primary window is 100" 100 (List.length primaries);
       match messages with
       | first :: _ ->
           Alcotest.(check string) "window starts at a user line, not an orphan tool"
-            "user" first.role;
+            "user" (K.Role.to_label first.role);
           Alcotest.(check string) "oldest retained turn is turn 2" "u2" first.content
       | [] -> Alcotest.fail "expected non-empty window")
 
@@ -472,14 +636,14 @@ let test_tail_bounded_load_matches_full_scan_window () =
        | first :: _ ->
            Alcotest.(check string) "window starts at line 5101"
              "msg-5101" (content_prefix first);
-           Alcotest.(check string) "line 5101 is a user line" "user" first.K.role
+           Alcotest.(check string) "line 5101 is a user line" "user" (K.Role.to_label first.K.role)
        | [] -> Alcotest.fail "expected non-empty window");
       (match List.rev messages with
        | last :: _ ->
            Alcotest.(check string) "window ends at line 5200"
              "msg-5200" (content_prefix last);
            Alcotest.(check string) "line 5200 is an assistant line"
-             "assistant" last.K.role
+             "assistant" (K.Role.to_label last.K.role)
        | [] -> Alcotest.fail "expected non-empty window"))
 
 (* RFC-0228 P1 — backward paging. Raw JSONL with controlled ts so the
@@ -555,6 +719,78 @@ let test_load_page_binary_search_large_file () =
         (content_no (List.hd (List.rev tail.K.messages)));
       Alcotest.(check bool) "tail has_more" true tail.K.has_more)
 
+(* ── Row_kind (typed transport-failure marker) ───────────── *)
+
+let test_failure_turn_kind_roundtrip () =
+  let base_dir = temp_base_path "keeper-chat-store-kind" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"ping"
+        ~user_attachments:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_kind:K.Row_kind.Transport_failure
+        ~assistant_content:"Keeper request failed: boom"
+        ();
+      match K.load ~base_dir ~keeper_name with
+      | [ user; asst ] ->
+          Alcotest.(check bool) "user row is an utterance" true
+            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
+          Alcotest.(check bool) "assistant row is a transport failure" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Transport_failure);
+          let raw = read_file (chat_path ~base_dir ~keeper_name) in
+          Alcotest.(check bool) "failure row persists the kind field" true
+            (contains_substring raw {|"kind":"transport_failure"|})
+      | messages ->
+          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let test_kind_absent_reads_utterance () =
+  (* Every row written before the [kind] field existed is an utterance;
+     the writer also omits the field for utterances, so ordinary rows
+     stay byte-identical to the pre-[kind] format. *)
+  let base_dir = temp_base_path "keeper-chat-store-kind-absent" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-absent" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"hello" ~user_attachments:[]
+        ~assistant_content:"world" ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "utterance rows carry no kind field" false
+        (contains_substring raw {|"kind"|});
+      match K.load ~base_dir ~keeper_name with
+      | [ user; asst ] ->
+          Alcotest.(check bool) "user reads as utterance" true
+            (K.Row_kind.equal user.kind K.Row_kind.Utterance);
+          Alcotest.(check bool) "assistant reads as utterance" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Utterance)
+      | messages ->
+          Alcotest.failf "expected 2 rows, got %d" (List.length messages))
+
+let test_unknown_kind_reported_reads_utterance () =
+  let base_dir = temp_base_path "keeper-chat-store-kind-unknown" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-kind-unknown" in
+      let invalid_payload = Safe_ops.persistence_read_drop_reason_invalid_payload in
+      let before = drop_value invalid_payload in
+      let path = chat_path ~base_dir ~keeper_name in
+      write_file path
+        ({|{"role":"assistant","content":"hi","ts":1.0,"kind":"weird"}|} ^ "\n");
+      match K.load ~base_dir ~keeper_name with
+      | [ asst ] ->
+          Alcotest.(check bool)
+            "unknown kind reads as utterance (conservative arm)" true
+            (K.Row_kind.equal asst.kind K.Row_kind.Utterance);
+          Alcotest.(check (float 0.001)) "unknown kind reported" 1.0
+            (drop_value invalid_payload -. before)
+      | messages ->
+          Alcotest.failf "expected 1 row, got %d" (List.length messages))
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -571,6 +807,17 @@ let () =
             test_load_records_malformed_row_drops;
           Alcotest.test_case "tool row without name dropped" `Quick
             test_tool_row_missing_name_dropped;
+          Alcotest.test_case "unknown role row dropped (RFC-0232)" `Quick
+            test_unknown_role_row_dropped;
+        ] );
+      ( "row_kind",
+        [
+          Alcotest.test_case "failure turn kind roundtrip" `Quick
+            test_failure_turn_kind_roundtrip;
+          Alcotest.test_case "absent kind reads utterance" `Quick
+            test_kind_absent_reads_utterance;
+          Alcotest.test_case "unknown kind reported, reads utterance" `Quick
+            test_unknown_kind_reported_reads_utterance;
         ] );
       ( "speaker_identity",
         [
@@ -589,6 +836,12 @@ let () =
             test_append_turn_roundtrip;
           Alcotest.test_case "legacy lines parse" `Quick
             test_legacy_lines_parse_without_new_fields;
+          Alcotest.test_case "recent context renders reply and tool evidence" `Quick
+            test_recent_direct_context_renders_prior_reply_and_tool_evidence;
+          Alcotest.test_case "recent context omits transport failure as reply" `Quick
+            test_recent_direct_context_omits_transport_failure_as_self_reply;
+          Alcotest.test_case "recent context is owner-direct only" `Quick
+            test_direct_owner_context_excludes_connector_turns;
           Alcotest.test_case "append_turn redacts projected secrets" `Quick
             test_append_turn_redacts_projected_secrets;
           Alcotest.test_case "load redacts legacy raw secret rows" `Quick

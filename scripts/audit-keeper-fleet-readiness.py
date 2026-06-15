@@ -34,6 +34,7 @@ BOARD_TOOLS = {
 }
 WEB_SEARCH_TOOLS = {
     "masc_web_search",
+    "WebSearch",
     "SearchWeb",
 }
 PRODUCT_DOMAIN_MARKERS = {
@@ -1360,7 +1361,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-web-search-evidence",
         action="store_true",
         help=(
-            "Fail unless each keeper has successful masc_web_search/SearchWeb "
+            "Fail unless each keeper has successful masc_web_search/WebSearch/SearchWeb "
             "evidence from decision or global tool-call logs."
         ),
     )

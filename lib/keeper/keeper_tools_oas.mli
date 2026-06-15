@@ -116,9 +116,9 @@ val transient_mutex_contention_tool_error
     alias tool entries. The closure dispatches via
     [execute_keeper_tool_call_with_outcome] using [~name] as the
     INTERNAL tool name (telemetry SSOT). [~input_schema] is the
-    internal tool schema used for pre-execution validation after
-    [?translate_input] reshapes incoming JSON from a public alias
-    schema to the internal payload (identity by default). *)
+    internal tool schema used for pre-execution validation. Public aliases
+    validate their LLM-facing payload before translation to the internal
+    payload. *)
 
 (** Build the keeper's full [tool_bundle]: internal tools +
     alias-registered (public name) tools that translate input to

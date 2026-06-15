@@ -145,16 +145,29 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_task_claim"
     ; description =
-        "Claim the next unclaimed todo task that matches your capabilities. Returns \
-         claimed task details (task_id, title, description) or empty if none available. \
-         If you already own a task in Claimed state (not yet started), it is \
-         auto-released to Todo so the claim can proceed. Tasks in InProgress or \
-         AwaitingVerification block the claim -- use keeper_task_done or \
-         keeper_task_force_release on them first. If active_goal_ids are configured, \
-         only tasks linked to those goals are eligible; when that scoped pool has no \
-         claimable task for your current capabilities, the claim stops instead of \
-         crossing into unrelated goals."
-    ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+        "Claim MASC backlog work. With no task_id, claims the next eligible \
+         unclaimed todo task that matches your capabilities. With task_id, claims \
+         that exact task when a user, mention, board item, or keeper_tasks_list row \
+         identifies it. If you already own another Claimed/InProgress task, finish \
+         it with keeper_task_done or explicitly release it first; keeper_task_claim \
+         does not auto-release active work. If active_goal_ids are configured, the \
+         no-arg claim prefers goal-linked work and only widens when the scoped pool \
+         has no eligible task."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "task_id"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional exact task id from keeper_tasks_list, board, mention, or user request" )
+                      ; "minLength", `Int 1
+                      ] )
+                ] )
+          ]
     }
   ; { name = "keeper_task_done"
     ; description =

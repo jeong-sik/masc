@@ -33,10 +33,23 @@ let message_json (m : Store.chat_message) : Yojson.Safe.t =
               `String (Store.authority_label sp.speaker_authority) );
           ]
   in
+  (* Surface the writer-declared kind for non-utterance rows so the
+     keeper reading its own lane sees a transport-failure marker as the
+     server's record of a failed request, not as something it said. *)
+  let kind_fields =
+    match m.kind with
+    | Store.Row_kind.Utterance -> []
+    | Store.Row_kind.Transport_failure ->
+        [ ("kind", `String (Store.Row_kind.to_label m.kind)) ]
+  in
   `Assoc
-    ([ ("role", `String m.role); ("content", `String m.content) ]
+    ([ ("role", `String (Store.Role.to_label m.role));
+       ("content", `String m.content) ]
+    @ kind_fields
     @ opt_float_field "ts" m.ts
     @ opt_string_field "source" m.source
+    @ opt_string_field "conversation_id" m.conversation_id
+    @ opt_string_field "external_message_id" m.external_message_id
     @ opt_string_field "tool_call_name" m.tool_call_name
     @ speaker_fields)
 
@@ -164,8 +177,9 @@ let respond ~surface ~limit ~has_more ~notes
         [
           ( "error",
             `String
-              "surface is required. Good: surface='discord'. The lane label \
-               equals the source shown in Connected Surfaces or chat history."
+              "surface is required. Use a lane label shown in Connected \
+               Surfaces or chat history; this tool reads that connected lane, \
+               not a connector-wide channel registry."
           );
         ])
   else

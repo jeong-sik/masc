@@ -20,6 +20,7 @@ val resolve_active_goal_ids :
     Returns structured {!Keeper_types_profile.tool_result}; failures carry their
     message on the typed error payload. *)
 val update_keeper :
+  ?preserve_prompt_defaults:bool ->
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   Keeper_meta_contract.keeper_meta ->

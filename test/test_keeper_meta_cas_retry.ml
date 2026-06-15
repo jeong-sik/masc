@@ -95,7 +95,7 @@ let test_retry_succeeds_after_concurrent_bump () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"beta" in
-    (match Keeper_meta_store.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "beta" with
@@ -157,7 +157,7 @@ let test_monotonic_usage_counters_on_cas_retry () =
     let config = Workspace.default_config base_dir in
     ignore (Workspace.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"gamma" in
-    (match Keeper_meta_store.write_meta ~force:true config m0 with
+    (match Keeper_meta_store.write_meta config m0 with
      | Ok () -> ()
      | Error e -> fail ("seed write failed: " ^ e));
     let caller_view = match Keeper_meta_store.read_meta config "gamma" with
@@ -199,6 +199,61 @@ let test_monotonic_usage_counters_on_cas_retry () =
     check int "last_* observation stays with the caller" 777
       final.runtime.usage.last_latency_ms)
 
+(* RFC-0237: the [write_meta ~force:true] escape hatch is removed, so the
+   counter-rewind path the four keeper-internal sites carried
+   (keeper_tool_surface / keeper_tool_surface_ops / keeper_keepalive /
+   keeper_heartbeat_loop_presence) is unrepresentable. A stale-snapshot
+   plain write that would have rewound a concurrent turn's counters is now
+   rejected by CAS; callers must route through [write_meta_with_merge]
+   (proven monotonic by [test_monotonic_usage_counters_on_cas_retry]). This
+   test pins that the bypass no longer exists: the stale write conflicts and
+   the advanced disk counter survives. *)
+let test_stale_write_conflicts_without_force () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  let base_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
+    let config = Workspace.default_config base_dir in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let m0 = make_meta ~name:"delta" in
+    (match Keeper_meta_store.write_meta config m0 with
+     | Ok () -> ()
+     | Error e -> fail ("seed write failed: " ^ e));
+    let caller_view = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "seed read failed"
+    in
+    let with_usage (m : Keeper_meta_contract.keeper_meta) usage =
+      { m with runtime = { m.runtime with usage } }
+    in
+    (* Concurrent turn advances counters on disk, bumping the version. *)
+    let racing =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 42 }
+    in
+    (match Keeper_meta_store.write_meta config racing with
+     | Ok () -> ()
+     | Error e -> fail ("racing write failed: " ^ e));
+    (* A stale snapshot write (the shape the old force path clobbered with)
+       now hits CAS: its version no longer matches the advanced disk, so the
+       write is rejected instead of rewinding the counter. *)
+    let stale =
+      with_usage caller_view
+        { caller_view.runtime.usage with total_turns = 5 }
+    in
+    (match Keeper_meta_store.write_meta config stale with
+     | Ok () -> fail "stale write unexpectedly succeeded (CAS bypass present?)"
+     | Error msg ->
+       check bool "stale write is rejected as a version conflict" true
+         (Keeper_meta_store.is_version_conflict_error msg));
+    let final = match Keeper_meta_store.read_meta config "delta" with
+      | Ok (Some m) -> m
+      | _ -> fail "final read failed"
+    in
+    check int "advanced disk counter survives (no rewind without force)"
+      42 final.runtime.usage.total_turns)
+
 let test_is_version_conflict_error_classifies () =
   let conflict_msg = "meta version conflict for foo: expected 3, disk has 4" in
   let other_msg = "failed to write meta /tmp/x: Permission denied" in
@@ -218,6 +273,8 @@ let () =
             test_retry_succeeds_after_concurrent_bump;
           test_case "usage counters stay monotonic on stale retry (RFC-0225 §3.2)"
             `Quick test_monotonic_usage_counters_on_cas_retry;
+          test_case "stale write conflicts without force (RFC-0237 escape hatch closed)"
+            `Quick test_stale_write_conflicts_without_force;
         ] );
       ( "is_version_conflict_error",
         [

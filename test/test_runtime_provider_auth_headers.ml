@@ -18,10 +18,20 @@ let normalized_header_value name headers =
   |> List.find_map (fun (k, v) ->
     if String.equal name (String.lowercase_ascii k) then Some v else None)
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
 let runpod_provider =
   { Runtime_schema.id = "runpod_mtp"
   ; display_name = "RunPod"
-  ; protocol = "provider_d-http"
+  ; protocol = "openai-compatible-http"
   ; api_format = Chat_completions_api
   ; transport = Http "https://example-runpod.proxy.runpod.net/v1"
   ; is_non_interactive = true
@@ -36,6 +46,7 @@ let qwen_model =
   ; tools_support = true
   ; max_context = 160000
   ; thinking_support = true
+  ; preserve_thinking = false
   ; max_thinking_budget = None
   ; streaming = true
   ; capabilities = None
@@ -61,7 +72,7 @@ default = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "https://example-runpod.proxy.runpod.net/v1"
 
 %s
@@ -141,6 +152,303 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
+let test_runtime_toml_rejects_legacy_protocol_aliases () =
+  let content =
+    {|
+[runtime]
+default = "legacy_openai_compat.test_model"
+
+[providers.legacy_openai_compat]
+display-name = "Legacy OpenAI-Compatible"
+protocol = "provider_d-http"
+endpoint = "https://legacy-openai-compatible.example/v1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[legacy_openai_compat.test_model]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
+  | Error errors ->
+    check bool "rejects provider_d-http"
+      true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+            String.equal err.path "providers.legacy_openai_compat.protocol"
+            && String.equal err.message
+                 "unknown protocol \"provider_d-http\": expected one of \
+                  messages-cli, messages-http, openai-compatible-cli, \
+                  openai-compatible-http, ollama-http")
+         errors)
+
+let test_runtime_toml_accepts_messages_caching_capability () =
+  let content =
+    {|
+[runtime]
+default = "anthropic.claude-opus-4"
+
+[providers.anthropic]
+display-name = "Anthropic"
+protocol = "messages-http"
+endpoint = "https://api.anthropic.com"
+
+[providers.anthropic.capabilities]
+uses-messages-caching = true
+
+[models.claude-opus-4]
+api-name = "claude-opus-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[anthropic.claude-opus-4]
+max-concurrent = 2
+|}
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    fail
+      (errors
+       |> List.map (fun (err : Runtime_toml.parse_error) ->
+         err.path ^ ": " ^ err.message)
+       |> String.concat "; ")
+  | Ok config ->
+    (match config.providers with
+     | [ provider ] ->
+       (match provider.Runtime_schema.capabilities with
+        | Some caps ->
+          check bool "uses_anthropic_caching from uses-messages-caching" true
+            caps.uses_anthropic_caching
+        | None -> fail "expected provider capabilities")
+     | _ -> fail "expected one provider")
+
+let deepseek_runtime_toml =
+  {|
+[runtime]
+default = "deepseek.deepseek-v4-pro"
+
+[providers.deepseek]
+display-name = "DeepSeek API"
+protocol = "openai-compatible-http"
+endpoint = "https://api.deepseek.com"
+
+[providers.deepseek.credentials]
+type = "env"
+key = "DEEPSEEK_API_KEY"
+
+[models.deepseek-v4-pro]
+api-name = "deepseek-v4-pro"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.deepseek-v4-pro.capabilities]
+max-output-tokens = 384000
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "reasoning-effort"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+
+[deepseek.deepseek-v4-pro]
+max-concurrent = 2
+|}
+
+let deepseek_runtime_config_or_fail () =
+  match Runtime_toml.parse_string deepseek_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected DeepSeek runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let deepseek_provider_config_or_fail () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected DeepSeek adapter error: %s" msg)
+  | bindings -> failf "expected one DeepSeek binding, got %d" (List.length bindings)
+
+let with_deepseek_env deepseek f = with_env "DEEPSEEK_API_KEY" deepseek f
+
+let glm_coding_runtime_toml =
+  {|
+[runtime]
+default = "glm-coding.glm-4-7-coding"
+
+[providers.glm-coding]
+display-name = "GLM Coding Plan"
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/coding/paas/v4"
+
+[providers.glm-coding.credentials]
+type = "env"
+key = "ZAI_CODING_API_KEY"
+
+[models.glm-4-7-coding]
+api-name = "glm-4.7"
+max-context = 200000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.glm-4-7-coding.capabilities]
+max-output-tokens = 128000
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = false
+
+[glm-coding.glm-4-7-coding]
+max-concurrent = 3
+|}
+
+let glm_coding_runtime_config_or_fail () =
+  match Runtime_toml.parse_string glm_coding_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected GLM Coding Plan runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let glm_coding_provider_config_or_fail () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Ok provider_cfg -> provider_cfg
+     | Error msg -> failf "unexpected GLM Coding Plan adapter error: %s" msg)
+  | bindings ->
+    failf "expected one GLM Coding Plan binding, got %d" (List.length bindings)
+
+let with_glm_coding_env general coding f =
+  with_env "ZAI_API_KEY" general (fun () -> with_env "ZAI_CODING_API_KEY" coding f)
+
+let test_runtime_toml_accepts_deepseek_reasoning_effort_capability () =
+  let cfg = deepseek_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    (match model.capabilities with
+     | Some caps ->
+       check bool "reasoning effort parsed" true
+         (caps.thinking_control_format = Runtime_schema.Reasoning_effort);
+       check (option int) "max output" (Some 384000) caps.max_output_tokens
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_toml_accepts_chat_template_token_capability () =
+  let toml =
+    {|
+[runtime]
+default = "ollama.gemma4"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.gemma4]
+api-name = "hf.co/unsloth/gemma-4-26B-A4B-it-qat-GGUF:UD-Q4_K_XL"
+max-context = 262144
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.gemma4.capabilities]
+thinking-control-format = "chat_template_token"
+
+[ollama.gemma4]
+max-concurrent = 1
+|}
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected Gemma4 runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.models with
+     | [ model ] ->
+       (match model.capabilities with
+        | Some caps ->
+          check bool "chat template token parsed" true
+            (caps.thinking_control_format = Runtime_schema.Chat_template_token)
+        | None -> fail "expected model capabilities")
+     | models -> failf "expected one model, got %d" (List.length models))
+
+let test_runtime_adapter_materializes_deepseek_openai_compat () =
+  with_deepseek_env "ds-test-key" (fun () ->
+    let provider_cfg = deepseek_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat);
+    check string "base_url" "https://api.deepseek.com" provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "deepseek-v4-pro" provider_cfg.model_id;
+    check string "api key" "ds-test-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 1000000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 384000) provider_cfg.max_tokens;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
+let test_runtime_toml_accepts_glm_coding_capability () =
+  let cfg = glm_coding_runtime_config_or_fail () in
+  match cfg.models with
+  | [ model ] ->
+    check bool "thinking enabled" true model.thinking_support;
+    check bool "preserve thinking" true model.preserve_thinking;
+    (match model.capabilities with
+     | Some caps ->
+       check (option int) "max output" (Some 128000) caps.max_output_tokens;
+       check bool "forced tool choice disabled" false caps.supports_tool_choice;
+       check bool "extended thinking" true caps.supports_extended_thinking
+     | None -> fail "expected model capabilities")
+  | models -> failf "expected one model, got %d" (List.length models)
+
+let test_runtime_adapter_materializes_glm_coding_provider () =
+  with_glm_coding_env "general-key" "coding-key" (fun () ->
+    let provider_cfg = glm_coding_provider_config_or_fail () in
+    check bool "kind" true
+      (provider_cfg.kind = Llm_provider.Provider_config.Glm);
+    check string "base_url" "https://api.z.ai/api/coding/paas/v4"
+      provider_cfg.base_url;
+    check string "request_path" "/chat/completions" provider_cfg.request_path;
+    check string "model_id" "glm-4.7" provider_cfg.model_id;
+    check string "api key uses coding lane" "coding-key" provider_cfg.api_key;
+    check (option int) "max_context" (Some 200000) provider_cfg.max_context;
+    check (option int) "max_tokens" (Some 128000) provider_cfg.max_tokens;
+    check (option bool) "tool choice override" (Some false)
+      provider_cfg.supports_tool_choice_override;
+    check int "Authorization header count" 0
+      (normalized_header_count "Authorization" provider_cfg.headers))
+
 let test_runtime_adapter_keeps_auth_out_of_headers () =
   let cfg =
     { Runtime_schema.providers = [ runpod_provider ]
@@ -212,6 +520,68 @@ let provider_cfg () =
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
+
+(* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
+   Provider_config. Before the fix the adapter dropped both binding
+   fields, so keep_alive fell back to OAS_OLLAMA_KEEP_ALIVE / "-1" and
+   num_ctx to the Ollama Modelfile default. *)
+let ollama_keep_alive_runtime_toml =
+  {|
+[runtime]
+default = "ollama.qwen-local"
+
+[providers.ollama]
+display-name = "Local Ollama"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen-local]
+api-name = "qwen3:32b"
+max-context = 32768
+tools-support = true
+streaming = true
+
+[ollama.qwen-local]
+max-concurrent = 1
+keep-alive = "30m"
+num-ctx = 16384
+|}
+
+let test_runtime_adapter_threads_binding_keep_alive_and_num_ctx () =
+  match Runtime_toml.parse_string ollama_keep_alive_runtime_toml with
+  | Error errors ->
+    failf
+      "expected Ollama keep-alive runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       check (option string) "binding keep_alive parsed" (Some "30m")
+         binding.Runtime_schema.keep_alive;
+       check (option int) "binding num_ctx parsed" (Some 16384)
+         binding.Runtime_schema.num_ctx;
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error msg -> failf "unexpected adapter error: %s" msg
+        | Ok provider_cfg ->
+          check bool "kind" true
+            (provider_cfg.kind = Llm_provider.Provider_config.Ollama);
+          check (option string) "provider config keep_alive" (Some "30m")
+            provider_cfg.keep_alive;
+          check (option int) "provider config num_ctx" (Some 16384)
+            provider_cfg.num_ctx)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default () =
+  let provider_cfg = provider_cfg () in
+  check (option string) "keep_alive unset without TOML value" None
+    provider_cfg.keep_alive;
+  check (option int) "num_ctx unset without TOML value" None
+    provider_cfg.num_ctx
 
 let runtime_or_fail ?(provider = runpod_provider) () =
   let cfg =
@@ -433,6 +803,63 @@ let test_runtime_agent_max_turns_is_continuation_checkpoint () =
   check string "status" "continuation_checkpoint" lifecycle.status;
   check (option string) "no error" None lifecycle.error
 
+let test_runtime_agent_context_uses_configured_turn_budget () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config = { config with max_turns = 7 } in
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      let builder =
+        Runtime_agent_context.builder_without_approval
+          ~net:(Eio.Stdenv.net env)
+          ~config
+          ()
+      in
+      match Agent_sdk.Builder.build_safe builder with
+      | Error err -> fail (Agent_sdk.Error.to_string err)
+      | Ok agent ->
+        check int "builder max_turns" 7
+          (Agent_sdk.Agent.state agent).config.max_turns;
+        Eio.Switch.on_release sw (fun () ->
+          Agent_sdk.Agent.close agent)));
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 24
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; max_input_tokens = None
+    ; max_total_tokens = None
+    ; context = Agent_sdk.Context.create ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check int "resume adds fresh per-call turn budget" 31
+    prepared.agent_config.max_turns
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -489,6 +916,42 @@ let () =
             `Quick
             test_runtime_toml_trims_env_credential_key
         ; test_case
+            "runtime TOML rejects legacy protocol aliases"
+            `Quick
+            test_runtime_toml_rejects_legacy_protocol_aliases
+        ; test_case
+            "runtime TOML reads uses-messages-caching capability"
+            `Quick
+            test_runtime_toml_accepts_messages_caching_capability
+        ; test_case
+            "runtime TOML accepts DeepSeek reasoning effort"
+            `Quick
+            test_runtime_toml_accepts_deepseek_reasoning_effort_capability
+        ; test_case
+            "runtime TOML accepts GLM Coding Plan capabilities"
+            `Quick
+            test_runtime_toml_accepts_glm_coding_capability
+        ; test_case
+            "runtime TOML accepts chat template token thinking"
+            `Quick
+            test_runtime_toml_accepts_chat_template_token_capability
+        ; test_case
+            "runtime adapter materializes DeepSeek OpenAI compat"
+            `Quick
+            test_runtime_adapter_materializes_deepseek_openai_compat
+        ; test_case
+            "runtime adapter materializes GLM Coding Plan provider"
+            `Quick
+            test_runtime_adapter_materializes_glm_coding_provider
+        ; test_case
+            "runtime adapter threads binding keep-alive and num-ctx"
+            `Quick
+            test_runtime_adapter_threads_binding_keep_alive_and_num_ctx
+        ; test_case
+            "runtime adapter leaves keep-alive and num-ctx unset by default"
+            `Quick
+            test_runtime_adapter_leaves_keep_alive_and_num_ctx_unset_by_default
+        ; test_case
             "runtime agent terminal observation carries model identity"
             `Quick
             test_runtime_agent_terminal_observation_uses_runtime_identity
@@ -504,6 +967,10 @@ let () =
             "max turns is continuation checkpoint"
             `Quick
             test_runtime_agent_max_turns_is_continuation_checkpoint
+        ; test_case
+            "runtime agent context uses configured turn budget"
+            `Quick
+            test_runtime_agent_context_uses_configured_turn_budget
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

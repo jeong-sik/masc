@@ -314,9 +314,9 @@ let validate_goal_completion_ready config ~goal_id ~override_note =
   | Some note when not (String.equal (String.trim note) "") -> Ok ()
   | _ ->
     let index =
-      Workspace_goal_index.build_goal_task_index
+      Workspace_goal_index.build_goal_task_index_for_config
+        config
         (Workspace_query.get_tasks_safe config)
-        ~goal_task_links:[]
     in
     let linked_tasks =
       Workspace_goal_index.tasks_for_goal index ~goal_id

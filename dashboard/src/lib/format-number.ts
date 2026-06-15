@@ -32,6 +32,19 @@ export function formatNumber(value: number | null | undefined, digits = 0, fallb
   })
 }
 
+export function formatTokPerSec(value: number | null | undefined, digits = 1, fallback = '-'): string {
+  if (!isFiniteMetricValue(value)) return fallback
+  return `${formatNumber(value, digits, fallback)} tok/s`
+}
+
+export function deriveTokPerSec(
+  tokens: number | null | undefined,
+  durationMs: number | null | undefined,
+): number | null {
+  if (!isFiniteMetricValue(tokens) || !isFiniteMetricValue(durationMs) || durationMs <= 0) return null
+  return tokens / (durationMs / 1000)
+}
+
 /** Format a USD cost value. Sub-cent values get 4 decimals; otherwise 2.
  *  Returns fallback for null/NaN/undefined. */
 export function formatCost(value: number | null | undefined, fallback = '--'): string {

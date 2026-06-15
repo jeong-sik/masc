@@ -37,6 +37,8 @@ let with_env key value f =
 let with_flag_rate_limit value f =
   with_env "MASC_BOARD_MODERATION_FLAG_RATE_LIMIT_SEC" value f
 
+let run_eio f = Eio_main.run (fun _env -> f ())
+
 let test_with_env_restores_unset () =
   let key = "MASC_BOARD_MODERATION_TEST_UNSET" in
   unsetenv key;
@@ -468,58 +470,60 @@ let test_audit_entry_no_optional_fields_when_absent () =
 
 (* ── Runner ──────────────────────────────────────────────────────── *)
 
+let eio_test_case name speed f = test_case name speed (fun () -> run_eio f)
+
 let () =
   run "Board_moderation"
     [ ( "env",
-        [ test_case "with_env restores unset" `Quick
+        [ eio_test_case "with_env restores unset" `Quick
             test_with_env_restores_unset ] );
       ( "flag_reason",
-        [ test_case "spam roundtrip"       `Quick test_flag_reason_spam;
-          test_case "harassment roundtrip" `Quick test_flag_reason_harassment;
-          test_case "off_topic roundtrip"  `Quick test_flag_reason_off_topic;
-          test_case "policy roundtrip"     `Quick test_flag_reason_policy;
-          test_case "unknown -> None"      `Quick test_flag_reason_unknown ] );
+        [ eio_test_case "spam roundtrip"       `Quick test_flag_reason_spam;
+          eio_test_case "harassment roundtrip" `Quick test_flag_reason_harassment;
+          eio_test_case "off_topic roundtrip"  `Quick test_flag_reason_off_topic;
+          eio_test_case "policy roundtrip"     `Quick test_flag_reason_policy;
+          eio_test_case "unknown -> None"      `Quick test_flag_reason_unknown ] );
       ( "action_kind",
-        [ test_case "all roundtrips" `Quick test_action_kind_roundtrips ] );
+        [ eio_test_case "all roundtrips" `Quick test_action_kind_roundtrips ] );
       ( "target_kind",
-        [ test_case "all roundtrips" `Quick test_target_kind_roundtrips ] );
+        [ eio_test_case "all roundtrips" `Quick test_target_kind_roundtrips ] );
       ( "flag",
-        [ test_case "happy path"             `Quick test_flag_happy_path;
-          test_case "duplicate rejected"     `Quick test_flag_duplicate_rejected;
-          test_case "different targets ok"   `Quick test_flag_different_targets;
-          test_case "same reporter rate limited" `Quick
+        [ eio_test_case "happy path"             `Quick test_flag_happy_path;
+          eio_test_case "duplicate rejected"     `Quick test_flag_duplicate_rejected;
+          eio_test_case "different targets ok"   `Quick test_flag_different_targets;
+          eio_test_case "same reporter rate limited" `Quick
             test_flag_rate_limited_same_reporter;
-          test_case "different reporters bypass rate limit" `Quick
+          eio_test_case "different reporters bypass rate limit" `Quick
             test_flag_rate_limit_allows_different_reporters;
-          test_case "non-finite rate limit falls back" `Quick
+          eio_test_case "non-finite rate limit falls back" `Quick
             test_flag_rate_limit_non_finite_falls_back;
-          test_case "resolved entries still rate-limit reporter" `Quick
+          eio_test_case "resolved entries still rate-limit reporter" `Quick
             test_flag_rate_limit_survives_resolved_entries ] );
       ( "get_queue",
-        [ test_case "unresolved filter"      `Quick test_get_queue_unresolved;
-          test_case "all entries"            `Quick test_get_queue_all;
-          test_case "resolved filter"        `Quick test_get_queue_resolved_filter ] );
+        [ eio_test_case "unresolved filter"      `Quick test_get_queue_unresolved;
+          eio_test_case "all entries"            `Quick test_get_queue_all;
+          eio_test_case "resolved filter"        `Quick test_get_queue_resolved_filter ] );
       ( "resolve_entry",
-        [ test_case "not found -> error"     `Quick test_resolve_entry_not_found ] );
+        [ eio_test_case "not found -> error"     `Quick test_resolve_entry_not_found ] );
       ( "record_action",
-        [ test_case "happy path"             `Quick test_record_action_happy_path;
-          test_case "note capped at 500"     `Quick test_record_action_note_capped;
-          test_case "auto-resolves queue"    `Quick
+        [ eio_test_case "happy path"             `Quick test_record_action_happy_path;
+          eio_test_case "note capped at 500"     `Quick test_record_action_note_capped;
+          eio_test_case "auto-resolves queue"    `Quick
             test_record_action_auto_resolves_queue;
-          test_case "allows target to be reflagged" `Quick
+          eio_test_case "allows target to be reflagged" `Quick
             test_record_action_allows_target_to_be_reflagged ] );
       ( "get_audit_trail",
-        [ test_case "actor filter"           `Quick test_audit_trail_actor_filter;
-          test_case "target filter"          `Quick test_audit_trail_target_filter;
-          test_case "limit cap"              `Quick test_audit_trail_limit ] );
+        [ eio_test_case "actor filter"           `Quick test_audit_trail_actor_filter;
+          eio_test_case "target filter"          `Quick test_audit_trail_target_filter;
+          eio_test_case "limit cap"              `Quick test_audit_trail_limit ] );
       ( "target_summary",
-        [ test_case "none"                   `Quick test_target_summary_none;
-          test_case "flagged"                `Quick test_target_summary_flagged;
-          test_case "action status"          `Quick test_target_summary_action_status;
-          test_case "reflag wins over audit" `Quick
+        [ eio_test_case "none"                   `Quick test_target_summary_none;
+          eio_test_case "flagged"                `Quick test_target_summary_flagged;
+          eio_test_case "action status"          `Quick test_target_summary_action_status;
+          eio_test_case "reflag wins over audit" `Quick
             test_target_summary_reflagged_wins_over_audit ] );
       ( "json_projection",
-        [ test_case "queue_entry shape"      `Quick test_queue_entry_to_json;
-          test_case "audit_entry shape"      `Quick test_audit_entry_to_json;
-          test_case "audit optional absent"  `Quick
+        [ eio_test_case "queue_entry shape"      `Quick test_queue_entry_to_json;
+          eio_test_case "audit_entry shape"      `Quick test_audit_entry_to_json;
+          eio_test_case "audit optional absent"  `Quick
             test_audit_entry_no_optional_fields_when_absent ] ) ]

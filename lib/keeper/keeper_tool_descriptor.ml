@@ -55,6 +55,7 @@ type runtime_handler =
   | Tool_masc_misc_dispatch
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_surface_audit
 
@@ -84,6 +85,7 @@ type t =
   ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; receipt_labels : (string * string) list
+  ; eval_tags : string list
   }
 
 let executor_to_string = function
@@ -143,6 +145,7 @@ let runtime_handler_to_string = function
   | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
+  | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
@@ -180,10 +183,16 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
+let closed_object_schema ?(required = []) properties =
+  match object_schema ~required properties with
+  | `Assoc fields -> `Assoc (fields @ [ "additionalProperties", `Bool false ])
+  | schema -> schema
+;;
+
 let execute_schema = Tool_shard_types.tool_execute_schema.input_schema
 
 let read_file_schema =
-  object_schema
+  closed_object_schema
     ~required:[ "file_path" ]
     [ property
         "file_path"
@@ -257,6 +266,27 @@ let search_web_schema =
     ~required:[ "query" ]
     [ property "query" "string" "Search query text for current public web information."
     ; property "limit" "integer" "Maximum number of results to return."
+    ; property
+        "includeContent"
+        "boolean"
+        "When true, best-effort fetch raw page_content for each result and add a keeper-readable content_text summary."
+    ; ( "contentMaxChars",
+        `Assoc
+          [ "type", `String "integer"
+          ; "description",
+            `String "Maximum raw page_content characters per result."
+          ; "minimum", `Int 100
+          ; "maximum", `Int 20000
+          ; "default", `Int 4000
+          ] )
+    ; ( "contentTimeout",
+        `Assoc
+          [ "type", `String "integer"
+          ; "description", `String "Per-result content fetch timeout in seconds."
+          ; "minimum", `Int 1
+          ; "maximum", `Int 60
+          ; "default", `Int 15
+          ] )
     ]
 ;;
 
@@ -421,6 +451,7 @@ let descriptor_with_public_aliases
   ; runtime_handler
   ; translate
   ; receipt_labels
+  ; eval_tags = []
   }
 ;;
 
@@ -449,7 +480,11 @@ let descriptor
     ~backend
     ~sandbox
     ~runtime_handler
-    ~translate
+      ~translate
+;;
+
+let with_eval_tags eval_tags descriptor =
+  { descriptor with eval_tags }
 ;;
 
 let public_descriptors =
@@ -478,7 +513,7 @@ let public_descriptors =
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
-      ~public_aliases:[ "Search" ]
+      ~public_aliases:[ "Search"; "search_files" ]
       ~internal_name:"tool_search_files"
       ~description:
         "Search file contents with ripgrep: provide a regex `pattern` (and \
@@ -559,7 +594,9 @@ let public_descriptors =
       ~id:"agent.search_web"
       ~public_name:"WebSearch"
       ~internal_name:"masc_web_search"
-      ~description:"Search the public web for current information."
+      ~description:
+        "Search the public web for current information using the MASC-owned \
+         tool-list alias, not a generic snake_case web tool id."
       ~input_schema:search_web_schema
       ~policy:
         (policy
@@ -577,7 +614,9 @@ let public_descriptors =
       ~id:"agent.fetch_web"
       ~public_name:"WebFetch"
       ~internal_name:"masc_web_fetch"
-      ~description:"Fetch a selected web page for source-backed reading."
+      ~description:
+        "Fetch a selected web page for source-backed reading using the \
+         MASC-owned tool-list alias, not a generic snake_case web tool id."
       ~input_schema:fetch_web_schema
       ~policy:
         (policy
@@ -955,6 +994,21 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~maintenance_only:false
 ;;
 
+let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  { (cluster_descriptor
+       ~id:("masc.schedule." ^ definition.id)
+       ~name:schema.name
+       ~description:schema.description
+       ~handler:Tool_masc_schedule_dispatch
+       ~readonly:definition.read_only
+       ~inline_safe:false
+       ~maintenance_only:false)
+    with
+    input_schema = schema.input_schema
+  }
+;;
+
 let masc_keeper_descriptor id name description ~readonly =
   cluster_descriptor
     ~id:("masc.keeper." ^ id)
@@ -986,24 +1040,28 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_stay_silent
-  ; in_process_descriptor
-      ~id:"keeper.tools_list"
-      ~name:"keeper_tools_list"
-      ~description:
-        "List the active keeper tool surface from descriptors and registered schemas. \
-         No arguments."
-      ~input_schema:empty_object_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_tools_list
-  ; in_process_descriptor
-      ~id:"keeper.tool_search"
-      ~name:"keeper_tool_search"
-      ~description:
-        "Search keeper tool schemas by free-text query. Returns ranked tool \
-         descriptions and input schemas."
-      ~input_schema:tool_search_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_tool_search
+  ; (in_process_descriptor
+       ~id:"keeper.tools_list"
+       ~name:"keeper_tools_list"
+       ~description:
+         "List the active keeper tool surface from descriptors and registered schemas. \
+          This is capability introspection, not connector content lookup. Use \
+          keeper_surface_read only for current connected-surface lane context. \
+          No arguments."
+       ~input_schema:empty_object_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_tools_list
+     |> with_eval_tags [ "capability_introspection" ])
+  ; (in_process_descriptor
+       ~id:"keeper.tool_search"
+       ~name:"keeper_tool_search"
+       ~description:
+         "Search keeper tool schemas by free-text query. Returns ranked tool \
+          descriptions and input schemas."
+       ~input_schema:tool_search_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_tool_search
+     |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
       ~id:"keeper.context.status"
@@ -1045,17 +1103,21 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
-  ; in_process_descriptor
-      ~id:"keeper.surface.read"
-      ~name:"keeper_surface_read"
-      ~description:
-        "Read recent conversation from one connected surface lane (dashboard, \
-         discord, slack, or another connector label) with speaker identity \
-         and a derived participant roster. Use after Connected Surfaces \
-         shows a lane you want context from."
-      ~input_schema:surface_read_schema
-      ~policy:(read_only_in_process_policy ())
-      ~handler:Tool_surface_read
+  ; (in_process_descriptor
+       ~id:"keeper.surface.read"
+       ~name:"keeper_surface_read"
+       ~description:
+         "Read recent conversation from one connected surface lane (dashboard, \
+          discord, slack, or another connector label) with speaker identity \
+          and a derived participant roster. Use when the user asks about a \
+          current connector lane, recent lane messages, or participants. This \
+          does not enumerate connector-wide channel registries; if asked for \
+          channels outside Connected Surfaces, read only visible lane evidence \
+          and state that the wider registry is unavailable."
+       ~input_schema:surface_read_schema
+       ~policy:(read_only_in_process_policy ())
+       ~handler:Tool_surface_read
+     |> with_eval_tags [ "surface_context_read" ])
   ; in_process_descriptor
       ~id:"keeper.surface.post"
       ~name:"keeper_surface_post"
@@ -1256,8 +1318,9 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
-  ; masc_agent_descriptor "card" "masc_agent_card"
-      "Read an agent card." ~readonly:true
+  ; (masc_agent_descriptor "card" "masc_agent_card"
+       "Read an agent card." ~readonly:true
+     |> with_eval_tags [ "agent_profile_lookup" ])
   ; masc_agent_descriptor "fitness" "masc_agent_fitness"
       "Read agent fitness metrics." ~readonly:true
   ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
@@ -1291,7 +1354,7 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
   (* [masc_web_search] / [masc_web_fetch] are already owned by the
-     LLM-native WebSearch / WebFetch descriptors above. Do not add
+     MASC-owned web descriptors above. Do not add
      duplicate internal descriptors here; that would make runtime receipt
      projection depend on list order. *)
   (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
@@ -1302,11 +1365,15 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
   ; masc_agent_timeline_descriptor "masc_agent_timeline"
       "Read agent timeline events." ~readonly:true
+  (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
+  ]
+  @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
   (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
      sandbox lifecycle) use the keeper Eio context and are gated on
      Phase 5 Eio plumbing scope. *)
-  ; masc_keeper_descriptor "list" "masc_keeper_list"
+    masc_keeper_descriptor "list" "masc_keeper_list"
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true
@@ -1428,6 +1495,10 @@ let receipt_labels_json d =
   `Assoc (List.map (fun (key, value) -> key, `String value) d.receipt_labels)
 ;;
 
+let eval_tags_json d =
+  `List (List.map (fun tag -> `String tag) d.eval_tags)
+;;
+
 let route_evidence_json d =
   let policy = d.policy in
   let policy_fields =
@@ -1448,6 +1519,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "receipt_labels", receipt_labels_json d
+     ; "eval_tags", eval_tags_json d
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope

@@ -61,7 +61,8 @@ val validation_error_to_string : validation_error -> string
 
 val dedup_check : string -> bool
 (** [dedup_check key] returns [true] if [key] was already seen
-    within the TTL window (default 300 s).  Thread-safe. *)
+    within the TTL window ([MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default
+    3600 s).  Thread-safe. *)
 
 val dedup_cleanup : now:float -> unit
 (** Evict expired entries.  Called periodically by the Pulse consumer
@@ -95,6 +96,7 @@ type dispatch_fn =
   channel_user_name:string ->
   channel_workspace_id:string ->
   keeper_name:string ->
+  metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
 
@@ -123,4 +125,4 @@ val max_content_length : unit -> int
 (** [MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH], default 4000. *)
 
 val dedup_ttl_sec : unit -> float
-(** [MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 300.0. *)
+(** [MASC_CHANNEL_GATE_DEDUP_TTL_SEC], default 3600.0. *)

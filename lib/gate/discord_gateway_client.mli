@@ -30,11 +30,18 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       }
   | Message_create of
       { channel_id : string
+      ; guild_id : string option
       ; message_id : string
       ; author_id : string
       ; author_name : string option
       ; content : string
+      ; mention_user_ids : string list
       ; mentions_bot : bool
+      ; explicit_mentions_bot : bool
+      ; author_is_bot : bool
+      ; message_reference_channel_id : string option
+      ; message_reference_message_id : string option
+      ; referenced_message_author_id : string option
       }
   | Reaction_add of
       { channel_id : string
@@ -42,10 +49,21 @@ type gateway_event = Discord_gateway_state.dispatched_event =
       ; user_id : string
       ; emoji : string
       }
+  | Thread_tracked of
+      { thread_id : string
+      ; parent_channel_id : string
+      }
+  | Threads_bulk_tracked of
+      { threads : (string * string) list
+      }
+  | Thread_removed of
+      { thread_id : string
+      }
   | Ignored of string
 
 type trigger_policy = Discord_gateway_state.trigger_policy =
   | Mention_only
+  | Mention_or_thread
   | User_only of string
   | All
 
@@ -89,3 +107,11 @@ val connection_state : unit -> Discord_gateway_state.connection_state
     [Disconnected] until [run] has started. One gateway per process
     (single bot token); written only by [run], safe to read from any
     fiber. Feeds connector presence ([Channel_gate_discord_state]). *)
+
+val set_presence : Discord_gateway_state.presence_status -> unit
+(** [set_presence status] pushes a [Status_change] input into the
+    gateway's drive loop. When connected, the bot's Discord presence
+    updates immediately (online/idle/dnd/invisible). When disconnected,
+    the request is logged and dropped.
+
+    Thread-safe: may be called from any fiber. *)

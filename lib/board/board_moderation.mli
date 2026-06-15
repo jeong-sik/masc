@@ -12,8 +12,8 @@
     Design properties:
     - All queue and audit state is in-memory and serialised to JSONL under
       [<base_path>/.masc/board/moderation/].
-    - The store is single-writer (callers must serialise operations —
-      see {!Shared_audit.Store} for the same discipline).
+    - The store is protected by an [Eio.Mutex.t]; public operations are safe
+      to call from concurrent Eio fibers.
     - No silent failures: every mutating operation returns a
       [(unit, string) result].
     - IDs are cryptographic (no prediction).

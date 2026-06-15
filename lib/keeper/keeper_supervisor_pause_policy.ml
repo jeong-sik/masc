@@ -226,6 +226,20 @@ let failure_reason_policy_decision
     Some
       (Keeper_failure_policy.decide
          (Keeper_failure_policy.Runtime_exhausted { retryable }))
+  | Some (Keeper_registry.Provider_runtime_error { code; detail; reason = None; _ }) ->
+    (match
+       Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ~code
+         ~detail
+     with
+     | Keeper_provider_runtime_boundary.Provider_timeout timeout ->
+       Some
+         (Keeper_failure_policy.decide
+            (Keeper_provider_runtime_boundary.provider_timeout_failure
+               ~strikes:None
+               ~liveness:Keeper_failure_policy.Unknown_liveness
+               timeout))
+     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure -> None)
   | Some _ | None ->
     None
 ;;

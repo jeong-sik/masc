@@ -28,13 +28,16 @@ type try_provider_ctx =
   ; system_prompt : string
   ; tools : Agent_sdk.Tool.t list
   ; initial_messages : Agent_sdk.Types.message list
+  ; max_turns : int
   ; max_idle_turns : int
   ; stream_idle_timeout_s : float option
+  ; execution_idle_timeout_s : float option
   ; body_timeout_s : float option
   ; temperature : float
   ; max_tokens : int
   ; max_input_tokens : int option
   ; max_cost_usd : float option
+  ; accept : Agent_sdk_response.api_response -> bool
   ; guardrails : Agent_sdk.Guardrails.t option
   ; hooks : Agent_sdk.Hooks.hooks option
   ; context_reducer : Agent_sdk.Context_reducer.t option
@@ -54,6 +57,7 @@ type try_provider_ctx =
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
   ; enable_thinking : bool option
+  ; preserve_thinking : bool option
   ; approval : Agent_sdk.Hooks.approval_callback option
   ; exit_condition : (int -> bool) option
   ; exit_condition_result : (int -> Runtime_agent.stop_reason * string option) option
@@ -184,6 +188,97 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
   | Some _ as s -> s
   | None -> max_execution_time_for_attempt ?per_provider_timeout_s ()
 
+type last_tool_progress_context =
+  { tool_name : string
+  ; tool_effect : string
+  }
+
+let last_tool_use_of_messages (messages : Agent_sdk.Types.message list) =
+  let last_tool_in_message (msg : Agent_sdk.Types.message) acc =
+    if msg.role <> Agent_sdk.Types.Assistant
+    then acc
+    else
+      List.fold_left
+        (fun acc -> function
+          | Agent_sdk.Types.ToolUse { name; input; _ } -> Some (name, input)
+          | _ -> acc)
+        acc
+        msg.content
+  in
+  List.fold_left (fun acc msg -> last_tool_in_message msg acc) None messages
+;;
+
+let last_tool_progress_context_of_messages messages =
+  match last_tool_use_of_messages messages with
+  | None -> None
+  | Some (tool_name, input) ->
+    let tool_name = String.trim tool_name in
+    let tool_name = if tool_name = "" then "unknown" else tool_name in
+    let tool_effect =
+      if Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
+      then "read_only"
+      else "mutating"
+    in
+    Some { tool_name; tool_effect }
+;;
+
+let accept_rejection_context_of_run_result (run_result : Runtime_agent.run_result) =
+  match run_result.checkpoint with
+  | None -> None
+  | Some checkpoint ->
+    last_tool_progress_context_of_messages checkpoint.Agent_sdk.Checkpoint.messages
+;;
+
+let format_last_tool_progress_context = function
+  | None -> None
+  | Some { tool_name; tool_effect } ->
+    Some (Printf.sprintf "last_tool=%s; last_tool_effect=%s" tool_name tool_effect)
+;;
+
+let accept_rejected_error ~progress_context ~runtime_id
+    ~(response : Agent_sdk_response.api_response) =
+  let rejection =
+    Keeper_tool_response.accept_rejection_of_response ~runtime_id response
+  in
+  let rejection =
+    match progress_context with
+    | Some context when String.trim context <> "" ->
+      { rejection with reason = rejection.reason ^ "; " ^ context }
+    | Some _ | None -> rejection
+  in
+  let reason_kind =
+    match rejection.kind with
+    | Keeper_tool_response.No_usable_progress ->
+      Some Keeper_internal_error.Accept_no_usable_progress
+    | Keeper_tool_response.Predicate_rejected ->
+      Some Keeper_internal_error.Accept_predicate_rejected
+  in
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Accept_rejected
+       {
+         scope = runtime_id;
+         model =
+           Some
+             (Boundary_redaction.to_string
+                Boundary_redaction.runtime_model_label);
+         reason_kind;
+         reason = rejection.reason;
+       })
+
+let apply_accept ~runtime_id ~accept (run_result : Runtime_agent.run_result) =
+  if accept run_result.response then Ok run_result
+  else
+    let progress_context =
+      run_result
+      |> accept_rejection_context_of_run_result
+      |> format_last_tool_progress_context
+    in
+    Error
+      (accept_rejected_error
+         ~progress_context
+         ~runtime_id
+         ~response:run_result.response)
+
 (** Run a single provider attempt within the runtime.
 
     This is the extracted body of the [try_provider] closure that was
@@ -192,8 +287,9 @@ let body_timeout_for_attempt ?per_provider_timeout_s () =
 
     @param ctx Explicit closure context (captures from [run_named]).
     @param resume_checkpoint Checkpoint from a previous failed provider.
-    @param per_provider_timeout_s Legacy per-provider budget; not forwarded as
-    a cumulative OAS execution timeout on the keeper path.
+    @param per_provider_timeout_s Legacy per-provider budget used for manifest
+    diagnostics only. It is not applied as a cumulative timeout around
+    [Runtime_agent.run] because that run may include active tool execution.
     @param candidate The opaque runtime candidate to attempt.
     @return [(result, checkpoint_after, liveness_success_sample)] tuple. The
     sample is not recorded here; the caller records it only after the runtime
@@ -257,8 +353,15 @@ let run_try_provider
               stream_idle_timeout_for_attempt ~configured:ctx.stream_idle_timeout_s
           ; max_execution_time_s =
               max_execution_time_for_attempt ?per_provider_timeout_s ()
+          ; execution_idle_timeout_s =
+              (* Keeper/provider attempts must not forward Agent.run idle
+                 timeout until active tool execution is excluded from OAS idle
+                 accounting. *)
+              (let _ = ctx.execution_idle_timeout_s in
+               None)
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature = ctx.temperature
+          ; max_turns = ctx.max_turns
           ; max_idle_turns = ctx.max_idle_turns
           ; guardrails = ctx.guardrails
           ; hooks
@@ -276,6 +379,7 @@ let run_try_provider
           ; context_injector = ctx.context_injector
           ; context = ctx.context
           ; enable_thinking = ctx.enable_thinking
+          ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; approval = ctx.approval
           ; exit_condition = ctx.exit_condition
@@ -321,32 +425,14 @@ let run_try_provider
             ~agent_ref:local_agent_ref
             ctx.goal
         in
-        match per_provider_timeout_s with
-        | None -> run_fn ()
-        | Some t ->
-          let clock_opt =
-            match Masc_eio_env.get_opt () with
-            | Some env ->
-              (match env.clock with
-               | Some _ as clock_opt -> clock_opt
-               | None -> Eio_context.get_clock_opt ())
-            | None -> Eio_context.get_clock_opt ()
-          in
-          (match clock_opt with
-           | Some clock ->
-             (try Eio.Time.with_timeout_exn clock t run_fn with
-              | Eio.Time.Timeout ->
-                Log.Misc.info
-                  "[runtime-fallback] runtime %s: per-provider timeout after %.1fs"
-                  ctx.runtime_id
-                  t;
-                Error
-                  (Agent_sdk.Error.Api
-                     (Timeout
-                        { message =
-                            Printf.sprintf "Per-provider timeout after %.1fs" t
-                        })))
-           | None -> run_fn ()))
+        (* Do not wrap [Runtime_agent.run] in a MASC wall-clock timeout here.
+           OAS provider stream/body timeouts and tool-local subprocess budgets
+           are the safe liveness boundaries. A cumulative wrapper at this layer
+           cannot distinguish provider silence from active tool execution. *)
+        (match per_provider_timeout_s with
+         | Some (_ : float) -> ()
+         | None -> ());
+        run_fn ())
     in
     let result =
       (* Restore typed provider-context enrichment (auth-env / not-found hints).
@@ -358,6 +444,13 @@ let run_try_provider
            ~runtime_id:ctx.error_runtime_id
            ~provider_cfg:(Runtime_candidate.provider_cfg candidate))
         result
+    in
+    let result =
+      match result with
+      | Ok run_result ->
+        apply_accept ~runtime_id:ctx.error_runtime_id ~accept:ctx.accept
+          run_result
+      | Error _ as err -> err
     in
     (match ctx.on_runtime_observation, result with
      | Some emit, Ok run_result ->
@@ -388,4 +481,7 @@ module For_testing = struct
   let stream_idle_timeout_for_attempt = stream_idle_timeout_for_attempt
   let sanitize_runtime_mcp_external_tool_choice =
     sanitize_runtime_mcp_external_tool_choice
+  let apply_accept = apply_accept
+  let last_tool_progress_context_of_messages = last_tool_progress_context_of_messages
+  let format_last_tool_progress_context = format_last_tool_progress_context
 end

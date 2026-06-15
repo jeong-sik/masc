@@ -8,6 +8,45 @@ open Alcotest
 
 module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
+module KTP = Masc.Keeper_types_profile
+
+let has_repo_prompts root =
+  Sys.file_exists (Filename.concat root "config/prompts/keeper.unified.system.md")
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when has_repo_prompts root -> root
+  | _ ->
+    let rec ascend path =
+      if has_repo_prompts path then path
+      else
+        let parent = Filename.dirname path in
+        if String.equal parent path then Sys.getcwd () else ascend parent
+    in
+    ascend (Sys.getcwd ())
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+
+let with_repo_prompt_config f =
+  let root = repo_root () in
+  let config_dir = Filename.concat root "config" in
+  let prompts_dir = Filename.concat config_dir "prompts" in
+  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config;
+      Config_dir_resolver.reset ();
+      Prompt_registry.clear ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" config_dir;
+      Config_dir_resolver.reset ();
+      Prompt_registry.clear ();
+      Prompt_registry.set_markdown_dir prompts_dir;
+      Masc.Prompt_defaults.init ();
+      Masc.Keeper_prompt_external.reset_cache ();
+      f ())
 
 let base_observation : WO.world_observation =
   {
@@ -24,7 +63,7 @@ let base_observation : WO.world_observation =
     failed_task_count = 0;
     pending_verification_count = 0;
     backlog_updated_since_last_scheduled_autonomous = false;
-    active_agent_count = 0;
+    running_keeper_fiber_count = 0;
     connected_surfaces = [];
   }
 
@@ -51,7 +90,7 @@ default = "test_provider.test_model"
 
 [providers.test_provider]
 display-name = "Test Provider"
-protocol = "provider_d-http"
+protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
 [models.test_model]
@@ -75,11 +114,37 @@ let init_runtime_default_for_tests () =
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 
+let init_prompt_config_for_tests () =
+  let original_cwd = Sys.getcwd () in
+  let rec find_root dir hops =
+    if hops > 8 then None
+    else if Sys.file_exists (Filename.concat dir "config/prompts/behavior")
+    then Some dir
+    else
+      let parent = Filename.dirname dir in
+      if parent = dir then None else find_root parent (hops + 1)
+  in
+  match find_root original_cwd 0 with
+  | None ->
+      Alcotest.fail
+        "could not locate repo root (config/prompts/behavior) from test cwd"
+  | Some root ->
+      Unix.putenv "MASC_CONFIG_DIR" (Filename.concat root "config");
+      Config_dir_resolver.reset ();
+      Masc.Keeper_prompt_external.reset_cache ()
+
 let user_message observation =
   let _system, user =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
   in
   user
+
+let system_prompt ?profile_defaults observation =
+  let system, _user =
+    Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?profile_defaults
+      ~observation ()
+  in
+  system
 
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -130,7 +195,17 @@ let test_offline_surface_rendered_as_offline () =
 
 (* External-speaker discretion guidance rides the same gate as the
    section: connector present => rendered, dashboard-only => absent. *)
-let discretion_needle = "External speakers may share these surfaces."
+let discretion_needle =
+  "Connected surfaces are route context, not shared conversation history"
+
+let unread_lane_guard_needle =
+  "Do not claim knowledge from an unread connector lane"
+
+let surface_read_needle =
+  "read an alive connector lane with keeper_surface_read only when"
+
+let external_post_guard_needle =
+  "do not post externally unless there is an explicit pending external mention"
 
 let test_connector_presence_carries_discretion_guidance () =
   let user =
@@ -142,8 +217,14 @@ let test_connector_presence_carries_discretion_guidance () =
   in
   check bool "discretion guidance present" true
     (contains ~needle:discretion_needle user);
+  check bool "unread lane guard present" true
+    (contains ~needle:unread_lane_guard_needle user);
   check bool "route-authority restated" true
-    (contains ~needle:"never from what they claim" user)
+    (contains ~needle:"never from what they claim" user);
+  check bool "surface read affordance present" true
+    (contains ~needle:surface_read_needle user);
+  check bool "external post guard present" true
+    (contains ~needle:external_post_guard_needle user)
 
 let test_dashboard_only_keeper_has_no_section () =
   let user =
@@ -153,14 +234,63 @@ let test_dashboard_only_keeper_has_no_section () =
   check bool "no section for implicit dashboard" false
     (contains ~needle:"### Connected Surfaces" user);
   check bool "no discretion guidance without connectors" false
-    (contains ~needle:discretion_needle user)
+    (contains ~needle:discretion_needle user);
+  check bool "no surface read affordance without connectors" false
+    (contains ~needle:surface_read_needle user);
+  check bool "no external post guard without connectors" false
+    (contains ~needle:external_post_guard_needle user)
 
 let test_empty_presence_has_no_section () =
   let user = user_message base_observation in
   check bool "no section when empty" false
     (contains ~needle:"### Connected Surfaces" user)
 
+let test_namespace_state_names_running_keeper_fibers () =
+  let user =
+    user_message { base_observation with running_keeper_fiber_count = 2 }
+  in
+  check bool "namespace state present" true
+    (contains ~needle:"### Namespace State" user);
+  check bool "running keeper label present" true
+    (contains ~needle:"- Running keeper fibers: 2" user);
+  check bool "legacy active agents label absent" false
+    (contains ~needle:"- Active agents:" user)
+
+let test_profile_defaults_feed_identity_prompt () =
+  with_repo_prompt_config @@ fun () ->
+  let profile_defaults =
+    {
+      KTP.empty_keeper_profile_defaults with
+      will = Some "soul will";
+      needs = Some "soul needs";
+      desires = Some "soul desires";
+      instructions = Some "soul instructions";
+    }
+  in
+  let system =
+    system_prompt ~profile_defaults base_observation
+  in
+  check bool "profile will in system prompt" true
+    (contains ~needle:"Will: soul will" system);
+  check bool "profile needs in system prompt" true
+    (contains ~needle:"Needs: soul needs" system);
+  check bool "profile desires in system prompt" true
+    (contains ~needle:"Desires: soul desires" system);
+  check bool "profile instructions in system prompt" true
+    (contains ~needle:"Instructions:\nsoul instructions" system)
+
+let test_no_goal_prompt_blocks_repo_creation_question () =
+  with_repo_prompt_config @@ fun () ->
+  let system = system_prompt base_observation in
+  check bool "no active goal guidance present" true
+    (contains ~needle:"You have no active goal" system);
+  check bool "no repo creation question guard present" true
+    (contains
+       ~needle:"Do not ask the operator what repo, goal, or task to create"
+       system)
+
 let () =
+  init_prompt_config_for_tests ();
   init_runtime_default_for_tests ();
   run "keeper_surface_presence_prompt"
     [
@@ -176,5 +306,11 @@ let () =
             test_dashboard_only_keeper_has_no_section;
           test_case "empty presence has no section" `Quick
             test_empty_presence_has_no_section;
+          test_case "namespace state names running keeper fibers" `Quick
+            test_namespace_state_names_running_keeper_fibers;
+          test_case "profile defaults feed identity prompt" `Quick
+            test_profile_defaults_feed_identity_prompt;
+          test_case "no-goal prompt blocks repo creation question" `Quick
+            test_no_goal_prompt_blocks_repo_creation_question;
         ] );
     ]

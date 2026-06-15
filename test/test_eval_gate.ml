@@ -161,6 +161,7 @@ let test_pre_entropy () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     (* Add 3 consecutive same-tool calls with same args *)
     Trajectory.record_entry acc (mk "tool_execute" repeated_args);
@@ -193,6 +194,7 @@ let test_pre_entropy_different_args () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     (* Add 3 consecutive same-tool calls but with different args *)
     Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo a\"}");
@@ -223,6 +225,7 @@ let test_pre_turn_limit () =
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
+      execution_id = None;
     } in
     Trajectory.record_entry acc (mk "tool_execute");
     Trajectory.record_entry acc (mk "tool_read_file");

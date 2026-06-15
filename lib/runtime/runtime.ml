@@ -165,6 +165,13 @@ let thinking_support_of_runtime_id (id : string) : bool option =
   | None -> None
 ;;
 
+let preserve_thinking_of_runtime_id (id : string) : bool option =
+  match get_runtime_by_id id with
+  | Some rt when rt.model.preserve_thinking -> Some true
+  | Some _ -> None
+  | None -> None
+;;
+
 (* fail-fast: uninitialized = startup-ordering bug, NOT a recoverable
    condition. 이전 [| None -> "tool_strict"] 하드코딩 fallback 은 90 사이트에
    조작된 id 를 흘리는 Unknown→Permissive 안티패턴이라 제거했다 (RFC-0206 §2.1).

@@ -27,6 +27,19 @@ type entry =
   ; completed_at : float option
   }
 
+(** Outcome of looking up a request record.
+
+    - [Found entry] — the request is known (in memory or recovered from disk).
+    - [Absent] — no record exists: the id was never accepted, or its terminal
+      record already aged out. Pollers can stop polling or resubmit.
+    - [Unreadable reason] — a record file exists but cannot be decoded
+      (corrupt JSON, missing required fields, or unknown status). The request
+      WAS accepted, but its result cannot be recovered. *)
+type load_result =
+  | Found of entry
+  | Absent
+  | Unreadable of string
+
 (** {1 Submit and poll} *)
 
 (** [submit ?clock ?timeout_sec ~sw ~f ~keeper_name] forks a background daemon fiber on
@@ -46,11 +59,12 @@ val submit
   -> unit
   -> string
 
-(** [poll ?base_path request_id] returns the current entry, or [None] when the
-    id was never seen. If [base_path] is supplied and a persisted non-terminal
-    request exists without an in-memory worker, it is returned as [Lost] and the
-    terminal lost state is persisted. *)
-val poll : ?base_path:string -> string -> entry option
+(** [poll ?base_path request_id] returns [Found entry] for a known request,
+    [Absent] when no record exists, and [Unreadable reason] when a persisted
+    record exists but cannot be decoded. If [base_path] is supplied and a
+    persisted non-terminal request exists without an in-memory worker, it is
+    returned as [Lost] and the terminal lost state is persisted. *)
+val poll : ?base_path:string -> string -> load_result
 
 (** [cancel ?base_path request_id] aborts a running async keeper_msg request.
     Returns [true] if it was successfully cancelled, [false] if not found
@@ -71,8 +85,10 @@ val status_to_string : request_status -> string
 val entry_to_json : entry -> Yojson.Safe.t
 
 module For_testing : sig
+  val is_safe_request_id : string -> bool
   val forget : string -> unit
   val clear : unit -> unit
   val record_path : base_path:string -> request_id:string -> string option
+  val load_record : base_path:string -> request_id:string -> load_result
   val gc_stale_disk : base_path:string -> int
 end

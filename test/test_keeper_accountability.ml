@@ -624,6 +624,46 @@ let test_summary_lookup_reads_window_once_for_multiple_agents () =
       in
       check int "window read count" 1 read_count)
 
+let test_summary_lookup_reuses_fresh_snapshot_across_lookup_construction () =
+  with_workspace (fun config ->
+      let created_at =
+        iso_of_unix (Unix.gettimeofday () -. (25.0 *. 3600.0))
+      in
+      append_accountability_event config.base_path ~created_at
+        (`Assoc
+           [
+             ("event_type", `String "claim_created");
+             ("claim_id", `String "acct-cache-reuse");
+             ("agent_name", `String "keeper-cache-agent");
+             ("keeper_name", `String "keeper-cache");
+             ("kind", `String "completion_claim");
+             ("subject", `String "Ship cache reuse");
+             ("surface", `String "keeper_turn");
+             ("created_at", `String created_at);
+             ("evidence_refs", `List []);
+             ("synthetic", `Bool false);
+           ]);
+      Keeper_accountability.enable_window_read_count_for_testing ();
+      let read_count =
+        Fun.protect
+          ~finally:Keeper_accountability.disable_window_read_count_for_testing
+          (fun () ->
+            let first =
+              Keeper_accountability.accountability_summary_lookup config
+            in
+            ignore
+              (first ~keeper_name:"keeper-cache"
+                 ~agent_name:"keeper-cache-agent");
+            let second =
+              Keeper_accountability.accountability_summary_lookup config
+            in
+            ignore
+              (second ~keeper_name:"keeper-cache"
+                 ~agent_name:"keeper-cache-agent");
+            Keeper_accountability.window_read_count_for_testing ())
+      in
+      check int "window read count" 1 read_count)
+
 (* compute_reputation calls accountability_summary_json once per post author in
    a board render. After the per-render memoization fix the windowed claim
    aggregation is built once per base path (short TTL) and reused, so two
@@ -782,6 +822,8 @@ let () =
             test_synthetic_claims_do_not_dilute_unsupported_rate;
           test_case "summary lookup reads window once" `Quick
             test_summary_lookup_reads_window_once_for_multiple_agents;
+          test_case "summary lookup reuses fresh snapshot" `Quick
+            test_summary_lookup_reuses_fresh_snapshot_across_lookup_construction;
           test_case "summary json memoizes window across agents" `Quick
             test_summary_json_memoizes_window_across_agents;
         ] );

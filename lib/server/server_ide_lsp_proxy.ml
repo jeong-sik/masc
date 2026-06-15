@@ -65,7 +65,7 @@ type conn_state =
   ; disconnected : bool Atomic.t
   }
 
-let base_path_of_state state = state.Mcp_server.workspace_config.base_path
+let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
 (** Signal connection end — resolves the disconnect promise so
     [Eio.Switch.run] exits and cleans up all associated resources. *)

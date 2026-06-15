@@ -13,10 +13,10 @@
 ;; The coupling moved to the call site of [select_with_feedback] (today
 ;; test-only); Thompson itself depends only on the neutral libraries below.
 ;;
-;; Post_verifier (used by [record_quality_signal]) is NOT a mega-lib edge —
-;; it already lives in the leaf masc.tool_call_quality_benchmark library
-;; (deps: yojson + masc_core + time_compat, no cycle back to Thompson), so it
-;; is kept as a normal library dependency rather than callback-inverted.
+;; Tool_call_quality_benchmark (used by [record_quality_signal]) is NOT a
+;; mega-lib edge — it already lives in the leaf masc.tool_call_quality_benchmark
+;; library (deps: yojson + masc_core + time_compat, no cycle back to Thompson),
+;; so it is kept as a normal library dependency rather than callback-inverted.
 ;;
 ;; (wrapped false) keeps the bare `Thompson_sampling` module name so call
 ;; sites stay `Thompson_sampling.*`.

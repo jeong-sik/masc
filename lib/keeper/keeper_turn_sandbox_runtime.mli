@@ -41,6 +41,8 @@ val run_command_with_status :
 
 val run_exec_with_status :
   ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
   t ->
   cwd:string ->
@@ -48,7 +50,20 @@ val run_exec_with_status :
   (Unix.process_status * string, string) result
 (** Execute [command_argv] inside the turn-scoped container and return the raw
     process status and merged output without applying success-code policy.
-    This is the argv-level entrypoint used by Shell IR dispatch. *)
+    Existing read-backend callers use this for legacy merged-output behavior. *)
+
+val run_exec_with_status_split :
+  ?stdin_content:string ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
+  timeout_sec:float ->
+  t ->
+  cwd:string ->
+  command_argv:string list ->
+  (Unix.process_status * string * string, string) result
+(** Execute [command_argv] inside the turn-scoped container and return split
+    stdout/stderr without applying success-code policy. This is the argv-level
+    entrypoint used by Shell IR dispatch. *)
 
 type exec_pipeline_stage = {
   command_argv : string list;
@@ -56,6 +71,8 @@ type exec_pipeline_stage = {
 }
 
 val run_exec_pipeline_with_status :
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   timeout_sec:float ->
   t ->
   cwd:string ->

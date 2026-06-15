@@ -22,6 +22,7 @@ let make_keeper_tool_handler
       ?search_fn
       ?on_tool_called
       ?clock
+      ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ~(failure_counts : failure_counts)
       ()
@@ -33,11 +34,7 @@ let make_keeper_tool_handler
   in
   fun raw_input ->
     let t0 = Time_compat.now () in
-    let input = translate_input raw_input in
-    match
-      Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
-    with
-    | Error validation_result ->
+    let handle_validation_error ~input validation_result =
       let raw_result = Yojson.Safe.to_string (Tool_result.data validation_result) in
       let output_text = normalize_tool_result ~success:false raw_result in
       let duration_ms = 0 in
@@ -93,52 +90,75 @@ let make_keeper_tool_handler
         ~tool_name:name
         ~start_time:t0
         output_text
-    | Ok input ->
-      let key = args_key input in
-      let prior_fails = failure_count_get failure_counts key in
-      if prior_fails >= max_consecutive_failures
-      then (
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ToolsOasFailures)
-          ~labels:[ "tool", name; "site", "blocked" ]
-          ();
-        Log.Keeper.warn
-          "tool %s blocked after %d consecutive failures (same args)"
-          name
-          prior_fails;
-        let msg =
-          Printf.sprintf
-            "This tool has failed %d times in a row with the same arguments. Try a \
-             different approach or different arguments."
-            prior_fails
-        in
-        let output_text = normalize_tool_result ~success:false msg in
-        Tool_result.error
-          ~failure_class:(Some Tool_result.Runtime_failure)
-          ~tool_name:name
-          ~start_time:t0
-          output_text)
-      else (
+    in
+    match pre_validate_input raw_input with
+    | Error validation_result ->
+      handle_validation_error ~input:raw_input validation_result
+    | Ok pre_validated_input ->
+      let input = translate_input pre_validated_input in
+      (match
+         Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
+       with
+       | Error validation_result -> handle_validation_error ~input validation_result
+       | Ok input ->
+         let key = args_key input in
+         let prior_fails = failure_count_get failure_counts key in
+         if prior_fails >= max_consecutive_failures
+         then (
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string ToolsOasFailures)
+             ~labels:[ "tool", name; "site", "blocked" ]
+             ();
+           Log.Keeper.warn
+             "tool %s blocked after %d consecutive failures (same args)"
+             name
+             prior_fails;
+           let msg =
+             Printf.sprintf
+               "This tool has failed %d times in a row with the same arguments. Try a \
+                different approach or different arguments."
+               prior_fails
+           in
+           let output_text = normalize_tool_result ~success:false msg in
+           Tool_result.error
+             ~failure_class:(Some Tool_result.Runtime_failure)
+             ~tool_name:name
+             ~start_time:t0
+             output_text)
+         else (
           let gate_clock =
             match clock with
             | Some clock -> Some clock
             | None -> Eio_context.get_clock_opt ()
           in
-          match gate_clock with
-          | None ->
+          let run_with_current_eio_context ?clock () =
+            let sw = Eio_context.get_switch_opt () in
+            let net = Eio_context.get_net_opt () in
+            let proc_mgr =
+              match Process_eio.get_proc_mgr () with
+              | Ok proc_mgr -> Some proc_mgr
+              | Error _ -> None
+            in
             Keeper_tools_oas_handler_exec.execute_with_observers
               ~name
               ~config
-                ~meta
-                ~ctx_snapshot
-                ?turn_sandbox_factory
-                ~exec_cache
+              ~meta
+              ~ctx_snapshot
+              ?turn_sandbox_factory
+              ~exec_cache
               ?search_fn
               ?on_tool_called
+              ?sw
+              ?clock
+              ?proc_mgr
+              ?net
               ~failure_counts
               ~key
               ~input
               ()
+          in
+          match gate_clock with
+          | None -> run_with_current_eio_context ()
           | Some clock ->
             let start_time = Time_compat.now () in
             let is_read_only =
@@ -169,18 +189,5 @@ let make_keeper_tool_handler
                   ~tool_name:name
                   ~start_time
                   payload)
-              (fun () ->
-                Keeper_tools_oas_handler_exec.execute_with_observers
-                  ~name
-                  ~config
-                    ~meta
-                    ~ctx_snapshot
-                    ?turn_sandbox_factory
-                    ~exec_cache
-                  ?search_fn
-                  ?on_tool_called
-                  ~failure_counts
-                  ~key
-                  ~input
-                  ()))
+              (fun () -> run_with_current_eio_context ~clock ())))
 ;;

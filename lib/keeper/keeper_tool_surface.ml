@@ -642,7 +642,10 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                   };
               }
             in
-            (match Keeper_meta_store.write_meta ~force:true config updated_meta with
+            (match
+               Keeper_meta_store.write_meta_with_merge
+                 ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+             with
              | Ok () -> true
              | Error err ->
                  Log.Keeper.warn

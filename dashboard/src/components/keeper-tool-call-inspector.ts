@@ -2,10 +2,11 @@
 // Fetches from GET /api/v1/keepers/:name/tool-calls
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useCallback, useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
+import { lastEvent } from '../sse'
 import { formatTimeHms } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
@@ -13,7 +14,8 @@ import { asRecord, mergeRouteRecord, hasRouteContext, type MutableRouteContext }
 import { SectionCap } from './common/section-cap'
 import { toolCategory, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
-import { parseToolBlobMarker } from '../lib/tool-blob-marker'
+import { parseToolBlobMarker, type ToolBlobMarker } from '../lib/tool-blob-marker'
+import { fetchToolBlob } from '../api/tool-blob'
 import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
@@ -24,6 +26,7 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
+import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-match'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -363,6 +366,19 @@ export function formatOutput(output: string | { _blob: { sha256: string; bytes: 
   return tryPrettyJson(output) ?? output
 }
 
+// Extract the blob marker from either persisted shape ({_blob: {...}}
+// descriptor or legacy [masc:blob ...] string). Null for inline outputs.
+export function blobMarkerOfOutput(
+  output: ToolCallEntry['output'],
+): ToolBlobMarker | null {
+  if (output == null) return null
+  if (typeof output === 'object') {
+    const { sha256, bytes, mime, preview } = output._blob
+    return { sha256, bytes, mime, preview }
+  }
+  return parseToolBlobMarker(output)
+}
+
 // ── Single tool call row (expandable) ───────────────────
 
 function CopyableToolCallBlock({
@@ -392,11 +408,64 @@ function CopyableToolCallBlock({
   `
 }
 
+// Output block with on-demand full-blob hydration. Externalized outputs
+// (Tool_blob_store) persist only a ~200-char preview in the jsonl; the full
+// bytes stay addressable by sha256 via GET /api/v1/artifacts/<sha>. Without
+// this button the inspector shows the truncated preview only, which reads
+// as "the tool returned nothing" for large outputs like keeper_context_status
+// (#20910).
+function ToolCallOutputBlock({ entry }: { entry: ToolCallEntry }) {
+  const fullText = useSignal<string | null>(null)
+  const loading = useSignal(false)
+  const error = useSignal<string | null>(null)
+  const marker = blobMarkerOfOutput(entry.output)
+
+  const onLoadFull = async () => {
+    if (marker === null || loading.value) return
+    loading.value = true
+    error.value = null
+    try {
+      const blob = await fetchToolBlob(marker.sha256)
+      fullText.value = tryPrettyJson(blob.content) ?? blob.content
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  return html`
+    <div class="space-y-1">
+      <${CopyableToolCallBlock}
+        title="출력"
+        value=${fullText.value ?? formatOutput(entry.output)}
+        maxHeightClass=${fullText.value !== null ? 'max-h-100' : 'max-h-64'}
+        ariaLabel="도구 호출 출력 복사"
+      />
+      ${marker !== null && fullText.value === null ? html`
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            data-testid="tool-output-load-full"
+            class=${`rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-accent-fg)] hover:border-[var(--color-accent-border)] hover:bg-[var(--color-bg-hover)] ${ringFocusClasses()}`}
+            disabled=${loading.value}
+            onClick=${() => void onLoadFull()}
+          >
+            ${loading.value ? '불러오는 중…' : `전체 출력 보기 (${marker.bytes.toLocaleString()}B)`}
+          </button>
+          ${error.value !== null ? html`
+            <span class="text-3xs text-[var(--color-status-err)]">${error.value}</span>
+          ` : null}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const expanded = useSignal(false)
   const cat = toolCategory(entry.tool)
   const formattedInput = formatInput(entry.input)
-  const formattedOutput = formatOutput(entry.output)
   const routeLinks = toolCallRouteLinks(entry)
 
   return html`
@@ -456,12 +525,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             maxHeightClass="max-h-48"
             ariaLabel="도구 호출 입력 복사"
           />
-          <${CopyableToolCallBlock}
-            title="출력"
-            value=${formattedOutput}
-            maxHeightClass="max-h-64"
-            ariaLabel="도구 호출 출력 복사"
-          />
+          <${ToolCallOutputBlock} entry=${entry} />
         </div>
       ` : null}
     </div>
@@ -532,14 +596,27 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const resource = useManagedAsyncResource<ToolCallsResponse | null>(null)
   const filterTool = useSignal('')
 
+  const loadToolCalls = useCallback((signal: AbortSignal) =>
+    fetchKeeperToolCalls(keeperName, 100, { signal }), [keeperName])
+
   useEffect(() => {
-    void resource.load(async (signal) => {
-      return await fetchKeeperToolCalls(keeperName, 100, { signal })
-    })
+    void resource.load(loadToolCalls)
     return () => {
       resource.cancel()
     }
-  }, [keeperName, resource])
+  }, [loadToolCalls, resource])
+
+  useEffect(() => {
+    const unsubscribe = lastEvent.subscribe((event) => {
+      if (!event) return
+      if (!isKeeperToolActivityEvent(event)) return
+      if (!sseEventMatchesKeeper(event, keeperName)) return
+      void resource.load(loadToolCalls)
+    })
+    return () => {
+      unsubscribe()
+    }
+  }, [keeperName, loadToolCalls, resource])
 
   const response = resource.state.value.data
   const allEntries = response?.entries ?? []

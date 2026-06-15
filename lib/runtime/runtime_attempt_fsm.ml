@@ -32,9 +32,7 @@ let decide ~accept_on_exhaustion ~is_last = function
   | Accept_rejected { response; reason } ->
     if is_last && accept_on_exhaustion
     then Accept_on_exhaustion { response; reason }
-    else if is_last
-    then Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
-    else Try_next { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
+    else Exhausted { last_err = Some (Llm_provider.Http_client.AcceptRejected { reason }) }
   | Call_err err ->
     if (not is_last) && should_try_next err
     then Try_next { last_err = Some err }
@@ -61,20 +59,6 @@ let to_user_message = function
   | Some (Llm_provider.Http_client.ProviderFailure { kind; message }) ->
     Llm_provider.Http_client.provider_failure_to_string ~kind ~message
   | None -> "No providers available"
-
-let format_exhausted_error last_err =
-  let message = to_user_message last_err in
-  let kind =
-    match last_err with
-    | Some (Llm_provider.Http_client.NetworkError { kind; _ }) -> kind
-    | Some (Llm_provider.Http_client.TimeoutError _) -> Llm_provider.Http_client.Timeout
-    | _ -> Llm_provider.Http_client.Unknown
-  in
-  match last_err with
-  | Some (Llm_provider.Http_client.AcceptRejected _ as err) -> err
-  | _ ->
-    Llm_provider.Http_client.NetworkError
-      { message = Printf.sprintf "All providers failed: %s" message; kind }
 
 let provider_outcome_to_string = function
   | Call_ok _ -> "call-ok"

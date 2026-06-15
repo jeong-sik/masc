@@ -233,14 +233,30 @@ let assemble_hooks
                     thinking_budget = adaptive_thinking_budget
                   ; enable_thinking =
                       (match runtime_seed.thinking_enabled with
-                       | Some false -> Some false
-                       | _ -> current_params.enable_thinking)
+                       | Some enabled -> Some enabled
+                       | None -> current_params.enable_thinking)
+                  ; preserve_thinking =
+                      (match runtime_seed.preserve_thinking with
+                       | Some preserve -> Some preserve
+                       | None -> current_params.preserve_thinking)
                   }
+                in
+                (* RFC-0233 PR-3: every append below also records its
+                   (block id, raw text) pair; the snapshot lands in the
+                   hook accumulator just before AdjustParams so the
+                   receipt/TurnRecord writer can persist typed
+                   provenance. The closed Prompt_block_id sum makes a
+                   new injection site without a recording a compile
+                   error at the snapshot below. *)
+                let recorded_blocks = ref [] in
+                let record_block block text =
+                  recorded_blocks := (block, text) :: !recorded_blocks
                 in
                 let ctx =
                   if String.trim dynamic_context = ""
                   then current_params.extra_system_context
                   else (
+                    record_block Prompt_block_id.Dynamic_context dynamic_context;
                     match current_params.extra_system_context with
                     | None -> Some dynamic_context
                     | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
@@ -249,6 +265,7 @@ let assemble_hooks
                   match Masc_context_injector.render_temporal_summary shared_context with
                   | None -> ctx
                   | Some temporal ->
+                    record_block Prompt_block_id.Temporal_summary temporal;
                     (match ctx with
                      | None -> Some temporal
                      | Some existing -> Some (existing ^ "\n\n" ^ temporal))
@@ -286,6 +303,7 @@ let assemble_hooks
                            [STATE] with the blocker instead of inventing a tool name."
                           (Keeper_id.Task_id.to_string task_id)
                       in
+                      record_block Prompt_block_id.Claimed_task_nudge nudge;
                       match ctx with
                       | None -> Some nudge
                       | Some existing -> Some (existing ^ "\n\n" ^ nudge))
@@ -308,15 +326,32 @@ let assemble_hooks
                 in
                 let ctx =
                   if is_retry
-                  then
-                    append_ctx
-                      ctx
-                      (Printf.sprintf
-                         "[RETRY] The previous attempt overflowed the model context. \
-                          Stay concise, prefer already-loaded context, and only use the \
-                          smallest essential tool set if a tool call is strictly \
-                          necessary.")
+                  then (
+                    let retry_nudge =
+                      "[RETRY] The previous attempt overflowed the model context. \
+                       Stay concise, prefer already-loaded context, and only use the \
+                       smallest essential tool set if a tool call is strictly \
+                       necessary."
+                    in
+                    record_block Prompt_block_id.Retry_nudge retry_nudge;
+                    append_ctx ctx retry_nudge)
                   else ctx
+                in
+                let ctx =
+                  (* Memory OS recall — bounded advisory block rendered from
+                     persisted facts/episodes (read side; the write side is
+                     the librarian wired in #20897). Opt-in via
+                     MASC_KEEPER_MEMORY_OS_RECALL. *)
+                  match
+                    Keeper_memory_os_recall.render_if_enabled
+                      ~keeper_id:meta.name
+                      ~now:(Time_compat.now ())
+                      ()
+                  with
+                  | None -> ctx
+                  | Some block ->
+                    record_block Prompt_block_id.Memory_os_recall block;
+                    append_ctx ctx block
                 in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
@@ -404,6 +439,36 @@ let assemble_hooks
                  Keeper_registry.mark_turn_provider_attempt_started
                    ~base_path:config.base_path
                    meta.name);
+                (* RFC-0233 PR-3 + #20936: snapshot this SDK turn's
+                   assembly into the accumulator the receipt/TurnRecord
+                   writer reads. Appended blocks hash their raw appended
+                   text; Persona reuses the prompt-metrics fingerprint
+                   (sha256 of the sanitized rendered system prompt) —
+                   the digest the prompt store already records. *)
+                let sha256_hex text =
+                  Digestif.SHA256.(digest_string text |> to_hex)
+                in
+                let persona_blocks =
+                  match prompt_metrics.system_prompt_segment.fingerprint with
+                  | Some digest ->
+                    [ { Turn_record.block = Prompt_block_id.Persona
+                      ; bytes = prompt_metrics.system_prompt_segment.bytes
+                      ; digest
+                      }
+                    ]
+                  | None -> []
+                in
+                acc.prompt_blocks
+                <- persona_blocks
+                   @ List.rev_map
+                       (fun (block, text) ->
+                          { Turn_record.block
+                          ; bytes = String.length text
+                          ; digest = sha256_hex text
+                          })
+                       !recorded_blocks;
+                acc.extra_system_context_digest <- Option.map sha256_hex ctx;
+                acc.extra_system_context_size <- Option.map String.length ctx;
                 Eio.Fiber.yield ();
                 Agent_sdk.Hooks.AdjustParams
                   { current_params with
@@ -434,28 +499,10 @@ let assemble_hooks
         | Some r -> [ r ]
         | None -> []
       in
-      let tool_pair_counts messages =
-        List.fold_left
-          (fun (uses, results) (msg : Agent_sdk.Types.message) ->
-             List.fold_left
-               (fun (uses, results) -> function
-                 | Agent_sdk.Types.ToolUse _ -> uses + 1, results
-                 | Agent_sdk.Types.ToolResult _ -> uses, results + 1
-                 | Agent_sdk.Types.Text _
-                 | Agent_sdk.Types.Thinking _
-                 | Agent_sdk.Types.RedactedThinking _
-                 | Agent_sdk.Types.Image _
-                 | Agent_sdk.Types.Document _
-                 | Agent_sdk.Types.Audio _ -> uses, results)
-               (uses, results)
-               msg.content)
-          (0, 0)
-          messages
-      in
       let repair_broken_tool_call_pairs_observed messages =
-        let before_uses, before_results = tool_pair_counts messages in
-        let repaired = Keeper_context_core.repair_broken_tool_call_pairs messages in
-        let after_uses, after_results = tool_pair_counts repaired in
+        let repaired, stats =
+          Keeper_context_core.repair_broken_tool_call_pairs_with_stats messages
+        in
         let record kind delta =
           if delta > 0 then
             Otel_metric_store.inc_counter
@@ -464,8 +511,40 @@ let assemble_hooks
               ~delta:(float_of_int delta)
               ()
         in
-        record "dangling_tool_use" (max 0 (before_uses - after_uses));
-        record "orphan_tool_result" (max 0 (before_results - after_results));
+        record "dropped_tool_use" stats.dropped_tool_uses;
+        record "dropped_tool_result" stats.dropped_tool_results;
+        if Keeper_context_core.tool_pair_repair_stats_changed stats then (
+          let tool_use_sample_json =
+            List.map
+              (fun (tool_use_id, tool_name) ->
+                 `Assoc
+                   [ "tool_use_id", `String tool_use_id
+                   ; "tool_name", `String tool_name
+                   ])
+              stats.dropped_tool_use_samples
+          in
+          let tool_result_id_json =
+            List.map
+              (fun tool_use_id -> `String tool_use_id)
+              stats.dropped_tool_result_ids
+          in
+          Log.Harness.emit
+            Log.Warn
+            ~details:
+              (`Assoc
+                  [ "keeper_name", `String agent_name
+                  ; "site", `String "keeper_reducer"
+                  ; "dropped_tool_uses", `Int stats.dropped_tool_uses
+                  ; "dropped_tool_results", `Int stats.dropped_tool_results
+                  ; "dropped_tool_use_samples", `List tool_use_sample_json
+                  ; "dropped_tool_result_ids", `List tool_result_id_json
+                  ])
+            (Printf.sprintf
+               "keeper_reducer_pair_repair keeper=%s dropped_tool_uses=%d \
+                dropped_tool_results=%d"
+               agent_name
+               stats.dropped_tool_uses
+               stats.dropped_tool_results));
         repaired
       in
       Agent_sdk.Context_reducer.compose

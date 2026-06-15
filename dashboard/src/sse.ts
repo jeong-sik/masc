@@ -15,6 +15,7 @@ import {
   normalizeJournalSource,
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
+import { scheduleSessionTraceReload } from './components/session-trace/session-trace-state'
 import { appendAuditEntry } from './live-store'
 import { isCrashedPhase } from './lib/keeper-predicates'
 import { dashboardBearerToken } from './api/core'
@@ -55,6 +56,21 @@ function traceToolArgs(value: unknown): string | Record<string, unknown> | null 
     return value
   }
   return traceValueString(value)
+}
+
+function normalizeKeeperTraceName(raw: string | undefined): string {
+  const name = (raw ?? '').trim()
+  const match = /^keeper-(.+)-agent$/.exec(name)
+  return match?.[1] ?? name
+}
+
+function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
+  return normalizeKeeperTraceName(
+    event.name
+      ?? event.keeper_name
+      ?? event.agent_name
+      ?? fallback,
+  )
 }
 
 // --- Signals ---
@@ -486,6 +502,10 @@ function handleEvent(event: SSEEvent): void {
         break
       }
     case 'keeper_turn_complete':
+      {
+        const keeperName = keeperTraceNameFromEvent(event, agent)
+        if (keeperName) scheduleSessionTraceReload(keeperName, true)
+      }
       addTypedJournalEntry(
         event.name ?? agent,
         `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
@@ -587,10 +607,12 @@ function handleEvent(event: SSEEvent): void {
         },
       )
       // Push to live trace if session trace is open for this keeper
-      if (event.name) {
+      {
+        const keeperName = keeperTraceNameFromEvent(event, agent)
+        if (!keeperName) break
         const toolArgs = traceToolArgs(event.tool_args) ?? event.tool_args_preview ?? null
         const toolResult = traceValueString(event.tool_result) ?? event.tool_output_preview ?? null
-        appendLiveToolCall(event.name, {
+        appendLiveToolCall(keeperName, {
           toolName,
           durationMs,
           success: event.success !== false,
@@ -617,8 +639,10 @@ function handleEvent(event: SSEEvent): void {
           narrativeText: `${actorLabel(event.name ?? agent)}의 ${toolName} 도구가 차단되었습니다 (${reasonCode})`,
         },
       )
-      if (event.name) {
-        appendLiveToolCall(event.name, {
+      {
+        const keeperName = keeperTraceNameFromEvent(event, agent)
+        if (!keeperName) break
+        appendLiveToolCall(keeperName, {
           toolName,
           durationMs: 0,
           success: false,

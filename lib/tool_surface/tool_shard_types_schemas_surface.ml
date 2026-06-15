@@ -6,8 +6,11 @@ let surface_tools : Masc_domain.tool_schema list =
     ; description =
         "Read recent conversation from one connected surface lane (dashboard, \
          discord, slack, or another connector label) with speaker identity \
-         and a derived participant roster. Use after Connected Surfaces \
-         shows a lane you want context from."
+         and a derived participant roster. Use when the user asks about a \
+         current connector lane, recent lane messages, or participants. This \
+         does not enumerate connector-wide channel registries; if asked for \
+         channels outside Connected Surfaces, read only visible lane evidence \
+         and state that the wider registry is unavailable."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

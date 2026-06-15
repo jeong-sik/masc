@@ -434,6 +434,41 @@ let test_send_to_nonexistent () =
    Test Runners
    ============================================================ *)
 
+(* ============================================================
+   Snapshot Throttle Tests
+   ============================================================ *)
+
+let test_sync_transport_snapshot_throttle_idempotent () =
+  (* Calling sync_transport_snapshot multiple times rapidly must not
+     crash or corrupt state.  The CAS throttle ensures only the first
+     call in each [snapshot_min_interval_sec] window computes; the
+     rest return () immediately. *)
+  let session_id = "test_throttle_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      for _ = 1 to 20 do
+        Sse.sync_transport_snapshot ()
+      done;
+      check int "client count preserved after rapid snapshots"
+        1 (Sse.client_count ()))
+
+let test_broadcast_throttled_snapshot_stability () =
+  (* broadcast_impl calls sync_transport_snapshot internally.
+     Verify rapid broadcasts do not corrupt client state. *)
+  let session_id = "test_bcast_throttle_" ^ string_of_int (Random.bits ()) in
+  Fun.protect
+    ~finally:(fun () -> Sse.unregister session_id)
+    (fun () ->
+      let (_id, _, _) = Sse.register session_id ~last_event_id:0 in
+      let payload = `Assoc [ "test", `String "throttle" ] in
+      for _ = 1 to 20 do
+        Sse.broadcast payload
+      done;
+      check int "client count preserved after rapid broadcasts"
+        1 (Sse.client_count ()))
+
 let () =
   run "Sse Coverage" [
     "format_event", [
@@ -493,6 +528,12 @@ let () =
     "broadcast", [
       test_case "sends to clients" `Quick test_broadcast_sends_to_clients;
       test_case "empty clients" `Quick test_broadcast_empty_clients;
+    ];
+    "snapshot_throttle", [
+      test_case "rapid sync_transport_snapshot idempotent" `Quick
+        test_sync_transport_snapshot_throttle_idempotent;
+      test_case "rapid broadcast snapshot stable" `Quick
+        test_broadcast_throttled_snapshot_stability;
     ];
     "send_to", [
       test_case "existing" `Quick test_send_to_existing;

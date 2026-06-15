@@ -21,7 +21,7 @@ Related:
 
 ## 0. Problem framing
 
-`lib/runtime/runtime_phonebook_types.ml` defines typed sum types for `runtime_server_flavor` (`Llama_cpp | Ollama | Vllm | Provider_d_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire`) and `runtime_protocol` (`Openai_http | Ollama_http | Provider_a_http | Openai_cli`). String roundtrip is hand-rolled via `flavor_of_string` / `flavor_to_string` / `protocol_of_string` / `protocol_to_string`, with literal forms `"provider_d"`, `"provider_g"`, `"zai-provider_k"`, `"provider_h"`, `"provider_d-http"`, `"provider_a-http"`, `"provider_d-cli"`.
+`lib/runtime/runtime_phonebook_types.ml` defines typed sum types for `runtime_server_flavor` (`Llama_cpp | Ollama | Vllm | Provider_d_wire | DeepSeek_wire | Provider_k_zai | Provider_h_wire`) and `runtime_protocol` (`Openai_http | Ollama_http | Provider_a_http | Openai_cli`). String roundtrip is hand-rolled via `flavor_of_string` / `flavor_to_string` / `protocol_of_string` / `protocol_to_string`, with literal forms `"provider_d"`, `"deepseek"`, `"zai-provider_k"`, `"provider_h"`, `"provider_d-http"`, `"provider_a-http"`, `"provider_d-cli"`.
 
 This produces two compounding fragilities:
 
@@ -33,7 +33,7 @@ PR #18837's dropped commit `1e0f96365` ("fix(runtime): accept hyphenated protoco
 
 ### Fragility 2 — generic placeholder names are semantically empty
 
-RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`provider_d`, `provider_g`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Provider_d_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/runtime.toml` who sees `protocol = "provider_d-http"` cannot tell what wire format it commits to without bouncing through `runtime_phonebook_types.ml`.
+RFC-0172/0173 vendor purge replaced vendor names (`anthropic`, `openai`, `deepseek`, `groq`, `zai`) with placeholders (`provider_d`, `deepseek`, `provider_h`, `provider_k`). The typed OCaml variants kept their semantics in trailing comments (`Provider_d_wire (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)`), but the string surface lost all meaning. A reader of `<MASC_BASE>/.masc/config/runtime.toml` who sees `protocol = "provider_d-http"` cannot tell what wire format it commits to without bouncing through `runtime_phonebook_types.ml`.
 
 `"zai-provider_k"` is the proof — the purge stripped vendors but left `zai-` as a partial prefix, because the variant name (`Provider_k_zai`) preserved the vendor reference. The string surface is now half-purged, half-vendor, half-placeholder.
 

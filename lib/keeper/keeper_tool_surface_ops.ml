@@ -133,7 +133,10 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
               trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
               generation = meta.runtime.generation + 1 } }
         in
-        (match Keeper_meta_store.write_meta ~force:true config updated_meta with
+        (match
+           Keeper_meta_store.write_meta_with_merge
+             ~merge:Keeper_meta_merge.monotonic_usage_counters config updated_meta
+         with
          | Ok () ->
              Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
              Ok
@@ -495,40 +498,49 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_name_lookup_candidates raw_name =
+  let trimmed = String.trim raw_name in
+  if String.equal trimmed "" then
+    []
+  else
+    let aliases =
+      match Keeper_identity.canonical_keeper_name trimmed with
+      | Some candidate when not (String.equal candidate trimmed) -> [ candidate ]
+      | Some _ | None -> []
+    in
+    trimmed :: aliases
+
 let resolve_keeper_name_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved config name with
-  | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
-  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
-  | Error err -> Error (Printf.sprintf "%s" err)
+  let rec loop = function
+    | [] -> Error (Printf.sprintf "keeper not found: %s" name)
+    | candidate :: rest -> (
+        match read_meta_resolved config candidate with
+        | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
+        | Ok None -> loop rest
+        | Error err -> Error (Printf.sprintf "%s" err))
+  in
+  loop (keeper_name_lookup_candidates name)
 
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
-let has_string_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value >= prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-;;
-
-let continuation_checkpoint_prefix = "Continuation checkpoint saved;"
-
 let direct_reply_visible_text body =
   try
     let json = Yojson.Safe.from_string body in
-    match Json_util.get_string json "reply" with
-    | None -> None
-    | Some reply ->
-        let visible =
-          reply
-          |> Keeper_skill_routing.strip_skill_route_lines
-          |> Keeper_execution.strip_state_blocks_text
-          |> String.trim
-        in
-        if visible = ""
-           || has_string_prefix ~prefix:continuation_checkpoint_prefix visible
-        then None
-        else Some visible
+    match Keeper_turn_outcome.of_reply_payload (Some json) with
+    | Keeper_turn_outcome.Continuation_checkpoint -> None
+    | Keeper_turn_outcome.Visible_reply -> (
+        match Json_util.get_string json "reply" with
+        | None -> None
+        | Some reply ->
+            let visible =
+              reply
+              |> Keeper_skill_routing.strip_skill_route_lines
+              |> Keeper_execution.strip_state_blocks_text
+              |> String.trim
+            in
+            if visible = "" then None else Some visible)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Yojson.Json_error _ -> None
@@ -557,7 +569,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~keeper_name:name
             ~user_content
             ~user_attachments:[]
-            ~source:"agent"
+            ~surface:Surface_ref.Agent
             ~assistant_content
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:"agent"
@@ -567,7 +579,7 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
             ~base_dir:config.base_path
             ~keeper_name:name
             ~content:assistant_content
-            ~source:channel
+            ~surface:(Surface_ref.Gate { label = channel; address = [] })
             ();
           Keeper_chat_broadcast.chat_appended ~keeper_name:name ~source:channel
         end)
@@ -689,10 +701,23 @@ let keeper_msg_result_body ~(config : Workspace.config) args : tool_result =
     tool_result_error {|{"error":"request_id is required"}|}
   else
     match Keeper_msg_async.poll ~base_path:config.base_path request_id with
-    | None ->
+    | Keeper_msg_async.Absent ->
       tool_result_error
         (Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
-    | Some entry ->
+    | Keeper_msg_async.Unreadable reason ->
+      tool_result_error
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ ("error", `String "request_record_unreadable")
+              ; ( "message"
+                , `String
+                    (Printf.sprintf
+                       "request record unreadable: %s — request was accepted but its \
+                        result is lost"
+                       reason) )
+              ; ("request_id", `String request_id)
+              ]))
+    | Keeper_msg_async.Found entry ->
       tool_result_ok (Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
 let handle_keeper_msg_result ctx args : tool_result =

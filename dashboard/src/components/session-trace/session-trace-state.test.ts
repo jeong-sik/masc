@@ -1,4 +1,13 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+
+const dashboardApiMocks = vi.hoisted(() => ({
+  fetchAgentTimeline: vi.fn(),
+  fetchKeeperToolCalls: vi.fn(),
+  fetchKeeperTrajectory: vi.fn(),
+}))
+
+vi.mock('../../api/dashboard', () => dashboardApiMocks)
+
 import {
   closeSessionTrace,
   getTraceEvents,
@@ -14,6 +23,7 @@ import {
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
+  scheduleSessionTraceReload,
   traceSlots,
 } from './session-trace-state'
 import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
@@ -23,6 +33,26 @@ beforeEach(() => {
   traceSlots.value = {}
   liveTraceFeeds.value = {}
 })
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
+
+function emptyTimeline(agent = 'keeper-a') {
+  return {
+    agent,
+    period: { from: '', to: '' },
+    events: [],
+    summary: {
+      tasks_completed: 0,
+      tasks_claimed: 0,
+      messages_sent: 0,
+      active_duration_minutes: 0,
+      total_events: 0,
+    },
+  }
+}
 
 describe('appendLiveToolCall', () => {
   it('does nothing when trace slot is not open', () => {
@@ -169,6 +199,64 @@ describe('appendLiveToolCall', () => {
     // Newest-first: tool_call (tsUnix=1712400000) > broadcast (ts=1712399000000)
     expect(events[0]!.kind).toBe('tool_call')
     expect(events[1]!.kind).toBe('broadcast')
+  })
+})
+
+describe('scheduleSessionTraceReload', () => {
+  it('debounces a reload for an open keeper trace slot', async () => {
+    vi.useFakeTimers()
+    traceSlots.value = {
+      'keeper-a': {
+        events: [],
+        loading: false,
+        error: null,
+        filter: 'all',
+        statusFilter: 'all',
+        searchQuery: '',
+        fetchToken: 0,
+      },
+    }
+    dashboardApiMocks.fetchAgentTimeline.mockResolvedValue(emptyTimeline())
+    dashboardApiMocks.fetchKeeperTrajectory.mockResolvedValue({
+      keeper: 'keeper-a',
+      trace_id: 'trace-1',
+      generation: 1,
+      total_entries: 1,
+      showing: 1,
+      entries: [{
+        type: 'thinking',
+        ts: 1712400000,
+        ts_iso: '2024-04-06T10:40:00Z',
+        turn: 12,
+        content: 'new keeper thought',
+        content_length: 18,
+        redacted: false,
+      }],
+    })
+    dashboardApiMocks.fetchKeeperToolCalls.mockResolvedValue({
+      keeper: 'keeper-a',
+      count: 0,
+      entries: [],
+    })
+
+    scheduleSessionTraceReload('keeper-a', true, 10)
+    scheduleSessionTraceReload('keeper-a', true, 10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
+    expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
+    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+  })
+
+  it('ignores reload requests for closed trace slots', async () => {
+    vi.useFakeTimers()
+
+    scheduleSessionTraceReload('keeper-a', true, 10)
+    await vi.advanceTimersByTimeAsync(10)
+
+    expect(dashboardApiMocks.fetchAgentTimeline).not.toHaveBeenCalled()
   })
 })
 
@@ -332,6 +420,209 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.error).toBe('command exited 1')
     expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
     expect(events[0]!.detail.lane).toBe('runtime_mcp')
+  })
+
+  it('joins trajectory and tool-call log rows on execution_id despite divergent turn vocabularies (#20910)', () => {
+    // Reproduces the double-row symptom: trajectory turn is trace-relative
+    // (0) while the log turn is session-absolute (4064). The heuristic join
+    // fails on that mismatch; the canonical execution_id must win.
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      {
+        keeper: 'test',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        showing: 1,
+        entries: [{
+          ts: 1712397700,
+          ts_iso: '2024-04-06T10:01:40Z',
+          turn: 0,
+          round: 5,
+          tool_name: 'keeper_fs_read',
+          args: { file_path: '/tmp/trajectory.txt' },
+          result: 'trajectory result',
+          duration_ms: 50,
+          gate: { status: 'pass' },
+          cost_usd: 0.001,
+          error: null,
+          execution_id: 'exec-1712397700000-002a',
+        }],
+      },
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/full.txt' },
+          output: 'full file contents',
+          success: true,
+          duration_ms: 50,
+          trace_id: 'trace-1',
+          session_id: 'trace-1',
+          turn: 4064,
+          keeper_turn_id: 9,
+          task_id: 'task-1',
+          lane: 'runtime_mcp',
+          execution_id: 'exec-1712397700000-002a',
+        }],
+      },
+    )
+    const toolEvents = events.filter(e => e.kind === 'tool_call')
+    expect(toolEvents).toHaveLength(1)
+    expect(toolEvents[0]!.executionId).toBe('exec-1712397700000-002a')
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+    // Trace-relative T/R pair stays on the badge; absolute turn remains a detail attribute.
+    expect(toolEvents[0]!.turn).toBe(0)
+    expect(toolEvents[0]!.round).toBe(5)
+    expect(toolEvents[0]!.detail.turn).toBe(4064)
+    expect(toolEvents[0]!.toolResult).toBe('full file contents')
+  })
+
+  it('does not join rows with different execution_ids even when heuristics agree', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      {
+        keeper: 'test',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        showing: 1,
+        entries: [{
+          ts: 1712397700,
+          ts_iso: '2024-04-06T10:01:40Z',
+          turn: 1,
+          round: 1,
+          tool_name: 'keeper_fs_read',
+          args: { file_path: '/tmp/a.txt' },
+          result: 'a',
+          duration_ms: 50,
+          gate: { status: 'pass' },
+          cost_usd: 0.001,
+          error: null,
+          execution_id: 'exec-1712397700000-0001',
+        }],
+      },
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/a.txt' },
+          output: 'a',
+          success: true,
+          duration_ms: 50,
+          trace_id: 'trace-1',
+          session_id: 'trace-1',
+          turn: 1,
+          keeper_turn_id: 1,
+          lane: 'runtime_mcp',
+          execution_id: 'exec-1712397700001-0002',
+        }],
+      },
+    )
+    const toolEvents = events.filter(e => e.kind === 'tool_call')
+    expect(toolEvents).toHaveLength(2)
+  })
+
+  it('falls back to the heuristic join for pre-PR-1 rows without execution_id', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      {
+        keeper: 'test',
+        trace_id: 'trace-1',
+        generation: 1,
+        total_entries: 1,
+        showing: 1,
+        entries: [{
+          ts: 1712397700,
+          ts_iso: '2024-04-06T10:01:40Z',
+          turn: 1,
+          round: 1,
+          tool_name: 'keeper_fs_read',
+          args: { file_path: '/tmp/legacy.txt' },
+          result: 'legacy',
+          duration_ms: 50,
+          gate: { status: 'pass' },
+          cost_usd: 0.001,
+          error: null,
+        }],
+      },
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_fs_read',
+          input: { file_path: '/tmp/legacy.txt' },
+          output: 'legacy full',
+          success: true,
+          duration_ms: 50,
+          trace_id: 'trace-1',
+          session_id: 'trace-1',
+          turn: 1,
+          keeper_turn_id: 1,
+          lane: 'runtime_mcp',
+        }],
+      },
+    )
+    const toolEvents = events.filter(e => e.kind === 'tool_call')
+    expect(toolEvents).toHaveLength(1)
+    expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
+  })
+
+  it('uses execution_id as the stable synthetic row id when present', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      null,
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'Execute',
+          input: { cmd: 'true' },
+          output: 'ok',
+          success: true,
+          duration_ms: 10,
+          trace_id: 'trace-2',
+          session_id: 'trace-2',
+          turn: 3,
+          keeper_turn_id: 3,
+          lane: 'runtime_mcp',
+          execution_id: 'exec-1712397700000-00ff',
+        }],
+      },
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.id).toBe('tc-exec-1712397700000-00ff')
+    expect(events[0]!.executionId).toBe('exec-1712397700000-00ff')
   })
 
   it('maps keeper contract verdict activity into lifecycle trace events', () => {

@@ -82,7 +82,7 @@ let base_observation : WO.world_observation =
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; backlog_updated_since_last_scheduled_autonomous = false
-  ; active_agent_count = 0
+  ; running_keeper_fiber_count = 0
   ; connected_surfaces = []
   }
 
@@ -483,6 +483,53 @@ let test_fresh_presence_preserves_turn_failures () =
       | Some phase -> check string "heartbeat alone stays failing" "failing" (KSM.phase_to_string phase)
       | None -> fail "expected registered keeper phase")
 
+(** T6 audit: a swallowed keepalive-cycle exception must surface as a
+    turn failure. [record_crashed_cycle_failure] (called by the
+    [run_keepalive_unified_turn] catch-all) increments the same
+    registry counter the unified-turn failure path uses, and the
+    caller's post-turn event mapping ([turn_status_event]) then yields
+    [Turn_failed] — not [Turn_succeeded] — moving the state machine to
+    failing. *)
+let test_crashed_cycle_records_turn_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_path = temp_dir "crashed-cycle-turn-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let meta = make_meta "crashed-cycle" in
+      ignore (R.register ~base_path:config.base_path meta.name meta);
+      check int "no failures before crash" 0
+        (R.get_turn_failures ~base_path:config.base_path meta.name);
+      KHL.record_crashed_cycle_failure
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+        (Failure "boom");
+      let count = R.get_turn_failures ~base_path:config.base_path meta.name in
+      check int "crash recorded as turn failure" 1 count;
+      (* Same registry read + event mapping the caller loop performs
+         after [run_keepalive_unified_turn] returns. *)
+      let event = KHL.turn_status_event ~turn_fail_count:count ~max_allowed:10 in
+      (match event with
+       | KSM.Turn_failed { consecutive; max_allowed } ->
+         check int "consecutive" 1 consecutive;
+         check int "max_allowed" 10 max_allowed
+       | _ -> fail "expected Turn_failed for crashed cycle");
+      ignore (R.dispatch_event ~base_path:config.base_path meta.name event);
+      (match R.get_phase ~base_path:config.base_path meta.name with
+       | Some phase ->
+         check string "crashed cycle moves state machine to failing" "failing"
+           (KSM.phase_to_string phase)
+       | None -> fail "expected registered keeper phase");
+      (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
+      match KHL.turn_status_event ~turn_fail_count:0 ~max_allowed:10 with
+      | KSM.Turn_succeeded -> ()
+      | _ -> fail "expected Turn_succeeded when no failures recorded")
+
 (* ══════════════════════════════════════════════════════════
    8. Direct keepalive path resolves lifecycle promises
    ══════════════════════════════════════════════════════════ *)
@@ -531,6 +578,92 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+let test_start_keepalive_preserves_unresolved_failing_entry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "direct-keepalive-live-failing" in
+  let keeper_name = "live-failing-entry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      let original = R.register ~base_path:config.base_path keeper_name meta in
+      ignore
+        (R.dispatch_event
+           ~base_path:config.base_path
+           keeper_name
+           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "expected live-failing-entry registry entry"
+      | Some entry ->
+        check string "phase remains failing" "failing" (KSM.phase_to_string entry.phase);
+        check bool "unresolved failing entry is preserved" true
+          (entry.done_p == original.done_p);
+        check bool "done promise remains unresolved" true
+          (Option.is_none (Eio.Promise.peek entry.done_p)))
+
+let test_start_keepalive_reclaims_finished_failing_entry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.clear ();
+  let base_dir = temp_dir "direct-keepalive-stale-failing" in
+  let keeper_name = "stale-failing-entry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive keeper_name;
+      R.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      let original = R.register ~base_path:config.base_path keeper_name meta in
+      ignore
+        (R.dispatch_event
+           ~base_path:config.base_path
+           keeper_name
+           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+      resolve_done_for_test original (`Crashed "provider runtime error");
+      Eio.Switch.run @@ fun sw ->
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = "tester";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      Masc.Keeper_keepalive.start_keepalive ctx meta;
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "expected stale-failing-entry registry entry"
+      | Some entry ->
+        check string "phase is running after reclaim" "running"
+          (KSM.phase_to_string entry.phase);
+        check bool "stale entry was replaced" true (entry.done_p != original.done_p);
+        check bool "new done promise is unresolved" true
+          (Option.is_none (Eio.Promise.peek entry.done_p));
+        Masc.Keeper_keepalive.stop_keepalive keeper_name)
 
 let test_stop_keepalive_resolves_running_entry_immediately () =
   R.clear ();
@@ -743,10 +876,16 @@ let () =
       test_case "cohort key" `Quick test_cohort_key_turn_failures;
       test_case "fresh presence preserves turn failures" `Quick
         test_fresh_presence_preserves_turn_failures;
+      test_case "crashed cycle surfaces as turn failure" `Quick
+        test_crashed_cycle_records_turn_failure;
     ];
     "direct_keepalive", [
       test_case "stop resolves done promise" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "unresolved failing entry is preserved" `Quick
+        test_start_keepalive_preserves_unresolved_failing_entry;
+      test_case "finished failing entry is reclaimed" `Quick
+        test_start_keepalive_reclaims_finished_failing_entry;
       test_case "manual stop resolves running entry immediately" `Quick
         test_stop_keepalive_resolves_running_entry_immediately;
       test_case "manual stop preserves crashed outcome" `Quick

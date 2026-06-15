@@ -46,6 +46,41 @@ let metric_ws_bytes_cache_hits = Otel_metric_store_core.declare_counter "masc_ws
 let metric_ws_bytes_cache_misses = Otel_metric_store_core.declare_counter "masc_ws_bytes_cache_misses_total"
 let metric_ws_dashboard_hello_latency_seconds = "masc_ws_dashboard_hello_latency_seconds"
 
+let metric_discord_gateway_events =
+  Otel_metric_store_core.declare_counter "masc_discord_gateway_events_total"
+;;
+
+let metric_discord_gateway_closes =
+  Otel_metric_store_core.declare_counter "masc_discord_gateway_closes_total"
+;;
+
+let metric_discord_gateway_reconnect_scheduled =
+  Otel_metric_store_core.declare_counter
+    "masc_discord_gateway_reconnect_scheduled_total"
+;;
+
+let metric_discord_gateway_ack_timeouts =
+  Otel_metric_store_core.declare_counter
+    "masc_discord_gateway_ack_timeouts_total"
+;;
+
+let metric_discord_gateway_reconnect_outcomes =
+  Otel_metric_store_core.declare_counter
+    "masc_discord_gateway_reconnect_outcomes_total"
+;;
+
+let metric_discord_inbound_dispatch =
+  Otel_metric_store_core.declare_counter "masc_discord_inbound_dispatch_total"
+;;
+
+let metric_discord_ambient_record =
+  Otel_metric_store_core.declare_counter "masc_discord_ambient_record_total"
+;;
+
+let metric_discord_outbound_replies =
+  Otel_metric_store_core.declare_counter "masc_discord_outbound_replies_total"
+;;
+
 let metric_dashboard_execution_render_phase_sec =
   "masc_dashboard_execution_render_phase_seconds"
 ;;

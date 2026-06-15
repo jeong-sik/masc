@@ -80,10 +80,10 @@ let test_metric_registered () =
        ~needle:"masc_keeper_paused_state_persist_errors_total"
        metrics
      >= 1);
-  let prom = load_source "lib/otel_metric_store_builtin_metrics_part2.ml" in
-  check bool "paused-state persist-errors metric registered with HELP"
+  let prom = load_source "lib/keeper_metrics/keeper_metrics.ml" in
+  check bool "paused-state persist-errors metric registered in all list"
     true
-    (count_occurrences ~needle:metric_name prom >= 1)
+    (count_occurrences ~needle:"PausedStatePersistErrors" prom >= 1)
 
 let test_happy_path_preserved () =
   let src = target_source () in

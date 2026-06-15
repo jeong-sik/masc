@@ -101,7 +101,7 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
       Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
       content = [
         Agent_sdk.Types.Text
-          (Printf.sprintf "[Compacted %d messages into summary]\n%s"
+          (Printf.sprintf "[MEMORY_SUMMARY] Compacted %d older messages\n%s"
              (List.length msgs) (String.concat "\n" lines))
       ];
       name = None;
@@ -324,7 +324,7 @@ let observation_summary = function
   | None -> "obs=none"
   | Some obs ->
       Printf.sprintf
-        "obs=ratio=%.2f agents=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
+        "obs=ratio=%.2f keepers=%d unclaimed=%d single_task=%b ctx=%dk local=%b"
         obs.context_ratio obs.active_agent_count obs.unclaimed_task_count
         obs.is_single_focused_task (obs.context_window / 1000) obs.is_local_model
 

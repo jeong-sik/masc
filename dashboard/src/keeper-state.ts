@@ -358,6 +358,18 @@ export function finalizeAssistantEntry(
   }))
 }
 
+export function removeThreadEntries(name: string, entryIds: readonly string[]): void {
+  if (entryIds.length === 0) return
+  const ids = new Set(entryIds)
+  const existing = keeperThreads.value[name] ?? []
+  const next = existing.filter(entry => !ids.has(entry.id))
+  if (next.length === existing.length) return
+  keeperThreads.value = {
+    ...keeperThreads.value,
+    [name]: next,
+  }
+}
+
 // Dedup key for merging server history with locally-appended entries.
 // Compares role + text only: the server stamps a message pair with its
 // completion time while the local entry carries the send time, so

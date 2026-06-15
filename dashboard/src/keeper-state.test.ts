@@ -9,6 +9,7 @@ import {
   keeperThreads,
   mergeServerHistoryEntries,
   normalizeStatusDetail,
+  removeThreadEntries,
   setStatusDetail,
 } from './keeper-state'
 import type { KeeperConversationEntry } from './types'
@@ -221,6 +222,17 @@ describe('thread history merge & persistence', () => {
 
     const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
     expect(ids).toEqual(['tool-1', 'reply-1', 'tail-1'])
+  })
+
+  it('removes only the requested local thread entries', () => {
+    appendThreadEntry('echo', entry({ id: 'user-1', role: 'user', text: 'question' }))
+    appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', text: '' }))
+    appendThreadEntry('echo', entry({ id: 'reply-2', role: 'assistant', text: 'answer' }))
+
+    removeThreadEntries('echo', ['reply-1', 'missing'])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['user-1', 'reply-2'])
   })
 
   it('caps the thread window at THREAD_ENTRY_CAP', () => {

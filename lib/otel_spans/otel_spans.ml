@@ -81,6 +81,12 @@ let setup_exporter_with ?(enabled = Otel_config.enabled) ~endpoint ~setup () =
           endpoint (Printexc.to_string exn)
   end
 
+(** [port_of_uri uri] returns the explicit port of [uri], falling back to the
+    configured OTLP default ([Masc_network_defaults.otel_default_port]) when the
+    URI omits one. Keeps the OTLP port in a single source of truth. *)
+let port_of_uri uri =
+  Option.value (Uri.port uri) ~default:Masc_network_defaults.otel_default_port
+
 (** Probe OTLP collector endpoint via TCP connect with DNS resolution.
     Lightweight: resolves host, opens connection, and immediately closes.
     Returns [true] if the collector is reachable. *)
@@ -88,7 +94,7 @@ let probe_endpoint ~(env : Eio_unix.Stdenv.base) endpoint =
   try
     let uri = Uri.of_string endpoint in
     let host = Option.value (Uri.host uri) ~default:"localhost" in
-    let port = Option.value (Uri.port uri) ~default:4318 in
+    let port = port_of_uri uri in
     let net = env#net in
     let addrs = Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) in
     match addrs with

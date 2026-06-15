@@ -112,6 +112,35 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).not.toContain('inspect_turn_timeout')
   })
 
+  it('labels provider runtime error tokens from the live keeper status surface', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        attention_reason: 'provider_runtime_error',
+        next_human_action: 'inspect_provider_runtime_cause',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('런타임 호출 오류')
+    expect(text).toContain('Provider 런타임 원인 확인')
+    expect(text).not.toContain('provider_runtime_error')
+    expect(text).not.toContain('inspect_provider_runtime_cause')
+  })
+
+  it('labels direct latest-error inspection actions from the live keeper status surface', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        next_human_action: 'inspect_latest_error',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('최근 오류 확인')
+    expect(text).not.toContain('inspect_latest_error')
+  })
+
   // Lock the remaining producer-side action wires that
   // [canonicalNextHumanAction] folds into inspect_runtime_blocker. Each
   // wire here has a live producer in lib/keeper (see

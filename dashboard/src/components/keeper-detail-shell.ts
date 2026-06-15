@@ -6,6 +6,7 @@ import type { Keeper } from '../types'
 import { keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { keeperDisplayModel } from '../lib/keeper-runtime-display'
+import { KeeperBadge } from './keeper-badge'
 
 function SectionLabel({ children }: { children: unknown }) {
   return html`<div class="text-3xs font-semibold uppercase tracking-[var(--track-label)] text-[var(--color-fg-muted)]">${children}</div>`
@@ -83,7 +84,11 @@ export function KeeperDetailHeaderInfo({
         <span aria-hidden="true">←</span>
         목록
       </button>
-      <div class="size-9 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] flex items-center justify-center text-lg">${keeper.emoji}</div>
+      <div class="size-9 shrink-0 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] flex items-center justify-center text-lg">
+        ${keeper.emoji
+          ? html`<span aria-hidden="true">${keeper.emoji}</span>`
+          : html`<${KeeperBadge} id=${keeper.name} size="lg" variant="sigil" />`}
+      </div>
       <div class="flex min-w-[12rem] flex-1 flex-col gap-0.5">
         <div class="flex flex-wrap items-center gap-2.5">
           <h2 id=${titleId} class="m-0 text-xl font-semibold text-[var(--color-fg-primary)]">${keeper.name}</h2>

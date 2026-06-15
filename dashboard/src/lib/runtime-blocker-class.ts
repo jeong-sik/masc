@@ -56,7 +56,7 @@ const BACKEND_KEEPER_META_BLOCKER_CLASSES = [
   'turn_timeout',
   'turn_livelock_blocked',
   'completion_contract_violation',
-  'stay_silent_loop',
+  'no_progress_loop',
   'fiber_unresolved',
   'stale_turn_timeout',
   'stale_fleet_batch',

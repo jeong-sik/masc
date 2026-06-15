@@ -101,10 +101,99 @@ let test_jaccard_case_insensitive () =
     "case-folded match scores exactly like exact match" true
     (approx_eq case_score exact_score)
 
+
+(* ── Phase 3a/4: Memory OS scoring ── *)
+
+let test_recency_factor_immediate () =
+  let now = 1_000_000.0 in
+  let r = recency_factor ~now ~last_accessed:now in
+  Alcotest.(check bool) "accessed now => 1.0" true (approx_eq r 1.0)
+
+let test_recency_factor_future () =
+  let r = recency_factor ~now:100.0 ~last_accessed:200.0 in
+  Alcotest.(check bool) "future access => clamp to 1.0" true (approx_eq r 1.0)
+
+let test_access_factor_zero () =
+  let a = access_factor ~count:0 in
+  Alcotest.(check bool) "zero count => 0.0" true (approx_eq a 0.0)
+
+let test_access_factor_one () =
+  let a = access_factor ~count:1 in
+  Alcotest.(check bool) "one access => ~1.0" true (approx_eq a 1.0)
+
+let test_stale_penalty_none () =
+  let s = stale_penalty ~last_accessed:0.0 ~expected_lifetime_cycles:None ~now:1e8 in
+  Alcotest.(check bool) "no expected lifetime => 0.0" true (approx_eq s 0.0)
+
+let test_stale_penalty_under () =
+  let s = stale_penalty ~last_accessed:1e8 ~expected_lifetime_cycles:(Some 2) ~now:1e8 in
+  Alcotest.(check bool) "within cycles => 0.0" true (approx_eq s 0.0)
+
+let test_stale_penalty_over () =
+  let age = 3600.0 *. 24.0 *. 7.0 *. 4.0 in (* 4 weeks *)
+  let s = stale_penalty ~last_accessed:0.0 ~expected_lifetime_cycles:(Some 2) ~now:age in
+  Alcotest.(check bool) "exceeds cycles => positive" true (s > 0.0)
+
+let test_recency_bonus_hour () =
+  let now = 1_000_000.0 in
+  let b = recency_bonus ~now ~last_accessed:(now -. 1800.0) in
+  Alcotest.(check bool) "within hour => 0.1" true (approx_eq b 0.1)
+
+let test_recency_bonus_day () =
+  let now = 1_000_000.0 in
+  let b = recency_bonus ~now ~last_accessed:(now -. 43200.0) in
+  Alcotest.(check bool) "within day => 0.05" true (approx_eq b 0.05)
+
+let test_recency_bonus_old () =
+  let now = 1_000_000.0 in
+  let b = recency_bonus ~now ~last_accessed:(now -. 172800.0) in
+  Alcotest.(check bool) "beyond day => 0.0" true (approx_eq b 0.0)
+
+let test_valid_until_gate_none () =
+  Alcotest.(check bool) "no expiry => open" true (valid_until_gate ~valid_until:None ~now:1e8)
+
+let test_valid_until_gate_before () =
+  Alcotest.(check bool) "before expiry => open" true
+    (valid_until_gate ~valid_until:(Some 1e9) ~now:1e8)
+
+let test_valid_until_gate_after () =
+  Alcotest.(check bool) "after expiry => closed" false
+    (valid_until_gate ~valid_until:(Some 1e8) ~now:1e9)
+
+let test_verification_factor_of () =
+  let v = verification_factor_of ~confidence:0.8 ~access_count:5 in
+  Alcotest.(check bool) "confidence+access_boost > confidence" true (v > 0.8);
+  Alcotest.(check bool) "capped at 1.0" true (v <= 1.0)
+
+let test_score_fact_valid () =
+  let fact = {
+    confidence = 0.9;
+    last_accessed = 1_000_000.0;
+    access_count = 10;
+    stale_penalty = 0.0;
+    expected_lifetime_cycles = Some 52;
+    valid_until = Some 1e9;
+    verification_factor = 0.9;
+  } in
+  let _, score = score_fact ~now:1_000_100.0 fact in
+  Alcotest.(check bool) "valid fact => positive score" true (score > 0.0)
+
+let test_score_fact_expired () =
+  let fact = {
+    confidence = 0.9;
+    last_accessed = 1_000_000.0;
+    access_count = 10;
+    stale_penalty = 0.0;
+    expected_lifetime_cycles = Some 52;
+    valid_until = Some 100.0;
+    verification_factor = 0.9;
+  } in
+  let _, score = score_fact ~now:1_000_000.0 fact in
+  Alcotest.(check bool) "expired => -1.0" true (approx_eq score (-1.0))
 let () =
   Alcotest.run "cognitive_gravity"
     [
-      ( "rank_basics",
+      ( "rank_basics_updated",
         [
           Alcotest.test_case "empty input" `Quick test_rank_empty;
           Alcotest.test_case "single item" `Quick test_rank_single_item;
@@ -129,3 +218,40 @@ let () =
             test_jaccard_case_insensitive;
         ] );
     ]
+      ( "phase3a_recency",
+        [
+          Alcotest.test_case "immediate access" `Quick test_recency_factor_immediate;
+          Alcotest.test_case "future access" `Quick test_recency_factor_future;
+        ] );
+      ( "phase3a_access",
+        [
+          Alcotest.test_case "zero count" `Quick test_access_factor_zero;
+          Alcotest.test_case "one access" `Quick test_access_factor_one;
+        ] );
+      ( "phase3a_stale",
+        [
+          Alcotest.test_case "no penalty" `Quick test_stale_penalty_none;
+          Alcotest.test_case "within cycles" `Quick test_stale_penalty_under;
+          Alcotest.test_case "exceeds cycles" `Quick test_stale_penalty_over;
+        ] );
+      ( "phase3a_recency_bonus",
+        [
+          Alcotest.test_case "within hour" `Quick test_recency_bonus_hour;
+          Alcotest.test_case "within day" `Quick test_recency_bonus_day;
+          Alcotest.test_case "beyond day" `Quick test_recency_bonus_old;
+        ] );
+      ( "phase4_gate",
+        [
+          Alcotest.test_case "no expiry" `Quick test_valid_until_gate_none;
+          Alcotest.test_case "before expiry" `Quick test_valid_until_gate_before;
+          Alcotest.test_case "after expiry" `Quick test_valid_until_gate_after;
+        ] );
+      ( "phase4_verification",
+        [
+          Alcotest.test_case "verification factor" `Quick test_verification_factor_of;
+        ] );
+      ( "phase4_score_fact",
+        [
+          Alcotest.test_case "valid fact" `Quick test_score_fact_valid;
+          Alcotest.test_case "expired fact" `Quick test_score_fact_expired;
+        ] );

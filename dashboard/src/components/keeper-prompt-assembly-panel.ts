@@ -2,8 +2,6 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   AlertTriangle,
-  ClipboardCheck,
-  FileText,
   GitCompareArrows,
   RefreshCw,
   Route,
@@ -152,11 +150,11 @@ const STAGES: AssemblyStageSpec[] = [
   {
     id: 'oas-hook',
     order: 5,
-    title: 'Provider handoff',
+    title: 'Final context',
     lane: 'oas_hook',
     role: 'model_input',
-    messageSlot: 'provider',
-    summary: 'Provider-specific recall and tool hints before send.',
+    messageSlot: 'final',
+    summary: 'Memory and tool hints added at the end.',
     promptKeys: [
       'keeper.memory_os_recall.context',
       'keeper.memory_os_recall.facts_section',
@@ -428,7 +426,7 @@ function stageAttention(stage: KeeperPromptAssemblyStage): { tone: StatusChipTon
 }
 
 function modelInputMicrocopy(stages: KeeperPromptAssemblyStage[]): string {
-  return `${stages.length} model-visible part${stages.length === 1 ? '' : 's'}`
+  return `${stages.length} sent part${stages.length === 1 ? '' : 's'}`
 }
 
 function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
@@ -456,73 +454,93 @@ function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; i
   `
 }
 
-function SupportStep({
-  icon: Icon,
-  eyebrow,
-  title,
-  summary,
-}: {
-  icon: typeof FileText
-  eyebrow: string
+interface BuildPathStep {
+  id: string
+  label: string
   title: string
   summary: string
-}) {
+  chips: string[]
+  tone: StatusChipTone
+  stages: KeeperPromptAssemblyStage[]
+}
+
+function buildPathSteps(report: KeeperPromptAssemblyReport): BuildPathStep[] {
+  const sourceStages = report.stages.filter(stage => stage.role === 'source_prep')
+  const modelStages = report.stages.filter(stage => stage.role === 'model_input')
+  const evidenceStages = report.stages.filter(stage => stage.role === 'evidence')
+
+  return [
+    {
+      id: 'source-chosen',
+      label: '1',
+      title: 'Prompt text chosen',
+      summary: 'MASC selects the active text from defaults, files, or saved edits.',
+      chips: sourceStages.map(stage => stage.title),
+      tone: 'neutral',
+      stages: sourceStages,
+    },
+    {
+      id: 'sent-to-model',
+      label: '2',
+      title: 'Sent to model',
+      summary: 'Only these ordered request parts leave MASC.',
+      chips: modelStages.map(stage => `${stage.messageSlot}: ${stage.title}`),
+      tone: 'info',
+      stages: modelStages,
+    },
+    {
+      id: 'stored-record',
+      label: '3',
+      title: 'Stored record',
+      summary: 'The audit record is kept for inspection after assembly. It is not sent.',
+      chips: evidenceStages.map(stage => stage.title),
+      tone: 'neutral',
+      stages: evidenceStages,
+    },
+  ]
+}
+
+function BuildPathStepRow({ step }: { step: BuildPathStep }) {
+  const overrideCount = step.stages.reduce((sum, stage) => sum + stage.overrideCount, 0)
+  const missingCount = step.stages.reduce((sum, stage) => sum + stage.missingCount, 0)
+
   return html`
-    <section class="min-w-0 border-l border-[var(--color-border-default)] py-1 pl-3">
-      <div class="mb-2 flex min-w-0 items-center gap-2">
-        <${Icon} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
-        <div class="min-w-0">
-          <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${eyebrow}</div>
-          <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">${title}</div>
-        </div>
+    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0">
+      <div class="mb-1 flex flex-wrap items-center gap-2">
+        <${StatusChip} tone=${step.tone} uppercase=${false}>${step.label}<//>
+        <div class="text-xs font-semibold text-[var(--color-fg-primary)]">${step.title}</div>
+        ${overrideCount > 0 ? html`<${StatusChip} tone="warn">${overrideCount} edited<//>` : null}
+        ${missingCount > 0 ? html`<${StatusChip} tone="bad">${missingCount} missing<//>` : null}
       </div>
-      <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${summary}</p>
-    </section>
+      <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${step.summary}</p>
+      <div class="mt-2 flex flex-wrap gap-1">
+        ${step.chips.map(chip => html`
+          <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-3xs text-[var(--color-fg-secondary)]">${chip}</span>
+        `)}
+      </div>
+    </li>
   `
 }
 
 function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
   const modelStages = stages.filter(stage => stage.role === 'model_input')
-  const sourceStage = stages.find(stage => stage.role === 'source_prep')
-  const auditStage = stages.find(stage => stage.role === 'evidence')
 
   return html`
-    <section data-prompt-route-default class="grid gap-3 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]">
-      <div class="order-2 grid content-start gap-4 lg:order-1">
-        <${SupportStep}
-          icon=${FileText}
-          eyebrow="before send"
-          title="Choose source text"
-          summary=${sourceStage?.summary ?? 'MASC chooses the active text for this turn.'}
-        />
-        <${SupportStep}
-          icon=${ClipboardCheck}
-          eyebrow="after send"
-          title="Save audit trail"
-          summary=${auditStage?.summary ?? 'The assembled request is stored for inspection.'}
-        />
-      </div>
-
-      <section class="order-1 min-w-0 border-l border-[var(--accent-22)] py-1 pl-3 lg:order-2">
-        <div class="mb-2 grid gap-1 sm:flex sm:min-w-0 sm:items-center sm:justify-between sm:gap-3">
-          <div class="flex min-w-0 items-center gap-2">
-            <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
-            <div class="min-w-0">
-              <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">model sees</div>
-              <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">Model request</div>
-            </div>
+    <section data-prompt-route-default class="min-w-0 border-l border-[var(--accent-22)] py-1 pl-3">
+      <div class="mb-2 flex min-w-0 items-center gap-2">
+        <div class="flex min-w-0 items-center gap-2">
+          <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
+          <div class="min-w-0">
+            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">model sees</div>
+            <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">Model request</div>
           </div>
-          <span class="pl-7 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)] sm:shrink-0 sm:pl-0">${modelInputMicrocopy(modelStages)}</span>
         </div>
-        <p class="m-0 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-          Only these ordered parts leave MASC for the model.
-        </p>
-        <ol class="mt-3">
-          ${modelStages.map((stage, index) => html`
-            <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
-          `)}
-        </ol>
-      </section>
+      </div>
+      <ol class="mt-2">
+        ${modelStages.map((stage, index) => html`
+          <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
+        `)}
+      </ol>
     </section>
   `
 }
@@ -573,67 +591,83 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
 
 function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemblyReport; compact: boolean }) {
   if (compact) return null
+  const pathSteps = buildPathSteps(report)
 
   return html`
     <details data-developer-evidence class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
         <span class="flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
           <${GitCompareArrows} size=${14} />
-          Technical trace
+          Build details
         </span>
-        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">hidden by default</span>
+        <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">optional</span>
       </summary>
-      <div class="border-t border-[var(--color-border-default)] p-3">
-        ${report.activePromptRoots.length > 0 ? html`
-          <div class="mb-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-2">
-            <div class="mb-1 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">active prompt root</div>
-            ${report.activePromptRoots.map(root => html`
-              <code class="block break-all text-2xs text-[var(--color-fg-secondary)]">${root}</code>
+      <div class="border-t border-[var(--color-border-default)] p-3 pb-16 md:pb-3">
+        <div data-source-audit-map class="mb-3">
+          <div class="mb-2 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">build path</div>
+          <ol class="border-l border-[var(--accent-22)] pl-3">
+            ${pathSteps.map(step => html`
+              <${BuildPathStepRow} key=${step.id} step=${step} />
             `)}
-          </div>
-        ` : null}
-        <div class="overflow-x-auto rounded-[var(--r-1)] border border-[var(--color-border-default)]">
-          <table class="min-w-[860px] w-full border-collapse text-left text-2xs">
-            <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
-              <tr>
-                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">step</th>
-                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">prompt</th>
-                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">source</th>
-                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">weight</th>
-                <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">fingerprint</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${report.rows.map(row => html`
-                <tr class="border-t border-[var(--color-border-default)] ${row.hasOverride
-                  ? 'bg-[var(--warn-8)]'
-                  : row.missing
-                    ? 'bg-[var(--bad-8)]'
-                    : ''}">
-                  <td class="px-3 py-2 align-top">
-                    <div class="font-mono text-[var(--color-fg-disabled)]">#${row.order}</div>
-                    <div class="text-xs font-medium text-[var(--color-fg-primary)]">${row.title}</div>
-                  </td>
-                  <td class="px-3 py-2 align-top">
-                    <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${row.promptKey}</div>
-                    ${row.filePath ? html`<div class="mt-1 max-w-[320px] truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${row.filePath}>${row.filePath}</div>` : null}
-                  </td>
-                  <td class="px-3 py-2 align-top">
-                    <div class="flex flex-wrap gap-1">
-                      <${StatusChip} tone=${sourceTone(row)}>${row.source}<//>
-                      ${row.hasOverride ? html`<${StatusChip} tone="warn">override<//>` : null}
-                    </div>
-                  </td>
-                  <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">
-                    <div>${formatBytes(row.bytes)}</div>
-                    <div class="text-3xs text-[var(--color-fg-disabled)]">${row.estimatedTokens ? `${row.estimatedTokens.toLocaleString()} tok est` : '-'}</div>
-                  </td>
-                  <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">${row.fingerprint}</td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
+          </ol>
         </div>
+        <${CleanupDetails} warnings=${report.warnings} />
+        <details data-prompt-file-list class="mt-3 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
+          <summary class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2">
+            <span class="text-xs font-semibold text-[var(--color-fg-primary)]">Raw prompt files</span>
+            <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">exact file details</span>
+          </summary>
+          ${report.activePromptRoots.length > 0 ? html`
+            <div class="border-t border-[var(--color-border-default)] px-3 py-2">
+              <div class="mb-1 text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">prompt folder</div>
+              ${report.activePromptRoots.map(root => html`
+                <code class="block break-all text-2xs text-[var(--color-fg-secondary)]">${root}</code>
+              `)}
+            </div>
+          ` : null}
+          <div class="overflow-x-auto border-t border-[var(--color-border-default)]">
+            <table class="min-w-[860px] w-full border-collapse text-left text-2xs">
+              <thead class="bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]">
+                <tr>
+                  <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">step</th>
+                  <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">prompt</th>
+                  <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">source</th>
+                  <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">weight</th>
+                  <th class="px-3 py-2 font-semibold uppercase tracking-[var(--track-caps)]">fingerprint</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${report.rows.map(row => html`
+                  <tr class="border-t border-[var(--color-border-default)] ${row.hasOverride
+                    ? 'bg-[var(--warn-8)]'
+                    : row.missing
+                      ? 'bg-[var(--bad-8)]'
+                      : ''}">
+                    <td class="px-3 py-2 align-top">
+                      <div class="font-mono text-[var(--color-fg-disabled)]">#${row.order}</div>
+                      <div class="text-xs font-medium text-[var(--color-fg-primary)]">${row.title}</div>
+                    </td>
+                    <td class="px-3 py-2 align-top">
+                      <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${row.promptKey}</div>
+                      ${row.filePath ? html`<div class="mt-1 max-w-[320px] truncate font-mono text-3xs text-[var(--color-fg-disabled)]" title=${row.filePath}>${row.filePath}</div>` : null}
+                    </td>
+                    <td class="px-3 py-2 align-top">
+                      <div class="flex flex-wrap gap-1">
+                        <${StatusChip} tone=${sourceTone(row)}>${row.source}<//>
+                        ${row.hasOverride ? html`<${StatusChip} tone="warn">override<//>` : null}
+                      </div>
+                    </td>
+                    <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">
+                      <div>${formatBytes(row.bytes)}</div>
+                      <div class="text-3xs text-[var(--color-fg-disabled)]">${row.estimatedTokens ? `${row.estimatedTokens.toLocaleString()} tok est` : '-'}</div>
+                    </td>
+                    <td class="px-3 py-2 align-top font-mono text-xs text-[var(--color-fg-secondary)]">${row.fingerprint}</td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
     </details>
   `
@@ -651,14 +685,13 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
             <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Turn prompt recipe</h3>
             <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
           </div>
-          <p class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            Default view shows the model-visible order. File paths, hashes, and token estimates stay in Technical trace.
+          <p data-prompt-recipe-intro class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+            Shows only the ordered model request. Build details explains assembly.
           </p>
         </div>
       </div>
 
       <${PromptFlowMap} stages=${report.stages} />
-      <${CleanupDetails} warnings=${report.warnings} />
       <${SourceEvidenceDetails} report=${report} compact=${compact} />
     </div>
   `
@@ -695,10 +728,11 @@ export function KeeperPromptAssemblyPanel({
   }, [ownsFetch])
 
   const report = buildKeeperPromptAssemblyReport(providedPrompts ?? loadedPrompts)
+  const showToolbar = ownsFetch || loading
 
   return html`
     <div class="mb-5" data-keeper-prompt-assembly-panel>
-      <div class="mb-2 flex items-center justify-between gap-3">
+      ${showToolbar ? html`<div data-prompt-recipe-toolbar class="mb-2 flex items-center justify-between gap-3">
         <div class="flex items-center gap-2">
           <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">Prompt Recipe</span>
           ${loading ? html`<${StatusChip} tone="info">loading<//>` : null}
@@ -709,7 +743,7 @@ export function KeeperPromptAssemblyPanel({
             ${loading ? '새로고침 중' : '새로고침'}
           <//>
         ` : null}
-      </div>
+      </div>` : null}
       ${error ? html`<${ErrorState} message=${error} class="mb-3" />` : null}
       <${PromptAssemblyContent} report=${report} compact=${compact} />
     </div>

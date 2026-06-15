@@ -156,8 +156,20 @@ val board_reactive_debounce_sec : float
 
 val board_reactive_wakeup_max : int
 
+(** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is
+    deduped under (RFC-0239 R4): normalized (author,title,content), or the
+    [post_id] when title+content are empty. Exposed for testing. *)
+val board_wakeup_dedup_key :
+  post_id:string -> author:string -> title:string -> content:string -> string
+
+(** Check if a board-reactive wakeup is allowed for [keeper_name] given the
+    incoming [signal]. Debounced on the signal's content fingerprint
+    (RFC-0239 R4), not its post_id, so identical re-posts collapse. *)
 val board_reactive_wakeup_allowed :
-  base_path:string -> keeper_name:string -> post_id:string -> bool
+  base_path:string
+  -> keeper_name:string
+  -> signal:Board_dispatch.board_signal
+  -> bool
 
 (** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
     short-circuit and wake unconditionally (returned with [dropped = 0]); other

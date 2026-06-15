@@ -601,18 +601,11 @@ let dashboard_shell_payload_json
 let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
   : Yojson.Safe.t
   =
-  let dashboard_auth_error_code = function
-    | Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _) -> Some "invalid_token"
-    | Masc_domain.Auth (Masc_domain.Auth_error.TokenExpired _) -> Some "token_expired"
-    | Masc_domain.Auth
-        (Masc_domain.Auth_error.Forbidden
-           { agent = "browser"; action = "cross-origin HTTP mutation" }) ->
-      Some "same_origin_blocked"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _) -> Some "insufficient_role"
-    | Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized { reason; _ }) ->
-      Some (Masc_domain.Auth_error.unauthorized_reason_to_string reason)
-    | _ -> Some "unknown"
-  in
+  (* SSOT: typed-error → dashboard auth code lives in
+     [Masc_domain.dashboard_auth_error_code] so this shell summary and
+     the HTTP 401 error body ([Server_auth.auth_error_json]) emit the
+     same code. *)
+  let dashboard_auth_error_code = Masc_domain.dashboard_auth_error_code in
   let auth_cfg = Auth.load_auth_config config.base_path in
   let token = auth_token_from_request request in
   let token_credential_result =

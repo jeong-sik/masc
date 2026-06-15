@@ -81,4 +81,33 @@ describe('KeeperWorkspaceRoster', () => {
     expect(rows.length).toBe(1)
     expect(rows[0]?.textContent).toContain('rama')
   })
+
+  it('shows a work-preview line per row, preferring recent output', () => {
+    keepers.value = [
+      mk({ name: 'with-output', status: 'running', recent_output_preview: '리뷰 코멘트 정리 중' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="with-output" />`, host)
+    const work = host.querySelector('.kw-kp-work') as HTMLElement
+    expect(work?.textContent).toBe('리뷰 코멘트 정리 중')
+    // title mirrors the text so truncated previews stay inspectable on hover
+    expect(work?.getAttribute('title')).toBe('리뷰 코멘트 정리 중')
+  })
+
+  it('falls through the work-preview precedence chain', () => {
+    keepers.value = [
+      // recent_output/input absent -> short_goal wins over goal/current_task
+      mk({ name: 'goal-only', status: 'running', short_goal: 'WIP 게이트 수정', goal: '무시됨' }),
+    ]
+    render(html`<${KeeperWorkspaceRoster} activeName="goal-only" />`, host)
+    const work = host.querySelector('.kw-kp-work') as HTMLElement
+    expect(work?.textContent).toBe('WIP 게이트 수정')
+  })
+
+  it('renders the empty-work fallback when no preview source exists', () => {
+    keepers.value = [mk({ name: 'bare', status: 'stopped' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="bare" />`, host)
+    const work = host.querySelector('.kw-kp-work') as HTMLElement
+    expect(work?.textContent).toBe('최근 작업 요약 없음')
+    expect(work?.getAttribute('title')).toBe('')
+  })
 })

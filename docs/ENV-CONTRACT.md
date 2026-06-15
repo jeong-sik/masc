@@ -139,7 +139,31 @@ Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
 restart and the next `Execute` call picks it up.
 
-### 5. Test-only boot overrides
+### 5. WebSearch provider selection (`request_dynamic` inside the process)
+
+The WebSearch backend reads these values while handling each search request.
+Changing the parent shell after the server has already started still requires a
+process restart; changing the process env inside the running process is picked
+up on the next WebSearch call.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `MASC_SEARXNG_URL` | `http://localhost:8888` | Enables the self-hosted SearXNG provider and gives it first priority when present. Use `scripts/searxng-local.sh start` to run a Docker-backed local instance with JSON output enabled. |
+| `MASC_WEB_SEARCH_PROVIDER` | `auto` | Pins one provider instead of auto order selection. |
+| `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
+| `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
+| `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
+| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `30.0` | In-process WebSearch cache TTL. |
+| `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | `30.0` | In-process WebSearch rate-limit window. |
+| `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | `30` | In-process WebSearch rate-limit ceiling per window. |
+
+Representative code paths:
+
+- [`tool_misc_web_search.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/tool_misc_web_search.ml)
+- [`env_config_runtime.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/env_config_runtime.ml)
+- [`masc_network_defaults.ml`](/Users/dancer/me/workspace/yousleepwhen/masc/lib/config/masc_network_defaults.ml)
+
+### 6. Test-only boot overrides
 
 The following flags exist only to make OCaml test executables deterministic:
 

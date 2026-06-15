@@ -31,6 +31,24 @@ val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
 
+(** {1 Retention (RFC-0239 Q4, supersedes RFC-0238 Capped_by_score)} *)
+
+(** Per-keeper fact recall window / retention target. The store is bounded to
+    this many facts; recall reads up to this many candidates (not just the last
+    few), so score ranking selects the globally best facts in the bounded
+    store. *)
+val fact_recall_window : int
+
+(** Read and parse every fact in the store (unbounded; used by retention). *)
+val read_all_facts : keeper_id:string -> fact list
+
+(** When the fact store exceeds [trigger], keep the [keep] highest-[rank]ed
+    facts and atomically rewrite the file; otherwise no-op. Returns the number
+    of facts dropped. The hysteresis ([trigger] > [keep]) keeps rewrites off the
+    per-turn hot path. *)
+val cap_facts :
+  keeper_id:string -> keep:int -> trigger:int -> rank:(fact -> float) -> int
+
 module For_testing : sig
   val with_keepers_dir : string -> (unit -> 'a) -> 'a
 end

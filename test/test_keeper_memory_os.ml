@@ -1050,6 +1050,47 @@ let test_recall_dedups_repeated_claim () =
         (contains "a genuinely distinct fact" ctx)))
 ;;
 
+(* RFC-0239 Q4 (retention): cap_facts bounds the append-only store, keeping the
+   highest-ranked facts and dropping the rest, but only once the store exceeds
+   the trigger (hysteresis). *)
+let test_cap_facts_keeps_top_ranked () =
+  with_temp_keepers_dir (fun _keepers_dir ->
+    let keeper_id = "virtual-memory-keeper" in
+    let now = 1_000_000.0 in
+    let base = fact_fixture ~now () in
+    for i = 1 to 10 do
+      let f =
+        { base with
+          Types.claim = Printf.sprintf "fact-%02d" i
+        ; Types.confidence = 0.1 *. float_of_int i
+        ; Types.source = { base.source with turn = i }
+        }
+      in
+      Memory_io.append_fact ~keeper_id f
+    done;
+    (* rank by confidence: keep the 3 highest (fact-08/09/10), drop 7. *)
+    let dropped =
+      Memory_io.cap_facts ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
+        f.Types.confidence)
+    in
+    Alcotest.(check int) "dropped count" 7 dropped;
+    let remaining = Memory_io.read_all_facts ~keeper_id in
+    Alcotest.(check int) "kept count" 3 (List.length remaining);
+    List.iter
+      (fun f ->
+        Alcotest.(check bool)
+          (Printf.sprintf "%s is a top-3 claim" f.Types.claim)
+          true
+          (List.mem f.Types.claim [ "fact-08"; "fact-09"; "fact-10" ]))
+      remaining;
+    (* below trigger now (3 <= 5): no-op, nothing dropped. *)
+    let dropped2 =
+      Memory_io.cap_facts ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
+        f.Types.confidence)
+    in
+    Alcotest.(check int) "no-op below trigger" 0 dropped2)
+;;
+
 let test_recall_context_renders_sanitized_memory () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -1279,6 +1320,12 @@ let () =
             "dedups repeated claim (RFC-0239 R2)"
             `Quick
             test_recall_dedups_repeated_claim
+        ] )
+    ; ( "retention"
+      , [ Alcotest.test_case
+            "cap_facts keeps top-ranked (RFC-0239 Q4)"
+            `Quick
+            test_cap_facts_keeps_top_ranked
         ] )
     ]
 ;;

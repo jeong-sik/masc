@@ -172,6 +172,29 @@ let extract_and_append_with_provider
   | Error _ as e -> e
   | Ok episode ->
     Keeper_memory_os_io.append_episode_bundle ~keeper_id episode;
+    (* RFC-0239 Q4 (supersedes RFC-0238 Capped_by_score): bound the append-only
+       fact store after each librarian write. cap_facts' hysteresis keeps this
+       off the hot path (a rewrite only fires once the store overflows the
+       trigger). A retention failure must not fail the already-succeeded
+       append, so it is logged and swallowed. *)
+    (try
+       let window = Keeper_memory_os_io.fact_recall_window in
+       ignore
+         (Keeper_memory_os_io.cap_facts
+            ~keeper_id
+            ~keep:window
+            ~trigger:(window + (window / 2))
+            ~rank:
+              (Keeper_memory_os_policy.score_fact
+                 ~now:episode.Keeper_memory_os_types.created_at)
+          : int)
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Keeper.warn
+         "memory os retention sweep failed keeper=%s: %s"
+         keeper_id
+         (Printexc.to_string exn));
     Ok episode
 ;;
 

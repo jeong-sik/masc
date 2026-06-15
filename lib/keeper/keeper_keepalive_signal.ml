@@ -292,25 +292,23 @@ let select_board_wakeup_candidates
     selected, generic_dropped + total_dropped
 ;;
 
-let board_signal_kind_to_string = function
-  | Board_dispatch.Board_post_created -> "post_created"
-  | Board_dispatch.Board_comment_added -> "comment_added"
-;;
-
+(* RFC-0020: enqueue the board signal as a typed [stimulus_payload] instead of a
+   JSON-serialised string. [reason] still selects urgency at the producer; it is
+   not part of the payload (the consumer never read the prior "wake_reason"
+   field — wake-reason classification is recomputed downstream). *)
 let board_signal_stimulus ~(reason : string) (signal : Board_dispatch.board_signal) =
-  let payload =
-    `Assoc
-      [ "source", `String "board_signal"
-      ; "kind", `String (board_signal_kind_to_string signal.kind)
-      ; "post_id", `String signal.post_id
-      ; "author", `String signal.author
-      ; "title", `String signal.title
-      ; "content", `String signal.content
-      ; "hearth", Json_util.string_opt_to_json signal.hearth
-      ; ( "updated_at_unix", Json_util.float_opt_to_json signal.updated_at )
-      ; "wake_reason", `String reason
-      ]
-    |> Yojson.Safe.to_string
+  let payload : Keeper_event_queue.stimulus_payload =
+    Keeper_event_queue.Board_signal
+      { kind =
+          (match signal.kind with
+           | Board_dispatch.Board_post_created -> Keeper_event_queue.Post_created
+           | Board_dispatch.Board_comment_added -> Keeper_event_queue.Comment_added)
+      ; author = signal.author
+      ; title = signal.title
+      ; content = signal.content
+      ; hearth = signal.hearth
+      ; updated_at = signal.updated_at
+      }
   in
   { Keeper_event_queue.post_id = signal.post_id
   ; urgency =

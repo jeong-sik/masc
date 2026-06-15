@@ -1,23 +1,13 @@
 (** Stay-silent loop recovery helpers for the unified keeper turn. *)
 
-let recovery_stimulus ~now ~keeper_name ~streak ~threshold =
-  let payload =
-    `Assoc
-      [ "source", `String "stay_silent_recovery"
-      ; "keeper", `String keeper_name
-      ; "streak", `Int streak
-      ; "threshold", `Int threshold
-      ; ( "message"
-        , `String
-            "stay_silent loop threshold crossed; run a recovery cycle instead of \
-             remaining silent" )
-      ]
-    |> Yojson.Safe.to_string
-  in
+(* RFC-0020: the stay-silent recovery stimulus carries no data — the consumer
+   only branches on the kind. streak/threshold are recorded in the failure
+   reason / blocker detail by the caller, not in the stimulus payload. *)
+let recovery_stimulus ~now ~keeper_name =
   { Keeper_event_queue.post_id = "stay-silent-loop:" ^ keeper_name
   ; urgency = Keeper_event_queue.Immediate
   ; arrived_at = now
-  ; payload
+  ; payload = Keeper_event_queue.Stay_silent_recovery
   }
 ;;
 
@@ -43,11 +33,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
     meta.Keeper_meta_contract.name
     (Some failure_reason);
   let stimulus =
-    recovery_stimulus
-      ~now:(Time_compat.now ())
-      ~keeper_name:meta.name
-      ~streak
-      ~threshold
+    recovery_stimulus ~now:(Time_compat.now ()) ~keeper_name:meta.name
   in
   Keeper_registry_event_queue.enqueue
     ~base_path:config.base_path

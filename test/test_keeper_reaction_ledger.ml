@@ -9,20 +9,17 @@ let with_temp_base f =
   f base_path
 ;;
 
-let board_payload ?updated_at ~post_id () =
-  `Assoc
-    ([ "source", `String "board_signal"
-     ; "kind", `String "post_created"
-     ; "post_id", `String post_id
-     ; "author", `String "operator"
-     ; "title", `String "Ship reaction ledger"
-     ; "content", `String "Please react"
-     ]
-     @
-     match updated_at with
-     | Some value -> [ "updated_at_unix", `Float value ]
-     | None -> [])
-  |> Yojson.Safe.to_string
+let board_payload ?updated_at ~post_id:(_ : string) () :
+  Keeper_event_queue.stimulus_payload
+  =
+  Keeper_event_queue.Board_signal
+    { kind = Keeper_event_queue.Post_created
+    ; author = "operator"
+    ; title = "Ship reaction ledger"
+    ; content = "Please react"
+    ; hearth = None
+    ; updated_at
+    }
 ;;
 
 let board_stimulus ?(post_id = "post-42") ?updated_at () :
@@ -38,19 +35,10 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
 let stay_silent_recovery_stimulus ?(keeper_name = "silent-keeper") () :
   Keeper_event_queue.stimulus
   =
-  let payload =
-    `Assoc
-      [ "source", `String "stay_silent_recovery"
-      ; "keeper", `String keeper_name
-      ; "streak", `Int 10
-      ; "threshold", `Int 10
-      ]
-    |> Yojson.Safe.to_string
-  in
   { post_id = "stay-silent-loop:" ^ keeper_name
   ; urgency = Immediate
   ; arrived_at = 1234.5
-  ; payload
+  ; payload = Keeper_event_queue.Stay_silent_recovery
   }
 ;;
 
@@ -359,29 +347,9 @@ let test_unknown_reaction_degrades_summary () =
     (summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_malformed_typed_payload_degrades_summary () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "malformed-payload-keeper" in
-  let stimulus =
-    { Keeper_event_queue.post_id = "bad-board"
-    ; urgency = Immediate
-    ; arrived_at = 1234.5
-    ; payload = {|{"source":"board_signal"|}
-    }
-  in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "malformed payload summary status" "degraded" "status" summary;
-  check bool "malformed payload requires operator action" true
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "payload parse error counted" 1
-    (summary |> member "payload_parse_error_count" |> to_int)
-;;
+(* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
+   payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
+   covered a parse-error path that can no longer occur and was removed. *)
 
 let () =
   run
@@ -423,10 +391,6 @@ let () =
             "unknown reaction degrades summary"
             `Quick
             test_unknown_reaction_degrades_summary
-        ; test_case
-            "malformed typed payload degrades summary"
-            `Quick
-            test_malformed_typed_payload_degrades_summary
         ] )
     ]
 ;;

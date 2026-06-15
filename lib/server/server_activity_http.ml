@@ -297,8 +297,8 @@ let handle_stream ~deps ~state request reqd =
   info_ref := Some info;
   ignore
     (send_raw info
-       (Printf.sprintf ": activity-stream after=%d\nretry: 3000\n\n"
-          after_seq));
+       (Server_mcp_transport_http_headers.sse_comment_with_retry
+          ~comment:(Printf.sprintf "activity-stream after=%d" after_seq)));
   let replay =
     Activity_graph.list_events (Mcp_server.workspace_config state) ~kinds
       ~after_seq ~limit:replay_limit ()

@@ -1653,6 +1653,8 @@
 
 (include stanzas/test_social_state_cap_on_load.inc)
 
+(include stanzas/test_sse_retry_ssot.inc)
+
 (include stanzas/test_sse_storm_e2e.inc)
 
 (include stanzas/test_start_masc_script.inc)

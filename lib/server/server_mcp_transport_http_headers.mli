@@ -152,6 +152,12 @@ val sse_prime_event : unit -> string
     from {!Sse.next_id}.  The trailing double-newline is the SSE
     frame terminator — required by the spec. *)
 
+val sse_comment_with_retry : comment:string -> string
+(** [sse_comment_with_retry ~comment] returns an SSE comment frame
+    [[": <comment>\nretry: <sse_retry_ms>\n\n"]].  Stream priming sites
+    (presence, activity) use this so their reconnect interval stays sourced
+    from {!sse_retry_ms} instead of an inlined literal. *)
+
 val sse_ping_interval_s : float
 (** Pinned at [30.0] seconds.  Ping fibers use this interval to
     write the SSE comment frame [": ping\n\n"] so middleboxes do

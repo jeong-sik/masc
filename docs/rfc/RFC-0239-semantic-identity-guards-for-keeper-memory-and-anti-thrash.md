@@ -49,15 +49,17 @@ termination check in the system. This RFC fixes the five guards that share that 
 | R3 no-progress loop detector | **Implemented + tested** | `keeper_stay_silent_loop_detector`, commit `R3` |
 | R4 wake content-fingerprint debounce | **Implemented + tested** | `keeper_keepalive_signal` / `keeper_registry`, commit `R4` |
 | R2 recall-time claim dedup | **Implemented + tested** | `keeper_memory_os_recall`, commit `R2` |
-| R1 per-fact lifetime at write | **Ratification required** | naive category→TTL is a string-classifier workaround (§2 principle 1); needs a typed taxonomy or a librarian-contract + eval — §9 Q5 |
-| R0 wire inert recall signals | **Ratification required** | naive `bump_access_for_turn` wiring *worsens* the inversion (frequently-recalled stale facts would score higher); needs a stale-lowering signal — §9 Q3 |
-| Retention sweep (supersedes RFC-0238) | **Ratification required** | `Capped_by_score` defaults + legacy 17,426-fact handling — §9 Q4 |
+| Retention sweep (supersedes RFC-0238) | **Implemented + tested** | `keeper_memory_os_io.cap_facts`, Q4 commit |
+| R1 per-fact lifetime at write | **Closed — subsumed** | Q5: drop per-fact TTL (avoids the category string-classifier); store bounding is handled by the retention sweep |
+| R0 wire inert recall signals | **Closed — subsumed** | Q3: naive `bump_access_for_turn` wiring *worsens* the inversion (frequently-recalled stale facts would score higher); R2 dedup + the retention cap cover the in-session symptom. Revisit only if measurement still shows inversion |
 
 R3 + R4 are the loop engine: together they stop the cross-keeper thrash (R3 pauses a
 keeper after a threshold of no-progress turns; R4 stops identical re-posts re-waking peers).
-R2 stops duplicate conclusions crowding recall. The three ratification-required roots are
-the memory-os write/scoring/retention design choices that should not be hacked in — a naive
-version of each is exactly a workaround this RFC's own §2 forbids.
+R2 stops duplicate conclusions crowding recall, and the retention sweep bounds the
+append-only store to `fact_recall_window` (256) facts per keeper by score. R0 and R1 are
+closed as subsumed: per the Q3/Q5 ratification, the right write-side fix is one deterministic
+bounding sweep, not per-fact TTLs (an LLM-trust / string-classifier hazard) or an access
+boost (which would re-amplify the inversion).
 
 ## §1 Problem (with live evidence)
 

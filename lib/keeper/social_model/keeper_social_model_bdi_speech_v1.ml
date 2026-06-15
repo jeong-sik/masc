@@ -155,11 +155,7 @@ let tools_include_keeper tool tools =
   List.exists (keeper_tool_name_matches tool) tools
 
 let inferred_tool_surface tools =
-  if tools = [ "keeper_stay_silent" ] then
-    Some
-      ( { speech_act = Types.Stay_silent; delivery_surface = Types.Silent }
-      , Types.Tool_only_stay_silent )
-  else if tools_include_keeper "keeper_board_comment" tools then
+  if tools_include_keeper "keeper_board_comment" tools then
     Some
       ( {
           speech_act = Types.Comment_board;

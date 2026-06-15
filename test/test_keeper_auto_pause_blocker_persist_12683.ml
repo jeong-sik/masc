@@ -144,19 +144,19 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("parse base: " ^ err)
 
-let test_stay_silent_loop_detection_pauses_keeper () =
-  let base_path = temp_dir "masc-stay-silent-pause-" in
+let test_no_progress_loop_detection_pauses_keeper () =
+  let base_path = temp_dir "masc-no-progress-pause-" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let keeper_name = "stay-silent-paused" in
+       let keeper_name = "no-progress-paused" in
        let meta = make_meta keeper_name in
        Masc.Keeper_registry.clear ();
        ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
        let paused_meta =
-         Masc.Keeper_unified_turn_stay_silent.mark_loop_detected
+         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
            ~config
            meta
            ~streak:10
@@ -169,14 +169,14 @@ let test_stay_silent_loop_detection_pauses_keeper () =
          None
        paused_meta.auto_resume_after_sec;
        (match paused_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = Stay_silent_loop; detail } ->
+        | Some { Keeper_meta_contract.klass = No_progress_loop; detail } ->
           check
             string
             "blocker detail"
-            "stay_silent loop detected: streak=10 threshold=10; manual pause applied"
+            "no_progress loop detected: streak=10 threshold=10; manual pause applied"
             detail
-        | Some _ -> fail "expected Stay_silent_loop blocker"
-        | None -> fail "expected stay_silent loop blocker");
+        | Some _ -> fail "expected No_progress_loop blocker"
+        | None -> fail "expected no_progress loop blocker");
        match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
        | Some entry ->
          check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused
@@ -283,10 +283,10 @@ let () =
           test_case "legacy blocker string rejected" `Quick
             test_legacy_last_blocker_string_rejected;
         ] );
-      ( "stay_silent loop",
+      ( "no_progress loop",
         [
           test_case "loop detection pauses keeper for manual resume" `Quick
-            test_stay_silent_loop_detection_pauses_keeper;
+            test_no_progress_loop_detection_pauses_keeper;
         ] );
       ( "idle-detected loop",
         [

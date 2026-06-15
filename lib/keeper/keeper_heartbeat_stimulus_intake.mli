@@ -40,7 +40,7 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
-    classes). [Stay_silent_recovery] also writes a reaction-ledger entry. *)
+    classes). [No_progress_recovery] also writes a reaction-ledger entry. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta

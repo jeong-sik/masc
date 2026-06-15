@@ -26,7 +26,7 @@ type board_stimulus = {
 type stimulus_payload =
   | Board_signal of board_stimulus
   | Bootstrap
-  | Stay_silent_recovery
+  | No_progress_recovery
 
 type stimulus = {
   post_id : post_id;
@@ -92,11 +92,11 @@ let sort_by_urgency (queue : t) : t =
 let payload_kind_label = function
   | Board_signal _ -> "board_signal"
   | Bootstrap -> "bootstrap"
-  | Stay_silent_recovery -> "stay_silent_recovery"
+  | No_progress_recovery -> "no_progress_recovery"
 
 let is_board_signal = function
   | Board_signal _ -> true
-  | Bootstrap | Stay_silent_recovery -> false
+  | Bootstrap | No_progress_recovery -> false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
   let now = Unix.gettimeofday () in

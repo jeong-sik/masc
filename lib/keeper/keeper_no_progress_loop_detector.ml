@@ -1,8 +1,7 @@
 let default_threshold = 10
 
-(* Step 14(b) of the bloodflow restoration plan inlined the env knob
-   [MASC_STAY_SILENT_LOOP_THRESHOLD]: hyperparameters belong in code,
-   not in [Sys.getenv_opt]. *)
+(* Step 14(b) of the bloodflow restoration plan inlined the old threshold env
+   knob: hyperparameters belong in code, not in [Sys.getenv_opt]. *)
 let threshold () = default_threshold
 
 type record_outcome =
@@ -20,7 +19,7 @@ type keeper_state = {
 
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
 
-(* Eio.Mutex: stay-silent records originate from keeper turn fibers in a
+(* Eio.Mutex: no-progress records originate from keeper turn fibers in a
    single domain. Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK turns fiber
    contention into EDEADLK (memory: feedback_eio-mutex-vs-stdlib). *)
 let mutex = Eio.Mutex.create ()
@@ -38,7 +37,7 @@ let get_or_create keeper_name =
 
 let update_streak_gauge keeper_name value =
   Otel_metric_store.set_gauge
-    "masc_keeper_stay_silent_streak"
+    "masc_keeper_no_progress_streak"
     ~labels:[ ("keeper", keeper_name) ]
     (Float.of_int value)
 
@@ -67,12 +66,12 @@ let record_turn ~keeper_name ~made_progress =
       if s.streak >= t && not s.detected_latched then begin
         s.detected_latched <- true;
         Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string StaySilentLoopDetected)
+          Keeper_metrics.(to_string NoProgressLoopDetected)
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.error
           "#9926/RFC-0239 no-progress loop detected keeper=%s streak=%d \
-           threshold=%d — keeper repeated no-progress turns (stay_silent, or \
-           board posts with no tool evidence). Check effective tool surface \
+           threshold=%d — keeper repeated no-progress turns (silent speech act \
+           or board posts with no tool evidence). Check effective tool surface \
            mismatch or scheduler/backlog drift. Counter will not re-fire until \
            the streak resets via a turn that makes progress."
           keeper_name s.streak t;

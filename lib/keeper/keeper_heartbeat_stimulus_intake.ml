@@ -80,9 +80,9 @@ let consume_single_heartbeat_stimulus
       "turn entry: bootstrap stimulus consumed (keeper=%s)"
       meta_after_triage.name;
     []
-  | Keeper_event_queue.Stay_silent_recovery ->
+  | Keeper_event_queue.No_progress_recovery ->
     Log.Keeper.info
-      "turn entry: stay-silent recovery stimulus consumed post_id=%s \
+      "turn entry: no-progress recovery stimulus consumed post_id=%s \
        (keeper=%s)"
       stim.post_id
       meta_after_triage.name;

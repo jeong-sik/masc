@@ -155,7 +155,7 @@ include Otel_identity_metric_names
 (* Centralized metric constants for inline string replacement.
    keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
    keeper_tool_execute_runtime.ml, keeper_sandbox_docker.ml,
-   keeper_heartbeat_snapshot.ml, keeper_stay_silent_loop_detector.ml,
+   keeper_heartbeat_snapshot.ml, keeper_no_progress_loop_detector.ml,
    keeper_unified_metrics.ml. *)
 (* OAS after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy

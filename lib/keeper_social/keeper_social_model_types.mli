@@ -21,7 +21,6 @@ type model_id =
   | Magentic_ledger_v1
 
 type transition_reason =
-  | Tool_only_stay_silent
   | Tool_only_comment_board
   | Tool_only_post_board
   | Tool_only_broadcast

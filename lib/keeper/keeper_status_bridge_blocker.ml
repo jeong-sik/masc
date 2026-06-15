@@ -164,7 +164,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Admission_queue_wait_timeout
     | Turn_timeout_after_queue_wait
     | Turn_timeout
-    | Stay_silent_loop
+    | No_progress_loop
     | Stale_fleet_batch
     | Sdk_max_turns_exceeded
     | Sdk_token_budget_exceeded

@@ -1,14 +1,14 @@
-(* test/test_stay_silent_loop_detector.ml
+(* test/test_no_progress_loop_detector.ml
 
    #9926: detector observability contract. Pins:
-   - Streak increments on consecutive "stay_silent" speech_act
-   - Streak resets to 0 on any non-stay_silent act
+   - Streak increments on consecutive no-progress turns
+   - Streak resets to 0 on any progress turn
    - Detected-counter only bumps once per loop episode (latched)
    - Reset latches on streak reset
    - Threshold is the product constant
    - Per-keeper isolation *)
 
-module D = Masc.Keeper_stay_silent_loop_detector
+module D = Masc.Keeper_no_progress_loop_detector
 module Metrics = Masc.Otel_metric_store
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
@@ -18,7 +18,7 @@ let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let detected_count keeper =
   Metrics.metric_value_or_zero
-    "masc_keeper_stay_silent_loop_detected_total"
+    "masc_keeper_no_progress_loop_detected_total"
     ~labels:[ ("keeper", keeper) ] ()
 
 let record_turn = D.record_turn
@@ -49,7 +49,7 @@ let test_any_other_act_resets () =
    | D.Normal | D.Loop_detected _ -> Alcotest.fail "expected loop reset");
   Alcotest.(check int) "after declare" 0 (D.current_streak ~keeper_name:k);
   record_turn ~keeper_name:k ~made_progress:false |> ignore_outcome;
-  Alcotest.(check int) "after new stay_silent" 1
+  Alcotest.(check int) "after new no-progress turn" 1
     (D.current_streak ~keeper_name:k)
 
 let test_threshold_crossing_fires_counter () =
@@ -76,7 +76,7 @@ let test_latched_no_repeat_while_streak_grows () =
   for _ = 1 to D.threshold () + 7 do
     record_turn ~keeper_name:k ~made_progress:false |> ignore_outcome
   done;
-  Alcotest.(check (float 0.0001)) "latched: exactly +1 across long stay_silent run"
+  Alcotest.(check (float 0.0001)) "latched: exactly +1 across long no-progress run"
     (before +. 1.0) (detected_count k)
 
 let test_latch_releases_on_reset_then_refires () =
@@ -88,7 +88,7 @@ let test_latch_releases_on_reset_then_refires () =
   done;
   Alcotest.(check (float 0.0001)) "first loop fires once"
     (before +. 1.0) (detected_count k);
-  (* Break the loop with a non-stay_silent act. *)
+  (* Break the loop with a progress turn. *)
   (match record_turn ~keeper_name:k ~made_progress:true with
    | D.Loop_reset { was_latched; _ } ->
      Alcotest.(check bool) "reset releases latched loop" true was_latched
@@ -119,11 +119,11 @@ let test_threshold_constant_is_10 () =
   Alcotest.(check int) "default threshold" 10 (D.threshold ())
 
 let test_threshold_env_is_ignored () =
-  Unix.putenv "MASC_STAY_SILENT_LOOP_THRESHOLD" "25";
+  Unix.putenv "MASC_NO_PROGRESS_LOOP_THRESHOLD" "25";
   Alcotest.(check int) "env ignored" 10 (D.threshold ());
-  Unix.putenv "MASC_STAY_SILENT_LOOP_THRESHOLD" "notanumber";
+  Unix.putenv "MASC_NO_PROGRESS_LOOP_THRESHOLD" "notanumber";
   Alcotest.(check int) "non-numeric → default" 10 (D.threshold ());
-  Unix.putenv "MASC_STAY_SILENT_LOOP_THRESHOLD" ""
+  Unix.putenv "MASC_NO_PROGRESS_LOOP_THRESHOLD" ""
 
 let test_explicit_reset () =
   D.reset_all_for_test ();
@@ -141,7 +141,7 @@ let test_explicit_reset () =
    produced durable evidence OR was on a surface that does not require it. The
    key new case is the third one: a no-evidence turn on a peer-facing surface
    (board post) is NOT progress, so the streak accrues — the exact case the old
-   speech_act="stay_silent" check missed. *)
+   literal silent speech-act check missed. *)
 let test_made_progress_predicate () =
   Alcotest.(check bool) "evidence on evidence-required surface = progress" true
     (D.turn_made_progress ~strong_evidence:true ~surface_requires_evidence:true);
@@ -171,13 +171,13 @@ let test_no_progress_board_post_accrues_streak () =
     (D.current_streak ~keeper_name:k)
 
 let () =
-  Alcotest.run "keeper_stay_silent_loop_detector"
+  Alcotest.run "keeper_no_progress_loop_detector"
     [
       ( "streak semantics",
         [
-          Alcotest.test_case "increments on stay_silent"
+          Alcotest.test_case "increments on no-progress"
             `Quick (with_eio test_streak_increments);
-          Alcotest.test_case "any other act resets"
+          Alcotest.test_case "progress resets"
             `Quick (with_eio test_any_other_act_resets);
           Alcotest.test_case "explicit reset"
             `Quick (with_eio test_explicit_reset);

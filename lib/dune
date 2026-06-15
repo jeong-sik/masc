@@ -108,7 +108,7 @@
   keeper_unified_metrics_json_support
   keeper_unified_metrics_support
   keeper_unified_turn_event_bus
-  keeper_unified_turn_stay_silent
+  keeper_unified_turn_no_progress
   keeper_unified_turn_success
   keeper_unified_turn_failure
   keeper_unified_turn_phase_plan

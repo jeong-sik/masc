@@ -13,7 +13,7 @@ type cursor =
 type stimulus_kind =
   | Board_signal
   | Bootstrap
-  | Stay_silent_recovery
+  | No_progress_recovery
 
 type reaction_kind =
   | Turn_started

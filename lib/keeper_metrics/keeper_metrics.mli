@@ -194,7 +194,7 @@ type t =
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | StaySilentLoopDetected
+  | NoProgressLoopDetected
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures

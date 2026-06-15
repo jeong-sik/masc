@@ -32,13 +32,13 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
   }
 ;;
 
-let stay_silent_recovery_stimulus ?(keeper_name = "silent-keeper") () :
+let no_progress_recovery_stimulus ?(keeper_name = "no-progress-keeper") () :
   Keeper_event_queue.stimulus
   =
-  { post_id = "stay-silent-loop:" ^ keeper_name
+  { post_id = "no-progress-loop:" ^ keeper_name
   ; urgency = Immediate
   ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.Stay_silent_recovery
+  ; payload = Keeper_event_queue.No_progress_recovery
   }
 ;;
 
@@ -270,10 +270,10 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_stay_silent_recovery_stimulus_is_typed () =
+let test_no_progress_recovery_stimulus_is_typed () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "silent-keeper" in
-  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  let keeper_name = "no-progress-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
@@ -283,18 +283,18 @@ let test_stay_silent_recovery_stimulus_is_typed () =
     |> latest_row
   in
   check_member_string
-    "stay-silent stimulus kind"
-    "stay_silent_recovery"
+    "no-progress stimulus kind"
+    "no_progress_recovery"
     "kind"
     (row |> member "stimulus");
   check string "stable stimulus prefix" "stimulus:"
     (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
 ;;
 
-let test_stay_silent_recovery_reaction_clears_pending () =
+let test_no_progress_recovery_reaction_clears_pending () =
   with_temp_base @@ fun base_path ->
-  let keeper_name = "silent-keeper" in
-  let stimulus = stay_silent_recovery_stimulus ~keeper_name () in
+  let keeper_name = "no-progress-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
@@ -380,13 +380,13 @@ let () =
             `Quick
             test_summary_cursor_ack_respects_post_id_tiebreaker
         ; test_case
-            "stay-silent recovery stimulus is typed"
+            "no-progress recovery stimulus is typed"
             `Quick
-            test_stay_silent_recovery_stimulus_is_typed
+            test_no_progress_recovery_stimulus_is_typed
         ; test_case
-            "stay-silent recovery reaction clears pending"
+            "no-progress recovery reaction clears pending"
             `Quick
-            test_stay_silent_recovery_reaction_clears_pending
+            test_no_progress_recovery_reaction_clears_pending
         ; test_case
             "unknown reaction degrades summary"
             `Quick

@@ -17,10 +17,6 @@ let handle_time_now ~args:_ =
     (`Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ])
 ;;
 
-let handle_stay_silent ~args:_ =
-  Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ])
-;;
-
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
   Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;

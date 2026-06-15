@@ -57,9 +57,12 @@ independent of the task in front of it. That is not retrieval.
 
 ## §2 Design
 
-Phased. Phase 1 is the concrete near-term change and the subject of the first
-implementation PR; Phases 2–3 are designed here but gated behind Phase 1 and a
-separate review (they change the fact schema and the cross-keeper topology).
+Phased. Phase 1 (turn-seeded lexical recall) is **merged** (#21224). Phase 2 (the
+shared semantic tier, which absorbs the originally-separate "provenance fields"
+phase — see §2.2) is designed here but gated behind its own PR and review: it adds
+one fact-type field (`observed_by`) and the cross-keeper consolidation topology.
+The standalone per-keeper provenance phase was dropped after the write path was
+read (§2.2, §4) — those fields are dead in a single keeper's store.
 
 ### §2.1 Phase 1 — turn-seeded deterministic lexical relevance (concrete)
 
@@ -100,28 +103,43 @@ latency. masc's memory-os is deterministic-by-design; embeddings would change
 that contract. Embedding recall is **rejected for this RFC** and recorded as a
 possible future opt-in tier behind a flag (§4), not a default.
 
-### §2.2 Phase 2 — provenance fields (prerequisite for any sharing)
+### §2.2 Phase 2 — shared semantic tier (absorbs the former "provenance fields" phase)
 
-Two fields on the fact type, both `*_of_json`-tolerant of absence (so the
-migration is read-compatible with existing stores):
+**Ground-truth correction (2026-06-15, from reading the write path before
+coding).** The original draft split this into a standalone "Phase 2 = add
+`keeper_scope` + `observed_by` to the fact type" that "does not yet share anything
+across keepers." Reading the code shows that standalone phase is **hollow** — it
+would add dead fields:
 
-- `keeper_scope : Keeper_id.t option` — `None` = global candidate, `Some k` =
-  keeper-local. This is design (A) already proposed in the 456-paradox analysis
-  (`~/me/docs/library/multi-keeper-fact-namespace-problem--456-paradox-analysis-20260615.md`).
-- `observed_by : provenance` — the **set of distinct source keepers** that have
-  observed this claim (not just a count). RFC-0243's `reobserve_fact` raises
-  confidence on every re-observation; it cannot today tell **independent
-  corroboration** (two keepers agree → real consensus) from an **echo chamber**
-  (one keeper repeats itself). With `observed_by`, `blend_confidence` rises only
-  on a **new distinct source**; a same-source repeat bumps `access_count`
-  (quantity) but holds `confidence` (quality). This closes the echo-chamber risk
-  that a shared store would otherwise amplify (the 456 docs name this "confidence
-  inversion at uniform ~0.988").
+- The fact already carries single-origin provenance
+  (`keeper_memory_os_types.ml:9-19`): `source : provenance_event =
+  { trace_id; turn; tool_call_id }`. What is missing is a *distinct-keeper
+  corroboration set*, not provenance per se.
+- `reobserve_fact` (`keeper_memory_os_policy.ml:203-209`) blends confidence on
+  every same-identity re-observation, fired once per librarian write
+  (`keeper_memory_os_io.ml:406` `merge_and_cap_facts`), and each librarian episode
+  carries a **fresh `trace_id`** (`io.ml:370` `merge_episode_facts`).
+- Therefore **inside one keeper's store there is no "distinct source" to gate on**:
+  every re-observation is a new trace. An `observed_by` keyed on trace grows
+  unconditionally (gates nothing); keyed on keeper it is a constant (one keeper).
+  Either way it is a dead field — the exact gradient-collapse pathology RFC-0243
+  was written to remove (`stale_factor` / `valid_until` /
+  `expected_lifetime_cycles` are already dead; a fourth dead field repeats the
+  mistake).
 
-Phase 2 changes only how `reobserve_fact` reads/writes these fields; it does not
-yet share anything across keepers.
+`observed_by` only becomes a **live** signal when the sources are **distinct
+keepers**, which only exists once a shared tier exists. So the provenance fields
+are not a prerequisite *phase*; they are *part of* the shared tier (below), where
+the consolidator's distinct-keeper gate — not a per-keeper field — is what closes
+the echo-chamber that a flat shared store would amplify (the 456 docs name this
+"confidence inversion at uniform ~0.988").
 
-### §2.3 Phase 3 — layered consolidation (the "communal brain", done safely)
+(One genuinely single-keeper bug surfaced while grounding: `merge_episode_facts`
+double-blends a claim if a single episode repeats the same normalized claim
+(`io.ml:382-394`). It is a small, independent correctness fix — dedup incoming by
+`normalize_claim` before folding — not "Phase 2", and is tracked separately.)
+
+### §2.3 Layered consolidation — the "communal brain", done safely
 
 The instinct "one giant shared Obsidian brain across all keepers" is **rejected
 as a flat merge** (§4): the 456 paradox is precisely what a flat shared
@@ -143,16 +161,33 @@ episodic→semantic consolidation (`hippo-consolidator`):
 
 - **Tier 1 — per-keeper private** (today's `keepers/<id>.facts.jsonl`,
   `keeper_memory_os_io.ml:44-80`): working/episodic memory, stays isolated.
-- **Tier 2 — shared semantic**: a *consolidator* (not every keeper writing
-  directly) promotes a Tier-1 fact only when it is corroborated by **≥ 2 distinct
-  keepers** (`observed_by` from Phase 2) **and** confidence ≥ threshold **and**
-  its category is on a promotion whitelist. Promotion carries provenance, never
-  collapses sources.
+  Unchanged by this RFC.
+- **Tier 2 — shared semantic**: a single reserved store reusing the existing IO
+  verbatim — `keepers/_shared.facts.jsonl` via `facts_path ~keeper_id:"_shared"`
+  (`_shared` is not a legal keeper name, so no real keeper collides; no new codec
+  or path machinery). A *consolidator* (not every keeper writing directly)
+  promotes a Tier-1 fact into `_shared` only when the same `normalize_claim`
+  identity is held by **≥ 2 distinct keeper ids**, each above a confidence
+  threshold, **and** its category is on a promotion whitelist. Promotion carries
+  provenance and **collapses no sources**.
+- **`observed_by : keeper-id set` is added to the fact type, populated for Tier-2
+  facts only** (Tier-1 leaves it empty — it has no use for it). This is where the
+  field is finally *live*: confidence on a Tier-2 fact rises only when a **new
+  distinct keeper id** corroborates it; a same-keeper repeat does not inflate it.
+  `keeper_scope` is the tier marker (`Some k` while private, `None` once shared).
+- **The consolidator is a cross-keeper deterministic sweep**, the sibling of
+  `run_gc` (`keeper_memory_os_gc.ml:76`, which is per-keeper TTL/verdict/dedup):
+  it reads each keeper's Tier-1 store, groups by `normalize_claim`, applies the
+  promotion gate, and writes `_shared`. It runs **off the hot path** (a scheduled
+  consolidation sweep, never per turn — mirroring how `cap_facts`/`run_gc` are
+  amortized), so the per-turn write path (`merge_and_cap_facts`) is untouched.
 - **Recall reads both tiers**, private taking precedence; shared facts are
-  surfaced as labeled, provenance-stamped context, never silently merged.
+  surfaced as labeled, provenance-stamped context, never silently merged. This
+  extends P1's `render_context` (`keeper_memory_os_recall.ml:171`,
+  single-`keeper_id` today) to also read `_shared`.
 - **Contradiction at Tier 2** is resolved by **keep-both-with-provenance**, and
-  surfaced to the Board (the existing correction channel) — never a silent
-  winner-pick.
+  surfaced to the Board (`lib/board/`, the existing correction channel) — never a
+  silent winner-pick.
 
 This buys the "공용뇌" value (shared, corroborated knowledge) without reopening
 456, because origin is tracked (`observed_by`/`keeper_scope`) and contradictions
@@ -192,9 +227,17 @@ coexist instead of colliding.
 - **Link-degree / backlink centrality ranking** — *deferred*: there are no
   inter-fact links in the store today, so there is no graph to weight. Becomes
   viable only after a linking model (and a writer for it) lands.
-- **Read-path access-bump hysteresis tuning** — Phase 1 wires
-  `bump_access_for_turn`; the exact thrash-guard threshold is an implementation
-  detail to settle against RFC-0243 §2.5 during the PR.
+- **Standalone per-keeper provenance phase (`observed_by` / `keeper_scope` as a
+  Phase-2 before sharing)** — *rejected* (2026-06-15, after reading the write
+  path; see §2.2): in a single keeper's store there is no distinct source to gate
+  on (every re-observation is a fresh `trace_id`), so the fields would be dead.
+  They are folded into the shared tier (§2.2/§2.3), where distinct *keepers* make
+  `observed_by` live.
+- **Recall-time persistent access-bump** — *deferred*: the draft expected Phase 1
+  to wire `bump_access_for_turn` into recall, but that is a write on a one-way
+  read path (see §5). The persistent bump belongs in the librarian write-path,
+  not recall; its thrash-guard threshold settles against RFC-0243 §2.5 if/when it
+  lands there.
 
 ## §5 Verification plan
 
@@ -209,12 +252,18 @@ Phase 1 (first PR):
 - **Determinism / reproducibility**: `lexical_relevance(seed, fact)` and the full
   `render_context ~seed` are pure — same inputs yield the same output across runs
   (property test) — proves the offline tenet is kept.
-- **Dead-code resurrection**: `bump_access_for_turn` now has a live caller; a
-  recalled-and-matched fact's `access_count` increments (ties into RFC-0243's
-  live `access_factor`).
-- `dune build` green; `test/test_keeper_memory_os.ml` extended; no regression in
-  the RFC-0243 32 tests.
+- **Read-only ranking, not a write** (corrected during impl): the draft above
+  expected Phase 1 to "resurrect" `bump_access_for_turn` (a write that bumps
+  `access_count`) inside recall. The merged PR (#21224) **deliberately did not**:
+  `recall.mli` documents recall as "intentionally one-way at prompt time", and a
+  write there violates that invariant. Turn-aware ranking is the read-only
+  `lexical_relevance` factor instead; the persistent access-bump is deferred to
+  the librarian write-path (§4). `bump_access_for_turn` stays unwired, sharing
+  only the `tokenize` SSOT.
+- `dune build` green; `test/test_keeper_memory_os.ml` extended (+6); no regression
+  in the RFC-0243 33 tests (39/39 total). **Status: Phase 1 merged (#21224).**
 
-Phases 2–3 are gated: each lands behind its own PR and review, after Phase 1, and
-must carry the 456-paradox provenance invariants (no source collapse, contradiction
-coexistence) as explicit tests before any cross-keeper read is enabled.
+Phase 2 (shared tier) is gated: it lands behind its own PR and review, after
+Phase 1, and must carry the 456-paradox provenance invariants (no source collapse,
+contradiction coexistence) as explicit tests before any cross-keeper read is
+enabled.

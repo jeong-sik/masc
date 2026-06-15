@@ -6,6 +6,7 @@ import {
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
 import type { KeeperConversationDetails } from '../types'
+import type { DashboardAuthErrorCode } from '../types/dashboard-execution'
 import {
   currentDashboardActor,
   apiRequestErrorFromResponse,
@@ -393,7 +394,39 @@ function keeperStreamErrorMessage(raw: string, status: number): string {
   return message
 }
 
-function isTokenMismatchAuthError(raw: string): boolean {
+/**
+ * Auth error codes that mean the stored bearer token is stale or wrong for
+ * the requested actor — minting a fresh dev token and retrying can recover.
+ * `same_origin_blocked` / `insufficient_role` / `missing_token` are NOT here:
+ * a token refresh cannot fix a CORS rejection, a role shortfall, or a request
+ * that simply omitted the token.
+ */
+const STALE_TOKEN_AUTH_CODES: ReadonlySet<DashboardAuthErrorCode> = new Set([
+  'invalid_token',
+  'token_expired',
+  'actor_mismatch',
+])
+
+/**
+ * Decide whether a 401 body signals a stale/wrong bearer token.
+ * Primary gate: the typed `auth_error_code` field in the JSON body
+ * (server SSOT: `lib/types/masc_error.ml:dashboard_auth_error_code`,
+ * emitted by `lib/server/server_auth.ml:auth_error_json`).
+ */
+function isStaleTokenAuthError(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as { auth_error_code?: unknown }
+    const code = parsed.auth_error_code
+    if (typeof code === 'string') {
+      return STALE_TOKEN_AUTH_CODES.has(code as DashboardAuthErrorCode)
+    }
+  } catch {
+    // Not JSON — fall through to the legacy substring fallback below.
+  }
+  // WORKAROUND: legacy server fallback for servers that predate the typed
+  // `auth_error_code` 401 body. The substring shape comes from
+  // `Auth_error.InvalidToken "Token mismatch"` rendered as
+  // "[AuthError] Invalid token: Token mismatch". removal target: next release.
   const normalized = raw.toLowerCase()
   return normalized.includes('autherror')
     && normalized.includes('invalid token')
@@ -456,7 +489,7 @@ export async function streamKeeperMessage(
     let raw = await res.text()
     if (
       res.status === 401
-      && isTokenMismatchAuthError(raw)
+      && isStaleTokenAuthError(raw)
       && await refreshLoopbackDevTokenAfterMismatch()
     ) {
       res = await postStream()

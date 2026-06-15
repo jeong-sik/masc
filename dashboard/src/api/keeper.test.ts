@@ -168,20 +168,22 @@ describe('streamKeeperMessage', () => {
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
-  it('refreshes a stale loopback dev token once and retries direct chat', async () => {
+  const stubStaleToken = () => {
     window.sessionStorage.setItem('masc_bearer_token', 'stale-token')
     window.sessionStorage.setItem(
       'masc_bearer_token_meta',
       JSON.stringify({ source: 'dev', actor: 'dashboard', scope: 'worker' }),
     )
+  }
 
+  const stubStreamRetryFetch = (first401Body: unknown) => {
     let chatAttempts = 0
     const fetchMock = vi.fn((url: string, _init?: RequestInit) => {
       if (url === '/api/v1/keepers/chat/stream') {
         chatAttempts += 1
         if (chatAttempts === 1) {
           return Promise.resolve(new Response(
-            JSON.stringify({ error: '[AuthError] Invalid token: Token mismatch' }),
+            JSON.stringify(first401Body),
             { status: 401, headers: { 'Content-Type': 'application/json' } },
           ))
         }
@@ -199,6 +201,17 @@ describe('streamKeeperMessage', () => {
       return Promise.reject(new Error(`unexpected fetch ${url}`))
     })
     vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('refreshes a stale loopback dev token once and retries on typed invalid_token code', async () => {
+    stubStaleToken()
+    // The message is a generic string that would NOT match the legacy
+    // substring matcher; the typed auth_error_code drives the retry.
+    const fetchMock = stubStreamRetryFetch({
+      error: 'authentication failed',
+      auth_error_code: 'invalid_token',
+    })
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
@@ -217,6 +230,63 @@ describe('streamKeeperMessage', () => {
     expect(firstHeaders.Authorization).toBe('Bearer stale-token')
     expect(retryHeaders.Authorization).toBe('Bearer fresh-token')
     expect(events).toEqual(['RUN_FINISHED'])
+  })
+
+  it('retries on actor_mismatch typed code', async () => {
+    stubStaleToken()
+    const fetchMock = stubStreamRetryFetch({
+      error: 'Agent name required',
+      auth_error_code: 'actor_mismatch',
+    })
+
+    await streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} })
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/keepers/chat/stream',
+      '/api/v1/dashboard/dev-token',
+      '/api/v1/keepers/chat/stream',
+    ])
+  })
+
+  it('does NOT retry when the typed code is not a stale-token case', async () => {
+    stubStaleToken()
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/v1/keepers/chat/stream') {
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            error: '[AuthError] Forbidden: browser cannot cross-origin HTTP mutation',
+            auth_error_code: 'same_origin_blocked',
+          }),
+          { status: 401, headers: { 'Content-Type': 'application/json' } },
+        ))
+      }
+      return Promise.reject(new Error(`unexpected fetch ${url}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} }),
+    ).rejects.toThrow()
+
+    // Only the single chat POST — no dev-token refresh, no retry.
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/keepers/chat/stream',
+    ])
+  })
+
+  it('falls back to the legacy substring match for servers without auth_error_code', async () => {
+    stubStaleToken()
+    const fetchMock = stubStreamRetryFetch({
+      error: '[AuthError] Invalid token: Token mismatch',
+    })
+
+    await streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} })
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/keepers/chat/stream',
+      '/api/v1/dashboard/dev-token',
+      '/api/v1/keepers/chat/stream',
+    ])
   })
 })
 

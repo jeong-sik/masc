@@ -1,13 +1,25 @@
-(** Cognitive Gravity Event Bus — Phase4 GC Trigger Wiring.
+(** Cognitive Gravity Event Bus — Phase4 GC Trigger Wiring Interface.
 
-    Decay triggers that drive stale-fact reconciliation in Memory OS.
-    See {!Cognitive_gravity_event_bus} for implementation. *)
+    Implements the trigger registry / dispatch layer described in
+    rondo's task-1282 consolidated design and garnet's original
+    Phase4 trigger taxonomy (8 trigger types, merging both sources).
+
+    @see <p-fafed821f4c8d5b6d87106c4bc82fbc0> rondo design
+    @see garnet Phase4 original trigger taxonomy *)
 
 type decay_trigger =
-  | TurnElapsed                             (** A keeper turn completed without meaningful change *)
-  | NoNewMentions                           (** Board mentions for the keeper are 0 in the current window *)
-  | Contradiction                           (** A fact in Memory OS directly contradicts new evidence *)
-  | ManualDecay                             (** Explicit decay signal (admin/operator/Phase4e demotion) *)
+  | TurnElapsed
+  | NoNewMentions
+  | Contradiction
+  | ManualDecay
+  | KeeperVerification  (* sangsu's 3rd missing type *)
+  | TaskCycle
+  | KnowledgeImport
+  | DecayResistance
+
+val trigger_weight : decay_trigger -> float
+(** Weight used to accumulate decay score per trigger.
+    Sum of concurrent triggers >= 0.7 triggers GC sweep. *)
 
 type event = {
   trigger : decay_trigger;
@@ -15,15 +27,23 @@ type event = {
   keeper_id : string;
 }
 
-(** Register a decay-event handler for a keeper. *)
-val register_trigger : string -> (event -> unit) -> unit
+type handler = event -> unit
 
-(** Emit a decay event to all registered keepers matching the predicate. *)
+val register_trigger : keeper_id:string -> handler -> unit
+(** Register a handler to fire immediately on emit. *)
+
 val emit : event -> unit
+(** Emit an event: append to pending queue + fire registered handlers. *)
 
-(** Dispatch all pending decay events and apply GC on stale facts.
-    Returns the number of facts that crossed the stale threshold. *)
-val dispatch : string -> int
+val dispatch : keeper_id:string -> int
+(** Drain pending events for [keeper_id].
+    Returns 1 if accumulated decay >= 0.7 (GC signalled), else 0. *)
 
-(** Collect pending events without applying them (for testing/inspection). *)
-val peek : string -> event list
+val peek : keeper_id:string -> event list
+(** Peek pending events for [keeper_id] without draining. *)
+
+val make_event : trigger:decay_trigger -> keeper_id:string -> unit -> event
+(** Build an event with current Unix timestamp. *)
+
+val emit_trigger : trigger:decay_trigger -> keeper_id:string -> unit
+(** make_event + emit in one call. *)

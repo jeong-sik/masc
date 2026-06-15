@@ -8,9 +8,9 @@
 
 open Keeper_memory_os_types
 
-(** Categories shared across keepers by default ([fact]; [constraint]). Anything
-    else is default-denied as keeper- or task-local. *)
-val default_promote_categories : string list
+(** Categories shared across keepers by default ([Fact]; [Constraint]). Anything
+    else — including [Unknown] — is default-denied as keeper- or task-local. *)
+val default_promote_categories : category list
 
 (** Minimum confidence for an observation to count as corroboration. *)
 val default_confidence_threshold : float
@@ -31,7 +31,7 @@ type report =
     noisy-OR confidence over the per-keeper best confidences. No IO; [now] sets
     the shared facts' [last_verified_at]. *)
 val promote_facts
-  :  ?categories:string list
+  :  ?categories:category list
   -> ?threshold:float
   -> ?min_keepers:int
   -> now:float
@@ -44,7 +44,7 @@ val promote_facts
     shared store atomically. *)
 val run
   :  ?dry_run:bool
-  -> ?categories:string list
+  -> ?categories:category list
   -> ?threshold:float
   -> ?min_keepers:int
   -> keeper_ids:string list

@@ -21,11 +21,13 @@ open Keeper_memory_os_types
 module Io = Keeper_memory_os_io
 
 (* Categories objective enough to share across keepers. Default-deny: anything
-   not listed (preference / goal / blocker / code_change) stays keeper-local,
-   because promoting keeper- or task-local state cross-keeper is the 456 leak.
-   See RFC-0244 §2.3 and the librarian taxonomy
-   (config/prompts/keeper.librarian.episode_extraction.md). *)
-let default_promote_categories = [ "fact"; "constraint" ]
+   not listed (Preference / Goal / Blocker / Code_change / Unknown) stays
+   keeper-local, because promoting keeper- or task-local state cross-keeper is
+   the 456 leak. Typed since #21241 — an [Unknown] label (LLM drift, or an
+   ephemeral event the librarian no longer extracts) is never promoted, and the
+   surface-string match this list used to be is gone. See RFC-0244 §2.3 and the
+   librarian taxonomy (config/prompts/keeper.librarian.episode_extraction.md). *)
+let default_promote_categories : category list = [ Fact; Constraint ]
 
 (* A contributing observation must clear this confidence floor; below it a claim
    is too weak to count as corroboration. *)

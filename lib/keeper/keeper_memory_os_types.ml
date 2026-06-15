@@ -18,10 +18,48 @@ type provenance_event =
   ; tool_call_id : string option
   }
 
+(* The librarian taxonomy as a closed sum (RFC-0244 §2.3, #21241). The LLM emits
+   a free-text category label; [category_of_string] parses it once at the
+   producer boundary into this type, with [Unknown] absorbing any label outside
+   the taxonomy (drift / typo / a future label) instead of letting a free-text
+   string flow downstream. Consumers (consolidator promotion whitelist, recall
+   rendering) then match typed variants — a new label can never be silently
+   promoted, and the surface-string list that the consolidator used to match on
+   is gone. *)
+type category =
+  | Code_change
+  | Fact
+  | Preference
+  | Blocker
+  | Goal
+  | Constraint
+  | Unknown of string
+
+let category_to_string = function
+  | Code_change -> "code_change"
+  | Fact -> "fact"
+  | Preference -> "preference"
+  | Blocker -> "blocker"
+  | Goal -> "goal"
+  | Constraint -> "constraint"
+  | Unknown s -> s
+;;
+
+let category_of_string s =
+  match String.lowercase_ascii (String.trim s) with
+  | "code_change" -> Code_change
+  | "fact" -> Fact
+  | "preference" -> Preference
+  | "blocker" -> Blocker
+  | "goal" -> Goal
+  | "constraint" -> Constraint
+  | _ -> Unknown s
+;;
+
 type fact =
   { claim : string
   ; confidence : float
-  ; category : string
+  ; category : category
   ; source : provenance_event
   ; observed_by : string list
     (* RFC-0244 Tier 2 (shared semantic store) ONLY: the sorted set of distinct
@@ -166,7 +204,7 @@ let fact_to_json f =
   let fields =
     [ "claim", `String f.claim
     ; "confidence", `Float f.confidence
-    ; "category", `String f.category
+    ; "category", `String (category_to_string f.category)
     ; "source", provenance_event_to_json f.source
     ; "access_count", `Int f.access_count
     ; "first_seen", `Float f.first_seen
@@ -195,7 +233,7 @@ let fact_of_json (json : Yojson.Safe.t) =
        , json_string_field "category" fields
        , List.assoc_opt "source" fields )
      with
-     | Some claim, Some confidence, Some category, Some source_json ->
+     | Some claim, Some confidence, Some category_str, Some source_json ->
        (match provenance_event_of_json source_json with
         | Some source ->
           (* DET-OK: backward-compatible defaults for optional persisted fields. *)
@@ -226,7 +264,7 @@ let fact_of_json (json : Yojson.Safe.t) =
           Some
             { claim
             ; confidence = clamp01 confidence
-            ; category
+            ; category = category_of_string category_str
             ; source
             ; observed_by
             ; access_count

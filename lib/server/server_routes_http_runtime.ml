@@ -63,33 +63,120 @@ let configured_http_port () =
 let configured_http_host () =
   Env_config_core.masc_host ()
 
-let advertised_host_port request =
-  let (host, port) =
-    parse_host_port
-      (Httpun.Headers.get request.Httpun.Request.headers "host")
-      (configured_http_host ()) (configured_http_port ())
+let authority_host host =
+  match Ipaddr.of_string host with
+  | Ok (Ipaddr.V6 _) -> "[" ^ host ^ "]"
+  | Ok (Ipaddr.V4 _) | Error _ -> host
+
+let authority_of_host_port host port =
+  Printf.sprintf "%s:%d" (authority_host host) port
+
+let advertised_host_port_authority request =
+  let default_host = configured_http_host () in
+  let default_port = configured_http_port () in
+  let fallback () =
+    let host = Transport_read_model.normalize_advertised_host default_host in
+    (host, default_port, authority_of_host_port host default_port)
   in
-  (Transport_read_model.normalize_advertised_host host, port)
+  match Httpun.Headers.get request.Httpun.Request.headers "host" with
+  | None -> fallback ()
+  | Some raw -> (
+      let trimmed = String.trim raw in
+      if trimmed = "" || host_header_has_forbidden_authority_chars trimmed
+      then fallback ()
+      else
+        try
+          let uri = Uri.of_string ("http://" ^ trimmed) in
+          let parsed_host = Uri.host uri |> Option.value ~default:default_host in
+          let port_opt = Uri.port uri in
+          let port = Option.value ~default:default_port port_opt in
+          let host = Transport_read_model.normalize_advertised_host parsed_host in
+          let authority =
+            match port_opt with
+            | Some _ -> authority_of_host_port host port
+            | None ->
+              if String.equal host parsed_host
+              then authority_host host
+              else authority_of_host_port host port
+          in
+          (host, port, authority)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | _ -> fallback ())
+
+let advertised_host_port request =
+  let host, port, _authority = advertised_host_port_authority request in
+  (host, port)
+
+let normalize_forwarded_proto raw =
+  let value =
+    raw
+    |> String.trim
+    |> String.lowercase_ascii
+    |> fun value ->
+    let len = String.length value in
+    if len >= 2 && value.[0] = '"' && value.[len - 1] = '"'
+    then String.sub value 1 (len - 2)
+    else value
+  in
+  match value with
+  | "http" | "https" -> Some value
+  | _ -> None
+
+let first_forwarded_proto raw =
+  raw
+  |> String.split_on_char ','
+  |> List.find_map (fun element ->
+       element
+       |> String.split_on_char ';'
+       |> List.find_map (fun part ->
+            match String.split_on_char '=' (String.trim part) with
+            | [ key; value ] when String.equal (String.lowercase_ascii (String.trim key)) "proto" ->
+              normalize_forwarded_proto value
+            | _ -> None))
+
+let advertised_scheme request =
+  let headers = request.Httpun.Request.headers in
+  match Httpun.Headers.get headers "x-forwarded-proto" with
+  | Some raw -> (
+      match
+        raw
+        |> String.split_on_char ','
+        |> List.find_map normalize_forwarded_proto
+      with
+      | Some scheme -> scheme
+      | None -> (
+          match Httpun.Headers.get headers "forwarded" with
+          | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
+          | None -> "http"))
+  | None -> (
+      match Httpun.Headers.get headers "forwarded" with
+      | Some raw -> Option.value ~default:"http" (first_forwarded_proto raw)
+      | None -> "http")
+
+let advertised_base_url request =
+  let _host, _port, authority = advertised_host_port_authority request in
+  Printf.sprintf "%s://%s" (advertised_scheme request) authority
 
 let websocket_discovery_json request =
-  let (host, port) = advertised_host_port request in
+  let (host, _port) = advertised_host_port request in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~host ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
+      ~host ~base_url:(advertised_base_url request) ()
   in
   Transport_read_model.websocket_discovery_json ctx
 
 let transport_json request =
-  let (host, port) = advertised_host_port request in
+  let (host, _port) = advertised_host_port request in
   let ctx =
     Transport_read_model.make_http_context ~include_configured:true
-      ~host ~base_url:(Printf.sprintf "http://%s:%d" host port) ()
+      ~host ~base_url:(advertised_base_url request) ()
   in
   Transport_read_model.transport_status_json ctx
 
 let agent_card_json request =
   let (host, port) = advertised_host_port request in
-  let base_url = Printf.sprintf "http://%s:%d" host port in
+  let base_url = advertised_base_url request in
   let build = Build_identity.current () in
   `Assoc
     [

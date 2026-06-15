@@ -68,6 +68,18 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
+function sameOriginWebSocketUrl(wsUrl: string): boolean {
+  if (typeof window === 'undefined' || typeof window.location === 'undefined') return true
+  const expectedProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (window.location.protocol !== 'https:' && window.location.protocol !== 'http:') return true
+  try {
+    const parsed = new URL(wsUrl, window.location.href)
+    return parsed.protocol === expectedProtocol && parsed.host === window.location.host
+  } catch {
+    return false
+  }
+}
+
 function readCachedWsUrl(): string | null {
   const storage = sessionStorageOrNull()
   if (!storage) return null
@@ -75,7 +87,12 @@ function readCachedWsUrl(): string | null {
     const raw = storage.getItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
     if (!raw) return null
     const data = JSON.parse(raw) as { ws_url?: unknown }
-    return typeof data.ws_url === 'string' && data.ws_url.length > 0 ? data.ws_url : null
+    if (typeof data.ws_url !== 'string' || data.ws_url.length === 0) return null
+    if (!sameOriginWebSocketUrl(data.ws_url)) {
+      storage.removeItem(DASHBOARD_WS_DISCOVERY_CACHE_KEY)
+      return null
+    }
+    return data.ws_url
   } catch {
     // Eviction must not propagate: in restricted storage contexts the
     // initial getItem can throw, and a follow-up removeItem can throw too.

@@ -45,6 +45,7 @@ module Progress = Masc.Progress
 module Sse = Masc.Sse
 module Safe_ops = Safe_ops
 module Tool_board = Board_tool
+module Transport_metrics = Masc.Transport_metrics
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 
@@ -215,12 +216,75 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
   end
   else false
 
+let header_contains_token headers name token =
+  match get_header_any_case headers name with
+  | None -> false
+  | Some value ->
+    value
+    |> String.split_on_char ','
+    |> List.exists (fun part ->
+         String.equal
+           (String.lowercase_ascii (String.trim part))
+           (String.lowercase_ascii token))
+
+let header_equals_token headers name token =
+  match get_header_any_case headers name with
+  | None -> false
+  | Some value ->
+    String.equal
+      (String.lowercase_ascii (String.trim value))
+      (String.lowercase_ascii token)
+
+let is_websocket_upgrade_request request =
+  let headers = request.Httpun.Request.headers in
+  header_contains_token headers "connection" "upgrade"
+  && header_equals_token headers "upgrade" "websocket"
+
+let respond_ws_upgrade_unavailable reqd =
+  let body = {|{"error":"websocket transport disabled"}|} in
+  let headers =
+    Httpun.Headers.of_list
+      [ ("content-type", "application/json")
+      ; ("content-length", string_of_int (String.length body))
+      ]
+  in
+  let response = Httpun.Response.create ~headers `Service_unavailable in
+  safe_reqd_respond reqd response body
+
+let handle_websocket_upgrade reqd =
+  if not (Transport_metrics.ws_enabled ())
+  then respond_ws_upgrade_unavailable reqd
+  else
+    let state = current_server_state_opt () in
+    match
+      Server_mcp_transport_ws.upgrade_connection
+        ?sw:(state_switch_opt state)
+        ?clock:(state_clock_opt state)
+        reqd
+    with
+    | Ok () -> ()
+    | Error msg ->
+      let body =
+        Yojson.Safe.to_string
+          (`Assoc [ ("error", `String ("websocket upgrade failed: " ^ msg)) ])
+      in
+      let headers =
+        Httpun.Headers.of_list
+          [ ("content-type", "application/json")
+          ; ("content-length", string_of_int (String.length body))
+          ]
+      in
+      let response = Httpun.Response.create ~headers `Bad_request in
+      safe_reqd_respond reqd response body
+
 (** Method/path dispatcher for MCP-validated requests. Caller is
     responsible for rate limiting and origin/protocol-version checks
     before invoking this function. *)
 let dispatch_route ~router ~request ~path reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
+  | `GET, "/ws" when is_websocket_upgrade_request request ->
+    handle_websocket_upgrade reqd
   | `GET, "/ws" ->
     let body =
       Server_routes_http_runtime.websocket_discovery_json request

@@ -728,10 +728,12 @@ let get_bindings ~host ~port : binding list =
       @ [
           {
             protocol = Ws;
-            url =
-              Printf.sprintf "ws://%s:%d/" host
-                Env_config.Transport.ws_port;
-            options = [ ("mode", "standalone"); ("discovery_path", "/ws") ];
+            url = Printf.sprintf "ws://%s:%d/ws" host port;
+            options =
+              [ ("mode", "same_origin_upgrade")
+              ; ("discovery_path", "/ws")
+              ; ("standalone_port", string_of_int Env_config.Transport.ws_port)
+              ];
           };
         ]
     else

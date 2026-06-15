@@ -18,6 +18,23 @@ let trim_trailing_slashes value =
 
 ;;
 
+let websocket_scheme_for_http_scheme = function
+  | Some scheme ->
+    (match String.lowercase_ascii scheme with
+     | "https" | "wss" -> "wss"
+     | "http" | "ws" -> "ws"
+     | _ -> "ws")
+  | None -> "ws"
+;;
+
+let websocket_url_from_base_url base_url =
+  let uri = Uri.of_string (trim_trailing_slashes base_url) in
+  let uri =
+    Uri.with_scheme uri (Some (websocket_scheme_for_http_scheme (Uri.scheme uri)))
+  in
+  (Uri.to_string uri |> trim_trailing_slashes) ^ "/ws"
+;;
+
 let configured_http_port () = Env_config_core.masc_http_port_int ()
 let configured_http_host () = Env_config_core.masc_host ()
 
@@ -156,15 +173,21 @@ let get_ws_session_count () =
 let websocket_discovery_json (ctx : http_context) =
   let enabled = Transport_metrics.ws_enabled () in
   let port = Env_config.Transport.ws_port in
-  let reachable = Transport_metrics.ws_listening () || tcp_port_reachable port in
+  let standalone_listening = Transport_metrics.ws_listening () in
+  let upgrade_available = enabled in
+  let listening = upgrade_available || standalone_listening in
+  let reachable = listening || tcp_port_reachable port in
+  let standalone_ws_url = Printf.sprintf "ws://%s:%d/" ctx.host port in
   let base_fields =
     [ "enabled", `Bool enabled ]
     @ maybe_configured_fields ~include_configured:ctx.include_configured enabled
-    @ [ "listening", `Bool (Transport_metrics.ws_listening ())
+    @ [ "listening", `Bool listening
       ; "reachable", `Bool reachable
       ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
-      ; "mode", `String "standalone"
+      ; "mode", `String "same_origin_upgrade"
       ; "discovery_path", `String "/ws"
+      ; "upgrade_path", `String "/ws"
+      ; "standalone_listening", `Bool standalone_listening
       ; "session_count", `Int (get_ws_session_count ())
       ]
   in
@@ -173,7 +196,9 @@ let websocket_discovery_json (ctx : http_context) =
     then
       base_fields
       @ [ "ws_port", `Int port
-        ; "ws_url", `String (Printf.sprintf "ws://%s:%d/" ctx.host port)
+        ; "ws_url", `String (websocket_url_from_base_url ctx.base_url)
+        ; "standalone_ws_port", `Int port
+        ; "standalone_ws_url", `String standalone_ws_url
         ]
     else base_fields
   in
@@ -288,4 +313,3 @@ let transport_status_json (ctx : http_context) =
     ; "enabled_protocols", enabled_protocols_json ()
     ]
 ;;
-

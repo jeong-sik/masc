@@ -77,6 +77,12 @@ val advertised_host_port :
     [(configured_http_host (), configured_http_port ())] when
     the header is absent. *)
 
+val advertised_base_url : Httpun.Request.t -> string
+(** [advertised_base_url request] returns the browser-visible HTTP(S) base URL.
+    It derives the authority from [Host:] and the scheme from
+    [X-Forwarded-Proto] / [Forwarded: proto=...] when present, falling back to
+    local [http]. *)
+
 (** {1 Discovery / status JSON} *)
 
 val websocket_discovery_json : Httpun.Request.t -> Yojson.Safe.t

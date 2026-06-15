@@ -57,7 +57,7 @@
     [slice_index_enabled],
     [__test_reset_env_caches],
     [read_payload_string], [handle_inbound_text],
-    [upgrade_connection], [send_to_session],
+    [send_to_session],
     [broadcast_ws]). *)
 
 (** {1 Session record} *)
@@ -173,6 +173,16 @@ val read_inbound_message_frame :
     accumulates partial-text fragments across [is_fin =
     false] frames, and invokes [on_message ~session_id
     ~body] when a final fragment arrives. *)
+
+val upgrade_connection :
+  ?sw:Eio.Switch.t ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  ?on_message:(string -> string -> unit) ->
+  Httpun.Reqd.t ->
+  (unit, string) result
+(** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin.  When [sw]
+    and [clock] are provided, forks the same protocol-level heartbeat used by
+    the standalone WS listener. *)
 
 (** {1 Outbound delivery} *)
 

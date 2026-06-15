@@ -88,8 +88,8 @@ let turn_reason_to_string =
 let skip_reason_to_string =
   Keeper_world_observation_turn_types.skip_reason_to_string
 let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
-let is_autonomous_channel =
-  Keeper_world_observation_turn_types.is_autonomous_channel
+let channel_of_string = Keeper_world_observation_turn_types.channel_of_string
+let is_autonomous = Keeper_world_observation_turn_types.is_autonomous
 let verdict_reasons_to_strings =
   Keeper_world_observation_turn_types.verdict_reasons_to_strings
 

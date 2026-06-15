@@ -620,7 +620,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ctx args : tool_result
                    ~latency_ms
                    ~turn_cost:(turn_cost_for_result result)
                    ~turn_generation:lifecycle.turn_generation
-                   ~channel:"turn"
+                   ~channel:Keeper_world_observation.Reactive
                    ~snapshot_source:"keeper_turn_msg"
                    ~context_ratio:lifecycle.context_ratio
                    ~context_tokens:lifecycle.context_tokens

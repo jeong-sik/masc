@@ -14,12 +14,20 @@ type decay_trigger =
   | NoNewMentions
   | Contradiction
   | ManualDecay
+  | KeeperVerification
+  | TaskCycle
+  | KnowledgeImport
+  | DecayResistance
 
 let trigger_weight = function
-  | TurnElapsed   -> 0.15
-  | NoNewMentions -> 0.20
-  | Contradiction -> 0.60
-  | ManualDecay   -> 0.50
+  | TurnElapsed        -> 0.15
+  | NoNewMentions      -> 0.20
+  | Contradiction      -> 0.60
+  | ManualDecay        -> 0.50
+  | KeeperVerification -> 0.30
+  | TaskCycle          -> 0.25
+  | KnowledgeImport    -> 0.20
+  | DecayResistance    -> (-0.40)
 
 type event = {
   trigger : decay_trigger;

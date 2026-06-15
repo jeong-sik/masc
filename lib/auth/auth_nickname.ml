@@ -1,73 +1,12 @@
 (** Generated credential alias nickname helpers for Auth. *)
 
 ;;
-let nickname_adjectives =
-  [| "swift"
-   ; "brave"
-   ; "calm"
-   ; "eager"
-   ; "fierce"
-   ; "gentle"
-   ; "happy"
-   ; "jolly"
-   ; "keen"
-   ; "lucky"
-   ; "merry"
-   ; "noble"
-   ; "proud"
-   ; "quick"
-   ; "witty"
-   ; "bold"
-   ; "cool"
-   ; "deft"
-   ; "fair"
-   ; "grand"
-   ; "hale"
-   ; "jade"
-   ; "kind"
-   ; "lean"
-   ; "neat"
-   ; "pale"
-   ; "rare"
-   ; "sage"
-   ; "tame"
-   ; "warm"
-  |]
-;;
-
-let nickname_animals =
-  [| "fox"
-   ; "bear"
-   ; "wolf"
-   ; "hawk"
-   ; "lion"
-   ; "tiger"
-   ; "eagle"
-   ; "otter"
-   ; "panda"
-   ; "koala"
-   ; "raven"
-   ; "falcon"
-   ; "badger"
-   ; "beaver"
-   ; "whale"
-   ; "shark"
-   ; "crane"
-   ; "heron"
-   ; "moose"
-   ; "viper"
-   ; "cobra"
-   ; "gecko"
-   ; "lemur"
-   ; "llama"
-   ; "manta"
-   ; "orca"
-   ; "rhino"
-   ; "sloth"
-   ; "tapir"
-   ; "zebra"
-  |]
-;;
+(* Adjective/animal vocabulary comes from the shared [Nickname_words] SSOT
+   (masc.config). Auth previously inlined a copy to avoid depending on
+   [Nickname]; reading the shared lists keeps this classifier from drifting away
+   from the generator. *)
+let nickname_adjectives = Nickname_words.adjectives
+let nickname_animals = Nickname_words.animals
 
 let array_contains arr value =
   let rec loop idx =
@@ -104,16 +43,14 @@ let extract_generated_nickname_prefix name =
   | _ -> None
 ;;
 
-(* Inline copy of Nickname.is_generated_nickname / extract_agent_type.
-   Auth lives below masc_workspace in the module graph and cannot depend on
-   it. The nickname pattern — stable-prefix + adjective + animal
-   [+ hex4] — is duplicated here so auth can canonicalize generated
-   aliases without depending on Nickname. Keeper aliases use a
-   different canonical shape
-   (keeper-<name>-agent) and must resolve to the middle segment so
-   keeper-scoped credentials can be stored under the stable keeper name
-   rather than the transport alias. Covered by the nickname fallback
-   tests. *)
+(* The nickname classification logic (shape check + prefix extraction) mirrors
+   Nickname's, kept inline because auth lives below masc_workspace in the module
+   graph and cannot depend on Nickname. The adjective/animal word lists are no
+   longer duplicated — they come from the shared Nickname_words (masc.config)
+   above, so the two paths cannot drift. Keeper aliases use a different
+   canonical shape (keeper-<name>-agent) and must resolve to the middle segment
+   so keeper-scoped credentials can be stored under the stable keeper name
+   rather than the transport alias. Covered by the nickname fallback tests. *)
 let is_generated_nickname_shape name = List.length (String.split_on_char '-' name) >= 3
 
 let keeper_transport_alias_stable_name name =

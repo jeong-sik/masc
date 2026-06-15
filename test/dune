@@ -1337,6 +1337,8 @@
 
 (include stanzas/test_otel_zero_fill.inc)
 
+(include stanzas/test_nickname_words_ssot.inc)
+
 (include stanzas/test_workspace_bootstrap.inc)
 
 (include stanzas/test_workspace_base_path_cache.inc)

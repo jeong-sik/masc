@@ -98,6 +98,21 @@ function currentSection(): StatusSection {
 export function Status() {
   const section = currentSection()
 
+  // Keeper detail (monitoring/agents/keeper=<name>) is a full-bleed 3-pane
+  // workspace that owns its own scroll. Render it in a height-filling
+  // container instead of the default vertical section stack, otherwise the
+  // `flex-col gap-5` wrapper collapses the workspace's `height: 100%`.
+  const keeperParam = route.value.params.keeper
+  if (section === 'agents' && typeof keeperParam === 'string' && keeperParam.trim() !== '') {
+    return html`
+      <div class="h-full min-h-0">
+        <${Suspense} fallback=${sectionFallback(sectionLabel('agents'))}>
+          <${LazyAgentsUnified} />
+        <//>
+      </div>
+    `
+  }
+
   return html`
     <div class="flex flex-col gap-5">
       <div class="transition-opacity duration-[var(--t-slow)]">

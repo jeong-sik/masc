@@ -330,18 +330,25 @@ describe('KeeperDetailPage', () => {
     keepers.value = [analyst]
 
     const { container } = render(html`<${KeeperDetailPage} />`)
-    expect(screen.getByRole('heading', { level: 2, name: 'analyst' })).toBeTruthy()
+    // 3-pane workspace renders (roster | conversation | context rail) without
+    // tripping the monitoring error boundary.
+    expect(container.querySelector('.kw-grid')).toBeTruthy()
+    expect(container.querySelector('.kw-roster')).toBeTruthy()
+    expect(container.querySelector('.kw-rail')).toBeTruthy()
+    // The keeper name appears in the roster row and the chat header.
+    expect(screen.getAllByText('analyst').length).toBeGreaterThanOrEqual(1)
+    // The reused chat engine is mounted in the conversation pane.
     expect(screen.getByText('direct chat analyst')).toBeTruthy()
+    // FSM Hub is detail-only, not in the default conversation view.
     expect(screen.queryByText('FSM Hub (6축 상태 머신)')).toBeNull()
-    const pageText = container.textContent ?? ''
-    expect(pageText.indexOf('대화 / 세션')).toBeGreaterThanOrEqual(0)
-    expect(pageText.indexOf('운영 상태 개요')).toBe(-1)
+    expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
+
+    // "상세" flips to the full tabbed detail (KeeperDetailBody is reused).
+    fireEvent.click(screen.getByRole('button', { name: '상세' }))
     const statusTab = screen.getByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('운영 상태 개요')).toBeTruthy()
-    expect(screen.queryByText('대화 / 세션')).toBeNull()
-    expect(mocks.selectKeeper).toHaveBeenCalledWith('analyst')
   })
 
   // Removed test 'surfaces and clears keeper route focus...' (2026-05-19):

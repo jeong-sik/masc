@@ -1,0 +1,197 @@
+// Keeper Workspace — context rail (right). Runtime/throughput, context-window
+// occupancy, owned tasks, recent tool calls, and the "상세 보기" toggle that
+// surfaces the full KeeperDetailBody. All data comes from the live Keeper
+// object + the tasks store — no new fetches.
+
+import { html } from 'htm/preact'
+import type { VNode } from 'preact'
+import { tasks } from '../../store'
+import type { Keeper, Task } from '../../types'
+import { keeperModelLabel, keeperRuntimeLabel } from './keeper-workspace-shared'
+
+const COMPACT_AT = 85 // auto-compaction threshold (%) — matches runtime default
+
+function contextPercent(keeper: Keeper): number {
+  const ratio = keeper.context_ratio ?? keeper.context?.context_ratio ?? 0
+  return Math.max(0, Math.min(100, Math.round(ratio * 100)))
+}
+
+function formatK(n: number | null | undefined): string | null {
+  if (typeof n !== 'number') return null
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
+}
+
+/** Newest-last per-turn throughput series for the rail sparkline. */
+function tpsSeries(keeper: Keeper): number[] {
+  return (keeper.metrics_series ?? [])
+    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
+    .slice(-24)
+}
+
+function ownedTasks(keeper: Keeper): Task[] {
+  return tasks.value.filter(t => t.assignee === keeper.name || (keeper.agent_name != null && t.assignee === keeper.agent_name))
+}
+
+function taskStateClass(status: Task['status']): string {
+  if (status === 'awaiting_verification') return 'review'
+  return ''
+}
+
+type AttentionItem = { sev: 'bad' | 'warn'; text: string }
+
+/** Attention items from the same live signals the roster badge counts
+ *  (blocked tasks + explicit flag). No fabricated severities — the section
+ *  is omitted entirely when there is nothing to surface. */
+function attentionItems(keeper: Keeper): AttentionItem[] {
+  const items: AttentionItem[] = []
+  const blocked = keeper.blocked_task_count ?? 0
+  if (blocked > 0) items.push({ sev: 'bad', text: `차단된 태스크 ${blocked}건` })
+  const awaiting = ownedTasks(keeper).filter(t => t.status === 'awaiting_verification')
+  if (awaiting.length > 0) items.push({ sev: 'warn', text: `검증 대기 ${awaiting.length}건` })
+  if (items.length === 0 && keeper.needs_attention === true) {
+    items.push({ sev: 'warn', text: '점검이 필요합니다' })
+  }
+  return items
+}
+
+function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
+  const items = attentionItems(keeper)
+  if (items.length === 0) return null
+  return html`
+    <div class="kw-sec">
+      <h4>주의 <span class="kw-kp-att">${items.length}</span></h4>
+      <div class="kw-att-list">
+        ${items.map((it, i) => html`
+          <div class=${`kw-att-item ${it.sev}`} key=${`${it.text}-${i}`}>
+            <span class="kw-att-dot" aria-hidden="true"></span>
+            <span class="kw-att-text" title=${it.text}>${it.text}</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+function ContextSection({ keeper }: { keeper: Keeper }): VNode {
+  const pct = contextPercent(keeper)
+  const hot = pct >= COMPACT_AT
+  const tokens = formatK(keeper.context_tokens ?? keeper.context?.context_tokens ?? null)
+  const max = formatK(keeper.context_max ?? keeper.context?.context_max ?? null)
+  return html`
+    <div class="kw-sec">
+      <h4>컨텍스트 점유</h4>
+      <div class="kw-card">
+        <div class="flex items-baseline justify-between">
+          <span class="text-xs text-[var(--color-fg-secondary)]">윈도우 사용량</span>
+          <span class=${`font-mono text-sm ${hot ? 'text-[var(--color-status-err)]' : 'text-[var(--color-accent-fg)]'}`}>${pct}%</span>
+        </div>
+        <div class="kw-meter-wrap">
+          <div class=${`kw-meter${hot ? ' hot' : ''}`}><span style=${{ width: `${pct}%` }}></span></div>
+          <span class="kw-meter-mark" style=${{ left: `${COMPACT_AT}%` }} title=${`자동 compact 임계치 ${COMPACT_AT}%`}>
+            <i class="kw-meter-mark-lbl">compact ${COMPACT_AT}%</i>
+          </span>
+        </div>
+        ${tokens || max
+          ? html`<div class="kw-ctx-tok">
+              <span class="mono">${tokens ?? '—'}</span>
+              <span aria-hidden="true">/</span>
+              <span class="mono">${max ?? '—'}</span>
+              <span class="lbl">사용 / 전체 윈도우</span>
+            </div>`
+          : null}
+      </div>
+    </div>
+  `
+}
+
+function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
+  const model = keeperModelLabel(keeper)
+  const runtime = keeperRuntimeLabel(keeper)
+  const series = tpsSeries(keeper)
+  const peak = Math.max(1, ...series)
+  const latest = series.length ? series[series.length - 1] : 0
+  return html`
+    <div class="kw-sec">
+      <h4>런타임 · 처리량</h4>
+      <div class="kw-vitals">
+        <div class="kw-vital"><div class="vk">모델</div><div class="vv" title=${model ?? ''}>${model ?? '—'}</div></div>
+        <div class="kw-vital"><div class="vk">런타임</div><div class="vv" title=${runtime ?? ''}>${runtime ?? '—'}</div></div>
+      </div>
+      ${series.length >= 2
+        ? html`<div class="kw-card mt-2">
+            <div class="flex items-baseline justify-between">
+              <span class="font-mono text-base text-[var(--color-status-ok)]">${latest}</span>
+              <span class="text-2xs text-[var(--color-fg-muted)]">tok/s</span>
+            </div>
+            <div class="mt-2 flex h-7 items-end gap-0.5" aria-hidden="true">
+              ${series.map(v => html`<span class="flex-1 rounded-[1px] bg-[var(--color-status-ok)]" style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: 0.35 + 0.65 * (v / peak) }}></span>`)}
+            </div>
+          </div>`
+        : null}
+    </div>
+  `
+}
+
+function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
+  const owned = ownedTasks(keeper)
+  return html`
+    <div class="kw-sec">
+      <h4>소유 태스크</h4>
+      <div class="kw-list">
+        ${owned.length
+          ? owned.map(t => html`
+              <div class="kw-tasktag" key=${t.id}>
+                <span class="tid">${t.id}</span>
+                <span class="ttl" title=${t.title}>${t.title}</span>
+                ${t.status ? html`<span class=${`tstate ${taskStateClass(t.status)}`}>${t.status}</span>` : null}
+              </div>
+            `)
+          : html`<div class="kw-list-empty">할당된 태스크 없음</div>`}
+      </div>
+    </div>
+  `
+}
+
+function RecentToolsSection({ keeper }: { keeper: Keeper }): VNode | null {
+  const names = (keeper.recent_tool_names ?? keeper.latest_tool_names ?? []).slice(0, 8)
+  if (names.length === 0) return null
+  return html`
+    <div class="kw-sec">
+      <h4>최근 도구 호출</h4>
+      <div class="kw-list">
+        ${names.map((n, i) => html`
+          <div class="kw-tool" key=${`${n}-${i}`}>
+            <span class="kw-dot ok" aria-hidden="true"></span>
+            <span class="nm" title=${n}>${n}</span>
+          </div>
+        `)}
+      </div>
+    </div>
+  `
+}
+
+export function KeeperWorkspaceRail({
+  keeper,
+  onToggleDetail,
+}: {
+  keeper: Keeper
+  onToggleDetail: () => void
+}): VNode {
+  return html`
+    <aside class="kw-rail" aria-label="키퍼 컨텍스트">
+      <div class="kw-rail-scroll">
+        <${AttentionSection} keeper=${keeper} />
+        <${ThroughputSection} keeper=${keeper} />
+        <${ContextSection} keeper=${keeper} />
+        <${OwnedTasksSection} keeper=${keeper} />
+        <${RecentToolsSection} keeper=${keeper} />
+        <div class="kw-sec">
+          <button type="button" class="kw-detail-btn" onClick=${onToggleDetail}>
+            <span>상세 보기</span>
+            <span class="sub">상태 · 진단 · 정체성 · 설정 →</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+  `
+}

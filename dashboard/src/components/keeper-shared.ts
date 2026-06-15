@@ -380,7 +380,7 @@ export function KeeperConversationPanel({
 }: {
   keeperName: string
   placeholder: string
-  layout?: 'default' | 'primary'
+  layout?: 'default' | 'primary' | 'workspace'
 }) {
   const [draft, setDraft] = useState('')
   const [showMetadata, setShowMetadata] = useState(readKeeperChatMetadataVisible())
@@ -535,6 +535,126 @@ export function KeeperConversationPanel({
   const cancelQueue = () => {
     clearInputQueue(keeperName)
     bumpQueue()
+  }
+
+  if (layout === 'workspace') {
+    // 3-pane workspace: identity + lifecycle live in the ChatHeader above
+    // this panel, so the workspace layout drops the panel's own header and
+    // renders just the spacious thread + composer. All chat state/handlers
+    // (draft, queue, attachments, streaming, search, toggles) are reused
+    // unchanged — only the chrome differs. Spacing comes from keeper-workspace.css.
+    return html`
+      <div
+        class="flex min-h-0 flex-1 flex-col"
+        data-keeper-chat-layout="workspace"
+        onPaste=${handlePaste}
+      >
+        <div class="kw-chat-toolbar">
+          <${TextInput}
+            class="max-w-50"
+            name="keeper_chat_search"
+            ariaLabel="대화 내용 검색"
+            autoComplete="off"
+            placeholder="대화 검색..."
+            value=${searchQuery}
+            onInput=${(e: Event) => { setSearchQuery((e.target as HTMLInputElement).value) }}
+          />
+          ${hasQuery
+            ? html`<span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs font-medium text-[var(--color-fg-secondary)]" data-chat-search-count>
+                ${transcriptEntries.length} / ${visibleThread.length}
+              </span>`
+            : null}
+          <span class="spacer"></span>
+          <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
+            ${showMetadata ? '메타데이터 숨김' : '메타데이터'}
+          <//>
+          <${GhostButton}
+            onClick=${toggleInternal}
+            ariaExpanded=${showInternal}
+            class=${showInternal ? 'border-[var(--info-border)] text-[var(--info-fg)]' : ''}
+          >
+            ${showInternal ? '내부 숨김' : '내부 메시지'}
+          </${GhostButton}>
+          ${!historyExpanded
+            ? html`
+                <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
+                  ${hydrating
+                    ? '불러오는 중...'
+                    : rawThread.length === 0
+                      ? '이력 불러오기'
+                      : `전체 이력 (${thread.length})`}
+                <//>
+              `
+            : null}
+        </div>
+
+        ${chatAccess.message
+          ? html`
+              <div class="mx-10 mt-3 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2.5 text-xs leading-loose text-[var(--warn-bright)]">
+                ${chatAccess.message}
+              </div>
+            `
+          : null}
+
+        <div class="kw-thread">
+          <div class="kw-thread-inner">
+            <${ChatTranscript}
+              entries=${transcriptEntries}
+              emptyText=${transcriptEmptyText}
+              showMetadata=${showMetadata}
+              variant="messenger"
+              size="primary"
+            />
+          </div>
+        </div>
+
+        ${!showInternal && hiddenCount > 0
+          ? html`
+              <div class="mx-10 mb-2 rounded-[var(--r-2)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs leading-paragraph text-[var(--warn-bright)]">
+                ${hiddenCount}개의 내부 메시지가 숨겨져 있습니다. "내부 메시지"로 볼 수 있습니다.
+              </div>
+            `
+          : null}
+
+        <div class="kw-composer-wrap">
+          <div class="kw-composer-inner">
+            ${queueCount > 0
+              ? html`
+                  <div class="mb-2 flex items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-chat-queue-row>
+                    <span>${queueCount}개 메시지 대기 중</span>
+                    <button type="button" class="underline hover:text-[var(--color-fg-secondary)]" onClick=${cancelQueue}>모두 취소</button>
+                  </div>
+                `
+              : null}
+            <${AttachmentChips} attachments=${selectedAttachments} onRemove=${removeAttachment} />
+            <div class="flex items-end gap-2">
+              <${AttachButton} disabled=${composerDisabled} onFiles=${(files: FileList | null) => { void addFiles(files) }} />
+              <div class="min-w-0 flex-1">
+                <${ChatComposer}
+                  draft=${draft}
+                  placeholder=${chatAccess.blocked
+                    ? '현재 actor는 direct keeper chat 권한이 없습니다'
+                    : sending
+                      ? '응답 중 — 지금 보내면 대기열에 추가됩니다'
+                      : placeholder}
+                  disabled=${composerDisabled}
+                  streaming=${sending}
+                  streamStartedAt=${streamStartedAt}
+                  lastEventAt=${lastSignalAt}
+                  queueEnabled=${true}
+                  queueCount=${queueCount}
+                  onDraftChange=${setDraft}
+                  onSend=${() => { void submit() }}
+                  onAbort=${() => { abortKeeperThreadMessage(keeperName) }}
+                  layout="primary"
+                />
+              </div>
+            </div>
+            ${error ? html`<div class="mt-2 text-xs text-[var(--bad-light)] leading-relaxed">${error}</div>` : null}
+          </div>
+        </div>
+      </div>
+    `
   }
 
   if (layout === 'primary') {

@@ -528,13 +528,13 @@ module Tools = struct
     Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt
 
   let web_search_provider_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER" |> trim_opt
+    raw_value_opt "MASC_WEB_SEARCH_PROVIDER" |> trim_opt
 
   let web_search_provider_order_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" |> trim_opt
+    raw_value_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" |> trim_opt
 
   let web_search_fallbacks_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_FALLBACKS" |> trim_opt
+    raw_value_opt "MASC_WEB_SEARCH_FALLBACKS" |> trim_opt
 
   let web_search_timeout_sec () =
     let v = get_int ~default:15 "MASC_WEB_SEARCH_TIMEOUT_SEC" in

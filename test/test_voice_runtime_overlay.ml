@@ -359,7 +359,7 @@ let test_keeper_voice_speak_failure_writes_no_memory_row () =
     let row =
       rows
       |> List.find_opt (fun row ->
-        String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+        row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
         && String.equal row.text message)
     in
     check bool "no voice_output row for failed speak" true (Option.is_none row))
@@ -390,7 +390,7 @@ let test_keeper_voice_speak_text_fallback_records_memory_bank_row () =
   let row =
     rows
     |> List.find_opt (fun row ->
-      String.equal row.Masc.Keeper_memory_bank.source "voice_output"
+      row.Masc.Keeper_memory_bank.source = Masc.Keeper_memory_bank.Voice_output
       && String.equal row.kind "progress"
       && String.equal row.text message)
   in

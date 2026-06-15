@@ -19,6 +19,10 @@ val enabled : unit -> bool
 val max_messages : unit -> int
 (** Maximum recent checkpoint messages sent to the librarian prompt. *)
 
+val runtime_id_for_librarian : runtime_id:string -> string
+(** Runtime id after applying the optional
+    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] override. *)
+
 val select_recent_messages
   :  max_messages:int
   -> Agent_sdk.Types.message list

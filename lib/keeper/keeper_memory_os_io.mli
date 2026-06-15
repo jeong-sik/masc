@@ -20,11 +20,13 @@ val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
 val append_episode_bundle : keeper_id:string -> episode -> unit
+val rewrite_facts_atomically : keeper_id:string -> fact list -> unit
 val save_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t -> unit
 val load_tool_result : keeper_id:string -> tool_call_id:string -> Yojson.Safe.t option
 
 (** {1 Bounded tail reads} *)
 
+val read_facts_all : keeper_id:string -> fact list
 val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list

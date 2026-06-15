@@ -154,18 +154,20 @@ val wakeup_all_keepers : ?base_path:string -> unit -> unit
 (** Board-reactive debounce interval (seconds), from runtime config. *)
 val board_reactive_debounce_sec : float
 
-val board_reactive_generic_wakeup_limit : int
-
 val board_reactive_wakeup_max : int
 
 val board_reactive_wakeup_allowed :
   base_path:string -> keeper_name:string -> post_id:string -> bool
 
+(** Select which keepers wake for a board signal (RFC-0020). Explicit mentions
+    short-circuit and wake unconditionally (returned with [dropped = 0]); other
+    typed reasons compete for [?total_limit] slots in candidate order. [None]
+    reasons are dropped. Returns the selected [(item, reason)] pairs and the
+    number of non-explicit candidates dropped by the cap. *)
 val select_board_wakeup_candidates :
-  ?generic_limit:int ->
   ?total_limit:int ->
-  ('a * string option) list ->
-  ('a * string) list * int
+  ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
+  ('a * Keeper_world_observation_board_signal.wake_reason) list * int
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit

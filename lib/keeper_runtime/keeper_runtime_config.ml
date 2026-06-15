@@ -27,7 +27,6 @@ let key_to_env =
     "heartbeat.smart_heartbeat",        "MASC_KEEPER_SMART_HEARTBEAT";
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
-    "heartbeat.board_generic_wakeup_limit", "MASC_KEEPER_BOARD_GENERIC_WAKEUP_LIMIT";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
     (* [proactive] *)
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";

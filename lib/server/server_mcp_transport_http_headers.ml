@@ -192,6 +192,13 @@ let sse_prime_event () =
   let id = Sse.next_id () in
   Printf.sprintf "retry: %d\nid: %d\n\n" sse_retry_ms id
 
+(* RFC-0089: SSE comment line + reconnect [retry:] directive, sourced from the
+   [sse_retry_ms] SSOT. Stream priming sites (presence, activity) used to inline
+   "retry: 3000", which would silently diverge from [sse_retry_ms] if the
+   reconnect interval were ever tuned. *)
+let sse_comment_with_retry ~comment =
+  Printf.sprintf ": %s\nretry: %d\n\n" comment sse_retry_ms
+
 let sse_ping_interval_s = 30.0
 
 let get_last_event_id (request : Httpun.Request.t) =
